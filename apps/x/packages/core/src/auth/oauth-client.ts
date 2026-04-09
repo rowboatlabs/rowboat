@@ -37,9 +37,10 @@ function toOAuthTokens(response: client.TokenEndpointResponse): OAuthTokens {
  */
 export async function discoverConfiguration(
   issuerUrl: string,
-  clientId: string
+  clientId: string,
+  clientSecret?: string
 ): Promise<client.Configuration> {
-  const cacheKey = `${issuerUrl}:${clientId}`;
+  const cacheKey = `${issuerUrl}:${clientId}:${clientSecret ? 'secret' : 'none'}`;
 
   const cached = configCache.get(cacheKey);
   if (cached) {
@@ -50,8 +51,8 @@ export async function discoverConfiguration(
   const config = await client.discovery(
     new URL(issuerUrl),
     clientId,
-    undefined, // no client_secret (PKCE flow)
-    client.None(), // PKCE doesn't require client authentication
+    clientSecret ?? undefined,
+    clientSecret ? client.ClientSecretPost(clientSecret) : client.None(),
     {
       execute: [client.allowInsecureRequests],
     }
@@ -69,7 +70,8 @@ export function createStaticConfiguration(
   authorizationEndpoint: string,
   tokenEndpoint: string,
   clientId: string,
-  revocationEndpoint?: string
+  revocationEndpoint?: string,
+  clientSecret?: string
 ): client.Configuration {
   console.log(`[OAuth] Creating static configuration (no discovery)`);
 
@@ -86,8 +88,8 @@ export function createStaticConfiguration(
   return new client.Configuration(
     serverMetadata,
     clientId,
-    undefined, // no client_secret
-    client.None() // PKCE auth
+    clientSecret ?? undefined,
+    clientSecret ? client.ClientSecretPost(clientSecret) : client.None()
   );
 }
 
