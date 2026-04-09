@@ -147,40 +147,40 @@
    * Warm charcoal surfaces + warm steel-blue accent + silver text
    * Blue shifted to ~230° hue so it harmonizes with warm backgrounds
    */
-  --background: var(--bg-color, oklch(0.308 0.004 220));       /* main content — cooled charcoal */
-  --foreground: var(--text-color, oklch(0.907 0.004 230));     /* silver text — slight cool tint */
-  --card: var(--bg-color, oklch(0.236 0.003 220));             /* cards / bubbles */
+  --background: var(--bg-color, oklch(0.240 0.004 220));       /* main content — rich dark */
+  --foreground: var(--text-color, oklch(0.907 0.004 230));     /* silver text */
+  --card: var(--bg-color, oklch(0.175 0.003 220));             /* cards / bubbles — deep */
   --card-foreground: var(--text-color, oklch(0.907 0.004 230));
-  --popover: var(--bg-color, oklch(0.285 0.004 220));          /* popovers */
+  --popover: var(--bg-color, oklch(0.220 0.004 220));          /* popovers */
   --popover-foreground: var(--text-color, oklch(0.907 0.004 230));
-  --primary: var(--main-color, oklch(0.617 0.063 233));        /* #5E8CA5 — fjord blue */
-  --primary-foreground: var(--bg-color, oklch(0.191 0.002 107)); /* #141413 */
-  --secondary: var(--sub-alt-color, oklch(0.334 0.004 220));
+  --primary: var(--main-color, oklch(0.617 0.063 233));        /* fjord blue */
+  --primary-foreground: var(--bg-color, oklch(0.130 0.003 220));
+  --secondary: var(--sub-alt-color, oklch(0.270 0.004 220));
   --secondary-foreground: var(--text-color, oklch(0.907 0.004 230));
-  --muted: var(--sub-alt-color, oklch(0.334 0.004 220));
-  --muted-foreground: var(--sub-color, oklch(0.682 0.010 230)); /* cool muted text (4.6:1) */
-  --accent: var(--sub-color, oklch(0.334 0.004 220));
+  --muted: var(--sub-alt-color, oklch(0.270 0.004 220));
+  --muted-foreground: var(--sub-color, oklch(0.600 0.010 230)); /* cool muted text */
+  --accent: var(--sub-color, oklch(0.270 0.004 220));
   --accent-foreground: var(--text-color, oklch(0.907 0.004 230));
-  --destructive: var(--error-color, oklch(0.672 0.143 30));    /* #E07060 — warm coral */
-  --border: var(--sub-alt-color, oklch(0.349 0.004 220));       /* cooled border */
-  --input: var(--sub-alt-color, oklch(0.381 0.005 220));       /* cooled input border */
-  --ring: var(--main-color, oklch(0.712 0.060 228));           /* #7AAAC0 — light steel ring */
+  --destructive: var(--error-color, oklch(0.672 0.143 30));    /* warm coral */
+  --border: var(--sub-alt-color, oklch(0.290 0.004 220));      /* border */
+  --input: var(--sub-alt-color, oklch(0.320 0.005 220));       /* input border */
+  --ring: var(--main-color, oklch(0.712 0.060 228));           /* light steel ring */
   --chart-1: oklch(0.617 0.063 233);                           /* fjord blue */
   --chart-2: oklch(0.674 0.072 190);                           /* teal */
   --chart-3: oklch(0.698 0.091 68);                            /* warm amber */
   --chart-4: oklch(0.613 0.082 20);                            /* dusty rose */
   --chart-5: oklch(0.650 0.073 137);                           /* sage */
-  --sidebar: var(--bg-color, oklch(0.261 0.004 220));          /* sidebar — cooled */
+  --sidebar: var(--bg-color, oklch(0.200 0.004 220));          /* sidebar — darker */
   --sidebar-foreground: var(--text-color, oklch(0.907 0.004 230));
-  --sidebar-primary: var(--main-color, oklch(0.617 0.063 233)); /* fjord blue — active items */
-  --sidebar-primary-foreground: var(--bg-color, oklch(0.191 0.002 107));
-  --sidebar-accent: var(--sub-color, oklch(0.191 0.003 220));  /* selected item — cooled */
+  --sidebar-primary: var(--main-color, oklch(0.617 0.063 233)); /* fjord blue */
+  --sidebar-primary-foreground: var(--bg-color, oklch(0.130 0.003 220));
+  --sidebar-accent: var(--sub-color, oklch(0.140 0.003 220));  /* selected item — deepest */
   --sidebar-accent-foreground: var(--text-color, oklch(0.907 0.004 230));
-  --sidebar-border: var(--sub-alt-color, oklch(0.349 0.004 220));
+  --sidebar-border: var(--sub-alt-color, oklch(0.290 0.004 220));
   --sidebar-ring: var(--main-color, oklch(0.712 0.060 228));
-  --scrollbar-track: oklch(0.285 0.004 220);
-  --scrollbar-thumb: oklch(0.400 0.004 220);
-  --scrollbar-thumb-hover: oklch(0.448 0.005 220);
+  --scrollbar-track: oklch(0.220 0.004 220);
+  --scrollbar-thumb: oklch(0.340 0.004 220);
+  --scrollbar-thumb-hover: oklch(0.400 0.005 220);
 }
 
 @layer base {

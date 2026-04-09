@@ -219,12 +219,6 @@
   margin-left: 1.5em;
 }
 
-/* Selection */
-.tiptap-editor .ProseMirror ::selection {
-  background-color: var(--ring);
-  color: var(--background);
-}
-
 /* Toolbar */
 .editor-toolbar {
   display: flex;
