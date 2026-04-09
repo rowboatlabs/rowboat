@@ -626,6 +626,71 @@ const ipcSchemas = {
       error: z.string().optional(),
     }),
   },
+  // Embedded browser (WebContentsView) channels
+  'browser:setBounds': {
+    req: z.object({
+      x: z.number().int(),
+      y: z.number().int(),
+      width: z.number().int().nonnegative(),
+      height: z.number().int().nonnegative(),
+    }),
+    res: z.object({ ok: z.literal(true) }),
+  },
+  'browser:setVisible': {
+    req: z.object({ visible: z.boolean() }),
+    res: z.object({ ok: z.literal(true) }),
+  },
+  'browser:navigate': {
+    req: z.object({
+      url: z.string().min(1).refine(
+        (u) => {
+          const lower = u.trim().toLowerCase();
+          if (lower.startsWith('javascript:')) return false;
+          if (lower.startsWith('file://')) return false;
+          if (lower.startsWith('chrome://')) return false;
+          if (lower.startsWith('chrome-extension://')) return false;
+          return true;
+        },
+        { message: 'Unsafe URL scheme' },
+      ),
+    }),
+    res: z.object({
+      ok: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  'browser:back': {
+    req: z.null(),
+    res: z.object({ ok: z.boolean() }),
+  },
+  'browser:forward': {
+    req: z.null(),
+    res: z.object({ ok: z.boolean() }),
+  },
+  'browser:reload': {
+    req: z.null(),
+    res: z.object({ ok: z.literal(true) }),
+  },
+  'browser:getState': {
+    req: z.null(),
+    res: z.object({
+      url: z.string(),
+      title: z.string(),
+      canGoBack: z.boolean(),
+      canGoForward: z.boolean(),
+      loading: z.boolean(),
+    }),
+  },
+  'browser:didUpdateState': {
+    req: z.object({
+      url: z.string(),
+      title: z.string(),
+      canGoBack: z.boolean(),
+      canGoForward: z.boolean(),
+      loading: z.boolean(),
+    }),
+    res: z.null(),
+  },
   // Billing channels
   'billing:getInfo': {
     req: z.null(),

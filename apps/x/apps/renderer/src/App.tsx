@@ -5,7 +5,7 @@ import { RunEvent, ListRunsResponse } from '@x/shared/src/runs.js';
 import type { LanguageModelUsage, ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
-import { CheckIcon, LoaderIcon, PanelLeftIcon, Maximize2, Minimize2, ChevronLeftIcon, ChevronRightIcon, SquarePen, SearchIcon, HistoryIcon, RadioIcon, SquareIcon } from 'lucide-react';
+import { CheckIcon, LoaderIcon, PanelLeftIcon, Maximize2, Minimize2, ChevronLeftIcon, ChevronRightIcon, SquarePen, SearchIcon, HistoryIcon, RadioIcon, SquareIcon, Globe } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MarkdownEditor, type MarkdownEditorHandle } from './components/markdown-editor';
 import { ChatSidebar } from './components/chat-sidebar';
@@ -57,6 +57,7 @@ import { OnboardingModal } from '@/components/onboarding'
 import { CommandPalette, type CommandPaletteContext, type CommandPaletteMention } from '@/components/search-dialog'
 import { TrackModal } from '@/components/track-modal'
 import { BackgroundTaskDetail } from '@/components/background-task-detail'
+import { BrowserPane } from '@/components/browser-pane/BrowserPane'
 import { VersionHistoryPanel } from '@/components/version-history-panel'
 import { FileCardProvider } from '@/contexts/file-card-context'
 import { MarkdownPreOverride } from '@/components/ai-elements/markdown-code-override'
@@ -455,6 +456,8 @@ function FixedSidebarToggle({
   meetingSummarizing,
   meetingAvailable,
   onToggleMeeting,
+  isBrowserOpen,
+  onToggleBrowser,
   leftInsetPx,
 }: {
   onNewChat: () => void
@@ -463,6 +466,8 @@ function FixedSidebarToggle({
   meetingSummarizing: boolean
   meetingAvailable: boolean
   onToggleMeeting: () => void
+  isBrowserOpen: boolean
+  onToggleBrowser: () => void
   leftInsetPx: number
 }) {
   const { toggleSidebar } = useSidebar()
@@ -527,6 +532,49 @@ function FixedSidebarToggle({
             {meetingSummarizing ? 'Generating meeting notes...' : meetingState === 'connecting' ? 'Starting transcription...' : meetingState === 'recording' ? 'Stop meeting notes' : 'Take new meeting notes'}
           </TooltipContent>
         </Tooltip>
+      )}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={onToggleBrowser}
+            className={cn(
+              "flex h-8 w-8 items-center justify-center rounded-md transition-colors",
+              isBrowserOpen
+                ? "bg-accent text-foreground"
+                : "text-muted-foreground hover:bg-accent hover:text-foreground"
+            )}
+            style={{ marginLeft: TITLEBAR_BUTTON_GAP_PX }}
+            aria-label={isBrowserOpen ? "Close browser" : "Open browser"}
+          >
+            <Globe className="size-5" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">{isBrowserOpen ? 'Close browser' : 'Open browser'}</TooltipContent>
+      </Tooltip>
+      {/* Back / Forward navigation */}
+      {isCollapsed && (
+        <>
+          <button
+            type="button"
+            onClick={onNavigateBack}
+            disabled={!canNavigateBack}
+            className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-30 disabled:pointer-events-none"
+            style={{ marginLeft: TITLEBAR_BUTTON_GAP_PX }}
+            aria-label="Go back"
+          >
+            <ChevronLeftIcon className="size-5" />
+          </button>
+          <button
+            type="button"
+            onClick={onNavigateForward}
+            disabled={!canNavigateForward}
+            className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-30 disabled:pointer-events-none"
+            aria-label="Go forward"
+          >
+            <ChevronRightIcon className="size-5" />
+          </button>
+        </>
       )}
     </div>
   )
@@ -606,6 +654,7 @@ function App() {
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set())
   const [recentWikiFiles, setRecentWikiFiles] = useState<string[]>([])
   const [isGraphOpen, setIsGraphOpen] = useState(false)
+  const [isBrowserOpen, setIsBrowserOpen] = useState(false)
   const [expandedFrom, setExpandedFrom] = useState<{ path: string | null; graph: boolean } | null>(null)
   const [baseConfigByPath, setBaseConfigByPath] = useState<Record<string, BaseConfig>>({})
   const [graphData, setGraphData] = useState<{ nodes: GraphNode[]; edges: GraphEdge[] }>({
@@ -2714,6 +2763,24 @@ function App() {
     setIsChatSidebarOpen(prev => !prev)
   }, [])
 
+  // Browser is an overlay on the middle pane: opening it forces the chat
+  // sidebar to be visible on the right; closing it restores whatever the
+  // middle pane was showing previously (file/graph/task/chat).
+  const handleToggleBrowser = useCallback(() => {
+    setIsBrowserOpen(prev => {
+      const next = !prev
+      if (next) {
+        setIsChatSidebarOpen(true)
+        setIsRightPaneMaximized(false)
+      }
+      return next
+    })
+  }, [])
+
+  const handleCloseBrowser = useCallback(() => {
+    setIsBrowserOpen(false)
+  }, [])
+
   const toggleRightPaneMaximize = useCallback(() => {
     setIsChatSidebarOpen(true)
     setIsRightPaneMaximized(prev => !prev)
@@ -2797,6 +2864,9 @@ function App() {
       case 'file':
         setSelectedBackgroundTask(null)
         setIsGraphOpen(false)
+        // Navigating to a file dismisses the browser overlay so the file is
+        // visible in the middle pane.
+        setIsBrowserOpen(false)
         setExpandedFrom(null)
         // Preserve split vs knowledge-max mode when navigating knowledge files.
         // Only exit chat-only maximize, because that would hide the selected file.
@@ -2809,6 +2879,7 @@ function App() {
       case 'graph':
         setSelectedBackgroundTask(null)
         setSelectedPath(null)
+        setIsBrowserOpen(false)
         setExpandedFrom(null)
         setIsGraphOpen(true)
         ensureGraphFileTab()
@@ -2819,6 +2890,7 @@ function App() {
       case 'task':
         setSelectedPath(null)
         setIsGraphOpen(false)
+        setIsBrowserOpen(false)
         setExpandedFrom(null)
         setIsRightPaneMaximized(false)
         setSelectedBackgroundTask(view.name)
@@ -2826,6 +2898,8 @@ function App() {
       case 'chat':
         setSelectedPath(null)
         setIsGraphOpen(false)
+        // Don't touch isBrowserOpen here — chat navigation should land in
+        // the right sidebar when the browser overlay is active.
         setExpandedFrom(null)
         setIsRightPaneMaximized(false)
         setSelectedBackgroundTask(null)
@@ -3101,7 +3175,7 @@ function App() {
   }, [])
 
   // Keyboard shortcut: Ctrl+L to toggle main chat view
-  const isFullScreenChat = !selectedPath && !isGraphOpen && !selectedBackgroundTask
+  const isFullScreenChat = !selectedPath && !isGraphOpen && !selectedBackgroundTask && !isBrowserOpen
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'l') {
@@ -3964,7 +4038,7 @@ function App() {
   const selectedTask = selectedBackgroundTask
     ? backgroundTasks.find(t => t.name === selectedBackgroundTask)
     : null
-  const isRightPaneContext = Boolean(selectedPath || isGraphOpen)
+  const isRightPaneContext = Boolean(selectedPath || isGraphOpen || isBrowserOpen)
   const isRightPaneOnlyMode = isRightPaneContext && isChatSidebarOpen && isRightPaneMaximized
   const shouldCollapseLeftPane = isRightPaneOnlyMode
   const openMarkdownTabs = React.useMemo(() => {
@@ -4006,7 +4080,7 @@ function App() {
                 onNewChat: handleNewChatTab,
                 onSelectRun: (runIdToLoad) => {
                   cancelRecordingIfActive()
-                  if (selectedPath || isGraphOpen) {
+                  if (selectedPath || isGraphOpen || isBrowserOpen) {
                     setIsChatSidebarOpen(true)
                   }
 
@@ -4016,8 +4090,8 @@ function App() {
                     switchChatTab(existingTab.id)
                     return
                   }
-                  // In two-pane mode, keep current knowledge/graph context and just swap chat context.
-                  if (selectedPath || isGraphOpen) {
+                  // In two-pane mode (file/graph/browser), keep the middle pane and just swap chat context in the right sidebar.
+                  if (selectedPath || isGraphOpen || isBrowserOpen) {
                     setChatTabs(prev => prev.map(t => t.id === activeChatTabId ? { ...t, runId: runIdToLoad } : t))
                     loadRun(runIdToLoad)
                     return
@@ -4041,14 +4115,14 @@ function App() {
                       } else {
                         // Only one tab, reset it to new chat
                         setChatTabs([{ id: tabForRun.id, runId: null }])
-                        if (selectedPath || isGraphOpen) {
+                        if (selectedPath || isGraphOpen || isBrowserOpen) {
                           handleNewChat()
                         } else {
                           void navigateToView({ type: 'chat', runId: null })
                         }
                       }
                     } else if (runId === runIdToDelete) {
-                      if (selectedPath || isGraphOpen) {
+                      if (selectedPath || isGraphOpen || isBrowserOpen) {
                         setChatTabs(prev => prev.map(t => t.id === activeChatTabId ? { ...t, runId: null } : t))
                         handleNewChat()
                       } else {
@@ -4146,7 +4220,7 @@ function App() {
                     <TooltipContent side="bottom">Version history</TooltipContent>
                   </Tooltip>
                 )}
-                {!selectedPath && !isGraphOpen && !selectedTask && (
+                {!selectedPath && !isGraphOpen && !selectedTask && !isBrowserOpen && (
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
@@ -4161,7 +4235,7 @@ function App() {
                     <TooltipContent side="bottom">New chat tab</TooltipContent>
                   </Tooltip>
                 )}
-                {!selectedPath && !isGraphOpen && expandedFrom && (
+                {!selectedPath && !isGraphOpen && !isBrowserOpen && expandedFrom && (
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
@@ -4195,7 +4269,9 @@ function App() {
                 )}
               </ContentHeader>
 
-              {selectedPath && isBaseFilePath(selectedPath) ? (
+              {isBrowserOpen ? (
+                <BrowserPane onClose={handleCloseBrowser} />
+              ) : selectedPath && isBaseFilePath(selectedPath) ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                   <BasesView
                     tree={tree}
@@ -4568,6 +4644,8 @@ function App() {
               meetingSummarizing={meetingSummarizing}
               meetingAvailable={voiceAvailable}
               onToggleMeeting={() => { void handleToggleMeeting() }}
+              isBrowserOpen={isBrowserOpen}
+              onToggleBrowser={handleToggleBrowser}
               leftInsetPx={isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0}
             />
           </SidebarProvider>

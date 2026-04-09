@@ -31,6 +31,8 @@ import started from "electron-squirrel-startup";
 import { execSync, exec, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { init as initChromeSync } from "@x/core/dist/knowledge/chrome-extension/server/server.js";
+import { browserViewManager } from "./browser/view.js";
+import { setupBrowserEventForwarding } from "./browser/ipc.js";
 
 const execAsync = promisify(exec);
 
@@ -175,6 +177,10 @@ function createWindow() {
     }
   });
 
+  // Attach the embedded browser pane manager to this window.
+  // The WebContentsView is created lazily on first `browser:setVisible`.
+  browserViewManager.attach(win);
+
   if (app.isPackaged) {
     win.loadURL("app://-/index.html");
   } else {
@@ -216,6 +222,7 @@ app.whenReady().then(async () => {
   await initConfigs();
 
   setupIpcHandlers();
+  setupBrowserEventForwarding();
 
   createWindow();
 
