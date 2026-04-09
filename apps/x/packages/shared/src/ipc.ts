@@ -252,6 +252,7 @@ const ipcSchemas = {
         connected: z.boolean(),
         error: z.string().nullable().optional(),
         userId: z.string().optional(),
+        clientId: z.string().nullable().optional(),
       })),
     }),
   },

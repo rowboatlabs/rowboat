@@ -517,6 +517,10 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
           isConnecting: false,
         }
       }
+      // Hydrate in-memory Google client ID from persisted config so Connect can skip re-entry
+      if (config.google?.clientId) {
+        setGoogleClientId(config.google.clientId)
+      }
     } catch (error) {
       console.error('Failed to check connection status for providers:', error)
       for (const provider of providers) {

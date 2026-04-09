@@ -122,6 +122,14 @@ Select:
 
 ![Create OAuth Client ID (UWP)](https://raw.githubusercontent.com/rowboatlabs/rowboat/main/apps/docs/docs/img/google-setup/05-create-oauth-client-uwp.png)
 
+### Authorized redirect URIs (if shown)
+
+If your OAuth client configuration shows **Authorized redirect URIs**, add:
+
+- `http://localhost:8080/oauth/callback`
+
+Use this exactly: no trailing slash, port **8080**. This must match what the app uses for the OAuth callback. (Some client types, e.g. UWP, may not expose redirect URIs; that is fine.)
+
 ---
 
 ## 7️⃣ Copy the Client ID
@@ -134,5 +142,17 @@ After creation, Google will show:
 Copy the **Client ID** and paste it into Rowboat where prompted.
 
 ![Copy Client ID](https://raw.githubusercontent.com/rowboatlabs/rowboat/main/apps/docs/docs/img/google-setup/06-copy-client-id.png)
+
+---
+
+## Troubleshooting
+
+**Error after "Authorization Successful"**
+
+If the browser shows "Authorization Successful" but the app then shows an error (e.g. "invalid response encountered" or "response parameter \"iss\" (issuer) missing"):
+
+1. **Check the app logs** (e.g. terminal or dev tools) for the full error. The message there will often indicate the cause (e.g. redirect URI mismatch, missing parameter).
+2. **Verify redirect URI in Google Cloud Console**: Open [Credentials → your OAuth 2.0 Client ID](https://console.cloud.google.com/auth/clients). If the client type allows **Authorized redirect URIs**, ensure `http://localhost:8080/oauth/callback` is listed exactly.
+3. **Client type**: Use **Desktop** or **UWP** as the application type. A "Web application" client may require the redirect URI to be set and can behave differently with localhost.
 
 ---

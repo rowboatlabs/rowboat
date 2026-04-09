@@ -22,10 +22,11 @@ export interface AuthServerResult {
 /**
  * Create a local HTTP server to handle OAuth callback
  * Listens on http://localhost:8080/oauth/callback
+ * Passes the full callback URL (including iss, scope, etc.) so openid-client validation succeeds.
  */
 export function createAuthServer(
   port: number = DEFAULT_PORT,
-  onCallback: (params: Record<string, string>) => void | Promise<void>
+  onCallback: (callbackUrl: URL) => void | Promise<void>
 ): Promise<AuthServerResult> {
   return new Promise((resolve, reject) => {
     const server = createServer((req, res) => {
@@ -38,8 +39,6 @@ export function createAuthServer(
       const url = new URL(req.url, `http://localhost:${port}`);
       
       if (url.pathname === OAUTH_CALLBACK_PATH) {
-        const code = url.searchParams.get('code');
-        const state = url.searchParams.get('state');
         const error = url.searchParams.get('error');
 
         if (error) {
@@ -65,9 +64,8 @@ export function createAuthServer(
           return;
         }
 
-        // Handle callback - either traditional OAuth with code/state or Composio-style notification
-        // Composio callbacks may not have code/state, just a notification that the flow completed
-        onCallback(Object.fromEntries(url.searchParams.entries()));
+        // Handle callback - pass full URL so params like iss (OpenID Connect) are preserved for token exchange
+        onCallback(url);
 
         res.writeHead(200, { 'Content-Type': 'text/html' });
         res.end(`
