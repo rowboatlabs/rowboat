@@ -619,7 +619,8 @@
 .tiptap-editor .ProseMirror .table-block-wrapper,
 .tiptap-editor .ProseMirror .calendar-block-wrapper,
 .tiptap-editor .ProseMirror .email-block-wrapper,
-.tiptap-editor .ProseMirror .transcript-block-wrapper {
+.tiptap-editor .ProseMirror .transcript-block-wrapper,
+.tiptap-editor .ProseMirror .mermaid-block-wrapper {
   margin: 8px 0;
 }
 
@@ -630,7 +631,8 @@
 .tiptap-editor .ProseMirror .calendar-block-card,
 .tiptap-editor .ProseMirror .email-block-card,
 .tiptap-editor .ProseMirror .email-draft-block-card,
-.tiptap-editor .ProseMirror .transcript-block-card {
+.tiptap-editor .ProseMirror .transcript-block-card,
+.tiptap-editor .ProseMirror .mermaid-block-card {
   position: relative;
   padding: 12px 14px;
   border: 1px solid var(--border);
@@ -647,7 +649,8 @@
 .tiptap-editor .ProseMirror .calendar-block-card:hover,
 .tiptap-editor .ProseMirror .email-block-card:hover,
 .tiptap-editor .ProseMirror .email-draft-block-card:hover,
-.tiptap-editor .ProseMirror .transcript-block-card:hover {
+.tiptap-editor .ProseMirror .transcript-block-card:hover,
+.tiptap-editor .ProseMirror .mermaid-block-card:hover {
   background-color: color-mix(in srgb, var(--muted) 70%, transparent);
 }
 
@@ -657,7 +660,8 @@
 .tiptap-editor .ProseMirror .table-block-wrapper.ProseMirror-selectednode .table-block-card,
 .tiptap-editor .ProseMirror .calendar-block-wrapper.ProseMirror-selectednode .calendar-block-card,
 .tiptap-editor .ProseMirror .email-block-wrapper.ProseMirror-selectednode .email-block-card,
-.tiptap-editor .ProseMirror .email-draft-block-wrapper.ProseMirror-selectednode .email-draft-block-card {
+.tiptap-editor .ProseMirror .email-draft-block-wrapper.ProseMirror-selectednode .email-draft-block-card,
+.tiptap-editor .ProseMirror .mermaid-block-wrapper.ProseMirror-selectednode .mermaid-block-card {
   outline: 2px solid var(--primary);
   outline-offset: 1px;
 }
@@ -668,7 +672,8 @@
 .tiptap-editor .ProseMirror .table-block-delete,
 .tiptap-editor .ProseMirror .calendar-block-delete,
 .tiptap-editor .ProseMirror .email-block-delete,
-.tiptap-editor .ProseMirror .email-draft-block-delete {
+.tiptap-editor .ProseMirror .email-draft-block-delete,
+.tiptap-editor .ProseMirror .mermaid-block-delete {
   position: absolute;
   top: 6px;
   right: 6px;
@@ -693,7 +698,8 @@
 .tiptap-editor .ProseMirror .table-block-card:hover .table-block-delete,
 .tiptap-editor .ProseMirror .calendar-block-card:hover .calendar-block-delete,
 .tiptap-editor .ProseMirror .email-block-card:hover .email-block-delete,
-.tiptap-editor .ProseMirror .email-draft-block-card:hover .email-draft-block-delete {
+.tiptap-editor .ProseMirror .email-draft-block-card:hover .email-draft-block-delete,
+.tiptap-editor .ProseMirror .mermaid-block-card:hover .mermaid-block-delete {
   opacity: 1;
 }
 
@@ -703,9 +709,24 @@
 .tiptap-editor .ProseMirror .table-block-delete:hover,
 .tiptap-editor .ProseMirror .calendar-block-delete:hover,
 .tiptap-editor .ProseMirror .email-block-delete:hover,
-.tiptap-editor .ProseMirror .email-draft-block-delete:hover {
+.tiptap-editor .ProseMirror .email-draft-block-delete:hover,
+.tiptap-editor .ProseMirror .mermaid-block-delete:hover {
   background-color: color-mix(in srgb, var(--foreground) 8%, transparent);
   color: var(--foreground);
+}
+
+/* Mermaid block */
+.tiptap-editor .ProseMirror .mermaid-block-card svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.tiptap-editor .ProseMirror .mermaid-block-empty {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: color-mix(in srgb, var(--foreground) 50%, transparent);
 }
 
 /* Image block */
