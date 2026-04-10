@@ -110,6 +110,18 @@ function markdownToHtml(markdown: string, title: string): string {
 </style></head><body>${html}</body></html>`
 }
 
+function resolveShellPath(filePath: string): string {
+  if (filePath.startsWith('~')) {
+    return path.join(os.homedir(), filePath.slice(1));
+  }
+
+  if (path.isAbsolute(filePath)) {
+    return filePath;
+  }
+
+  return workspace.resolveWorkspacePath(filePath);
+}
+
 type InvokeChannels = ipc.InvokeChannels;
 type IPCChannels = ipc.IPCChannels;
 
@@ -271,7 +283,7 @@ function handleWorkspaceChange(event: z.infer<typeof workspaceShared.WorkspaceCh
 
 /**
  * Start workspace watcher
- * Watches ~/.rowboat recursively and emits change events to renderer
+ * Watches the configured workspace root recursively and emits change events to renderer
  * 
  * This should be called once when the app starts (from main.ts).
  * The watcher runs as a main-process service and catches ALL filesystem changes
@@ -607,24 +619,12 @@ export function setupIpcHandlers() {
     },
     // Shell integration handlers
     'shell:openPath': async (_event, args) => {
-      let filePath = args.path;
-      if (filePath.startsWith('~')) {
-        filePath = path.join(os.homedir(), filePath.slice(1));
-      } else if (!path.isAbsolute(filePath)) {
-        // Workspace-relative path — resolve against ~/.rowboat/
-        filePath = path.join(os.homedir(), '.rowboat', filePath);
-      }
+      const filePath = resolveShellPath(args.path);
       const error = await shell.openPath(filePath);
       return { error: error || undefined };
     },
     'shell:readFileBase64': async (_event, args) => {
-      let filePath = args.path;
-      if (filePath.startsWith('~')) {
-        filePath = path.join(os.homedir(), filePath.slice(1));
-      } else if (!path.isAbsolute(filePath)) {
-        // Workspace-relative path — resolve against ~/.rowboat/
-        filePath = path.join(os.homedir(), '.rowboat', filePath);
-      }
+      const filePath = resolveShellPath(args.path);
       const stat = await fs.stat(filePath);
       if (stat.size > 10 * 1024 * 1024) {
         throw new Error('File too large (>10MB)');

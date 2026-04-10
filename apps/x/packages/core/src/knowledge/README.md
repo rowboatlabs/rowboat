@@ -13,7 +13,7 @@ Main orchestrator that:
 ### `graph_state.ts`
 State management module that tracks which files have been processed:
 - Uses hybrid mtime + hash approach for change detection
-- Stores state in `~/.rowboat/knowledge_graph_state.json`
+- Stores state in `WorkDir/knowledge_graph_state.json`
 - Provides modular functions for state operations
 
 ### `sync_gmail.ts` & `sync_fireflies.ts`
@@ -39,7 +39,7 @@ This is efficient (only hashes potentially changed files) and reliable (confirms
 
 ### State File Structure
 
-`~/.rowboat/knowledge_graph_state.json`:
+`WorkDir/knowledge_graph_state.json`:
 ```json
 {
   "processedFiles": {
@@ -69,7 +69,7 @@ This is efficient (only hashes potentially changed files) and reliable (confirms
 
 3. **Agent processes batch**
    - Extracts entities (people, orgs, projects, topics)
-   - Creates/updates notes in `~/.rowboat/knowledge/`
+   - Creates/updates notes in `WorkDir/knowledge/`
    - Merges information for entities appearing in multiple files
 
 ## Replacing the Change Detection Logic
@@ -135,7 +135,7 @@ import { resetGraphState } from './build_graph.js';
 resetGraphState(); // Clears the state file
 ```
 
-Or manually delete: `~/.rowboat/knowledge_graph_state.json`
+Or manually delete: `WorkDir/knowledge_graph_state.json`
 
 ## Note Creation Strictness
 
@@ -143,7 +143,7 @@ The system supports three strictness levels that control how aggressively notes 
 
 ### Configuration
 
-Strictness is configured in `~/.rowboat/config/note_creation.json`:
+Strictness is configured in `WorkDir/config/note_creation.json`:
 
 ```json
 {
@@ -218,7 +218,7 @@ Each strictness level has its own agent prompt:
 Change `BATCH_SIZE` in `build_graph.ts` (currently 25 files per batch)
 
 ### State File Location
-Change `STATE_FILE` in `graph_state.ts` (currently `~/.rowboat/knowledge_graph_state.json`)
+Change `STATE_FILE` in `graph_state.ts` (currently `WorkDir/knowledge_graph_state.json`)
 
 ### Hash Algorithm
 Change `crypto.createHash('sha256')` in `graph_state.ts` to use a different algorithm (md5, sha1, etc.)

@@ -9,7 +9,7 @@ export interface NoteTypeDefinition {
   extractionGuide: string;
 }
 
-// ── Default definitions (used to seed ~/.rowboat/config/notes.json) ──────────
+// ── Default definitions (used to seed WorkDir/config/notes.json) ─────────────
 
 const DEFAULT_NOTE_TYPE_DEFINITIONS: NoteTypeDefinition[] = [
   {

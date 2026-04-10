@@ -10,7 +10,7 @@ export type WorkspaceChangeCallback = (event: z.infer<typeof WorkspaceChangeEven
 
 /**
  * Create a workspace watcher
- * Watches ~/.rowboat recursively and emits change events via callback
+ * Watches the configured workspace root recursively and emits change events via callback
  * 
  * Returns a watcher instance that can be closed.
  * The watcher emits events immediately without debouncing.
@@ -74,4 +74,3 @@ export async function createWorkspaceWatcher(
 
   return watcher;
 }
-
