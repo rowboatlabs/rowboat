@@ -39,58 +39,78 @@ interface BrowserPaneProps {
 export function BrowserPane({ onClose }: BrowserPaneProps) {
   const [state, setState] = useState<BrowserState>(EMPTY_STATE)
   const [addressValue, setAddressValue] = useState('')
-  const [addressFocused, setAddressFocused] = useState(false)
 
-  const containerRef = useRef<HTMLDivElement>(null)
+  const addressFocusedRef = useRef(false)
   const viewportRef = useRef<HTMLDivElement>(null)
   const lastBoundsRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null)
+  const viewVisibleRef = useRef(false)
 
   // ── Subscribe to state updates from main ──────────────────────────────────
   useEffect(() => {
     const cleanup = window.ipc.on('browser:didUpdateState', (incoming) => {
       const next = incoming as BrowserState
       setState(next)
+      if (!addressFocusedRef.current) {
+        setAddressValue(next.url)
+      }
     })
     // Kick an initial state fetch so the chrome reflects wherever the view
     // was left from a previous session (or empty, if never loaded).
     void window.ipc.invoke('browser:getState', null).then((initial) => {
-      setState(initial as BrowserState)
+      const next = initial as BrowserState
+      setState(next)
+      if (!addressFocusedRef.current) {
+        setAddressValue(next.url)
+      }
     })
     return cleanup
-  }, [])
-
-  // Keep the address bar in sync with the active page URL, but only when the
-  // input isn't focused — don't clobber whatever the user is typing.
-  useEffect(() => {
-    if (!addressFocused) {
-      setAddressValue(state.url)
-    }
-  }, [state.url, addressFocused])
-
-  // ── Visibility lifecycle ──────────────────────────────────────────────────
-  // Show on mount, hide on unmount. The WebContentsView is expensive to
-  // create but cheap to show/hide.
-  useEffect(() => {
-    void window.ipc.invoke('browser:setVisible', { visible: true })
-    return () => {
-      void window.ipc.invoke('browser:setVisible', { visible: false })
-    }
   }, [])
 
   // ── Bounds tracking ───────────────────────────────────────────────────────
   // The main process needs pixel-accurate bounds *relative to the window
   // content area*. getBoundingClientRect() returns viewport-relative coords,
-  // which in Electron with no custom chrome equal content-area coords.
-  const pushBounds = useCallback(() => {
+  // which in Electron with hiddenInset titleBar equal content-area coords.
+  //
+  // Reads layout synchronously and posts an IPC update only when the rect
+  // actually changed. Cheap enough to call from a RAF loop or observer.
+  const setViewVisible = useCallback((visible: boolean) => {
+    if (viewVisibleRef.current === visible) return
+    viewVisibleRef.current = visible
+    void window.ipc.invoke('browser:setVisible', { visible })
+  }, [])
+
+  const measureBounds = useCallback(() => {
     const el = viewportRef.current
-    if (!el) return
+    if (!el) return null
+    const zoomFactor = Math.max(window.electronUtils.getZoomFactor(), 0.01)
     const rect = el.getBoundingClientRect()
+    const chatSidebar = el.ownerDocument.querySelector<HTMLElement>('[data-chat-sidebar-root]')
+    const chatSidebarRect = chatSidebar?.getBoundingClientRect()
+    const clampedRightCss = chatSidebarRect && chatSidebarRect.width > 0
+      ? Math.min(rect.right, chatSidebarRect.left)
+      : rect.right
+    // `getBoundingClientRect()` is reported in zoomed CSS pixels. Electron's
+    // native view bounds are in unzoomed window coordinates, so we have to
+    // convert back using the renderer zoom factor.
+    const left = Math.ceil(rect.left * zoomFactor)
+    const top = Math.ceil(rect.top * zoomFactor)
+    const right = Math.floor(clampedRightCss * zoomFactor)
+    const bottom = Math.floor(rect.bottom * zoomFactor)
+    const width = right - left
+    const height = bottom - top
+    // A zero-sized rect means the element isn't laid out yet or has been
+    // collapsed behind the chat pane — hide the native view in that case.
+    if (width <= 0 || height <= 0) return null
     const bounds = {
-      x: Math.round(rect.left),
-      y: Math.round(rect.top),
-      width: Math.round(rect.width),
-      height: Math.round(rect.height),
+      x: left,
+      y: top,
+      width,
+      height,
     }
+    return bounds
+  }, [])
+
+  const pushBounds = useCallback((bounds: { x: number; y: number; width: number; height: number }) => {
     const last = lastBoundsRef.current
     if (
       last &&
@@ -99,36 +119,96 @@ export function BrowserPane({ onClose }: BrowserPaneProps) {
       last.width === bounds.width &&
       last.height === bounds.height
     ) {
-      return
+      return bounds
     }
     lastBoundsRef.current = bounds
     void window.ipc.invoke('browser:setBounds', bounds)
+    return bounds
   }, [])
 
+  const syncView = useCallback(() => {
+    const bounds = measureBounds()
+    if (!bounds) {
+      lastBoundsRef.current = null
+      setViewVisible(false)
+      return null
+    }
+    pushBounds(bounds)
+    setViewVisible(true)
+    return bounds
+  }, [measureBounds, pushBounds, setViewVisible])
+
+  // Defensively re-push bounds whenever the underlying page state changes.
+  // Electron's WebContentsView can drop its laid-out rect on navigation,
+  // and even though main re-applies on the same events, pushing from the
+  // renderer ensures we use the *current* layout (in case the chat sidebar
+  // or window resized while the page was loading).
+  useEffect(() => {
+    syncView()
+  }, [state.url, state.loading, syncView])
+
+  // ── Visibility lifecycle ──────────────────────────────────────────────────
+  // Order matters: push bounds FIRST so the WCV is created at the right
+  // position, THEN setVisible. Otherwise the view gets attached at stale
+  // (or zero) cached bounds and visually spills until the next bounds push.
+  //
+  // We wait one animation frame after mount so React's commit + the browser's
+  // layout pass for any sibling that just mounted (e.g. the chat sidebar) are
+  // both reflected in getBoundingClientRect. A single RAF is enough — by then
+  // the renderer has painted the post-commit DOM at least once.
+  useEffect(() => {
+    let cancelled = false
+    const rafId = requestAnimationFrame(() => {
+      if (cancelled) return
+      syncView()
+    })
+    return () => {
+      cancelled = true
+      cancelAnimationFrame(rafId)
+      lastBoundsRef.current = null
+      setViewVisible(false)
+    }
+  }, [setViewVisible, syncView])
+
+  // Ongoing bounds tracking. Observes everything that can move our viewport:
+  //   - the viewport div itself (local size changes)
+  //   - the SidebarInset ancestor (changes when chat sidebar mounts/resizes)
+  //   - the document root (window resize, devicePixelRatio changes)
+  //
+  // ResizeObserver fires after layout but before paint, so by the time we
+  // call pushBounds the rect is current. Multiple observers may fire in the
+  // same frame — RAF-coalesce them so we only post one IPC per frame.
   useEffect(() => {
     const el = viewportRef.current
     if (!el) return
 
-    // Initial push + ResizeObserver for size changes.
-    pushBounds()
-    const ro = new ResizeObserver(() => pushBounds())
+    // The sidebar-inset main element is the immediate flex parent whose
+    // width shrinks when a sibling appears. Walking up the tree is more
+    // robust than passing a ref through props.
+    const sidebarInset = el.closest<HTMLElement>('[data-slot="sidebar-inset"]')
+    const chatSidebar = el.ownerDocument.querySelector<HTMLElement>('[data-chat-sidebar-root]')
+    const documentElement = el.ownerDocument.documentElement
+
+    let pendingRaf: number | null = null
+    const schedule = () => {
+      if (pendingRaf !== null) return
+      pendingRaf = requestAnimationFrame(() => {
+        pendingRaf = null
+        syncView()
+      })
+    }
+
+    const ro = new ResizeObserver(schedule)
     ro.observe(el)
-
-    // The container may move without resizing (sidebar collapse, window
-    // resize). Listen on window resize for that case.
-    const onWindowResize = () => pushBounds()
-    window.addEventListener('resize', onWindowResize)
-
-    // Also poll briefly during layout transitions (the sidebar uses CSS
-    // transitions that don't fire ResizeObserver every frame).
-    const interval = window.setInterval(pushBounds, 100)
+    if (sidebarInset) ro.observe(sidebarInset)
+    if (chatSidebar) ro.observe(chatSidebar)
+    ro.observe(documentElement)
 
     return () => {
+      if (pendingRaf !== null) cancelAnimationFrame(pendingRaf)
       ro.disconnect()
-      window.removeEventListener('resize', onWindowResize)
-      window.clearInterval(interval)
     }
-  }, [pushBounds])
+  }, [syncView])
 
   // ── Actions ───────────────────────────────────────────────────────────────
   const handleSubmitAddress = useCallback((e: React.FormEvent) => {
@@ -157,8 +237,7 @@ export function BrowserPane({ onClose }: BrowserPaneProps) {
 
   return (
     <div
-      ref={containerRef}
-      className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background"
+      className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background"
     >
       {/* Chrome row: back / forward / reload / address bar */}
       <div
@@ -207,10 +286,13 @@ export function BrowserPane({ onClose }: BrowserPaneProps) {
             value={addressValue}
             onChange={(e) => setAddressValue(e.target.value)}
             onFocus={(e) => {
-              setAddressFocused(true)
+              addressFocusedRef.current = true
               e.currentTarget.select()
             }}
-            onBlur={() => setAddressFocused(false)}
+            onBlur={() => {
+              addressFocusedRef.current = false
+              setAddressValue(state.url)
+            }}
             placeholder="Enter URL or search..."
             className={cn(
               'h-7 w-full rounded-md border border-transparent bg-background px-3 text-sm text-foreground',
@@ -242,7 +324,7 @@ export function BrowserPane({ onClose }: BrowserPaneProps) {
           user sees the web page, not a React element. */}
       <div
         ref={viewportRef}
-        className="relative min-h-0 flex-1"
+        className="relative min-h-0 min-w-0 flex-1"
         data-browser-viewport
       />
     </div>

@@ -97,12 +97,25 @@ export class BrowserViewManager extends EventEmitter {
 
     const emit = () => this.emit('state-updated', this.snapshotState());
 
-    wc.on('did-navigate', emit);
-    wc.on('did-navigate-in-page', emit);
-    wc.on('did-start-loading', emit);
-    wc.on('did-stop-loading', emit);
-    wc.on('did-finish-load', emit);
-    wc.on('did-fail-load', emit);
+    // Defensively re-apply bounds on navigation events. Electron's
+    // WebContentsView is known to occasionally reset its laid-out bounds on
+    // navigation (a behavior carried over from the deprecated BrowserView),
+    // which manifests as the view "spilling" outside its intended pane.
+    // Re-applying after every navigation/load event is cheap and idempotent.
+    const reapplyBounds = () => {
+      if (this.attached && this.bounds.width > 0 && this.bounds.height > 0) {
+        view.setBounds(this.bounds);
+      }
+    };
+
+    wc.on('did-start-navigation', reapplyBounds);
+    wc.on('did-navigate', () => { reapplyBounds(); emit(); });
+    wc.on('did-navigate-in-page', () => { reapplyBounds(); emit(); });
+    wc.on('did-start-loading', () => { reapplyBounds(); emit(); });
+    wc.on('did-stop-loading', () => { reapplyBounds(); emit(); });
+    wc.on('did-finish-load', () => { reapplyBounds(); emit(); });
+    wc.on('did-frame-finish-load', reapplyBounds);
+    wc.on('did-fail-load', () => { reapplyBounds(); emit(); });
     wc.on('page-title-updated', emit);
 
     // Pop-ups / target="_blank" — hand off to the OS browser for now.
@@ -121,10 +134,16 @@ export class BrowserViewManager extends EventEmitter {
     const contentView = this.window.contentView;
 
     if (visible) {
+      // Order: attach FIRST, then setBounds. Calling setBounds on an
+      // unattached WebContentsView can leave it in a state where the next
+      // attach uses default bounds, blanking the renderer area.
       if (!this.attached) {
         contentView.addChildView(view);
         this.attached = true;
       }
+      // The renderer only asks us to show the view after it has pushed a
+      // fresh non-zero rect, so applying the cached bounds here should land
+      // the surface in the correct pane immediately on attach.
       view.setBounds(this.bounds);
       this.visible = true;
 
@@ -144,7 +163,10 @@ export class BrowserViewManager extends EventEmitter {
 
   setBounds(bounds: BrowserBounds): void {
     this.bounds = bounds;
-    if (this.view && this.visible) {
+    // Only apply to the view if it's currently attached and visible.
+    // Applying to a detached view appears to put Electron's WebContentsView
+    // into a bad state on subsequent attach (renderer area blanks out).
+    if (this.view && this.attached && this.visible) {
       this.view.setBounds(bounds);
     }
   }

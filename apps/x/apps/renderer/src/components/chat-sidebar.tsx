@@ -76,12 +76,18 @@ function matchBillingError(message: string) {
   return BILLING_ERROR_PATTERNS.find(({ pattern }) => pattern.test(message)) ?? null
 }
 
+interface BillingRowboatAccount {
+  config?: {
+    appUrl?: string | null
+  } | null
+}
+
 function BillingErrorCTA({ label }: { label: string }) {
   const [appUrl, setAppUrl] = useState<string | null>(null)
 
   useEffect(() => {
     window.ipc.invoke('account:getRowboat', null)
-      .then((account: any) => setAppUrl(account.config?.appUrl ?? null))
+      .then((account: BillingRowboatAccount) => setAppUrl(account.config?.appUrl ?? null))
       .catch(() => {})
   }, [])
 
@@ -467,6 +473,7 @@ export function ChatSidebar({
   return (
     <div
       ref={paneRef}
+      data-chat-sidebar-root
       onMouseDownCapture={onActivate}
       onFocusCapture={onActivate}
       className={cn(
