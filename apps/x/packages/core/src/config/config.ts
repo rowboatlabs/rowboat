@@ -3,9 +3,25 @@ import fs from "fs";
 import { homedir } from "os";
 import { fileURLToPath } from "url";
 
+function resolveWorkDir(): string {
+    const configured = process.env.ROWBOAT_WORKDIR;
+    if (!configured) {
+        return path.join(homedir(), ".rowboat");
+    }
+
+    const expanded = configured === "~"
+        ? homedir()
+        : (configured.startsWith("~/") || configured.startsWith("~\\"))
+            ? path.join(homedir(), configured.slice(2))
+            : configured;
+
+    return path.resolve(expanded);
+}
+
 // Resolve app root relative to compiled file location (dist/...)
-// Allow override via ROWBOAT_WORKDIR env var for standalone pipeline usage
-export const WorkDir = process.env.ROWBOAT_WORKDIR || path.join(homedir(), ".rowboat");
+// Allow override via ROWBOAT_WORKDIR env var for standalone pipeline usage.
+// Normalize to an absolute path so workspace boundary checks behave consistently.
+export const WorkDir = resolveWorkDir();
 
 // Get the directory of this file (for locating bundled assets)
 const __filename = fileURLToPath(import.meta.url);
