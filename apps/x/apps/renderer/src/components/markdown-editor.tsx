@@ -9,6 +9,7 @@ import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import { ImageUploadPlaceholderExtension, createImageUploadHandler } from '@/extensions/image-upload'
 import { TaskBlockExtension } from '@/extensions/task-block'
+import { TrackBlockExtension } from '@/extensions/track-block'
 import { ImageBlockExtension } from '@/extensions/image-block'
 import { EmbedBlockExtension } from '@/extensions/embed-block'
 import { ChartBlockExtension } from '@/extensions/chart-block'
@@ -638,6 +639,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       }),
       ImageUploadPlaceholderExtension,
       TaskBlockExtension,
+      TrackBlockExtension.configure({ notePath }),
       ImageBlockExtension,
       EmbedBlockExtension,
       ChartBlockExtension,

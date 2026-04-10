@@ -44,6 +44,8 @@ import { getBillingInfo } from '@x/core/dist/billing/billing.js';
 import { summarizeMeeting } from '@x/core/dist/knowledge/summarize_meeting.js';
 import { getAccessToken } from '@x/core/dist/auth/tokens.js';
 import { getRowboatConfig } from '@x/core/dist/config/rowboat.js';
+import { triggerTrackUpdate } from '@x/core/dist/knowledge/track/runner.js';
+import { trackBus } from '@x/core/dist/knowledge/track/bus.js';
 
 /**
  * Convert markdown to a styled HTML document for PDF/DOCX export.
@@ -359,6 +361,19 @@ export async function startServicesWatcher(): Promise<void> {
   }
   servicesWatcher = await serviceBus.subscribe(async (event) => {
     emitServiceEvent(event);
+  });
+}
+
+let tracksWatcher: (() => void) | null = null;
+export function startTracksWatcher(): void {
+  if (tracksWatcher) return;
+  tracksWatcher = trackBus.subscribe((event) => {
+    const windows = BrowserWindow.getAllWindows();
+    for (const win of windows) {
+      if (!win.isDestroyed() && win.webContents) {
+        win.webContents.send('tracks:events', event);
+      }
+    }
   });
 }
 
@@ -757,6 +772,11 @@ export function setupIpcHandlers() {
     },
     'voice:synthesize': async (_event, args) => {
       return voice.synthesizeSpeech(args.text);
+    },
+    // Track handler
+    'track:run': async (_event, args) => {
+      const result = await triggerTrackUpdate(args.trackId, args.filePath);
+      return { success: !result.error, summary: result.summary ?? undefined, error: result.error };
     },
     // Billing handler
     'billing:getInfo': async () => {

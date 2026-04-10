@@ -6,6 +6,7 @@ import { LlmModelConfig } from './models.js';
 import { AgentScheduleConfig, AgentScheduleEntry } from './agent-schedule.js';
 import { AgentScheduleState } from './agent-schedule-state.js';
 import { ServiceEvent } from './service-events.js';
+import { TrackEvent } from './track-block.js';
 import { UserMessageContent } from './message.js';
 import { RowboatApiConfig } from './rowboat-account.js';
 import { ZListToolkitsResponse } from './composio.js';
@@ -191,6 +192,10 @@ const ipcSchemas = {
   },
   'services:events': {
     req: ServiceEvent,
+    res: z.null(),
+  },
+  'tracks:events': {
+    req: TrackEvent,
     res: z.null(),
   },
   'models:list': {
@@ -558,6 +563,18 @@ const ipcSchemas = {
       ]).nullable(),
       scheduleLabel: z.string().nullable(),
       response: z.string().nullable(),
+    }),
+  },
+  // Track channels
+  'track:run': {
+    req: z.object({
+      trackId: z.string(),
+      filePath: z.string(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      summary: z.string().optional(),
+      error: z.string().optional(),
     }),
   },
   // Billing channels
