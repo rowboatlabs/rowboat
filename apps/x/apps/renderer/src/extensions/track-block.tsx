@@ -57,7 +57,7 @@ function TrackBlockView({ node, deleteNode, updateAttributes, extension }: {
 
   // Track run status from the global hook
   const allTrackStatus = useTrackStatus()
-  const runState = allTrackStatus.get(`${track.trackId}:${trackFilePath}`) ?? { status: 'idle' as const }
+  const runState = allTrackStatus.get(`${track?.trackId}:${trackFilePath}`) ?? { status: 'idle' as const }
   const runStatus = runState.status
   const runSummary = runState.summary ?? runState.error ?? null
 
