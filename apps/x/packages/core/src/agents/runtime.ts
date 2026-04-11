@@ -1068,35 +1068,34 @@ export async function* streamAgent({
         // Local-provider prioritization: background agents yield to active chat
         if (isBackgroundAgent) {
             await waitIfChatActive(providerFlavor, signal);
-        } else {
-            markChatActive();
         }
         try {
-        for await (const event of streamLlm(
-            model,
-            state.messages,
-            instructionsWithDateTime,
-            tools,
-            signal,
-        )) {
-            messageBuilder.ingest(event);
-            yield* processEvent({
-                runId,
-                type: "llm-stream-event",
-                event: event,
-                subflow: [],
-            });
-            if (event.type === "error") {
-                streamError = event.error;
+            if (!isBackgroundAgent) markChatActive();
+            for await (const event of streamLlm(
+                model,
+                state.messages,
+                instructionsWithDateTime,
+                tools,
+                signal,
+            )) {
+                messageBuilder.ingest(event);
                 yield* processEvent({
                     runId,
-                    type: "error",
-                    error: streamError,
+                    type: "llm-stream-event",
+                    event: event,
                     subflow: [],
                 });
-                break;
+                if (event.type === "error") {
+                    streamError = event.error;
+                    yield* processEvent({
+                        runId,
+                        type: "error",
+                        error: streamError,
+                        subflow: [],
+                    });
+                    break;
+                }
             }
-        }
         } finally {
             if (!isBackgroundAgent) {
                 markChatIdle();

@@ -7,6 +7,7 @@ import { createOllama } from "ollama-ai-provider-v2";
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { LlmModelConfig, LlmProvider } from "@x/shared/dist/models.js";
+import { isLocalProvider } from "./llm-queue.js";
 import z from "zod";
 import { isSignedIn } from "../account/account.js";
 import { getGatewayProvider } from "./gateway.js";
@@ -75,8 +76,7 @@ export async function testModelConnection(
     model: string,
     timeoutMs?: number,
 ): Promise<{ success: boolean; error?: string }> {
-    const isLocal = providerConfig.flavor === "ollama" || providerConfig.flavor === "openai-compatible";
-    const effectiveTimeout = timeoutMs ?? (isLocal ? 60000 : 8000);
+    const effectiveTimeout = timeoutMs ?? (isLocalProvider(providerConfig.flavor) ? 60000 : 8000);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), effectiveTimeout);
     try {

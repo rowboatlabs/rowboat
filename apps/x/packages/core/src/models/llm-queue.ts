@@ -9,23 +9,24 @@
  * Cloud providers bypass this entirely — they handle concurrency fine.
  */
 
+import type { z } from "zod";
+import type { LlmProvider } from "@x/shared/dist/models.js";
+
+type ProviderFlavor = z.infer<typeof LlmProvider>["flavor"];
+
 let chatActiveCount = 0;
 let chatIdleResolvers: Array<() => void> = [];
 
-/**
- * Call when an interactive chat LLM stream starts.
- * Nestable — supports concurrent interactive streams.
- */
 export function markChatActive(): void {
     chatActiveCount++;
 }
 
-/**
- * Call when an interactive chat LLM stream ends.
- * When all interactive streams finish, waiting background tasks resume.
- */
 export function markChatIdle(): void {
-    chatActiveCount = Math.max(0, chatActiveCount - 1);
+    if (chatActiveCount <= 0) {
+        console.warn("[llm-queue] markChatIdle called with no active chat — possible mismatched calls");
+        return;
+    }
+    chatActiveCount--;
     if (chatActiveCount === 0) {
         const resolvers = chatIdleResolvers;
         chatIdleResolvers = [];
@@ -35,23 +36,16 @@ export function markChatIdle(): void {
     }
 }
 
-/**
- * Returns true if the provider flavor represents a local inference server.
- */
-export function isLocalProvider(flavor: string): boolean {
+export function isLocalProvider(flavor: ProviderFlavor): boolean {
     return flavor === "ollama" || flavor === "openai-compatible";
 }
 
 /**
  * Background services call this before each LLM request.
- * - If the provider is cloud-based, returns immediately.
- * - If the provider is local and no chat is active, returns immediately.
- * - If the provider is local and chat IS active, waits until chat finishes.
- *
- * @param providerFlavor - The provider flavor string (e.g. "ollama", "openai", "anthropic")
- * @param signal - Optional AbortSignal to cancel the wait
+ * Returns immediately for cloud providers or when no chat is active.
+ * For local providers with active chat, waits until chat finishes.
  */
-export function waitIfChatActive(providerFlavor: string, signal?: AbortSignal): Promise<void> {
+export function waitIfChatActive(providerFlavor: ProviderFlavor, signal?: AbortSignal): Promise<void> {
     if (!isLocalProvider(providerFlavor)) {
         return Promise.resolve();
     }
