@@ -732,6 +732,11 @@ async function performSyncComposio() {
         let highWaterMark: string | null = state?.last_sync ?? null;
         let processedCount = 0;
         for (const threadId of allThreadIds) {
+            // Re-check connection in case user disconnected mid-sync
+            if (!composioAccountsRepo.isConnected('gmail')) {
+                console.log('[Gmail] Account disconnected during sync. Stopping.');
+                return;
+            }
             try {
                 const newestInThread = await processThreadComposio(connectedAccountId, threadId, SYNC_DIR);
                 processedCount++;

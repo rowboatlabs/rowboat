@@ -442,6 +442,12 @@ async function performSyncComposio() {
         const MAX_PAGES = 20;
 
         for (let page = 0; page < MAX_PAGES; page++) {
+            // Re-check connection in case user disconnected mid-sync
+            if (!composioAccountsRepo.isConnected('googlecalendar')) {
+                console.log('[Calendar] Account disconnected during sync. Stopping.');
+                return;
+            }
+
             const args: Record<string, unknown> = {
                 calendar_id: 'primary',
                 time_min: timeMin,
