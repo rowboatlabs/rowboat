@@ -1,4 +1,4 @@
-import { asClass, createContainer, InjectionMode } from "awilix";
+import { asClass, asValue, createContainer, InjectionMode } from "awilix";
 import { FSModelConfigRepo, IModelConfigRepo } from "../models/repo.js";
 import { FSMcpConfigRepo, IMcpConfigRepo } from "../mcp/repo.js";
 import { FSAgentsRepo, IAgentsRepo } from "../agents/repo.js";
@@ -42,3 +42,10 @@ container.register({
 });
 
 export default container;
+
+export function registerContainerValues(values: Record<string, unknown>): void {
+    const registrations = Object.fromEntries(
+        Object.entries(values).map(([key, value]) => [key, asValue(value)]),
+    );
+    container.register(registrations);
+}

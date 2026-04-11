@@ -10,6 +10,7 @@ import { TrackEvent } from './track-block.js';
 import { UserMessageContent } from './message.js';
 import { RowboatApiConfig } from './rowboat-account.js';
 import { ZListToolkitsResponse } from './composio.js';
+import { BrowserStateSchema } from './browser-control.js';
 
 // ============================================================================
 // Runtime Validation Schemas (Single Source of Truth)
@@ -701,29 +702,15 @@ const ipcSchemas = {
   },
   'browser:getState': {
     req: z.null(),
-    res: z.object({
-      activeTabId: z.string().nullable(),
-      tabs: z.array(z.object({
-        id: z.string(),
-        url: z.string(),
-        title: z.string(),
-        canGoBack: z.boolean(),
-        canGoForward: z.boolean(),
-        loading: z.boolean(),
-      })),
-    }),
+    res: BrowserStateSchema,
   },
   'browser:didUpdateState': {
+    req: BrowserStateSchema,
+    res: z.null(),
+  },
+  'browser:didRequestPaneState': {
     req: z.object({
-      activeTabId: z.string().nullable(),
-      tabs: z.array(z.object({
-        id: z.string(),
-        url: z.string(),
-        title: z.string(),
-        canGoBack: z.boolean(),
-        canGoForward: z.boolean(),
-        loading: z.boolean(),
-      })),
+      open: z.boolean(),
     }),
     res: z.null(),
   },

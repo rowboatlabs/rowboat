@@ -11,6 +11,7 @@ import backgroundAgentsSkill from "./background-agents/skill.js";
 import createPresentationsSkill from "./create-presentations/skill.js";
 
 import appNavigationSkill from "./app-navigation/skill.js";
+import browserControlSkill from "./browser-control/skill.js";
 import composioIntegrationSkill from "./composio-integration/skill.js";
 import tracksSkill from "./tracks/skill.js";
 
@@ -104,6 +105,12 @@ const definitions: SkillDefinition[] = [
     title: "Tracks",
     summary: "Create and manage track blocks — YAML-scheduled auto-updating content blocks in notes (weather, news, prices, status, dashboards). Insert at cursor (Cmd+K) or append to notes.",
     content: tracksSkill,
+  },
+  {
+    id: "browser-control",
+    title: "Browser Control",
+    summary: "Control the embedded browser pane - open sites, inspect page state, and interact with indexed page elements.",
+    content: browserControlSkill,
   },
 ];
 

@@ -231,6 +231,55 @@ export const getAppActionCardData = (tool: ToolCall): AppActionCardData | null =
   }
 }
 
+const BROWSER_PENDING_LABELS: Record<string, string> = {
+  open: 'Opening browser...',
+  'get-state': 'Reading browser state...',
+  'new-tab': 'Opening new browser tab...',
+  'switch-tab': 'Switching browser tab...',
+  'close-tab': 'Closing browser tab...',
+  navigate: 'Navigating browser...',
+  back: 'Going back...',
+  forward: 'Going forward...',
+  reload: 'Reloading page...',
+  'read-page': 'Reading page...',
+  click: 'Clicking page element...',
+  type: 'Typing into page...',
+  press: 'Sending key press...',
+  scroll: 'Scrolling page...',
+  wait: 'Waiting for page...',
+}
+
+export const getBrowserControlLabel = (tool: ToolCall): string | null => {
+  if (tool.name !== 'browser-control') return null
+
+  const input = normalizeToolInput(tool.input) as Record<string, unknown> | undefined
+  const result = tool.result as Record<string, unknown> | undefined
+  const action = (input?.action as string | undefined) || (result?.action as string | undefined) || 'browser'
+
+  if (tool.status !== 'completed') {
+    if (action === 'click' && typeof input?.index === 'number') {
+      return `Clicking element ${input.index}...`
+    }
+    if (action === 'type' && typeof input?.index === 'number') {
+      return `Typing into element ${input.index}...`
+    }
+    if (action === 'navigate' && typeof input?.target === 'string') {
+      return `Navigating to ${input.target}...`
+    }
+    return BROWSER_PENDING_LABELS[action] || 'Controlling browser...'
+  }
+
+  if (result?.success === false) {
+    return typeof result.error === 'string' ? `Browser error: ${result.error}` : 'Browser action failed'
+  }
+
+  if (typeof result?.message === 'string' && result.message.trim()) {
+    return result.message
+  }
+
+  return 'Controlled browser'
+}
+
 // Parse attached files from message content and return clean message + file paths.
 export const parseAttachedFiles = (content: string): { message: string; files: string[] } => {
   const attachedFilesRegex = /<attached-files>\s*([\s\S]*?)\s*<\/attached-files>/
@@ -315,6 +364,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   'web-search': 'Searching the web',
   'save-to-memory': 'Saving to memory',
   'app-navigation': 'Navigating app',
+  'browser-control': 'Controlling browser',
   'composio-list-toolkits': 'Listing integrations',
   'composio-search-tools': 'Searching tools',
   'composio-execute-tool': 'Running tool',
@@ -328,6 +378,8 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
  * Falls back to the raw tool name if no mapping exists.
  */
 export const getToolDisplayName = (tool: ToolCall): string => {
+  const browserLabel = getBrowserControlLabel(tool)
+  if (browserLabel) return browserLabel
   const composioData = getComposioActionCardData(tool)
   if (composioData) return composioData.label
   return TOOL_DISPLAY_NAMES[tool.name] || tool.name

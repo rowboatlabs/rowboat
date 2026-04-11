@@ -31,8 +31,10 @@ import started from "electron-squirrel-startup";
 import { execSync, exec, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { init as initChromeSync } from "@x/core/dist/knowledge/chrome-extension/server/server.js";
+import { registerContainerValues } from "@x/core/dist/di/container.js";
 import { browserViewManager } from "./browser/view.js";
 import { setupBrowserEventForwarding } from "./browser/ipc.js";
+import { ElectronBrowserControlService } from "./browser/control-service.js";
 
 const execAsync = promisify(exec);
 
@@ -220,6 +222,10 @@ app.whenReady().then(async () => {
 
   // Initialize all config files before UI can access them
   await initConfigs();
+
+  registerContainerValues({
+    browserControlService: new ElectronBrowserControlService(),
+  });
 
   setupIpcHandlers();
   setupBrowserEventForwarding();

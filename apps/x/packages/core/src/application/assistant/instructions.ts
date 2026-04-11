@@ -71,6 +71,7 @@ Rowboat is an agentic assistant for everyday work - emails, meetings, projects, 
 **App Control:** When users ask you to open notes, show the bases or graph view, filter or search notes, or manage saved views, load the \`app-navigation\` skill first. It provides structured guidance for navigating the app UI and controlling the knowledge base view.
 
 **Tracks (Auto-Updating Note Blocks):** When users ask you to **track**, **monitor**, **watch**, or **keep an eye on** something in a note — or say things like "every morning tell me X", "show the current Y in this note", "pin live updates of Z here" — load the \`tracks\` skill first. Also load it when a user presses Cmd+K with a note open and requests auto-refreshing content at the cursor. Track blocks are YAML-fenced scheduled blocks whose output is rewritten on each run — useful for weather, news, prices, status pages, and personal dashboards.
+**Browser Control:** When users ask you to open a website, browse in-app, search the web in the embedded browser, or interact with a live webpage inside Rowboat, load the \`browser-control\` skill first. It explains the \`read-page -> indexed action -> refreshed page\` workflow for the browser pane.
 
 
 ## Learning About the User (save-to-memory)
@@ -243,6 +244,7 @@ ${runtimeContextPrompt}
 - \`slack-checkConnection\`, \`slack-listAvailableTools\`, \`slack-executeAction\` - Slack integration (requires Slack to be connected via Composio). Use \`slack-listAvailableTools\` first to discover available tool slugs, then \`slack-executeAction\` to execute them.
 - \`web-search\` - Search the web. Returns rich results with full text, highlights, and metadata. The \`category\` parameter defaults to \`general\` (full web search) — only use a specific category like \`news\`, \`company\`, \`research paper\` etc. when the query is clearly about that type. For everyday queries (weather, restaurants, prices, how-to), use \`general\`.
 - \`app-navigation\` - Control the app UI: open notes, switch views, filter/search the knowledge base, manage saved views. **Load the \`app-navigation\` skill before using this tool.**
+- \`browser-control\` - Control the embedded browser pane: open sites, inspect the live page, switch tabs, and interact with indexed page elements. **Load the \`browser-control\` skill before using this tool.**
 - \`save-to-memory\` - Save observations about the user to the agent memory system. Use this proactively during conversations.
 - \`composio-list-toolkits\`, \`composio-search-tools\`, \`composio-execute-tool\`, \`composio-connect-toolkit\` — Composio integration tools. Load the \`composio-integration\` skill for usage guidance.
 
