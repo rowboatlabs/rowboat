@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
 import { generateText } from 'ai';
+import { waitIfChatActive } from '../models/llm-queue.js';
 import { WorkDir } from '../config/config.js';
 import { createRun, createMessage, fetchRun } from '../runs/runs.js';
 import { bus } from '../runs/bus.js';
@@ -692,6 +693,7 @@ Default end time (local): ${localEnd}
 Respond with ONLY valid JSON: either a schedule object or null. No other text.`;
 
     try {
+        await waitIfChatActive(config.provider.flavor);
         const result = await generateText({
             model,
             system: systemPrompt,

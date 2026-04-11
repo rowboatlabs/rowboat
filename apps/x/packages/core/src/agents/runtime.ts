@@ -15,6 +15,7 @@ import { isBlocked, extractCommandNames } from "../application/lib/command-execu
 import container from "../di/container.js";
 import { IModelConfigRepo } from "../models/repo.js";
 import { createProvider } from "../models/models.js";
+import { markChatActive, markChatIdle, waitIfChatActive } from "../models/llm-queue.js";
 import { isSignedIn } from "../account/account.js";
 import { getGatewayProvider } from "../models/gateway.js";
 import { IAgentsRepo } from "./repo.js";
@@ -857,6 +858,8 @@ export async function* streamAgent({
     const knowledgeGraphAgents = ["note_creation", "email-draft", "meeting-prep", "labeling_agent", "note_tagging_agent", "agent_notes_agent"];
     const isKgAgent = knowledgeGraphAgents.includes(state.agentName!);
     const isInlineTaskAgent = state.agentName === "inline_task_agent";
+    const isBackgroundAgent = isKgAgent || isInlineTaskAgent;
+    const providerFlavor = modelConfig.provider.flavor;
     const defaultModel = signedIn ? "gpt-5.4" : modelConfig.model;
     const defaultKgModel = signedIn ? "gpt-5.4-mini" : defaultModel;
     const defaultInlineTaskModel = signedIn ? "gpt-5.4" : defaultModel;
@@ -1062,6 +1065,13 @@ export async function* streamAgent({
             instructionsWithDateTime += `\n\n# Search\nThe user has requested a search. Use the web-search tool to answer their query.`;
         }
         let streamError: string | null = null;
+        // Local-provider prioritization: background agents yield to active chat
+        if (isBackgroundAgent) {
+            await waitIfChatActive(providerFlavor, signal);
+        } else {
+            markChatActive();
+        }
+        try {
         for await (const event of streamLlm(
             model,
             state.messages,
@@ -1085,6 +1095,11 @@ export async function* streamAgent({
                     subflow: [],
                 });
                 break;
+            }
+        }
+        } finally {
+            if (!isBackgroundAgent) {
+                markChatIdle();
             }
         }
 

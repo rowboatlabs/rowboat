@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { generateText } from 'ai';
+import { waitIfChatActive } from '../models/llm-queue.js';
 import container from '../di/container.js';
 import type { IModelConfigRepo } from '../models/repo.js';
 import { createProvider } from '../models/models.js';
@@ -159,6 +160,7 @@ export async function summarizeMeeting(transcript: string, meetingStartTime?: st
 
     const prompt = `Meeting recording started at: ${meetingStartTime || 'unknown'}\n\n${transcript}${calendarContext}`;
 
+    await waitIfChatActive(config.provider.flavor);
     const result = await generateText({
         model,
         system: SYSTEM_PROMPT,
