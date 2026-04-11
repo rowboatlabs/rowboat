@@ -12,6 +12,9 @@ type InvokeHandler<K extends keyof IPCChannels> = (
 type BrowserHandlers = {
   'browser:setBounds': InvokeHandler<'browser:setBounds'>;
   'browser:setVisible': InvokeHandler<'browser:setVisible'>;
+  'browser:newTab': InvokeHandler<'browser:newTab'>;
+  'browser:switchTab': InvokeHandler<'browser:switchTab'>;
+  'browser:closeTab': InvokeHandler<'browser:closeTab'>;
   'browser:navigate': InvokeHandler<'browser:navigate'>;
   'browser:back': InvokeHandler<'browser:back'>;
   'browser:forward': InvokeHandler<'browser:forward'>;
@@ -33,6 +36,15 @@ export const browserIpcHandlers: BrowserHandlers = {
   'browser:setVisible': async (_event, args) => {
     browserViewManager.setVisible(args.visible);
     return { ok: true };
+  },
+  'browser:newTab': async (_event, args) => {
+    return browserViewManager.newTab(args.url);
+  },
+  'browser:switchTab': async (_event, args) => {
+    return browserViewManager.switchTab(args.tabId);
+  },
+  'browser:closeTab': async (_event, args) => {
+    return browserViewManager.closeTab(args.tabId);
   },
   'browser:navigate': async (_event, args) => {
     return browserViewManager.navigate(args.url);

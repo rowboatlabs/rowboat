@@ -640,6 +640,34 @@ const ipcSchemas = {
     req: z.object({ visible: z.boolean() }),
     res: z.object({ ok: z.literal(true) }),
   },
+  'browser:newTab': {
+    req: z.object({
+      url: z.string().min(1).refine(
+        (u) => {
+          const lower = u.trim().toLowerCase();
+          if (lower.startsWith('javascript:')) return false;
+          if (lower.startsWith('file://')) return false;
+          if (lower.startsWith('chrome://')) return false;
+          if (lower.startsWith('chrome-extension://')) return false;
+          return true;
+        },
+        { message: 'Unsafe URL scheme' },
+      ).optional(),
+    }),
+    res: z.object({
+      ok: z.boolean(),
+      tabId: z.string().optional(),
+      error: z.string().optional(),
+    }),
+  },
+  'browser:switchTab': {
+    req: z.object({ tabId: z.string().min(1) }),
+    res: z.object({ ok: z.boolean() }),
+  },
+  'browser:closeTab': {
+    req: z.object({ tabId: z.string().min(1) }),
+    res: z.object({ ok: z.boolean() }),
+  },
   'browser:navigate': {
     req: z.object({
       url: z.string().min(1).refine(
@@ -674,20 +702,28 @@ const ipcSchemas = {
   'browser:getState': {
     req: z.null(),
     res: z.object({
-      url: z.string(),
-      title: z.string(),
-      canGoBack: z.boolean(),
-      canGoForward: z.boolean(),
-      loading: z.boolean(),
+      activeTabId: z.string().nullable(),
+      tabs: z.array(z.object({
+        id: z.string(),
+        url: z.string(),
+        title: z.string(),
+        canGoBack: z.boolean(),
+        canGoForward: z.boolean(),
+        loading: z.boolean(),
+      })),
     }),
   },
   'browser:didUpdateState': {
     req: z.object({
-      url: z.string(),
-      title: z.string(),
-      canGoBack: z.boolean(),
-      canGoForward: z.boolean(),
-      loading: z.boolean(),
+      activeTabId: z.string().nullable(),
+      tabs: z.array(z.object({
+        id: z.string(),
+        url: z.string(),
+        title: z.string(),
+        canGoBack: z.boolean(),
+        canGoForward: z.boolean(),
+        loading: z.boolean(),
+      })),
     }),
     res: z.null(),
   },

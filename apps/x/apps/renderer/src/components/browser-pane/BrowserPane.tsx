@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, RotateCw, Loader2, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Loader2, Plus, RotateCw, X } from 'lucide-react'
 
+import { TabBar } from '@/components/tab-bar'
 import { cn } from '@/lib/utils'
 
 /**
@@ -9,11 +10,12 @@ import { cn } from '@/lib/utils'
  * Renders a transparent placeholder div whose bounds are reported to the
  * main process via `browser:setBounds`. The actual browsing surface is an
  * Electron WebContentsView layered on top of the renderer by the main
- * process — this component only owns the chrome (address bar, nav, spinner)
- * and the sizing/visibility lifecycle.
+ * process — this component only owns the chrome (tabs, address bar, nav
+ * buttons) and the sizing/visibility lifecycle.
  */
 
-interface BrowserState {
+interface BrowserTabState {
+  id: string
   url: string
   title: string
   canGoBack: boolean
@@ -21,58 +23,73 @@ interface BrowserState {
   loading: boolean
 }
 
-const EMPTY_STATE: BrowserState = {
-  url: '',
-  title: '',
-  canGoBack: false,
-  canGoForward: false,
-  loading: false,
+interface BrowserState {
+  activeTabId: string | null
+  tabs: BrowserTabState[]
 }
 
-/** Placeholder height we subtract from the inner bounds for the chrome row. */
+const EMPTY_STATE: BrowserState = {
+  activeTabId: null,
+  tabs: [],
+}
+
 const CHROME_HEIGHT = 40
 
 interface BrowserPaneProps {
   onClose: () => void
 }
 
+const getActiveTab = (state: BrowserState) =>
+  state.tabs.find((tab) => tab.id === state.activeTabId) ?? null
+
+const getBrowserTabTitle = (tab: BrowserTabState) => {
+  const title = tab.title.trim()
+  if (title) return title
+  const url = tab.url.trim()
+  if (!url) return 'New tab'
+  try {
+    const parsed = new URL(url)
+    return parsed.hostname || parsed.href
+  } catch {
+    return url.replace(/^https?:\/\//i, '') || 'New tab'
+  }
+}
+
 export function BrowserPane({ onClose }: BrowserPaneProps) {
   const [state, setState] = useState<BrowserState>(EMPTY_STATE)
   const [addressValue, setAddressValue] = useState('')
 
+  const activeTabIdRef = useRef<string | null>(null)
   const addressFocusedRef = useRef(false)
   const viewportRef = useRef<HTMLDivElement>(null)
   const lastBoundsRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null)
   const viewVisibleRef = useRef(false)
 
-  // ── Subscribe to state updates from main ──────────────────────────────────
-  useEffect(() => {
-    const cleanup = window.ipc.on('browser:didUpdateState', (incoming) => {
-      const next = incoming as BrowserState
-      setState(next)
-      if (!addressFocusedRef.current) {
-        setAddressValue(next.url)
-      }
-    })
-    // Kick an initial state fetch so the chrome reflects wherever the view
-    // was left from a previous session (or empty, if never loaded).
-    void window.ipc.invoke('browser:getState', null).then((initial) => {
-      const next = initial as BrowserState
-      setState(next)
-      if (!addressFocusedRef.current) {
-        setAddressValue(next.url)
-      }
-    })
-    return cleanup
+  const activeTab = getActiveTab(state)
+
+  const applyState = useCallback((next: BrowserState) => {
+    const previousActiveTabId = activeTabIdRef.current
+    activeTabIdRef.current = next.activeTabId
+    setState(next)
+
+    const nextActiveTab = getActiveTab(next)
+    if (!addressFocusedRef.current || next.activeTabId !== previousActiveTabId) {
+      setAddressValue(nextActiveTab?.url ?? '')
+    }
   }, [])
 
-  // ── Bounds tracking ───────────────────────────────────────────────────────
-  // The main process needs pixel-accurate bounds *relative to the window
-  // content area*. getBoundingClientRect() returns viewport-relative coords,
-  // which in Electron with hiddenInset titleBar equal content-area coords.
-  //
-  // Reads layout synchronously and posts an IPC update only when the rect
-  // actually changed. Cheap enough to call from a RAF loop or observer.
+  useEffect(() => {
+    const cleanup = window.ipc.on('browser:didUpdateState', (incoming) => {
+      applyState(incoming as BrowserState)
+    })
+
+    void window.ipc.invoke('browser:getState', null).then((initial) => {
+      applyState(initial as BrowserState)
+    })
+
+    return cleanup
+  }, [applyState])
+
   const setViewVisible = useCallback((visible: boolean) => {
     if (viewVisibleRef.current === visible) return
     viewVisibleRef.current = visible
@@ -82,6 +99,7 @@ export function BrowserPane({ onClose }: BrowserPaneProps) {
   const measureBounds = useCallback(() => {
     const el = viewportRef.current
     if (!el) return null
+
     const zoomFactor = Math.max(window.electronUtils.getZoomFactor(), 0.01)
     const rect = el.getBoundingClientRect()
     const chatSidebar = el.ownerDocument.querySelector<HTMLElement>('[data-chat-sidebar-root]')
@@ -89,25 +107,25 @@ export function BrowserPane({ onClose }: BrowserPaneProps) {
     const clampedRightCss = chatSidebarRect && chatSidebarRect.width > 0
       ? Math.min(rect.right, chatSidebarRect.left)
       : rect.right
+
     // `getBoundingClientRect()` is reported in zoomed CSS pixels. Electron's
-    // native view bounds are in unzoomed window coordinates, so we have to
-    // convert back using the renderer zoom factor.
+    // native view bounds are in unzoomed window coordinates, so convert back
+    // using the renderer zoom factor before calling into the main process.
     const left = Math.ceil(rect.left * zoomFactor)
     const top = Math.ceil(rect.top * zoomFactor)
     const right = Math.floor(clampedRightCss * zoomFactor)
     const bottom = Math.floor(rect.bottom * zoomFactor)
     const width = right - left
     const height = bottom - top
-    // A zero-sized rect means the element isn't laid out yet or has been
-    // collapsed behind the chat pane — hide the native view in that case.
+
     if (width <= 0 || height <= 0) return null
-    const bounds = {
+
+    return {
       x: left,
       y: top,
       width,
       height,
     }
-    return bounds
   }, [])
 
   const pushBounds = useCallback((bounds: { x: number; y: number; width: number; height: number }) => {
@@ -138,24 +156,10 @@ export function BrowserPane({ onClose }: BrowserPaneProps) {
     return bounds
   }, [measureBounds, pushBounds, setViewVisible])
 
-  // Defensively re-push bounds whenever the underlying page state changes.
-  // Electron's WebContentsView can drop its laid-out rect on navigation,
-  // and even though main re-applies on the same events, pushing from the
-  // renderer ensures we use the *current* layout (in case the chat sidebar
-  // or window resized while the page was loading).
   useEffect(() => {
     syncView()
-  }, [state.url, state.loading, syncView])
+  }, [activeTab?.id, activeTab?.loading, activeTab?.url, syncView])
 
-  // ── Visibility lifecycle ──────────────────────────────────────────────────
-  // Order matters: push bounds FIRST so the WCV is created at the right
-  // position, THEN setVisible. Otherwise the view gets attached at stale
-  // (or zero) cached bounds and visually spills until the next bounds push.
-  //
-  // We wait one animation frame after mount so React's commit + the browser's
-  // layout pass for any sibling that just mounted (e.g. the chat sidebar) are
-  // both reflected in getBoundingClientRect. A single RAF is enough — by then
-  // the renderer has painted the post-commit DOM at least once.
   useEffect(() => {
     let cancelled = false
     const rafId = requestAnimationFrame(() => {
@@ -170,21 +174,10 @@ export function BrowserPane({ onClose }: BrowserPaneProps) {
     }
   }, [setViewVisible, syncView])
 
-  // Ongoing bounds tracking. Observes everything that can move our viewport:
-  //   - the viewport div itself (local size changes)
-  //   - the SidebarInset ancestor (changes when chat sidebar mounts/resizes)
-  //   - the document root (window resize, devicePixelRatio changes)
-  //
-  // ResizeObserver fires after layout but before paint, so by the time we
-  // call pushBounds the rect is current. Multiple observers may fire in the
-  // same frame — RAF-coalesce them so we only post one IPC per frame.
   useEffect(() => {
     const el = viewportRef.current
     if (!el) return
 
-    // The sidebar-inset main element is the immediate flex parent whose
-    // width shrinks when a sibling appears. Walking up the tree is more
-    // robust than passing a ref through props.
     const sidebarInset = el.closest<HTMLElement>('[data-slot="sidebar-inset"]')
     const chatSidebar = el.ownerDocument.querySelector<HTMLElement>('[data-chat-sidebar-root]')
     const documentElement = el.ownerDocument.documentElement
@@ -210,7 +203,23 @@ export function BrowserPane({ onClose }: BrowserPaneProps) {
     }
   }, [syncView])
 
-  // ── Actions ───────────────────────────────────────────────────────────────
+  const handleNewTab = useCallback(() => {
+    void window.ipc.invoke('browser:newTab', {}).then((res) => {
+      const result = res as { ok: boolean; error?: string }
+      if (!result.ok && result.error) {
+        console.error('browser:newTab failed', result.error)
+      }
+    })
+  }, [])
+
+  const handleSwitchTab = useCallback((tabId: string) => {
+    void window.ipc.invoke('browser:switchTab', { tabId })
+  }, [])
+
+  const handleCloseTab = useCallback((tabId: string) => {
+    void window.ipc.invoke('browser:closeTab', { tabId })
+  }, [])
+
   const handleSubmitAddress = useCallback((e: React.FormEvent) => {
     e.preventDefault()
     const trimmed = addressValue.trim()
@@ -236,10 +245,27 @@ export function BrowserPane({ onClose }: BrowserPaneProps) {
   }, [])
 
   return (
-    <div
-      className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background"
-    >
-      {/* Chrome row: back / forward / reload / address bar */}
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
+      <div className="flex h-9 shrink-0 items-stretch border-b border-border bg-sidebar">
+        <TabBar
+          tabs={state.tabs}
+          activeTabId={state.activeTabId ?? ''}
+          getTabTitle={getBrowserTabTitle}
+          getTabId={(tab) => tab.id}
+          onSwitchTab={handleSwitchTab}
+          onCloseTab={handleCloseTab}
+          layout="scroll"
+        />
+        <button
+          type="button"
+          onClick={handleNewTab}
+          className="flex h-9 w-9 shrink-0 items-center justify-center border-l border-border text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          aria-label="New browser tab"
+        >
+          <Plus className="size-4" />
+        </button>
+      </div>
+
       <div
         className="flex h-10 shrink-0 items-center gap-1 border-b border-border bg-sidebar px-2"
         style={{ minHeight: CHROME_HEIGHT }}
@@ -247,10 +273,10 @@ export function BrowserPane({ onClose }: BrowserPaneProps) {
         <button
           type="button"
           onClick={handleBack}
-          disabled={!state.canGoBack}
+          disabled={!activeTab?.canGoBack}
           className={cn(
             'flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors',
-            state.canGoBack ? 'hover:bg-accent hover:text-foreground' : 'opacity-40',
+            activeTab?.canGoBack ? 'hover:bg-accent hover:text-foreground' : 'opacity-40',
           )}
           aria-label="Back"
         >
@@ -259,10 +285,10 @@ export function BrowserPane({ onClose }: BrowserPaneProps) {
         <button
           type="button"
           onClick={handleForward}
-          disabled={!state.canGoForward}
+          disabled={!activeTab?.canGoForward}
           className={cn(
             'flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors',
-            state.canGoForward ? 'hover:bg-accent hover:text-foreground' : 'opacity-40',
+            activeTab?.canGoForward ? 'hover:bg-accent hover:text-foreground' : 'opacity-40',
           )}
           aria-label="Forward"
         >
@@ -271,10 +297,14 @@ export function BrowserPane({ onClose }: BrowserPaneProps) {
         <button
           type="button"
           onClick={handleReload}
-          className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          disabled={!activeTab}
+          className={cn(
+            'flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors',
+            activeTab ? 'hover:bg-accent hover:text-foreground' : 'opacity-40',
+          )}
           aria-label="Reload"
         >
-          {state.loading ? (
+          {activeTab?.loading ? (
             <Loader2 className="size-4 animate-spin" />
           ) : (
             <RotateCw className="size-4" />
@@ -291,7 +321,7 @@ export function BrowserPane({ onClose }: BrowserPaneProps) {
             }}
             onBlur={() => {
               addressFocusedRef.current = false
-              setAddressValue(state.url)
+              setAddressValue(activeTab?.url ?? '')
             }}
             placeholder="Enter URL or search..."
             className={cn(
@@ -304,11 +334,6 @@ export function BrowserPane({ onClose }: BrowserPaneProps) {
             autoCapitalize="off"
           />
         </form>
-        {state.title && (
-          <div className="hidden max-w-[220px] shrink-0 truncate pl-2 text-xs text-muted-foreground sm:block">
-            {state.title}
-          </div>
-        )}
         <button
           type="button"
           onClick={onClose}
@@ -319,9 +344,6 @@ export function BrowserPane({ onClose }: BrowserPaneProps) {
         </button>
       </div>
 
-      {/* Viewport placeholder — the WebContentsView is layered on top of this
-          area from the main process. The div itself stays transparent so the
-          user sees the web page, not a React element. */}
       <div
         ref={viewportRef}
         className="relative min-h-0 min-w-0 flex-1"
