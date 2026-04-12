@@ -7,6 +7,7 @@ import type {
   BrowserState,
   BrowserTabState,
 } from '@x/shared/dist/browser-control.js';
+import { normalizeNavigationTarget } from './navigation.js';
 
 export type { BrowserPageSnapshot, BrowserState, BrowserTabState };
 
@@ -478,14 +479,6 @@ export class BrowserViewManager extends EventEmitter {
     this.snapshotCache.delete(tabId);
   }
 
-  private normalizeUrl(rawUrl: string): string {
-    let url = rawUrl.trim();
-    if (!/^[a-z][a-z0-9+.-]*:/i.test(url)) {
-      url = `https://${url}`;
-    }
-    return url;
-  }
-
   private isEmbeddedTabUrl(url: string): boolean {
     return /^https?:\/\//i.test(url) || url === 'about:blank';
   }
@@ -613,7 +606,7 @@ export class BrowserViewManager extends EventEmitter {
     const targetUrl =
       initialUrl === 'about:blank'
         ? HOME_URL
-        : this.normalizeUrl(initialUrl);
+        : normalizeNavigationTarget(initialUrl);
     void tab.view.webContents.loadURL(targetUrl).catch(() => {
       this.emitState();
     });
@@ -792,7 +785,7 @@ export class BrowserViewManager extends EventEmitter {
     try {
       const activeTab = this.getActiveTab() ?? this.ensureInitialTab();
       this.invalidateSnapshot(activeTab.id);
-      await activeTab.view.webContents.loadURL(this.normalizeUrl(rawUrl));
+      await activeTab.view.webContents.loadURL(normalizeNavigationTarget(rawUrl));
       return { ok: true };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
