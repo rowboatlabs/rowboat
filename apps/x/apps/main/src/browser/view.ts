@@ -54,6 +54,31 @@ const INTERACTABLE_SELECTORS = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(', ');
 
+const CLICKABLE_TARGET_SELECTORS = [
+  'a[href]',
+  'button',
+  'summary',
+  'label',
+  'input',
+  'textarea',
+  'select',
+  '[role="button"]',
+  '[role="link"]',
+  '[role="tab"]',
+  '[role="menuitem"]',
+  '[role="option"]',
+  '[role="checkbox"]',
+  '[role="radio"]',
+  '[role="switch"]',
+  '[role="menuitemcheckbox"]',
+  '[role="menuitemradio"]',
+  '[aria-pressed]',
+  '[aria-expanded]',
+  '[aria-checked]',
+  '[contenteditable="true"]',
+  '[tabindex]:not([tabindex="-1"])',
+].join(', ');
+
 const DOM_HELPERS_SOURCE = String.raw`
 const truncateText = (value, max) => {
   const normalized = String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -86,6 +111,11 @@ const isDisabledElement = (element) => {
   if (element.getAttribute('aria-disabled') === 'true') return true;
   return 'disabled' in element && Boolean(element.disabled);
 };
+
+const isUselessClickTarget = (element) => (
+  element === document.body
+  || element === document.documentElement
+);
 
 const getElementRole = (element) => {
   const explicitRole = element.getAttribute('role');
@@ -142,6 +172,87 @@ const describeElement = (element) => {
   const role = getElementRole(element) || element.tagName.toLowerCase();
   const label = getElementLabel(element);
   return label ? role + ' "' + label + '"' : role;
+};
+
+const clampNumber = (value, min, max) => Math.min(Math.max(value, min), max);
+
+const getAssociatedControl = (element) => {
+  if (!(element instanceof Element)) return null;
+  if (element instanceof HTMLLabelElement) return element.control;
+  const parentLabel = element.closest('label');
+  return parentLabel instanceof HTMLLabelElement ? parentLabel.control : null;
+};
+
+const resolveClickTarget = (element) => {
+  if (!(element instanceof Element)) return null;
+
+  const clickableAncestor = element.closest(${JSON.stringify(CLICKABLE_TARGET_SELECTORS)});
+  const labelAncestor = element.closest('label');
+  const associatedControl = getAssociatedControl(element);
+  const candidates = [clickableAncestor, labelAncestor, associatedControl, element];
+
+  for (const candidate of candidates) {
+    if (!(candidate instanceof Element)) continue;
+    if (isUselessClickTarget(candidate)) continue;
+    if (!isVisibleElement(candidate)) continue;
+    if (isDisabledElement(candidate)) continue;
+    return candidate;
+  }
+
+  for (const candidate of candidates) {
+    if (candidate instanceof Element) return candidate;
+  }
+
+  return null;
+};
+
+const getVerificationTargetState = (element) => {
+  if (!(element instanceof Element)) return null;
+
+  const text = truncateText(element.innerText || element.textContent || '', 200);
+  const activeElement = document.activeElement;
+  const isActive =
+    activeElement instanceof Element
+      ? activeElement === element || element.contains(activeElement)
+      : false;
+
+  return {
+    selector: buildUniqueSelector(element),
+    descriptor: describeElement(element),
+    text: text || null,
+    checked:
+      element instanceof HTMLInputElement && (element.type === 'checkbox' || element.type === 'radio')
+        ? element.checked
+        : null,
+    value:
+      element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement
+        ? truncateText(element.value ?? '', 200)
+        : element instanceof HTMLSelectElement
+          ? truncateText(element.value ?? '', 200)
+          : element instanceof HTMLElement && element.isContentEditable
+            ? truncateText(element.innerText || element.textContent || '', 200)
+            : null,
+    selectedIndex: element instanceof HTMLSelectElement ? element.selectedIndex : null,
+    open:
+      'open' in element && typeof element.open === 'boolean'
+        ? element.open
+        : null,
+    disabled: isDisabledElement(element),
+    active: isActive,
+    ariaChecked: element.getAttribute('aria-checked'),
+    ariaPressed: element.getAttribute('aria-pressed'),
+    ariaExpanded: element.getAttribute('aria-expanded'),
+  };
+};
+
+const getPageVerificationState = () => {
+  const activeElement = document.activeElement instanceof Element ? document.activeElement : null;
+  return {
+    url: window.location.href,
+    title: document.title || '',
+    textSample: truncateText(document.body?.innerText || document.body?.textContent || '', 2000),
+    activeSelector: activeElement ? buildUniqueSelector(activeElement) : null,
+  };
 };
 
 const buildUniqueSelector = (element) => {
@@ -303,26 +414,122 @@ function buildReadPageScript(maxElements: number, maxTextLength: number): string
 function buildClickScript(selector: string): string {
   return `(() => {
     ${DOM_HELPERS_SOURCE}
-    const element = document.querySelector(${JSON.stringify(selector)});
+    const requestedSelector = ${JSON.stringify(selector)};
+    if (/^(body|html)$/i.test(requestedSelector.trim())) {
+      return {
+        ok: false,
+        error: 'Refusing to click the page body. Read the page again and target a specific element.',
+      };
+    }
+
+    const element = document.querySelector(requestedSelector);
     if (!(element instanceof Element)) {
       return { ok: false, error: 'Element not found.' };
     }
-    if (!isVisibleElement(element)) {
-      return { ok: false, error: 'Element is not visible.' };
-    }
-    if (isDisabledElement(element)) {
-      return { ok: false, error: 'Element is disabled.' };
+    if (isUselessClickTarget(element)) {
+      return {
+        ok: false,
+        error: 'Refusing to click the page body. Read the page again and target a specific element.',
+      };
     }
 
-    if (element instanceof HTMLElement) {
-      element.scrollIntoView({ block: 'center', inline: 'center' });
-      element.focus({ preventScroll: true });
-      element.click();
+    const target = resolveClickTarget(element);
+    if (!(target instanceof Element)) {
+      return { ok: false, error: 'Could not resolve a clickable target.' };
+    }
+    if (isUselessClickTarget(target)) {
+      return {
+        ok: false,
+        error: 'Resolved click target was too generic. Read the page again and choose a specific control.',
+      };
+    }
+    if (!isVisibleElement(target)) {
+      return { ok: false, error: 'Resolved click target is not visible.' };
+    }
+    if (isDisabledElement(target)) {
+      return { ok: false, error: 'Resolved click target is disabled.' };
+    }
+
+    const before = {
+      page: getPageVerificationState(),
+      target: getVerificationTargetState(target),
+    };
+
+    if (target instanceof HTMLElement) {
+      target.scrollIntoView({ block: 'center', inline: 'center' });
+      target.focus({ preventScroll: true });
+    }
+
+    const rect = target.getBoundingClientRect();
+    const clientX = clampNumber(rect.left + (rect.width / 2), 1, Math.max(1, window.innerWidth - 1));
+    const clientY = clampNumber(rect.top + (rect.height / 2), 1, Math.max(1, window.innerHeight - 1));
+    const topElement = document.elementFromPoint(clientX, clientY);
+    const eventTarget =
+      topElement instanceof Element && (topElement === target || topElement.contains(target) || target.contains(topElement))
+        ? topElement
+        : target;
+
+    if (eventTarget instanceof HTMLElement) {
+      eventTarget.focus({ preventScroll: true });
+      eventTarget.click();
     } else {
-      element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+      eventTarget.dispatchEvent(new MouseEvent('click', {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        clientX,
+        clientY,
+        view: window,
+      }));
     }
 
-    return { ok: true, description: describeElement(element) };
+    return {
+      ok: true,
+      description: describeElement(target),
+      verification: {
+        before,
+        targetSelector: buildUniqueSelector(target) || requestedSelector,
+      },
+    };
+  })()`;
+}
+
+function buildVerifyClickScript(targetSelector: string | null, before: unknown): string {
+  return `(() => {
+    ${DOM_HELPERS_SOURCE}
+    const beforeState = ${JSON.stringify(before)};
+    const selector = ${JSON.stringify(targetSelector)};
+    const afterPage = getPageVerificationState();
+    const afterTarget = selector ? getVerificationTargetState(document.querySelector(selector)) : null;
+    const beforeTarget = beforeState?.target ?? null;
+    const reasons = [];
+
+    if (beforeState?.page?.url !== afterPage.url) reasons.push('url changed');
+    if (beforeState?.page?.title !== afterPage.title) reasons.push('title changed');
+    if (beforeState?.page?.textSample !== afterPage.textSample) reasons.push('page text changed');
+    if (beforeState?.page?.activeSelector !== afterPage.activeSelector) reasons.push('focus changed');
+
+    if (beforeTarget && !afterTarget) {
+      reasons.push('clicked element disappeared');
+    }
+
+    if (beforeTarget && afterTarget) {
+      if (beforeTarget.checked !== afterTarget.checked) reasons.push('checked state changed');
+      if (beforeTarget.value !== afterTarget.value) reasons.push('value changed');
+      if (beforeTarget.selectedIndex !== afterTarget.selectedIndex) reasons.push('selection changed');
+      if (beforeTarget.open !== afterTarget.open) reasons.push('open state changed');
+      if (beforeTarget.disabled !== afterTarget.disabled) reasons.push('disabled state changed');
+      if (beforeTarget.active !== afterTarget.active) reasons.push('target focus changed');
+      if (beforeTarget.ariaChecked !== afterTarget.ariaChecked) reasons.push('aria-checked changed');
+      if (beforeTarget.ariaPressed !== afterTarget.ariaPressed) reasons.push('aria-pressed changed');
+      if (beforeTarget.ariaExpanded !== afterTarget.ariaExpanded) reasons.push('aria-expanded changed');
+      if (beforeTarget.text !== afterTarget.text) reasons.push('target text changed');
+    }
+
+    return {
+      changed: reasons.length > 0,
+      reasons,
+    };
   })()`;
 }
 
@@ -922,13 +1129,38 @@ export class BrowserViewManager extends EventEmitter {
     if (!resolved.ok) return resolved;
 
     try {
-      const result = await this.executeOnActiveTab<{ ok: boolean; error?: string; description?: string }>(
+      const result = await this.executeOnActiveTab<{
+        ok: boolean;
+        error?: string;
+        description?: string;
+        verification?: {
+          before: unknown;
+          targetSelector: string | null;
+        };
+      }>(
         buildClickScript(resolved.selector),
         signal,
       );
       if (!result.ok) return result;
       this.invalidateSnapshot(activeTab.id);
       await this.waitForWebContentsSettle(activeTab, signal);
+
+      if (result.verification) {
+        const verification = await this.executeOnActiveTab<{ changed: boolean; reasons: string[] }>(
+          buildVerifyClickScript(result.verification.targetSelector, result.verification.before),
+          signal,
+          { waitForReady: false },
+        );
+
+        if (!verification.changed) {
+          return {
+            ok: false,
+            error: 'Click did not change the page state. Target may not be the correct control.',
+            description: result.description,
+          };
+        }
+      }
+
       return result;
     } catch (error) {
       return {
