@@ -53,7 +53,7 @@ export class ElectronBrowserControlService implements IBrowserControlService {
       switch (input.action) {
         case 'open': {
           await browserViewManager.ensureActiveTabReady(signal);
-          const page = await browserViewManager.readPageSummary(signal) ?? undefined;
+          const page = await browserViewManager.readPageSummary(signal, { waitForReady: false }) ?? undefined;
           return buildSuccessResult('open', 'Opened the browser pane.', page);
         }
 
@@ -67,7 +67,7 @@ export class ElectronBrowserControlService implements IBrowserControlService {
             return buildErrorResult('new-tab', result.error ?? 'Failed to open a new tab.');
           }
           await browserViewManager.ensureActiveTabReady(signal);
-          const page = await browserViewManager.readPageSummary(signal) ?? undefined;
+          const page = await browserViewManager.readPageSummary(signal, { waitForReady: false }) ?? undefined;
           return buildSuccessResult(
             'new-tab',
             target ? `Opened a new tab for ${target}.` : 'Opened a new tab.',
@@ -85,7 +85,7 @@ export class ElectronBrowserControlService implements IBrowserControlService {
             return buildErrorResult('switch-tab', `No browser tab exists with id ${tabId}.`);
           }
           await browserViewManager.ensureActiveTabReady(signal);
-          const page = await browserViewManager.readPageSummary(signal) ?? undefined;
+          const page = await browserViewManager.readPageSummary(signal, { waitForReady: false }) ?? undefined;
           return buildSuccessResult('switch-tab', `Switched to tab ${tabId}.`, page);
         }
 
@@ -99,7 +99,7 @@ export class ElectronBrowserControlService implements IBrowserControlService {
             return buildErrorResult('close-tab', `Could not close tab ${tabId}.`);
           }
           await browserViewManager.ensureActiveTabReady(signal);
-          const page = await browserViewManager.readPageSummary(signal) ?? undefined;
+          const page = await browserViewManager.readPageSummary(signal, { waitForReady: false }) ?? undefined;
           return buildSuccessResult('close-tab', `Closed tab ${tabId}.`, page);
         }
 
@@ -114,7 +114,7 @@ export class ElectronBrowserControlService implements IBrowserControlService {
             return buildErrorResult('navigate', result.error ?? `Failed to navigate to ${target}.`);
           }
           await browserViewManager.ensureActiveTabReady(signal);
-          const page = await browserViewManager.readPageSummary(signal) ?? undefined;
+          const page = await browserViewManager.readPageSummary(signal, { waitForReady: false }) ?? undefined;
           return buildSuccessResult('navigate', `Navigated to ${target}.`, page);
         }
 
@@ -124,7 +124,7 @@ export class ElectronBrowserControlService implements IBrowserControlService {
             return buildErrorResult('back', 'The active tab cannot go back.');
           }
           await browserViewManager.ensureActiveTabReady(signal);
-          const page = await browserViewManager.readPageSummary(signal) ?? undefined;
+          const page = await browserViewManager.readPageSummary(signal, { waitForReady: false }) ?? undefined;
           return buildSuccessResult('back', 'Went back in the active tab.', page);
         }
 
@@ -134,14 +134,14 @@ export class ElectronBrowserControlService implements IBrowserControlService {
             return buildErrorResult('forward', 'The active tab cannot go forward.');
           }
           await browserViewManager.ensureActiveTabReady(signal);
-          const page = await browserViewManager.readPageSummary(signal) ?? undefined;
+          const page = await browserViewManager.readPageSummary(signal, { waitForReady: false }) ?? undefined;
           return buildSuccessResult('forward', 'Went forward in the active tab.', page);
         }
 
         case 'reload': {
           browserViewManager.reload();
           await browserViewManager.ensureActiveTabReady(signal);
-          const page = await browserViewManager.readPageSummary(signal) ?? undefined;
+          const page = await browserViewManager.readPageSummary(signal, { waitForReady: false }) ?? undefined;
           return buildSuccessResult('reload', 'Reloaded the active tab.', page);
         }
 
@@ -171,7 +171,7 @@ export class ElectronBrowserControlService implements IBrowserControlService {
           if (!result.ok) {
             return buildErrorResult('click', result.error ?? 'Failed to click the requested element.');
           }
-          const page = await browserViewManager.readPageSummary(signal) ?? undefined;
+          const page = await browserViewManager.readPageSummary(signal, { waitForReady: false }) ?? undefined;
           return buildSuccessResult(
             'click',
             result.description ? `Clicked ${result.description}.` : 'Clicked the requested element.',
@@ -196,7 +196,7 @@ export class ElectronBrowserControlService implements IBrowserControlService {
           if (!result.ok) {
             return buildErrorResult('type', result.error ?? 'Failed to type into the requested element.');
           }
-          const page = await browserViewManager.readPageSummary(signal) ?? undefined;
+          const page = await browserViewManager.readPageSummary(signal, { waitForReady: false }) ?? undefined;
           return buildSuccessResult(
             'type',
             result.description ? `Typed into ${result.description}.` : 'Typed into the requested element.',
@@ -221,7 +221,7 @@ export class ElectronBrowserControlService implements IBrowserControlService {
           if (!result.ok) {
             return buildErrorResult('press', result.error ?? `Failed to press ${key}.`);
           }
-          const page = await browserViewManager.readPageSummary(signal) ?? undefined;
+          const page = await browserViewManager.readPageSummary(signal, { waitForReady: false }) ?? undefined;
           return buildSuccessResult(
             'press',
             result.description ? `Pressed ${result.description}.` : `Pressed ${key}.`,
@@ -238,14 +238,14 @@ export class ElectronBrowserControlService implements IBrowserControlService {
           if (!result.ok) {
             return buildErrorResult('scroll', result.error ?? 'Failed to scroll the page.');
           }
-          const page = await browserViewManager.readPageSummary(signal) ?? undefined;
+          const page = await browserViewManager.readPageSummary(signal, { waitForReady: false }) ?? undefined;
           return buildSuccessResult('scroll', `Scrolled ${input.direction ?? 'down'}.`, page);
         }
 
         case 'wait': {
           const duration = input.ms ?? 1000;
           await browserViewManager.wait(duration, signal);
-          const page = await browserViewManager.readPageSummary(signal) ?? undefined;
+          const page = await browserViewManager.readPageSummary(signal, { waitForReady: false }) ?? undefined;
           return buildSuccessResult('wait', `Waited ${duration}ms for the page to settle.`, page);
         }
       }

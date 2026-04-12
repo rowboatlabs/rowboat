@@ -1,5 +1,10 @@
 const SEARCH_ENGINE_BASE_URL = 'https://www.google.com/search?q=';
 
+const HAS_SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
+const IPV4_HOST_RE = /^\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?(?:\/.*)?$/;
+const LOCALHOST_RE = /^localhost(?::\d+)?(?:\/.*)?$/i;
+const DOMAIN_LIKE_RE = /^[\w.-]+\.[a-z]{2,}(?::\d+)?(?:\/.*)?$/i;
+
 export function normalizeNavigationTarget(target: string): string {
   const trimmed = target.trim();
   if (!trimmed) {
@@ -16,17 +21,20 @@ export function normalizeNavigationTarget(target: string): string {
     throw new Error('That URL scheme is not allowed in the embedded browser.');
   }
 
-  if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) {
+  if (HAS_SCHEME_RE.test(trimmed)) {
     return trimmed;
   }
 
   const looksLikeHost =
-    trimmed.startsWith('localhost')
-    || /^[\w.-]+\.[a-z]{2,}/i.test(trimmed)
-    || /^\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?(?:\/.*)?$/.test(trimmed);
+    LOCALHOST_RE.test(trimmed)
+    || DOMAIN_LIKE_RE.test(trimmed)
+    || IPV4_HOST_RE.test(trimmed);
 
   if (looksLikeHost && !/\s/.test(trimmed)) {
-    return trimmed;
+    const scheme = LOCALHOST_RE.test(trimmed) || IPV4_HOST_RE.test(trimmed)
+      ? 'http://'
+      : 'https://';
+    return `${scheme}${trimmed}`;
   }
 
   return `${SEARCH_ENGINE_BASE_URL}${encodeURIComponent(trimmed)}`;

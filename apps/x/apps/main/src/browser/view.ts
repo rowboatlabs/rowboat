@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { BrowserWindow, WebContentsView, session, shell, type Session, type WebContents } from 'electron';
+import { BrowserWindow, WebContentsView, session, shell, type Session } from 'electron';
 import type {
   BrowserPageElement,
   BrowserPageSnapshot,
@@ -202,6 +202,8 @@ export interface BrowserBounds {
 type BrowserTab = {
   id: string;
   view: WebContentsView;
+  domReadyAt: number | null;
+  loadError: string | null;
 };
 
 type CachedSnapshot = {
@@ -483,7 +485,7 @@ export class BrowserViewManager extends EventEmitter {
     return /^https?:\/\//i.test(url) || url === 'about:blank';
   }
 
-  private createView(tabId: string): WebContentsView {
+  private createView(): WebContentsView {
     const view = new WebContentsView({
       webPreferences: {
         session: this.getSession(),
@@ -494,11 +496,11 @@ export class BrowserViewManager extends EventEmitter {
     });
 
     view.webContents.setUserAgent(SPOOF_UA);
-    this.wireEvents(tabId, view);
     return view;
   }
 
-  private wireEvents(tabId: string, view: WebContentsView): void {
+  private wireEvents(tab: BrowserTab): void {
+    const { id: tabId, view } = tab;
     const wc = view.webContents;
 
     const reapplyBounds = () => {
@@ -517,17 +519,40 @@ export class BrowserViewManager extends EventEmitter {
       this.emitState();
     };
 
-    wc.on('did-start-navigation', () => {
+    wc.on('did-start-navigation', (_event, _url, _isInPlace, isMainFrame) => {
+      if (isMainFrame !== false) {
+        tab.domReadyAt = null;
+        tab.loadError = null;
+      }
       this.invalidateSnapshot(tabId);
       reapplyBounds();
     });
     wc.on('did-navigate', () => { reapplyBounds(); invalidateAndEmit(); });
     wc.on('did-navigate-in-page', () => { reapplyBounds(); invalidateAndEmit(); });
-    wc.on('did-start-loading', () => { this.invalidateSnapshot(tabId); reapplyBounds(); this.emitState(); });
+    wc.on('did-start-loading', () => {
+      tab.loadError = null;
+      this.invalidateSnapshot(tabId);
+      reapplyBounds();
+      this.emitState();
+    });
     wc.on('did-stop-loading', () => { reapplyBounds(); invalidateAndEmit(); });
     wc.on('did-finish-load', () => { reapplyBounds(); invalidateAndEmit(); });
+    wc.on('dom-ready', () => {
+      tab.domReadyAt = Date.now();
+      reapplyBounds();
+      invalidateAndEmit();
+    });
     wc.on('did-frame-finish-load', reapplyBounds);
-    wc.on('did-fail-load', () => { reapplyBounds(); invalidateAndEmit(); });
+    wc.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+      if (isMainFrame && errorCode !== -3) {
+        const target = validatedURL || wc.getURL() || 'page';
+        tab.loadError = errorDescription
+          ? `Failed to load ${target}: ${errorDescription}.`
+          : `Failed to load ${target}.`;
+      }
+      reapplyBounds();
+      invalidateAndEmit();
+    });
     wc.on('page-title-updated', this.emitState.bind(this));
 
     wc.setWindowOpenHandler(({ url }) => {
@@ -593,9 +618,12 @@ export class BrowserViewManager extends EventEmitter {
     const tabId = randomUUID();
     const tab: BrowserTab = {
       id: tabId,
-      view: this.createView(tabId),
+      view: this.createView(),
+      domReadyAt: null,
+      loadError: null,
     };
 
+    this.wireEvents(tab);
     this.tabs.set(tabId, tab);
     this.tabOrder.push(tabId);
     this.activeTabId = tabId;
@@ -607,7 +635,10 @@ export class BrowserViewManager extends EventEmitter {
       initialUrl === 'about:blank'
         ? HOME_URL
         : normalizeNavigationTarget(initialUrl);
-    void tab.view.webContents.loadURL(targetUrl).catch(() => {
+    void tab.view.webContents.loadURL(targetUrl).catch((error) => {
+      tab.loadError = error instanceof Error
+        ? error.message
+        : `Failed to load ${targetUrl}.`;
       this.emitState();
     });
 
@@ -629,17 +660,29 @@ export class BrowserViewManager extends EventEmitter {
   }
 
   private async waitForWebContentsSettle(
-    wc: WebContents,
+    tab: BrowserTab,
     signal?: AbortSignal,
     idleMs = POST_ACTION_IDLE_MS,
     timeoutMs = NAVIGATION_TIMEOUT_MS,
   ): Promise<void> {
+    const wc = tab.view.webContents;
     const startedAt = Date.now();
     let sawLoading = wc.isLoading();
 
     while (Date.now() - startedAt < timeoutMs) {
       abortIfNeeded(signal);
       if (wc.isDestroyed()) return;
+      if (tab.loadError) {
+        throw new Error(tab.loadError);
+      }
+
+      if (tab.domReadyAt != null) {
+        const domReadyForMs = Date.now() - tab.domReadyAt;
+        const requiredIdleMs = sawLoading ? idleMs : Math.min(idleMs, 200);
+        if (domReadyForMs >= requiredIdleMs) return;
+        await sleep(Math.min(100, requiredIdleMs - domReadyForMs), signal);
+        continue;
+      }
 
       if (wc.isLoading()) {
         sawLoading = true;
@@ -648,15 +691,24 @@ export class BrowserViewManager extends EventEmitter {
       }
 
       await sleep(sawLoading ? idleMs : Math.min(idleMs, 200), signal);
-      if (!wc.isLoading()) return;
+      if (tab.loadError) {
+        throw new Error(tab.loadError);
+      }
+      if (!wc.isLoading() || tab.domReadyAt != null) return;
       sawLoading = true;
     }
   }
 
-  private async executeOnActiveTab<T>(script: string, signal?: AbortSignal): Promise<T> {
+  private async executeOnActiveTab<T>(
+    script: string,
+    signal?: AbortSignal,
+    options?: { waitForReady?: boolean },
+  ): Promise<T> {
     abortIfNeeded(signal);
     const activeTab = this.getActiveTab() ?? this.ensureInitialTab();
-    await this.waitForWebContentsSettle(activeTab.view.webContents, signal);
+    if (options?.waitForReady !== false) {
+      await this.waitForWebContentsSettle(activeTab, signal);
+    }
     abortIfNeeded(signal);
     return activeTab.view.webContents.executeJavaScript(script, true) as Promise<T>;
   }
@@ -734,7 +786,7 @@ export class BrowserViewManager extends EventEmitter {
 
   async ensureActiveTabReady(signal?: AbortSignal): Promise<void> {
     const activeTab = this.getActiveTab() ?? this.ensureInitialTab();
-    await this.waitForWebContentsSettle(activeTab.view.webContents, signal);
+    await this.waitForWebContentsSettle(activeTab, signal);
   }
 
   async newTab(rawUrl?: string): Promise<{ ok: boolean; tabId?: string; error?: string }> {
@@ -820,7 +872,7 @@ export class BrowserViewManager extends EventEmitter {
   }
 
   async readPage(
-    options?: { maxElements?: number; maxTextLength?: number },
+    options?: { maxElements?: number; maxTextLength?: number; waitForReady?: boolean },
     signal?: AbortSignal,
   ): Promise<{ ok: boolean; page?: BrowserPageSnapshot; error?: string }> {
     try {
@@ -831,6 +883,7 @@ export class BrowserViewManager extends EventEmitter {
           options?.maxTextLength ?? DEFAULT_READ_MAX_TEXT_LENGTH,
         ),
         signal,
+        { waitForReady: options?.waitForReady },
       );
       return {
         ok: true,
@@ -844,11 +897,15 @@ export class BrowserViewManager extends EventEmitter {
     }
   }
 
-  async readPageSummary(signal?: AbortSignal): Promise<BrowserPageSnapshot | null> {
+  async readPageSummary(
+    signal?: AbortSignal,
+    options?: { waitForReady?: boolean },
+  ): Promise<BrowserPageSnapshot | null> {
     const result = await this.readPage(
       {
         maxElements: POST_ACTION_MAX_ELEMENTS,
         maxTextLength: POST_ACTION_MAX_TEXT_LENGTH,
+        waitForReady: options?.waitForReady,
       },
       signal,
     );
@@ -871,7 +928,7 @@ export class BrowserViewManager extends EventEmitter {
       );
       if (!result.ok) return result;
       this.invalidateSnapshot(activeTab.id);
-      await this.waitForWebContentsSettle(activeTab.view.webContents, signal);
+      await this.waitForWebContentsSettle(activeTab, signal);
       return result;
     } catch (error) {
       return {
@@ -897,7 +954,7 @@ export class BrowserViewManager extends EventEmitter {
       );
       if (!result.ok) return result;
       this.invalidateSnapshot(activeTab.id);
-      await this.waitForWebContentsSettle(activeTab.view.webContents, signal);
+      await this.waitForWebContentsSettle(activeTab, signal);
       return result;
     } catch (error) {
       return {
@@ -948,7 +1005,7 @@ export class BrowserViewManager extends EventEmitter {
       wc.sendInputEvent({ type: 'keyUp', keyCode });
 
       this.invalidateSnapshot(activeTab.id);
-      await this.waitForWebContentsSettle(wc, signal);
+      await this.waitForWebContentsSettle(activeTab, signal);
 
       return {
         ok: true,
@@ -990,7 +1047,7 @@ export class BrowserViewManager extends EventEmitter {
     await sleep(ms, signal);
     const activeTab = this.getActiveTab();
     if (!activeTab) return;
-    await this.waitForWebContentsSettle(activeTab.view.webContents, signal);
+    await this.waitForWebContentsSettle(activeTab, signal);
   }
 
   getState(): BrowserState {
