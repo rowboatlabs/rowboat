@@ -99,6 +99,8 @@ Parameters:
 - If the tool says the snapshot is stale, call ` + "`read-page`" + ` again.
 - After navigation, clicking, typing, pressing, or scrolling, use the returned page snapshot instead of assuming the page state.
 - Use Rowboat's browser for live interaction. Use web search tools for research where a live session is unnecessary.
+- Do not wrap browser URLs or browser pages in ` + "```filepath" + ` blocks. Filepath cards are only for real files on disk, not web pages or browser tabs.
+- If you mention a page the browser opened, use plain text for the URL/title instead of trying to create a clickable file card.
 `;
 
 export default skill;
