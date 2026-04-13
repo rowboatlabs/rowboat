@@ -566,7 +566,8 @@ export function convertFromMessages(messages: z.infer<typeof Message>[]): ModelM
                     for (const part of msg.content) {
                         if (part.type === "attachment") {
                             const sizeStr = part.size ? `, ${formatBytes(part.size)}` : '';
-                            attachmentLines.push(`- ${part.filename} (${part.mimeType}${sizeStr}) at ${part.path}`);
+                            const lineStr = part.lineNumber ? ` (line ${part.lineNumber})` : '';
+                            attachmentLines.push(`- ${part.filename} (${part.mimeType}${sizeStr}) at ${part.path}${lineStr}`);
                         } else {
                             textSegments.push(part.text);
                         }

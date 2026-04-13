@@ -18,7 +18,7 @@ import { EmailBlockExtension } from '@/extensions/email-block'
 import { TranscriptBlockExtension } from '@/extensions/transcript-block'
 import { MermaidBlockExtension } from '@/extensions/mermaid-block'
 import { Markdown } from 'tiptap-markdown'
-import { useEffect, useCallback, useMemo, useRef, useState } from 'react'
+import { useEffect, useCallback, useMemo, useRef, useState, forwardRef, useImperativeHandle } from 'react'
 import { Calendar, ChevronDown, ExternalLink } from 'lucide-react'
 
 // Zero-width space used as invisible marker for blank lines
@@ -54,159 +54,220 @@ function postprocessMarkdown(markdown: string): string {
   }).join('\n')
 }
 
-// Custom function to get markdown that preserves empty paragraphs as blank lines
-function getMarkdownWithBlankLines(editor: Editor): string {
-  const json = editor.getJSON()
-  if (!json.content) return ''
+type JsonNode = {
+  type?: string
+  content?: JsonNode[]
+  text?: string
+  marks?: Array<{ type: string; attrs?: Record<string, unknown> }>
+  attrs?: Record<string, unknown>
+}
 
-  const blocks: string[] = []
-
-  // Helper to convert a node to markdown text
-  const nodeToText = (node: {
-    type?: string
-    content?: Array<{
-      type?: string
-      text?: string
-      marks?: Array<{ type: string; attrs?: Record<string, unknown> }>
-      attrs?: Record<string, unknown>
-    }>
-    attrs?: Record<string, unknown>
-  }): string => {
-    if (!node.content) return ''
-    return node.content.map(child => {
-      if (child.type === 'text') {
-        let text = child.text || ''
-        // Apply marks (bold, italic, etc.)
-        if (child.marks) {
-          for (const mark of child.marks) {
-            if (mark.type === 'bold') text = `**${text}**`
-            else if (mark.type === 'italic') text = `*${text}*`
-            else if (mark.type === 'code') text = `\`${text}\``
-            else if (mark.type === 'link' && mark.attrs?.href) text = `[${text}](${mark.attrs.href})`
-          }
+// Convert a node's inline content (text + marks + wikiLinks + hardBreaks) to markdown text
+function nodeToText(node: JsonNode): string {
+  if (!node.content) return ''
+  return node.content.map(child => {
+    if (child.type === 'text') {
+      let text = child.text || ''
+      if (child.marks) {
+        for (const mark of child.marks) {
+          if (mark.type === 'bold') text = `**${text}**`
+          else if (mark.type === 'italic') text = `*${text}*`
+          else if (mark.type === 'code') text = `\`${text}\``
+          else if (mark.type === 'link' && mark.attrs?.href) text = `[${text}](${mark.attrs.href})`
         }
-        return text
-      } else if (child.type === 'wikiLink') {
-        const path = (child.attrs?.path as string) || ''
-        return path ? `[[${path}]]` : ''
-      } else if (child.type === 'hardBreak') {
-        return '\n'
       }
-      return ''
-    }).join('')
-  }
+      return text
+    } else if (child.type === 'wikiLink') {
+      const path = (child.attrs?.path as string) || ''
+      return path ? `[[${path}]]` : ''
+    } else if (child.type === 'hardBreak') {
+      return '\n'
+    }
+    return ''
+  }).join('')
+}
 
-  for (const node of json.content) {
-    if (node.type === 'paragraph') {
-      const text = nodeToText(node)
-      // If the paragraph contains only the blank line marker or is empty, it's a blank line
-      if (!text || text === BLANK_LINE_MARKER || text.trim() === BLANK_LINE_MARKER) {
-        // Push empty string to represent blank line - will add extra newline when joining
-        blocks.push('')
+// Recursively serialize a list node (one line per item; nested lists indented two spaces)
+function serializeList(listNode: JsonNode, indent: number): string[] {
+  const lines: string[] = []
+  const items = (listNode.content || []) as JsonNode[]
+  items.forEach((item, index) => {
+    const indentStr = '  '.repeat(indent)
+    let prefix: string
+    if (listNode.type === 'taskList') {
+      const checked = item.attrs?.checked ? 'x' : ' '
+      prefix = `- [${checked}] `
+    } else if (listNode.type === 'orderedList') {
+      prefix = `${index + 1}. `
+    } else {
+      prefix = '- '
+    }
+    const itemContent = (item.content || []) as JsonNode[]
+    let firstPara = true
+    itemContent.forEach(child => {
+      if (child.type === 'bulletList' || child.type === 'orderedList' || child.type === 'taskList') {
+        lines.push(...serializeList(child, indent + 1))
       } else {
-        blocks.push(text)
+        const text = nodeToText(child)
+        if (firstPara) {
+          lines.push(indentStr + prefix + text)
+          firstPara = false
+        } else {
+          lines.push(indentStr + '  ' + text)
+        }
       }
-    } else if (node.type === 'heading') {
-      const level = (node.attrs?.level as number) || 1
+    })
+  })
+  return lines
+}
+
+// Serialize a single top-level block to its markdown string. Empty paragraphs (or blank-marker
+// paragraphs) return '' to signal "blank line slot" for the join logic in serializeBlocksToMarkdown.
+function blockToMarkdown(node: JsonNode): string {
+  switch (node.type) {
+    case 'paragraph': {
       const text = nodeToText(node)
-      blocks.push('#'.repeat(level) + ' ' + text)
-    } else if (node.type === 'bulletList' || node.type === 'orderedList' || node.type === 'taskList') {
-      // Recursively serialize lists to handle nested bullets
-      const serializeList = (
-        listNode: { type?: string; content?: Array<Record<string, unknown>>; attrs?: Record<string, unknown> },
-        indent: number
-      ): string[] => {
-        const lines: string[] = []
-        const items = (listNode.content || []) as Array<{ content?: Array<Record<string, unknown>>; attrs?: Record<string, unknown> }>
-        items.forEach((item, index) => {
-          const indentStr = '  '.repeat(indent)
-          let prefix: string
-          if (listNode.type === 'taskList') {
-            const checked = item.attrs?.checked ? 'x' : ' '
-            prefix = `- [${checked}] `
-          } else if (listNode.type === 'orderedList') {
-            prefix = `${index + 1}. `
-          } else {
-            prefix = '- '
-          }
-          const itemContent = (item.content || []) as Array<{ type?: string; content?: Array<{ type?: string; text?: string; marks?: Array<{ type: string; attrs?: Record<string, unknown> }> }>; attrs?: Record<string, unknown> }>
-          let firstPara = true
-          itemContent.forEach(child => {
-            if (child.type === 'bulletList' || child.type === 'orderedList' || child.type === 'taskList') {
-              lines.push(...serializeList(child, indent + 1))
-            } else {
-              const text = nodeToText(child)
-              if (firstPara) {
-                lines.push(indentStr + prefix + text)
-                firstPara = false
-              } else {
-                lines.push(indentStr + '  ' + text)
-              }
-            }
-          })
-        })
-        return lines
-      }
-      blocks.push(serializeList(node, 0).join('\n'))
-    } else if (node.type === 'taskBlock') {
-      blocks.push('```task\n' + (node.attrs?.data as string || '{}') + '\n```')
-    } else if (node.type === 'imageBlock') {
-      blocks.push('```image\n' + (node.attrs?.data as string || '{}') + '\n```')
-    } else if (node.type === 'embedBlock') {
-      blocks.push('```embed\n' + (node.attrs?.data as string || '{}') + '\n```')
-    } else if (node.type === 'chartBlock') {
-      blocks.push('```chart\n' + (node.attrs?.data as string || '{}') + '\n```')
-    } else if (node.type === 'tableBlock') {
-      blocks.push('```table\n' + (node.attrs?.data as string || '{}') + '\n```')
-    } else if (node.type === 'calendarBlock') {
-      blocks.push('```calendar\n' + (node.attrs?.data as string || '{}') + '\n```')
-    } else if (node.type === 'emailBlock') {
-      blocks.push('```email\n' + (node.attrs?.data as string || '{}') + '\n```')
-    } else if (node.type === 'transcriptBlock') {
-      blocks.push('```transcript\n' + (node.attrs?.data as string || '{}') + '\n```')
-    } else if (node.type === 'mermaidBlock') {
-      blocks.push('```mermaid\n' + (node.attrs?.data as string || '') + '\n```')
-    } else if (node.type === 'codeBlock') {
+      if (!text || text === BLANK_LINE_MARKER || text.trim() === BLANK_LINE_MARKER) return ''
+      return text
+    }
+    case 'heading': {
+      const level = (node.attrs?.level as number) || 1
+      return '#'.repeat(level) + ' ' + nodeToText(node)
+    }
+    case 'bulletList':
+    case 'orderedList':
+    case 'taskList':
+      return serializeList(node, 0).join('\n')
+    case 'taskBlock':
+      return '```task\n' + (node.attrs?.data as string || '{}') + '\n```'
+    case 'imageBlock':
+      return '```image\n' + (node.attrs?.data as string || '{}') + '\n```'
+    case 'embedBlock':
+      return '```embed\n' + (node.attrs?.data as string || '{}') + '\n```'
+    case 'chartBlock':
+      return '```chart\n' + (node.attrs?.data as string || '{}') + '\n```'
+    case 'tableBlock':
+      return '```table\n' + (node.attrs?.data as string || '{}') + '\n```'
+    case 'calendarBlock':
+      return '```calendar\n' + (node.attrs?.data as string || '{}') + '\n```'
+    case 'emailBlock':
+      return '```email\n' + (node.attrs?.data as string || '{}') + '\n```'
+    case 'transcriptBlock':
+      return '```transcript\n' + (node.attrs?.data as string || '{}') + '\n```'
+    case 'mermaidBlock':
+      return '```mermaid\n' + (node.attrs?.data as string || '') + '\n```'
+    case 'codeBlock': {
       const lang = (node.attrs?.language as string) || ''
-      blocks.push('```' + lang + '\n' + nodeToText(node) + '\n```')
-    } else if (node.type === 'blockquote') {
-      const content = node.content || []
-      const quoteLines = content.map(para => '> ' + nodeToText(para))
-      blocks.push(quoteLines.join('\n'))
-    } else if (node.type === 'horizontalRule') {
-      blocks.push('---')
-    } else if (node.type === 'wikiLink') {
+      return '```' + lang + '\n' + nodeToText(node) + '\n```'
+    }
+    case 'blockquote': {
+      const content = (node.content || []) as JsonNode[]
+      return content.map(para => '> ' + nodeToText(para)).join('\n')
+    }
+    case 'horizontalRule':
+      return '---'
+    case 'wikiLink': {
       const path = (node.attrs?.path as string) || ''
-      blocks.push(`[[${path}]]`)
-    } else if (node.type === 'image') {
+      return `[[${path}]]`
+    }
+    case 'image': {
       const src = (node.attrs?.src as string) || ''
       const alt = (node.attrs?.alt as string) || ''
-      blocks.push(`![${alt}](${src})`)
+      return `![${alt}](${src})`
     }
+    default:
+      return ''
   }
+}
 
-  // Custom join: content blocks get \n\n before them, empty blocks add \n each
-  // This produces: 1 empty paragraph = 3 newlines (1 blank line on disk)
+// Pure helper: serialize a slice of top-level block nodes to markdown.
+// Custom join: content blocks get \n\n before them, empty blocks add \n each.
+// 1 empty paragraph = 3 newlines on disk (1 blank line).
+function serializeBlocksToMarkdown(blocks: JsonNode[]): string {
   if (blocks.length === 0) return ''
-
   let result = ''
-
   for (let i = 0; i < blocks.length; i++) {
-    const block = blocks[i]
+    const block = blockToMarkdown(blocks[i])
     const isContent = block !== ''
-
     if (i === 0) {
       result = block
     } else if (isContent) {
-      // Content block: add \n\n before it (standard paragraph break)
       result += '\n\n' + block
     } else {
-      // Empty block: just add \n (one extra newline for blank line)
       result += '\n'
     }
   }
-
   return result
+}
+
+// Custom function to get markdown that preserves empty paragraphs as blank lines
+function getMarkdownWithBlankLines(editor: Editor): string {
+  const json = editor.getJSON() as JsonNode
+  if (!json.content) return ''
+  return serializeBlocksToMarkdown(json.content as JsonNode[])
+}
+
+// Compute the cursor's 1-indexed line number in the markdown that getMarkdownWithBlankLines
+// would produce. Used to attach precise line-references when inserting editor-context mentions.
+function getCursorContextLine(editor: Editor): number {
+  const $from = editor.state.selection.$from
+  const json = editor.getJSON() as JsonNode
+  const blocks = (json.content ?? []) as JsonNode[]
+  if (blocks.length === 0) return 1
+
+  const blockIndex = $from.index(0)
+  if (blockIndex < 0 || blockIndex >= blocks.length) return 1
+
+  // Line where the cursor's top-level block starts.
+  // Joining: prefix + '\n\n' + nextContentBlock → next block sits two lines below the prefix's last line.
+  let blockStartLine: number
+  if (blockIndex === 0) {
+    blockStartLine = 1
+  } else {
+    const prefix = serializeBlocksToMarkdown(blocks.slice(0, blockIndex))
+    const prefixLineCount = prefix === '' ? 0 : prefix.split('\n').length
+    blockStartLine = prefixLineCount + 2
+  }
+
+  return blockStartLine + computeWithinBlockOffset(blocks[blockIndex], $from)
+}
+
+// Lines into the cursor's top-level block. 0 for the common single-line cases (paragraph/heading);
+// for multi-line containers, computed against how the block serializes.
+function computeWithinBlockOffset(
+  block: JsonNode,
+  $from: { parentOffset: number; depth: number; index: (depth: number) => number }
+): number {
+  switch (block.type) {
+    case 'paragraph':
+    case 'heading': {
+      // Each hardBreak before the cursor moves us down one rendered line.
+      const offset = $from.parentOffset
+      let pos = 0
+      let hbCount = 0
+      for (const child of (block.content ?? [])) {
+        if (pos >= offset) break
+        const size = child.type === 'text' ? (child.text?.length ?? 0) : 1
+        if (child.type === 'hardBreak' && pos < offset) hbCount++
+        pos += size
+      }
+      return hbCount
+    }
+    case 'bulletList':
+    case 'orderedList':
+    case 'taskList':
+    case 'blockquote':
+      // Item index within the container = lines into the block (one item per line for shallow lists/quotes).
+      return $from.depth >= 1 ? $from.index(1) : 0
+    case 'codeBlock': {
+      // +1 for the opening ``` fence line, plus newlines within the code text before the cursor.
+      const text = block.content?.[0]?.text ?? ''
+      const before = text.substring(0, $from.parentOffset)
+      return 1 + (before.match(/\n/g)?.length ?? 0)
+    }
+    default:
+      return 0
+  }
 }
 import { EditorToolbar } from './editor-toolbar'
 import { FrontmatterProperties } from './frontmatter-properties'
@@ -439,7 +500,12 @@ const TabIndentExtension = Extension.create({
   },
 })
 
-export function MarkdownEditor({
+export interface MarkdownEditorHandle {
+  /** Returns {path, lineNumber} for the cursor's current position, or null if no notePath / no editor. */
+  getCursorContext: () => { path: string; lineNumber: number } | null
+}
+
+export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(function MarkdownEditor({
   content,
   onChange,
   onPrimaryHeadingCommit,
@@ -454,7 +520,7 @@ export function MarkdownEditor({
   onFrontmatterChange,
   onExport,
   notePath,
-}: MarkdownEditorProps) {
+}, ref) {
   const isInternalUpdate = useRef(false)
   const wrapperRef = useRef<HTMLDivElement>(null)
   const [activeWikiLink, setActiveWikiLink] = useState<WikiLinkMatch | null>(null)
@@ -788,6 +854,17 @@ export function MarkdownEditor({
       top: coords.bottom - wrapperRect.top,
     })
   }, [editor, wikiLinks])
+
+  useImperativeHandle(ref, () => ({
+    getCursorContext: () => {
+      if (!notePath || !editor) return null
+      try {
+        return { path: notePath, lineNumber: getCursorContextLine(editor) }
+      } catch {
+        return null
+      }
+    },
+  }), [notePath, editor])
 
   const updateRowboatMentionState = useCallback(() => {
     if (!editor) return
@@ -1452,4 +1529,4 @@ export function MarkdownEditor({
       </div>
     </div>
   )
-}
+})

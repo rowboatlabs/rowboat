@@ -7,7 +7,7 @@ import './App.css'
 import z from 'zod';
 import { CheckIcon, LoaderIcon, PanelLeftIcon, Maximize2, Minimize2, ChevronLeftIcon, ChevronRightIcon, SquarePen, SearchIcon, HistoryIcon, RadioIcon, SquareIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { MarkdownEditor } from './components/markdown-editor';
+import { MarkdownEditor, type MarkdownEditorHandle } from './components/markdown-editor';
 import { ChatSidebar } from './components/chat-sidebar';
 import { ChatInputWithMentions, type StagedAttachment } from './components/chat-input-with-mentions';
 import { ChatMessageAttachments } from '@/components/chat-message-attachments'
@@ -54,7 +54,7 @@ import { Toaster } from "@/components/ui/sonner"
 import { stripKnowledgePrefix, toKnowledgePath, wikiLabel } from '@/lib/wiki-links'
 import { splitFrontmatter, joinFrontmatter } from '@/lib/frontmatter'
 import { OnboardingModal } from '@/components/onboarding'
-import { SearchDialog } from '@/components/search-dialog'
+import { CommandPalette, type CommandPaletteContext, type CommandPaletteMention } from '@/components/search-dialog'
 import { BackgroundTaskDetail } from '@/components/background-task-detail'
 import { VersionHistoryPanel } from '@/components/version-history-panel'
 import { FileCardProvider } from '@/contexts/file-card-context'
@@ -739,6 +739,12 @@ function App() {
   const handlePromptSubmitRef = useRef<((message: PromptInputMessage, mentions?: FileMention[], stagedAttachments?: StagedAttachment[], searchEnabled?: boolean) => Promise<void>) | null>(null)
   const pendingVoiceInputRef = useRef(false)
 
+  // Palette: per-tab editor handles for capturing cursor context on Cmd+K, and pending payload
+  // queued across the new-chat-tab state flush before submit fires.
+  const editorRefsByTabId = useRef<Map<string, MarkdownEditorHandle>>(new Map())
+  const [paletteContext, setPaletteContext] = useState<CommandPaletteContext | null>(null)
+  const [pendingPaletteSubmit, setPendingPaletteSubmit] = useState<{ text: string; mention: CommandPaletteMention | null } | null>(null)
+
   const handleSubmitRecording = useCallback(() => {
     const text = voice.submit()
     setIsRecording(false)
@@ -885,6 +891,8 @@ function App() {
   // File tab state
   const [fileTabs, setFileTabs] = useState<FileTab[]>([])
   const [activeFileTabId, setActiveFileTabId] = useState<string | null>(null)
+  const activeFileTabIdRef = useRef(activeFileTabId)
+  activeFileTabIdRef.current = activeFileTabId
   const [editorSessionByTabId, setEditorSessionByTabId] = useState<Record<string, number>>({})
   const fileHistoryHandlersRef = useRef<Map<string, MarkdownHistoryHandlers>>(new Map())
   const fileTabIdCounterRef = useRef(0)
@@ -2155,6 +2163,7 @@ function App() {
               filename: string
               mimeType: string
               size?: number
+              lineNumber?: number
             }
 
         const contentParts: ContentPart[] = []
@@ -2166,6 +2175,7 @@ function App() {
               path: mention.path,
               filename: mention.displayName || mention.path.split('/').pop() || mention.path,
               mimeType: 'text/markdown',
+              ...(mention.lineNumber !== undefined ? { lineNumber: mention.lineNumber } : {}),
             })
           }
         }
@@ -2651,6 +2661,32 @@ function App() {
     handleNewChat()
   }, [chatTabs, activeChatTabId, handleNewChat])
 
+  // Palette → sidebar submission. Opens the sidebar (if closed), forces a fresh chat tab,
+  // queues the message; the pending-submit effect (below) flushes it once state has settled
+  // so handlePromptSubmit sees the new tab's null runId.
+  const submitFromPalette = useCallback((text: string, mention: CommandPaletteMention | null) => {
+    if (!isChatSidebarOpen) setIsChatSidebarOpen(true)
+    handleNewChatTabInSidebar()
+    setPendingPaletteSubmit({ text, mention })
+  }, [isChatSidebarOpen, handleNewChatTabInSidebar])
+
+  useEffect(() => {
+    if (!pendingPaletteSubmit) return
+    const fileMention: FileMention | undefined = pendingPaletteSubmit.mention
+      ? {
+          id: `palette-${Date.now()}`,
+          path: pendingPaletteSubmit.mention.path,
+          displayName: pendingPaletteSubmit.mention.displayName,
+          lineNumber: pendingPaletteSubmit.mention.lineNumber,
+        }
+      : undefined
+    void handlePromptSubmitRef.current?.(
+      { text: pendingPaletteSubmit.text, files: [] },
+      fileMention ? [fileMention] : undefined,
+    )
+    setPendingPaletteSubmit(null)
+  }, [pendingPaletteSubmit])
+
   const toggleKnowledgePane = useCallback(() => {
     setIsRightPaneMaximized(false)
     setIsChatSidebarOpen(prev => !prev)
@@ -3059,11 +3095,16 @@ function App() {
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [handleCloseFullScreenChat, isFullScreenChat, expandedFrom, navigateToFullScreenChat])
 
-  // Keyboard shortcut: Cmd+K / Ctrl+K to open search
+  // Keyboard shortcut: Cmd+K / Ctrl+K opens the unified palette (defaults to Chat mode).
+  // If an editor tab is currently active, capture cursor context so Chat mode shows the
+  // note + line as a removable chip.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
         e.preventDefault()
+        const activeId = activeFileTabIdRef.current
+        const handle = activeId ? editorRefsByTabId.current.get(activeId) : null
+        setPaletteContext(handle?.getCursorContext() ?? null)
         setIsSearchOpen(true)
       }
     }
@@ -4186,6 +4227,10 @@ function App() {
                             aria-hidden={!isActive}
                           >
                             <MarkdownEditor
+                              ref={(el) => {
+                                if (el) editorRefsByTabId.current.set(tab.id, el)
+                                else editorRefsByTabId.current.delete(tab.id)
+                              }}
                               content={tabContent}
                               notePath={tab.path}
                               onChange={(markdown) => { if (!isViewingHistory) handleEditorChange(tab.path, markdown) }}
@@ -4505,11 +4550,13 @@ function App() {
             />
           </SidebarProvider>
         </div>
-        <SearchDialog
+        <CommandPalette
           open={isSearchOpen}
           onOpenChange={setIsSearchOpen}
           onSelectFile={navigateToFile}
           onSelectRun={(id) => { void navigateToView({ type: 'chat', runId: id }) }}
+          initialContext={paletteContext}
+          onChatSubmit={submitFromPalette}
         />
       </SidebarSectionProvider>
       <Toaster />
