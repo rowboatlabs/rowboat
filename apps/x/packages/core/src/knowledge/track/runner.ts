@@ -4,6 +4,7 @@ import { createRun, createMessage } from '../../runs/runs.js';
 import { extractAgentResponse, waitForRunCompletion } from '../../agents/utils.js';
 import { trackBus } from './bus.js';
 import type { TrackStateSchema } from './types.js';
+import { PrefixLogger } from '@x/shared/dist/prefix-logger.js';
 
 export interface TrackUpdateResult {
     trackId: string;
@@ -63,16 +64,20 @@ export async function triggerTrackUpdate(
     trigger: 'manual' | 'timed' | 'event' = 'manual',
 ): Promise<TrackUpdateResult> {
     const key = `${trackId}:${filePath}`;
+    const logger = new PrefixLogger('track:runner');
+    logger.log('triggering track update', trackId, filePath, trigger, context);
     if (runningTracks.has(key)) {
+        logger.log('skipping, already running');
         return { trackId, action: 'no_update', contentBefore: null, contentAfter: null, summary: null, error: 'Already running' };
     }
     runningTracks.add(key);
 
     try {
-        console.log('triggerTrackUpdate', trackId, filePath, trigger, context);
         const tracks = await fetchAll(filePath);
+        logger.log('fetched tracks from file', tracks);
         const track = tracks.find(t => t.track.trackId === trackId);
         if (!track) {
+            logger.log('track not found', trackId, filePath, trigger, context);
             return { trackId, action: 'no_update', contentBefore: null, contentAfter: null, summary: null, error: 'Track not found' };
         }
 
