@@ -535,6 +535,14 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
 
     const cleanup = window.ipc.on('oauth:didConnect', async (event) => {
       if (event.provider === 'rowboat' && event.success) {
+        // Ensure user record exists before advancing (prevents duplicate
+        // Stripe customers from parallel API calls in later steps)
+        try {
+          await window.ipc.invoke('billing:getInfo', null)
+        } catch (error) {
+          console.error('Failed to fetch billing info during onboarding:', error)
+        }
+
         // Re-check composio flags now that the account is connected
         try {
           const [googleResult, calendarResult] = await Promise.all([
