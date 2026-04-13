@@ -1,5 +1,6 @@
 import { isValidElement, type JSX } from 'react'
 import { FilePathCard } from './file-path-card'
+import { MermaidRenderer } from '@/components/mermaid-renderer'
 
 export function MarkdownPreOverride(props: JSX.IntrinsicElements['pre']) {
   const { children, ...rest } = props
@@ -17,6 +18,17 @@ export function MarkdownPreOverride(props: JSX.IntrinsicElements['pre']) {
         : ''
       if (text) {
         return <FilePathCard filePath={text} />
+      }
+    }
+    if (
+      typeof childProps.className === 'string' &&
+      childProps.className.includes('language-mermaid')
+    ) {
+      const text = typeof childProps.children === 'string'
+        ? childProps.children.trim()
+        : ''
+      if (text) {
+        return <MermaidRenderer source={text} />
       }
     }
   }

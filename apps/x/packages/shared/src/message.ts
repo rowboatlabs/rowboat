@@ -41,6 +41,7 @@ export const UserAttachmentPart = z.object({
     filename: z.string(),                // display name ("photo.png")
     mimeType: z.string(),                // MIME type ("image/png", "text/plain")
     size: z.number().optional(),         // bytes
+    lineNumber: z.number().int().min(1).optional(),  // 1-indexed line in source file (for editor-context references)
 });
 
 // Any single part of a user message (text or attachment)

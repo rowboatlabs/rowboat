@@ -1,6 +1,8 @@
 import { z, ZodType } from "zod";
 import * as path from "path";
 import * as fs from "fs/promises";
+import { createReadStream } from "fs";
+import { createInterface } from "readline";
 import { execSync } from "child_process";
 import { glob } from "glob";
 import { executeCommand, executeCommandAbortable } from "./command-executor.js";
@@ -170,14 +172,119 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
     },
 
     'workspace-readFile': {
-        description: 'Read file contents from the workspace. Supports utf8, base64, and binary encodings.',
+        description: 'Read a file from the workspace. For text files (utf8, the default), returns the content with each line prefixed by its 1-indexed line number (e.g. `12: some text`). Use the `offset` and `limit` parameters to page through large files; defaults read up to 2000 lines starting at line 1. Output is wrapped in `<path>`, `<type>`, `<content>` tags and ends with a footer indicating whether the read reached end-of-file or was truncated. Line numbers in the output are display-only — do NOT include them when later writing or editing the file. For `base64` / `binary` encodings, returns the raw bytes as a string and ignores `offset` / `limit`.',
         inputSchema: z.object({
             path: z.string().min(1).describe('Workspace-relative file path'),
+            offset: z.coerce.number().int().min(1).optional().describe('1-indexed line to start reading from (default: 1). Utf8 only.'),
+            limit: z.coerce.number().int().min(1).optional().describe('Maximum number of lines to read (default: 2000). Utf8 only.'),
             encoding: z.enum(['utf8', 'base64', 'binary']).optional().describe('File encoding (default: utf8)'),
         }),
-        execute: async ({ path: relPath, encoding = 'utf8' }: { path: string; encoding?: 'utf8' | 'base64' | 'binary' }) => {
+        execute: async ({
+            path: relPath,
+            offset,
+            limit,
+            encoding = 'utf8',
+        }: {
+            path: string;
+            offset?: number;
+            limit?: number;
+            encoding?: 'utf8' | 'base64' | 'binary';
+        }) => {
             try {
-                return await workspace.readFile(relPath, encoding);
+                if (encoding !== 'utf8') {
+                    return await workspace.readFile(relPath, encoding);
+                }
+
+                const DEFAULT_READ_LIMIT = 2000;
+                const MAX_LINE_LENGTH = 2000;
+                const MAX_LINE_SUFFIX = `... (line truncated to ${MAX_LINE_LENGTH} chars)`;
+                const MAX_BYTES = 50 * 1024;
+                const MAX_BYTES_LABEL = `${MAX_BYTES / 1024} KB`;
+
+                const absPath = workspace.resolveWorkspacePath(relPath);
+                const stats = await fs.lstat(absPath);
+                const stat = workspace.statToSchema(stats, 'file');
+                const etag = workspace.computeEtag(stats.size, stats.mtimeMs);
+
+                const effectiveOffset = offset ?? 1;
+                const effectiveLimit = limit ?? DEFAULT_READ_LIMIT;
+                const start = effectiveOffset - 1;
+
+                const stream = createReadStream(absPath, { encoding: 'utf8' });
+                const rl = createInterface({ input: stream, crlfDelay: Infinity });
+
+                const collected: string[] = [];
+                let totalLines = 0;
+                let bytes = 0;
+                let truncatedByBytes = false;
+                let hasMoreLines = false;
+
+                try {
+                    for await (const text of rl) {
+                        totalLines += 1;
+                        if (totalLines <= start) continue;
+
+                        if (collected.length >= effectiveLimit) {
+                            hasMoreLines = true;
+                            continue;
+                        }
+
+                        const line = text.length > MAX_LINE_LENGTH
+                            ? text.substring(0, MAX_LINE_LENGTH) + MAX_LINE_SUFFIX
+                            : text;
+                        const size = Buffer.byteLength(line, 'utf-8') + (collected.length > 0 ? 1 : 0);
+                        if (bytes + size > MAX_BYTES) {
+                            truncatedByBytes = true;
+                            hasMoreLines = true;
+                            break;
+                        }
+
+                        collected.push(line);
+                        bytes += size;
+                    }
+                } finally {
+                    rl.close();
+                    stream.destroy();
+                }
+
+                if (totalLines < effectiveOffset && !(totalLines === 0 && effectiveOffset === 1)) {
+                    return { error: `Offset ${effectiveOffset} is out of range for this file (${totalLines} lines)` };
+                }
+
+                const prefixed = collected.map((line, index) => `${index + effectiveOffset}: ${line}`);
+                const lastReadLine = effectiveOffset + collected.length - 1;
+                const nextOffset = lastReadLine + 1;
+
+                let footer: string;
+                if (truncatedByBytes) {
+                    footer = `(Output capped at ${MAX_BYTES_LABEL}. Showing lines ${effectiveOffset}-${lastReadLine}. Use offset=${nextOffset} to continue.)`;
+                } else if (hasMoreLines) {
+                    footer = `(Showing lines ${effectiveOffset}-${lastReadLine} of ${totalLines}. Use offset=${nextOffset} to continue.)`;
+                } else {
+                    footer = `(End of file - total ${totalLines} lines)`;
+                }
+
+                const content = [
+                    `<path>${relPath}</path>`,
+                    `<type>file</type>`,
+                    `<content>`,
+                    prefixed.join('\n'),
+                    '',
+                    footer,
+                    `</content>`,
+                ].join('\n');
+
+                return {
+                    path: relPath,
+                    encoding: 'utf8' as const,
+                    content,
+                    stat,
+                    etag,
+                    offset: effectiveOffset,
+                    limit: effectiveLimit,
+                    totalLines,
+                    hasMore: hasMoreLines || truncatedByBytes,
+                };
             } catch (error) {
                 return {
                     error: error instanceof Error ? error.message : 'Unknown error',
@@ -1092,14 +1199,14 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                     } catch {
                         return {
                             success: false,
-                            error: 'Exa Search API key not configured. Create ~/.rowboat/config/exa-search.json with { "apiKey": "<your-key>" }',
+                            error: `Exa Search API key not configured. Create ${exaConfigPath} with { "apiKey": "<your-key>" }`,
                         };
                     }
 
                     if (!apiKey) {
                         return {
                             success: false,
-                            error: 'Exa Search API key is empty. Set "apiKey" in ~/.rowboat/config/exa-search.json',
+                            error: `Exa Search API key is empty. Set "apiKey" in ${exaConfigPath}`,
                         };
                     }
 

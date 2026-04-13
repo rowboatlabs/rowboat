@@ -7,7 +7,7 @@ You are helping the user prepare for meetings by gathering context from their kn
 
 **BEFORE creating any meeting brief, you MUST look up the attendees in the knowledge base.**
 
-**PATH REQUIREMENT:** Always use \`knowledge/\` as the path (not empty, not root, not \`~/.rowboat\`).
+**PATH REQUIREMENT:** Always use \`knowledge/\` as the path (not empty, not the workspace root, not an absolute path).
 - **WRONG:** \`path: ""\` or \`path: "."\`
 - **CORRECT:** \`path: "knowledge/"\`
 

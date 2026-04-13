@@ -10,7 +10,7 @@ Agents can use builtin tools by declaring them in the YAML frontmatter \`tools\`
 ### executeCommand
 **The most powerful and versatile builtin tool** - Execute any bash/shell command and get the output.
 
-**Security note:** Commands are filtered through \`.rowboat/config/security.json\`. Populate this file with allowed command names (array or dictionary entries). Any command not present is blocked and returns exit code 126 so the agent knows it violated the policy.
+**Security note:** Commands are filtered through \`config/security.json\` in the workspace root. Populate this file with allowed command names (array or dictionary entries). Any command not present is blocked and returns exit code 126 so the agent knows it violated the policy.
 
 **Agent tool declaration (YAML frontmatter):**
 \`\`\`yaml

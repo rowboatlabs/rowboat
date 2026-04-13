@@ -2,9 +2,8 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { isSignedIn } from '../account/account.js';
 import { getAccessToken } from '../auth/tokens.js';
+import { WorkDir } from '../config/config.js';
 import { API_URL } from '../config/env.js';
-
-const homedir = process.env.HOME || process.env.USERPROFILE || '';
 
 export interface VoiceConfig {
     deepgram: { apiKey: string } | null;
@@ -13,7 +12,7 @@ export interface VoiceConfig {
 
 async function readJsonConfig(filename: string): Promise<Record<string, unknown> | null> {
     try {
-        const configPath = path.join(homedir, '.rowboat', 'config', filename);
+        const configPath = path.join(WorkDir, 'config', filename);
         const raw = await fs.readFile(configPath, 'utf8');
         return JSON.parse(raw);
     } catch {
@@ -51,7 +50,7 @@ export async function synthesizeSpeech(text: string): Promise<{ audioBase64: str
         console.log('[voice] synthesizing speech via Rowboat proxy, text length:', text.length, 'voiceId:', voiceId);
     } else {
         if (!config.elevenlabs) {
-            throw new Error('ElevenLabs not configured. Create ~/.rowboat/config/elevenlabs.json with { "apiKey": "<your-key>" }');
+            throw new Error(`ElevenLabs not configured. Create ${path.join(WorkDir, 'config', 'elevenlabs.json')} with { "apiKey": "<your-key>" }`);
         }
         const voiceId = config.elevenlabs.voiceId || 'UgBBYS2sOqTuMpoF3BR0';
         url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`;

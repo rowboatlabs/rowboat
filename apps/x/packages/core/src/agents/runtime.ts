@@ -566,7 +566,8 @@ export function convertFromMessages(messages: z.infer<typeof Message>[]): ModelM
                     for (const part of msg.content) {
                         if (part.type === "attachment") {
                             const sizeStr = part.size ? `, ${formatBytes(part.size)}` : '';
-                            attachmentLines.push(`- ${part.filename} (${part.mimeType}${sizeStr}) at ${part.path}`);
+                            const lineStr = part.lineNumber ? ` (line ${part.lineNumber})` : '';
+                            attachmentLines.push(`- ${part.filename} (${part.mimeType}${sizeStr}) at ${part.path}${lineStr}`);
                         } else {
                             textSegments.push(part.text);
                         }
@@ -858,8 +859,8 @@ export async function* streamAgent({
     const isKgAgent = knowledgeGraphAgents.includes(state.agentName!);
     const isInlineTaskAgent = state.agentName === "inline_task_agent";
     const defaultModel = signedIn ? "gpt-5.4" : modelConfig.model;
-    const defaultKgModel = signedIn ? "gpt-5.4-mini" : defaultModel;
-    const defaultInlineTaskModel = signedIn ? "gpt-5.4" : defaultModel;
+    const defaultKgModel = signedIn ? "anthropic/claude-haiku-4.5" : defaultModel;
+    const defaultInlineTaskModel = signedIn ? "anthropic/claude-sonnet-4.6" : defaultModel;
     const modelId = isInlineTaskAgent
         ? defaultInlineTaskModel
         : (isKgAgent && modelConfig.knowledgeGraphModel)

@@ -26,7 +26,7 @@ export interface TagDefinition {
   noteEffect?: NoteEffect;
 }
 
-// ── Default definitions (used to seed ~/.rowboat/config/tags.json) ──────────
+// ── Default definitions (used to seed WorkDir/config/tags.json) ─────────────
 
 const DEFAULT_TAG_DEFINITIONS: TagDefinition[] = [
   // ── Relationship — who is this from/about (all create) ────────────────

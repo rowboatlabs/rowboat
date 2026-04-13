@@ -7,7 +7,7 @@ You interact with Slack by running **agent-slack** commands through \`executeCom
 
 ## 1. Check Connection
 
-Before any Slack operation, read \`~/.rowboat/config/slack.json\`. If \`enabled\` is \`false\` or the \`workspaces\` array is empty, simply tell the user: "Slack is not enabled. You can enable it in the Connectors settings." Do not attempt any agent-slack commands.
+Before any Slack operation, read \`config/slack.json\` from the workspace root. If \`enabled\` is \`false\` or the \`workspaces\` array is empty, simply tell the user: "Slack is not enabled. You can enable it in the Connectors settings." Do not attempt any agent-slack commands.
 
 If enabled, use the workspace URLs from the config for all commands.
 
@@ -75,7 +75,7 @@ agent-slack canvas get F01234567 --workspace https://team.slack.com
 
 ## 3. Multi-Workspace
 
-**Important:** The user has chosen which workspaces to use. Before your first Slack operation, read \`~/.rowboat/config/slack.json\` to see the selected workspaces. Only interact with workspaces listed in that config — ignore any other authenticated workspaces.
+**Important:** The user has chosen which workspaces to use. Before your first Slack operation, read \`config/slack.json\` from the workspace root to see the selected workspaces. Only interact with workspaces listed in that config — ignore any other authenticated workspaces.
 
 If the selected workspace list contains multiple entries, use \`--workspace <url>\` to disambiguate:
 
