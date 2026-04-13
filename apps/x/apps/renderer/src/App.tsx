@@ -2144,8 +2144,9 @@ function App() {
       }
 
       let titleSource = userMessage
+      const hasMentions = (mentions?.length ?? 0) > 0
 
-      if (hasAttachments) {
+      if (hasAttachments || hasMentions) {
         type ContentPart =
           | { type: 'text'; text: string }
           | {
@@ -2182,7 +2183,7 @@ function App() {
         if (userMessage) {
           contentParts.push({ type: 'text', text: userMessage })
         } else {
-          titleSource = stagedAttachments[0]?.filename ?? ''
+          titleSource = stagedAttachments[0]?.filename ?? mentions?.[0]?.displayName ?? mentions?.[0]?.path ?? ''
         }
 
         // Shared IPC payload types can lag until package rebuilds; runtime validation still enforces schema.
@@ -2200,32 +2201,9 @@ function App() {
           searchEnabled: searchEnabled || undefined,
         })
       } else {
-        // Legacy path: plain string with optional XML-formatted @mentions.
-        let formattedMessage = userMessage
-        if (mentions && mentions.length > 0) {
-          const attachedFiles = await Promise.all(
-            mentions.map(async (mention) => {
-              try {
-                const result = await window.ipc.invoke('workspace:readFile', { path: mention.path })
-                return { path: mention.path, content: result.data as string }
-              } catch (err) {
-                console.error('Failed to read mentioned file:', mention.path, err)
-                return { path: mention.path, content: `[Error reading file: ${mention.path}]` }
-              }
-            })
-          )
-
-          if (attachedFiles.length > 0) {
-            const filesXml = attachedFiles
-              .map((file) => `<file path="${file.path}">\n${file.content}\n</file>`)
-              .join('\n')
-            formattedMessage = `<attached-files>\n${filesXml}\n</attached-files>\n\n${userMessage}`
-          }
-        }
-
         await window.ipc.invoke('runs:createMessage', {
           runId: currentRunId,
-          message: formattedMessage,
+          message: userMessage,
           voiceInput: pendingVoiceInputRef.current || undefined,
           voiceOutput: ttsEnabledRef.current ? ttsModeRef.current : undefined,
           searchEnabled: searchEnabled || undefined,
@@ -2235,8 +2213,6 @@ function App() {
           voiceOutput: ttsEnabledRef.current ? ttsModeRef.current : undefined,
           searchEnabled: searchEnabled || undefined,
         })
-
-        titleSource = formattedMessage
       }
 
       pendingVoiceInputRef.current = false
