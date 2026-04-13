@@ -23,8 +23,8 @@ export async function fetchAll(filePath: string): Promise<z.infer<typeof TrackSt
     const lines = content.split('\n');
     const blocks: z.infer<typeof TrackStateSchema>[] = [];
     let i = 0;
-    const contentFenceStartMatcher = /<!--track-target:(\w+)-->/;
-    const contentFenceEndMatcher = /<!--\/track-target:(\w+)-->/;
+    const contentFenceStartMatcher = /<!--track-target:(.+)-->/;
+    const contentFenceEndMatcher = /<!--\/track-target:(.+)-->/;
     while (i < lines.length) {
         if (lines[i].trim() === '```track') {
             const fenceStart = i;
