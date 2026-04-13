@@ -12,9 +12,12 @@ import createPresentationsSkill from "./create-presentations/skill.js";
 
 import appNavigationSkill from "./app-navigation/skill.js";
 import composioIntegrationSkill from "./composio-integration/skill.js";
+import tracksSkill from "./tracks/skill.js";
 
 const CURRENT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const CATALOG_PREFIX = "src/application/assistant/skills";
+
+console.log(tracksSkill);
 
 type SkillDefinition = {
   id: string;  // Also used as folder name
@@ -95,6 +98,12 @@ const definitions: SkillDefinition[] = [
     title: "App Navigation",
     summary: "Navigate the app UI - open notes, switch views, filter/search the knowledge base, and manage saved views.",
     content: appNavigationSkill,
+  },
+  {
+    id: "tracks",
+    title: "Tracks",
+    summary: "Create and manage track blocks — YAML-scheduled auto-updating content blocks in notes (weather, news, prices, status, dashboards). Insert at cursor (Cmd+K) or append to notes.",
+    content: tracksSkill,
   },
 ];
 
