@@ -1,43 +1,28 @@
-import fs from 'fs';
-import path from 'path';
 import { PrefixLogger } from '@x/shared';
-import { WorkDir } from '../../config/config.js';
+import * as workspace from '../../workspace/workspace.js';
 import { fetchAll } from './fileops.js';
 import { triggerTrackUpdate } from './runner.js';
 import { isTrackScheduleDue } from './schedule-utils.js';
 
 const log = new PrefixLogger('TrackScheduler');
-const KNOWLEDGE_DIR = path.join(WorkDir, 'knowledge');
 const POLL_INTERVAL_MS = 15_000; // 15 seconds
 
-function scanMarkdownFiles(dir: string): string[] {
-    if (!fs.existsSync(dir)) return [];
-    const files: string[] = [];
-    const entries = fs.readdirSync(dir, { withFileTypes: true });
-    for (const entry of entries) {
-        if (entry.name.startsWith('.')) continue;
-        const fullPath = path.join(dir, entry.name);
-        if (entry.isDirectory()) {
-            files.push(...scanMarkdownFiles(fullPath));
-        } else if (entry.isFile() && entry.name.endsWith('.md')) {
-            files.push(fullPath);
-        }
+async function listKnowledgeMarkdownFiles(): Promise<string[]> {
+    try {
+        const entries = await workspace.readdir('knowledge', { recursive: true });
+        return entries
+            .filter(e => e.kind === 'file' && e.name.endsWith('.md'))
+            .map(e => e.path.replace(/^knowledge\//, ''));
+    } catch {
+        return [];
     }
-    return files;
 }
 
 async function processScheduledTracks(): Promise<void> {
-    if (!fs.existsSync(KNOWLEDGE_DIR)) {
-        log.log('Knowledge directory not found');
-        return;
-    }
+    const relativePaths = await listKnowledgeMarkdownFiles();
+    log.log(`Scanning ${relativePaths.length} markdown files`);
 
-    const allFiles = scanMarkdownFiles(KNOWLEDGE_DIR);
-    log.log(`Scanning ${allFiles.length} markdown files`);
-
-    for (const fullPath of allFiles) {
-        const relativePath = path.relative(KNOWLEDGE_DIR, fullPath);
-
+    for (const relativePath of relativePaths) {
         let tracks;
         try {
             tracks = await fetchAll(relativePath);

@@ -126,6 +126,33 @@ Fires once at ` + "`" + `runAt` + "`" + ` and never again. Local time, no ` + "`
 
 **Omit ` + "`" + `schedule` + "`" + ` entirely for a manual-only track** — the user triggers it via the Play button in the UI.
 
+## Event Triggers (third trigger type)
+
+In addition to manual and scheduled, a track can be triggered by **events** — incoming signals from the user's data sources (currently: gmail emails). Set ` + "`" + `eventMatchCriteria` + "`" + ` to a description of what kinds of events should consider this track for an update:
+
+` + "```" + `track
+trackId: q3-planning-emails
+instruction: Maintain a running summary of decisions and open questions about Q3 planning, drawn from emails on the topic.
+active: true
+eventMatchCriteria: Emails about Q3 planning, roadmap decisions, or quarterly OKRs
+` + "```" + `
+
+How it works:
+1. When a new event arrives (e.g. an email syncs), a fast LLM classifier checks ` + "`" + `eventMatchCriteria` + "`" + ` against the event content.
+2. If it might match, the track-run agent receives both the event payload and the existing track content, and decides whether to actually update.
+3. If the event isn't truly relevant on closer inspection, the agent skips the update — no fabricated content.
+
+When to suggest event triggers:
+- The user wants to **maintain a living summary** of a topic ("keep notes on everything related to project X").
+- The content depends on **incoming signals** rather than periodic refresh ("update this whenever a relevant email arrives").
+- Mention to the user: scheduled (cron) is for time-driven updates; event is for signal-driven updates. They can be combined — a track can have both a ` + "`" + `schedule` + "`" + ` and ` + "`" + `eventMatchCriteria` + "`" + ` (it'll run on schedule AND on relevant events).
+
+Writing good ` + "`" + `eventMatchCriteria` + "`" + `:
+- Be descriptive but not overly narrow — Pass 1 routing is liberal by design.
+- Examples: ` + "`" + `"Emails from John about the migration project"` + "`" + `, ` + "`" + `"Calendar events related to customer interviews"` + "`" + `, ` + "`" + `"Meeting notes that mention pricing changes"` + "`" + `.
+
+Tracks **without** ` + "`" + `eventMatchCriteria` + "`" + ` opt out of events entirely — they'll only run on schedule or manually.
+
 ## Insertion Workflow
 
 ### Cmd+K with cursor context

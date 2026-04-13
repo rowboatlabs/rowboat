@@ -47,7 +47,7 @@ function TrackBlockView({ node, deleteNode, updateAttributes, extension }: {
 
   const trackId = track?.trackId ?? ''
   const instruction = track?.instruction ?? ''
-  const matchCriteria = track?.matchCriteria ?? ''
+  const eventMatchCriteria = track?.eventMatchCriteria ?? ''
   const active = track?.active ?? true
   const lastRunAt = track?.lastRunAt ?? ''
   const lastRunId = track?.lastRunId ?? ''
@@ -225,9 +225,9 @@ function TrackBlockView({ node, deleteNode, updateAttributes, extension }: {
                 )}
                 {activeTab === 'criteria' && (
                   <div className="track-block-panel-text">
-                    {matchCriteria
-                      ? <Streamdown className="track-block-markdown">{matchCriteria}</Streamdown>
-                      : <span className="track-block-empty">No match criteria set</span>}
+                    {eventMatchCriteria
+                      ? <Streamdown className="track-block-markdown">{eventMatchCriteria}</Streamdown>
+                      : <span className="track-block-empty">No event match criteria set</span>}
                   </div>
                 )}
                 {activeTab === 'metadata' && (

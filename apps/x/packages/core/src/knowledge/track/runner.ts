@@ -8,6 +8,7 @@ import { PrefixLogger } from '@x/shared/dist/prefix-logger.js';
 
 export interface TrackUpdateResult {
     trackId: string;
+    runId: string | null;
     action: 'replace' | 'no_update';
     contentBefore: string | null;
     contentAfter: string | null;
@@ -19,7 +20,12 @@ export interface TrackUpdateResult {
 // Agent run
 // ---------------------------------------------------------------------------
 
-function buildMessage(filePath: string, track: z.infer<typeof TrackStateSchema>, context?: string): string {
+function buildMessage(
+    filePath: string,
+    track: z.infer<typeof TrackStateSchema>,
+    trigger: 'manual' | 'timed' | 'event',
+    context?: string,
+): string {
     const now = new Date();
     const localNow = now.toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'long' });
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -36,7 +42,19 @@ ${track.content || '(empty — first run)'}
 
 Use \`update-track-content\` with filePath=\`${filePath}\` and trackId=\`${track.track.trackId}\`.`;
 
-    if (context) {
+    if (trigger === 'event') {
+        msg += `
+
+**Trigger:** Event match (a Pass 1 routing classifier flagged this track as potentially relevant to the event below)
+
+**Event match criteria for this track:**
+${track.track.eventMatchCriteria ?? '(none — should not happen for event-triggered runs)'}
+
+**Event payload:**
+${context ?? '(no payload)'}
+
+**Decision:** Determine whether this event genuinely warrants updating the track content. If the event is not meaningfully relevant on closer inspection, skip the update — do NOT call \`update-track-content\`. Only call the tool if the event provides new or changed information that should be reflected in the track.`;
+    } else if (context) {
         msg += `\n\n**Context:**\n${context}`;
     }
 
@@ -68,7 +86,7 @@ export async function triggerTrackUpdate(
     logger.log('triggering track update', trackId, filePath, trigger, context);
     if (runningTracks.has(key)) {
         logger.log('skipping, already running');
-        return { trackId, action: 'no_update', contentBefore: null, contentAfter: null, summary: null, error: 'Already running' };
+        return { trackId, runId: null, action: 'no_update', contentBefore: null, contentAfter: null, summary: null, error: 'Already running' };
     }
     runningTracks.add(key);
 
@@ -78,7 +96,7 @@ export async function triggerTrackUpdate(
         const track = tracks.find(t => t.track.trackId === trackId);
         if (!track) {
             logger.log('track not found', trackId, filePath, trigger, context);
-            return { trackId, action: 'no_update', contentBefore: null, contentAfter: null, summary: null, error: 'Track not found' };
+            return { trackId, runId: null, action: 'no_update', contentBefore: null, contentAfter: null, summary: null, error: 'Track not found' };
         }
 
         const contentBefore = track.content;
@@ -102,7 +120,7 @@ export async function triggerTrackUpdate(
         });
 
         try {
-            await createMessage(agentRun.id, buildMessage(filePath, track, context));
+            await createMessage(agentRun.id, buildMessage(filePath, track, trigger, context));
             await waitForRunCompletion(agentRun.id);
             const summary = await extractAgentResponse(agentRun.id);
 
@@ -125,6 +143,7 @@ export async function triggerTrackUpdate(
 
             return {
                 trackId,
+                runId: agentRun.id,
                 action: didUpdate ? 'replace' : 'no_update',
                 contentBefore: contentBefore ?? null,
                 contentAfter: contentAfter ?? null,
@@ -141,7 +160,7 @@ export async function triggerTrackUpdate(
                 error: msg,
             });
 
-            return { trackId, action: 'no_update', contentBefore: contentBefore ?? null, contentAfter: null, summary: null, error: msg };
+            return { trackId, runId: agentRun.id, action: 'no_update', contentBefore: contentBefore ?? null, contentAfter: null, summary: null, error: msg };
         }
     } finally {
         runningTracks.delete(key);
