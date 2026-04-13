@@ -70,6 +70,14 @@ export function createProvider(config: z.infer<typeof Provider>): ProviderV2 {
     }
 }
 
+export function shouldUseGatewayForModelTest(
+    flavor: z.infer<typeof Provider>["flavor"],
+    signedIn: boolean,
+): boolean {
+    const isLocal = flavor === "ollama" || flavor === "openai-compatible";
+    return signedIn && !isLocal;
+}
+
 export async function testModelConnection(
     providerConfig: z.infer<typeof Provider>,
     model: string,
@@ -80,7 +88,8 @@ export async function testModelConnection(
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), effectiveTimeout);
     try {
-        const provider = await isSignedIn()
+        const signedIn = await isSignedIn();
+        const provider = shouldUseGatewayForModelTest(providerConfig.flavor, signedIn)
             ? await getGatewayProvider()
             : createProvider(providerConfig);
         const languageModel = provider.languageModel(model);
