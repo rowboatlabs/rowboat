@@ -81,3 +81,11 @@ export const TranscriptBlockSchema = z.object({
 });
 
 export type TranscriptBlock = z.infer<typeof TranscriptBlockSchema>;
+
+export const SuggestedTopicBlockSchema = z.object({
+  title: z.string(),
+  description: z.string(),
+  category: z.string().optional(),
+});
+
+export type SuggestedTopicBlock = z.infer<typeof SuggestedTopicBlockSchema>;

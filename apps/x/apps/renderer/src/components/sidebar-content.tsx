@@ -19,6 +19,7 @@ import {
   Pencil,
   Table2,
   Plug,
+  Lightbulb,
   LoaderIcon,
   Settings,
   Square,
@@ -172,6 +173,7 @@ type SidebarContentPanelProps = {
   tasksActions?: TasksActions
   backgroundTasks?: BackgroundTaskItem[]
   selectedBackgroundTask?: string | null
+  onOpenSuggestedTopics?: () => void
 } & React.ComponentProps<typeof Sidebar>
 
 const sectionTabs: { id: ActiveSection; label: string }[] = [
@@ -395,6 +397,7 @@ export function SidebarContentPanel({
   tasksActions,
   backgroundTasks = [],
   selectedBackgroundTask,
+  onOpenSuggestedTopics,
   ...props
 }: SidebarContentPanelProps) {
   const { activeSection, setActiveSection } = useSidebarSection()
@@ -615,6 +618,18 @@ export function SidebarContentPanel({
               </AlertDialog>
             )}
           </div>
+          {onOpenSuggestedTopics && (
+            <button
+              onClick={onOpenSuggestedTopics}
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+            >
+              <Lightbulb className="size-4" />
+              <span>Suggested Topics</span>
+              <span className="ml-auto rounded-full bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-medium leading-none text-blue-600 dark:text-blue-400">
+                NEW
+              </span>
+            </button>
+          )}
           <SettingsDialog>
             <button className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors">
               <Settings className="size-4" />
