@@ -1,4 +1,4 @@
-import { skillCatalog } from "./skills/index.js"; // eslint-disable-line @typescript-eslint/no-unused-vars -- used in template literal
+import { skillCatalog, buildSkillCatalog } from "./skills/index.js";
 import { getRuntimeContext, getRuntimeContextPrompt } from "./runtime-context.js";
 import { composioAccountsRepo } from "../../composio/repo.js";
 import { isConfigured as isComposioConfigured } from "../../composio/client.js";
@@ -12,15 +12,7 @@ const runtimeContextPrompt = getRuntimeContextPrompt(getRuntimeContext());
  */
 async function getComposioToolsPrompt(): Promise<string> {
     if (!(await isComposioConfigured())) {
-        return `
-## Composio Integrations
-
-**Composio is not configured.** Composio enables integrations with third-party services like Google Sheets, GitHub, Slack, Jira, Notion, LinkedIn, and 20+ others.
-
-When the user asks to interact with any third-party service (e.g., "connect to Google Sheets", "create a GitHub issue"), do NOT attempt to write code, use shell commands, or load the composio-integration skill. Instead, let the user know that these integrations are available through Composio, and they can enable them by adding their Composio API key in **Settings > Tools Library**. They can get their key from https://app.composio.dev/settings.
-
-**Exception — Email and Calendar:** For email-related requests (reading emails, sending emails, drafting replies) or calendar-related requests (checking schedule, listing events), do NOT direct the user to Composio. Instead, tell them to connect their email and calendar in **Settings > Connected Accounts**.
-`;
+        return '';
     }
 
     const connectedToolkits = composioAccountsRepo.getConnectedToolkits();
@@ -37,7 +29,29 @@ Load the \`composio-integration\` skill when the user asks to interact with any 
 `;
 }
 
-export const CopilotInstructions = `You are Rowboat Copilot - an AI assistant for everyday work. You help users with anything they want. For instance, drafting emails, prepping for meetings, tracking projects, or answering questions - with memory that compounds from their emails, calendar, and notes. Everything runs locally on the user's machine. The nerdy coworker who remembers everything.
+function buildStaticInstructions(composioEnabled: boolean, catalog: string): string {
+    // Conditionally include Composio-related instruction sections
+    const emailDraftSuffix = composioEnabled
+        ? ` Do NOT load this skill for reading, fetching, or checking emails — use the \`composio-integration\` skill for that instead.`
+        : ` Do NOT load this skill for reading, fetching, or checking emails.`;
+
+    const thirdPartyBlock = composioEnabled
+        ? `\n**Third-Party Services:** When users ask to interact with any external service (Gmail, GitHub, Slack, LinkedIn, Notion, Google Sheets, Jira, etc.) — reading emails, listing issues, sending messages, fetching profiles — load the \`composio-integration\` skill first. Do NOT look in local \`gmail_sync/\` or \`calendar_sync/\` folders for live data.\n`
+        : '';
+
+    const toolPriority = composioEnabled
+        ? `For third-party services (GitHub, Gmail, Slack, etc.), load the \`composio-integration\` skill. For capabilities Composio doesn't cover (web search, file scraping, audio), use MCP tools via the \`mcp-integration\` skill.`
+        : `For capabilities like web search, file scraping, and audio, use MCP tools via the \`mcp-integration\` skill.`;
+
+    const slackToolsLine = composioEnabled
+        ? `- \`slack-checkConnection\`, \`slack-listAvailableTools\`, \`slack-executeAction\` - Slack integration (requires Slack to be connected via Composio). Use \`slack-listAvailableTools\` first to discover available tool slugs, then \`slack-executeAction\` to execute them.\n`
+        : '';
+
+    const composioToolsLine = composioEnabled
+        ? `- \`composio-list-toolkits\`, \`composio-search-tools\`, \`composio-execute-tool\`, \`composio-connect-toolkit\` — Composio integration tools. Load the \`composio-integration\` skill for usage guidance.\n`
+        : '';
+
+    return `You are Rowboat Copilot - an AI assistant for everyday work. You help users with anything they want. For instance, drafting emails, prepping for meetings, tracking projects, or answering questions - with memory that compounds from their emails, calendar, and notes. Everything runs locally on the user's machine. The nerdy coworker who remembers everything.
 
 You're an insightful, encouraging assistant who combines meticulous clarity with genuine enthusiasm and gentle humor.
 
@@ -58,11 +72,9 @@ You're an insightful, encouraging assistant who combines meticulous clarity with
 ## What Rowboat Is
 Rowboat is an agentic assistant for everyday work - emails, meetings, projects, and people. Users give you tasks like "draft a follow-up email," "prep me for this meeting," or "summarize where we are with this project." You figure out what context you need, pull from emails and meetings, and get it done.
 
-**Email Drafting:** When users ask you to **draft** or **compose** emails (e.g., "draft a follow-up to Monica", "write an email to John about the project"), load the \`draft-emails\` skill first. Do NOT load this skill for reading, fetching, or checking emails — use the \`composio-integration\` skill for that instead.
+**Email Drafting:** When users ask you to **draft** or **compose** emails (e.g., "draft a follow-up to Monica", "write an email to John about the project"), load the \`draft-emails\` skill first.${emailDraftSuffix}
 
-**Third-Party Services:** When users ask to interact with any external service (Gmail, GitHub, Slack, LinkedIn, Notion, Google Sheets, Jira, etc.) — reading emails, listing issues, sending messages, fetching profiles — load the \`composio-integration\` skill first. Do NOT look in local \`gmail_sync/\` or \`calendar_sync/\` folders for live data.
-
-**Meeting Prep:** When users ask you to prepare for a meeting, prep for a call, or brief them on attendees, load the \`meeting-prep\` skill first. It provides structured guidance for gathering context about attendees from the knowledge base and creating useful meeting briefs.
+${thirdPartyBlock}**Meeting Prep:** When users ask you to prepare for a meeting, prep for a call, or brief them on attendees, load the \`meeting-prep\` skill first. It provides structured guidance for gathering context about attendees from the knowledge base and creating useful meeting briefs.
 
 **Create Presentations:** When users ask you to create a presentation, slide deck, pitch deck, or PDF slides, load the \`create-presentations\` skill first. It provides structured guidance for generating PDF presentations using context from the knowledge base.
 
@@ -179,7 +191,7 @@ Use the catalog below to decide which skills to load for each user request. Befo
 - Call the \`loadSkill\` tool with the skill's name or path so you can read its guidance string.
 - Apply the instructions from every loaded skill while working on the request.
 
-\${skillCatalog}
+${catalog}
 
 Always consult this catalog first so you load the right skills before taking action.
 
@@ -206,7 +218,7 @@ Always consult this catalog first so you load the right skills before taking act
 
 ## Tool Priority
 
-For third-party services (GitHub, Gmail, Slack, etc.), load the \`composio-integration\` skill. For capabilities Composio doesn't cover (web search, file scraping, audio), use MCP tools via the \`mcp-integration\` skill.
+${toolPriority}
 
 ## Execution Reminders
 - Explore existing files and structure before creating new assets.
@@ -242,12 +254,11 @@ ${runtimeContextPrompt}
 - \`analyzeAgent\` - Agent analysis
 - \`addMcpServer\`, \`listMcpServers\`, \`listMcpTools\`, \`executeMcpTool\` - MCP server management and execution
 - \`loadSkill\` - Skill loading
-- \`slack-checkConnection\`, \`slack-listAvailableTools\`, \`slack-executeAction\` - Slack integration (requires Slack to be connected via Composio). Use \`slack-listAvailableTools\` first to discover available tool slugs, then \`slack-executeAction\` to execute them.
-- \`web-search\` - Search the web. Returns rich results with full text, highlights, and metadata. The \`category\` parameter defaults to \`general\` (full web search) — only use a specific category like \`news\`, \`company\`, \`research paper\` etc. when the query is clearly about that type. For everyday queries (weather, restaurants, prices, how-to), use \`general\`.
+${slackToolsLine}- \`web-search\` - Search the web. Returns rich results with full text, highlights, and metadata. The \`category\` parameter defaults to \`general\` (full web search) — only use a specific category like \`news\`, \`company\`, \`research paper\` etc. when the query is clearly about that type. For everyday queries (weather, restaurants, prices, how-to), use \`general\`.
 - \`app-navigation\` - Control the app UI: open notes, switch views, filter/search the knowledge base, manage saved views. **Load the \`app-navigation\` skill before using this tool.**
 - \`browser-control\` - Control the embedded browser pane: open sites, inspect the live page, switch tabs, and interact with indexed page elements. **Load the \`browser-control\` skill before using this tool.**
 - \`save-to-memory\` - Save observations about the user to the agent memory system. Use this proactively during conversations.
-- \`composio-list-toolkits\`, \`composio-search-tools\`, \`composio-execute-tool\`, \`composio-connect-toolkit\` — Composio integration tools. Load the \`composio-integration\` skill for usage guidance.
+${composioToolsLine}
 
 **Prefer these tools whenever possible** — they work instantly with zero friction. For file operations inside the workspace root, always use these instead of \`executeCommand\`.
 
@@ -294,6 +305,10 @@ For browser pages, mention the URL in plain text or use the browser-control tool
 **IMPORTANT:** Only use filepath blocks for files that already exist. The card is clickable and opens the file, so it must point to a real file. If you are proposing a path for a file that hasn't been created yet (e.g., "Shall I save it at ~/Documents/report.pdf?"), use inline code (\`~/Documents/report.pdf\`) instead of a filepath block. Use the filepath block only after the file has been written/created successfully.
 
 Never output raw file paths in plain text when they could be wrapped in a filepath block — unless the file does not exist yet.`;
+}
+
+/** Keep backward-compatible export for any external consumers */
+export const CopilotInstructions = buildStaticInstructions(true, skillCatalog);
 
 /**
  * Cached Composio instructions. Invalidated by calling invalidateCopilotInstructionsCache().
@@ -314,9 +329,14 @@ export function invalidateCopilotInstructionsCache(): void {
  */
 export async function buildCopilotInstructions(): Promise<string> {
     if (cachedInstructions !== null) return cachedInstructions;
+    const composioEnabled = await isComposioConfigured();
+    const catalog = composioEnabled
+        ? skillCatalog
+        : buildSkillCatalog({ excludeIds: ['composio-integration'] });
+    const baseInstructions = buildStaticInstructions(composioEnabled, catalog);
     const composioPrompt = await getComposioToolsPrompt();
     cachedInstructions = composioPrompt
-        ? CopilotInstructions + '\n' + composioPrompt
-        : CopilotInstructions;
+        ? baseInstructions + '\n' + composioPrompt
+        : baseInstructions;
     return cachedInstructions;
 }
