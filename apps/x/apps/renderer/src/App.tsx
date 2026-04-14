@@ -15,6 +15,7 @@ import { GraphView, type GraphEdge, type GraphNode } from '@/components/graph-vi
 import { BasesView, type BaseConfig, DEFAULT_BASE_CONFIG } from '@/components/bases-view';
 import { useDebounce } from './hooks/use-debounce';
 import { SidebarContentPanel } from '@/components/sidebar-content';
+import { SuggestedTopicsView } from '@/components/suggested-topics-view';
 import { SidebarSectionProvider } from '@/contexts/sidebar-context';
 import {
   Conversation,
@@ -437,6 +438,7 @@ type ViewState =
   | { type: 'file'; path: string }
   | { type: 'graph' }
   | { type: 'task'; name: string }
+  | { type: 'suggested-topics' }
 
 function viewStatesEqual(a: ViewState, b: ViewState): boolean {
   if (a.type !== b.type) return false
@@ -605,6 +607,7 @@ function App() {
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set())
   const [recentWikiFiles, setRecentWikiFiles] = useState<string[]>([])
   const [isGraphOpen, setIsGraphOpen] = useState(false)
+  const [isSuggestedTopicsOpen, setIsSuggestedTopicsOpen] = useState(false)
   const [expandedFrom, setExpandedFrom] = useState<{ path: string | null; graph: boolean } | null>(null)
   const [baseConfigByPath, setBaseConfigByPath] = useState<Record<string, BaseConfig>>({})
   const [graphData, setGraphData] = useState<{ nodes: GraphNode[]; edges: GraphEdge[] }>({
@@ -2721,10 +2724,11 @@ function App() {
 
   const currentViewState = React.useMemo<ViewState>(() => {
     if (selectedBackgroundTask) return { type: 'task', name: selectedBackgroundTask }
+    if (isSuggestedTopicsOpen) return { type: 'suggested-topics' }
     if (selectedPath) return { type: 'file', path: selectedPath }
     if (isGraphOpen) return { type: 'graph' }
     return { type: 'chat', runId }
-  }, [selectedBackgroundTask, selectedPath, isGraphOpen, runId])
+  }, [selectedBackgroundTask, isSuggestedTopicsOpen, selectedPath, isGraphOpen, runId])
 
   const appendUnique = useCallback((stack: ViewState[], entry: ViewState) => {
     const last = stack[stack.length - 1]
@@ -2775,6 +2779,7 @@ function App() {
       case 'file':
         setSelectedBackgroundTask(null)
         setIsGraphOpen(false)
+        setIsSuggestedTopicsOpen(false)
         setExpandedFrom(null)
         // Preserve split vs knowledge-max mode when navigating knowledge files.
         // Only exit chat-only maximize, because that would hide the selected file.
@@ -2787,6 +2792,7 @@ function App() {
       case 'graph':
         setSelectedBackgroundTask(null)
         setSelectedPath(null)
+        setIsSuggestedTopicsOpen(false)
         setExpandedFrom(null)
         setIsGraphOpen(true)
         ensureGraphFileTab()
@@ -2797,9 +2803,18 @@ function App() {
       case 'task':
         setSelectedPath(null)
         setIsGraphOpen(false)
+        setIsSuggestedTopicsOpen(false)
         setExpandedFrom(null)
         setIsRightPaneMaximized(false)
         setSelectedBackgroundTask(view.name)
+        return
+      case 'suggested-topics':
+        setSelectedPath(null)
+        setIsGraphOpen(false)
+        setExpandedFrom(null)
+        setIsRightPaneMaximized(false)
+        setSelectedBackgroundTask(null)
+        setIsSuggestedTopicsOpen(true)
         return
       case 'chat':
         setSelectedPath(null)
@@ -2807,6 +2822,7 @@ function App() {
         setExpandedFrom(null)
         setIsRightPaneMaximized(false)
         setSelectedBackgroundTask(null)
+        setIsSuggestedTopicsOpen(false)
         if (view.runId) {
           await loadRun(view.runId)
         } else {
@@ -4044,6 +4060,7 @@ function App() {
               }}
               backgroundTasks={backgroundTasks}
               selectedBackgroundTask={selectedBackgroundTask}
+              onOpenSuggestedTopics={() => void navigateToView({ type: 'suggested-topics' })}
             />
             <SidebarInset
               className={cn(
@@ -4173,7 +4190,16 @@ function App() {
                 )}
               </ContentHeader>
 
-              {selectedPath && isBaseFilePath(selectedPath) ? (
+              {isSuggestedTopicsOpen ? (
+                <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+                  <SuggestedTopicsView
+                    onExploreTopic={(title, description) => {
+                      const prompt = `I'd like to explore the topic: ${title}. ${description}`
+                      submitFromPalette(prompt, null)
+                    }}
+                  />
+                </div>
+              ) : selectedPath && isBaseFilePath(selectedPath) ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                   <BasesView
                     tree={tree}
