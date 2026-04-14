@@ -206,8 +206,63 @@ schedule:
 ## After Insertion
 
 - Confirm in one line: "Added ` + "`" + `chicago-time` + "`" + ` track, refreshing hourly."
-- Mention the user can click **Play** on the block to run it immediately.
-- **Do not** write anything into the ` + "`" + `<!--track-target:...-->` + "`" + ` region — the runner populates it.
+- **Then offer to run it once now** (see "Running a Track" below) — especially valuable for newly created blocks where the target region is otherwise empty until the next scheduled or event-triggered run.
+- **Do not** write anything into the ` + "`" + `<!--track-target:...-->` + "`" + ` region yourself — use the ` + "`" + `run-track-block` + "`" + ` tool to delegate to the track agent.
+
+## Running a Track (the ` + "`" + `run-track-block` + "`" + ` tool)
+
+The ` + "`" + `run-track-block` + "`" + ` tool manually triggers a track run right now. Equivalent to the user clicking the Play button — but you can pass extra ` + "`" + `context` + "`" + ` to bias what the track agent does on this single run (without modifying the block's ` + "`" + `instruction` + "`" + `).
+
+### When to proactively offer to run
+
+These are upsells — ask first, don't run silently.
+
+- **Just created a new track block.** Before declaring done, offer:
+  > "Want me to run it once now to seed the initial content?"
+
+  This is **especially valuable for event-triggered tracks** (with ` + "`" + `eventMatchCriteria` + "`" + `) — otherwise the target region stays empty until the next matching event arrives.
+
+  For tracks that pull from existing local data (synced emails, calendar, meeting notes), suggest a **backfill** with explicit context (see below).
+
+- **Just edited an existing track.** Offer:
+  > "Want me to run it now to see the updated output?"
+
+- **Explicit user request.** "run the X track", "test it", "refresh that block" → call the tool directly.
+
+### Using the ` + "`" + `context` + "`" + ` parameter (the powerful case)
+
+The ` + "`" + `context` + "`" + ` parameter is extra guidance for the track agent on this run only. It's the difference between a stock refresh and a smart backfill.
+
+**Examples:**
+
+- New track: "Track emails about Q3 planning" → after creating it, run with:
+  > context: "Initial backfill — scan ` + "`" + `gmail_sync/` + "`" + ` for emails from the last 90 days that match this track's topic (Q3 planning, OKRs, roadmap), and synthesize the initial summary."
+
+- New track: "Summarize this week's customer calls" → run with:
+  > context: "Backfill from this week's meeting notes in ` + "`" + `granola_sync/` + "`" + ` and ` + "`" + `fireflies_sync/` + "`" + `."
+
+- Manual refresh after the user mentions a recent change:
+  > context: "Focus on changes from the last 7 days only."
+
+- Plain refresh (user says "run it now"): **omit ` + "`" + `context` + "`" + ` entirely**. Don't invent context — it can mislead the agent.
+
+### What to do with the result
+
+The tool returns ` + "`" + `{ success, runId, action, summary, contentAfter, error }` + "`" + `:
+
+- **` + "`" + `action: 'replace'` + "`" + `** → the track was updated. Confirm with one line, optionally citing the first line of ` + "`" + `contentAfter` + "`" + `:
+  > "Done — track now shows: 72°F, partly cloudy in Chicago."
+
+- **` + "`" + `action: 'no_update'` + "`" + `** → the agent decided nothing needed to change. Tell the user briefly; ` + "`" + `summary` + "`" + ` may explain why.
+
+- **` + "`" + `error` + "`" + ` set** → surface it concisely. If the error is ` + "`" + `'Already running'` + "`" + ` (concurrency guard), let the user know the track is mid-run and to retry shortly.
+
+### Don'ts
+
+- **Don't auto-run** after every edit — ask first.
+- **Don't pass ` + "`" + `context` + "`" + `** for a plain refresh — only when there's specific extra guidance to give.
+- **Don't use ` + "`" + `run-track-block` + "`" + ` to manually write content** — that's ` + "`" + `update-track-content` + "`" + `'s job (and even that should be rare; the track agent handles content via this tool).
+- **Don't ` + "`" + `run-track-block` + "`" + ` repeatedly** in a single turn — one run per user-facing action.
 
 ## Proactive Suggestions
 

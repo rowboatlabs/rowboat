@@ -17,7 +17,7 @@ import tracksSkill from "./tracks/skill.js";
 const CURRENT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const CATALOG_PREFIX = "src/application/assistant/skills";
 
-console.log(tracksSkill);
+// console.log(tracksSkill);
 
 type SkillDefinition = {
   id: string;  // Also used as folder name
