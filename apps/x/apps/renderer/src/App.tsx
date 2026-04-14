@@ -450,6 +450,10 @@ function viewStatesEqual(a: ViewState, b: ViewState): boolean {
 
 /** Sidebar toggle + utility buttons (fixed position, top-left) */
 function FixedSidebarToggle({
+  onNavigateBack,
+  onNavigateForward,
+  canNavigateBack,
+  canNavigateForward,
   onNewChat,
   onOpenSearch,
   meetingState,
@@ -460,6 +464,10 @@ function FixedSidebarToggle({
   onToggleBrowser,
   leftInsetPx,
 }: {
+  onNavigateBack: () => void
+  onNavigateForward: () => void
+  canNavigateBack: boolean
+  canNavigateForward: boolean
   onNewChat: () => void
   onOpenSearch: () => void
   meetingState: MeetingTranscriptionState
@@ -470,7 +478,8 @@ function FixedSidebarToggle({
   onToggleBrowser: () => void
   leftInsetPx: number
 }) {
-  const { toggleSidebar } = useSidebar()
+  const { toggleSidebar, state } = useSidebar()
+  const isCollapsed = state === "collapsed"
   return (
     <div className="fixed left-0 top-0 z-50 flex h-10 items-center" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
       <div aria-hidden="true" className="h-10 shrink-0" style={{ width: leftInsetPx }} />
@@ -4651,6 +4660,10 @@ function App() {
             )}
             {/* Rendered last so its no-drag region paints over the sidebar drag region */}
             <FixedSidebarToggle
+              onNavigateBack={() => { void navigateBack() }}
+              onNavigateForward={() => { void navigateForward() }}
+              canNavigateBack={canNavigateBack}
+              canNavigateForward={canNavigateForward}
               onNewChat={handleNewChatTab}
               onOpenSearch={() => setIsSearchOpen(true)}
               meetingState={meetingTranscription.state}
