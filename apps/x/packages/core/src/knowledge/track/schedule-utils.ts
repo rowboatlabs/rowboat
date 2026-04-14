@@ -15,42 +15,41 @@ export function isTrackScheduleDue(schedule: TrackSchedule, lastRunAt: string | 
         case 'cron': {
             if (!lastRunAt) return true; // Never ran — immediately due
             try {
+                // Find the MOST RECENT occurrence at-or-before `now`, not the
+                // occurrence right after lastRunAt. If lastRunAt is old, that
+                // occurrence would be ancient too and always fall outside the
+                // grace window, blocking every future fire.
                 const interval = CronExpressionParser.parse(schedule.expression, {
-                    currentDate: new Date(lastRunAt),
+                    currentDate: now,
                 });
-                const nextRun = interval.next().toDate();
-                return now >= nextRun && now.getTime() <= nextRun.getTime() + GRACE_MS;
+                const prevRun = interval.prev().toDate();
+
+                // Already ran at-or-after this occurrence → skip.
+                if (new Date(lastRunAt).getTime() >= prevRun.getTime()) return false;
+
+                // Within grace → fire. Outside grace → missed, skip.
+                return now.getTime() <= prevRun.getTime() + GRACE_MS;
             } catch {
                 return false;
             }
         }
         case 'window': {
-            if (!lastRunAt) {
-                // Never ran — due if within the time window now
-                const [startHour, startMin] = schedule.startTime.split(':').map(Number);
-                const [endHour, endMin] = schedule.endTime.split(':').map(Number);
-                const startMinutes = startHour * 60 + startMin;
-                const endMinutes = endHour * 60 + endMin;
-                const nowMinutes = now.getHours() * 60 + now.getMinutes();
-                return nowMinutes >= startMinutes && nowMinutes <= endMinutes;
-            }
+            // Time-of-day filter (applies regardless of lastRunAt state).
+            const [startHour, startMin] = schedule.startTime.split(':').map(Number);
+            const [endHour, endMin] = schedule.endTime.split(':').map(Number);
+            const startMinutes = startHour * 60 + startMin;
+            const endMinutes = endHour * 60 + endMin;
+            const nowMinutes = now.getHours() * 60 + now.getMinutes();
+            if (nowMinutes < startMinutes || nowMinutes > endMinutes) return false;
+
+            if (!lastRunAt) return true;
             try {
                 const interval = CronExpressionParser.parse(schedule.cron, {
-                    currentDate: new Date(lastRunAt),
+                    currentDate: now,
                 });
-                const nextRun = interval.next().toDate();
-                if (!(now >= nextRun && now.getTime() <= nextRun.getTime() + GRACE_MS)) {
-                    return false;
-                }
-
-                // Check if current time is within the time window
-                const [startHour, startMin] = schedule.startTime.split(':').map(Number);
-                const [endHour, endMin] = schedule.endTime.split(':').map(Number);
-                const startMinutes = startHour * 60 + startMin;
-                const endMinutes = endHour * 60 + endMin;
-                const nowMinutes = now.getHours() * 60 + now.getMinutes();
-
-                return nowMinutes >= startMinutes && nowMinutes <= endMinutes;
+                const prevRun = interval.prev().toDate();
+                if (new Date(lastRunAt).getTime() >= prevRun.getTime()) return false;
+                return now.getTime() <= prevRun.getTime() + GRACE_MS;
             } catch {
                 return false;
             }
