@@ -10,6 +10,7 @@ import TaskItem from '@tiptap/extension-task-item'
 import { ImageUploadPlaceholderExtension, createImageUploadHandler } from '@/extensions/image-upload'
 import { TaskBlockExtension } from '@/extensions/task-block'
 import { TrackBlockExtension } from '@/extensions/track-block'
+import { TrackTargetExtension } from '@/extensions/track-target'
 import { ImageBlockExtension } from '@/extensions/image-block'
 import { EmbedBlockExtension } from '@/extensions/embed-block'
 import { ChartBlockExtension } from '@/extensions/chart-block'
@@ -41,6 +42,22 @@ function preprocessMarkdown(markdown: string): string {
     }
     return result
   })
+}
+
+// Convert each `<!--track-target:ID-->...<!--/track-target:ID-->` region to a
+// placeholder HTML element that Tiptap's TrackTargetExtension parses into a
+// `trackTarget` node. Content is base64-encoded so any characters survive.
+// Without this step, tiptap-markdown strips the comment markers and leaves the
+// inner content as loose paragraphs, which then duplicates when the backend
+// re-inserts fresh markers around new content.
+function preprocessTrackTargets(md: string): string {
+  return md.replace(
+    /<!--track-target:([^\s>]+)-->\n?([\s\S]*?)\n?<!--\/track-target:\1-->/g,
+    (_match, id: string, content: string) => {
+      const b64 = btoa(unescape(encodeURIComponent(content)))
+      return `<div data-type="track-target" data-track-id="${id}" data-content="${b64}"></div>`
+    },
+  )
 }
 
 // Post-process to clean up any zero-width spaces in the output
@@ -141,6 +158,13 @@ function blockToMarkdown(node: JsonNode): string {
       return serializeList(node, 0).join('\n')
     case 'taskBlock':
       return '```task\n' + (node.attrs?.data as string || '{}') + '\n```'
+    case 'trackBlock':
+      return '```track\n' + (node.attrs?.data as string || '') + '\n```'
+    case 'trackTarget': {
+      const id = (node.attrs?.trackId as string) ?? ''
+      const content = (node.attrs?.content as string) ?? ''
+      return `<!--track-target:${id}-->\n${content}\n<!--/track-target:${id}-->`
+    }
     case 'imageBlock':
       return '```image\n' + (node.attrs?.data as string || '{}') + '\n```'
     case 'embedBlock':
@@ -640,6 +664,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       ImageUploadPlaceholderExtension,
       TaskBlockExtension,
       TrackBlockExtension.configure({ notePath }),
+      TrackTargetExtension,
       ImageBlockExtension,
       EmbedBlockExtension,
       ChartBlockExtension,
@@ -1034,8 +1059,9 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       const normalizeForCompare = (s: string) => s.split('\n').map(line => line.trimEnd()).join('\n').trim()
       if (normalizeForCompare(currentContent) !== normalizeForCompare(content)) {
         isInternalUpdate.current = true
-        // Pre-process to preserve blank lines
-        const preprocessed = preprocessMarkdown(content)
+        // Pre-process to preserve blank lines, then wrap track-target comment
+        // regions into placeholder divs so TrackTargetExtension can pick them up.
+        const preprocessed = preprocessMarkdown(preprocessTrackTargets(content))
         // Treat tab-open content as baseline: do not add hydration to undo history.
         editor.chain().setMeta('addToHistory', false).setContent(preprocessed).run()
         isInternalUpdate.current = false
