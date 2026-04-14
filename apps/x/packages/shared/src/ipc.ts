@@ -6,6 +6,7 @@ import { LlmModelConfig } from './models.js';
 import { AgentScheduleConfig, AgentScheduleEntry } from './agent-schedule.js';
 import { AgentScheduleState } from './agent-schedule-state.js';
 import { ServiceEvent } from './service-events.js';
+import { TrackEvent } from './track-block.js';
 import { UserMessageContent } from './message.js';
 import { RowboatApiConfig } from './rowboat-account.js';
 import { ZListToolkitsResponse } from './composio.js';
@@ -191,6 +192,10 @@ const ipcSchemas = {
   },
   'services:events': {
     req: ServiceEvent,
+    res: z.null(),
+  },
+  'tracks:events': {
+    req: TrackEvent,
     res: z.null(),
   },
   'models:list': {
@@ -558,6 +563,67 @@ const ipcSchemas = {
       ]).nullable(),
       scheduleLabel: z.string().nullable(),
       response: z.string().nullable(),
+    }),
+  },
+  // Track channels
+  'track:run': {
+    req: z.object({
+      trackId: z.string(),
+      filePath: z.string(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      summary: z.string().optional(),
+      error: z.string().optional(),
+    }),
+  },
+  'track:get': {
+    req: z.object({
+      trackId: z.string(),
+      filePath: z.string(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      // Fresh, authoritative YAML of the track block from disk.
+      // Renderer should use this for display/edit — never its Tiptap node attr.
+      yaml: z.string().optional(),
+      error: z.string().optional(),
+    }),
+  },
+  'track:update': {
+    req: z.object({
+      trackId: z.string(),
+      filePath: z.string(),
+      // Partial TrackBlock updates — merged into the block's YAML on disk.
+      // Backend is the sole writer; avoids races with scheduler/runner writes.
+      updates: z.record(z.string(), z.unknown()),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      yaml: z.string().optional(),
+      error: z.string().optional(),
+    }),
+  },
+  'track:replaceYaml': {
+    req: z.object({
+      trackId: z.string(),
+      filePath: z.string(),
+      yaml: z.string(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      yaml: z.string().optional(),
+      error: z.string().optional(),
+    }),
+  },
+  'track:delete': {
+    req: z.object({
+      trackId: z.string(),
+      filePath: z.string(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
     }),
   },
   // Billing channels

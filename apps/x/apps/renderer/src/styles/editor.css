@@ -611,6 +611,155 @@
 .tiptap-editor .ProseMirror .task-block-last-run {
   color: color-mix(in srgb, var(--foreground) 38%, transparent);
 }
+/* =============================================================
+   Track Block — inline chip (display-only)
+   The chip just opens a modal (TrackModal). All mutations live in the
+   modal and go through IPC, so the editor never writes track state.
+   ============================================================= */
+
+.tiptap-editor .ProseMirror .track-block-chip-wrapper {
+  --track-accent: #64748b; /* default: manual/slate */
+  margin: 4px 0;
+  display: inline-block;
+}
+
+.tiptap-editor .ProseMirror .track-block-chip-wrapper[data-trigger="scheduled"] { --track-accent: #6366f1; }
+.tiptap-editor .ProseMirror .track-block-chip-wrapper[data-trigger="event"]     { --track-accent: #a855f7; }
+.tiptap-editor .ProseMirror .track-block-chip-wrapper[data-trigger="manual"]    { --track-accent: #64748b; }
+.tiptap-editor .ProseMirror .track-block-chip-wrapper[data-active="false"]      { --track-accent: color-mix(in srgb, var(--foreground) 30%, transparent); }
+
+.tiptap-editor .ProseMirror .track-block-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 6px 12px;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.3;
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--track-accent) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--track-accent) 35%, transparent);
+  border-left: 3px solid var(--track-accent);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background-color 0.12s ease, box-shadow 0.12s ease, transform 0.06s ease;
+  user-select: none;
+}
+
+.tiptap-editor .ProseMirror .track-block-chip:hover {
+  background: color-mix(in srgb, var(--track-accent) 14%, transparent);
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--track-accent) 20%, transparent);
+}
+
+.tiptap-editor .ProseMirror .track-block-chip:active {
+  transform: translateY(0.5px);
+}
+
+.tiptap-editor .ProseMirror .track-block-chip:focus-visible {
+  outline: 2px solid var(--track-accent);
+  outline-offset: 2px;
+}
+
+.tiptap-editor .ProseMirror .track-block-chip-paused-state {
+  opacity: 0.65;
+}
+
+.tiptap-editor .ProseMirror .track-block-chip-running {
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--track-accent) 40%, transparent);
+  animation: track-chip-pulse 2s ease-in-out infinite;
+}
+
+@keyframes track-chip-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--track-accent) 35%, transparent); }
+  50%      { box-shadow: 0 0 0 4px color-mix(in srgb, var(--track-accent) 15%, transparent); }
+}
+
+.tiptap-editor .ProseMirror .track-block-chip-icon {
+  flex-shrink: 0;
+  color: var(--track-accent);
+}
+
+.tiptap-editor .ProseMirror .track-block-chip-id {
+  font-weight: 600;
+  color: var(--track-accent);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.tiptap-editor .ProseMirror .track-block-chip-sep {
+  color: color-mix(in srgb, var(--foreground) 25%, transparent);
+  flex-shrink: 0;
+}
+
+.tiptap-editor .ProseMirror .track-block-chip-instruction {
+  color: color-mix(in srgb, var(--foreground) 80%, transparent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.tiptap-editor .ProseMirror .track-block-chip-paused-label {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: color-mix(in srgb, var(--foreground) 55%, transparent);
+  background: color-mix(in srgb, var(--foreground) 10%, transparent);
+  padding: 1px 6px;
+  border-radius: 999px;
+}
+
+.tiptap-editor .ProseMirror .track-block-chip-wrapper.ProseMirror-selectednode .track-block-chip {
+  outline: 2px solid var(--track-accent);
+  outline-offset: 2px;
+}
+
+/* =============================================================
+   Track target markers — thin visual bookends around a track's
+   output region. The content BETWEEN these markers is normal,
+   editable document content (rendered by the existing extensions).
+   ============================================================= */
+
+.tiptap-editor .ProseMirror div[data-type="track-target-open"] {
+  position: relative;
+  height: 1px;
+  margin: 14px 0 6px 0;
+  background: color-mix(in srgb, var(--foreground) 15%, transparent);
+  pointer-events: none;
+}
+
+.tiptap-editor .ProseMirror div[data-type="track-target-open"]::before {
+  content: 'track: ' attr(data-track-id);
+  position: absolute;
+  top: -8px;
+  left: 8px;
+  padding: 0 6px;
+  background: var(--background, #fff);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: color-mix(in srgb, var(--foreground) 50%, transparent);
+  text-transform: none;
+  white-space: nowrap;
+  pointer-events: auto;
+}
+
+.tiptap-editor .ProseMirror div[data-type="track-target-close"] {
+  height: 1px;
+  margin: 6px 0 14px 0;
+  background: color-mix(in srgb, var(--foreground) 10%, transparent);
+  pointer-events: none;
+}
+
+.tiptap-editor .ProseMirror div[data-type="track-target-open"].ProseMirror-selectednode,
+.tiptap-editor .ProseMirror div[data-type="track-target-close"].ProseMirror-selectednode {
+  outline: 2px solid color-mix(in srgb, var(--foreground) 30%, transparent);
+  outline-offset: 1px;
+  pointer-events: auto;
+}
 
 /* Shared block styles (image, embed, chart, table) */
 .tiptap-editor .ProseMirror .image-block-wrapper,

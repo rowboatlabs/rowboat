@@ -9,6 +9,8 @@ import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import { ImageUploadPlaceholderExtension, createImageUploadHandler } from '@/extensions/image-upload'
 import { TaskBlockExtension } from '@/extensions/task-block'
+import { TrackBlockExtension } from '@/extensions/track-block'
+import { TrackTargetOpenExtension, TrackTargetCloseExtension } from '@/extensions/track-target'
 import { ImageBlockExtension } from '@/extensions/image-block'
 import { EmbedBlockExtension } from '@/extensions/embed-block'
 import { ChartBlockExtension } from '@/extensions/chart-block'
@@ -40,6 +42,31 @@ function preprocessMarkdown(markdown: string): string {
     }
     return result
   })
+}
+
+// Convert track-target open/close HTML comment markers into placeholder divs
+// that TrackTargetOpenExtension / TrackTargetCloseExtension pick up as atom
+// nodes. Content *between* the markers is left untouched — tiptap-markdown
+// parses it naturally as whatever it is (paragraphs, lists, custom-block
+// fences, etc.), all rendered live by the existing extension set.
+//
+// CommonMark rule: a type-6 HTML block (div, etc.) runs from the opening tag
+// line until a blank line terminates it, and markdown inline rules (bold,
+// italics, links) don't apply inside the block. Without surrounding blank
+// lines, the line right after our placeholder div gets absorbed as HTML and
+// its markdown is not parsed. We consume any adjacent newlines in the match
+// and emit exactly `\n\n<div></div>\n\n` so the HTML block starts and ends on
+// its own line.
+function preprocessTrackTargets(md: string): string {
+  return md
+    .replace(
+      /\n?<!--track-target:([^\s>]+)-->\n?/g,
+      (_m, id: string) => `\n\n<div data-type="track-target-open" data-track-id="${id}"></div>\n\n`,
+    )
+    .replace(
+      /\n?<!--\/track-target:([^\s>]+)-->\n?/g,
+      (_m, id: string) => `\n\n<div data-type="track-target-close" data-track-id="${id}"></div>\n\n`,
+    )
 }
 
 // Post-process to clean up any zero-width spaces in the output
@@ -140,6 +167,12 @@ function blockToMarkdown(node: JsonNode): string {
       return serializeList(node, 0).join('\n')
     case 'taskBlock':
       return '```task\n' + (node.attrs?.data as string || '{}') + '\n```'
+    case 'trackBlock':
+      return '```track\n' + (node.attrs?.data as string || '') + '\n```'
+    case 'trackTargetOpen':
+      return `<!--track-target:${(node.attrs?.trackId as string) ?? ''}-->`
+    case 'trackTargetClose':
+      return `<!--/track-target:${(node.attrs?.trackId as string) ?? ''}-->`
     case 'imageBlock':
       return '```image\n' + (node.attrs?.data as string || '{}') + '\n```'
     case 'embedBlock':
@@ -638,6 +671,9 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       }),
       ImageUploadPlaceholderExtension,
       TaskBlockExtension,
+      TrackBlockExtension.configure({ notePath }),
+      TrackTargetOpenExtension,
+      TrackTargetCloseExtension,
       ImageBlockExtension,
       EmbedBlockExtension,
       ChartBlockExtension,
@@ -1032,8 +1068,9 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       const normalizeForCompare = (s: string) => s.split('\n').map(line => line.trimEnd()).join('\n').trim()
       if (normalizeForCompare(currentContent) !== normalizeForCompare(content)) {
         isInternalUpdate.current = true
-        // Pre-process to preserve blank lines
-        const preprocessed = preprocessMarkdown(content)
+        // Pre-process to preserve blank lines, then wrap track-target comment
+        // regions into placeholder divs so TrackTargetExtension can pick them up.
+        const preprocessed = preprocessMarkdown(preprocessTrackTargets(content))
         // Treat tab-open content as baseline: do not add hydration to undo history.
         editor.chain().setMeta('addToHistory', false).setContent(preprocessed).run()
         isInternalUpdate.current = false

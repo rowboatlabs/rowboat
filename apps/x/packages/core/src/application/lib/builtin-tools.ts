@@ -25,6 +25,7 @@ import { isSignedIn } from "../../account/account.js";
 import { getGatewayProvider } from "../../models/gateway.js";
 import { getAccessToken } from "../../auth/tokens.js";
 import { API_URL } from "../../config/env.js";
+import { updateContent, updateTrackBlock } from "../../knowledge/track/fileops.js";
 // Parser libraries are loaded dynamically inside parseFile.execute()
 // to avoid pulling pdfjs-dist's DOM polyfills into the main bundle.
 // Import paths are computed so esbuild cannot statically resolve them.
@@ -1430,5 +1431,57 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
             };
         },
         isAvailable: async () => isComposioConfigured(),
+    },
+    'update-track-content': {
+        description: "Update the output content of a track block in a knowledge note. This replaces the content inside the track's target region (between <!--track-target:ID--> markers), or creates the target region if it doesn't exist. Also updates the track's lastRunAt timestamp.",
+        inputSchema: z.object({
+            filePath: z.string().describe("Workspace-relative path to the note file (e.g., 'knowledge/Notes/my-note.md')"),
+            trackId: z.string().describe("The track block's trackId"),
+            content: z.string().describe("The new content to place inside the track's target region"),
+        }),
+        execute: async ({ filePath, trackId, content }: { filePath: string; trackId: string; content: string }) => {
+            try {
+                await updateContent(filePath, trackId, content);
+                await updateTrackBlock(filePath, trackId, { lastRunAt: new Date().toISOString() });
+                return { success: true, message: `Updated track ${trackId} in ${filePath}` };
+            } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                return { success: false, error: msg };
+            }
+        },
+    },
+
+    'run-track-block': {
+        description: "Manually trigger a track block to run now. Equivalent to the user clicking the Play button on the block, but you can pass extra `context` to bias what the track agent does this run — most useful for backfills (e.g. seeding a new email-tracking block from existing synced emails) or focused refreshes. Returns the action taken, summary, and the new content.",
+        inputSchema: z.object({
+            filePath: z.string().describe("Workspace-relative path to the note file (e.g., 'knowledge/Notes/my-note.md')"),
+            trackId: z.string().describe("The track block's trackId (must exist in the file)"),
+            context: z.string().optional().describe(
+                "Optional extra context for the track agent to consider for THIS run only — does not modify the block's instruction. " +
+                "Use it to drive backfills (e.g. 'Backfill from existing synced emails in gmail_sync/ from the last 90 days about this topic') " +
+                "or focused refreshes (e.g. 'Focus on changes from the last 7 days'). " +
+                "Omit for a plain refresh."
+            ),
+        }),
+        execute: async ({ filePath, trackId, context }: { filePath: string; trackId: string; context?: string }) => {
+            const knowledgeRelativePath = filePath.replace(/^knowledge\//, '');
+            try {
+                // Lazy import to break a module-init cycle:
+                // builtin-tools → track/runner → runs/runs → agents/runtime → builtin-tools
+                const { triggerTrackUpdate } = await import("../../knowledge/track/runner.js");
+                const result = await triggerTrackUpdate(trackId, knowledgeRelativePath, context, 'manual');
+                return {
+                    success: !result.error,
+                    runId: result.runId,
+                    action: result.action,
+                    summary: result.summary,
+                    contentAfter: result.contentAfter,
+                    error: result.error,
+                };
+            } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                return { success: false, error: msg };
+            }
+        },
     },
 };
