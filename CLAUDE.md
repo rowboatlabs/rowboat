@@ -102,6 +102,14 @@ pnpm uses symlinks for workspace packages. Electron Forge's dependency walker ca
 | Workspace config | `apps/x/pnpm-workspace.yaml` |
 | Root scripts | `apps/x/package.json` |
 
+## Feature Deep-Dives
+
+Long-form docs for specific features. Read the relevant file before making changes in that area — it has the full product flow, technical flows, and (where applicable) a catalog of the LLM prompts involved with exact file:line pointers.
+
+| Feature | Doc |
+|---------|-----|
+| Track Blocks — auto-updating note content (scheduled / event-driven / manual), Copilot skill, prompts catalog | `apps/x/TRACKS.md` |
+
 ## Common Tasks
 
 ### LLM configuration (single provider)
