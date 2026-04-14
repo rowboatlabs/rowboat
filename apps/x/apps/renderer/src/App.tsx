@@ -55,6 +55,7 @@ import { stripKnowledgePrefix, toKnowledgePath, wikiLabel } from '@/lib/wiki-lin
 import { splitFrontmatter, joinFrontmatter } from '@/lib/frontmatter'
 import { OnboardingModal } from '@/components/onboarding'
 import { CommandPalette, type CommandPaletteContext, type CommandPaletteMention } from '@/components/search-dialog'
+import { TrackModal } from '@/components/track-modal'
 import { BackgroundTaskDetail } from '@/components/background-task-detail'
 import { VersionHistoryPanel } from '@/components/version-history-panel'
 import { FileCardProvider } from '@/contexts/file-card-context'
@@ -2687,6 +2688,27 @@ function App() {
     setPendingPaletteSubmit(null)
   }, [pendingPaletteSubmit])
 
+  // Listener for track-block "Edit with Copilot" events
+  // (dispatched by apps/renderer/src/extensions/track-block.tsx)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const ev = e as CustomEvent<{
+        trackId?: string
+        filePath?: string
+      }>
+      const trackId = ev.detail?.trackId
+      const filePath = ev.detail?.filePath
+      if (!trackId || !filePath) return
+      const displayName = filePath.split('/').pop() ?? filePath
+      submitFromPalette(
+        `Let's work on the \`${trackId}\` track in this note. Please load the \`tracks\` skill first, then ask me what I want to change.`,
+        { path: filePath, displayName },
+      )
+    }
+    window.addEventListener('rowboat:open-copilot-edit-track', handler as EventListener)
+    return () => window.removeEventListener('rowboat:open-copilot-edit-track', handler as EventListener)
+  }, [submitFromPalette])
+
   const toggleKnowledgePane = useCallback(() => {
     setIsRightPaneMaximized(false)
     setIsChatSidebarOpen(prev => !prev)
@@ -4560,6 +4582,7 @@ function App() {
         />
       </SidebarSectionProvider>
       <Toaster />
+      <TrackModal />
       <OnboardingModal
         open={showOnboarding}
         onComplete={handleOnboardingComplete}

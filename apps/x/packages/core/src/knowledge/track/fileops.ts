@@ -69,6 +69,17 @@ export async function fetch(filePath: string, trackId: string): Promise<z.infer<
     return blocks.find(b => b.track.trackId === trackId) ?? null;
 }
 
+/**
+ * Fetch a track block and return its canonical YAML string (or null if not found).
+ * Useful for IPC handlers that need to return the fresh YAML without taking a
+ * dependency on the `yaml` package themselves.
+ */
+export async function fetchYaml(filePath: string, trackId: string): Promise<string | null> {
+    const block = await fetch(filePath, trackId);
+    if (!block) return null;
+    return stringifyYaml(block.track).trimEnd();
+}
+
 export async function updateContent(filePath: string, trackId: string, newContent: string): Promise<void> {
     let content = await fs.readFile(absPath(filePath), 'utf-8');
     const openTag = `<!--track-target:${trackId}-->`;
@@ -106,4 +117,74 @@ export async function updateTrackBlock(filepath: string, trackId: string, update
     lines.splice(block.fenceStart, block.fenceEnd - block.fenceStart + 1, '```track', ...yamlLines, '```');
     content = lines.join('\n');
     await fs.writeFile(absPath(filepath), content, 'utf-8');
+}
+
+/**
+ * Replace the entire YAML of a track block on disk with a new string.
+ * Unlike updateTrackBlock (which merges), this writes the raw YAML verbatim —
+ * used when the user explicitly edits raw YAML in the modal.
+ * The new YAML must still parse to a valid TrackBlock with a matching trackId,
+ * otherwise the write is rejected.
+ */
+export async function replaceTrackBlockYaml(filePath: string, trackId: string, newYaml: string): Promise<void> {
+    const block = await fetch(filePath, trackId);
+    if (!block) {
+        throw new Error(`Track ${trackId} not found in ${filePath}`);
+    }
+    const parsed = TrackBlockSchema.safeParse(parseYaml(newYaml));
+    if (!parsed.success) {
+        throw new Error(`Invalid track YAML: ${parsed.error.message}`);
+    }
+    if (parsed.data.trackId !== trackId) {
+        throw new Error(`trackId cannot be changed (was "${trackId}", got "${parsed.data.trackId}")`);
+    }
+
+    const content = await fs.readFile(absPath(filePath), 'utf-8');
+    const lines = content.split('\n');
+    const yamlLines = newYaml.trimEnd().split('\n');
+    lines.splice(block.fenceStart, block.fenceEnd - block.fenceStart + 1, '```track', ...yamlLines, '```');
+    await fs.writeFile(absPath(filePath), lines.join('\n'), 'utf-8');
+}
+
+/**
+ * Remove a track block and its sibling target region from the file.
+ */
+export async function deleteTrackBlock(filePath: string, trackId: string): Promise<void> {
+    const block = await fetch(filePath, trackId);
+    if (!block) {
+        // Already gone — treat as success.
+        return;
+    }
+
+    const content = await fs.readFile(absPath(filePath), 'utf-8');
+    const lines = content.split('\n');
+    const openTag = `<!--track-target:${trackId}-->`;
+    const closeTag = `<!--/track-target:${trackId}-->`;
+
+    // Find target region (may not exist)
+    let targetStart = -1;
+    let targetEnd = -1;
+    for (let i = 0; i < lines.length; i++) {
+        if (lines[i].includes(openTag)) { targetStart = i; }
+        if (targetStart !== -1 && lines[i].includes(closeTag)) { targetEnd = i; break; }
+    }
+
+    // Build a list of [start, end] ranges to remove, sorted descending so
+    // indices stay valid as we splice.
+    const ranges: Array<[number, number]> = [];
+    ranges.push([block.fenceStart, block.fenceEnd]);
+    if (targetStart !== -1 && targetEnd !== -1 && targetEnd >= targetStart) {
+        ranges.push([targetStart, targetEnd]);
+    }
+    ranges.sort((a, b) => b[0] - a[0]);
+
+    for (const [start, end] of ranges) {
+        lines.splice(start, end - start + 1);
+        // Also drop a trailing blank line if the removal left two in a row.
+        if (start < lines.length && lines[start].trim() === '' && start > 0 && lines[start - 1].trim() === '') {
+            lines.splice(start, 1);
+        }
+    }
+
+    await fs.writeFile(absPath(filePath), lines.join('\n'), 'utf-8');
 }

@@ -611,381 +611,110 @@
 .tiptap-editor .ProseMirror .task-block-last-run {
   color: color-mix(in srgb, var(--foreground) 38%, transparent);
 }
+/* =============================================================
+   Track Block — inline chip (display-only)
+   The chip just opens a modal (TrackModal). All mutations live in the
+   modal and go through IPC, so the editor never writes track state.
+   ============================================================= */
 
-/* Track block styles */
-.tiptap-editor .ProseMirror .track-block-wrapper {
-  margin: 8px 0;
+.tiptap-editor .ProseMirror .track-block-chip-wrapper {
+  --track-accent: #64748b; /* default: manual/slate */
+  margin: 4px 0;
+  display: inline-block;
 }
 
-.tiptap-editor .ProseMirror .track-block-card {
-  position: relative;
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--primary);
-  border-radius: 8px;
-  background-color: color-mix(in srgb, var(--primary) 4%, transparent);
-  cursor: default;
-  transition: background-color 0.15s ease;
-  user-select: none;
-}
+.tiptap-editor .ProseMirror .track-block-chip-wrapper[data-trigger="scheduled"] { --track-accent: #6366f1; }
+.tiptap-editor .ProseMirror .track-block-chip-wrapper[data-trigger="event"]     { --track-accent: #a855f7; }
+.tiptap-editor .ProseMirror .track-block-chip-wrapper[data-trigger="manual"]    { --track-accent: #64748b; }
+.tiptap-editor .ProseMirror .track-block-chip-wrapper[data-active="false"]      { --track-accent: color-mix(in srgb, var(--foreground) 30%, transparent); }
 
-.tiptap-editor .ProseMirror .track-block-card.track-block-paused {
-  border-left-color: color-mix(in srgb, var(--foreground) 25%, transparent);
-  background-color: color-mix(in srgb, var(--muted) 30%, transparent);
-  opacity: 0.7;
-}
-
-.tiptap-editor .ProseMirror .track-block-card:hover {
-  background-color: color-mix(in srgb, var(--primary) 8%, transparent);
-}
-
-.tiptap-editor .ProseMirror .track-block-wrapper.ProseMirror-selectednode .track-block-card {
-  outline: 2px solid var(--primary);
-  outline-offset: 1px;
-}
-
-/* Delete button */
-.tiptap-editor .ProseMirror .track-block-delete {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border: none;
-  border-radius: 4px;
-  background: none;
-  cursor: pointer;
-  color: color-mix(in srgb, var(--foreground) 40%, transparent);
-  opacity: 0;
-  transition: opacity 0.15s ease, background-color 0.15s ease;
-  z-index: 1;
-}
-
-.tiptap-editor .ProseMirror .track-block-card:hover .track-block-delete {
-  opacity: 1;
-}
-
-.tiptap-editor .ProseMirror .track-block-delete:hover {
-  background-color: color-mix(in srgb, var(--foreground) 8%, transparent);
-  color: var(--foreground);
-}
-
-/* Collapsed row */
-.tiptap-editor .ProseMirror .track-block-collapsed {
-  display: flex;
+.tiptap-editor .ProseMirror .track-block-chip {
+  display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 10px 32px 10px 12px;
+  max-width: 100%;
+  padding: 6px 12px;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.3;
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--track-accent) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--track-accent) 35%, transparent);
+  border-left: 3px solid var(--track-accent);
+  border-radius: 999px;
   cursor: pointer;
-  min-width: 0;
+  transition: background-color 0.12s ease, box-shadow 0.12s ease, transform 0.06s ease;
   user-select: none;
 }
 
-.tiptap-editor .ProseMirror .track-block-chevron {
+.tiptap-editor .ProseMirror .track-block-chip:hover {
+  background: color-mix(in srgb, var(--track-accent) 14%, transparent);
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--track-accent) 20%, transparent);
+}
+
+.tiptap-editor .ProseMirror .track-block-chip:active {
+  transform: translateY(0.5px);
+}
+
+.tiptap-editor .ProseMirror .track-block-chip:focus-visible {
+  outline: 2px solid var(--track-accent);
+  outline-offset: 2px;
+}
+
+.tiptap-editor .ProseMirror .track-block-chip-paused-state {
+  opacity: 0.65;
+}
+
+.tiptap-editor .ProseMirror .track-block-chip-running {
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--track-accent) 40%, transparent);
+  animation: track-chip-pulse 2s ease-in-out infinite;
+}
+
+@keyframes track-chip-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--track-accent) 35%, transparent); }
+  50%      { box-shadow: 0 0 0 4px color-mix(in srgb, var(--track-accent) 15%, transparent); }
+}
+
+.tiptap-editor .ProseMirror .track-block-chip-icon {
   flex-shrink: 0;
-  color: color-mix(in srgb, var(--foreground) 40%, transparent);
-  transition: transform 0.15s ease;
+  color: var(--track-accent);
 }
 
-.tiptap-editor .ProseMirror .track-block-chevron-open {
-  transform: rotate(90deg);
-}
-
-.tiptap-editor .ProseMirror .track-block-icon {
-  color: var(--primary);
+.tiptap-editor .ProseMirror .track-block-chip-id {
+  font-weight: 600;
+  color: var(--track-accent);
+  white-space: nowrap;
   flex-shrink: 0;
 }
 
-.tiptap-editor .ProseMirror .track-block-label {
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--primary);
+.tiptap-editor .ProseMirror .track-block-chip-sep {
+  color: color-mix(in srgb, var(--foreground) 25%, transparent);
   flex-shrink: 0;
 }
 
-.tiptap-editor .ProseMirror .track-block-summary {
-  font-size: 13px;
-  color: var(--foreground);
+.tiptap-editor .ProseMirror .track-block-chip-instruction {
+  color: color-mix(in srgb, var(--foreground) 80%, transparent);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
-  flex: 1;
 }
 
-.tiptap-editor .ProseMirror .track-block-meta {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  font-size: 11px;
-  color: color-mix(in srgb, var(--foreground) 40%, transparent);
+.tiptap-editor .ProseMirror .track-block-chip-paused-label {
   flex-shrink: 0;
-  white-space: nowrap;
-}
-
-/* Re-run button */
-.tiptap-editor .ProseMirror .track-block-run-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border: none;
-  border-radius: 4px;
-  background: none;
-  cursor: pointer;
-  color: color-mix(in srgb, var(--foreground) 35%, transparent);
-  flex-shrink: 0;
-  opacity: 0;
-  transition: opacity 0.15s ease, color 0.1s ease, background-color 0.1s ease;
-}
-
-.tiptap-editor .ProseMirror .track-block-card:hover .track-block-run-btn {
-  opacity: 1;
-}
-
-.tiptap-editor .ProseMirror .track-block-run-btn:hover {
-  color: var(--primary);
-  background: color-mix(in srgb, var(--primary) 10%, transparent);
-}
-
-.tiptap-editor .ProseMirror .track-block-run-btn:disabled {
-  opacity: 1;
-  color: var(--primary);
-  cursor: default;
-  background: none;
-}
-
-/* Running state */
-.tiptap-editor .ProseMirror .track-block-card.track-block-running {
-  border-left-color: color-mix(in srgb, var(--primary) 70%, transparent);
-  animation: track-pulse 2s ease-in-out infinite;
-}
-
-@keyframes track-pulse {
-  0%, 100% { background-color: color-mix(in srgb, var(--primary) 4%, transparent); }
-  50% { background-color: color-mix(in srgb, var(--primary) 10%, transparent); }
-}
-
-.tiptap-editor .ProseMirror .track-block-meta-running {
-  color: var(--primary);
-  font-weight: 500;
-}
-
-/* Status bar */
-.tiptap-editor .ProseMirror .track-block-status-bar {
-  padding: 6px 14px;
-  font-size: 12px;
-  line-height: 1.4;
-  border-top: 1px solid var(--border);
-  animation: track-status-fade-in 0.15s ease;
-}
-
-@keyframes track-status-fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-.tiptap-editor .ProseMirror .track-block-status-done {
-  color: color-mix(in srgb, var(--foreground) 65%, transparent);
-}
-
-.tiptap-editor .ProseMirror .track-block-status-error {
-  color: var(--destructive, #ef4444);
-}
-
-/* Badges */
-.tiptap-editor .ProseMirror .track-block-badge {
   font-size: 10px;
   font-weight: 600;
-  padding: 1px 6px;
-  border-radius: 4px;
-  flex-shrink: 0;
-}
-
-.tiptap-editor .ProseMirror .track-block-badge-active {
-  color: var(--primary);
-  background: color-mix(in srgb, var(--primary) 12%, transparent);
-}
-
-.tiptap-editor .ProseMirror .track-block-badge-paused {
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
   color: color-mix(in srgb, var(--foreground) 55%, transparent);
-  background: color-mix(in srgb, var(--foreground) 8%, transparent);
+  background: color-mix(in srgb, var(--foreground) 10%, transparent);
+  padding: 1px 6px;
+  border-radius: 999px;
 }
 
-/* Expanded area */
-.tiptap-editor .ProseMirror .track-block-expanded {
-  border-top: 1px solid var(--border);
-}
-
-/* Tabs */
-.tiptap-editor .ProseMirror .track-block-tabs {
-  display: flex;
-  gap: 0;
-  padding: 0 12px;
-  border-bottom: 1px solid var(--border);
-}
-
-.tiptap-editor .ProseMirror .track-block-tab {
-  padding: 8px 12px;
-  font-size: 12px;
-  font-weight: 500;
-  color: color-mix(in srgb, var(--foreground) 50%, transparent);
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  cursor: pointer;
-  transition: color 0.1s ease, border-color 0.1s ease;
-  white-space: nowrap;
-}
-
-.tiptap-editor .ProseMirror .track-block-tab:hover {
-  color: var(--foreground);
-}
-
-.tiptap-editor .ProseMirror .track-block-tab-active {
-  color: var(--primary);
-  border-bottom-color: var(--primary);
-}
-
-.tiptap-editor .ProseMirror .track-block-tab-raw {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-/* Tab panel content */
-.tiptap-editor .ProseMirror .track-block-panel {
-  padding: 12px 14px;
-}
-
-.tiptap-editor .ProseMirror .track-block-panel-text {
-  font-size: 13px;
-  line-height: 1.6;
-  color: var(--foreground);
-  white-space: pre-wrap;
-  user-select: text;
-}
-
-.tiptap-editor .ProseMirror .track-block-empty {
-  color: color-mix(in srgb, var(--foreground) 35%, transparent);
-  font-style: italic;
-}
-
-.tiptap-editor .ProseMirror .track-block-markdown {
-  font-size: 13px;
-  line-height: 1.6;
-  user-select: text;
-}
-
-.tiptap-editor .ProseMirror .track-block-markdown > *:first-child {
-  margin-top: 0;
-}
-
-.tiptap-editor .ProseMirror .track-block-markdown > *:last-child {
-  margin-bottom: 0;
-}
-
-/* Metadata grid */
-.tiptap-editor .ProseMirror .track-block-metadata-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.tiptap-editor .ProseMirror .track-block-metadata-row {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-}
-
-.tiptap-editor .ProseMirror .track-block-metadata-label {
-  font-size: 12px;
-  font-weight: 500;
-  color: color-mix(in srgb, var(--foreground) 50%, transparent);
-  min-width: 70px;
-  flex-shrink: 0;
-}
-
-.tiptap-editor .ProseMirror .track-block-metadata-value {
-  font-size: 13px;
-  color: var(--foreground);
-}
-
-.tiptap-editor .ProseMirror .track-block-metadata-value code {
-  font-size: 12px;
-  padding: 1px 5px;
-  border-radius: 3px;
-  background: color-mix(in srgb, var(--foreground) 6%, transparent);
-  font-family: var(--font-mono, ui-monospace, monospace);
-}
-
-/* Raw editor */
-.tiptap-editor .ProseMirror .track-block-raw-editor {
-  padding: 12px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.tiptap-editor .ProseMirror .track-block-textarea {
-  width: 100%;
-  font-size: 12px;
-  font-family: var(--font-mono, ui-monospace, monospace);
-  line-height: 1.5;
-  padding: 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--foreground) 3%, transparent);
-  color: var(--foreground);
-  resize: vertical;
-}
-
-.tiptap-editor .ProseMirror .track-block-textarea:focus {
-  outline: 2px solid var(--primary);
-  outline-offset: -1px;
-}
-
-.tiptap-editor .ProseMirror .track-block-raw-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 6px;
-}
-
-.tiptap-editor .ProseMirror .track-block-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 5px 12px;
-  font-size: 12px;
-  font-weight: 500;
-  border: none;
-  border-radius: 5px;
-  cursor: pointer;
-  transition: background-color 0.1s ease;
-}
-
-.tiptap-editor .ProseMirror .track-block-btn-secondary {
-  background: color-mix(in srgb, var(--foreground) 8%, transparent);
-  color: var(--foreground);
-}
-
-.tiptap-editor .ProseMirror .track-block-btn-secondary:hover {
-  background: color-mix(in srgb, var(--foreground) 14%, transparent);
-}
-
-.tiptap-editor .ProseMirror .track-block-btn-primary {
-  background: var(--primary);
-  color: var(--primary-foreground);
-}
-
-.tiptap-editor .ProseMirror .track-block-btn-primary:hover {
-  background: color-mix(in srgb, var(--primary) 85%, black);
+.tiptap-editor .ProseMirror .track-block-chip-wrapper.ProseMirror-selectednode .track-block-chip {
+  outline: 2px solid var(--track-accent);
+  outline-offset: 2px;
 }
 
 /* Shared block styles (image, embed, chart, table) */

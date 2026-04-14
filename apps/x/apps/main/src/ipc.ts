@@ -46,6 +46,12 @@ import { getAccessToken } from '@x/core/dist/auth/tokens.js';
 import { getRowboatConfig } from '@x/core/dist/config/rowboat.js';
 import { triggerTrackUpdate } from '@x/core/dist/knowledge/track/runner.js';
 import { trackBus } from '@x/core/dist/knowledge/track/bus.js';
+import {
+  fetchYaml,
+  updateTrackBlock,
+  replaceTrackBlockYaml,
+  deleteTrackBlock,
+} from '@x/core/dist/knowledge/track/fileops.js';
 
 /**
  * Convert markdown to a styled HTML document for PDF/DOCX export.
@@ -773,10 +779,47 @@ export function setupIpcHandlers() {
     'voice:synthesize': async (_event, args) => {
       return voice.synthesizeSpeech(args.text);
     },
-    // Track handler
+    // Track handlers
     'track:run': async (_event, args) => {
       const result = await triggerTrackUpdate(args.trackId, args.filePath);
       return { success: !result.error, summary: result.summary ?? undefined, error: result.error };
+    },
+    'track:get': async (_event, args) => {
+      try {
+        const yaml = await fetchYaml(args.filePath, args.trackId);
+        if (yaml === null) return { success: false, error: 'Track not found' };
+        return { success: true, yaml };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'track:update': async (_event, args) => {
+      try {
+        await updateTrackBlock(args.filePath, args.trackId, args.updates as Record<string, unknown>);
+        const yaml = await fetchYaml(args.filePath, args.trackId);
+        if (yaml === null) return { success: false, error: 'Track vanished after update' };
+        return { success: true, yaml };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'track:replaceYaml': async (_event, args) => {
+      try {
+        await replaceTrackBlockYaml(args.filePath, args.trackId, args.yaml);
+        const yaml = await fetchYaml(args.filePath, args.trackId);
+        if (yaml === null) return { success: false, error: 'Track vanished after replace' };
+        return { success: true, yaml };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'track:delete': async (_event, args) => {
+      try {
+        await deleteTrackBlock(args.filePath, args.trackId);
+        return { success: true };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
     },
     // Billing handler
     'billing:getInfo': async () => {
