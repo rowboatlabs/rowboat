@@ -718,39 +718,47 @@
 }
 
 /* =============================================================
-   Track Target — rendered output region below a track chip.
-   Display-only; the backend is the sole writer.
+   Track target markers — thin visual bookends around a track's
+   output region. The content BETWEEN these markers is normal,
+   editable document content (rendered by the existing extensions).
    ============================================================= */
 
-.tiptap-editor .ProseMirror .track-target-wrapper {
-  margin: 6px 0 10px 0;
-}
-
-.tiptap-editor .ProseMirror .track-target-box {
+.tiptap-editor .ProseMirror div[data-type="track-target-open"] {
   position: relative;
-  padding: 10px 12px 10px 16px;
-  border: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
-  border-left: 3px solid color-mix(in srgb, var(--foreground) 30%, transparent);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--foreground) 3%, transparent);
-  user-select: text;
-  font-size: 13.5px;
-  line-height: 1.55;
+  height: 1px;
+  margin: 14px 0 6px 0;
+  background: color-mix(in srgb, var(--foreground) 15%, transparent);
+  pointer-events: none;
 }
 
-.tiptap-editor .ProseMirror .track-target-wrapper.ProseMirror-selectednode .track-target-box {
+.tiptap-editor .ProseMirror div[data-type="track-target-open"]::before {
+  content: 'track: ' attr(data-track-id);
+  position: absolute;
+  top: -8px;
+  left: 8px;
+  padding: 0 6px;
+  background: var(--background, #fff);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: color-mix(in srgb, var(--foreground) 50%, transparent);
+  text-transform: none;
+  white-space: nowrap;
+  pointer-events: auto;
+}
+
+.tiptap-editor .ProseMirror div[data-type="track-target-close"] {
+  height: 1px;
+  margin: 6px 0 14px 0;
+  background: color-mix(in srgb, var(--foreground) 10%, transparent);
+  pointer-events: none;
+}
+
+.tiptap-editor .ProseMirror div[data-type="track-target-open"].ProseMirror-selectednode,
+.tiptap-editor .ProseMirror div[data-type="track-target-close"].ProseMirror-selectednode {
   outline: 2px solid color-mix(in srgb, var(--foreground) 30%, transparent);
-  outline-offset: 2px;
-}
-
-.tiptap-editor .ProseMirror .track-target-markdown > *:first-child { margin-top: 0; }
-.tiptap-editor .ProseMirror .track-target-markdown > *:last-child { margin-bottom: 0; }
-
-.tiptap-editor .ProseMirror .track-target-empty {
-  display: block;
-  font-size: 12px;
-  color: color-mix(in srgb, var(--foreground) 45%, transparent);
-  font-style: italic;
+  outline-offset: 1px;
+  pointer-events: auto;
 }
 
 /* Shared block styles (image, embed, chart, table) */

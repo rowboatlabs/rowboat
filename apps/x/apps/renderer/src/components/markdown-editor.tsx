@@ -10,7 +10,7 @@ import TaskItem from '@tiptap/extension-task-item'
 import { ImageUploadPlaceholderExtension, createImageUploadHandler } from '@/extensions/image-upload'
 import { TaskBlockExtension } from '@/extensions/task-block'
 import { TrackBlockExtension } from '@/extensions/track-block'
-import { TrackTargetExtension } from '@/extensions/track-target'
+import { TrackTargetOpenExtension, TrackTargetCloseExtension } from '@/extensions/track-target'
 import { ImageBlockExtension } from '@/extensions/image-block'
 import { EmbedBlockExtension } from '@/extensions/embed-block'
 import { ChartBlockExtension } from '@/extensions/chart-block'
@@ -44,20 +44,29 @@ function preprocessMarkdown(markdown: string): string {
   })
 }
 
-// Convert each `<!--track-target:ID-->...<!--/track-target:ID-->` region to a
-// placeholder HTML element that Tiptap's TrackTargetExtension parses into a
-// `trackTarget` node. Content is base64-encoded so any characters survive.
-// Without this step, tiptap-markdown strips the comment markers and leaves the
-// inner content as loose paragraphs, which then duplicates when the backend
-// re-inserts fresh markers around new content.
+// Convert track-target open/close HTML comment markers into placeholder divs
+// that TrackTargetOpenExtension / TrackTargetCloseExtension pick up as atom
+// nodes. Content *between* the markers is left untouched — tiptap-markdown
+// parses it naturally as whatever it is (paragraphs, lists, custom-block
+// fences, etc.), all rendered live by the existing extension set.
+//
+// CommonMark rule: a type-6 HTML block (div, etc.) runs from the opening tag
+// line until a blank line terminates it, and markdown inline rules (bold,
+// italics, links) don't apply inside the block. Without surrounding blank
+// lines, the line right after our placeholder div gets absorbed as HTML and
+// its markdown is not parsed. We consume any adjacent newlines in the match
+// and emit exactly `\n\n<div></div>\n\n` so the HTML block starts and ends on
+// its own line.
 function preprocessTrackTargets(md: string): string {
-  return md.replace(
-    /<!--track-target:([^\s>]+)-->\n?([\s\S]*?)\n?<!--\/track-target:\1-->/g,
-    (_match, id: string, content: string) => {
-      const b64 = btoa(unescape(encodeURIComponent(content)))
-      return `<div data-type="track-target" data-track-id="${id}" data-content="${b64}"></div>`
-    },
-  )
+  return md
+    .replace(
+      /\n?<!--track-target:([^\s>]+)-->\n?/g,
+      (_m, id: string) => `\n\n<div data-type="track-target-open" data-track-id="${id}"></div>\n\n`,
+    )
+    .replace(
+      /\n?<!--\/track-target:([^\s>]+)-->\n?/g,
+      (_m, id: string) => `\n\n<div data-type="track-target-close" data-track-id="${id}"></div>\n\n`,
+    )
 }
 
 // Post-process to clean up any zero-width spaces in the output
@@ -160,11 +169,10 @@ function blockToMarkdown(node: JsonNode): string {
       return '```task\n' + (node.attrs?.data as string || '{}') + '\n```'
     case 'trackBlock':
       return '```track\n' + (node.attrs?.data as string || '') + '\n```'
-    case 'trackTarget': {
-      const id = (node.attrs?.trackId as string) ?? ''
-      const content = (node.attrs?.content as string) ?? ''
-      return `<!--track-target:${id}-->\n${content}\n<!--/track-target:${id}-->`
-    }
+    case 'trackTargetOpen':
+      return `<!--track-target:${(node.attrs?.trackId as string) ?? ''}-->`
+    case 'trackTargetClose':
+      return `<!--/track-target:${(node.attrs?.trackId as string) ?? ''}-->`
     case 'imageBlock':
       return '```image\n' + (node.attrs?.data as string || '{}') + '\n```'
     case 'embedBlock':
@@ -664,7 +672,8 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       ImageUploadPlaceholderExtension,
       TaskBlockExtension,
       TrackBlockExtension.configure({ notePath }),
-      TrackTargetExtension,
+      TrackTargetOpenExtension,
+      TrackTargetCloseExtension,
       ImageBlockExtension,
       EmbedBlockExtension,
       ChartBlockExtension,
