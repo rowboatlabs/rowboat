@@ -44,6 +44,7 @@ export async function isConfigured(): Promise<{ configured: boolean }> {
 export function setApiKey(apiKey: string): { success: boolean; error?: string } {
     try {
         composioClient.setApiKey(apiKey);
+        invalidateCopilotInstructionsCache();
         return { success: true };
     } catch (error) {
         return {

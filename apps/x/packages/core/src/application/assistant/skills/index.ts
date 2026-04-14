@@ -117,6 +117,27 @@ export const skillCatalog = [
   catalogSections.join("\n\n"),
 ].join("\n");
 
+/**
+ * Build a skill catalog string, optionally excluding specific skills by ID.
+ */
+export function buildSkillCatalog(options?: { excludeIds?: string[] }): string {
+  const entries = options?.excludeIds
+    ? skillEntries.filter(e => !options.excludeIds!.includes(e.id))
+    : skillEntries;
+  const sections = entries.map((entry) => [
+    `## ${entry.title}`,
+    `- **Skill file:** \`${entry.catalogPath}\``,
+    `- **Use it for:** ${entry.summary}`,
+  ].join("\n"));
+  return [
+    "# Rowboat Skill Catalog",
+    "",
+    "Use this catalog to see which specialized skills you can load. Each entry lists the exact skill file plus a short description of when it helps.",
+    "",
+    sections.join("\n\n"),
+  ].join("\n");
+}
+
 const normalizeIdentifier = (value: string) =>
   value.trim().replace(/\\/g, "/").replace(/^\.\/+/, "");
 
