@@ -34,6 +34,18 @@ const EMPTY_STATE: BrowserState = {
 }
 
 const CHROME_HEIGHT = 40
+const BLOCKING_OVERLAY_SLOTS = new Set([
+  'alert-dialog-content',
+  'context-menu-content',
+  'context-menu-sub-content',
+  'dialog-content',
+  'dropdown-menu-content',
+  'dropdown-menu-sub-content',
+  'hover-card-content',
+  'popover-content',
+  'select-content',
+  'sheet-content',
+])
 
 interface BrowserPaneProps {
   onClose: () => void
@@ -41,6 +53,24 @@ interface BrowserPaneProps {
 
 const getActiveTab = (state: BrowserState) =>
   state.tabs.find((tab) => tab.id === state.activeTabId) ?? null
+
+const isVisibleOverlayElement = (el: HTMLElement) => {
+  const style = window.getComputedStyle(el)
+  if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+    return false
+  }
+  const rect = el.getBoundingClientRect()
+  return rect.width > 0 && rect.height > 0
+}
+
+const hasBlockingOverlay = (doc: Document) => {
+  const openContent = doc.querySelectorAll<HTMLElement>('[data-slot][data-state="open"]')
+  return Array.from(openContent).some((el) => {
+    const slot = el.dataset.slot
+    if (!slot || !BLOCKING_OVERLAY_SLOTS.has(slot)) return false
+    return isVisibleOverlayElement(el)
+  })
+}
 
 const getBrowserTabTitle = (tab: BrowserTabState) => {
   const title = tab.title.trim()
@@ -145,6 +175,13 @@ export function BrowserPane({ onClose }: BrowserPaneProps) {
   }, [])
 
   const syncView = useCallback(() => {
+    const doc = viewportRef.current?.ownerDocument
+    if (doc && hasBlockingOverlay(doc)) {
+      lastBoundsRef.current = null
+      setViewVisible(false)
+      return null
+    }
+
     const bounds = measureBounds()
     if (!bounds) {
       lastBoundsRef.current = null
@@ -200,6 +237,33 @@ export function BrowserPane({ onClose }: BrowserPaneProps) {
     return () => {
       if (pendingRaf !== null) cancelAnimationFrame(pendingRaf)
       ro.disconnect()
+    }
+  }, [syncView])
+
+  useEffect(() => {
+    const doc = viewportRef.current?.ownerDocument
+    if (!doc?.body) return
+
+    let pendingRaf: number | null = null
+    const schedule = () => {
+      if (pendingRaf !== null) return
+      pendingRaf = requestAnimationFrame(() => {
+        pendingRaf = null
+        syncView()
+      })
+    }
+
+    const observer = new MutationObserver(schedule)
+    observer.observe(doc.body, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ['data-state', 'style', 'hidden', 'aria-hidden', 'open'],
+    })
+
+    return () => {
+      if (pendingRaf !== null) cancelAnimationFrame(pendingRaf)
+      observer.disconnect()
     }
   }, [syncView])
 

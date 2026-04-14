@@ -23,7 +23,7 @@ export type { BrowserPageSnapshot, BrowserState, BrowserTabState };
  * standard Chrome UA so sites like Google (OAuth) don't reject it.
  */
 
-const PARTITION = 'persist:rowboat-browser';
+export const BROWSER_PARTITION = 'persist:rowboat-browser';
 
 // Claims Chrome 130 on macOS — close enough to recent stable for OAuth servers
 // that sniff the UA looking for "real browser" shapes.
@@ -471,21 +471,15 @@ function buildClickScript(selector: string): string {
 
     if (eventTarget instanceof HTMLElement) {
       eventTarget.focus({ preventScroll: true });
-      eventTarget.click();
-    } else {
-      eventTarget.dispatchEvent(new MouseEvent('click', {
-        bubbles: true,
-        cancelable: true,
-        composed: true,
-        clientX,
-        clientY,
-        view: window,
-      }));
     }
 
     return {
       ok: true,
       description: describeElement(target),
+      clickPoint: {
+        x: Math.round(clientX),
+        y: Math.round(clientY),
+      },
       verification: {
         before,
         targetSelector: buildUniqueSelector(target) || requestedSelector,
@@ -665,7 +659,7 @@ export class BrowserViewManager extends EventEmitter {
 
   private getSession(): Session {
     if (this.browserSession) return this.browserSession;
-    const browserSession = session.fromPartition(PARTITION);
+    const browserSession = session.fromPartition(BROWSER_PARTITION);
     browserSession.setUserAgent(SPOOF_UA);
     this.browserSession = browserSession;
     return browserSession;
@@ -1133,6 +1127,10 @@ export class BrowserViewManager extends EventEmitter {
         ok: boolean;
         error?: string;
         description?: string;
+        clickPoint?: {
+          x: number;
+          y: number;
+        };
         verification?: {
           before: unknown;
           targetSelector: string | null;
@@ -1142,6 +1140,37 @@ export class BrowserViewManager extends EventEmitter {
         signal,
       );
       if (!result.ok) return result;
+      if (!result.clickPoint) {
+        return {
+          ok: false,
+          error: 'Could not determine where to click on the page.',
+        };
+      }
+
+      this.window?.focus();
+      activeTab.view.webContents.focus();
+      activeTab.view.webContents.sendInputEvent({
+        type: 'mouseMove',
+        x: result.clickPoint.x,
+        y: result.clickPoint.y,
+        movementX: 0,
+        movementY: 0,
+      });
+      activeTab.view.webContents.sendInputEvent({
+        type: 'mouseDown',
+        x: result.clickPoint.x,
+        y: result.clickPoint.y,
+        button: 'left',
+        clickCount: 1,
+      });
+      activeTab.view.webContents.sendInputEvent({
+        type: 'mouseUp',
+        x: result.clickPoint.x,
+        y: result.clickPoint.y,
+        button: 'left',
+        clickCount: 1,
+      });
+
       this.invalidateSnapshot(activeTab.id);
       await this.waitForWebContentsSettle(activeTab, signal);
 
