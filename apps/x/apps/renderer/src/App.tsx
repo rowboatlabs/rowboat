@@ -128,6 +128,7 @@ const TITLEBAR_TOGGLE_MARGIN_LEFT_PX = 12
 const TITLEBAR_BUTTONS_COLLAPSED = 4
 const TITLEBAR_BUTTON_GAPS_COLLAPSED = 3
 const GRAPH_TAB_PATH = '__rowboat_graph_view__'
+const SUGGESTED_TOPICS_TAB_PATH = '__rowboat_suggested_topics__'
 const BASES_DEFAULT_TAB_PATH = '__rowboat_bases_default__'
 
 const clampNumber = (value: number, min: number, max: number) =>
@@ -256,6 +257,7 @@ const getAncestorDirectoryPaths = (path: string): string[] => {
 }
 
 const isGraphTabPath = (path: string) => path === GRAPH_TAB_PATH
+const isSuggestedTopicsTabPath = (path: string) => path === SUGGESTED_TOPICS_TAB_PATH
 const isBaseFilePath = (path: string) => path.endsWith('.base') || path === BASES_DEFAULT_TAB_PATH
 
 const normalizeUsage = (usage?: Partial<LanguageModelUsage> | null): LanguageModelUsage | null => {
@@ -903,6 +905,7 @@ function App() {
 
   const getFileTabTitle = useCallback((tab: FileTab) => {
     if (isGraphTabPath(tab.path)) return 'Graph View'
+    if (isSuggestedTopicsTabPath(tab.path)) return 'Suggested Topics'
     if (tab.path === BASES_DEFAULT_TAB_PATH) return 'Bases'
     if (tab.path.endsWith('.base')) return tab.path.split('/').pop()?.replace(/\.base$/i, '') || 'Base'
     return tab.path.split('/').pop()?.replace(/\.md$/i, '') || tab.path
@@ -2566,9 +2569,17 @@ function App() {
     if (isGraphTabPath(tab.path)) {
       setSelectedPath(null)
       setIsGraphOpen(true)
+      setIsSuggestedTopicsOpen(false)
+      return
+    }
+    if (isSuggestedTopicsTabPath(tab.path)) {
+      setSelectedPath(null)
+      setIsGraphOpen(false)
+      setIsSuggestedTopicsOpen(true)
       return
     }
     setIsGraphOpen(false)
+    setIsSuggestedTopicsOpen(false)
     setSelectedPath(tab.path)
   }, [fileTabs, isRightPaneMaximized])
 
@@ -2596,6 +2607,7 @@ function App() {
         setActiveFileTabId(null)
         setSelectedPath(null)
         setIsGraphOpen(false)
+        setIsSuggestedTopicsOpen(false)
           return []
       }
       const idx = prev.findIndex(t => t.id === tabId)
@@ -2608,8 +2620,14 @@ function App() {
         if (isGraphTabPath(newActiveTab.path)) {
           setSelectedPath(null)
           setIsGraphOpen(true)
+          setIsSuggestedTopicsOpen(false)
+        } else if (isSuggestedTopicsTabPath(newActiveTab.path)) {
+          setSelectedPath(null)
+          setIsGraphOpen(false)
+          setIsSuggestedTopicsOpen(true)
         } else {
           setIsGraphOpen(false)
+          setIsSuggestedTopicsOpen(false)
               setSelectedPath(newActiveTab.path)
         }
       }
@@ -2774,6 +2792,17 @@ function App() {
     setActiveFileTabId(id)
   }, [fileTabs])
 
+  const ensureSuggestedTopicsFileTab = useCallback(() => {
+    const existing = fileTabs.find((tab) => isSuggestedTopicsTabPath(tab.path))
+    if (existing) {
+      setActiveFileTabId(existing.id)
+      return
+    }
+    const id = newFileTabId()
+    setFileTabs((prev) => [...prev, { id, path: SUGGESTED_TOPICS_TAB_PATH }])
+    setActiveFileTabId(id)
+  }, [fileTabs])
+
   const applyViewState = useCallback(async (view: ViewState) => {
     switch (view.type) {
       case 'file':
@@ -2815,6 +2844,7 @@ function App() {
         setIsRightPaneMaximized(false)
         setSelectedBackgroundTask(null)
         setIsSuggestedTopicsOpen(true)
+        ensureSuggestedTopicsFileTab()
         return
       case 'chat':
         setSelectedPath(null)
@@ -2830,7 +2860,7 @@ function App() {
         }
         return
     }
-  }, [ensureFileTabForPath, ensureGraphFileTab, handleNewChat, isRightPaneMaximized, loadRun])
+  }, [ensureFileTabForPath, ensureGraphFileTab, ensureSuggestedTopicsFileTab, handleNewChat, isRightPaneMaximized, loadRun])
 
   const navigateToView = useCallback(async (nextView: ViewState) => {
     const current = currentViewState
@@ -4080,7 +4110,7 @@ function App() {
                 canNavigateForward={canNavigateForward}
                 collapsedLeftPaddingPx={collapsedLeftPaddingPx}
               >
-                {(selectedPath || isGraphOpen) && fileTabs.length >= 1 ? (
+                {(selectedPath || isGraphOpen || isSuggestedTopicsOpen) && fileTabs.length >= 1 ? (
                   <TabBar
                     tabs={fileTabs}
                     activeTabId={activeFileTabId ?? ''}
@@ -4088,7 +4118,7 @@ function App() {
                     getTabId={(t) => t.id}
                     onSwitchTab={switchFileTab}
                     onCloseTab={closeFileTab}
-                    allowSingleTabClose={fileTabs.length === 1 && (isGraphOpen || (selectedPath != null && isBaseFilePath(selectedPath)))}
+                    allowSingleTabClose={fileTabs.length === 1 && (isGraphOpen || isSuggestedTopicsOpen || (selectedPath != null && isBaseFilePath(selectedPath)))}
                   />
                 ) : (
                   <TabBar
