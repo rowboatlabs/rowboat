@@ -708,12 +708,6 @@ const ipcSchemas = {
     req: BrowserStateSchema,
     res: z.null(),
   },
-  'browser:didRequestPaneState': {
-    req: z.object({
-      open: z.boolean(),
-    }),
-    res: z.null(),
-  },
   // Billing channels
   'billing:getInfo': {
     req: z.null(),

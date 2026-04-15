@@ -1,17 +1,7 @@
-import { BrowserWindow } from 'electron';
 import type { IBrowserControlService } from '@x/core/dist/application/browser-control/service.js';
 import type { BrowserControlAction, BrowserControlInput, BrowserControlResult } from '@x/shared/dist/browser-control.js';
 import { browserViewManager } from './view.js';
 import { normalizeNavigationTarget } from './navigation.js';
-
-function emitPaneState(open: boolean): void {
-  const windows = BrowserWindow.getAllWindows();
-  for (const win of windows) {
-    if (!win.isDestroyed() && win.webContents) {
-      win.webContents.send('browser:didRequestPaneState', { open });
-    }
-  }
-}
 
 function buildSuccessResult(
   action: BrowserControlAction,
@@ -37,24 +27,18 @@ function buildErrorResult(action: BrowserControlAction, error: string): BrowserC
 }
 
 export class ElectronBrowserControlService implements IBrowserControlService {
-  private ensurePaneOpen(): void {
-    emitPaneState(true);
-    browserViewManager.setVisible(true);
-  }
-
   async execute(
     input: BrowserControlInput,
     ctx?: { signal?: AbortSignal },
   ): Promise<BrowserControlResult> {
     const signal = ctx?.signal;
-    this.ensurePaneOpen();
 
     try {
       switch (input.action) {
         case 'open': {
           await browserViewManager.ensureActiveTabReady(signal);
           const page = await browserViewManager.readPageSummary(signal, { waitForReady: false }) ?? undefined;
-          return buildSuccessResult('open', 'Opened the browser pane.', page);
+          return buildSuccessResult('open', 'Opened a browser session.', page);
         }
 
         case 'get-state':

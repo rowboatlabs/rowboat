@@ -789,19 +789,6 @@ function App() {
     return cleanup
   }, [refreshVoiceAvailability])
 
-  useEffect(() => {
-    const cleanup = window.ipc.on('browser:didRequestPaneState', (event) => {
-      if (event.open) {
-        setIsBrowserOpen(true)
-        setIsChatSidebarOpen(true)
-        setIsRightPaneMaximized(false)
-        return
-      }
-      setIsBrowserOpen(false)
-    })
-    return cleanup
-  }, [])
-
   const handleStartRecording = useCallback(() => {
     setIsRecording(true)
     isRecordingRef.current = true
