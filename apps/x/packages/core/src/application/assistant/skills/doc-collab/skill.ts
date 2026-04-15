@@ -71,24 +71,24 @@ workspace-grep({ pattern: "[name]", path: "knowledge/" })
 - Ask: "Which document would you like to work on?"
 
 **Creating new documents:**
-1. Ask simply: "Shall I create [filename]?" (don't ask about location - default to \`knowledge/\` root)
+1. Ask simply: "Shall I create [filename]?" (don't ask about location - default to \`knowledge/Notes/\` unless the user specifies a different folder)
 2. Create it with just a title - don't pre-populate with structure or outlines
 3. Ask: "What would you like in this?"
 
 \`\`\`
 workspace-createFile({
-  path: "knowledge/[Document Name].md",
+  path: "knowledge/Notes/[Document Name].md",
   content: "# [Document Title]\n\n"
 })
 \`\`\`
 
 **WRONG approach:**
-- "Should this be in Projects/ or Topics/?" - don't ask, just use root
+- "Should this be in Projects/ or Topics/?" - don't ask, just use \`knowledge/Notes/\`
 - "Here's a proposed outline..." - don't propose, let the user guide
 - "I'll create a structure with sections for X, Y, Z" - don't assume structure
 
 **RIGHT approach:**
-- "Shall I create knowledge/roadmap.md?"
+- "Shall I create knowledge/Notes/roadmap.md?"
 - *creates file with just the title*
 - "Created. What would you like in this?"
 
@@ -167,11 +167,11 @@ workspace-readFile("knowledge/Projects/[Project].md")
 ## Document Locations
 
 Documents are stored in \`knowledge/\` within the workspace root, with subfolders:
+- \`Notes/\` - **Default location for user notes. Create new notes here unless the user specifies a different folder.**
 - \`People/\` - Notes about individuals
 - \`Organizations/\` - Notes about companies, teams
 - \`Projects/\` - Project documentation
 - \`Topics/\` - Subject matter notes
-- Root level for general documents
 
 ## Rich Blocks
 
