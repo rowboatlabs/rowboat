@@ -12,4 +12,5 @@ export * as blocks from './blocks.js';
 export * as trackBlock from './track-block.js';
 export * as frontmatter from './frontmatter.js';
 export * as bases from './bases.js';
+export * as browserControl from './browser-control.js';
 export { PrefixLogger };

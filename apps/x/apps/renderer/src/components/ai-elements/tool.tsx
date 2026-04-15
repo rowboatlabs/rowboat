@@ -98,24 +98,33 @@ export const ToolHeader = ({
   type,
   state,
   ...props
-}: ToolHeaderProps) => (
-  <CollapsibleTrigger
-    className={cn(
-      "flex w-full items-center justify-between gap-4 p-3",
-      className
-    )}
-    {...props}
-  >
-    <div className="flex items-center gap-2">
-      <WrenchIcon className="size-4 text-muted-foreground" />
-      <span className="font-medium text-sm">
-        {title ?? type.split("-").slice(1).join("-")}
-      </span>
-      {getStatusBadge(state)}
-    </div>
-    <ChevronDownIcon className="size-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
-  </CollapsibleTrigger>
-);
+}: ToolHeaderProps) => {
+  const displayTitle = title ?? type.split("-").slice(1).join("-")
+
+  return (
+    <CollapsibleTrigger
+      className={cn(
+        "flex w-full items-center justify-between gap-4 p-3",
+        className
+      )}
+      {...props}
+    >
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <WrenchIcon className="size-4 shrink-0 text-muted-foreground" />
+        <span
+          className="min-w-0 flex-1 truncate text-left font-medium text-sm"
+          title={displayTitle}
+        >
+          {displayTitle}
+        </span>
+      </div>
+      <div className="flex shrink-0 items-center gap-3">
+        {getStatusBadge(state)}
+        <ChevronDownIcon className="size-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+      </div>
+    </CollapsibleTrigger>
+  )
+};
 
 export type ToolContentProps = ComponentProps<typeof CollapsibleContent>;
 
@@ -215,4 +224,3 @@ export const ToolTabbedContent = ({
     </div>
   );
 };
-

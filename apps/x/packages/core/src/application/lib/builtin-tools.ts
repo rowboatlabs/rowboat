@@ -17,6 +17,7 @@ import { WorkDir } from "../../config/config.js";
 import { composioAccountsRepo } from "../../composio/repo.js";
 import { executeAction as executeComposioAction, isConfigured as isComposioConfigured, searchTools as searchComposioTools } from "../../composio/client.js";
 import { CURATED_TOOLKITS, CURATED_TOOLKIT_SLUGS } from "@x/shared/dist/composio.js";
+import { BrowserControlInputSchema, type BrowserControlInput } from "@x/shared/dist/browser-control.js";
 import type { ToolContext } from "./exec-tool.js";
 import { generateText } from "ai";
 import { createProvider } from "../../models/models.js";
@@ -26,6 +27,7 @@ import { getGatewayProvider } from "../../models/gateway.js";
 import { getAccessToken } from "../../auth/tokens.js";
 import { API_URL } from "../../config/env.js";
 import { updateContent, updateTrackBlock } from "../../knowledge/track/fileops.js";
+import type { IBrowserControlService } from "../browser-control/service.js";
 // Parser libraries are loaded dynamically inside parseFile.execute()
 // to avoid pulling pdfjs-dist's DOM polyfills into the main bundle.
 // Import paths are computed so esbuild cannot statically resolve them.
@@ -562,7 +564,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                         count: matches.length,
                         tool: 'ripgrep',
                     };
-                } catch (rgError) {
+                } catch {
                     // Fallback to basic grep if ripgrep not available or failed
                     const grepArgs = [
                         '-rn',
@@ -992,6 +994,39 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                     success: false,
                     message: `Failed to execute command: ${error instanceof Error ? error.message : 'Unknown error'}`,
                     command,
+                };
+            }
+        },
+    },
+
+    // ============================================================================
+    // Browser Control
+    // ============================================================================
+
+    'browser-control': {
+        description: 'Control the embedded browser pane. Read the current page, inspect indexed interactable elements, and navigate/click/type/press keys in the active browser tab.',
+        inputSchema: BrowserControlInputSchema,
+        isAvailable: async () => {
+            try {
+                container.resolve<IBrowserControlService>('browserControlService');
+                return true;
+            } catch {
+                return false;
+            }
+        },
+        execute: async (input: BrowserControlInput, ctx?: ToolContext) => {
+            try {
+                const browserControlService = container.resolve<IBrowserControlService>('browserControlService');
+                return await browserControlService.execute(input, { signal: ctx?.signal });
+            } catch (error) {
+                return {
+                    success: false,
+                    action: input.action,
+                    error: error instanceof Error ? error.message : 'Browser control is unavailable.',
+                    browser: {
+                        activeTabId: null,
+                        tabs: [],
+                    },
                 };
             }
         },

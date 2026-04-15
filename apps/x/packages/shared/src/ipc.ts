@@ -10,6 +10,7 @@ import { TrackEvent } from './track-block.js';
 import { UserMessageContent } from './message.js';
 import { RowboatApiConfig } from './rowboat-account.js';
 import { ZListToolkitsResponse } from './composio.js';
+import { BrowserStateSchema } from './browser-control.js';
 
 // ============================================================================
 // Runtime Validation Schemas (Single Source of Truth)
@@ -625,6 +626,87 @@ const ipcSchemas = {
       success: z.boolean(),
       error: z.string().optional(),
     }),
+  },
+  // Embedded browser (WebContentsView) channels
+  'browser:setBounds': {
+    req: z.object({
+      x: z.number().int(),
+      y: z.number().int(),
+      width: z.number().int().nonnegative(),
+      height: z.number().int().nonnegative(),
+    }),
+    res: z.object({ ok: z.literal(true) }),
+  },
+  'browser:setVisible': {
+    req: z.object({ visible: z.boolean() }),
+    res: z.object({ ok: z.literal(true) }),
+  },
+  'browser:newTab': {
+    req: z.object({
+      url: z.string().min(1).refine(
+        (u) => {
+          const lower = u.trim().toLowerCase();
+          if (lower.startsWith('javascript:')) return false;
+          if (lower.startsWith('file://')) return false;
+          if (lower.startsWith('chrome://')) return false;
+          if (lower.startsWith('chrome-extension://')) return false;
+          return true;
+        },
+        { message: 'Unsafe URL scheme' },
+      ).optional(),
+    }),
+    res: z.object({
+      ok: z.boolean(),
+      tabId: z.string().optional(),
+      error: z.string().optional(),
+    }),
+  },
+  'browser:switchTab': {
+    req: z.object({ tabId: z.string().min(1) }),
+    res: z.object({ ok: z.boolean() }),
+  },
+  'browser:closeTab': {
+    req: z.object({ tabId: z.string().min(1) }),
+    res: z.object({ ok: z.boolean() }),
+  },
+  'browser:navigate': {
+    req: z.object({
+      url: z.string().min(1).refine(
+        (u) => {
+          const lower = u.trim().toLowerCase();
+          if (lower.startsWith('javascript:')) return false;
+          if (lower.startsWith('file://')) return false;
+          if (lower.startsWith('chrome://')) return false;
+          if (lower.startsWith('chrome-extension://')) return false;
+          return true;
+        },
+        { message: 'Unsafe URL scheme' },
+      ),
+    }),
+    res: z.object({
+      ok: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  'browser:back': {
+    req: z.null(),
+    res: z.object({ ok: z.boolean() }),
+  },
+  'browser:forward': {
+    req: z.null(),
+    res: z.object({ ok: z.boolean() }),
+  },
+  'browser:reload': {
+    req: z.null(),
+    res: z.object({ ok: z.literal(true) }),
+  },
+  'browser:getState': {
+    req: z.null(),
+    res: BrowserStateSchema,
+  },
+  'browser:didUpdateState': {
+    req: BrowserStateSchema,
+    res: z.null(),
   },
   // Billing channels
   'billing:getInfo': {

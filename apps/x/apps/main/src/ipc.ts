@@ -52,6 +52,7 @@ import {
   replaceTrackBlockYaml,
   deleteTrackBlock,
 } from '@x/core/dist/knowledge/track/fileops.js';
+import { browserIpcHandlers } from './browser/ipc.js';
 
 /**
  * Convert markdown to a styled HTML document for PDF/DOCX export.
@@ -825,5 +826,7 @@ export function setupIpcHandlers() {
     'billing:getInfo': async () => {
       return await getBillingInfo();
     },
+    // Embedded browser handlers (WebContentsView + navigation)
+    ...browserIpcHandlers,
   });
 }

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, desktopCapturer, protocol, net, shell, session } from "electron";
+import { app, BrowserWindow, desktopCapturer, protocol, net, shell, session, type Session } from "electron";
 import path from "node:path";
 import {
   setupIpcHandlers,
@@ -31,6 +31,10 @@ import started from "electron-squirrel-startup";
 import { execSync, exec, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { init as initChromeSync } from "@x/core/dist/knowledge/chrome-extension/server/server.js";
+import { registerBrowserControlService } from "@x/core/dist/di/container.js";
+import { browserViewManager, BROWSER_PARTITION } from "./browser/view.js";
+import { setupBrowserEventForwarding } from "./browser/ipc.js";
+import { ElectronBrowserControlService } from "./browser/control-service.js";
 
 const execAsync = promisify(exec);
 
@@ -112,6 +116,30 @@ protocol.registerSchemesAsPrivileged([
   },
 ]);
 
+const ALLOWED_SESSION_PERMISSIONS = new Set(["media", "display-capture"]);
+
+function configureSessionPermissions(targetSession: Session): void {
+  targetSession.setPermissionCheckHandler((_webContents, permission) => {
+    return ALLOWED_SESSION_PERMISSIONS.has(permission);
+  });
+
+  targetSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+    callback(ALLOWED_SESSION_PERMISSIONS.has(permission));
+  });
+
+  // Auto-approve display media requests and route system audio as loopback.
+  // Electron requires a video source in the callback even if we only want audio.
+  // We pass the first available screen source; the renderer discards the video track.
+  targetSession.setDisplayMediaRequestHandler(async (_request, callback) => {
+    const sources = await desktopCapturer.getSources({ types: ['screen'] });
+    if (sources.length === 0) {
+      callback({});
+      return;
+    }
+    callback({ video: sources[0], audio: 'loopback' });
+  });
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1280,
@@ -131,26 +159,8 @@ function createWindow() {
     },
   });
 
-  // Grant microphone and display-capture permissions
-  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
-    if (permission === 'media' || permission === 'display-capture') {
-      callback(true);
-    } else {
-      callback(false);
-    }
-  });
-
-  // Auto-approve display media requests and route system audio as loopback.
-  // Electron requires a video source in the callback even if we only want audio.
-  // We pass the first available screen source; the renderer discards the video track.
-  session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {
-    const sources = await desktopCapturer.getSources({ types: ['screen'] });
-    if (sources.length === 0) {
-      callback({});
-      return;
-    }
-    callback({ video: sources[0], audio: 'loopback' });
-  });
+  configureSessionPermissions(session.defaultSession);
+  configureSessionPermissions(session.fromPartition(BROWSER_PARTITION));
 
   // Show window when content is ready to prevent blank screen
   win.once("ready-to-show", () => {
@@ -174,6 +184,10 @@ function createWindow() {
       shell.openExternal(url);
     }
   });
+
+  // Attach the embedded browser pane manager to this window.
+  // The WebContentsView is created lazily on first `browser:setVisible`.
+  browserViewManager.attach(win);
 
   if (app.isPackaged) {
     win.loadURL("app://-/index.html");
@@ -215,7 +229,10 @@ app.whenReady().then(async () => {
   // Initialize all config files before UI can access them
   await initConfigs();
 
+  registerBrowserControlService(new ElectronBrowserControlService());
+
   setupIpcHandlers();
+  setupBrowserEventForwarding();
 
   createWindow();
 

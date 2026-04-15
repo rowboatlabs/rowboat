@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, webUtils } from 'electron';
+import { contextBridge, ipcRenderer, webFrame, webUtils } from 'electron';
 import { ipc as ipcShared } from '@x/shared';
 
 type InvokeChannels = ipcShared.InvokeChannels;
@@ -55,4 +55,5 @@ contextBridge.exposeInMainWorld('ipc', ipc);
 
 contextBridge.exposeInMainWorld('electronUtils', {
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
+  getZoomFactor: () => webFrame.getZoomFactor(),
 });
