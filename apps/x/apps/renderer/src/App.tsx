@@ -88,7 +88,7 @@ import { AgentScheduleState } from '@x/shared/dist/agent-schedule-state.js'
 import { toast } from "sonner"
 import { useVoiceMode } from '@/hooks/useVoiceMode'
 import { useVoiceTTS } from '@/hooks/useVoiceTTS'
-import { useMeetingTranscription, type MeetingTranscriptionState, type CalendarEventMeta } from '@/hooks/useMeetingTranscription'
+import { useMeetingTranscription, type CalendarEventMeta } from '@/hooks/useMeetingTranscription'
 import { useAnalyticsIdentity } from '@/hooks/useAnalyticsIdentity'
 import * as analytics from '@/lib/analytics'
 
