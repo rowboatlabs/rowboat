@@ -954,73 +954,14 @@
 .tiptap-editor .ProseMirror .iframe-block-card {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-}
-
-.tiptap-editor .ProseMirror .iframe-block-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
   gap: 12px;
-  padding-right: 30px;
-}
-
-.tiptap-editor .ProseMirror .iframe-block-header-main {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  min-width: 0;
-}
-
-.tiptap-editor .ProseMirror .iframe-block-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  width: fit-content;
-  padding: 4px 8px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--primary) 12%, transparent);
-  color: color-mix(in srgb, var(--foreground) 78%, transparent);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-}
-
-.tiptap-editor .ProseMirror .iframe-block-title-row {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
 }
 
 .tiptap-editor .ProseMirror .iframe-block-title {
   font-size: 15px;
   font-weight: 600;
   color: var(--foreground);
-}
-
-.tiptap-editor .ProseMirror .iframe-block-host {
-  font-size: 12px;
-  color: color-mix(in srgb, var(--foreground) 55%, transparent);
-  word-break: break-all;
-}
-
-.tiptap-editor .ProseMirror .iframe-block-open {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--foreground) 6%, transparent);
-  color: var(--foreground);
-  font-size: 12px;
-  font-weight: 500;
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.tiptap-editor .ProseMirror .iframe-block-open:hover {
-  background: color-mix(in srgb, var(--foreground) 10%, transparent);
+  padding-right: 28px;
 }
 
 .tiptap-editor .ProseMirror .iframe-block-frame-shell {
@@ -1087,12 +1028,6 @@
 
 .tiptap-editor .ProseMirror .iframe-block-frame-shell-loading .iframe-block-frame {
   opacity: 0;
-}
-
-.tiptap-editor .ProseMirror .iframe-block-caption {
-  font-size: 12px;
-  color: color-mix(in srgb, var(--foreground) 55%, transparent);
-  text-align: center;
 }
 
 .tiptap-editor .ProseMirror .iframe-block-error {

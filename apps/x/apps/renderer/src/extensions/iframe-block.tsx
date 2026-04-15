@@ -1,6 +1,6 @@
 import { mergeAttributes, Node } from '@tiptap/react'
 import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react'
-import { ExternalLink, Globe, X } from 'lucide-react'
+import { Globe, X } from 'lucide-react'
 import { blocks } from '@x/shared'
 import { useEffect, useRef, useState } from 'react'
 
@@ -23,18 +23,6 @@ const DEFAULT_IFRAME_ALLOW = [
   'geolocation',
   'microphone',
 ].join('; ')
-
-function getIframeMeta(url: string): { host: string; path: string } | null {
-  try {
-    const parsed = new URL(url)
-    return {
-      host: parsed.host,
-      path: parsed.pathname === '/' ? '' : parsed.pathname,
-    }
-  } catch {
-    return null
-  }
-}
 
 function getIframeHeightCacheKey(url: string): string {
   return `${IFRAME_HEIGHT_CACHE_PREFIX}${url}`
@@ -94,8 +82,8 @@ function IframeBlockView({ node, deleteNode }: { node: { attrs: Record<string, u
     )
   }
 
-  const meta = getIframeMeta(config.url)
-  const title = config.title || meta?.host || 'Embedded page'
+  const visibleTitle = config.title?.trim() || ''
+  const title = visibleTitle || 'Embedded page'
   const allow = config.allow || DEFAULT_IFRAME_ALLOW
   const initialHeight = config.height ?? DEFAULT_IFRAME_HEIGHT
   const [frameHeight, setFrameHeight] = useState(() => readCachedIframeHeight(config.url, initialHeight))
@@ -177,32 +165,7 @@ function IframeBlockView({ node, deleteNode }: { node: { attrs: Record<string, u
         >
           <X size={14} />
         </button>
-        <div className="iframe-block-header">
-          <div className="iframe-block-header-main">
-            <div className="iframe-block-badge">
-              <Globe size={13} />
-              Iframe
-            </div>
-            <div className="iframe-block-title-row">
-              <div className="iframe-block-title">{title}</div>
-              {meta && (
-                <div className="iframe-block-host">
-                  {meta.host}
-                  {meta.path}
-                </div>
-              )}
-            </div>
-          </div>
-          <a
-            href={config.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="iframe-block-open"
-          >
-            <ExternalLink size={13} />
-            Open
-          </a>
-        </div>
+        {visibleTitle && <div className="iframe-block-title">{visibleTitle}</div>}
         <div
           className={`iframe-block-frame-shell${frameReady ? ' iframe-block-frame-shell-ready' : ' iframe-block-frame-shell-loading'}`}
           style={{ height: frameHeight }}
@@ -233,9 +196,6 @@ function IframeBlockView({ node, deleteNode }: { node: { attrs: Record<string, u
             sandbox="allow-same-origin allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms allow-modals allow-downloads"
           />
         </div>
-        {config.caption && (
-          <div className="iframe-block-caption">{config.caption}</div>
-        )}
       </div>
     </NodeViewWrapper>
   )
