@@ -19,6 +19,7 @@ You can embed a local site in a note with:
 Notes:
 
 - The app serves each site with SPA-friendly routing, so client-side routers work
+- Local HTML pages auto-expand inside Rowboat iframe blocks to fit their content height
 - Put an \`index.html\` file at the site root
 - Remote APIs still need to allow browser requests from a local page
 `,

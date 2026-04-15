@@ -11,6 +11,7 @@ export const LOCAL_SITES_BASE_URL = `http://localhost:${LOCAL_SITES_PORT}`;
 
 const LOCAL_SITES_DIR = path.join(WorkDir, 'sites');
 const SITE_SLUG_RE = /^[a-z0-9][a-z0-9-_]*$/i;
+const IFRAME_HEIGHT_MESSAGE = 'rowboat:iframe-height';
 const TEXT_EXTENSIONS = new Set([
   '.css',
   '.html',
@@ -40,6 +41,82 @@ const MIME_TYPES: Record<string, string> = {
   '.webp': 'image/webp',
   '.xml': 'application/xml; charset=utf-8',
 };
+const IFRAME_AUTOSIZE_BOOTSTRAP = String.raw`<script>
+(() => {
+  if (window.parent === window || typeof window.parent?.postMessage !== 'function') return;
+
+  const MESSAGE_TYPE = '__ROWBOAT_IFRAME_HEIGHT_MESSAGE__';
+  const MIN_HEIGHT = 240;
+  let animationFrameId = 0;
+  let lastHeight = 0;
+
+  const applyEmbeddedStyles = () => {
+    const root = document.documentElement;
+    if (root) root.style.overflowY = 'hidden';
+    if (document.body) document.body.style.overflowY = 'hidden';
+  };
+
+  const measureHeight = () => {
+    const root = document.documentElement;
+    const body = document.body;
+    return Math.max(
+      root?.scrollHeight ?? 0,
+      root?.offsetHeight ?? 0,
+      root?.clientHeight ?? 0,
+      body?.scrollHeight ?? 0,
+      body?.offsetHeight ?? 0,
+      body?.clientHeight ?? 0,
+    );
+  };
+
+  const publishHeight = () => {
+    animationFrameId = 0;
+    applyEmbeddedStyles();
+    const nextHeight = Math.max(MIN_HEIGHT, Math.ceil(measureHeight()));
+    if (Math.abs(nextHeight - lastHeight) < 2) return;
+    lastHeight = nextHeight;
+    window.parent.postMessage({
+      type: MESSAGE_TYPE,
+      height: nextHeight,
+      href: window.location.href,
+    }, '*');
+  };
+
+  const schedulePublish = () => {
+    if (animationFrameId) cancelAnimationFrame(animationFrameId);
+    animationFrameId = requestAnimationFrame(publishHeight);
+  };
+
+  const resizeObserver = typeof ResizeObserver !== 'undefined'
+    ? new ResizeObserver(schedulePublish)
+    : null;
+  if (resizeObserver && document.documentElement) resizeObserver.observe(document.documentElement);
+  if (resizeObserver && document.body) resizeObserver.observe(document.body);
+
+  const mutationObserver = new MutationObserver(schedulePublish);
+  if (document.documentElement) {
+    mutationObserver.observe(document.documentElement, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      characterData: true,
+    });
+  }
+
+  window.addEventListener('load', schedulePublish);
+  window.addEventListener('resize', schedulePublish);
+
+  if (document.fonts?.addEventListener) {
+    document.fonts.addEventListener('loadingdone', schedulePublish);
+  }
+
+  for (const delay of [0, 50, 150, 300, 600, 1200]) {
+    setTimeout(schedulePublish, delay);
+  }
+
+  schedulePublish();
+})();
+</script>`;
 
 let localSitesServer: Server | null = null;
 let startPromise: Promise<void> | null = null;
@@ -110,6 +187,14 @@ async function ensureLocalSiteScaffold(): Promise<void> {
   );
 }
 
+function injectIframeAutosizeBootstrap(html: string): string {
+  const bootstrap = IFRAME_AUTOSIZE_BOOTSTRAP.replace('__ROWBOAT_IFRAME_HEIGHT_MESSAGE__', IFRAME_HEIGHT_MESSAGE)
+  if (/<\/body>/i.test(html)) {
+    return html.replace(/<\/body>/i, `${bootstrap}\n</body>`)
+  }
+  return `${html}\n${bootstrap}`
+}
+
 async function respondWithFile(res: express.Response, filePath: string, method: string): Promise<void> {
   const extension = path.extname(filePath).toLowerCase();
   const mimeType = MIME_TYPES[extension] || 'application/octet-stream';
@@ -126,7 +211,11 @@ async function respondWithFile(res: express.Response, filePath: string, method: 
   }
 
   if (TEXT_EXTENSIONS.has(extension)) {
-    const text = await fsp.readFile(filePath, 'utf8');
+    let text = await fsp.readFile(filePath, 'utf8');
+    if (extension === '.html') {
+      text = injectIframeAutosizeBootstrap(text);
+    }
+    res.setHeader('Content-Length', String(Buffer.byteLength(text)));
     res.end(text);
     return;
   }
