@@ -116,7 +116,7 @@ protocol.registerSchemesAsPrivileged([
   },
 ]);
 
-const ALLOWED_SESSION_PERMISSIONS = new Set(["media", "display-capture"]);
+const ALLOWED_SESSION_PERMISSIONS = new Set(["media", "display-capture", "clipboard-read", "clipboard-sanitized-write"]);
 
 function configureSessionPermissions(targetSession: Session): void {
   targetSession.setPermissionCheckHandler((_webContents, permission) => {
