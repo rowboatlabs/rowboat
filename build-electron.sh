@@ -1,12 +1,14 @@
 #!/bin/bash
 set -e
 
-# build rowboatx next.js app
+# Prepare the frontend and local runtime embedded by the desktop shell.
+
+# Build the RowboatX Next.js frontend.
 (cd apps/rowboatx && \
     npm install && \
     npm run build)
 
-# build rowboat server
+# Build the local CLI/runtime service.
 (cd apps/cli && \
     npm install && \
     npm run build)

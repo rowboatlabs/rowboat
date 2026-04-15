@@ -12,9 +12,10 @@ export interface IMcpConfigRepo {
 
 export class FSMcpConfigRepo implements IMcpConfigRepo {
     private readonly configPath = path.join(WorkDir, "config", "mcp.json");
+    private readonly initPromise: Promise<void>;
 
     constructor() {
-        this.ensureDefaultConfig();
+        this.initPromise = this.ensureDefaultConfig();
     }
 
     private async ensureDefaultConfig(): Promise<void> {
@@ -25,18 +26,25 @@ export class FSMcpConfigRepo implements IMcpConfigRepo {
         }
     }
 
+    private async ensureInitialized(): Promise<void> {
+        await this.initPromise;
+    }
+
     async getConfig(): Promise<z.infer<typeof McpServerConfig>> {
+        await this.ensureInitialized();
         const config = await fs.readFile(this.configPath, "utf8");
         return McpServerConfig.parse(JSON.parse(config));
     }
 
     async upsert(serverName: string, config: z.infer<typeof McpServerDefinition>): Promise<void> {
+        await this.ensureInitialized();
         const conf = await this.getConfig();
         conf.mcpServers[serverName] = config;
         await fs.writeFile(this.configPath, JSON.stringify(conf, null, 2));
     }
 
     async delete(serverName: string): Promise<void> {
+        await this.ensureInitialized();
         const conf = await this.getConfig();
         delete conf.mcpServers[serverName];
         await fs.writeFile(this.configPath, JSON.stringify(conf, null, 2));

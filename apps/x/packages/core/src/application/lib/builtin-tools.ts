@@ -561,7 +561,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                         count: matches.length,
                         tool: 'ripgrep',
                     };
-                } catch (rgError) {
+                } catch {
                     // Fallback to basic grep if ripgrep not available or failed
                     const grepArgs = [
                         '-rn',

@@ -27,11 +27,8 @@ jobs:
         run: npm ci
         working-directory: apps/cli
 
-      # optional: run tests
-      # - run: npm test
-
-      - name: Build
-        run: npm run build
+      - name: Verify
+        run: npm run verify
         working-directory: apps/cli
 
       - name: Pack

@@ -43,7 +43,7 @@ function pathToSlug(url: string): string {
         const parsed = new URL(url);
         const p = parsed.pathname + (parsed.search || '');
         if (!p || p === '/') return 'index';
-        let slug = p.replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_|_$/g, '');
+        const slug = p.replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_|_$/g, '');
         return slug.substring(0, 80) || 'index';
     } catch {
         return 'index';
@@ -184,12 +184,13 @@ function saveConfig(config: Config): void {
     fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf-8');
 }
 
-function validateConfig(data: any): data is Config {
+function validateConfig(data: unknown): data is Config {
     if (typeof data !== 'object' || data === null) return false;
-    if (data.mode !== 'all' && data.mode !== 'ask') return false;
-    if (!Array.isArray(data.whitelist)) return false;
-    if (!Array.isArray(data.blacklist)) return false;
-    if (typeof data.enabled !== 'boolean') return false;
+    const candidate = data as Partial<Config>;
+    if (candidate.mode !== 'all' && candidate.mode !== 'ask') return false;
+    if (!Array.isArray(candidate.whitelist)) return false;
+    if (!Array.isArray(candidate.blacklist)) return false;
+    if (typeof candidate.enabled !== 'boolean') return false;
     return true;
 }
 

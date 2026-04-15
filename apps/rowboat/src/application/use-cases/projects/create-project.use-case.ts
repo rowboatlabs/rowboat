@@ -4,7 +4,6 @@ import { IProjectsRepository } from "../../repositories/projects.repository.inte
 import { IUsageQuotaPolicy } from "../../policies/usage-quota.policy.interface";
 import { BadRequestError, BillingError } from "@/src/entities/errors/common";
 import { IProjectMembersRepository } from "../../repositories/project-members.repository.interface";
-import { authorize, getCustomerForUserId } from "@/app/lib/billing";
 import { USE_BILLING } from "@/app/lib/feature_flags";
 import { Project } from "@/src/entities/models/project";
 import { Workflow } from "@/app/lib/types/workflow_types";
@@ -58,6 +57,8 @@ export class CreateProjectUseCase implements ICreateProjectUseCase {
 
         // Check billing auth
         if (USE_BILLING) {
+            const { authorize, getCustomerForUserId } = await import("@/app/lib/billing");
+
             // get billing customer id for project
             const customer = await getCustomerForUserId(request.userId);
             if (!customer) {

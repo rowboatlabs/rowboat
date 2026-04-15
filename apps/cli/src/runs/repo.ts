@@ -1,4 +1,4 @@
-import { Run } from "./runs.js";
+import { Run } from "./schema.js";
 import z from "zod";
 import { IMonotonicallyIncreasingIdGenerator } from "../application/lib/id-gen.js";
 import { WorkDir } from "../config/config.js";
@@ -37,6 +37,7 @@ export class FSRunsRepo implements IRunsRepo {
     }
 
     async appendEvents(runId: string, events: z.infer<typeof RunEvent>[]): Promise<void> {
+        await fsp.mkdir(path.join(WorkDir, 'runs'), { recursive: true });
         await fsp.appendFile(
             path.join(WorkDir, 'runs', `${runId}.jsonl`),
             events.map(event => JSON.stringify(event)).join("\n") + "\n"

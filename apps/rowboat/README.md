@@ -1,6 +1,16 @@
-This is a [Next.js](https://nextjs.org/) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+# Rowboat Web App
 
-## Getting Started
+`apps/rowboat` is the hosted or self-hosted Next.js application in this repository. It is the server-backed Rowboat surface with project-scoped conversations, data sources, jobs, integrations, billing hooks, and RAG infrastructure.
+
+## What Lives Here
+
+- Next.js 15 App Router application
+- Project and conversation APIs under `app/api`
+- Dependency injection container in `di/container.ts`
+- Layered backend code under `src/application`, `src/entities`, `src/infrastructure`, and `src/interface-adapters`
+- Background workers for jobs and RAG ingestion in `app/scripts`
+
+## Local Development
 
 Install dependencies:
 
@@ -8,29 +18,45 @@ Install dependencies:
 npm install
 ```
 
-First, run the development server:
+Run the app:
 
 ```bash
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Useful commands:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm run verify
+npm run build
+npm run lint
+npm run typecheck
+npm run rag-worker
+npm run jobs-worker
+npm run setupQdrant
+npm run deleteQdrant
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/basic-features/font-optimization) to automatically optimize and load Inter, a custom Google Font.
+## Infrastructure Dependencies
 
-## Learn More
+This app can depend on several services, depending on the features you enable:
 
-To learn more about Next.js, take a look at the following resources:
+- MongoDB for primary application data
+- Redis for caching, pub/sub, and job coordination
+- Qdrant for vector search
+- Local uploads or S3 for document storage
+- External model providers and integrations configured through environment variables
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+The root `docker-compose.yml` is the easiest way to see the expected service topology.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js/) - your feedback and contributions are welcome!
+## Environment
 
-## Deploy on Vercel
+Start from the repository `.env.example` and add the services you need. Common feature flags include auth, RAG, uploads, scraping, billing, and chat widget support.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Architectural Notes
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/deployment) for more details.
+- Route handlers stay thin and resolve controllers from the DI container.
+- Use cases and repositories are split by domain.
+- Workers in `app/scripts` handle asynchronous processing such as document ingestion and recurring jobs.
+
+If you are trying to understand where a feature belongs in the repo, read the root `ARCHITECTURE.md` first.
