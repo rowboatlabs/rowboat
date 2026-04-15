@@ -5,7 +5,7 @@ import { RunEvent, ListRunsResponse } from '@x/shared/src/runs.js';
 import type { LanguageModelUsage, ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
-import { CheckIcon, LoaderIcon, PanelLeftIcon, Maximize2, Minimize2, ChevronLeftIcon, ChevronRightIcon, SquarePen, SearchIcon, HistoryIcon, RadioIcon, SquareIcon, Globe } from 'lucide-react';
+import { CheckIcon, LoaderIcon, PanelLeftIcon, Maximize2, Minimize2, ChevronLeftIcon, ChevronRightIcon, SquarePen, HistoryIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MarkdownEditor, type MarkdownEditorHandle } from './components/markdown-editor';
 import { ChatSidebar } from './components/chat-sidebar';
@@ -454,28 +454,12 @@ function FixedSidebarToggle({
   onNavigateForward,
   canNavigateBack,
   canNavigateForward,
-  onNewChat,
-  onOpenSearch,
-  meetingState,
-  meetingSummarizing,
-  meetingAvailable,
-  onToggleMeeting,
-  isBrowserOpen,
-  onToggleBrowser,
   leftInsetPx,
 }: {
   onNavigateBack: () => void
   onNavigateForward: () => void
   canNavigateBack: boolean
   canNavigateForward: boolean
-  onNewChat: () => void
-  onOpenSearch: () => void
-  meetingState: MeetingTranscriptionState
-  meetingSummarizing: boolean
-  meetingAvailable: boolean
-  onToggleMeeting: () => void
-  isBrowserOpen: boolean
-  onToggleBrowser: () => void
   leftInsetPx: number
 }) {
   const { toggleSidebar, state } = useSidebar()
@@ -493,74 +477,6 @@ function FixedSidebarToggle({
       >
         <PanelLeftIcon className="size-5" />
       </button>
-      <button
-        type="button"
-        onClick={onNewChat}
-        className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-        style={{ marginLeft: TITLEBAR_BUTTON_GAP_PX }}
-        aria-label="New chat"
-      >
-        <SquarePen className="size-5" />
-      </button>
-      <button
-        type="button"
-        onClick={onOpenSearch}
-        className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-        style={{ marginLeft: TITLEBAR_BUTTON_GAP_PX }}
-        aria-label="Search"
-      >
-        <SearchIcon className="size-5" />
-      </button>
-      {meetingAvailable && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              onClick={onToggleMeeting}
-              disabled={meetingState === 'connecting' || meetingState === 'stopping' || meetingSummarizing}
-              className={cn(
-                "flex h-8 w-8 items-center justify-center rounded-md transition-colors disabled:pointer-events-none",
-                meetingSummarizing
-                  ? "text-muted-foreground"
-                  : meetingState === 'recording'
-                    ? "text-red-500 hover:bg-accent"
-                    : "text-muted-foreground hover:bg-accent hover:text-foreground"
-              )}
-              style={{ marginLeft: TITLEBAR_BUTTON_GAP_PX }}
-            >
-              {meetingSummarizing || meetingState === 'connecting' ? (
-                <LoaderIcon className="size-4 animate-spin" />
-              ) : meetingState === 'recording' ? (
-                <SquareIcon className="size-4 animate-pulse" />
-              ) : (
-                <RadioIcon className="size-5" />
-              )}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">
-            {meetingSummarizing ? 'Generating meeting notes...' : meetingState === 'connecting' ? 'Starting transcription...' : meetingState === 'recording' ? 'Stop meeting notes' : 'Take new meeting notes'}
-          </TooltipContent>
-        </Tooltip>
-      )}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            onClick={onToggleBrowser}
-            className={cn(
-              "flex h-8 w-8 items-center justify-center rounded-md transition-colors",
-              isBrowserOpen
-                ? "bg-accent text-foreground"
-                : "text-muted-foreground hover:bg-accent hover:text-foreground"
-            )}
-            style={{ marginLeft: TITLEBAR_BUTTON_GAP_PX }}
-            aria-label={isBrowserOpen ? "Close browser" : "Open browser"}
-          >
-            <Globe className="size-5" />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom">{isBrowserOpen ? 'Close browser' : 'Open browser'}</TooltipContent>
-      </Tooltip>
       {/* Back / Forward navigation */}
       {isCollapsed && (
         <>
@@ -4149,6 +4065,14 @@ function App() {
               }}
               backgroundTasks={backgroundTasks}
               selectedBackgroundTask={selectedBackgroundTask}
+              onNewChat={handleNewChatTab}
+              onOpenSearch={() => setIsSearchOpen(true)}
+              meetingState={meetingTranscription.state}
+              meetingSummarizing={meetingSummarizing}
+              meetingAvailable={voiceAvailable}
+              onToggleMeeting={() => { void handleToggleMeeting() }}
+              isBrowserOpen={isBrowserOpen}
+              onToggleBrowser={handleToggleBrowser}
             />
             <SidebarInset
               className={cn(
@@ -4651,14 +4575,6 @@ function App() {
               onNavigateForward={() => { void navigateForward() }}
               canNavigateBack={canNavigateBack}
               canNavigateForward={canNavigateForward}
-              onNewChat={handleNewChatTab}
-              onOpenSearch={() => setIsSearchOpen(true)}
-              meetingState={meetingTranscription.state}
-              meetingSummarizing={meetingSummarizing}
-              meetingAvailable={voiceAvailable}
-              onToggleMeeting={() => { void handleToggleMeeting() }}
-              isBrowserOpen={isBrowserOpen}
-              onToggleBrowser={handleToggleBrowser}
               leftInsetPx={isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0}
             />
           </SidebarProvider>
