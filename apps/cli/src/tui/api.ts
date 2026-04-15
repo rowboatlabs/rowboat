@@ -2,7 +2,7 @@ import { createParser } from "eventsource-parser";
 import { Agent } from "../agents/agents.js";
 import { AskHumanResponsePayload, Run, ToolPermissionAuthorizePayload } from "../runs/runs.js";
 import { ListRunsResponse } from "../runs/repo.js";
-import { ModelConfig } from "../models/models.js";
+import { ModelConfig } from "../models/schema.js";
 import { RunEvent } from "../entities/run-events.js";
 import z from "zod";
 

@@ -12,7 +12,7 @@ import { Agent } from "./agents/agents.js";
 import { McpServerConfig, McpServerDefinition } from "./mcp/schema.js";
 import { Example } from "./entities/example.js";
 import { z } from "zod";
-import { Flavor } from "./models/models.js";
+import { Flavor } from "./models/schema.js";
 import { examples } from "./examples/index.js";
 import container from "./di/container.js";
 import { IModelConfigRepo } from "./models/repo.js";

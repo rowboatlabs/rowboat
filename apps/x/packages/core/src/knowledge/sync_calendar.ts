@@ -348,24 +348,6 @@ async function performSync(syncDir: string, lookbackDays: number) {
 
 // --- Composio-based Sync ---
 
-interface ComposioCalendarState {
-    last_sync: string; // ISO string
-}
-
-function loadComposioState(stateFile: string): ComposioCalendarState | null {
-    if (fs.existsSync(stateFile)) {
-        try {
-            const data = JSON.parse(fs.readFileSync(stateFile, 'utf-8'));
-            if (data.last_sync) {
-                return { last_sync: data.last_sync };
-            }
-        } catch (e) {
-            console.error('[Calendar] Failed to load composio state:', e);
-        }
-    }
-    return null;
-}
-
 function saveComposioState(stateFile: string, lastSync: string): void {
     fs.writeFileSync(stateFile, JSON.stringify({ last_sync: lastSync }, null, 2));
 }

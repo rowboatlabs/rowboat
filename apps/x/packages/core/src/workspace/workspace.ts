@@ -3,7 +3,6 @@ import type { Stats } from 'node:fs';
 import path from 'node:path';
 import { workspace } from '@x/shared';
 import { z } from 'zod';
-import { RemoveOptions, WriteFileOptions, WriteFileResult } from 'packages/shared/dist/workspace.js';
 import { WorkDir } from '../config/config.js';
 import { rewriteWikiLinksForRenamedKnowledgeFile } from './wiki-link-rewrite.js';
 import { commitAll } from '../knowledge/version_history.js';
@@ -237,8 +236,8 @@ function scheduleKnowledgeCommit(filename: string): void {
 export async function writeFile(
   relPath: string,
   data: string,
-  opts?: z.infer<typeof WriteFileOptions>
-): Promise<z.infer<typeof WriteFileResult>> {
+  opts?: z.infer<typeof workspace.WriteFileOptions>
+): Promise<z.infer<typeof workspace.WriteFileResult>> {
   const filePath = resolveWorkspacePath(relPath);
   const encoding = opts?.encoding || 'utf8';
   const atomic = opts?.atomic !== false; // default true
@@ -381,7 +380,7 @@ export async function copy(
 
 export async function remove(
   relPath: string,
-  opts?: z.infer<typeof RemoveOptions>
+  opts?: z.infer<typeof workspace.RemoveOptions>
 ): Promise<{ ok: true }> {
   const filePath = resolveWorkspacePath(relPath);
   const trash = opts?.trash !== false; // default true

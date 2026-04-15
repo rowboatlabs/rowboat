@@ -6,7 +6,8 @@
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "rm -rf dist && tsc",
-    "dev": "tsc -w"
+    "dev": "tsc -w",
+    "test": "npm run build && node ./test/run-tests.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^2.0.63",

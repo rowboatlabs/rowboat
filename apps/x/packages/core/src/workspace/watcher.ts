@@ -1,12 +1,12 @@
 import chokidar, { type FSWatcher } from 'chokidar';
 import fs from 'node:fs/promises';
+import { workspace } from '@x/shared';
 import { ensureWorkspaceRoot, absToRelPosix } from './workspace.js';
 import { WorkDir } from '../config/config.js';
-import { WorkspaceChangeEvent } from 'packages/shared/dist/workspace.js';
 import z from 'zod';
 import { Stats } from 'node:fs';
 
-export type WorkspaceChangeCallback = (event: z.infer<typeof WorkspaceChangeEvent>) => void;
+export type WorkspaceChangeCallback = (event: z.infer<typeof workspace.WorkspaceChangeEvent>) => void;
 
 /**
  * Create a workspace watcher

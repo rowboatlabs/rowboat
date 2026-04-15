@@ -22,13 +22,16 @@ const PREBUILT_DIR = path.join(WorkDir, 'pre-built');
  * Wait for a run to complete by listening for run-processing-end event
  */
 async function waitForRunCompletion(runId: string): Promise<void> {
-    return new Promise(async (resolve) => {
-        const unsubscribe = await bus.subscribe('*', async (event) => {
+    return new Promise((resolve, reject) => {
+        let unsubscribe = () => {};
+        bus.subscribe('*', async (event) => {
             if (event.type === 'run-processing-end' && event.runId === runId) {
                 unsubscribe();
                 resolve();
             }
-        });
+        }).then((nextUnsubscribe) => {
+            unsubscribe = nextUnsubscribe;
+        }).catch(reject);
     });
 }
 
@@ -89,8 +92,6 @@ Process new items and use the user context above to identify yourself when draft
  * Check all agents and run those that are due
  */
 async function checkAndRunAgents(): Promise<void> {
-    const config = loadConfig();
-
     for (const agentName of PREBUILT_AGENTS) {
         try {
             if (shouldRunAgent(agentName)) {
@@ -149,7 +150,7 @@ export async function init(): Promise<void> {
  * Manually trigger an agent run (useful for testing)
  */
 export async function triggerAgent(agentName: string): Promise<void> {
-    if (!PREBUILT_AGENTS.includes(agentName as any)) {
+    if (!PREBUILT_AGENTS.includes(agentName as (typeof PREBUILT_AGENTS)[number])) {
         throw new Error(`Unknown agent: ${agentName}. Available: ${PREBUILT_AGENTS.join(', ')}`);
     }
     await runAgent(agentName);

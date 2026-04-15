@@ -5,6 +5,7 @@ import { AskHumanResponseEvent, RunEvent, ToolPermissionResponseEvent } from "..
 import { CreateRunOptions, IRunsRepo } from "./repo.js";
 import { IAgentRuntime } from "../agents/runtime.js";
 import { IBus } from "../application/lib/bus.js";
+import { Run } from "./schema.js";
 
 export const ToolPermissionAuthorizePayload = ToolPermissionResponseEvent.pick({
     subflow: true,
@@ -18,12 +19,7 @@ export const AskHumanResponsePayload = AskHumanResponseEvent.pick({
     response: true,
 });
 
-export const Run = z.object({
-    id: z.string(),
-    createdAt: z.iso.datetime(),
-    agentId: z.string(),
-    log: z.array(RunEvent),
-});
+export { Run };
 
 export async function createRun(opts: z.infer<typeof CreateRunOptions>): Promise<z.infer<typeof Run>> {
     const repo = container.resolve<IRunsRepo>('runsRepo');

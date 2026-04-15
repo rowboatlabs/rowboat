@@ -2,7 +2,7 @@
     "$schema": "https://mintlify.com/docs.json",
     "theme": "maple",
     "name": "Rowboat",
-    "description": "Rowboat is an open-source platform for building multi-agent systems. It helps you orchestrate tools, RAG, memory, and deployable agents with ease.",
+    "description": "Rowboat is a local-first AI coworker with transparent Markdown memory, agent workflows, tools, and optional hosted services.",
     "favicon": "/favicon.ico",
     "colors": {
       "primary": "#6366F1",

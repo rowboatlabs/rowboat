@@ -1,4 +1,4 @@
-import { ModelConfig, Provider } from "./models.js";
+import { ModelConfig, Provider } from "./schema.js";
 import { WorkDir } from "../config/config.js";
 import fs from "fs/promises";
 import path from "path";
@@ -25,9 +25,10 @@ const defaultConfig: z.infer<typeof ModelConfig> = {
 
 export class FSModelConfigRepo implements IModelConfigRepo {
     private readonly configPath = path.join(WorkDir, "config", "models.json");
+    private readonly initPromise: Promise<void>;
 
     constructor() {
-        this.ensureDefaultConfig();
+        this.initPromise = this.ensureDefaultConfig();
     }
 
     private async ensureDefaultConfig(): Promise<void> {
@@ -38,12 +39,18 @@ export class FSModelConfigRepo implements IModelConfigRepo {
         }
     }
 
+    private async ensureInitialized(): Promise<void> {
+        await this.initPromise;
+    }
+
     async getConfig(): Promise<z.infer<typeof ModelConfig>> {
+        await this.ensureInitialized();
         const config = await fs.readFile(this.configPath, "utf8");
         return ModelConfig.parse(JSON.parse(config));
     }
 
     private async setConfig(config: z.infer<typeof ModelConfig>): Promise<void> {
+        await this.ensureInitialized();
         await fs.writeFile(this.configPath, JSON.stringify(config, null, 2));
     }
 

@@ -1,6 +1,5 @@
 import { WorkDir } from "../config/config.js";
 import fs from "fs/promises";
-import { glob } from "node:fs/promises";
 import path from "path";
 import z from "zod";
 import { Agent } from "./agents.js";
@@ -19,11 +18,32 @@ export interface IAgentsRepo {
 export class FSAgentsRepo implements IAgentsRepo {
     private readonly agentsDir = path.join(WorkDir, "agents");
 
+    private async listMarkdownFiles(dir: string, prefix: string = ""): Promise<string[]> {
+        const entries = await fs.readdir(dir, { withFileTypes: true });
+        const results: string[] = [];
+
+        for (const entry of entries) {
+            const relativePath = prefix ? path.posix.join(prefix, entry.name) : entry.name;
+            const absolutePath = path.join(dir, entry.name);
+
+            if (entry.isDirectory()) {
+                results.push(...await this.listMarkdownFiles(absolutePath, relativePath));
+                continue;
+            }
+
+            if (entry.isFile() && entry.name.endsWith(".md")) {
+                results.push(relativePath);
+            }
+        }
+
+        return results;
+    }
+
     async list(): Promise<z.infer<typeof Agent>[]> {
         const result: z.infer<typeof Agent>[] = [];
 
         // list all md files in workdir/agents/
-        const matches = await Array.fromAsync(glob("**/*.md", { cwd: this.agentsDir }));
+        const matches = await this.listMarkdownFiles(this.agentsDir);
         for (const file of matches) {
             try {
                 const agent = await this.parseAgentMd(path.join(this.agentsDir, file));
@@ -79,13 +99,17 @@ export class FSAgentsRepo implements IAgentsRepo {
     async create(agent: z.infer<typeof Agent>): Promise<void> {
         const { instructions, ...rest } = agent;
         const contents = `---\n${stringify(rest)}\n---\n${instructions}`;
-        await fs.writeFile(path.join(this.agentsDir, `${agent.name}.md`), contents);
+        const filePath = path.join(this.agentsDir, `${agent.name}.md`);
+        await fs.mkdir(path.dirname(filePath), { recursive: true });
+        await fs.writeFile(filePath, contents);
     }
 
     async update(id: string, agent: z.infer<typeof UpdateAgentSchema>): Promise<void> {
         const { instructions, ...rest } = agent;
         const contents = `---\n${stringify(rest)}\n---\n${instructions}`;
-        await fs.writeFile(path.join(this.agentsDir, `${id}.md`), contents);
+        const filePath = path.join(this.agentsDir, `${id}.md`);
+        await fs.mkdir(path.dirname(filePath), { recursive: true });
+        await fs.writeFile(filePath, contents);
     }
 
     async delete(id: string): Promise<void> {

@@ -81,6 +81,18 @@ All API key files use the same format:
 }
 ```
 
+## Repository Map
+
+This repository contains multiple Rowboat surfaces. Start with `ARCHITECTURE.md` if you are contributing or trying to understand which app owns a feature.
+
+- `apps/x` - primary local-first Electron desktop app
+- `apps/rowboat` - hosted Next.js platform and APIs
+- `apps/cli` - local runtime and npm-distributed CLI package
+- `apps/rowboatx` - newer frontend for the local runtime
+- `apps/docs` - Mintlify docs site
+- `apps/python-sdk` - Python API client
+- `apps/experimental` - prototypes and non-core experiments
+
 ## What it does
 
 Rowboat is a **local-first AI coworker** that can:

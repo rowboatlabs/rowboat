@@ -79,13 +79,16 @@ function getUntaggedNotes(state: NoteTaggingState): string[] {
  * Wait for a run to complete by listening for run-processing-end event
  */
 async function waitForRunCompletion(runId: string): Promise<void> {
-    return new Promise(async (resolve) => {
-        const unsubscribe = await bus.subscribe('*', async (event) => {
+    return new Promise((resolve, reject) => {
+        let unsubscribe = () => {};
+        bus.subscribe('*', async (event) => {
             if (event.type === 'run-processing-end' && event.runId === runId) {
                 unsubscribe();
                 resolve();
             }
-        });
+        }).then((nextUnsubscribe) => {
+            unsubscribe = nextUnsubscribe;
+        }).catch(reject);
     });
 }
 

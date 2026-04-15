@@ -1,22 +1,40 @@
-import { NextRequest } from "next/server";
 import { z } from "zod";
 import { ApiResponse } from "@/app/lib/types/api_types";
 import { ApiRequest } from "@/app/lib/types/api_types";
 import { PrefixLogger } from "../../../../lib/utils";
-import { container } from "@/di/container";
 import { IRunTurnController } from "@/src/interface-adapters/controllers/conversations/run-turn.controller";
 
+type ChatRouteContext = { params: Promise<{ projectId: string }> };
+
+interface LoggerLike {
+    log(message: string): void;
+}
+
+interface ChatRouteDependencies {
+    createLogger(requestId: string): LoggerLike;
+    resolveRunTurnController(): IRunTurnController | Promise<IRunTurnController>;
+}
+
+const defaultDependencies: ChatRouteDependencies = {
+    createLogger: (requestId) => new PrefixLogger(`${requestId}`),
+    resolveRunTurnController: async () => {
+        const { container } = await import("@/di/container");
+        return container.resolve<IRunTurnController>("runTurnController");
+    },
+};
+
 // get next turn / agent response
-export async function POST(
-    req: NextRequest,
-    { params }: { params: Promise<{ projectId: string }> }
+export async function handlePostChat(
+    req: Request,
+    { params }: ChatRouteContext,
+    deps: ChatRouteDependencies = defaultDependencies,
 ): Promise<Response> {
     const { projectId } = await params;
     const requestId = crypto.randomUUID();
-    const logger = new PrefixLogger(`${requestId}`);
+    const logger = deps.createLogger(requestId);
 
     // parse and validate the request body
-    let data;
+    let data: z.infer<typeof ApiRequest>;
     try {
         const body = await req.json();
         data = ApiRequest.parse(body);
@@ -26,7 +44,7 @@ export async function POST(
     }
     const { conversationId, messages, mockTools, stream } = data;
 
-    const runTurnController = container.resolve<IRunTurnController>("runTurnController");
+    const runTurnController = await deps.resolveRunTurnController();
 
     // get assistant response
     const response = await runTurnController.execute({
@@ -80,4 +98,8 @@ export async function POST(
         turn: response.turn,
     };
     return Response.json(responseBody);
+}
+
+export async function POST(req: Request, context: ChatRouteContext): Promise<Response> {
+    return handlePostChat(req, context);
 }

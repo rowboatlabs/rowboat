@@ -8,33 +8,9 @@ import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { IModelConfigRepo } from "./repo.js";
 import container from "../di/container.js";
-import z from "zod";
+import { Flavor, Provider, ModelConfig } from "./schema.js";
 
-export const Flavor = z.enum([
-    "rowboat [free]",
-    "aigateway",
-    "anthropic",
-    "google",
-    "ollama",
-    "openai",
-    "openai-compatible",
-    "openrouter",
-]);
-
-export const Provider = z.object({
-    flavor: Flavor,
-    apiKey: z.string().optional(),
-    baseURL: z.string().optional(),
-    headers: z.record(z.string(), z.string()).optional(),
-});
-
-export const ModelConfig = z.object({
-    providers: z.record(z.string(), Provider),
-    defaults: z.object({
-        provider: z.string(),
-        model: z.string(),
-    }),
-});
+export { Flavor, Provider, ModelConfig };
 
 const providerMap: Record<string, ProviderV2> = {};
 

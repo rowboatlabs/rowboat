@@ -20,12 +20,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
         working-directory: apps/rowboat
-        
+
+      - name: Verify Rowboat
+        run: npm run verify
+        working-directory: apps/rowboat
+         
       - name: Build Rowboat
         run: npm run build
         working-directory: apps/rowboat
 
-  build-rowboatx:
+  build-cli:
     runs-on: ubuntu-latest
     
     steps:
@@ -34,7 +38,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          cache-dependency-path: 'apps/rowboat/package-lock.json'
+          cache-dependency-path: 'apps/cli/package-lock.json'
           node-version: '24'
           cache: 'npm'
           
@@ -42,6 +46,32 @@ jobs:
         run: npm ci
         working-directory: apps/cli
         
-      - name: Build Rowboat
-        run: npm run build
-        working-directory: apps/cli 
+      - name: Verify CLI
+        run: npm run verify
+        working-directory: apps/cli
+
+  test-desktop-core:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+          cache-dependency-path: 'apps/x/pnpm-lock.yaml'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: apps/x
+
+      - name: Verify desktop app
+        run: pnpm run verify
+        working-directory: apps/x
