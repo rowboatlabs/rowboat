@@ -15,6 +15,7 @@ import { IAbortRegistry, InMemoryAbortRegistry } from "../runs/abort-registry.js
 import { FSAgentScheduleRepo, IAgentScheduleRepo } from "../agent-schedule/repo.js";
 import { FSAgentScheduleStateRepo, IAgentScheduleStateRepo } from "../agent-schedule/state-repo.js";
 import { FSSlackConfigRepo, ISlackConfigRepo } from "../slack/repo.js";
+import type { IBrowserControlService } from "../application/browser-control/service.js";
 
 const container = createContainer({
     injectionMode: InjectionMode.PROXY,
@@ -43,9 +44,8 @@ container.register({
 
 export default container;
 
-export function registerContainerValues(values: Record<string, unknown>): void {
-    const registrations = Object.fromEntries(
-        Object.entries(values).map(([key, value]) => [key, asValue(value)]),
-    );
-    container.register(registrations);
+export function registerBrowserControlService(service: IBrowserControlService): void {
+    container.register({
+        browserControlService: asValue(service),
+    });
 }
