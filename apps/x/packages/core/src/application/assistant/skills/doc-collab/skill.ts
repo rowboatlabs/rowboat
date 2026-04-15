@@ -196,6 +196,18 @@ Embeds external content (YouTube videos, Figma designs, or generic links).
 - \`caption\` (optional): Caption displayed below the embed
 - YouTube and Figma render as iframes; generic shows a link card
 
+### Iframe Block
+Embeds an arbitrary web page or a locally-served dashboard in the note.
+\`\`\`iframe
+{"url": "http://localhost:3210/sites/example-dashboard/", "title": "Trend Dashboard", "height": 640, "caption": "Local dashboard served from sites/example-dashboard"}
+\`\`\`
+- \`url\` (required): Full URL to render. Use \`https://\` for remote sites, or \`http://localhost:3210/sites/<slug>/\` for local dashboards
+- \`title\` (optional): Title shown above the iframe
+- \`height\` (optional): Height in pixels. Good dashboard defaults are 480-800
+- \`caption\` (optional): Caption shown below the iframe
+- \`allow\` (optional): Custom iframe \`allow\` attribute when the page needs extra browser capabilities
+- Remote sites may refuse to render in iframes because of their own CSP / X-Frame-Options headers. When you need a reliable embed, create a local site in \`sites/<slug>/\` and use the localhost URL above
+
 ### Chart Block
 Renders a chart from inline data.
 \`\`\`chart
@@ -220,8 +232,9 @@ Renders a styled table from structured data.
 ### Block Guidelines
 - The JSON must be valid and on a single line (no pretty-printing)
 - Insert blocks using \`workspace-editFile\` just like any other content
-- When the user asks for a chart, table, or embed — use blocks rather than plain Markdown tables or image links
+- When the user asks for a chart, table, embed, or live dashboard — use blocks rather than plain Markdown tables or image links
 - When editing a note that already contains blocks, preserve them unless the user asks to change them
+- For local dashboards and mini apps, put the site files in \`sites/<slug>/\` and point an \`iframe\` block at \`http://localhost:3210/sites/<slug>/\`
 
 ## Best Practices
 

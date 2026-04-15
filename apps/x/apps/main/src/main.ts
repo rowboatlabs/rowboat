@@ -25,6 +25,7 @@ import { init as initAgentRunner } from "@x/core/dist/agent-schedule/runner.js";
 import { init as initAgentNotes } from "@x/core/dist/knowledge/agent_notes.js";
 import { init as initTrackScheduler } from "@x/core/dist/knowledge/track/scheduler.js";
 import { init as initTrackEventProcessor } from "@x/core/dist/knowledge/track/events.js";
+import { init as initLocalSites } from "@x/core/dist/local-sites/server.js";
 
 import { initConfigs } from "@x/core/dist/config/initConfigs.js";
 import started from "electron-squirrel-startup";
@@ -290,6 +291,11 @@ app.whenReady().then(async () => {
 
   // start chrome extension sync server
   initChromeSync();
+
+  // start local sites server for iframe dashboards and other mini apps
+  initLocalSites().catch((error) => {
+    console.error('[LocalSites] Failed to start:', error);
+  });
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
