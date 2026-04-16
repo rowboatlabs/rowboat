@@ -4,6 +4,9 @@ import z from "zod";
 
 export type UserMessageContentType = z.infer<typeof UserMessageContent>;
 export type VoiceOutputMode = 'summary' | 'full';
+export type MiddlePaneContext =
+    | { kind: 'note'; path: string; content: string }
+    | { kind: 'browser'; url: string; title: string };
 
 type EnqueuedMessage = {
     messageId: string;
@@ -11,10 +14,11 @@ type EnqueuedMessage = {
     voiceInput?: boolean;
     voiceOutput?: VoiceOutputMode;
     searchEnabled?: boolean;
+    middlePaneContext?: MiddlePaneContext;
 };
 
 export interface IMessageQueue {
-    enqueue(runId: string, message: UserMessageContentType, voiceInput?: boolean, voiceOutput?: VoiceOutputMode, searchEnabled?: boolean): Promise<string>;
+    enqueue(runId: string, message: UserMessageContentType, voiceInput?: boolean, voiceOutput?: VoiceOutputMode, searchEnabled?: boolean, middlePaneContext?: MiddlePaneContext): Promise<string>;
     dequeue(runId: string): Promise<EnqueuedMessage | null>;
 }
 
@@ -30,7 +34,7 @@ export class InMemoryMessageQueue implements IMessageQueue {
         this.idGenerator = idGenerator;
     }
 
-    async enqueue(runId: string, message: UserMessageContentType, voiceInput?: boolean, voiceOutput?: VoiceOutputMode, searchEnabled?: boolean): Promise<string> {
+    async enqueue(runId: string, message: UserMessageContentType, voiceInput?: boolean, voiceOutput?: VoiceOutputMode, searchEnabled?: boolean, middlePaneContext?: MiddlePaneContext): Promise<string> {
         if (!this.store[runId]) {
             this.store[runId] = [];
         }
@@ -41,6 +45,7 @@ export class InMemoryMessageQueue implements IMessageQueue {
             voiceInput,
             voiceOutput,
             searchEnabled,
+            middlePaneContext,
         });
         return id;
     }

@@ -878,6 +878,10 @@ export async function* streamAgent({
     let voiceInput = false;
     let voiceOutput: 'summary' | 'full' | null = null;
     let searchEnabled = false;
+    let middlePaneContext:
+        | { kind: 'note'; path: string; content: string }
+        | { kind: 'browser'; url: string; title: string }
+        | null = null;
     while (true) {
         // Check abort at the top of each iteration
         signal.throwIfAborted();
@@ -1005,6 +1009,9 @@ export async function* streamAgent({
             if (msg.voiceOutput) {
                 voiceOutput = msg.voiceOutput;
             }
+            // Middle pane is NOT sticky — it should reflect the state at the moment of the
+            // latest user message. If the user closed the pane between messages, clear it.
+            middlePaneContext = msg.middlePaneContext ?? null;
             loopLogger.log('dequeued user message', msg.messageId);
             yield* processEvent({
                 runId,
@@ -1050,6 +1057,19 @@ export async function* streamAgent({
             const agentNotesContext = loadAgentNotesContext();
             if (agentNotesContext) {
                 instructionsWithDateTime += `\n\n${agentNotesContext}`;
+            }
+            // Always inject a Middle Pane section so the LLM has a clear, up-to-date signal
+            // that supersedes any earlier middle-pane mention in the conversation history.
+            const middlePaneHeader = `\n\n# Middle Pane (Current State)\nThis section reflects what the user has open in the middle pane RIGHT NOW, at the time of their latest message. **This is authoritative and overrides any earlier mention of a note or web page in this conversation** — if the conversation history references a different note or browser page, the user has since closed or navigated away from it. Do not treat earlier context as current.\n\n`;
+            if (!middlePaneContext) {
+                loopLogger.log('injecting middle pane context (empty)');
+                instructionsWithDateTime += `${middlePaneHeader}**Nothing relevant is open in the middle pane right now.** The user is not looking at any note or web page. If earlier in this conversation you referenced a note or browser page as "what the user is viewing", that is no longer accurate — do not refer to it as currently open. Answer the user's latest message on its own merits.`;
+            } else if (middlePaneContext.kind === 'note') {
+                loopLogger.log('injecting middle pane context (note)', middlePaneContext.path);
+                instructionsWithDateTime += `${middlePaneHeader}The user has a note open. Its path and full content are provided below so you can reference it when relevant.\n\n**How to use this context:**\n- The user may or may not be talking about this note. Do NOT assume every message is about it.\n- Only reference or act on this note when the user's message clearly relates to it (e.g. "this note", "what I'm looking at", "here", "above", "below", or questions whose subject is plainly this note's content).\n- For unrelated questions (general chat, questions about other notes, tasks, emails, calendar, etc.), ignore this context entirely and answer normally.\n- Do not mention that you can see this note unless it is relevant to the answer.\n\n## Open note path\n${middlePaneContext.path}\n\n## Open note content\n\`\`\`\n${middlePaneContext.content}\n\`\`\``;
+            } else if (middlePaneContext.kind === 'browser') {
+                loopLogger.log('injecting middle pane context (browser)', middlePaneContext.url);
+                instructionsWithDateTime += `${middlePaneHeader}The user has the embedded browser open and is viewing a web page. Only the URL and page title are shown below — the page content itself is NOT included here. If you need the page content to answer, use the browser tools available to you to read the page.\n\n**How to use this context:**\n- The user may or may not be talking about this page. Do NOT assume every message is about it.\n- Only reference or act on this page when the user's message clearly relates to it (e.g. "this page", "this article", "what I'm looking at", "this site", "summarize this").\n- For unrelated questions (general chat, questions about other notes, tasks, emails, calendar, etc.), ignore this context entirely and answer normally.\n- Do not mention that you can see the browser unless it is relevant to the answer.\n\n## Current page\nURL: ${middlePaneContext.url}\nTitle: ${middlePaneContext.title}`;
             }
         }
         if (voiceInput) {

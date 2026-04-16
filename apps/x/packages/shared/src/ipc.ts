@@ -137,6 +137,18 @@ const ipcSchemas = {
       voiceInput: z.boolean().optional(),
       voiceOutput: z.enum(['summary', 'full']).optional(),
       searchEnabled: z.boolean().optional(),
+      middlePaneContext: z.discriminatedUnion('kind', [
+        z.object({
+          kind: z.literal('note'),
+          path: z.string(),
+          content: z.string(),
+        }),
+        z.object({
+          kind: z.literal('browser'),
+          url: z.string(),
+          title: z.string(),
+        }),
+      ]).optional(),
     }),
     res: z.object({
       messageId: z.string(),
