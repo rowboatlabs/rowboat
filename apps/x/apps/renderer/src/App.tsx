@@ -2070,6 +2070,34 @@ function App() {
     return cleanup
   }, [handleRunEvent])
 
+  type MiddlePaneContextPayload =
+    | { kind: 'note'; path: string; content: string }
+    | { kind: 'browser'; url: string; title: string }
+  const buildMiddlePaneContext = async (): Promise<MiddlePaneContextPayload | undefined> => {
+    // Nothing visible in the middle pane when the right pane is maximized.
+    if (isRightPaneMaximized) return undefined
+
+    // Browser is an overlay on top of any note — when it's open, it's what the user is looking at.
+    if (isBrowserOpen) {
+      try {
+        const state = await window.ipc.invoke('browser:getState', null)
+        const activeTab = state.tabs.find((t) => t.id === state.activeTabId)
+        if (activeTab) {
+          return { kind: 'browser', url: activeTab.url, title: activeTab.title }
+        }
+      } catch {
+        // fall through to no-context if browser state is unavailable
+      }
+      return undefined
+    }
+
+    // Note case: only markdown files are meaningfully readable as context.
+    const path = selectedPathRef.current
+    if (!path || !path.endsWith('.md')) return undefined
+    const content = editorContentRef.current ?? ''
+    return { kind: 'note', path, content }
+  }
+
   const handlePromptSubmit = async (
     message: PromptInputMessage,
     mentions?: FileMention[],
@@ -2173,12 +2201,14 @@ function App() {
 
         // Shared IPC payload types can lag until package rebuilds; runtime validation still enforces schema.
         const attachmentPayload = contentParts as unknown as string
+        const middlePaneContext = await buildMiddlePaneContext()
         await window.ipc.invoke('runs:createMessage', {
           runId: currentRunId,
           message: attachmentPayload,
           voiceInput: pendingVoiceInputRef.current || undefined,
           voiceOutput: ttsEnabledRef.current ? ttsModeRef.current : undefined,
           searchEnabled: searchEnabled || undefined,
+          middlePaneContext,
         })
         analytics.chatMessageSent({
           voiceInput: pendingVoiceInputRef.current || undefined,
@@ -2186,12 +2216,14 @@ function App() {
           searchEnabled: searchEnabled || undefined,
         })
       } else {
+        const middlePaneContext = await buildMiddlePaneContext()
         await window.ipc.invoke('runs:createMessage', {
           runId: currentRunId,
           message: userMessage,
           voiceInput: pendingVoiceInputRef.current || undefined,
           voiceOutput: ttsEnabledRef.current ? ttsModeRef.current : undefined,
           searchEnabled: searchEnabled || undefined,
+          middlePaneContext,
         })
         analytics.chatMessageSent({
           voiceInput: pendingVoiceInputRef.current || undefined,
