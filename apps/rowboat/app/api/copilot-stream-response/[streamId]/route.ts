@@ -10,6 +10,15 @@ export async function GET(request: Request, props: { params: Promise<{ streamId:
   // get user data
   const user = await requireAuth();
 
+  // Validate auth token
+  const apiKey = request.headers.get("Authorization")?.split(" ")[1];
+  if (!apiKey) {
+    return new Response(JSON.stringify({ error: "Missing or invalid Authorization header" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
   const runCopilotCachedTurnController = container.resolve<IRunCopilotCachedTurnController>("runCopilotCachedTurnController");
 
   const encoder = new TextEncoder();
@@ -21,7 +30,7 @@ export async function GET(request: Request, props: { params: Promise<{ streamId:
         for await (const event of runCopilotCachedTurnController.execute({
           caller: "user",
           userId: user.id,
-          apiKey: request.headers.get("Authorization")?.split(" ")[1],
+          apiKey,
           key: params.streamId,
         })) {
           // Check if this is a content event
