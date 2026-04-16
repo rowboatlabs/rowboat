@@ -199,12 +199,11 @@ Embeds external content (YouTube videos, Figma designs, or generic links).
 ### Iframe Block
 Embeds an arbitrary web page or a locally-served dashboard in the note.
 \`\`\`iframe
-{"url": "http://localhost:3210/sites/example-dashboard/", "title": "Trend Dashboard", "height": 640, "caption": "Local dashboard served from sites/example-dashboard"}
+{"url": "http://localhost:3210/sites/example-dashboard/", "title": "Trend Dashboard", "height": 640}
 \`\`\`
 - \`url\` (required): Full URL to render. Use \`https://\` for remote sites, or \`http://localhost:3210/sites/<slug>/\` for local dashboards
 - \`title\` (optional): Title shown above the iframe
 - \`height\` (optional): Height in pixels. Good dashboard defaults are 480-800
-- \`caption\` (optional): Caption shown below the iframe
 - \`allow\` (optional): Custom iframe \`allow\` attribute when the page needs extra browser capabilities
 - Remote sites may refuse to render in iframes because of their own CSP / X-Frame-Options headers. When you need a reliable embed, create a local site in \`sites/<slug>/\` and use the localhost URL above
 
