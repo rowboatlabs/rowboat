@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import type { Server } from 'node:http';
+import chokidar, { type FSWatcher } from 'chokidar';
 import express from 'express';
 import { WorkDir } from '../config/config.js';
 import { LOCAL_SITE_SCAFFOLD } from './templates.js';
@@ -12,6 +13,11 @@ export const LOCAL_SITES_BASE_URL = `http://localhost:${LOCAL_SITES_PORT}`;
 const LOCAL_SITES_DIR = path.join(WorkDir, 'sites');
 const SITE_SLUG_RE = /^[a-z0-9][a-z0-9-_]*$/i;
 const IFRAME_HEIGHT_MESSAGE = 'rowboat:iframe-height';
+const SITE_RELOAD_MESSAGE = 'rowboat:site-changed';
+const SITE_EVENTS_PATH = '__rowboat_events';
+const SITE_RELOAD_DEBOUNCE_MS = 140;
+const SITE_EVENTS_RETRY_MS = 1000;
+const SITE_EVENTS_HEARTBEAT_MS = 15000;
 const TEXT_EXTENSIONS = new Set([
   '.css',
   '.html',
@@ -43,6 +49,59 @@ const MIME_TYPES: Record<string, string> = {
 };
 const IFRAME_AUTOSIZE_BOOTSTRAP = String.raw`<script>
 (() => {
+  const SITE_CHANGED_MESSAGE = '__ROWBOAT_SITE_CHANGED_MESSAGE__';
+  const SITE_EVENTS_PATH = '__ROWBOAT_SITE_EVENTS_PATH__';
+  let reloadRequested = false;
+  let reloadSource = null;
+
+  const getSiteSlug = () => {
+    const match = window.location.pathname.match(/^\/sites\/([^/]+)/i);
+    return match ? decodeURIComponent(match[1]) : null;
+  };
+
+  const scheduleReload = () => {
+    if (reloadRequested) return;
+    reloadRequested = true;
+    try {
+      reloadSource?.close();
+    } catch {
+      // ignore close failures
+    }
+    window.setTimeout(() => {
+      window.location.reload();
+    }, 80);
+  };
+
+  const connectLiveReload = () => {
+    const siteSlug = getSiteSlug();
+    if (!siteSlug || typeof EventSource === 'undefined') return;
+
+    const streamUrl = new URL('/sites/' + encodeURIComponent(siteSlug) + '/' + SITE_EVENTS_PATH, window.location.origin);
+    const source = new EventSource(streamUrl.toString());
+    reloadSource = source;
+
+    source.addEventListener('message', (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        if (payload?.type === SITE_CHANGED_MESSAGE) {
+          scheduleReload();
+        }
+      } catch {
+        // ignore malformed payloads
+      }
+    });
+
+    window.addEventListener('beforeunload', () => {
+      try {
+        source.close();
+      } catch {
+        // ignore close failures
+      }
+    }, { once: true });
+  };
+
+  connectLiveReload();
+
   if (window.parent === window || typeof window.parent?.postMessage !== 'function') return;
 
   const MESSAGE_TYPE = '__ROWBOAT_IFRAME_HEIGHT_MESSAGE__';
@@ -120,6 +179,9 @@ const IFRAME_AUTOSIZE_BOOTSTRAP = String.raw`<script>
 
 let localSitesServer: Server | null = null;
 let startPromise: Promise<void> | null = null;
+let localSitesWatcher: FSWatcher | null = null;
+const siteEventClients = new Map<string, Set<express.Response>>();
+const siteReloadTimers = new Map<string, NodeJS.Timeout>();
 
 function isSafeSiteSlug(siteSlug: string): boolean {
   return SITE_SLUG_RE.test(siteSlug);
@@ -188,11 +250,139 @@ async function ensureLocalSiteScaffold(): Promise<void> {
 }
 
 function injectIframeAutosizeBootstrap(html: string): string {
-  const bootstrap = IFRAME_AUTOSIZE_BOOTSTRAP.replace('__ROWBOAT_IFRAME_HEIGHT_MESSAGE__', IFRAME_HEIGHT_MESSAGE)
+  const bootstrap = IFRAME_AUTOSIZE_BOOTSTRAP
+    .replace('__ROWBOAT_IFRAME_HEIGHT_MESSAGE__', IFRAME_HEIGHT_MESSAGE)
+    .replace('__ROWBOAT_SITE_CHANGED_MESSAGE__', SITE_RELOAD_MESSAGE)
+    .replace('__ROWBOAT_SITE_EVENTS_PATH__', SITE_EVENTS_PATH)
   if (/<\/body>/i.test(html)) {
     return html.replace(/<\/body>/i, `${bootstrap}\n</body>`)
   }
   return `${html}\n${bootstrap}`
+}
+
+function getSiteSlugFromAbsolutePath(absolutePath: string): string | null {
+  const relativePath = path.relative(LOCAL_SITES_DIR, absolutePath);
+  if (!relativePath || relativePath === '.' || relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+    return null;
+  }
+
+  const [siteSlug] = relativePath.split(path.sep);
+  return siteSlug && isSafeSiteSlug(siteSlug) ? siteSlug : null;
+}
+
+function removeSiteEventClient(siteSlug: string, res: express.Response): void {
+  const clients = siteEventClients.get(siteSlug);
+  if (!clients) return;
+  clients.delete(res);
+  if (clients.size === 0) {
+    siteEventClients.delete(siteSlug);
+  }
+}
+
+function broadcastSiteReload(siteSlug: string, changedPath: string): void {
+  const clients = siteEventClients.get(siteSlug);
+  if (!clients || clients.size === 0) return;
+
+  const payload = JSON.stringify({
+    type: SITE_RELOAD_MESSAGE,
+    siteSlug,
+    changedPath,
+    at: Date.now(),
+  });
+
+  for (const res of Array.from(clients)) {
+    try {
+      res.write(`data: ${payload}\n\n`);
+    } catch {
+      removeSiteEventClient(siteSlug, res);
+    }
+  }
+}
+
+function scheduleSiteReload(siteSlug: string, changedPath: string): void {
+  const existingTimer = siteReloadTimers.get(siteSlug);
+  if (existingTimer) {
+    clearTimeout(existingTimer);
+  }
+
+  const timer = setTimeout(() => {
+    siteReloadTimers.delete(siteSlug);
+    broadcastSiteReload(siteSlug, changedPath);
+  }, SITE_RELOAD_DEBOUNCE_MS);
+
+  siteReloadTimers.set(siteSlug, timer);
+}
+
+async function startSiteWatcher(): Promise<void> {
+  if (localSitesWatcher) return;
+
+  const watcher = chokidar.watch(LOCAL_SITES_DIR, {
+    ignoreInitial: true,
+    awaitWriteFinish: {
+      stabilityThreshold: 180,
+      pollInterval: 50,
+    },
+  });
+
+  watcher
+    .on('all', (eventName, absolutePath) => {
+      if (!['add', 'addDir', 'change', 'unlink', 'unlinkDir'].includes(eventName)) return;
+
+      const siteSlug = getSiteSlugFromAbsolutePath(absolutePath);
+      if (!siteSlug) return;
+
+      const siteRoot = path.join(LOCAL_SITES_DIR, siteSlug);
+      const relativePath = path.relative(siteRoot, absolutePath);
+      const normalizedPath = !relativePath || relativePath === '.'
+        ? '.'
+        : relativePath.split(path.sep).join('/');
+
+      scheduleSiteReload(siteSlug, normalizedPath);
+    })
+    .on('error', (error: unknown) => {
+      console.error('[LocalSites] Watcher error:', error);
+    });
+
+  localSitesWatcher = watcher;
+}
+
+function handleSiteEventsRequest(req: express.Request, res: express.Response): void {
+  const siteSlugParam = req.params.siteSlug;
+  const siteSlug = Array.isArray(siteSlugParam) ? siteSlugParam[0] : siteSlugParam;
+  if (!siteSlug || !isSafeSiteSlug(siteSlug)) {
+    res.status(400).json({ error: 'Invalid site slug' });
+    return;
+  }
+
+  const clients = siteEventClients.get(siteSlug) ?? new Set<express.Response>();
+  siteEventClients.set(siteSlug, clients);
+  clients.add(res);
+
+  res.status(200);
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders?.();
+  res.write(`retry: ${SITE_EVENTS_RETRY_MS}\n`);
+  res.write(`event: ready\ndata: {"ok":true}\n\n`);
+
+  const heartbeat = setInterval(() => {
+    try {
+      res.write(`: keepalive ${Date.now()}\n\n`);
+    } catch {
+      clearInterval(heartbeat);
+      removeSiteEventClient(siteSlug, res);
+    }
+  }, SITE_EVENTS_HEARTBEAT_MS);
+
+  const cleanup = () => {
+    clearInterval(heartbeat);
+    removeSiteEventClient(siteSlug, res);
+  };
+
+  req.on('close', cleanup);
+  res.on('close', cleanup);
 }
 
 async function respondWithFile(res: express.Response, filePath: string, method: string): Promise<void> {
@@ -203,7 +393,8 @@ async function respondWithFile(res: express.Response, filePath: string, method: 
   res.status(200);
   res.setHeader('Content-Type', mimeType);
   res.setHeader('Content-Length', String(stats.size));
-  res.setHeader('Cache-Control', extension === '.html' ? 'no-cache' : 'public, max-age=60');
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Pragma', 'no-cache');
 
   if (method === 'HEAD') {
     res.end();
@@ -313,6 +504,10 @@ function createLocalSitesApp(): express.Express {
     });
   });
 
+  app.get(`/sites/:siteSlug/${SITE_EVENTS_PATH}`, (req, res) => {
+    handleSiteEventsRequest(req, res);
+  });
+
   app.use('/sites/:siteSlug', (req, res) => {
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       res.status(405).json({ error: 'Method not allowed' });
@@ -357,11 +552,55 @@ export async function init(): Promise<void> {
   if (startPromise) return startPromise;
 
   startPromise = (async () => {
-    await ensureLocalSiteScaffold();
-    await startServer();
+    try {
+      await ensureLocalSiteScaffold();
+      await startSiteWatcher();
+      await startServer();
+    } catch (error) {
+      await shutdown();
+      throw error;
+    }
   })().finally(() => {
     startPromise = null;
   });
 
   return startPromise;
+}
+
+export async function shutdown(): Promise<void> {
+  const watcher = localSitesWatcher;
+  localSitesWatcher = null;
+  if (watcher) {
+    await watcher.close();
+  }
+
+  for (const timer of siteReloadTimers.values()) {
+    clearTimeout(timer);
+  }
+  siteReloadTimers.clear();
+
+  for (const clients of siteEventClients.values()) {
+    for (const res of clients) {
+      try {
+        res.end();
+      } catch {
+        // ignore close failures
+      }
+    }
+  }
+  siteEventClients.clear();
+
+  const server = localSitesServer;
+  localSitesServer = null;
+  if (!server) return;
+
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
 }

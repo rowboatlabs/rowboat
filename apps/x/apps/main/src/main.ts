@@ -25,7 +25,7 @@ import { init as initAgentRunner } from "@x/core/dist/agent-schedule/runner.js";
 import { init as initAgentNotes } from "@x/core/dist/knowledge/agent_notes.js";
 import { init as initTrackScheduler } from "@x/core/dist/knowledge/track/scheduler.js";
 import { init as initTrackEventProcessor } from "@x/core/dist/knowledge/track/events.js";
-import { init as initLocalSites } from "@x/core/dist/local-sites/server.js";
+import { init as initLocalSites, shutdown as shutdownLocalSites } from "@x/core/dist/local-sites/server.js";
 
 import { initConfigs } from "@x/core/dist/config/initConfigs.js";
 import started from "electron-squirrel-startup";
@@ -315,4 +315,7 @@ app.on("before-quit", () => {
   stopWorkspaceWatcher();
   stopRunsWatcher();
   stopServicesWatcher();
+  shutdownLocalSites().catch((error) => {
+    console.error('[LocalSites] Failed to shut down cleanly:', error);
+  });
 });
