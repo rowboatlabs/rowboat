@@ -12,7 +12,7 @@ class UserMessage(BaseModel):
 class AssistantMessage(BaseModel):
     role: Literal['assistant']
     content: str
-    agenticName: Optional[str] = None
+    agentName: Optional[str] = None
     responseType: Literal['internal', 'external']
 
 class FunctionCall(BaseModel):
@@ -28,7 +28,7 @@ class AssistantMessageWithToolCalls(BaseModel):
     role: Literal['assistant']
     content: Optional[str] = None
     toolCalls: List[ToolCall]
-    agenticName: Optional[str] = None
+    agentName: Optional[str] = None
 
 class ToolMessage(BaseModel):
     role: Literal['tool']
