@@ -143,7 +143,7 @@ export function SuggestedTopicsView({ onExploreTopic }: SuggestedTopicsViewProps
               // Try next legacy location.
             }
           }
-          if (!legacyResult || !legacyPath) {
+          if (!legacyResult || !legacyPath || legacyResult.data === undefined) {
             throw new Error('Suggested topics file not found')
           }
           await window.ipc.invoke('workspace:writeFile', {
