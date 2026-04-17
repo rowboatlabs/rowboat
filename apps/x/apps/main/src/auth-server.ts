@@ -29,7 +29,7 @@ export function createAuthServer(
   onCallback: (callbackUrl: URL) => void | Promise<void>
 ): Promise<AuthServerResult> {
   return new Promise((resolve, reject) => {
-    const server = createServer((req, res) => {
+    const server = createServer(async (req, res) => {
       if (!req.url) {
         res.writeHead(400);
         res.end('Bad Request');
@@ -64,27 +64,51 @@ export function createAuthServer(
           return;
         }
 
-        // Handle callback - pass full URL so params like iss (OpenID Connect) are preserved for token exchange
-        onCallback(url);
+        try {
+          // Handle callback - pass full URL so params like iss (OpenID Connect)
+          // are preserved for token exchange.
+          await onCallback(url);
 
-        res.writeHead(200, { 'Content-Type': 'text/html' });
-        res.end(`
-          <!DOCTYPE html>
-          <html>
-            <head>
-              <title>Authorization Successful</title>
-              <style>
-                body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
-                .success { color: #2e7d32; }
-              </style>
-            </head>
-            <body>
-              <h1 class="success">Authorization Successful</h1>
-              <p>You can close this window.</p>
-              <script>setTimeout(() => window.close(), 2000);</script>
-            </body>
-          </html>
-        `);
+          res.writeHead(200, { 'Content-Type': 'text/html' });
+          res.end(`
+            <!DOCTYPE html>
+            <html>
+              <head>
+                <title>Authorization Successful</title>
+                <style>
+                  body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+                  .success { color: #2e7d32; }
+                </style>
+              </head>
+              <body>
+                <h1 class="success">Authorization Successful</h1>
+                <p>You can close this window.</p>
+                <script>setTimeout(() => window.close(), 2000);</script>
+              </body>
+            </html>
+          `);
+        } catch (callbackError) {
+          const message = callbackError instanceof Error ? callbackError.message : String(callbackError);
+          res.writeHead(200, { 'Content-Type': 'text/html' });
+          res.end(`
+            <!DOCTYPE html>
+            <html>
+              <head>
+                <title>OAuth Error</title>
+                <style>
+                  body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+                  .error { color: #d32f2f; }
+                </style>
+              </head>
+              <body>
+                <h1 class="error">Authorization Failed</h1>
+                <p>Error: ${escapeHtml(message)}</p>
+                <p>You can close this window.</p>
+                <script>setTimeout(() => window.close(), 3000);</script>
+              </body>
+            </html>
+          `);
+        }
       } else {
         res.writeHead(404);
         res.end('Not Found');
@@ -104,4 +128,3 @@ export function createAuthServer(
     });
   });
 }
-
