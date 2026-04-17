@@ -116,21 +116,26 @@ protocol.registerSchemesAsPrivileged([
   },
 ]);
 
-const ALLOWED_SESSION_PERMISSIONS = new Set(["media", "display-capture", "clipboard-read", "clipboard-sanitized-write"]);
+const APP_SESSION_PERMISSIONS = new Set(["media", "display-capture", "clipboard-read", "clipboard-sanitized-write"]);
+const BROWSER_SESSION_PERMISSIONS = new Set(["clipboard-read", "clipboard-sanitized-write"]);
 
-function configureSessionPermissions(targetSession: Session): void {
+function configureSessionPermissions(targetSession: Session, allowedPermissions: Set<string>): void {
   targetSession.setPermissionCheckHandler((_webContents, permission) => {
-    return ALLOWED_SESSION_PERMISSIONS.has(permission);
+    return allowedPermissions.has(permission);
   });
 
   targetSession.setPermissionRequestHandler((_webContents, permission, callback) => {
-    callback(ALLOWED_SESSION_PERMISSIONS.has(permission));
+    callback(allowedPermissions.has(permission));
   });
 
-  // Auto-approve display media requests and route system audio as loopback.
-  // Electron requires a video source in the callback even if we only want audio.
-  // We pass the first available screen source; the renderer discards the video track.
+  // Only sessions that explicitly allow display-capture should receive an
+  // auto-approved source. Embedded browser tabs use a separate session with a
+  // narrower permission set.
   targetSession.setDisplayMediaRequestHandler(async (_request, callback) => {
+    if (!allowedPermissions.has("display-capture")) {
+      callback({});
+      return;
+    }
     const sources = await desktopCapturer.getSources({ types: ['screen'] });
     if (sources.length === 0) {
       callback({});
@@ -159,8 +164,8 @@ function createWindow() {
     },
   });
 
-  configureSessionPermissions(session.defaultSession);
-  configureSessionPermissions(session.fromPartition(BROWSER_PARTITION));
+  configureSessionPermissions(session.defaultSession, APP_SESSION_PERMISSIONS);
+  configureSessionPermissions(session.fromPartition(BROWSER_PARTITION), BROWSER_SESSION_PERMISSIONS);
 
   // Show window when content is ready to prevent blank screen
   win.once("ready-to-show", () => {
