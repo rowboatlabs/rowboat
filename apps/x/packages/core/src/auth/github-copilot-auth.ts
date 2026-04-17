@@ -180,9 +180,45 @@ export async function getGitHubCopilotAuthStatus(): Promise<{
 /**
  * Disconnect GitHub Copilot (remove stored tokens)
  */
+/**
+ * Get GitHub Copilot API Token (exchange OAuth token for Copilot JWT)
+ */
+let cachedCopilotToken: { token: string; expiresAt: number } | null = null;
+
+export async function getGitHubCopilotApiToken(): Promise<string> {
+  // Return cached token if valid (with 5 min buffer)
+  if (cachedCopilotToken && cachedCopilotToken.expiresAt > Date.now() / 1000 + 300) {
+    return cachedCopilotToken.token;
+  }
+
+  const oauthToken = await getGitHubCopilotAccessToken();
+  
+  const response = await fetch('https://api.github.com/copilot_internal/v2/token', {
+    headers: {
+      'Authorization': `Bearer ${oauthToken}`,
+      'Accept': 'application/json',
+      'User-Agent': 'GithubCopilot/1.155.0'
+    }
+  });
+
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`Failed to get Copilot token: ${response.status} ${err}`);
+  }
+
+  const data = await response.json() as { token: string; expires_at: number };
+  cachedCopilotToken = {
+    token: data.token,
+    expiresAt: data.expires_at
+  };
+
+  return data.token;
+}
+
 export async function disconnectGitHubCopilot(): Promise<void> {
   console.log('[GitHub Copilot] Disconnecting...');
   const oauthRepo = container.resolve<IOAuthRepo>('oauthRepo');
   await oauthRepo.delete(PROVIDER_NAME);
+  cachedCopilotToken = null;
   console.log('[GitHub Copilot] Disconnected successfully');
 }

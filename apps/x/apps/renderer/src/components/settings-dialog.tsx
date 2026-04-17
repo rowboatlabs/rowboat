@@ -214,6 +214,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
   const [configLoading, setConfigLoading] = useState(true)
   const [showMoreProviders, setShowMoreProviders] = useState(false)
   const [githubCopilotCode, setGithubCopilotCode] = useState<{ userCode: string; verificationUri: string } | null>(null)
+  const [githubCopilotAuthenticated, setGithubCopilotAuthenticated] = useState<boolean>(false)
 
   const activeConfig = providerConfigs[provider]
   const showApiKey = provider === "openai" || provider === "anthropic" || provider === "google" || provider === "openrouter" || provider === "aigateway" || provider === "openai-compatible"
@@ -223,7 +224,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
   const isLocalProvider = provider === "ollama" || provider === "openai-compatible"
   const isGitHubCopilot = provider === "github-copilot"
   const modelsForProvider = modelsCatalog[provider] || []
-  const showModelInput = isLocalProvider || modelsForProvider.length === 0 || isGitHubCopilot
+  const showModelInput = isLocalProvider || modelsForProvider.length === 0
   const isMoreProvider = moreProviders.some(p => p.id === provider)
 
   const primaryModel = activeConfig.models[0] || ""
@@ -336,6 +337,23 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
 
     loadCurrentConfig()
   }, [dialogOpen])
+
+  // Check GitHub Copilot auth status
+  useEffect(() => {
+    if (!dialogOpen || provider !== "github-copilot") return;
+    
+    async function checkCopilotAuth() {
+      try {
+        const result = await window.ipc.invoke("github-copilot:isAuthenticated", null);
+        setGithubCopilotAuthenticated(!!result.authenticated);
+      } catch (error) {
+        console.error("Error checking Copilot auth:", error);
+        setGithubCopilotAuthenticated(false);
+      }
+    }
+    
+    checkCopilotAuth();
+  }, [dialogOpen, provider]);
 
   // Load models catalog
   useEffect(() => {
@@ -693,7 +711,44 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
         <div className="space-y-3 border rounded-lg p-3 bg-muted/30">
           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Authentication</span>
           
-          {!githubCopilotCode ? (
+          {githubCopilotAuthenticated ? (
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center justify-between p-2 border rounded bg-background/50">
+                <div className="flex items-center gap-2 text-sm">
+                  <CheckCircle2 className="size-4 text-green-500" />
+                  <span className="font-medium">Connected to GitHub</span>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
+                  onClick={async () => {
+                    try {
+                      setTestState({ status: "testing" });
+                      const result = await window.ipc.invoke("github-copilot:disconnect", null);
+                      if (result.success) {
+                        setGithubCopilotAuthenticated(false);
+                        setGithubCopilotCode(null);
+                        setTestState({ status: "idle" });
+                        toast.success("Disconnected successfully");
+                      } else {
+                        toast.error(result.error || "Failed to disconnect");
+                        setTestState({ status: "error", error: result.error });
+                      }
+                    } catch (error) {
+                      toast.error("Error disconnecting");
+                      setTestState({ status: "idle" });
+                    }
+                  }}
+                >
+                  Disconnect
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Your device is authenticated. You can select any model from the dropdown above to start using GitHub Copilot.
+              </p>
+            </div>
+          ) : !githubCopilotCode ? (
             <>
               <p className="text-xs text-muted-foreground">
                 GitHub Copilot uses Device Flow OAuth. Click below to get a device code.
@@ -786,6 +841,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
                         if (authCheck.authenticated) {
                           setTestState({ status: "success" });
                           setGithubCopilotCode(null);
+                          setGithubCopilotAuthenticated(true);
                           toast.success("GitHub Copilot authenticated!");
                           
                           // Reload models

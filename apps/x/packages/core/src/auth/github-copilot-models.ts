@@ -4,23 +4,31 @@
  * Handles GitHub Copilot model discovery and LLM provider initialization
  */
 
-import { getGitHubCopilotAccessToken, isGitHubCopilotAuthenticated } from './github-copilot-auth.js';
+import { getGitHubCopilotApiToken, isGitHubCopilotAuthenticated } from './github-copilot-auth.js';
 import { ProviderV2 } from '@ai-sdk/provider';
-import { createOpenAI } from '@ai-sdk/openai';
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import z from 'zod';
 import { LlmProvider } from '@x/shared/dist/models.js';
 
 // GitHub Copilot API endpoint
-const GITHUB_COPILOT_API_BASE = 'https://models.github.com/api/openai/';
+const GITHUB_COPILOT_API_BASE = 'https://api.githubcopilot.com/';
 
 // List of models available through GitHub Copilot
 // Based on GitHub Copilot API documentation
 // https://docs.github.com/en/copilot/using-github-copilot/asking-github-copilot-questions
 export const GITHUB_COPILOT_MODELS = [
-  'gpt-4o',          // GPT-4 Optimized (recommended)
-  'gpt-4-turbo',     // GPT-4 Turbo
-  'gpt-3.5-turbo',   // GPT-3.5 Turbo (fastest)
-  'claude-3.5-sonnet', // Claude 3.5 Sonnet (if available in plan)
+  'gpt-5.4-mini',
+  'gpt-5-mini',
+  'grok-code-fast-1',
+  'claude-haiku-4.5',
+  'gemini-3-flash-preview',
+  'gpt-5.2',
+  'gpt-4.1',
+  'gpt-4o',
+  'gemini-3.1-pro-preview',
+  'gpt-5.2-codex',
+  'gpt-5.3-codex',
+  'gemini-2.5-pro'
 ] as const;
 
 export type GitHubCopilotModel = typeof GITHUB_COPILOT_MODELS[number];
@@ -57,16 +65,20 @@ export async function createGitHubCopilotProvider(
     );
   }
 
-  // Get access token (will handle refresh if needed)
-  const accessToken = await getGitHubCopilotAccessToken();
+  // Get Copilot API token (handles refresh if needed)
+  const accessToken = await getGitHubCopilotApiToken();
 
   // Create OpenAI-compatible provider with GitHub Copilot endpoint
-  return createOpenAI({
+  return createOpenAICompatible({
+    name: "github-copilot",
     apiKey: accessToken,
     baseURL: config.baseURL || GITHUB_COPILOT_API_BASE,
     headers: {
       ...config.headers,
-      'user-agent': 'Rowboat/1.0',
+      'Editor-Version': 'vscode/1.88.0',
+      'Editor-Plugin-Version': 'copilot-chat/0.14.0',
+      'User-Agent': 'GitHubCopilotChat/0.14.0',
+      'Accept': '*/*',
     },
   });
 }
@@ -88,7 +100,7 @@ export async function testGitHubCopilotConnection(): Promise<{ success: boolean;
     }
 
     // Try to get access token
-    await getGitHubCopilotAccessToken();
+    await getGitHubCopilotApiToken();
 
     return { success: true };
   } catch (error) {

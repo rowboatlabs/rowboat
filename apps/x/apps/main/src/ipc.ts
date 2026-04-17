@@ -29,7 +29,7 @@ import { isSignedIn } from '@x/core/dist/account/account.js';
 import { listGatewayModels } from '@x/core/dist/models/gateway.js';
 import type { IModelConfigRepo } from '@x/core/dist/models/repo.js';
 import type { IOAuthRepo } from '@x/core/dist/auth/repo.js';
-import { startGitHubCopilotAuthentication, getGitHubCopilotAccessToken, isGitHubCopilotAuthenticated, disconnectGitHubCopilot } from '@x/core/dist/auth/github-copilot-auth.js';
+import { startGitHubCopilotAuthentication, isGitHubCopilotAuthenticated, disconnectGitHubCopilot } from '@x/core/dist/auth/github-copilot-auth.js';
 import { IGranolaConfigRepo } from '@x/core/dist/knowledge/granola/repo.js';
 import { triggerSync as triggerGranolaSync } from '@x/core/dist/knowledge/granola/sync.js';
 import { ISlackConfigRepo } from '@x/core/dist/slack/repo.js';
