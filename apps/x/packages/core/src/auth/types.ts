@@ -7,7 +7,7 @@ export const OAuthTokens = z.object({
   access_token: z.string(),
   refresh_token: z.string().nullable(),
   expires_at: z.number(), // Unix timestamp
-  token_type: z.literal('Bearer').optional(),
+  token_type: z.string().optional(), // Accept any token type (Bearer, bearer, etc.)
   scopes: z.array(z.string()).optional(), // Granted scopes from OAuth response
 });
 

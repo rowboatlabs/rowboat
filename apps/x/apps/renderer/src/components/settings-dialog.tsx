@@ -213,6 +213,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
   const [testState, setTestState] = useState<{ status: "idle" | "testing" | "success" | "error"; error?: string }>({ status: "idle" })
   const [configLoading, setConfigLoading] = useState(true)
   const [showMoreProviders, setShowMoreProviders] = useState(false)
+  const [githubCopilotCode, setGithubCopilotCode] = useState<{ userCode: string; verificationUri: string } | null>(null)
 
   const activeConfig = providerConfigs[provider]
   const showApiKey = provider === "openai" || provider === "anthropic" || provider === "google" || provider === "openrouter" || provider === "aigateway" || provider === "openai-compatible"
@@ -689,67 +690,155 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
 
       {/* GitHub Copilot Authentication */}
       {isGitHubCopilot && (
-        <div className="space-y-2">
+        <div className="space-y-3 border rounded-lg p-3 bg-muted/30">
           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Authentication</span>
-          <p className="text-xs text-muted-foreground">GitHub Copilot uses Device Flow OAuth for authentication. Click the button to authenticate with your GitHub account.</p>
-          <Button
-            onClick={async () => {
-              try {
-                setTestState({ status: "testing" });
-                const result = await window.ipc.invoke("github-copilot:authenticate", null);
-                
-                if (!result.success) {
-                  setTestState({ status: "error", error: result.error });
-                  toast.error(`Authentication failed: ${result.error}`);
-                  return;
-                }
-
-                // Show device code to user
-                const deviceCode = result.userCode;
-                const verificationUri = result.verificationUri;
-                
-                toast.info(
-                  `1. Open: ${verificationUri}\n2. Enter code: ${deviceCode}`,
-                  { duration: 60000 }
-                );
-
-                // Open verification URI in browser
-                window.open(verificationUri, '_blank');
-
-                // Wait a moment then check if authenticated
-                setTimeout(async () => {
-                  const authCheck = await window.ipc.invoke("github-copilot:isAuthenticated", null);
-                  if (authCheck.authenticated) {
-                    setTestState({ status: "success" });
-                    toast.success("GitHub Copilot authenticated!");
-                    // Reload models after successful auth
-                    const modelsResult = await window.ipc.invoke("models:list", null);
-                    const catalog: Record<string, any[]> = {};
-                    for (const p of modelsResult.providers || []) {
-                      catalog[p.id] = p.models || [];
+          
+          {!githubCopilotCode ? (
+            <>
+              <p className="text-xs text-muted-foreground">
+                GitHub Copilot uses Device Flow OAuth. Click below to get a device code.
+              </p>
+              <Button
+                onClick={async () => {
+                  try {
+                    setTestState({ status: "testing" });
+                    const result = await window.ipc.invoke("github-copilot:authenticate", null);
+                    
+                    if (!result.success) {
+                      setTestState({ status: "error", error: result.error });
+                      toast.error(`Error: ${result.error}`);
+                      return;
                     }
-                    setModelsCatalog(catalog);
+
+                    // Store code permanently on screen
+                    setGithubCopilotCode({
+                      userCode: result.userCode,
+                      verificationUri: result.verificationUri,
+                    });
+                    
+                    setTestState({ status: "idle" });
+                    toast.success("Device code ready! Follow the instructions below.");
+                    
+                    // Open GitHub automatically
+                    window.open(result.verificationUri, '_blank');
+                  } catch (error) {
+                    const errorMsg = error instanceof Error ? error.message : "Authentication error";
+                    setTestState({ status: "error", error: errorMsg });
+                    toast.error(`Error: ${errorMsg}`);
                   }
-                }, 3000);
-              } catch (error) {
-                const errorMsg = error instanceof Error ? error.message : "Authentication error";
-                setTestState({ status: "error", error: errorMsg });
-                toast.error(`Error: ${errorMsg}`);
-              }
-            }}
-            variant="outline"
-            className="w-full"
-            disabled={testState.status === "testing"}
-          >
-            {testState.status === "testing" ? (
-              <>
-                <Loader2 className="size-4 animate-spin mr-2" />
-                Authenticating...
-              </>
-            ) : (
-              "Authenticate with GitHub"
-            )}
-          </Button>
+                }}
+                variant="outline"
+                className="w-full"
+                disabled={testState.status === "testing"}
+              >
+                {testState.status === "testing" ? (
+                  <>
+                    <Loader2 className="size-4 animate-spin mr-2" />
+                    Getting device code...
+                  </>
+                ) : (
+                  "Get Device Code"
+                )}
+              </Button>
+            </>
+          ) : (
+            <>
+              <div className="space-y-3">
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1">1. Enter this code on GitHub:</p>
+                  <div className="flex gap-2">
+                    <code className="flex-1 bg-background border rounded px-3 py-2 text-sm font-mono text-foreground">
+                      {githubCopilotCode.userCode}
+                    </code>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        navigator.clipboard.writeText(githubCopilotCode.userCode);
+                        toast.success("Code copied!");
+                      }}
+                    >
+                      Copy
+                    </Button>
+                  </div>
+                </div>
+
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1">2. Open this URL (already opened in browser):</p>
+                  <Button
+                    variant="link"
+                    size="sm"
+                    className="h-auto p-0 text-xs"
+                    onClick={() => window.open(githubCopilotCode.verificationUri, '_blank')}
+                  >
+                    {githubCopilotCode.verificationUri}
+                  </Button>
+                </div>
+
+                <div>
+                  <p className="text-xs text-muted-foreground mb-2">3. After authorizing on GitHub, click the button below:</p>
+                  <Button
+                    onClick={async () => {
+                      try {
+                        setTestState({ status: "testing" });
+                        const authCheck = await window.ipc.invoke("github-copilot:isAuthenticated", null);
+                        
+                        if (authCheck.authenticated) {
+                          setTestState({ status: "success" });
+                          setGithubCopilotCode(null);
+                          toast.success("GitHub Copilot authenticated!");
+                          
+                          // Reload models
+                          const modelsResult = await window.ipc.invoke("models:list", null);
+                          const catalog: Record<string, any[]> = {};
+                          for (const p of modelsResult.providers || []) {
+                            catalog[p.id] = p.models || [];
+                          }
+                          setModelsCatalog(catalog);
+                        } else {
+                          setTestState({ status: "error", error: "Not authenticated yet. Please complete authorization on GitHub." });
+                          toast.error("Not authenticated yet");
+                        }
+                      } catch (error) {
+                        const errorMsg = error instanceof Error ? error.message : "Error checking auth";
+                        setTestState({ status: "error", error: errorMsg });
+                        toast.error(`Error: ${errorMsg}`);
+                      }
+                    }}
+                    className="w-full"
+                    disabled={testState.status === "testing"}
+                  >
+                    {testState.status === "testing" ? (
+                      <>
+                        <Loader2 className="size-4 animate-spin mr-2" />
+                        Checking...
+                      </>
+                    ) : (
+                      "I've Authorized on GitHub"
+                    )}
+                  </Button>
+                </div>
+
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="w-full text-xs"
+                  onClick={() => {
+                    setGithubCopilotCode(null);
+                    setTestState({ status: "idle" });
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </>
+          )}
+
+          {testState.status === "error" && (
+            <div className="text-xs text-destructive">
+              {testState.error}
+            </div>
+          )}
         </div>
       )}
 
