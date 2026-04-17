@@ -691,17 +691,64 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
       {isGitHubCopilot && (
         <div className="space-y-2">
           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Authentication</span>
-          <p className="text-xs text-muted-foreground">GitHub Copilot uses Device Flow OAuth for authentication. Click the button below to authenticate with your GitHub account.</p>
+          <p className="text-xs text-muted-foreground">GitHub Copilot uses Device Flow OAuth for authentication. Click the button to authenticate with your GitHub account.</p>
           <Button
-            onClick={() => {
-              // Authentication will be triggered when the user selects a model
-              // The models will be loaded from the auth service
-              toast.info("Select a GitHub Copilot model to authenticate")
+            onClick={async () => {
+              try {
+                setTestState({ status: "testing" });
+                const result = await window.ipc.invoke("github-copilot:authenticate", null);
+                
+                if (!result.success) {
+                  setTestState({ status: "error", error: result.error });
+                  toast.error(`Authentication failed: ${result.error}`);
+                  return;
+                }
+
+                // Show device code to user
+                const deviceCode = result.userCode;
+                const verificationUri = result.verificationUri;
+                
+                toast.info(
+                  `1. Open: ${verificationUri}\n2. Enter code: ${deviceCode}`,
+                  { duration: 60000 }
+                );
+
+                // Open verification URI in browser
+                window.open(verificationUri, '_blank');
+
+                // Wait a moment then check if authenticated
+                setTimeout(async () => {
+                  const authCheck = await window.ipc.invoke("github-copilot:isAuthenticated", null);
+                  if (authCheck.authenticated) {
+                    setTestState({ status: "success" });
+                    toast.success("GitHub Copilot authenticated!");
+                    // Reload models after successful auth
+                    const modelsResult = await window.ipc.invoke("models:list", null);
+                    const catalog: Record<string, any[]> = {};
+                    for (const p of modelsResult.providers || []) {
+                      catalog[p.id] = p.models || [];
+                    }
+                    setModelsCatalog(catalog);
+                  }
+                }, 3000);
+              } catch (error) {
+                const errorMsg = error instanceof Error ? error.message : "Authentication error";
+                setTestState({ status: "error", error: errorMsg });
+                toast.error(`Error: ${errorMsg}`);
+              }
             }}
             variant="outline"
             className="w-full"
+            disabled={testState.status === "testing"}
           >
-            Authenticate with GitHub
+            {testState.status === "testing" ? (
+              <>
+                <Loader2 className="size-4 animate-spin mr-2" />
+                Authenticating...
+              </>
+            ) : (
+              "Authenticate with GitHub"
+            )}
           </Button>
         </div>
       )}

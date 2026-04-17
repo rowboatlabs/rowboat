@@ -14,14 +14,13 @@ import { LlmProvider } from '@x/shared/dist/models.js';
 const GITHUB_COPILOT_API_BASE = 'https://models.github.com/api/openai/';
 
 // List of models available through GitHub Copilot
-// Based on GitHub Copilot documentation
+// Based on GitHub Copilot API documentation
+// https://docs.github.com/en/copilot/using-github-copilot/asking-github-copilot-questions
 export const GITHUB_COPILOT_MODELS = [
-  'gpt-4o',
-  'gpt-4-turbo',
-  'gpt-4',
-  'gpt-3.5-turbo',
-  'claude-3.5-sonnet', // If available in student plan
-  'claude-3-opus', // If available in student plan
+  'gpt-4o',          // GPT-4 Optimized (recommended)
+  'gpt-4-turbo',     // GPT-4 Turbo
+  'gpt-3.5-turbo',   // GPT-3.5 Turbo (fastest)
+  'claude-3.5-sonnet', // Claude 3.5 Sonnet (if available in plan)
 ] as const;
 
 export type GitHubCopilotModel = typeof GITHUB_COPILOT_MODELS[number];

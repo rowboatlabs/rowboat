@@ -257,6 +257,39 @@ const ipcSchemas = {
       })),
     }),
   },
+  'github-copilot:authenticate': {
+    req: z.null(),
+    res: z.union([
+      z.object({
+        success: z.literal(true),
+        userCode: z.string(),
+        verificationUri: z.string(),
+        expiresIn: z.number(),
+      }),
+      z.object({
+        success: z.literal(false),
+        error: z.string(),
+      }),
+    ]),
+  },
+  'github-copilot:isAuthenticated': {
+    req: z.null(),
+    res: z.object({
+      authenticated: z.boolean(),
+    }),
+  },
+  'github-copilot:disconnect': {
+    req: z.null(),
+    res: z.union([
+      z.object({
+        success: z.literal(true),
+      }),
+      z.object({
+        success: z.literal(false),
+        error: z.string(),
+      }),
+    ]),
+  },
   'account:getRowboat': {
     req: z.null(),
     res: z.object({
