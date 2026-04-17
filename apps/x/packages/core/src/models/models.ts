@@ -65,6 +65,17 @@ export function createProvider(config: z.infer<typeof Provider>): ProviderV2 {
                 baseURL,
                 headers,
             }) as unknown as ProviderV2;
+        case "github-copilot":
+            // GitHub Copilot uses OpenAI-compatible API
+            // baseURL should be set by the auth provider or default to GitHub Copilot endpoint
+            return createOpenAI({
+                apiKey,
+                baseURL: baseURL || "https://models.github.com/api/openai/",
+                headers: {
+                    ...headers,
+                    "user-agent": "Rowboat/1.0",
+                },
+            });
         default:
             throw new Error(`Unsupported provider flavor: ${config.flavor}`);
     }
