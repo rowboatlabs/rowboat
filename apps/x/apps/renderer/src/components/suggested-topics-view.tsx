@@ -2,6 +2,12 @@ import { useCallback, useEffect, useState } from 'react'
 import { ArrowRight, Lightbulb, Loader2 } from 'lucide-react'
 import { SuggestedTopicBlockSchema, type SuggestedTopicBlock } from '@x/shared/dist/blocks.js'
 
+const SUGGESTED_TOPICS_PATH = 'suggested-topics.md'
+const LEGACY_SUGGESTED_TOPICS_PATHS = [
+  'config/suggested-topics.md',
+  'knowledge/Notes/Suggested Topics.md',
+]
+
 /** Parse suggestedtopic code-fence blocks from the markdown file content. */
 function parseTopics(content: string): SuggestedTopicBlock[] {
   const topics: SuggestedTopicBlock[] = []
@@ -16,13 +22,42 @@ function parseTopics(content: string): SuggestedTopicBlock[] {
       // Skip malformed blocks
     }
   }
+
+  if (topics.length > 0) return topics
+
+  const lines = content
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => line && !line.startsWith('#'))
+
+  for (const line of lines) {
+    try {
+      const parsed = JSON.parse(line)
+      const topic = SuggestedTopicBlockSchema.parse(parsed)
+      topics.push(topic)
+    } catch {
+      // Skip malformed lines
+    }
+  }
+
   return topics
+}
+
+function serializeTopics(topics: SuggestedTopicBlock[]): string {
+  const blocks = topics.map((topic) => [
+    '```suggestedtopic',
+    JSON.stringify(topic),
+    '```',
+  ].join('\n'))
+
+  return ['# Suggested Topics', ...blocks].join('\n\n') + '\n'
 }
 
 const CATEGORY_COLORS: Record<string, string> = {
   Meetings: 'bg-violet-500/10 text-violet-600 dark:text-violet-400',
   Projects: 'bg-blue-500/10 text-blue-600 dark:text-blue-400',
   People: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
+  Organizations: 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400',
   Topics: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
 }
 
@@ -33,10 +68,11 @@ function getCategoryColor(category?: string): string {
 
 interface TopicCardProps {
   topic: SuggestedTopicBlock
-  onExplore: (topic: SuggestedTopicBlock) => void
+  onTrack: () => void
+  isRemoving: boolean
 }
 
-function TopicCard({ topic, onExplore }: TopicCardProps) {
+function TopicCard({ topic, onTrack, isRemoving }: TopicCardProps) {
   return (
     <div className="group flex flex-col gap-3 rounded-xl border border-border/60 bg-card p-5 transition-all hover:border-border hover:shadow-sm">
       <div className="flex items-start justify-between gap-3">
@@ -55,32 +91,72 @@ function TopicCard({ topic, onExplore }: TopicCardProps) {
         {topic.description}
       </p>
       <button
-        onClick={() => onExplore(topic)}
-        className="mt-auto flex w-fit items-center gap-1.5 rounded-lg bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/20"
+        type="button"
+        onClick={onTrack}
+        disabled={isRemoving}
+        className="mt-auto flex w-fit items-center gap-1.5 rounded-lg bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/20 disabled:cursor-not-allowed disabled:opacity-60"
       >
-        Explore
-        <ArrowRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
+        {isRemoving ? (
+          <>
+            <Loader2 className="size-3.5 animate-spin" />
+            Tracking…
+          </>
+        ) : (
+          <>
+            Track
+            <ArrowRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
+          </>
+        )}
       </button>
     </div>
   )
 }
 
 interface SuggestedTopicsViewProps {
-  onExploreTopic: (title: string, description: string) => void
+  onExploreTopic: (topic: SuggestedTopicBlock) => void
 }
 
 export function SuggestedTopicsView({ onExploreTopic }: SuggestedTopicsViewProps) {
   const [topics, setTopics] = useState<SuggestedTopicBlock[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [removingIndex, setRemovingIndex] = useState<number | null>(null)
 
   useEffect(() => {
     let cancelled = false
     async function load() {
       try {
-        const result = await window.ipc.invoke('workspace:readFile', {
-          path: 'config/suggested-topics.md',
-        })
+        let result
+        try {
+          result = await window.ipc.invoke('workspace:readFile', {
+            path: SUGGESTED_TOPICS_PATH,
+          })
+        } catch {
+          let legacyResult: { data?: string } | null = null
+          let legacyPath: string | null = null
+          for (const path of LEGACY_SUGGESTED_TOPICS_PATHS) {
+            try {
+              legacyResult = await window.ipc.invoke('workspace:readFile', { path })
+              legacyPath = path
+              break
+            } catch {
+              // Try next legacy location.
+            }
+          }
+          if (!legacyResult || !legacyPath) {
+            throw new Error('Suggested topics file not found')
+          }
+          await window.ipc.invoke('workspace:writeFile', {
+            path: SUGGESTED_TOPICS_PATH,
+            data: legacyResult.data,
+            opts: { encoding: 'utf8' },
+          })
+          await window.ipc.invoke('workspace:remove', {
+            path: legacyPath,
+            opts: { trash: true },
+          })
+          result = legacyResult
+        }
         if (cancelled) return
         if (result.data) {
           setTopics(parseTopics(result.data))
@@ -95,11 +171,30 @@ export function SuggestedTopicsView({ onExploreTopic }: SuggestedTopicsViewProps
     return () => { cancelled = true }
   }, [])
 
-  const handleExplore = useCallback(
-    (topic: SuggestedTopicBlock) => {
-      onExploreTopic(topic.title, topic.description)
+  const handleTrack = useCallback(
+    async (topic: SuggestedTopicBlock, topicIndex: number) => {
+      if (removingIndex !== null) return
+      const nextTopics = topics.filter((_, idx) => idx !== topicIndex)
+      setRemovingIndex(topicIndex)
+      setError(null)
+      try {
+        await window.ipc.invoke('workspace:writeFile', {
+          path: SUGGESTED_TOPICS_PATH,
+          data: serializeTopics(nextTopics),
+          opts: { encoding: 'utf8' },
+        })
+        setTopics(nextTopics)
+      } catch (err) {
+        console.error('Failed to remove suggested topic:', err)
+        setError('Failed to update suggested topics. Please try again.')
+        return
+      } finally {
+        setRemovingIndex(null)
+      }
+
+      onExploreTopic(topic)
     },
-    [onExploreTopic],
+    [onExploreTopic, removingIndex, topics],
   )
 
   if (loading) {
@@ -131,13 +226,18 @@ export function SuggestedTopicsView({ onExploreTopic }: SuggestedTopicsViewProps
           <h2 className="text-base font-semibold text-foreground">Suggested Topics</h2>
         </div>
         <p className="mt-1 text-xs text-muted-foreground">
-          Topics surfaced from your knowledge graph. Explore them to create new notes.
+          Suggested notes surfaced from your knowledge graph. Track one to start a tracking note.
         </p>
       </div>
       <div className="flex-1 overflow-y-auto p-6">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {topics.map((topic, i) => (
-            <TopicCard key={`${topic.title}-${i}`} topic={topic} onExplore={handleExplore} />
+            <TopicCard
+              key={`${topic.title}-${i}`}
+              topic={topic}
+              onTrack={() => { void handleTrack(topic, i) }}
+              isRemoving={removingIndex === i}
+            />
           ))}
         </div>
       </div>

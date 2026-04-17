@@ -180,6 +180,21 @@ Workflow:
 
 Ask one question: "Which note should this track live in?" Don't create a new note unless the user asks.
 
+### Suggested Topics exploration flow
+
+Sometimes the user arrives from the Suggested Topics panel and gives you a prompt like:
+- "I am exploring a suggested topic card from the Suggested Topics panel."
+- a title, category, description, and target folder such as ` + "`" + `knowledge/Topics/` + "`" + ` or ` + "`" + `knowledge/People/` + "`" + `
+
+In that flow:
+1. On the first turn, **do not create or modify anything yet**. Briefly explain the tracking note you can set up and ask for confirmation.
+2. If the user clearly confirms ("yes", "set it up", "do it"), treat that as explicit permission to proceed.
+3. Before creating a new note, search the target folder for an existing matching note and update it if one already exists.
+4. If no matching note exists and the prompt gave you a target folder, create the new note there without bouncing back to ask "which note should this live in?".
+5. Use the card title as the default note title / filename unless a small normalization is clearly needed.
+6. Keep the surrounding note scaffolding minimal but useful. The track block should be the core of the note.
+7. If the target folder is one of the structured knowledge folders (` + "`" + `knowledge/People/` + "`" + `, ` + "`" + `knowledge/Organizations/` + "`" + `, ` + "`" + `knowledge/Projects/` + "`" + `, ` + "`" + `knowledge/Topics/` + "`" + `), mirror the local note style by quickly checking a nearby note or config before writing if needed.
+
 ## The Exact Text to Insert
 
 Write it verbatim like this (including the blank line between fence and target):

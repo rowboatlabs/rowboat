@@ -25,6 +25,12 @@ import { getTagDefinitions } from './tag_system.js';
 
 const NOTES_OUTPUT_DIR = path.join(WorkDir, 'knowledge');
 const NOTE_CREATION_AGENT = 'note_creation';
+const SUGGESTED_TOPICS_REL_PATH = 'suggested-topics.md';
+const SUGGESTED_TOPICS_PATH = path.join(WorkDir, 'suggested-topics.md');
+const LEGACY_SUGGESTED_TOPICS_REL_PATH = 'config/suggested-topics.md';
+const LEGACY_SUGGESTED_TOPICS_PATH = path.join(WorkDir, 'config', 'suggested-topics.md');
+const LEGACY_SUGGESTED_TOPICS_KNOWLEDGE_REL_PATH = 'knowledge/Notes/Suggested Topics.md';
+const LEGACY_SUGGESTED_TOPICS_KNOWLEDGE_PATH = path.join(WorkDir, 'knowledge', 'Notes', 'Suggested Topics.md');
 
 // Configuration for the graph builder service
 const SYNC_INTERVAL_MS = 15 * 1000; // 15 seconds
@@ -85,6 +91,49 @@ function extractPathFromToolInput(input: string): string | null {
         return typeof parsed.path === 'string' ? parsed.path : null;
     } catch {
         return null;
+    }
+}
+
+function ensureSuggestedTopicsFileLocation(): string {
+    if (fs.existsSync(SUGGESTED_TOPICS_PATH)) {
+        return SUGGESTED_TOPICS_PATH;
+    }
+
+    const legacyCandidates: Array<{ absPath: string; relPath: string }> = [
+        { absPath: LEGACY_SUGGESTED_TOPICS_PATH, relPath: LEGACY_SUGGESTED_TOPICS_REL_PATH },
+        { absPath: LEGACY_SUGGESTED_TOPICS_KNOWLEDGE_PATH, relPath: LEGACY_SUGGESTED_TOPICS_KNOWLEDGE_REL_PATH },
+    ];
+
+    for (const legacy of legacyCandidates) {
+        if (!fs.existsSync(legacy.absPath)) {
+            continue;
+        }
+
+        try {
+            fs.renameSync(legacy.absPath, SUGGESTED_TOPICS_PATH);
+            console.log(`[buildGraph] Moved suggested topics file from ${legacy.relPath} to ${SUGGESTED_TOPICS_REL_PATH}`);
+            return SUGGESTED_TOPICS_PATH;
+        } catch (error) {
+            console.error(`[buildGraph] Failed to move suggested topics file from ${legacy.relPath} to ${SUGGESTED_TOPICS_REL_PATH}:`, error);
+            return legacy.absPath;
+        }
+    }
+
+    return SUGGESTED_TOPICS_PATH;
+}
+
+function readSuggestedTopicsFile(): string {
+    try {
+        const suggestedTopicsPath = ensureSuggestedTopicsFileLocation();
+        if (!fs.existsSync(suggestedTopicsPath)) {
+            return '_No existing suggested topics file._';
+        }
+
+        const content = fs.readFileSync(suggestedTopicsPath, 'utf-8').trim();
+        return content.length > 0 ? content : '_Existing suggested topics file is empty._';
+    } catch (error) {
+        console.error(`[buildGraph] Error reading suggested topics file:`, error);
+        return '_Failed to read existing suggested topics file._';
     }
 }
 
@@ -203,6 +252,7 @@ async function createNotesFromBatch(
     const run = await createRun({
         agentId: NOTE_CREATION_AGENT,
     });
+    const suggestedTopicsContent = readSuggestedTopicsFile();
 
     // Build message with index and all files in the batch
     let message = `Process the following ${files.length} source files and create/update obsidian notes.\n\n`;
@@ -210,14 +260,20 @@ async function createNotesFromBatch(
     message += `- Use the KNOWLEDGE BASE INDEX below to resolve entities - DO NOT grep/search for existing notes\n`;
     message += `- Extract entities (people, organizations, projects, topics) from ALL files below\n`;
     message += `- Create or update notes in "knowledge" directory (workspace-relative paths like "knowledge/People/Name.md")\n`;
+    message += `- You may also create or update "${SUGGESTED_TOPICS_REL_PATH}" to maintain curated suggested-topic cards\n`;
     message += `- If the same entity appears in multiple files, merge the information into a single note\n`;
-    message += `- Use workspace tools to read existing notes (when you need full content) and write updates\n`;
+    message += `- Use workspace tools to read existing notes or "${SUGGESTED_TOPICS_REL_PATH}" (when you need full content) and write updates\n`;
     message += `- Follow the note templates and guidelines in your instructions\n\n`;
 
     // Add the knowledge base index
     message += `---\n\n`;
     message += knowledgeIndex;
     message += `\n---\n\n`;
+
+    message += `# Current Suggested Topics File\n\n`;
+    message += `Path: ${SUGGESTED_TOPICS_REL_PATH}\n\n`;
+    message += suggestedTopicsContent;
+    message += `\n\n---\n\n`;
 
     // Add each file's content
     message += `# Source Files to Process\n\n`;
