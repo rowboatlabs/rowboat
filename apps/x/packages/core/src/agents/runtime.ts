@@ -854,7 +854,7 @@ export async function* streamAgent({
     const signedIn = await isSignedIn();
     const provider = signedIn
         ? await getGatewayProvider()
-        : createProvider(modelConfig.provider);
+        : await createProvider(modelConfig.provider);
     const knowledgeGraphAgents = ["note_creation", "email-draft", "meeting-prep", "labeling_agent", "note_tagging_agent", "agent_notes_agent"];
     const isKgAgent = knowledgeGraphAgents.includes(state.agentName!);
     const isInlineTaskAgent = state.agentName === "inline_task_agent";

@@ -748,7 +748,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 const modelConfig = await modelConfigRepo.getConfig();
                 const provider = await isSignedIn()
                     ? await getGatewayProvider()
-                    : createProvider(modelConfig.provider);
+                    : await createProvider(modelConfig.provider);
                 const model = provider.languageModel(modelConfig.model);
 
                 const userPrompt = prompt || 'Convert this file to well-structured markdown.';
