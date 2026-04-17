@@ -262,6 +262,60 @@ const isGraphTabPath = (path: string) => path === GRAPH_TAB_PATH
 const isSuggestedTopicsTabPath = (path: string) => path === SUGGESTED_TOPICS_TAB_PATH
 const isBaseFilePath = (path: string) => path.endsWith('.base') || path === BASES_DEFAULT_TAB_PATH
 
+const getSuggestedTopicTargetFolder = (category?: string) => {
+  const normalized = category?.trim().toLowerCase()
+  switch (normalized) {
+    case 'people':
+    case 'person':
+      return 'People'
+    case 'organizations':
+    case 'organization':
+      return 'Organizations'
+    case 'projects':
+    case 'project':
+      return 'Projects'
+    case 'meetings':
+    case 'meeting':
+      return 'Meetings'
+    case 'topics':
+    case 'topic':
+    default:
+      return 'Topics'
+  }
+}
+
+const buildSuggestedTopicExplorePrompt = ({
+  title,
+  description,
+  category,
+}: {
+  title: string
+  description: string
+  category?: string
+}) => {
+  const folder = getSuggestedTopicTargetFolder(category)
+  const categoryLabel = category?.trim() || 'Topics'
+  return [
+    'I am exploring a suggested topic card from the Suggested Topics panel.',
+    'This card may represent a person, organization, topic, or project.',
+    '',
+    'Card context:',
+    `- Title: ${title}`,
+    `- Category: ${categoryLabel}`,
+    `- Description: ${description}`,
+    `- Target folder if we set this up: knowledge/${folder}/`,
+    '',
+    `Please start by telling me that you can set up a tracking note for "${title}" under knowledge/${folder}/.`,
+    'Then briefly explain what that tracking note would monitor or refresh and ask me if you should set it up.',
+    'Do not create or modify anything yet.',
+    'Treat a clear confirmation from me as explicit approval to proceed.',
+    `If I confirm later, load the \`tracks\` skill first, check whether a matching note already exists under knowledge/${folder}/, and update it instead of creating a duplicate.`,
+    `If no matching note exists, create a new note under knowledge/${folder}/ with an appropriate filename.`,
+    'Use a track block in that note rather than only writing static content, and keep any surrounding note scaffolding short and useful.',
+    'Do not ask me to choose a note path unless there is a real ambiguity you cannot resolve from the card.',
+  ].join('\n')
+}
+
 const normalizeUsage = (usage?: Partial<LanguageModelUsage> | null): LanguageModelUsage | null => {
   if (!usage) return null
   const hasNumbers = Object.values(usage).some((value) => typeof value === 'number')
@@ -585,7 +639,7 @@ function App() {
   const [isGraphOpen, setIsGraphOpen] = useState(false)
   const [isBrowserOpen, setIsBrowserOpen] = useState(false)
   const [isSuggestedTopicsOpen, setIsSuggestedTopicsOpen] = useState(false)
-  const [expandedFrom, setExpandedFrom] = useState<{ path: string | null; graph: boolean } | null>(null)
+  const [expandedFrom, setExpandedFrom] = useState<{ path: string | null; graph: boolean; suggestedTopics: boolean } | null>(null)
   const [baseConfigByPath, setBaseConfigByPath] = useState<Record<string, BaseConfig>>({})
   const [graphData, setGraphData] = useState<{ nodes: GraphNode[]; edges: GraphEdge[] }>({
     nodes: [],
@@ -2664,15 +2718,16 @@ function App() {
     }
     handleNewChat()
     // Left-pane "new chat" should always open full chat view.
-    if (selectedPath || isGraphOpen) {
-      setExpandedFrom({ path: selectedPath, graph: isGraphOpen })
+    if (selectedPath || isGraphOpen || isSuggestedTopicsOpen) {
+      setExpandedFrom({ path: selectedPath, graph: isGraphOpen, suggestedTopics: isSuggestedTopicsOpen })
     } else {
       setExpandedFrom(null)
     }
     setIsRightPaneMaximized(false)
     setSelectedPath(null)
     setIsGraphOpen(false)
-  }, [chatTabs, activeChatTabId, handleNewChat, selectedPath, isGraphOpen])
+    setIsSuggestedTopicsOpen(false)
+  }, [chatTabs, activeChatTabId, handleNewChat, selectedPath, isGraphOpen, isSuggestedTopicsOpen])
 
   // Sidebar variant: create/switch chat tab without leaving file/graph context.
   const handleNewChatTabInSidebar = useCallback(() => {
@@ -2766,19 +2821,26 @@ function App() {
 
   const handleOpenFullScreenChat = useCallback(() => {
     // Remember where we came from so the close button can return
-    if (selectedPath || isGraphOpen) {
-      setExpandedFrom({ path: selectedPath, graph: isGraphOpen })
+    if (selectedPath || isGraphOpen || isSuggestedTopicsOpen) {
+      setExpandedFrom({ path: selectedPath, graph: isGraphOpen, suggestedTopics: isSuggestedTopicsOpen })
     }
     setIsRightPaneMaximized(false)
     setSelectedPath(null)
     setIsGraphOpen(false)
-  }, [selectedPath, isGraphOpen])
+    setIsSuggestedTopicsOpen(false)
+  }, [selectedPath, isGraphOpen, isSuggestedTopicsOpen])
 
   const handleCloseFullScreenChat = useCallback(() => {
     if (expandedFrom) {
       if (expandedFrom.graph) {
         setIsGraphOpen(true)
+        setIsSuggestedTopicsOpen(false)
+      } else if (expandedFrom.suggestedTopics) {
+        setIsGraphOpen(false)
+        setIsSuggestedTopicsOpen(true)
       } else if (expandedFrom.path) {
+        setIsGraphOpen(false)
+        setIsSuggestedTopicsOpen(false)
         setSelectedPath(expandedFrom.path)
       }
       setExpandedFrom(null)
@@ -3179,7 +3241,7 @@ function App() {
   }, [])
 
   // Keyboard shortcut: Ctrl+L to toggle main chat view
-  const isFullScreenChat = !selectedPath && !isGraphOpen && !selectedBackgroundTask && !isBrowserOpen
+  const isFullScreenChat = !selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !selectedBackgroundTask && !isBrowserOpen
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'l') {
@@ -3257,12 +3319,16 @@ function App() {
     const handleTabKeyDown = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey
       if (!mod) return
-      const rightPaneAvailable = Boolean((selectedPath || isGraphOpen) && isChatSidebarOpen)
+      const rightPaneAvailable = Boolean((selectedPath || isGraphOpen || isSuggestedTopicsOpen) && isChatSidebarOpen)
       const targetPane: ShortcutPane = rightPaneAvailable
         ? (isRightPaneMaximized ? 'right' : activeShortcutPane)
         : 'left'
-      const inFileView = targetPane === 'left' && Boolean(selectedPath || isGraphOpen)
-      const selectedKnowledgePath = isGraphOpen ? GRAPH_TAB_PATH : selectedPath
+      const inFileView = targetPane === 'left' && Boolean(selectedPath || isGraphOpen || isSuggestedTopicsOpen)
+      const selectedKnowledgePath = isGraphOpen
+        ? GRAPH_TAB_PATH
+        : isSuggestedTopicsOpen
+          ? SUGGESTED_TOPICS_TAB_PATH
+          : selectedPath
       const targetFileTabId = activeFileTabId ?? (
         selectedKnowledgePath
           ? (fileTabs.find((tab) => tab.path === selectedKnowledgePath)?.id ?? null)
@@ -3316,7 +3382,7 @@ function App() {
     }
     document.addEventListener('keydown', handleTabKeyDown)
     return () => document.removeEventListener('keydown', handleTabKeyDown)
-  }, [selectedPath, isGraphOpen, isChatSidebarOpen, isRightPaneMaximized, activeShortcutPane, chatTabs, fileTabs, activeChatTabId, activeFileTabId, closeChatTab, closeFileTab, switchChatTab, switchFileTab])
+  }, [selectedPath, isGraphOpen, isSuggestedTopicsOpen, isChatSidebarOpen, isRightPaneMaximized, activeShortcutPane, chatTabs, fileTabs, activeChatTabId, activeFileTabId, closeChatTab, closeFileTab, switchChatTab, switchFileTab])
 
   const toggleExpand = (path: string, kind: 'file' | 'dir') => {
     if (kind === 'file') {
@@ -3341,7 +3407,7 @@ function App() {
           }),
         },
       }))
-      if (!selectedPath && !isGraphOpen && !selectedBackgroundTask) {
+      if (!selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !selectedBackgroundTask) {
         setIsChatSidebarOpen(false)
         setIsRightPaneMaximized(false)
       }
@@ -3463,14 +3529,14 @@ function App() {
     },
     openGraph: () => {
       // From chat-only landing state, open graph directly in full knowledge view.
-      if (!selectedPath && !isGraphOpen && !selectedBackgroundTask) {
+      if (!selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !selectedBackgroundTask) {
         setIsChatSidebarOpen(false)
         setIsRightPaneMaximized(false)
       }
       void navigateToView({ type: 'graph' })
     },
     openBases: () => {
-      if (!selectedPath && !isGraphOpen && !selectedBackgroundTask) {
+      if (!selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !selectedBackgroundTask) {
         setIsChatSidebarOpen(false)
         setIsRightPaneMaximized(false)
       }
@@ -4042,7 +4108,7 @@ function App() {
   const selectedTask = selectedBackgroundTask
     ? backgroundTasks.find(t => t.name === selectedBackgroundTask)
     : null
-  const isRightPaneContext = Boolean(selectedPath || isGraphOpen || isBrowserOpen)
+  const isRightPaneContext = Boolean(selectedPath || isGraphOpen || isSuggestedTopicsOpen || isBrowserOpen)
   const isRightPaneOnlyMode = isRightPaneContext && isChatSidebarOpen && isRightPaneMaximized
   const shouldCollapseLeftPane = isRightPaneOnlyMode
   const openMarkdownTabs = React.useMemo(() => {
@@ -4084,7 +4150,7 @@ function App() {
                 onNewChat: handleNewChatTab,
                 onSelectRun: (runIdToLoad) => {
                   cancelRecordingIfActive()
-                  if (selectedPath || isGraphOpen || isBrowserOpen) {
+                  if (selectedPath || isGraphOpen || isSuggestedTopicsOpen || isBrowserOpen) {
                     setIsChatSidebarOpen(true)
                   }
 
@@ -4095,7 +4161,7 @@ function App() {
                     return
                   }
                   // In two-pane mode (file/graph/browser), keep the middle pane and just swap chat context in the right sidebar.
-                  if (selectedPath || isGraphOpen || isBrowserOpen) {
+                  if (selectedPath || isGraphOpen || isSuggestedTopicsOpen || isBrowserOpen) {
                     setChatTabs(prev => prev.map(t => t.id === activeChatTabId ? { ...t, runId: runIdToLoad } : t))
                     loadRun(runIdToLoad)
                     return
@@ -4119,14 +4185,14 @@ function App() {
                       } else {
                         // Only one tab, reset it to new chat
                         setChatTabs([{ id: tabForRun.id, runId: null }])
-                        if (selectedPath || isGraphOpen || isBrowserOpen) {
+                        if (selectedPath || isGraphOpen || isSuggestedTopicsOpen || isBrowserOpen) {
                           handleNewChat()
                         } else {
                           void navigateToView({ type: 'chat', runId: null })
                         }
                       }
                     } else if (runId === runIdToDelete) {
-                      if (selectedPath || isGraphOpen || isBrowserOpen) {
+                      if (selectedPath || isGraphOpen || isSuggestedTopicsOpen || isBrowserOpen) {
                         setChatTabs(prev => prev.map(t => t.id === activeChatTabId ? { ...t, runId: null } : t))
                         handleNewChat()
                       } else {
@@ -4152,6 +4218,7 @@ function App() {
               onToggleMeeting={() => { void handleToggleMeeting() }}
               isBrowserOpen={isBrowserOpen}
               onToggleBrowser={handleToggleBrowser}
+              isSuggestedTopicsOpen={isSuggestedTopicsOpen}
               onOpenSuggestedTopics={() => void navigateToView({ type: 'suggested-topics' })}
             />
             <SidebarInset
@@ -4233,7 +4300,7 @@ function App() {
                     <TooltipContent side="bottom">Version history</TooltipContent>
                   </Tooltip>
                 )}
-                {!selectedPath && !isGraphOpen && !selectedTask && !isBrowserOpen && (
+                {!selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !selectedTask && !isBrowserOpen && (
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
@@ -4248,7 +4315,7 @@ function App() {
                     <TooltipContent side="bottom">New chat tab</TooltipContent>
                   </Tooltip>
                 )}
-                {!selectedPath && !isGraphOpen && !isBrowserOpen && expandedFrom && (
+                {!selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isBrowserOpen && expandedFrom && (
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
@@ -4263,7 +4330,7 @@ function App() {
                     <TooltipContent side="bottom">Restore two-pane view</TooltipContent>
                   </Tooltip>
                 )}
-                {(selectedPath || isGraphOpen) && (
+                {(selectedPath || isGraphOpen || isSuggestedTopicsOpen) && (
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
@@ -4287,8 +4354,8 @@ function App() {
               ) : isSuggestedTopicsOpen ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                   <SuggestedTopicsView
-                    onExploreTopic={(title, description) => {
-                      const prompt = `I'd like to explore the topic: ${title}. ${description}`
+                    onExploreTopic={(topic) => {
+                      const prompt = buildSuggestedTopicExplorePrompt(topic)
                       submitFromPalette(prompt, null)
                     }}
                   />
