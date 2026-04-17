@@ -7,7 +7,6 @@
 
 import container from '../di/container.js';
 import { IOAuthRepo } from './repo.js';
-import { OAuthTokens } from './types.js';
 import { getProviderConfig } from './providers.js';
 import * as deviceFlow from './github-copilot-device-flow.js';
 import * as oauthClient from './oauth-client.js';

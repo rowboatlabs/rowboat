@@ -74,7 +74,6 @@ export async function pollForToken(
 ): Promise<OAuthTokens> {
   console.log('[GitHub Copilot] Polling for token...');
 
-  const startTime = Date.now();
   const pollingInterval = DEFAULT_POLLING_INTERVAL;
 
   while (Date.now() < expiresAt) {
