@@ -162,7 +162,7 @@ function AppearanceSettings() {
 
 // --- Model Settings UI ---
 
-type LlmProviderFlavor = "openai" | "anthropic" | "google" | "openrouter" | "aigateway" | "ollama" | "openai-compatible"
+type LlmProviderFlavor = "openai" | "anthropic" | "google" | "openrouter" | "aigateway" | "ollama" | "openai-compatible" | "github-copilot"
 
 interface LlmModelOption {
   id: string
@@ -181,6 +181,7 @@ const moreProviders: Array<{ id: LlmProviderFlavor; name: string; description: s
   { id: "openrouter", name: "OpenRouter", description: "Multiple models, one key" },
   { id: "aigateway", name: "AI Gateway (Vercel)", description: "Vercel's AI Gateway" },
   { id: "openai-compatible", name: "OpenAI-Compatible", description: "Custom OpenAI-compatible API" },
+  { id: "github-copilot", name: "GitHub Copilot Student", description: "GitHub Copilot with Device Flow" },
 ]
 
 const preferredDefaults: Partial<Record<LlmProviderFlavor, string>> = {
@@ -204,6 +205,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
     aigateway: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "" },
     ollama: { apiKey: "", baseURL: "http://localhost:11434", models: [""], knowledgeGraphModel: "" },
     "openai-compatible": { apiKey: "", baseURL: "http://localhost:1234/v1", models: [""], knowledgeGraphModel: "" },
+    "github-copilot": { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "" },
   })
   const [modelsCatalog, setModelsCatalog] = useState<Record<string, LlmModelOption[]>>({})
   const [modelsLoading, setModelsLoading] = useState(false)
@@ -218,8 +220,9 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
   const showBaseURL = provider === "ollama" || provider === "openai-compatible" || provider === "aigateway"
   const requiresBaseURL = provider === "ollama" || provider === "openai-compatible"
   const isLocalProvider = provider === "ollama" || provider === "openai-compatible"
+  const isGitHubCopilot = provider === "github-copilot"
   const modelsForProvider = modelsCatalog[provider] || []
-  const showModelInput = isLocalProvider || modelsForProvider.length === 0
+  const showModelInput = isLocalProvider || modelsForProvider.length === 0 || isGitHubCopilot
   const isMoreProvider = moreProviders.some(p => p.id === provider)
 
   const primaryModel = activeConfig.models[0] || ""
@@ -681,6 +684,25 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
                   : "https://ai-gateway.vercel.sh/v1"
             }
           />
+        </div>
+      )}
+
+      {/* GitHub Copilot Authentication */}
+      {isGitHubCopilot && (
+        <div className="space-y-2">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Authentication</span>
+          <p className="text-xs text-muted-foreground">GitHub Copilot uses Device Flow OAuth for authentication. Click the button below to authenticate with your GitHub account.</p>
+          <Button
+            onClick={() => {
+              // Authentication will be triggered when the user selects a model
+              // The models will be loaded from the auth service
+              toast.info("Select a GitHub Copilot model to authenticate")
+            }}
+            variant="outline"
+            className="w-full"
+          >
+            Authenticate with GitHub
+          </Button>
         </div>
       )}
 

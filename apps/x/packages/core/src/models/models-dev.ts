@@ -222,5 +222,19 @@ export async function listOnboardingModels(): Promise<{ providers: ProviderSumma
     });
   }
 
+  // Add GitHub Copilot models
+  providers.push({
+    id: "github-copilot",
+    name: "GitHub Copilot Student",
+    models: [
+      { id: "gpt-4o", name: "GPT-4o" },
+      { id: "gpt-4-turbo", name: "GPT-4 Turbo" },
+      { id: "gpt-4", name: "GPT-4" },
+      { id: "gpt-3.5-turbo", name: "GPT-3.5 Turbo" },
+      { id: "claude-3.5-sonnet", name: "Claude 3.5 Sonnet" },
+      { id: "claude-3-opus", name: "Claude 3 Opus" },
+    ],
+  });
+
   return { providers, lastUpdated: fetchedAt };
 }

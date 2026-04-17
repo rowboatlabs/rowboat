@@ -13,7 +13,7 @@ const originalFetch = global.fetch;
 const mockFetch = vi.fn();
 
 beforeEach(() => {
-  global.fetch = mockFetch as any;
+  global.fetch = mockFetch as any; // eslint-disable-line @typescript-eslint/no-explicit-any
 });
 
 afterEach(() => {
