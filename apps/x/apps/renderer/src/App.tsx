@@ -15,6 +15,7 @@ import { GraphView, type GraphEdge, type GraphNode } from '@/components/graph-vi
 import { BasesView, type BaseConfig, DEFAULT_BASE_CONFIG } from '@/components/bases-view';
 import { useDebounce } from './hooks/use-debounce';
 import { SidebarContentPanel } from '@/components/sidebar-content';
+import { SuggestedTopicsView } from '@/components/suggested-topics-view';
 import { SidebarSectionProvider } from '@/contexts/sidebar-context';
 import {
   Conversation,
@@ -129,6 +130,7 @@ const TITLEBAR_TOGGLE_MARGIN_LEFT_PX = 12
 const TITLEBAR_BUTTONS_COLLAPSED = 4
 const TITLEBAR_BUTTON_GAPS_COLLAPSED = 3
 const GRAPH_TAB_PATH = '__rowboat_graph_view__'
+const SUGGESTED_TOPICS_TAB_PATH = '__rowboat_suggested_topics__'
 const BASES_DEFAULT_TAB_PATH = '__rowboat_bases_default__'
 
 const clampNumber = (value: number, min: number, max: number) =>
@@ -257,6 +259,7 @@ const getAncestorDirectoryPaths = (path: string): string[] => {
 }
 
 const isGraphTabPath = (path: string) => path === GRAPH_TAB_PATH
+const isSuggestedTopicsTabPath = (path: string) => path === SUGGESTED_TOPICS_TAB_PATH
 const isBaseFilePath = (path: string) => path.endsWith('.base') || path === BASES_DEFAULT_TAB_PATH
 
 const normalizeUsage = (usage?: Partial<LanguageModelUsage> | null): LanguageModelUsage | null => {
@@ -439,6 +442,7 @@ type ViewState =
   | { type: 'file'; path: string }
   | { type: 'graph' }
   | { type: 'task'; name: string }
+  | { type: 'suggested-topics' }
 
 function viewStatesEqual(a: ViewState, b: ViewState): boolean {
   if (a.type !== b.type) return false
@@ -580,6 +584,7 @@ function App() {
   const [recentWikiFiles, setRecentWikiFiles] = useState<string[]>([])
   const [isGraphOpen, setIsGraphOpen] = useState(false)
   const [isBrowserOpen, setIsBrowserOpen] = useState(false)
+  const [isSuggestedTopicsOpen, setIsSuggestedTopicsOpen] = useState(false)
   const [expandedFrom, setExpandedFrom] = useState<{ path: string | null; graph: boolean } | null>(null)
   const [baseConfigByPath, setBaseConfigByPath] = useState<Record<string, BaseConfig>>({})
   const [graphData, setGraphData] = useState<{ nodes: GraphNode[]; edges: GraphEdge[] }>({
@@ -875,6 +880,7 @@ function App() {
 
   const getFileTabTitle = useCallback((tab: FileTab) => {
     if (isGraphTabPath(tab.path)) return 'Graph View'
+    if (isSuggestedTopicsTabPath(tab.path)) return 'Suggested Topics'
     if (tab.path === BASES_DEFAULT_TAB_PATH) return 'Bases'
     if (tab.path.endsWith('.base')) return tab.path.split('/').pop()?.replace(/\.base$/i, '') || 'Base'
     return tab.path.split('/').pop()?.replace(/\.md$/i, '') || tab.path
@@ -2570,9 +2576,17 @@ function App() {
     if (isGraphTabPath(tab.path)) {
       setSelectedPath(null)
       setIsGraphOpen(true)
+      setIsSuggestedTopicsOpen(false)
+      return
+    }
+    if (isSuggestedTopicsTabPath(tab.path)) {
+      setSelectedPath(null)
+      setIsGraphOpen(false)
+      setIsSuggestedTopicsOpen(true)
       return
     }
     setIsGraphOpen(false)
+    setIsSuggestedTopicsOpen(false)
     setSelectedPath(tab.path)
   }, [fileTabs, isRightPaneMaximized])
 
@@ -2600,6 +2614,7 @@ function App() {
         setActiveFileTabId(null)
         setSelectedPath(null)
         setIsGraphOpen(false)
+        setIsSuggestedTopicsOpen(false)
           return []
       }
       const idx = prev.findIndex(t => t.id === tabId)
@@ -2612,8 +2627,14 @@ function App() {
         if (isGraphTabPath(newActiveTab.path)) {
           setSelectedPath(null)
           setIsGraphOpen(true)
+          setIsSuggestedTopicsOpen(false)
+        } else if (isSuggestedTopicsTabPath(newActiveTab.path)) {
+          setSelectedPath(null)
+          setIsGraphOpen(false)
+          setIsSuggestedTopicsOpen(true)
         } else {
           setIsGraphOpen(false)
+          setIsSuggestedTopicsOpen(false)
               setSelectedPath(newActiveTab.path)
         }
       }
@@ -2767,10 +2788,11 @@ function App() {
 
   const currentViewState = React.useMemo<ViewState>(() => {
     if (selectedBackgroundTask) return { type: 'task', name: selectedBackgroundTask }
+    if (isSuggestedTopicsOpen) return { type: 'suggested-topics' }
     if (selectedPath) return { type: 'file', path: selectedPath }
     if (isGraphOpen) return { type: 'graph' }
     return { type: 'chat', runId }
-  }, [selectedBackgroundTask, selectedPath, isGraphOpen, runId])
+  }, [selectedBackgroundTask, isSuggestedTopicsOpen, selectedPath, isGraphOpen, runId])
 
   const appendUnique = useCallback((stack: ViewState[], entry: ViewState) => {
     const last = stack[stack.length - 1]
@@ -2816,6 +2838,17 @@ function App() {
     setActiveFileTabId(id)
   }, [fileTabs])
 
+  const ensureSuggestedTopicsFileTab = useCallback(() => {
+    const existing = fileTabs.find((tab) => isSuggestedTopicsTabPath(tab.path))
+    if (existing) {
+      setActiveFileTabId(existing.id)
+      return
+    }
+    const id = newFileTabId()
+    setFileTabs((prev) => [...prev, { id, path: SUGGESTED_TOPICS_TAB_PATH }])
+    setActiveFileTabId(id)
+  }, [fileTabs])
+
   const applyViewState = useCallback(async (view: ViewState) => {
     switch (view.type) {
       case 'file':
@@ -2824,6 +2857,7 @@ function App() {
         // Navigating to a file dismisses the browser overlay so the file is
         // visible in the middle pane.
         setIsBrowserOpen(false)
+        setIsSuggestedTopicsOpen(false)
         setExpandedFrom(null)
         // Preserve split vs knowledge-max mode when navigating knowledge files.
         // Only exit chat-only maximize, because that would hide the selected file.
@@ -2837,6 +2871,7 @@ function App() {
         setSelectedBackgroundTask(null)
         setSelectedPath(null)
         setIsBrowserOpen(false)
+        setIsSuggestedTopicsOpen(false)
         setExpandedFrom(null)
         setIsGraphOpen(true)
         ensureGraphFileTab()
@@ -2848,9 +2883,20 @@ function App() {
         setSelectedPath(null)
         setIsGraphOpen(false)
         setIsBrowserOpen(false)
+        setIsSuggestedTopicsOpen(false)
         setExpandedFrom(null)
         setIsRightPaneMaximized(false)
         setSelectedBackgroundTask(view.name)
+        return
+      case 'suggested-topics':
+        setSelectedPath(null)
+        setIsGraphOpen(false)
+        setIsBrowserOpen(false)
+        setExpandedFrom(null)
+        setIsRightPaneMaximized(false)
+        setSelectedBackgroundTask(null)
+        setIsSuggestedTopicsOpen(true)
+        ensureSuggestedTopicsFileTab()
         return
       case 'chat':
         setSelectedPath(null)
@@ -2860,6 +2906,7 @@ function App() {
         setExpandedFrom(null)
         setIsRightPaneMaximized(false)
         setSelectedBackgroundTask(null)
+        setIsSuggestedTopicsOpen(false)
         if (view.runId) {
           await loadRun(view.runId)
         } else {
@@ -2867,7 +2914,7 @@ function App() {
         }
         return
     }
-  }, [ensureFileTabForPath, ensureGraphFileTab, handleNewChat, isRightPaneMaximized, loadRun])
+  }, [ensureFileTabForPath, ensureGraphFileTab, ensureSuggestedTopicsFileTab, handleNewChat, isRightPaneMaximized, loadRun])
 
   const navigateToView = useCallback(async (nextView: ViewState) => {
     const current = currentViewState
@@ -4105,6 +4152,7 @@ function App() {
               onToggleMeeting={() => { void handleToggleMeeting() }}
               isBrowserOpen={isBrowserOpen}
               onToggleBrowser={handleToggleBrowser}
+              onOpenSuggestedTopics={() => void navigateToView({ type: 'suggested-topics' })}
             />
             <SidebarInset
               className={cn(
@@ -4124,7 +4172,7 @@ function App() {
                 canNavigateForward={canNavigateForward}
                 collapsedLeftPaddingPx={collapsedLeftPaddingPx}
               >
-                {(selectedPath || isGraphOpen) && fileTabs.length >= 1 ? (
+                {(selectedPath || isGraphOpen || isSuggestedTopicsOpen) && fileTabs.length >= 1 ? (
                   <TabBar
                     tabs={fileTabs}
                     activeTabId={activeFileTabId ?? ''}
@@ -4132,7 +4180,7 @@ function App() {
                     getTabId={(t) => t.id}
                     onSwitchTab={switchFileTab}
                     onCloseTab={closeFileTab}
-                    allowSingleTabClose={fileTabs.length === 1 && (isGraphOpen || (selectedPath != null && isBaseFilePath(selectedPath)))}
+                    allowSingleTabClose={fileTabs.length === 1 && (isGraphOpen || isSuggestedTopicsOpen || (selectedPath != null && isBaseFilePath(selectedPath)))}
                   />
                 ) : (
                   <TabBar
@@ -4236,6 +4284,15 @@ function App() {
 
               {isBrowserOpen ? (
                 <BrowserPane onClose={handleCloseBrowser} />
+              ) : isSuggestedTopicsOpen ? (
+                <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+                  <SuggestedTopicsView
+                    onExploreTopic={(title, description) => {
+                      const prompt = `I'd like to explore the topic: ${title}. ${description}`
+                      submitFromPalette(prompt, null)
+                    }}
+                  />
+                </div>
               ) : selectedPath && isBaseFilePath(selectedPath) ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                   <BasesView
