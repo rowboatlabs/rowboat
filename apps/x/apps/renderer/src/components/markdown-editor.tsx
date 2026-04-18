@@ -13,6 +13,7 @@ import { TrackBlockExtension } from '@/extensions/track-block'
 import { TrackTargetOpenExtension, TrackTargetCloseExtension } from '@/extensions/track-target'
 import { ImageBlockExtension } from '@/extensions/image-block'
 import { EmbedBlockExtension } from '@/extensions/embed-block'
+import { IframeBlockExtension } from '@/extensions/iframe-block'
 import { ChartBlockExtension } from '@/extensions/chart-block'
 import { TableBlockExtension } from '@/extensions/table-block'
 import { CalendarBlockExtension } from '@/extensions/calendar-block'
@@ -177,6 +178,8 @@ function blockToMarkdown(node: JsonNode): string {
       return '```image\n' + (node.attrs?.data as string || '{}') + '\n```'
     case 'embedBlock':
       return '```embed\n' + (node.attrs?.data as string || '{}') + '\n```'
+    case 'iframeBlock':
+      return '```iframe\n' + (node.attrs?.data as string || '{}') + '\n```'
     case 'chartBlock':
       return '```chart\n' + (node.attrs?.data as string || '{}') + '\n```'
     case 'tableBlock':
@@ -676,6 +679,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       TrackTargetCloseExtension,
       ImageBlockExtension,
       EmbedBlockExtension,
+      IframeBlockExtension,
       ChartBlockExtension,
       TableBlockExtension,
       CalendarBlockExtension,
