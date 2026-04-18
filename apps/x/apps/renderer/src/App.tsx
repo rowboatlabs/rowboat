@@ -3390,9 +3390,9 @@ function App() {
       return
     }
 
-    // Top-level knowledge folders (except Notes) open as a bases view with folder filter
+    // Top-level knowledge folders open as a bases view with folder filter
     const parts = path.split('/')
-    if (parts.length === 2 && parts[0] === 'knowledge' && parts[1] !== 'Notes') {
+    if (parts.length === 2 && parts[0] === 'knowledge') {
       const folderName = parts[1]
       const folderCfg = FOLDER_BASE_CONFIGS[folderName]
       setBaseConfigByPath((prev) => ({
@@ -4141,6 +4141,14 @@ function App() {
               selectedPath={selectedPath}
               expandedPaths={expandedPaths}
               onSelectFile={toggleExpand}
+              onToggleFolder={(path) => {
+                setExpandedPaths((prev) => {
+                  const next = new Set(prev)
+                  if (next.has(path)) next.delete(path)
+                  else next.add(path)
+                  return next
+                })
+              }}
               knowledgeActions={knowledgeActions}
               onVoiceNoteCreated={handleVoiceNoteCreated}
               runs={runs}

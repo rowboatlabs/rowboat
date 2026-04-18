@@ -63,6 +63,7 @@ import {
   SidebarGroupContent,
   SidebarHeader,
   SidebarMenu,
+  SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarMenuSub,
@@ -170,6 +171,7 @@ type SidebarContentPanelProps = {
   selectedPath: string | null
   expandedPaths: Set<string>
   onSelectFile: (path: string, kind: "file" | "dir") => void
+  onToggleFolder?: (path: string) => void
   knowledgeActions: KnowledgeActions
   onVoiceNoteCreated?: (path: string) => void
   runs?: RunListItem[]
@@ -403,6 +405,7 @@ export function SidebarContentPanel({
   selectedPath,
   expandedPaths,
   onSelectFile,
+  onToggleFolder,
   knowledgeActions,
   onVoiceNoteCreated,
   runs = [],
@@ -605,6 +608,7 @@ export function SidebarContentPanel({
             selectedPath={selectedPath}
             expandedPaths={expandedPaths}
             onSelectFile={onSelectFile}
+            onToggleFolder={onToggleFolder}
             actions={knowledgeActions}
             onVoiceNoteCreated={onVoiceNoteCreated}
           />
@@ -993,6 +997,7 @@ function KnowledgeSection({
   selectedPath,
   expandedPaths,
   onSelectFile,
+  onToggleFolder,
   actions,
   onVoiceNoteCreated,
 }: {
@@ -1000,6 +1005,7 @@ function KnowledgeSection({
   selectedPath: string | null
   expandedPaths: Set<string>
   onSelectFile: (path: string, kind: "file" | "dir") => void
+  onToggleFolder?: (path: string) => void
   actions: KnowledgeActions
   onVoiceNoteCreated?: (path: string) => void
 }) {
@@ -1089,6 +1095,7 @@ function KnowledgeSection({
                     selectedPath={selectedPath}
                     expandedPaths={expandedPaths}
                     onSelect={onSelectFile}
+                    onToggleFolder={onToggleFolder}
                     actions={actions}
                   />
                 ))}
@@ -1125,12 +1132,14 @@ function Tree({
   selectedPath,
   expandedPaths,
   onSelect,
+  onToggleFolder,
   actions,
 }: {
   item: TreeNode
   selectedPath: string | null
   expandedPaths: Set<string>
   onSelect: (path: string, kind: "file" | "dir") => void
+  onToggleFolder?: (path: string) => void
   actions: KnowledgeActions
 }) {
   const isDir = item.kind === 'dir'
@@ -1267,15 +1276,15 @@ function Tree({
     )
   }
 
-  // Top-level knowledge folders (except Notes) open bases view — render as flat items
+  // Top-level knowledge folders open bases view — render as flat items
   const parts = item.path.split('/')
-  const isBasesFolder = isDir && parts.length === 2 && parts[0] === 'knowledge' && parts[1] !== 'Notes'
+  const isBasesFolder = isDir && parts.length === 2 && parts[0] === 'knowledge'
 
   if (isBasesFolder) {
     return (
       <ContextMenu>
         <ContextMenuTrigger asChild>
-          <SidebarMenuItem>
+          <SidebarMenuItem className="group/file-item">
             <SidebarMenuButton onClick={() => onSelect(item.path, item.kind)}>
               <Folder className="size-4 shrink-0" />
               <div className="flex w-full items-center gap-1 min-w-0">
@@ -1283,6 +1292,38 @@ function Tree({
                 <span className="text-xs text-sidebar-foreground/50 tabular-nums shrink-0">{countFiles(item)}</span>
               </div>
             </SidebarMenuButton>
+            {onToggleFolder && (item.children?.length ?? 0) > 0 && (
+              <SidebarMenuAction
+                showOnHover
+                aria-label={isExpanded ? "Collapse folder" : "Expand folder"}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onToggleFolder(item.path)
+                }}
+              >
+                <ChevronRight
+                  className={cn(
+                    "transition-transform",
+                    isExpanded && "rotate-90",
+                  )}
+                />
+              </SidebarMenuAction>
+            )}
+            {isExpanded && (
+              <SidebarMenuSub>
+                {(item.children ?? []).map((subItem, index) => (
+                  <Tree
+                    key={index}
+                    item={subItem}
+                    selectedPath={selectedPath}
+                    expandedPaths={expandedPaths}
+                    onSelect={onSelect}
+                    onToggleFolder={onToggleFolder}
+                    actions={actions}
+                  />
+                ))}
+              </SidebarMenuSub>
+            )}
           </SidebarMenuItem>
         </ContextMenuTrigger>
         {contextMenuContent}
@@ -1347,6 +1388,7 @@ function Tree({
                     selectedPath={selectedPath}
                     expandedPaths={expandedPaths}
                     onSelect={onSelect}
+                    onToggleFolder={onToggleFolder}
                     actions={actions}
                   />
                 ))}
