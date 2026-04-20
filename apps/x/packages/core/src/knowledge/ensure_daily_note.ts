@@ -1,44 +1,163 @@
 import path from 'path';
 import fs from 'fs';
+import { stringify as stringifyYaml } from 'yaml';
+import { TrackBlockSchema } from '@x/shared/dist/track-block.js';
 import { WorkDir } from '../config/config.js';
 
 const KNOWLEDGE_DIR = path.join(WorkDir, 'knowledge');
 const DAILY_NOTE_PATH = path.join(KNOWLEDGE_DIR, 'Today.md');
-const TARGET_ID = 'dailybrief';
+
+interface Section {
+    heading: string;
+    track: unknown;
+}
+
+const SECTIONS: Section[] = [
+    {
+        heading: '## ⏱ Up Next',
+        track: {
+            trackId: 'up-next',
+            instruction:
+`Write 1-3 sentences of plain markdown giving the user a shoulder-tap about what's next on their calendar today.
+
+Data: read today's events from calendar_sync/ (workspace-readdir, then workspace-readFile each .json file). Filter to events whose start datetime is today and hasn't started yet.
+
+Lead based on how soon the next event is:
+- Under 15 minutes → urgent ("Standup starts in 10 minutes — join link in the Calendar section below.")
+- Under 2 hours → lead with the event ("Design review in 40 minutes.")
+- 2+ hours → frame the gap as focus time ("Next up is standup at noon — you've got a solid 3-hour focus block.")
+
+Always compute minutes-to-start against the actual current local time — never say "nothing in the next X hours" if an event is in that window.
+
+If you find quick context in knowledge/ that's genuinely useful, add one short clause ("Ramnique pushed the OAuth PR yesterday — might come up"). Use workspace-grep / workspace-readFile conservatively; don't stall on deep research.
+
+If nothing remains today, output exactly: Clear for the rest of the day.
+
+Plain markdown prose only — no calendar block, no email block, no headings.`,
+            eventMatchCriteria:
+`Calendar event changes affecting today — new meetings, reschedules, cancellations, meetings starting soon. Skip changes to events on other days.`,
+            active: true,
+            schedule: {
+                type: 'cron',
+                expression: '*/15 * * * *',
+            },
+        },
+    },
+    {
+        heading: '## 📅 Calendar',
+        track: {
+            trackId: 'calendar',
+            instruction:
+`Emit today's meetings as a calendar block titled "Today's Meetings".
+
+Data: read calendar_sync/ via workspace-readdir, then workspace-readFile each .json event file. Filter to events occurring today. After 10am local time, drop meetings that have already ended — only include meetings that haven't ended yet.
+
+Always emit the calendar block, even when there are no remaining events (in that case use events: [] and showJoinButton: false). Set showJoinButton: true whenever any event has a conferenceLink.
+
+After the block, you MAY add one short markdown line per event giving useful prep context pulled from knowledge/ ("Design review: last week we agreed to revisit the type-picker UX."). Keep it tight — one line each, only when meaningful. Skip routine/recurring meetings.`,
+            eventMatchCriteria:
+`Calendar event changes affecting today — additions, updates, cancellations, reschedules.`,
+            active: true,
+            schedule: {
+                type: 'cron',
+                expression: '0 * * * *',
+            },
+        },
+    },
+    {
+        heading: '## 📧 Emails',
+        track: {
+            trackId: 'emails',
+            instruction:
+`Maintain a digest of email threads worth the user's attention today, rendered as zero or more email blocks (one per thread).
+
+Event-driven path (primary): the agent message will include a freshly-synced thread's markdown as the event payload. Decide whether THIS thread warrants surfacing. If it's marketing, an auto-notification, a thread already closed out, or otherwise low-signal, skip the update — do NOT call update-track-content. If it's attention-worthy, integrate it into the digest: add a new email block, or update the existing one if the same threadId is already shown.
+
+Manual path (fallback): with no event payload, scan gmail_sync/ via workspace-readdir (skip sync_state.json and attachments/). Read threads with workspace-readFile. Prioritize threads whose frontmatter action field is "reply" or "respond", plus other high-signal recent threads.
+
+Each email block should include threadId, subject, from, date, summary, and latest_email. For threads that need a reply, add a draft_response written in the user's voice — direct, informal, no fluff. For FYI threads, omit draft_response.
+
+If there is genuinely nothing to surface, output the single line: No new emails.
+
+Do NOT re-list threads the user has already seen unless their state changed (new reply, status flip).`,
+            eventMatchCriteria:
+`New or updated email threads that may need the user's attention today — drafts to send, replies to write, urgent requests, time-sensitive info. Skip marketing, newsletters, auto-notifications, and chatter on closed threads.`,
+            active: true,
+        },
+    },
+    {
+        heading: '## 📰 What You Missed',
+        track: {
+            trackId: 'what-you-missed',
+            instruction:
+`Short markdown summary of what happened yesterday that matters this morning.
+
+Data sources:
+- knowledge/Meetings/<source>/<YYYY-MM-DD>/meeting-<timestamp>.md — use workspace-readdir with recursive: true on knowledge/Meetings, filter for folders matching yesterday's date (compute yesterday from the current local date), read each matching file. Pull out: decisions made, action items assigned, blockers raised, commitments.
+- gmail_sync/ — skim for threads from yesterday that went unresolved or still need a reply.
+
+Skip recurring/routine events (standups, weekly syncs) unless something unusual happened in them.
+
+Write concise markdown — a few bullets or a short paragraph, whichever reads better. Lead with anything that shifts the user's priorities today.
+
+If nothing notable happened, output exactly: Quiet day yesterday — nothing to flag.
+
+Do NOT manufacture content to fill the section.`,
+            active: true,
+            schedule: {
+                type: 'cron',
+                expression: '0 7 * * *',
+            },
+        },
+    },
+    {
+        heading: '## ✅ Today\'s Priorities',
+        track: {
+            trackId: 'priorities',
+            instruction:
+`Ranked markdown list of the real, actionable items the user should focus on today.
+
+Data sources:
+- Yesterday's meeting notes under knowledge/Meetings/<source>/<YYYY-MM-DD>/ — action items assigned to the user are often the most important source.
+- knowledge/ — use workspace-grep for "- [ ]" checkboxes, explicit action items, deadlines, follow-ups.
+- Optional: workspace-readFile on knowledge/Today.md for the current "What You Missed" section — useful for alignment.
+
+Rules:
+- Do NOT list calendar events as tasks — they're already in the Calendar section.
+- Do NOT list trivial admin (filing small invoices, archiving spam).
+- Rank by importance. Lead with the most critical item. Note time-sensitivity when it exists ("needs to go out before the 3pm review").
+- Add a brief reason for each item when it's not self-evident.
+
+If nothing genuinely needs attention, output exactly: No pressing tasks today — good day to make progress on bigger items.
+
+Do NOT invent busywork.`,
+            active: true,
+            schedule: {
+                type: 'cron',
+                expression: '30 7 * * *',
+            },
+        },
+    },
+];
 
 function buildDailyNoteContent(): string {
-    const now = new Date();
-    const startDate = now.toISOString();
-    const endDate = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000).toISOString();
-
-    const instruction = 'Create a daily brief for me';
-
-    const taskBlock = JSON.stringify({
-        instruction,
-        schedule: {
-            type: 'cron',
-            expression: '*/15 * * * *',
-            startDate,
-            endDate,
-        },
-        'schedule-label': 'runs every 15 minutes',
-        targetId: TARGET_ID,
-    });
-
-    return [
-        '---',
-        'live_note: true',
-        '---',
-        '# Today',
-        '',
-        '```task',
-        taskBlock,
-        '```',
-        '',
-        `<!--task-target:${TARGET_ID}-->`,
-        `<!--/task-target:${TARGET_ID}-->`,
-        '',
-    ].join('\n');
+    const parts: string[] = ['# Today', ''];
+    for (const { heading, track } of SECTIONS) {
+        const parsed = TrackBlockSchema.parse(track);
+        const yaml = stringifyYaml(parsed, { lineWidth: 0, blockQuote: 'literal' }).trimEnd();
+        parts.push(
+            heading,
+            '',
+            '```track',
+            yaml,
+            '```',
+            '',
+            `<!--track-target:${parsed.trackId}-->`,
+            `<!--/track-target:${parsed.trackId}-->`,
+            '',
+        );
+    }
+    return parts.join('\n');
 }
 
 export function ensureDailyNote(): void {
