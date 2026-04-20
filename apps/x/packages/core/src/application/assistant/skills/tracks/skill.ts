@@ -9,6 +9,14 @@ export const skill = String.raw`
 
 You are helping the user create and manage **track blocks** — YAML-fenced, auto-updating content blocks embedded in notes. Load this skill whenever the user wants to track, monitor, watch, or keep an eye on something in a note, asks for recurring/auto-refreshing content ("every morning...", "show current...", "pin live X here"), or presses Cmd+K and requests auto-updating content at the cursor.
 
+## First: Just Do It — Do Not Ask About Edit Mode
+
+Track creation and editing are **action-first**. When the user asks to track, monitor, watch, or pin auto-updating content, you proceed directly — read the file, construct the block, ` + "`" + `workspace-edit` + "`" + ` it in. Do not ask "Should I make edits directly, or show you changes first for approval?" — that prompt belongs to generic document editing, not to tracks.
+
+- If another skill or an earlier turn already asked about edit mode and is waiting, treat the user's track request as implicit "direct mode" and proceed.
+- You may still ask **one** short clarifying question when genuinely ambiguous (e.g. which note to add it to). Not about permission to edit.
+- The Suggested Topics flow below is the one first-turn-confirmation exception — leave it intact.
+
 ## What Is a Track Block
 
 A track block is a scheduled, agent-run block embedded directly inside a markdown note. Each block has:
@@ -69,16 +77,55 @@ ${schemaYaml}
 
 ## Writing a Good Instruction
 
+### The Frame: This Is a Personal Knowledge Tracker
+
+Track output lives in a personal knowledge base the user scans frequently. Aim for data-forward, scannable output — the answer to "what's current / what changed?" in the fewest words that carry real information. Not prose. Not decoration.
+
+### Core Rules
+
 - **Specific and actionable.** State exactly what to fetch or compute.
 - **Single-focus.** One block = one purpose. Split "weather + news + stocks" into three blocks, don't bundle.
 - **Imperative voice, 1-3 sentences.**
-- **Mention output style** if it matters ("markdown bullet list", "one sentence", "table with 5 rows").
+- **Specify output shape.** Describe it concretely: "one line: ` + "`" + `<temp>°F, <conditions>` + "`" + `", "3-column markdown table", "bulleted digest of 5 items".
 
-Good:
-> Fetch the current temperature, feels-like, and conditions for Chicago, IL in Fahrenheit. Return as a single line: "72°F (feels like 70°F), partly cloudy".
+### Self-Sufficiency (critical)
 
-Bad:
-> Tell me about Chicago.
+The instruction runs later, in a background scheduler, with **no chat context and no memory of this conversation**. It must stand alone.
+
+**Never use phrases that depend on prior conversation or prior runs:**
+- "as before", "same style as before", "like last time"
+- "keep the format we discussed", "matching the previous output"
+- "continue from where you left off" (without stating the state)
+
+If you want consistent style across runs, **describe the style inline** (e.g. "a 3-column markdown table with headers ` + "`" + `Location` + "`" + `, ` + "`" + `Local Time` + "`" + `, ` + "`" + `Offset` + "`" + `"; "a one-line status: HH:MM, conditions, temp"). The track agent only sees your instruction — not this chat, not what you produced last time.
+
+### Output Patterns — Match the Data
+
+Pick a shape that fits what the user is tracking. Four common patterns:
+
+**1. Single metric / status line.**
+- Good: "Fetch USD/INR. Return one line: ` + "`" + `USD/INR: <rate> (as of <HH:MM IST>)` + "`" + `."
+- Bad: "Give me a nice update about the dollar rate."
+
+**2. Compact table.**
+- Good: "Show current local time for India, Chicago, Indianapolis as a 3-column markdown table: ` + "`" + `Location | Local Time | Offset vs India` + "`" + `. One row per location, no prose."
+- Bad: "Show a polished, table-first world clock with a pleasant layout."
+
+**3. Rolling digest.**
+- Good: "Summarize the top 5 HN front-page stories as bullets: ` + "`" + `- <title> (<points> pts, <comments> comments)` + "`" + `. No commentary."
+- Bad: "Give me the top HN stories with thoughtful takeaways."
+
+**4. Status / threshold watch.**
+- Good: "Check https://status.example.com. Return one line: ` + "`" + `✓ All systems operational` + "`" + ` or ` + "`" + `⚠ <component>: <status>` + "`" + `. If degraded, add one bullet per affected component."
+- Bad: "Keep an eye on the status page and tell me how it looks."
+
+### Anti-Patterns
+
+- **Decorative adjectives** describing the output: "polished", "clean", "beautiful", "pleasant", "nicely formatted" — they tell the agent nothing concrete.
+- **References to past state** without a mechanism to access it ("as before", "same as last time").
+- **Bundling multiple purposes** into one instruction — split into separate track blocks.
+- **Open-ended prose requests** ("tell me about X", "give me thoughts on X").
+- **Output-shape words without a concrete shape** ("dashboard-like", "report-style").
 
 ## YAML String Style (critical — read before writing any ` + "`" + `instruction` + "`" + ` or ` + "`" + `eventMatchCriteria` + "`" + `)
 
@@ -94,10 +141,10 @@ Real failure seen in the wild — an instruction containing the phrase ` + "`" +
 
 ` + "```" + `yaml
 instruction: |
-  Show a side-by-side world clock for India, Chicago, and Indianapolis.
-  Return a compact markdown table with columns for location, current local
-  time, and relative offset vs India. Format with the same polished UI
-  style as before: clean, compact, visually pleasant, and table-first.
+  Show current local time for India, Chicago, and Indianapolis as a
+  3-column markdown table: Location | Local Time | Offset vs India.
+  One row per location, 24-hour time (HH:MM), no extra prose.
+  Note: when a location is in DST, reflect that in the offset column.
 eventMatchCriteria: |
   Emails from the finance team about Q3 budget or OKRs.
 ` + "```" + `
@@ -219,6 +266,8 @@ Writing good ` + "`" + `eventMatchCriteria` + "`" + `:
 Tracks **without** ` + "`" + `eventMatchCriteria` + "`" + ` opt out of events entirely — they'll only run on schedule or manually.
 
 ## Insertion Workflow
+
+**Reminder:** once you have enough to act, act. Do not pause to ask about edit mode.
 
 ### Cmd+K with cursor context
 
