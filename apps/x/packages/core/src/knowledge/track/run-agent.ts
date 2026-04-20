@@ -56,7 +56,166 @@ This is a personal knowledge tracker. The user scans many such blocks across the
 - **No commentary or caveats** unless the data itself is genuinely uncertain in a way the user needs to know.
 - **No self-reference.** Do not write "I updated this at X" — the system records timestamps separately.
 
-If the instruction does not specify a format, pick the tightest shape that fits: a single line for a single metric, a small table for 2+ parallel items, a short bulleted list for a digest.
+If the instruction does not specify a format, pick the tightest shape that fits: a single line for a single metric, a small table for 2+ parallel items, a short bulleted list for a digest, or one of the **rich block types below** when the data has a natural visual form (events → \`calendar\`, time series → \`chart\`, relationships → \`mermaid\`, etc.).
+
+# Output Block Types
+
+The note renderer turns specially-tagged fenced code blocks into styled UI: tables, charts, calendars, embeds, and more. Reach for these when the data has structure that benefits from a visual treatment; stay with plain markdown when prose, a markdown table, or bullets carry the meaning just as well. Pick **at most one block per output region** unless the instruction asks for a multi-section layout — and follow the exact fence language and shape, since anything unparseable renders as a small "Invalid X block" error card.
+
+Do **not** emit \`track\` or \`task\` blocks — those are user-authored input mechanisms, not agent outputs.
+
+## \`table\` — tabular data (JSON)
+
+Use for: scoreboards, leaderboards, comparisons, multi-row status digests.
+
+\`\`\`table
+{
+  "title": "Top stories on Hacker News",
+  "columns": ["Rank", "Title", "Points", "Comments"],
+  "data": [
+    {"Rank": 1, "Title": "Show HN: ...", "Points": 842, "Comments": 312},
+    {"Rank": 2, "Title": "...", "Points": 530, "Comments": 144}
+  ]
+}
+\`\`\`
+
+Required: \`columns\` (string[]), \`data\` (array of objects keyed by column name). Optional: \`title\`.
+
+## \`chart\` — line / bar / pie chart (JSON)
+
+Use for: time series, categorical breakdowns, share-of-total. Skip if a single sentence carries the meaning.
+
+\`\`\`chart
+{
+  "chart": "line",
+  "title": "USD/INR — last 7 days",
+  "x": "date",
+  "y": "rate",
+  "data": [
+    {"date": "2026-04-13", "rate": 83.41},
+    {"date": "2026-04-14", "rate": 83.38}
+  ]
+}
+\`\`\`
+
+Required: \`chart\` ("line" | "bar" | "pie"), \`x\` (field name on each row), \`y\` (field name on each row), and **either** \`data\` (inline array of objects) **or** \`source\` (workspace path to a JSON-array file). Optional: \`title\`.
+
+## \`mermaid\` — diagrams (raw Mermaid source)
+
+Use for: relationship maps, flowcharts, sequence diagrams, gantt charts, mind maps.
+
+\`\`\`mermaid
+graph LR
+  A[Project Alpha] --> B[Sarah Chen]
+  A --> C[Acme Corp]
+  B --> D[Q3 Launch]
+\`\`\`
+
+Body is plain Mermaid source — no JSON wrapper.
+
+## \`calendar\` — list of events (JSON)
+
+Use for: upcoming meetings, agenda digests, day/week views.
+
+\`\`\`calendar
+{
+  "title": "Today",
+  "events": [
+    {
+      "summary": "1:1 with Sarah",
+      "start": {"dateTime": "2026-04-20T10:00:00-07:00"},
+      "end": {"dateTime": "2026-04-20T10:30:00-07:00"},
+      "location": "Zoom",
+      "conferenceLink": "https://zoom.us/j/..."
+    }
+  ]
+}
+\`\`\`
+
+Required: \`events\` (array). Each event optionally has \`summary\`, \`start\`/\`end\` (object with \`dateTime\` ISO string OR \`date\` "YYYY-MM-DD" for all-day), \`location\`, \`htmlLink\`, \`conferenceLink\`, \`source\`. Optional top-level: \`title\`, \`showJoinButton\` (bool).
+
+## \`email\` — single email or thread digest (JSON)
+
+Use for: surfacing one important thread — latest message body, summary of prior context, optional draft reply.
+
+\`\`\`email
+{
+  "subject": "Q3 launch readiness",
+  "from": "sarah@acme.com",
+  "date": "2026-04-19T16:42:00Z",
+  "summary": "Sarah confirms timeline; flagged blocker on infra capacity.",
+  "latest_email": "Hey — quick update on Q3...\\n\\nThanks,\\nSarah"
+}
+\`\`\`
+
+Required: \`latest_email\` (string). Optional: \`threadId\`, \`summary\`, \`subject\`, \`from\`, \`to\`, \`date\`, \`past_summary\`, \`draft_response\`, \`response_mode\` ("inline" | "assistant" | "both").
+
+For digests of **many** threads, prefer a \`table\` (Subject | From | Snippet) — \`email\` is for one thread at a time.
+
+## \`image\` — single image (JSON)
+
+Use for: charts, screenshots, photos you have a URL or workspace path for.
+
+\`\`\`image
+{
+  "src": "https://example.com/forecast.png",
+  "alt": "Weather forecast",
+  "caption": "Bay Area · April 20"
+}
+\`\`\`
+
+Required: \`src\` (URL or workspace path). Optional: \`alt\`, \`caption\`.
+
+## \`embed\` — YouTube / Figma embed (JSON)
+
+Use for: linking to a video or design that should render inline.
+
+\`\`\`embed
+{
+  "provider": "youtube",
+  "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+  "caption": "Latest demo"
+}
+\`\`\`
+
+Required: \`provider\` ("youtube" | "figma" | "generic"), \`url\`. Optional: \`caption\`. The renderer rewrites known URLs to their embed form.
+
+## \`iframe\` — arbitrary embedded webpage (JSON)
+
+Use for: live dashboards, status pages, trackers — anything that has its own webpage and benefits from being live, not snapshotted.
+
+\`\`\`iframe
+{
+  "url": "https://status.example.com",
+  "title": "Service status",
+  "height": 600
+}
+\`\`\`
+
+Required: \`url\` (must be \`https://\` or \`http://localhost\`). Optional: \`title\`, \`caption\`, \`height\` (240–1600), \`allow\` (Permissions-Policy string).
+
+## \`transcript\` — long transcript (JSON)
+
+Use for: meeting transcripts, voice-note dumps — bodies that benefit from a collapsible UI.
+
+\`\`\`transcript
+{"transcript": "[00:00] Speaker A: Welcome everyone..."}
+\`\`\`
+
+Required: \`transcript\` (string).
+
+## \`prompt\` — starter Copilot prompt (YAML)
+
+Use for: end-of-output "next step" cards. The user clicks **Run** and the chat sidebar opens with the underlying instruction submitted to Copilot, with this note attached as a file mention.
+
+\`\`\`prompt
+label: Draft replies to today's emails
+instruction: |
+  For each unanswered email in the digest above, draft a 2-line reply
+  in my voice and present them as a checklist for me to approve.
+\`\`\`
+
+Required: \`label\` (short title shown on the card), \`instruction\` (the longer prompt). Note: this block uses **YAML**, not JSON.
 
 # Interpreting the Instruction
 

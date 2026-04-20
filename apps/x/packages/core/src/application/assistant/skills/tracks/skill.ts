@@ -4,6 +4,27 @@ import { TrackBlockSchema } from '@x/shared/dist/track-block.js';
 
 const schemaYaml = stringifyYaml(z.toJSONSchema(TrackBlockSchema)).trimEnd();
 
+const richBlockMenu = `**5. Rich block render — when the data has a natural visual form.**
+
+The track agent can emit *rich blocks* — special fenced blocks the editor renders as styled UI (charts, calendars, embedded iframes, etc.). When the data fits one of these shapes, instruct the agent explicitly so it doesn't fall back to plain markdown:
+
+- \`table\` — multi-row data, scoreboards, leaderboards. *"Render as a \`table\` block with columns Rank, Title, Points, Comments."*
+- \`chart\` — time series, breakdowns, share-of-total. *"Render as a \`chart\` block (line, bar, or pie) with x=date, y=rate."*
+- \`mermaid\` — flowcharts, sequence/relationship diagrams, gantt charts. *"Render as a \`mermaid\` diagram."*
+- \`calendar\` — upcoming events / agenda. *"Render as a \`calendar\` block."*
+- \`email\` — single email thread digest (subject, from, summary, latest body, optional draft). *"Render the most important unanswered thread as an \`email\` block."*
+- \`image\` — single image with caption. *"Render as an \`image\` block."*
+- \`embed\` — YouTube or Figma. *"Render as an \`embed\` block."*
+- \`iframe\` — live dashboards, status pages, anything that benefits from being live not snapshotted. *"Render as an \`iframe\` block pointing to <url>."*
+- \`transcript\` — long meeting transcripts (collapsible). *"Render as a \`transcript\` block."*
+- \`prompt\` — a "next step" Copilot card the user can click to start a chat. *"End with a \`prompt\` block labeled '<short label>' that runs '<longer prompt to send to Copilot>'."*
+
+You **do not** need to write the block body yourself — describe the desired output in the instruction and the track agent will format it (it knows each block's exact schema). Avoid \`track\` and \`task\` block types — those are user-authored input, not agent output.
+
+- Good: "Show today's calendar events. Render as a \`calendar\` block with \`showJoinButton: true\`."
+- Good: "Plot USD/INR over the last 7 days as a \`chart\` block — line chart, x=date, y=rate."
+- Bad: "Show today's calendar." (vague — agent may produce a markdown bullet list when the user wants the rich block)`;
+
 export const skill = String.raw`
 # Tracks Skill
 
@@ -101,7 +122,7 @@ If you want consistent style across runs, **describe the style inline** (e.g. "a
 
 ### Output Patterns — Match the Data
 
-Pick a shape that fits what the user is tracking. Four common patterns:
+Pick a shape that fits what the user is tracking. Five common patterns — the first four are plain markdown; the fifth is a rich rendered block:
 
 **1. Single metric / status line.**
 - Good: "Fetch USD/INR. Return one line: ` + "`" + `USD/INR: <rate> (as of <HH:MM IST>)` + "`" + `."
@@ -118,6 +139,8 @@ Pick a shape that fits what the user is tracking. Four common patterns:
 **4. Status / threshold watch.**
 - Good: "Check https://status.example.com. Return one line: ` + "`" + `✓ All systems operational` + "`" + ` or ` + "`" + `⚠ <component>: <status>` + "`" + `. If degraded, add one bullet per affected component."
 - Bad: "Keep an eye on the status page and tell me how it looks."
+
+${richBlockMenu}
 
 ### Anti-Patterns
 
