@@ -2791,6 +2791,27 @@ function App() {
     return () => window.removeEventListener('rowboat:open-copilot-edit-track', handler as EventListener)
   }, [submitFromPalette])
 
+  // Listener for prompt-block "Run" events
+  // (dispatched by apps/renderer/src/extensions/prompt-block.tsx)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const ev = e as CustomEvent<{
+        instruction?: string
+        filePath?: string
+        label?: string
+      }>
+      const instruction = ev.detail?.instruction
+      const filePath = ev.detail?.filePath
+      if (!instruction) return
+      const mention = filePath
+        ? { path: filePath, displayName: filePath.split('/').pop() ?? filePath }
+        : null
+      submitFromPalette(instruction, mention)
+    }
+    window.addEventListener('rowboat:open-copilot-prompt', handler as EventListener)
+    return () => window.removeEventListener('rowboat:open-copilot-prompt', handler as EventListener)
+  }, [submitFromPalette])
+
   const toggleKnowledgePane = useCallback(() => {
     setIsRightPaneMaximized(false)
     setIsChatSidebarOpen(prev => !prev)

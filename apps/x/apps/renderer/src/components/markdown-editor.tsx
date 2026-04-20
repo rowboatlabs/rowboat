@@ -12,6 +12,7 @@ import type { JSONContent, MarkdownRendererHelpers } from '@tiptap/react'
 import { ImageUploadPlaceholderExtension, createImageUploadHandler } from '@/extensions/image-upload'
 import { TaskBlockExtension } from '@/extensions/task-block'
 import { TrackBlockExtension } from '@/extensions/track-block'
+import { PromptBlockExtension } from '@/extensions/prompt-block'
 import { TrackTargetOpenExtension, TrackTargetCloseExtension } from '@/extensions/track-target'
 import { ImageBlockExtension } from '@/extensions/image-block'
 import { EmbedBlockExtension } from '@/extensions/embed-block'
@@ -690,6 +691,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       ImageUploadPlaceholderExtension,
       TaskBlockExtension,
       TrackBlockExtension.configure({ notePath }),
+      PromptBlockExtension.configure({ notePath }),
       TrackTargetOpenExtension,
       TrackTargetCloseExtension,
       ImageBlockExtension,
