@@ -58,17 +58,22 @@ function preprocessMarkdown(markdown: string): string {
 // line until a blank line terminates it, and markdown inline rules (bold,
 // italics, links) don't apply inside the block. Without surrounding blank
 // lines, the line right after our placeholder div gets absorbed as HTML and
-// its markdown is not parsed. We consume any adjacent newlines in the match
-// and emit exactly `\n\n<div></div>\n\n` so the HTML block starts and ends on
-// its own line.
+// its markdown is not parsed.
+//
+// Consume ALL adjacent newlines (\n*, not \n?) so the emitted `\n\n…\n\n`
+// is load/save stable. serializeBlocksToMarkdown emits `\n\n` between blocks
+// on save; a `\n?` regex on reload would only consume one of those two
+// newlines, so every cycle would add a net newline on each side of every
+// marker — causing tracks running on an open note to steadily inflate the
+// file with blank lines around target regions.
 function preprocessTrackTargets(md: string): string {
   return md
     .replace(
-      /\n?<!--track-target:([^\s>]+)-->\n?/g,
+      /\n*<!--track-target:([^\s>]+)-->\n*/g,
       (_m, id: string) => `\n\n<div data-type="track-target-open" data-track-id="${id}"></div>\n\n`,
     )
     .replace(
-      /\n?<!--\/track-target:([^\s>]+)-->\n?/g,
+      /\n*<!--\/track-target:([^\s>]+)-->\n*/g,
       (_m, id: string) => `\n\n<div data-type="track-target-close" data-track-id="${id}"></div>\n\n`,
     )
 }
