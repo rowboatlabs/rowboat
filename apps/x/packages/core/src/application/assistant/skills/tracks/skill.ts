@@ -19,7 +19,8 @@ A track block is a scheduled, agent-run block embedded directly inside a markdow
 
 ` + "```" + `track
 trackId: chicago-time
-instruction: Show the current time in Chicago, IL in 12-hour format.
+instruction: |
+  Show the current time in Chicago, IL in 12-hour format.
 active: true
 schedule:
   type: cron
@@ -79,6 +80,67 @@ Good:
 Bad:
 > Tell me about Chicago.
 
+## YAML String Style (critical — read before writing any ` + "`" + `instruction` + "`" + ` or ` + "`" + `eventMatchCriteria` + "`" + `)
+
+The two free-form fields — ` + "`" + `instruction` + "`" + ` and ` + "`" + `eventMatchCriteria` + "`" + ` — are where YAML parsing usually breaks. The runner re-emits the full YAML block every time it writes ` + "`" + `lastRunAt` + "`" + `, ` + "`" + `lastRunSummary` + "`" + `, etc., and the YAML library may re-flow long plain (unquoted) strings onto multiple lines. Once that happens, any ` + "`" + `:` + "`" + ` **followed by a space** inside the value silently corrupts the block: YAML interprets the ` + "`" + `:` + "`" + ` as a new key/value separator and the instruction gets truncated.
+
+Real failure seen in the wild — an instruction containing the phrase ` + "`" + `"polished UI style as before: clean, compact..."` + "`" + ` was written as a plain scalar, got re-emitted across multiple lines on the next run, and the ` + "`" + `as before:` + "`" + ` became a phantom key. The block parsed as garbage after that.
+
+### The rule: always use a safe scalar style
+
+**Default to the literal block scalar (` + "`" + `|` + "`" + `) for ` + "`" + `instruction` + "`" + ` and ` + "`" + `eventMatchCriteria` + "`" + `, every time.** It is the only style that is robust across the full range of punctuation these fields typically contain, and it is safe even if the content later grows to multiple lines.
+
+### Preferred: literal block scalar (` + "`" + `|` + "`" + `)
+
+` + "```" + `yaml
+instruction: |
+  Show a side-by-side world clock for India, Chicago, and Indianapolis.
+  Return a compact markdown table with columns for location, current local
+  time, and relative offset vs India. Format with the same polished UI
+  style as before: clean, compact, visually pleasant, and table-first.
+eventMatchCriteria: |
+  Emails from the finance team about Q3 budget or OKRs.
+` + "```" + `
+
+- ` + "`" + `|` + "`" + ` preserves line breaks verbatim. Colons, ` + "`" + `#` + "`" + `, quotes, leading ` + "`" + `-` + "`" + `, percent signs — all literal. No escaping needed.
+- **Indent every content line by 2 spaces** relative to the key (` + "`" + `instruction:` + "`" + `). Use spaces, never tabs.
+- Leave a real newline after ` + "`" + `|` + "`" + ` — content starts on the next line, not the same line.
+- Default chomping (no modifier) is fine. Do **not** add ` + "`" + `-` + "`" + ` or ` + "`" + `+` + "`" + ` unless you know you need them.
+- A ` + "`" + `|` + "`" + ` block is terminated by a line indented less than the content — typically the next sibling key (` + "`" + `active:` + "`" + `, ` + "`" + `schedule:` + "`" + `).
+
+### Acceptable alternative: double-quoted on a single line
+
+Fine for short single-sentence fields with no newline needs:
+
+` + "```" + `yaml
+instruction: "Show the current time in Chicago, IL in 12-hour format."
+eventMatchCriteria: "Emails about Q3 planning, OKRs, or roadmap decisions."
+` + "```" + `
+
+- Escape ` + "`" + `"` + "`" + ` as ` + "`" + `\"` + "`" + ` and backslash as ` + "`" + `\\` + "`" + `.
+- Prefer ` + "`" + `|` + "`" + ` the moment the string needs two sentences or a newline.
+
+### Single-quoted on a single line (only if double-quoted would require heavy escaping)
+
+` + "```" + `yaml
+instruction: 'He said "hi" at 9:00.'
+` + "```" + `
+
+- A literal single quote is escaped by doubling it: ` + "`" + `'it''s fine'` + "`" + `.
+- No other escape sequences work.
+
+### Do NOT use plain (unquoted) scalars for these two fields
+
+Even if the current value looks safe, a future edit (by you or the user) may introduce a ` + "`" + `:` + "`" + ` or ` + "`" + `#` + "`" + `, and a future re-emit may fold the line. The ` + "`" + `|` + "`" + ` style is safe under **all** future edits — plain scalars are not.
+
+### Editing an existing track
+
+If you ` + "`" + `workspace-edit` + "`" + ` an existing track's ` + "`" + `instruction` + "`" + ` or ` + "`" + `eventMatchCriteria` + "`" + ` and find it is still a plain scalar, **upgrade it to ` + "`" + `|` + "`" + `** in the same edit. Don't leave a plain scalar behind that the next run will corrupt.
+
+### Never-hand-write fields
+
+` + "`" + `lastRunAt` + "`" + `, ` + "`" + `lastRunId` + "`" + `, ` + "`" + `lastRunSummary` + "`" + ` are owned by the runner. Don't touch them — don't even try to style them. If your ` + "`" + `workspace-edit` + "`" + `'s ` + "`" + `oldString` + "`" + ` happens to include these lines, copy them byte-for-byte into ` + "`" + `newString` + "`" + ` unchanged.
+
 ## Schedules
 
 Schedule is an **optional** discriminated union. Three types:
@@ -132,9 +194,12 @@ In addition to manual and scheduled, a track can be triggered by **events** — 
 
 ` + "```" + `track
 trackId: q3-planning-emails
-instruction: Maintain a running summary of decisions and open questions about Q3 planning, drawn from emails on the topic.
+instruction: |
+  Maintain a running summary of decisions and open questions about Q3
+  planning, drawn from emails on the topic.
 active: true
-eventMatchCriteria: Emails about Q3 planning, roadmap decisions, or quarterly OKRs
+eventMatchCriteria: |
+  Emails about Q3 planning, roadmap decisions, or quarterly OKRs.
 ` + "```" + `
 
 How it works:
@@ -201,7 +266,8 @@ Write it verbatim like this (including the blank line between fence and target):
 
 ` + "```" + `track
 trackId: <id>
-instruction: <instruction>
+instruction: |
+  <instruction, indented 2 spaces, may span multiple lines>
 active: true
 schedule:
   type: cron
@@ -214,6 +280,7 @@ schedule:
 **Rules:**
 - One blank line between the closing ` + "`" + "```" + `" + " fence and the ` + "`" + `<!--track-target:ID-->` + "`" + `.
 - Target pair is **empty on creation**. The runner fills it on the first run.
+- **Always use the literal block scalar (` + "`" + `|` + "`" + `)** for ` + "`" + `instruction` + "`" + ` and ` + "`" + `eventMatchCriteria` + "`" + `, indented 2 spaces. Never a plain (unquoted) scalar — see the YAML String Style section above for why.
 - **Always quote cron expressions** in YAML — they contain spaces and ` + "`" + `*` + "`" + `.
 - Use 2-space YAML indent. No tabs.
 - Top-level markdown only — never inside a code fence, blockquote, or table.
@@ -317,7 +384,8 @@ Minimal template:
 
 ` + "```" + `track
 trackId: <kebab-id>
-instruction: <what to produce>
+instruction: |
+  <what to produce — always use ` + "`" + `|` + "`" + `, indented 2 spaces>
 active: true
 schedule:
   type: cron
@@ -328,6 +396,8 @@ schedule:
 <!--/track-target:<kebab-id>-->
 
 Top cron expressions: ` + "`" + `"0 * * * *"` + "`" + ` (hourly), ` + "`" + `"0 8 * * *"` + "`" + ` (daily 8am), ` + "`" + `"0 9 * * 1-5"` + "`" + ` (weekdays 9am), ` + "`" + `"*/15 * * * *"` + "`" + ` (every 15m).
+
+YAML style reminder: ` + "`" + `instruction` + "`" + ` and ` + "`" + `eventMatchCriteria` + "`" + ` are **always** ` + "`" + `|` + "`" + ` block scalars. Never plain. Never leave a plain scalar in place when editing.
 `;
 
 export default skill;
