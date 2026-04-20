@@ -53,6 +53,9 @@ ensureDefaultConfigs();
 import('../knowledge/ensure_daily_note.js').then(m => m.ensureDailyNote()).catch(err => {
     console.error('[DailyNote] Failed to ensure daily note:', err);
 });
+import('../knowledge/ensure_suggested_topics_note.js').then(m => m.ensureSuggestedTopicsNote()).catch(err => {
+    console.error('[SuggestedTopicsNote] Failed to ensure note:', err);
+});
 
 // Initialize version history repo (async, fire-and-forget on startup)
 import('../knowledge/version_history.js').then(m => m.initRepo()).catch(err => {
