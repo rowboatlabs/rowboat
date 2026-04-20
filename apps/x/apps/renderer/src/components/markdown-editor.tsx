@@ -187,6 +187,8 @@ function blockToMarkdown(node: JsonNode): string {
       return serializeList(node, 0).join('\n')
     case 'taskBlock':
       return '```task\n' + (node.attrs?.data as string || '{}') + '\n```'
+    case 'promptBlock':
+      return '```prompt\n' + (node.attrs?.data as string || '') + '\n```'
     case 'trackBlock':
       return '```track\n' + (node.attrs?.data as string || '') + '\n```'
     case 'trackTargetOpen':
