@@ -146,6 +146,48 @@
   color: #eb5757;
 }
 
+/* Native GFM tables (distinct from the custom tableBlock above) */
+.tiptap-editor .ProseMirror .tableWrapper {
+  overflow-x: auto;
+  margin: 8px 0;
+}
+
+.tiptap-editor .ProseMirror table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 13px;
+  margin: 8px 0;
+}
+
+.tiptap-editor .ProseMirror table th,
+.tiptap-editor .ProseMirror table td {
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  vertical-align: top;
+  box-sizing: border-box;
+  position: relative;
+  min-width: 60px;
+}
+
+.tiptap-editor .ProseMirror table th {
+  background: color-mix(in srgb, var(--foreground) 4%, transparent);
+  font-weight: 600;
+  text-align: left;
+}
+
+.tiptap-editor .ProseMirror table p {
+  margin: 0;
+}
+
+.tiptap-editor .ProseMirror table .selectedCell::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--foreground) 8%, transparent);
+  pointer-events: none;
+}
+
 /* Divider */
 .tiptap-editor .ProseMirror hr {
   border: none;

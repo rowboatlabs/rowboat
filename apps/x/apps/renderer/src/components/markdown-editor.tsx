@@ -7,6 +7,8 @@ import Image from '@tiptap/extension-image'
 import Placeholder from '@tiptap/extension-placeholder'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
+import { TableKit, renderTableToMarkdown } from '@tiptap/extension-table'
+import type { JSONContent, MarkdownRendererHelpers } from '@tiptap/react'
 import { ImageUploadPlaceholderExtension, createImageUploadHandler } from '@/extensions/image-upload'
 import { TaskBlockExtension } from '@/extensions/task-block'
 import { TrackBlockExtension } from '@/extensions/track-block'
@@ -149,6 +151,17 @@ function serializeList(listNode: JsonNode, indent: number): string[] {
   return lines
 }
 
+// Adapter for tiptap's first-party renderTableToMarkdown. Only renderChildren is
+// actually invoked — the other helpers are stubs to satisfy the type.
+const tableRenderHelpers: MarkdownRendererHelpers = {
+  renderChildren: (nodes) => {
+    const arr = Array.isArray(nodes) ? nodes : [nodes]
+    return arr.map(n => n.type === 'paragraph' ? nodeToText(n as JsonNode) : '').join('')
+  },
+  wrapInBlock: (prefix, content) => prefix + content,
+  indent: (content) => content,
+}
+
 // Serialize a single top-level block to its markdown string. Empty paragraphs (or blank-marker
 // paragraphs) return '' to signal "blank line slot" for the join logic in serializeBlocksToMarkdown.
 function blockToMarkdown(node: JsonNode): string {
@@ -192,6 +205,8 @@ function blockToMarkdown(node: JsonNode): string {
       return '```transcript\n' + (node.attrs?.data as string || '{}') + '\n```'
     case 'mermaidBlock':
       return '```mermaid\n' + (node.attrs?.data as string || '') + '\n```'
+    case 'table':
+      return renderTableToMarkdown(node as JSONContent, tableRenderHelpers).trim()
     case 'codeBlock': {
       const lang = (node.attrs?.language as string) || ''
       return '```' + lang + '\n' + nodeToText(node) + '\n```'
@@ -696,6 +711,9 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       TaskList,
       TaskItem.configure({
         nested: true,
+      }),
+      TableKit.configure({
+        table: { resizable: false },
       }),
       Placeholder.configure({
         placeholder,
