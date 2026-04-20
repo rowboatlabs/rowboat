@@ -36,11 +36,12 @@ function TrackBlockView({ node, deleteNode, extension }: {
   extension: { options: { notePath?: string } }
 }) {
   const raw = node.attrs.data as string
+  const cleaned = raw.replace(/[\u200B-\u200D\uFEFF]/g, "");
 
   const track = useMemo<z.infer<typeof TrackBlockSchema> | null>(() => {
     try {
-      return TrackBlockSchema.parse(parseYaml(raw))
-    } catch { return null }
+      return TrackBlockSchema.parse(parseYaml(cleaned))
+    } catch(error) { console.error('error', error); return null }
   }, [raw]) as z.infer<typeof TrackBlockSchema> | null;
 
   const trackId = track?.trackId ?? ''
