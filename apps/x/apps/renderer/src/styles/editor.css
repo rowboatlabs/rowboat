@@ -261,12 +261,6 @@
   margin-left: 1.5em;
 }
 
-/* Selection */
-.tiptap-editor .ProseMirror ::selection {
-  background-color: var(--ring);
-  color: var(--background);
-}
-
 /* Toolbar */
 .editor-toolbar {
   display: flex;
@@ -1832,25 +1826,25 @@
   background: color-mix(in srgb, var(--foreground) 5%, transparent);
 }
 
-/* Dark mode overrides */
+/* Dark mode overrides — fjord & stone */
 .dark .tiptap-editor .ProseMirror {
-  color: rgba(255, 255, 255, 0.9);
+  color: #E2E0DD;
 }
 
 .dark .tiptap-editor .ProseMirror a {
-  text-decoration-color: rgba(255, 255, 255, 0.4);
+  text-decoration-color: rgba(94, 140, 165, 0.5);
 }
 
 .dark .tiptap-editor .ProseMirror blockquote {
-  border-left-color: rgba(255, 255, 255, 0.4);
+  border-left-color: rgba(94, 140, 165, 0.4);
 }
 
 .dark .tiptap-editor .ProseMirror hr {
-  border-top-color: rgba(255, 255, 255, 0.16);
+  border-top-color: rgba(226, 224, 221, 0.16);
 }
 
 .dark .tiptap-editor .ProseMirror pre {
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(226, 224, 221, 0.05);
 }
 
 .dark .tiptap-editor .ProseMirror pre code {
@@ -1858,10 +1852,10 @@
 }
 
 .dark .tiptap-editor .ProseMirror code {
-  background: rgba(255, 255, 255, 0.1);
-  color: #ff7b72;
+  background: rgba(94, 140, 165, 0.12);
+  color: #7AAAC0;
 }
 
 .dark .tiptap-editor .ProseMirror p.is-editor-empty:first-child::before {
-  color: rgba(255, 255, 255, 0.3);
+  color: rgba(226, 224, 221, 0.3);
 }
