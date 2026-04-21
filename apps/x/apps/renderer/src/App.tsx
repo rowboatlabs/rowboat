@@ -127,8 +127,8 @@ const TITLEBAR_BUTTON_PX = 32
 const TITLEBAR_BUTTON_GAP_PX = 4
 const TITLEBAR_HEADER_GAP_PX = 8
 const TITLEBAR_TOGGLE_MARGIN_LEFT_PX = 12
-const TITLEBAR_BUTTONS_COLLAPSED = 4
-const TITLEBAR_BUTTON_GAPS_COLLAPSED = 3
+const TITLEBAR_BUTTONS_COLLAPSED = 1
+const TITLEBAR_BUTTON_GAPS_COLLAPSED = 0
 const GRAPH_TAB_PATH = '__rowboat_graph_view__'
 const SUGGESTED_TOPICS_TAB_PATH = '__rowboat_suggested_topics__'
 const BASES_DEFAULT_TAB_PATH = '__rowboat_bases_default__'
@@ -506,22 +506,13 @@ function viewStatesEqual(a: ViewState, b: ViewState): boolean {
   return true // both graph
 }
 
-/** Sidebar toggle + utility buttons (fixed position, top-left) */
+/** Sidebar toggle (fixed position, top-left) */
 function FixedSidebarToggle({
-  onNavigateBack,
-  onNavigateForward,
-  canNavigateBack,
-  canNavigateForward,
   leftInsetPx,
 }: {
-  onNavigateBack: () => void
-  onNavigateForward: () => void
-  canNavigateBack: boolean
-  canNavigateForward: boolean
   leftInsetPx: number
 }) {
-  const { toggleSidebar, state } = useSidebar()
-  const isCollapsed = state === "collapsed"
+  const { toggleSidebar } = useSidebar()
   return (
     <div className="fixed left-0 top-0 z-50 flex h-10 items-center" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
       <div aria-hidden="true" className="h-10 shrink-0" style={{ width: leftInsetPx }} />
@@ -535,30 +526,6 @@ function FixedSidebarToggle({
       >
         <PanelLeftIcon className="size-5" />
       </button>
-      {/* Back / Forward navigation */}
-      {isCollapsed && (
-        <>
-          <button
-            type="button"
-            onClick={onNavigateBack}
-            disabled={!canNavigateBack}
-            className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-30 disabled:pointer-events-none"
-            style={{ marginLeft: TITLEBAR_BUTTON_GAP_PX }}
-            aria-label="Go back"
-          >
-            <ChevronLeftIcon className="size-5" />
-          </button>
-          <button
-            type="button"
-            onClick={onNavigateForward}
-            disabled={!canNavigateForward}
-            className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-30 disabled:pointer-events-none"
-            aria-label="Go forward"
-          >
-            <ChevronRightIcon className="size-5" />
-          </button>
-        </>
-      )}
     </div>
   )
 }
@@ -4756,10 +4723,6 @@ function App() {
             )}
             {/* Rendered last so its no-drag region paints over the sidebar drag region */}
             <FixedSidebarToggle
-              onNavigateBack={() => { void navigateBack() }}
-              onNavigateForward={() => { void navigateForward() }}
-              canNavigateBack={canNavigateBack}
-              canNavigateForward={canNavigateForward}
               leftInsetPx={isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0}
             />
           </SidebarProvider>
