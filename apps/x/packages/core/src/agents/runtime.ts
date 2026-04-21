@@ -955,27 +955,40 @@ export async function* streamAgent({
                 subflow: [],
             });
             let result: unknown = null;
-            if (agent.tools![toolCall.toolName].type === "agent") {
-                const subflowState = state.subflowStates[toolCallId];
-                for await (const event of streamAgent({
-                    state: subflowState,
-                    idGenerator,
-                    runId,
-                    messageQueue,
-                    modelConfigRepo,
-                    signal,
-                    abortRegistry,
-                })) {
-                    yield* processEvent({
-                        ...event,
-                        subflow: [toolCallId, ...event.subflow],
-                    });
+            try {
+                if (agent.tools![toolCall.toolName].type === "agent") {
+                    const subflowState = state.subflowStates[toolCallId];
+                    for await (const event of streamAgent({
+                        state: subflowState,
+                        idGenerator,
+                        runId,
+                        messageQueue,
+                        modelConfigRepo,
+                        signal,
+                        abortRegistry,
+                    })) {
+                        yield* processEvent({
+                            ...event,
+                            subflow: [toolCallId, ...event.subflow],
+                        });
+                    }
+                    if (!subflowState.getPendingAskHumans().length && !subflowState.getPendingPermissions().length) {
+                        result = subflowState.finalResponse();
+                    }
+                } else {
+                    result = await execTool(agent.tools![toolCall.toolName], toolCall.arguments, { runId, signal, abortRegistry });
                 }
-                if (!subflowState.getPendingAskHumans().length && !subflowState.getPendingPermissions().length) {
-                    result = subflowState.finalResponse();
+            } catch (error) {
+                if ((error instanceof Error && error.name === "AbortError") || signal.aborted) {
+                    throw error;
                 }
-            } else {
-                result = await execTool(agent.tools![toolCall.toolName], toolCall.arguments, { runId, signal, abortRegistry });
+                const message = error instanceof Error ? (error.message || error.name) : String(error);
+                _logger.log('tool failed', message);
+                result = {
+                    success: false,
+                    error: message,
+                    toolName: toolCall.toolName,
+                };
             }
             const resultPayload = result === undefined ? null : result;
             const resultMsg: z.infer<typeof ToolMessage> = {
