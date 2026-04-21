@@ -3,13 +3,14 @@ import fs from 'fs';
 import { stringify as stringifyYaml } from 'yaml';
 import { TrackBlockSchema } from '@x/shared/dist/track-block.js';
 import { WorkDir } from '../config/config.js';
+import z from 'zod';
 
 const KNOWLEDGE_DIR = path.join(WorkDir, 'knowledge');
 const DAILY_NOTE_PATH = path.join(KNOWLEDGE_DIR, 'Today.md');
 
 interface Section {
     heading: string;
-    track: unknown;
+    track: z.infer<typeof TrackBlockSchema>;
 }
 
 const SECTIONS: Section[] = [
@@ -143,8 +144,7 @@ Do NOT invent busywork.`,
 function buildDailyNoteContent(): string {
     const parts: string[] = ['# Today', ''];
     for (const { heading, track } of SECTIONS) {
-        const parsed = TrackBlockSchema.parse(track);
-        const yaml = stringifyYaml(parsed, { lineWidth: 0, blockQuote: 'literal' }).trimEnd();
+        const yaml = stringifyYaml(track, { lineWidth: 0, blockQuote: 'literal' }).trimEnd();
         parts.push(
             heading,
             '',
@@ -152,8 +152,8 @@ function buildDailyNoteContent(): string {
             yaml,
             '```',
             '',
-            `<!--track-target:${parsed.trackId}-->`,
-            `<!--/track-target:${parsed.trackId}-->`,
+            `<!--track-target:${track.trackId}-->`,
+            `<!--/track-target:${track.trackId}-->`,
             '',
         );
     }
