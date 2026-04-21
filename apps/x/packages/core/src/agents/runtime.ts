@@ -194,6 +194,19 @@ export class AgentRuntime implements IAgentRuntime {
                 await this.runsRepo.appendEvents(runId, [stoppedEvent]);
                 await this.bus.publish(stoppedEvent);
             }
+        } catch (error) {
+            console.error(`Run ${runId} failed:`, error);
+            const message = error instanceof Error
+                ? (error.stack || error.message || error.name)
+                : typeof error === "string" ? error : JSON.stringify(error);
+            const errorEvent: z.infer<typeof RunEvent> = {
+                runId,
+                type: "error",
+                error: message,
+                subflow: [],
+            };
+            await this.runsRepo.appendEvents(runId, [errorEvent]);
+            await this.bus.publish(errorEvent);
         } finally {
             this.abortRegistry.cleanup(runId);
             await this.runsLock.release(runId);
