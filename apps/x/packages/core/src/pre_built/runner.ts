@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { WorkDir } from '../config/config.js';
 import { createRun, createMessage } from '../runs/runs.js';
-import { bus } from '../runs/bus.js';
+import { waitForRunCompletion } from '../agents/utils.js';
 import {
     loadConfig,
     loadState,
@@ -17,20 +17,6 @@ import { PREBUILT_AGENTS } from './types.js';
 // Service configuration
 const CHECK_INTERVAL_MS = 60 * 1000; // Check every minute which agents need to run
 const PREBUILT_DIR = path.join(WorkDir, 'pre-built');
-
-/**
- * Wait for a run to complete by listening for run-processing-end event
- */
-async function waitForRunCompletion(runId: string): Promise<void> {
-    return new Promise(async (resolve) => {
-        const unsubscribe = await bus.subscribe('*', async (event) => {
-            if (event.type === 'run-processing-end' && event.runId === runId) {
-                unsubscribe();
-                resolve();
-            }
-        });
-    });
-}
 
 /**
  * Run a pre-built agent by name

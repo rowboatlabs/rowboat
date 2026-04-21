@@ -4,7 +4,8 @@ import { glob } from "node:fs/promises";
 import path from "path";
 import z from "zod";
 import { Agent } from "@x/shared/dist/agent.js";
-import { parse, stringify } from "yaml";
+import { stringify } from "yaml";
+import { parseFrontmatter } from "../application/lib/parse-frontmatter.js";
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const UpdateAgentSchema = Agent.omit({ name: true });
@@ -33,7 +34,10 @@ export class FSAgentsRepo implements IAgentsRepo {
         for (const file of matches) {
             try {
                 const agent = await this.parseAgentMd(path.join(this.agentsDir, file));
-                result.push(agent);
+                result.push({
+                    ...agent,
+                    name: file.replace(/\.md$/, ""),
+                });
             } catch (error) {
                 console.error(`Error parsing agent ${file}: ${error instanceof Error ? error.message : String(error)}`);
                 continue;
@@ -42,44 +46,33 @@ export class FSAgentsRepo implements IAgentsRepo {
         return result;
     }
 
-    private async parseAgentMd(filePath: string): Promise<z.infer<typeof Agent>> {
-        const raw = await fs.readFile(filePath, "utf8");
+    private async parseAgentMd(filepath: string): Promise<z.infer<typeof Agent>> {
+        const raw = await fs.readFile(filepath, "utf8");
 
-        // strip the path prefix from the file name
-        // and the .md extension
-        const agentName = filePath
-            .replace(this.agentsDir + "/", "")
-            .replace(/\.md$/, "");
-        let agent: z.infer<typeof Agent> = {
-            name: agentName,
-            instructions: raw,
-        };
-        let content = raw;
+        const { frontmatter, content } = parseFrontmatter(raw);
+        if (frontmatter) {
+            const parsed = Agent
+                .omit({ instructions: true })
+                .parse(frontmatter);
 
-        // check for frontmatter markers at start
-        if (raw.startsWith("---")) {
-            const end = raw.indexOf("\n---", 3);
-
-            if (end !== -1) {
-                const fm = raw.slice(3, end).trim();       // YAML text
-                content = raw.slice(end + 4).trim();       // body after frontmatter
-                const yaml = parse(fm);
-                const parsed = Agent
-                    .omit({ name: true, instructions: true })
-                    .parse(yaml);
-                agent = {
-                    ...agent,
-                    ...parsed,
-                    instructions: content,
-                };
-            }
+            return {
+                ...parsed,
+                instructions: content,
+            };
         }
 
-        return agent;
+        return {
+            name: filepath,
+            instructions: raw,
+        };
     }
 
     async fetch(id: string): Promise<z.infer<typeof Agent>> {
-        return this.parseAgentMd(path.join(this.agentsDir, `${id}.md`));
+        const agent = await this.parseAgentMd(path.join(this.agentsDir, `${id}.md`));
+        return {
+            ...agent,
+            name: id,
+        };
     }
 
     async create(agent: z.infer<typeof Agent>): Promise<void> {

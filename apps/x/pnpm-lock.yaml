@@ -184,6 +184,9 @@ importers:
       '@tiptap/extension-placeholder':
         specifier: ^3.15.3
         version: 3.15.3(@tiptap/extensions@3.15.3(@tiptap/core@3.15.3(@tiptap/pm@3.15.3))(@tiptap/pm@3.15.3))
+      '@tiptap/extension-table':
+        specifier: ^3.22.4
+        version: 3.22.4(@tiptap/core@3.15.3(@tiptap/pm@3.15.3))(@tiptap/pm@3.15.3)
       '@tiptap/extension-task-item':
         specifier: ^3.15.3
         version: 3.15.3(@tiptap/extension-list@3.15.3(@tiptap/core@3.15.3(@tiptap/pm@3.15.3))(@tiptap/pm@3.15.3))
@@ -265,6 +268,9 @@ importers:
       use-stick-to-bottom:
         specifier: ^1.1.1
         version: 1.1.1(react@19.2.3)
+      yaml:
+        specifier: ^2.8.2
+        version: 2.8.2
       zod:
         specifier: ^4.2.1
         version: 4.2.1
@@ -3162,6 +3168,12 @@ packages:
     resolution: {integrity: sha512-Y1P3eGNY7RxQs2BcR6NfLo9VfEOplXXHAqkOM88oowWWOE7dMNeFFZM9H8HNxoQgXJ7H0aWW9B7ZTWM9hWli2Q==}
     peerDependencies:
       '@tiptap/core': ^3.15.3
+
+  '@tiptap/extension-table@3.22.4':
+    resolution: {integrity: sha512-kjvLv3Z4JI+1tLDqZKa+bKU8VcxY+ZOyMCKWQA7wYmy8nKWkLJ60W+xy8AcXXpHB2goCIgSFLhsTyswx0GXH4w==}
+    peerDependencies:
+      '@tiptap/core': 3.22.4
+      '@tiptap/pm': 3.22.4
 
   '@tiptap/extension-task-item@3.15.3':
     resolution: {integrity: sha512-bkrmouc1rE5n9ONw2G7+zCGfBRoF2HJWq8REThPMzg/6+L5GJJ5YTN4UmncaP48U9jHX8xeihjgg9Ypenjl4lw==}
@@ -11147,6 +11159,11 @@ snapshots:
   '@tiptap/extension-strike@3.15.3(@tiptap/core@3.15.3(@tiptap/pm@3.15.3))':
     dependencies:
       '@tiptap/core': 3.15.3(@tiptap/pm@3.15.3)
+
+  '@tiptap/extension-table@3.22.4(@tiptap/core@3.15.3(@tiptap/pm@3.15.3))(@tiptap/pm@3.15.3)':
+    dependencies:
+      '@tiptap/core': 3.15.3(@tiptap/pm@3.15.3)
+      '@tiptap/pm': 3.15.3
 
   '@tiptap/extension-task-item@3.15.3(@tiptap/extension-list@3.15.3(@tiptap/core@3.15.3(@tiptap/pm@3.15.3))(@tiptap/pm@3.15.3))':
     dependencies:

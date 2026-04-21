@@ -11,10 +11,14 @@ import backgroundAgentsSkill from "./background-agents/skill.js";
 import createPresentationsSkill from "./create-presentations/skill.js";
 
 import appNavigationSkill from "./app-navigation/skill.js";
+import browserControlSkill from "./browser-control/skill.js";
 import composioIntegrationSkill from "./composio-integration/skill.js";
+import tracksSkill from "./tracks/skill.js";
 
 const CURRENT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const CATALOG_PREFIX = "src/application/assistant/skills";
+
+// console.log(tracksSkill);
 
 type SkillDefinition = {
   id: string;  // Also used as folder name
@@ -96,6 +100,18 @@ const definitions: SkillDefinition[] = [
     summary: "Navigate the app UI - open notes, switch views, filter/search the knowledge base, and manage saved views.",
     content: appNavigationSkill,
   },
+  {
+    id: "tracks",
+    title: "Tracks",
+    summary: "Create and manage track blocks — YAML-scheduled auto-updating content blocks in notes (weather, news, prices, status, dashboards). Insert at cursor (Cmd+K) or append to notes.",
+    content: tracksSkill,
+  },
+  {
+    id: "browser-control",
+    title: "Browser Control",
+    summary: "Control the embedded browser pane - open sites, inspect page state, and interact with indexed page elements.",
+    content: browserControlSkill,
+  },
 ];
 
 const skillEntries = definitions.map((definition) => ({
@@ -116,6 +132,27 @@ export const skillCatalog = [
   "",
   catalogSections.join("\n\n"),
 ].join("\n");
+
+/**
+ * Build a skill catalog string, optionally excluding specific skills by ID.
+ */
+export function buildSkillCatalog(options?: { excludeIds?: string[] }): string {
+  const entries = options?.excludeIds
+    ? skillEntries.filter(e => !options.excludeIds!.includes(e.id))
+    : skillEntries;
+  const sections = entries.map((entry) => [
+    `## ${entry.title}`,
+    `- **Skill file:** \`${entry.catalogPath}\``,
+    `- **Use it for:** ${entry.summary}`,
+  ].join("\n"));
+  return [
+    "# Rowboat Skill Catalog",
+    "",
+    "Use this catalog to see which specialized skills you can load. Each entry lists the exact skill file plus a short description of when it helps.",
+    "",
+    sections.join("\n\n"),
+  ].join("\n");
+}
 
 const normalizeIdentifier = (value: string) =>
   value.trim().replace(/\\/g, "/").replace(/^\.\/+/, "");

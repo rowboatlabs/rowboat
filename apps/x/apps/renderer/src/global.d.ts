@@ -35,6 +35,7 @@ declare global {
     };
     electronUtils: {
       getPathForFile: (file: File) => string;
+      getZoomFactor: () => number;
     };
   }
 }

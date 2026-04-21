@@ -216,12 +216,15 @@ export async function refreshTokens(
   return tokens;
 }
 
+const EXPIRY_MARGIN_SECONDS = 60;
+
 /**
- * Check if tokens are expired
+ * Check if tokens are expired. Treats tokens as expired EXPIRY_MARGIN_SECONDS
+ * before the real expiry to absorb clock skew and in-flight request latency.
  */
 export function isTokenExpired(tokens: OAuthTokens): boolean {
   const now = Math.floor(Date.now() / 1000);
-  return tokens.expires_at <= now;
+  return tokens.expires_at <= now + EXPIRY_MARGIN_SECONDS;
 }
 
 /**

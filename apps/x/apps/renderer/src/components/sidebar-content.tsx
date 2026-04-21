@@ -12,13 +12,18 @@ import {
   FilePlus,
   Folder,
   FolderPlus,
+  Globe,
   AlertTriangle,
   HelpCircle,
   Mic,
   Network,
   Pencil,
+  Radio,
+  SearchIcon,
+  SquarePen,
   Table2,
   Plug,
+  Lightbulb,
   LoaderIcon,
   Settings,
   Square,
@@ -58,6 +63,7 @@ import {
   SidebarGroupContent,
   SidebarHeader,
   SidebarMenu,
+  SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarMenuSub,
@@ -90,6 +96,7 @@ import { SettingsDialog } from "@/components/settings-dialog"
 import { toast } from "@/lib/toast"
 import { useBilling } from "@/hooks/useBilling"
 import { ServiceEvent } from "@x/shared/src/service-events.js"
+import type { MeetingTranscriptionState } from "@/hooks/useMeetingTranscription"
 import z from "zod"
 
 interface TreeNode {
@@ -164,6 +171,7 @@ type SidebarContentPanelProps = {
   selectedPath: string | null
   expandedPaths: Set<string>
   onSelectFile: (path: string, kind: "file" | "dir") => void
+  onToggleFolder?: (path: string) => void
   knowledgeActions: KnowledgeActions
   onVoiceNoteCreated?: (path: string) => void
   runs?: RunListItem[]
@@ -172,6 +180,16 @@ type SidebarContentPanelProps = {
   tasksActions?: TasksActions
   backgroundTasks?: BackgroundTaskItem[]
   selectedBackgroundTask?: string | null
+  onNewChat?: () => void
+  onOpenSearch?: () => void
+  meetingState?: MeetingTranscriptionState
+  meetingSummarizing?: boolean
+  meetingAvailable?: boolean
+  onToggleMeeting?: () => void
+  isBrowserOpen?: boolean
+  onToggleBrowser?: () => void
+  isSuggestedTopicsOpen?: boolean
+  onOpenSuggestedTopics?: () => void
 } & React.ComponentProps<typeof Sidebar>
 
 const sectionTabs: { id: ActiveSection; label: string }[] = [
@@ -387,6 +405,7 @@ export function SidebarContentPanel({
   selectedPath,
   expandedPaths,
   onSelectFile,
+  onToggleFolder,
   knowledgeActions,
   onVoiceNoteCreated,
   runs = [],
@@ -395,6 +414,16 @@ export function SidebarContentPanel({
   tasksActions,
   backgroundTasks = [],
   selectedBackgroundTask,
+  onNewChat,
+  onOpenSearch,
+  meetingState = 'idle',
+  meetingSummarizing = false,
+  meetingAvailable = false,
+  onToggleMeeting,
+  isBrowserOpen = false,
+  onToggleBrowser,
+  isSuggestedTopicsOpen = false,
+  onOpenSuggestedTopics,
   ...props
 }: SidebarContentPanelProps) {
   const { activeSection, setActiveSection } = useSidebarSection()
@@ -488,6 +517,89 @@ export function SidebarContentPanel({
             ))}
           </div>
         </div>
+        {/* Quick action buttons */}
+        <div className="titlebar-no-drag flex flex-col gap-0.5 px-2 pb-1">
+          {onNewChat && (
+            <button
+              type="button"
+              onClick={onNewChat}
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+            >
+              <SquarePen className="size-4" />
+              <span>New chat</span>
+            </button>
+          )}
+          {onOpenSearch && (
+            <button
+              type="button"
+              onClick={onOpenSearch}
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+            >
+              <SearchIcon className="size-4" />
+              <span>Search</span>
+            </button>
+          )}
+          {meetingAvailable && onToggleMeeting && (
+            <button
+              type="button"
+              onClick={onToggleMeeting}
+              disabled={meetingState === 'connecting' || meetingState === 'stopping' || meetingSummarizing}
+              className={cn(
+                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors disabled:pointer-events-none",
+                meetingState === 'recording'
+                  ? "text-red-500 hover:bg-sidebar-accent"
+                  : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+              )}
+            >
+              {meetingSummarizing || meetingState === 'connecting' ? (
+                <LoaderIcon className="size-4 animate-spin" />
+              ) : meetingState === 'recording' ? (
+                <Square className="size-4 animate-pulse" />
+              ) : (
+                <Radio className="size-4" />
+              )}
+              <span>
+                {meetingSummarizing
+                  ? 'Generating notes…'
+                  : meetingState === 'connecting'
+                    ? 'Starting…'
+                    : meetingState === 'recording'
+                      ? 'Stop recording'
+                      : 'Take meeting notes'}
+              </span>
+            </button>
+          )}
+          {onToggleBrowser && (
+            <button
+              type="button"
+              onClick={onToggleBrowser}
+              className={cn(
+                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
+                isBrowserOpen
+                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                  : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+              )}
+            >
+              <Globe className="size-4" />
+              <span>Run browser task</span>
+            </button>
+          )}
+          {onOpenSuggestedTopics && (
+            <button
+              type="button"
+              onClick={onOpenSuggestedTopics}
+              className={cn(
+                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
+                isSuggestedTopicsOpen
+                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                  : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+              )}
+            >
+              <Lightbulb className="size-4" />
+              <span>Suggested Topics</span>
+            </button>
+          )}
+        </div>
       </SidebarHeader>
       <SidebarContent>
         {activeSection === "knowledge" && (
@@ -496,6 +608,7 @@ export function SidebarContentPanel({
             selectedPath={selectedPath}
             expandedPaths={expandedPaths}
             onSelectFile={onSelectFile}
+            onToggleFolder={onToggleFolder}
             actions={knowledgeActions}
             onVoiceNoteCreated={onVoiceNoteCreated}
           />
@@ -884,6 +997,7 @@ function KnowledgeSection({
   selectedPath,
   expandedPaths,
   onSelectFile,
+  onToggleFolder,
   actions,
   onVoiceNoteCreated,
 }: {
@@ -891,6 +1005,7 @@ function KnowledgeSection({
   selectedPath: string | null
   expandedPaths: Set<string>
   onSelectFile: (path: string, kind: "file" | "dir") => void
+  onToggleFolder?: (path: string) => void
   actions: KnowledgeActions
   onVoiceNoteCreated?: (path: string) => void
 }) {
@@ -980,6 +1095,7 @@ function KnowledgeSection({
                     selectedPath={selectedPath}
                     expandedPaths={expandedPaths}
                     onSelect={onSelectFile}
+                    onToggleFolder={onToggleFolder}
                     actions={actions}
                   />
                 ))}
@@ -1008,9 +1124,7 @@ function countFiles(node: TreeNode): number {
 }
 
 /** Display name overrides for top-level knowledge folders */
-const FOLDER_DISPLAY_NAMES: Record<string, string> = {
-  Notes: 'My Notes',
-}
+const FOLDER_DISPLAY_NAMES: Record<string, string> = {}
 
 // Tree component for file browser
 function Tree({
@@ -1018,12 +1132,14 @@ function Tree({
   selectedPath,
   expandedPaths,
   onSelect,
+  onToggleFolder,
   actions,
 }: {
   item: TreeNode
   selectedPath: string | null
   expandedPaths: Set<string>
   onSelect: (path: string, kind: "file" | "dir") => void
+  onToggleFolder?: (path: string) => void
   actions: KnowledgeActions
 }) {
   const isDir = item.kind === 'dir'
@@ -1160,15 +1276,15 @@ function Tree({
     )
   }
 
-  // Top-level knowledge folders (except Notes) open bases view — render as flat items
+  // Top-level knowledge folders open bases view — render as flat items
   const parts = item.path.split('/')
-  const isBasesFolder = isDir && parts.length === 2 && parts[0] === 'knowledge' && parts[1] !== 'Notes'
+  const isBasesFolder = isDir && parts.length === 2 && parts[0] === 'knowledge'
 
   if (isBasesFolder) {
     return (
       <ContextMenu>
         <ContextMenuTrigger asChild>
-          <SidebarMenuItem>
+          <SidebarMenuItem className="group/file-item">
             <SidebarMenuButton onClick={() => onSelect(item.path, item.kind)}>
               <Folder className="size-4 shrink-0" />
               <div className="flex w-full items-center gap-1 min-w-0">
@@ -1176,6 +1292,38 @@ function Tree({
                 <span className="text-xs text-sidebar-foreground/50 tabular-nums shrink-0">{countFiles(item)}</span>
               </div>
             </SidebarMenuButton>
+            {onToggleFolder && (item.children?.length ?? 0) > 0 && (
+              <SidebarMenuAction
+                showOnHover
+                aria-label={isExpanded ? "Collapse folder" : "Expand folder"}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onToggleFolder(item.path)
+                }}
+              >
+                <ChevronRight
+                  className={cn(
+                    "transition-transform",
+                    isExpanded && "rotate-90",
+                  )}
+                />
+              </SidebarMenuAction>
+            )}
+            {isExpanded && (
+              <SidebarMenuSub>
+                {(item.children ?? []).map((subItem, index) => (
+                  <Tree
+                    key={index}
+                    item={subItem}
+                    selectedPath={selectedPath}
+                    expandedPaths={expandedPaths}
+                    onSelect={onSelect}
+                    onToggleFolder={onToggleFolder}
+                    actions={actions}
+                  />
+                ))}
+              </SidebarMenuSub>
+            )}
           </SidebarMenuItem>
         </ContextMenuTrigger>
         {contextMenuContent}
@@ -1240,6 +1388,7 @@ function Tree({
                     selectedPath={selectedPath}
                     expandedPaths={expandedPaths}
                     onSelect={onSelect}
+                    onToggleFolder={onToggleFolder}
                     actions={actions}
                   />
                 ))}

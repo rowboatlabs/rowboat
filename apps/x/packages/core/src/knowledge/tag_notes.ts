@@ -3,6 +3,7 @@ import path from 'path';
 import { WorkDir } from '../config/config.js';
 import { createRun, createMessage } from '../runs/runs.js';
 import { bus } from '../runs/bus.js';
+import { waitForRunCompletion } from '../agents/utils.js';
 import { serviceLogger } from '../services/service_logger.js';
 import { limitEventItems } from './limit_event_items.js';
 import {
@@ -73,20 +74,6 @@ function getUntaggedNotes(state: NoteTaggingState): string[] {
     }
 
     return untagged;
-}
-
-/**
- * Wait for a run to complete by listening for run-processing-end event
- */
-async function waitForRunCompletion(runId: string): Promise<void> {
-    return new Promise(async (resolve) => {
-        const unsubscribe = await bus.subscribe('*', async (event) => {
-            if (event.type === 'run-processing-end' && event.runId === runId) {
-                unsubscribe();
-                resolve();
-            }
-        });
-    });
 }
 
 /**

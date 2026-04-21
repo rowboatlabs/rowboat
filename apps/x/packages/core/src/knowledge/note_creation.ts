@@ -485,9 +485,9 @@ RESOLVED (use canonical name with absolute path):
 - "Acme", "Acme Corp", "@acme.com" → [[Organizations/Acme Corp]]
 - "the pilot", "the integration" → [[Projects/Acme Integration]]
 
-NEW ENTITIES (create notes if source passes filters):
+NEW ENTITIES (create notes or suggestion cards if source passes filters):
 - "Jennifer" (CTO, Acme Corp) → Create [[People/Jennifer]] or [[People/Jennifer (Acme Corp)]]
-- "SOC 2" → Create [[Topics/Security Compliance]]
+- "SOC 2" → Add or update a suggestion card in \`suggested-topics.md\` with category \`Topics\`
 
 AMBIGUOUS (flag or skip):
 - "Mike" (no context) → Mention in activity only, don't create note
@@ -508,8 +508,8 @@ For entities not resolved to existing notes, determine if they warrant new notes
 
 **CREATE a note for people who are:**
 - External (not @user.domain)
-- Attendees in meetings
-- Email correspondents (emails that reach this step already passed label-based filtering)
+- People you directly interacted with in meetings
+- Email correspondents directly participating in the thread (emails that reach this step already passed label-based filtering)
 - Decision makers or contacts at customers, prospects, or partners
 - Investors or potential investors
 - Candidates you are interviewing
@@ -521,6 +521,7 @@ For entities not resolved to existing notes, determine if they warrant new notes
 - Large group meeting attendees you didn't interact with
 - Internal colleagues (@user.domain)
 - Assistants handling only logistics
+- People mentioned only as third parties ("we work with X", "I can introduce you to Y") when there has been no direct interaction yet
 
 ### Role Inference
 
@@ -579,30 +580,154 @@ For people who don't warrant their own note, add to Organization note's Contacts
 - Sarah Lee — Support, handled wire transfer issue
 \`\`\`
 
+### Direct Interaction Test (People and Organizations)
+
+For **new canonical People and Organizations notes**, require **direct interaction**, not just mention.
+
+**Direct interaction = YES**
+- The person sent the email, replied in the thread, or was directly addressed as part of the active exchange
+- The person participated in the meeting, and there is evidence the user actually interacted with them or the meeting centered on them
+- The organization is directly represented in the exchange by participants/senders and is part of an active first-degree relationship with the user or team
+- The user is directly evaluating, selling to, buying from, partnering with, interviewing, or coordinating with that person or organization
+
+**Direct interaction = NO**
+- Someone else mentions them in passing
+- A sender says they work with someone at another company
+- A sender offers to introduce the user to someone
+- A company is referenced as a customer, partner, employer, competitor, or example, but nobody from that company is directly involved in the interaction
+- The source only establishes a second-degree relationship, not a direct one
+
+**Canonical note rule:**
+- For **new People/Organizations**, create the canonical note only if both are true:
+  1. There is **direct interaction**
+  2. The entity clears the **weekly importance test**
+
+If an entity seems strategically relevant but fails the direct interaction test, do **not** auto-create a canonical note. At most, create a suggestion card in \`suggested-topics.md\`.
+
+### Weekly Importance Test (People and Organizations only)
+
+For **People** and **Organizations**, the final gate for **creating a new canonical note** is an importance test:
+
+**Ask:** _"If I were the user, would I realistically need to look at this note on a weekly basis over the near term?"_
+
+This test is mainly for **People** and **Organizations**. **Do NOT use it as the decision rule for Topic or Project suggestions.**
+
+**Strong YES signals:**
+- Active customer, prospect, investor, partner, candidate, advisor, or strategic vendor relationship
+- Repeated interaction or a likely ongoing cadence
+- Decision-maker, owner, blocker, evaluator, or approver in an active process
+- Material relevance to launch, sales, fundraising, hiring, compliance, product delivery, or another current priority
+- The user would benefit from a durable reference note instead of repeatedly reopening raw emails or meeting transcripts
+
+**Strong NO signals:**
+- One-off logistics, scheduling, or transactional contact
+- Assistant, support rep, recruiter, or vendor rep with no ongoing strategic role
+- Incidental attendee mentioned once with no leverage on current work
+- Passing mention with no evidence of an ongoing relationship
+
+**Borderline signals:**
+- Seems potentially important, but there isn't enough evidence yet that the user will need a weekly reference note
+- Might become important soon, but the role, relationship, or repeated relevance is still unclear
+- Important enough to track, but only through second-degree mention or an offered introduction rather than direct interaction
+
+**Outcome rules for new People/Organizations:**
+- **Clear YES + direct interaction** → Create/update the canonical \`People/\` or \`Organizations/\` note
+- **Borderline or no direct interaction, but still strategically relevant** → Do **not** create the canonical note yet; instead create or update a card in \`suggested-topics.md\`
+- **Clear NO** → Skip note creation and do not add a suggestion unless the source strongly suggests near-term strategic relevance
+
+**When a canonical note already exists:**
+- Update the existing note even if the current source is weaker; the importance test is mainly for deciding whether to create a **new** People/Organization note
+- If a previously tentative person/org is now clearly important enough for a canonical note, create/update the note and remove any tentative suggestion card for that exact entity from \`suggested-topics.md\`
+
 ## Organizations
 
 **CREATE a note if:**
-- Someone from that org attended a meeting
-- They're a customer, prospect, investor, or partner
-- Someone from that org sent relevant personalized correspondence
+- There is direct interaction with that org in the source
+- They're a customer, prospect, investor, or partner in a direct first-degree interaction
+- Someone from that org sent relevant personalized correspondence or joined a meeting you actually had with them
+- They pass the weekly importance test above
 
 **DO NOT create for:**
 - Tool/service providers mentioned in passing
 - One-time transactional vendors
 - Consumer service companies
+- Organizations only referenced through third-party mention or offered introductions
 
 ## Projects
 
-**CREATE a note if:**
+**If a project note already exists:** update it.
+
+**If no project note exists:** do **not** create a new canonical note in \`knowledge/Projects/\`.
+
+Instead, create or update a **suggestion card** in \`suggested-topics.md\` if the project is strong enough:
 - Discussed substantively in a meeting or email thread
 - Has a goal and timeline
 - Involves multiple interactions
 
+Otherwise skip it.
+
+Projects do **not** use the weekly importance test above. For **new** projects, the default output is a suggestion card, not a canonical note.
+
 ## Topics
 
-**CREATE a note if:**
+**If a topic note already exists:** update it.
+
+**If no topic note exists:** do **not** create a new canonical note in \`knowledge/Topics/\`.
+
+Instead, create or update a **suggestion card** in \`suggested-topics.md\` if the topic is strong enough:
 - Recurring theme discussed
 - Will come up again across conversations
+
+Otherwise skip it.
+
+Topics do **not** use the weekly importance test above. For **new** topics, the default output is a suggestion card, not a canonical note.
+
+## Suggested Topics Curation
+
+Also maintain \`suggested-topics.md\` as a **curated shortlist** of things worth exploring next.
+
+Despite the filename, \`suggested-topics.md\` can contain cards for **People, Organizations, Topics, or Projects**.
+
+There are **two reasons** to add or update a suggestion card:
+
+1. **High-quality Topic/Project cards**
+   - Use these for topics or projects that are timely, high-leverage, strategically important, or clearly worth exploring now
+   - These are not a dump of every topic/project note. Be selective
+   - For **new** topics and projects, cards are the default output from this pipeline
+
+2. **Tentative People/Organization cards**
+   - Use these when a person or organization seems important enough to track, but you are **not 100% sure** they clear the weekly-importance test for a canonical note yet
+   - The card should capture why they might matter and what still needs verification
+
+**Do NOT add cards for:**
+- Low-signal administrative or transactional entities
+- Stale or completed items with no near-term relevance
+- People/organizations that already have a clearly established canonical note, unless the card is about a distinct project/topic exploration rather than the entity itself
+
+**Card guidance:**
+- For **Topics/Projects**, use category \`Topics\` or \`Projects\`
+- For tentative **People/Organizations**, use category \`People\` or \`Organizations\`
+- Title should be concise and canonical when possible
+- Description should explain why it matters **now**
+- For tentative People/Organizations, description should also mention what is still uncertain or what the user should verify
+
+**Curation rules:**
+- Maintain a **high-quality set**, not an ever-growing backlog
+- Deduplicate by normalized title
+- Prefer current, actionable, recurring, or strategically important items
+- Keep only the strongest **8-12 cards total**
+- Preserve good existing cards unless the new source clearly supersedes them
+- Remove stale cards that are no longer relevant
+- If a tentative People/Organization card later becomes clearly important and you create a canonical note, remove the tentative card
+
+**File format for \`suggested-topics.md\`:**
+\`\`\`suggestedtopic
+{"title":"Security Compliance","description":"Summarize the current compliance posture, blockers, and customer implications.","category":"Topics"}
+\`\`\`
+
+The file should start with \`# Suggested Topics\` followed by one or more blocks in that format.
+
+If the file does not exist, create it. If it exists, update it in place or rewrite the full file so the final result is clean, deduped, and curated.
 
 ---
 
@@ -824,7 +949,7 @@ If new info contradicts existing:
 
 # Step 9: Write Updates
 
-## 9a: Create and Update Notes
+## 9a: Create and Update Notes and Suggested Topic Cards
 
 **IMPORTANT: Write sequentially, one file at a time.**
 - Generate content for exactly one note.
@@ -852,6 +977,12 @@ workspace-edit({
 })
 \`\`\`
 
+**For \`suggested-topics.md\`:**
+- Use workspace-relative path \`suggested-topics.md\`
+- Read the current file if you need the latest content
+- Use \`workspace-writeFile\` to create or rewrite the file when that is simpler and cleaner
+- Use \`workspace-edit\` for small targeted edits only if that keeps the file deduped and readable
+
 ## 9b: Apply State Changes
 
 For each state change identified in Step 7, update the relevant fields.
@@ -867,8 +998,9 @@ If you discovered new name variants during resolution, add them to Aliases field
 - Be concise: one line per activity entry
 - Note state changes with \`[Field → value]\` in activity
 - Escape quotes properly in shell commands
-- Write only one file per response (no multi-file write batches)
+- Write only one file per response (notes and \`suggested-topics.md\` follow the same rule)
 - **Always set \`Last update\`** in the Info section to the YYYY-MM-DD date of the source email or meeting. When updating an existing note, update this field to the new source event's date.
+- Keep \`suggested-topics.md\` curated, deduped, and capped to the strongest 8-12 cards
 
 ---
 
@@ -957,8 +1089,12 @@ Before completing, verify:
 **Filtering:**
 - [ ] Excluded self (user.name, user.email, @user.domain)
 - [ ] Applied relevance test to each person
+- [ ] Applied the direct interaction test to new People/Organizations
+- [ ] Applied the weekly importance test to new People/Organizations
 - [ ] Transactional contacts in Org Contacts, not People notes
 - [ ] Source correctly classified (process vs skip)
+- [ ] Third-party mentions did not become new canonical People/Organizations notes
+- [ ] Borderline People/Organizations became suggestion cards instead of canonical notes
 
 **Content Quality:**
 - [ ] Summaries describe relationship, not communication method
@@ -978,6 +1114,9 @@ Before completing, verify:
 - [ ] All entity mentions use \`[[Folder/Name]]\` absolute links
 - [ ] Activity entries are reverse chronological
 - [ ] No duplicate activity entries
+- [ ] \`suggested-topics.md\` stays deduped and curated
+- [ ] High-quality Topics/Projects were added to suggested topics only when timely and useful
+- [ ] New Topics/Projects were not auto-created as canonical notes
 - [ ] Dates are YYYY-MM-DD
 - [ ] Bidirectional links are consistent
 - [ ] New notes in correct folders
