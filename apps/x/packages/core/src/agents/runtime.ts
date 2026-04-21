@@ -99,6 +99,7 @@ export class AgentRuntime implements IAgentRuntime {
     private modelConfigRepo: IModelConfigRepo;
     private runsLock: IRunsLock;
     private abortRegistry: IAbortRegistry;
+    private rerunRequested: Set<string> = new Set();
 
     constructor({
         runsRepo,
@@ -129,9 +130,11 @@ export class AgentRuntime implements IAgentRuntime {
     async trigger(runId: string): Promise<void> {
         if (!await this.runsLock.lock(runId)) {
             console.log(`unable to acquire lock on run ${runId}`);
+            this.rerunRequested.add(runId);
             return;
         }
         const signal = this.abortRegistry.createForRun(runId);
+        let shouldRerun = false;
         try {
             await this.bus.publish({
                 runId,
@@ -194,6 +197,28 @@ export class AgentRuntime implements IAgentRuntime {
                 await this.runsRepo.appendEvents(runId, [stoppedEvent]);
                 await this.bus.publish(stoppedEvent);
             }
+        } catch (error) {
+            if (isAbortError(error) || signal.aborted) {
+                const stoppedEvent: z.infer<typeof RunEvent> = {
+                    runId,
+                    type: "run-stopped",
+                    reason: "user-requested",
+                    subflow: [],
+                };
+                await this.runsRepo.appendEvents(runId, [stoppedEvent]);
+                await this.bus.publish(stoppedEvent);
+            } else {
+                const message = formatRunError(error);
+                console.error(`Run ${runId} failed:`, error);
+                const errorEvent: z.infer<typeof RunEvent> = {
+                    runId,
+                    type: "error",
+                    error: message,
+                    subflow: [],
+                };
+                await this.runsRepo.appendEvents(runId, [errorEvent]);
+                await this.bus.publish(errorEvent);
+            }
         } finally {
             this.abortRegistry.cleanup(runId);
             await this.runsLock.release(runId);
@@ -202,6 +227,10 @@ export class AgentRuntime implements IAgentRuntime {
                 type: "run-processing-end",
                 subflow: [],
             });
+            shouldRerun = this.rerunRequested.delete(runId);
+        }
+        if (shouldRerun) {
+            void this.trigger(runId);
         }
     }
 }
@@ -346,26 +375,68 @@ export class StreamStepMessageBuilder {
 
 function formatLlmStreamError(rawError: unknown): string {
     let name: string | undefined;
+    let message: string | undefined;
     let responseBody: string | undefined;
     if (rawError && typeof rawError === "object") {
         const err = rawError as Record<string, unknown>;
         const nested = (err.error && typeof err.error === "object") ? err.error as Record<string, unknown> : null;
         const nameValue = err.name ?? nested?.name;
+        const messageValue = err.message ?? nested?.message;
         const responseBodyValue = err.responseBody ?? nested?.responseBody;
         if (nameValue !== undefined) {
             name = String(nameValue);
+        }
+        if (messageValue !== undefined) {
+            message = String(messageValue);
         }
         if (responseBodyValue !== undefined) {
             responseBody = String(responseBodyValue);
         }
     } else if (typeof rawError === "string") {
-        responseBody = rawError;
+        message = rawError;
     }
 
     const lines: string[] = [];
     if (name) lines.push(`name: ${name}`);
+    if (message) lines.push(`message: ${message}`);
     if (responseBody) lines.push(`responseBody: ${responseBody}`);
     return lines.length ? lines.join("\n") : "Model stream error";
+}
+
+function formatRunError(error: unknown): string {
+    if (error instanceof Error) {
+        return error.stack || error.message || error.name;
+    }
+    if (typeof error === "string") {
+        return error;
+    }
+    try {
+        return JSON.stringify(error);
+    } catch {
+        return String(error);
+    }
+}
+
+function isAbortError(error: unknown): boolean {
+    return error instanceof Error && error.name === "AbortError";
+}
+
+function toJsonCompatible(value: unknown): unknown {
+    if (value === undefined) {
+        return null;
+    }
+    try {
+        const serialized = JSON.stringify(value);
+        if (serialized === undefined) {
+            return null;
+        }
+        return JSON.parse(serialized);
+    } catch (error) {
+        return {
+            success: false,
+            error: `Tool returned a non-serializable result: ${formatRunError(error)}`,
+        };
+    }
 }
 
 export async function loadAgent(id: string): Promise<z.infer<typeof Agent>> {
@@ -942,29 +1013,42 @@ export async function* streamAgent({
                 subflow: [],
             });
             let result: unknown = null;
-            if (agent.tools![toolCall.toolName].type === "agent") {
-                const subflowState = state.subflowStates[toolCallId];
-                for await (const event of streamAgent({
-                    state: subflowState,
-                    idGenerator,
-                    runId,
-                    messageQueue,
-                    modelConfigRepo,
-                    signal,
-                    abortRegistry,
-                })) {
-                    yield* processEvent({
-                        ...event,
-                        subflow: [toolCallId, ...event.subflow],
-                    });
+            try {
+                if (agent.tools![toolCall.toolName].type === "agent") {
+                    const subflowState = state.subflowStates[toolCallId];
+                    for await (const event of streamAgent({
+                        state: subflowState,
+                        idGenerator,
+                        runId,
+                        messageQueue,
+                        modelConfigRepo,
+                        signal,
+                        abortRegistry,
+                    })) {
+                        yield* processEvent({
+                            ...event,
+                            subflow: [toolCallId, ...event.subflow],
+                        });
+                    }
+                    if (!subflowState.getPendingAskHumans().length && !subflowState.getPendingPermissions().length) {
+                        result = subflowState.finalResponse();
+                    }
+                } else {
+                    result = await execTool(agent.tools![toolCall.toolName], toolCall.arguments, { runId, signal, abortRegistry });
                 }
-                if (!subflowState.getPendingAskHumans().length && !subflowState.getPendingPermissions().length) {
-                    result = subflowState.finalResponse();
+            } catch (error) {
+                if (isAbortError(error) || signal.aborted) {
+                    throw error;
                 }
-            } else {
-                result = await execTool(agent.tools![toolCall.toolName], toolCall.arguments, { runId, signal, abortRegistry });
+                const message = formatRunError(error);
+                _logger.log('tool failed', message);
+                result = {
+                    success: false,
+                    error: message,
+                    toolName: toolCall.toolName,
+                };
             }
-            const resultPayload = result === undefined ? null : result;
+            const resultPayload = toJsonCompatible(result);
             const resultMsg: z.infer<typeof ToolMessage> = {
                 role: "tool",
                 content: JSON.stringify(resultPayload),
@@ -1189,85 +1273,95 @@ async function* streamLlm(
     signal?: AbortSignal,
 ): AsyncGenerator<z.infer<typeof LlmStepStreamEvent>, void, unknown> {
     const converted = convertFromMessages(messages);
-    console.log(`! SENDING payload to model: `, JSON.stringify(converted))
-    const { fullStream } = streamText({
-        model,
-        messages: converted,
-        system: instructions,
-        tools,
-        stopWhen: stepCountIs(1),
-        abortSignal: signal,
-    });
-    for await (const event of fullStream) {
-        // Check abort on every chunk for responsiveness
-        signal?.throwIfAborted();
-        console.log("-> \t\tstream event", JSON.stringify(event));
-        switch (event.type) {
-            case "error":
-                yield {
-                    type: "error",
-                    error: formatLlmStreamError((event as { error?: unknown }).error ?? event),
-                };
-                return;
-            case "reasoning-start":
-                yield {
-                    type: "reasoning-start",
-                    providerOptions: event.providerMetadata,
-                };
-                break;
-            case "reasoning-delta":
-                yield {
-                    type: "reasoning-delta",
-                    delta: event.text,
-                    providerOptions: event.providerMetadata,
-                };
-                break;
-            case "reasoning-end":
-                yield {
-                    type: "reasoning-end",
-                    providerOptions: event.providerMetadata,
-                };
-                break;
-            case "text-start":
-                yield {
-                    type: "text-start",
-                    providerOptions: event.providerMetadata,
-                };
-                break;
-            case "text-end":
-                yield {
-                    type: "text-end",
-                    providerOptions: event.providerMetadata,
-                };
-                break;
-            case "text-delta":
-                yield {
-                    type: "text-delta",
-                    delta: event.text,
-                    providerOptions: event.providerMetadata,
-                };
-                break;
-            case "tool-call":
-                yield {
-                    type: "tool-call",
-                    toolCallId: event.toolCallId,
-                    toolName: event.toolName,
-                    input: event.input,
-                    providerOptions: event.providerMetadata,
-                };
-                break;
-            case "finish-step":
-                yield {
-                    type: "finish-step",
-                    usage: event.usage,
-                    finishReason: event.finishReason,
-                    providerOptions: event.providerMetadata,
-                };
-                break;
-            default:
-                console.log('unknown stream event:', JSON.stringify(event));
-                continue;
+    console.log(`! SENDING payload to model: `, JSON.stringify(converted));
+    try {
+        const { fullStream } = streamText({
+            model,
+            messages: converted,
+            system: instructions,
+            tools,
+            stopWhen: stepCountIs(1),
+            abortSignal: signal,
+        });
+        for await (const event of fullStream) {
+            // Check abort on every chunk for responsiveness
+            signal?.throwIfAborted();
+            console.log("-> \t\tstream event", JSON.stringify(event));
+            switch (event.type) {
+                case "error":
+                    yield {
+                        type: "error",
+                        error: formatLlmStreamError((event as { error?: unknown }).error ?? event),
+                    };
+                    return;
+                case "reasoning-start":
+                    yield {
+                        type: "reasoning-start",
+                        providerOptions: event.providerMetadata,
+                    };
+                    break;
+                case "reasoning-delta":
+                    yield {
+                        type: "reasoning-delta",
+                        delta: event.text,
+                        providerOptions: event.providerMetadata,
+                    };
+                    break;
+                case "reasoning-end":
+                    yield {
+                        type: "reasoning-end",
+                        providerOptions: event.providerMetadata,
+                    };
+                    break;
+                case "text-start":
+                    yield {
+                        type: "text-start",
+                        providerOptions: event.providerMetadata,
+                    };
+                    break;
+                case "text-end":
+                    yield {
+                        type: "text-end",
+                        providerOptions: event.providerMetadata,
+                    };
+                    break;
+                case "text-delta":
+                    yield {
+                        type: "text-delta",
+                        delta: event.text,
+                        providerOptions: event.providerMetadata,
+                    };
+                    break;
+                case "tool-call":
+                    yield {
+                        type: "tool-call",
+                        toolCallId: event.toolCallId,
+                        toolName: event.toolName,
+                        input: event.input,
+                        providerOptions: event.providerMetadata,
+                    };
+                    break;
+                case "finish-step":
+                    yield {
+                        type: "finish-step",
+                        usage: event.usage,
+                        finishReason: event.finishReason,
+                        providerOptions: event.providerMetadata,
+                    };
+                    break;
+                default:
+                    console.log('unknown stream event:', JSON.stringify(event));
+                    continue;
+            }
         }
+    } catch (error) {
+        if (isAbortError(error) || signal?.aborted) {
+            throw error;
+        }
+        yield {
+            type: "error",
+            error: formatLlmStreamError(error),
+        };
     }
 }
 export const MappedToolCall = z.object({

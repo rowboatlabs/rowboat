@@ -23,7 +23,7 @@ export async function createMessage(runId: string, message: UserMessageContentTy
     const queue = container.resolve<IMessageQueue>('messageQueue');
     const id = await queue.enqueue(runId, message, voiceInput, voiceOutput, searchEnabled, middlePaneContext);
     const runtime = container.resolve<IAgentRuntime>('agentRuntime');
-    runtime.trigger(runId);
+    void runtime.trigger(runId);
     return id;
 }
 
@@ -57,7 +57,7 @@ export async function authorizePermission(runId: string, ev: z.infer<typeof Tool
     };
     await repo.appendEvents(runId, [event]);
     const runtime = container.resolve<IAgentRuntime>('agentRuntime');
-    runtime.trigger(runId);
+    void runtime.trigger(runId);
 }
 
 export async function replyToHumanInputRequest(runId: string, ev: z.infer<typeof AskHumanResponsePayload>): Promise<void> {
@@ -69,7 +69,7 @@ export async function replyToHumanInputRequest(runId: string, ev: z.infer<typeof
     };
     await repo.appendEvents(runId, [event]);
     const runtime = container.resolve<IAgentRuntime>('agentRuntime');
-    runtime.trigger(runId);
+    void runtime.trigger(runId);
 }
 
 export async function stop(runId: string, force: boolean = false): Promise<void> {
