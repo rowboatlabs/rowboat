@@ -26,7 +26,7 @@ import { type PromptInputMessage, type FileMention } from '@/components/ai-eleme
 import { FileCardProvider } from '@/contexts/file-card-context'
 import { MarkdownPreOverride } from '@/components/ai-elements/markdown-code-override'
 import { TabBar, type ChatTab } from '@/components/tab-bar'
-import { ChatInputWithMentions, type StagedAttachment } from '@/components/chat-input-with-mentions'
+import { ChatInputWithMentions, type StagedAttachment, type SelectedModel } from '@/components/chat-input-with-mentions'
 import { ChatMessageAttachments } from '@/components/chat-message-attachments'
 import { wikiLabel } from '@/lib/wiki-links'
 import {
@@ -158,6 +158,7 @@ interface ChatSidebarProps {
   onPresetMessageConsumed?: () => void
   getInitialDraft?: (tabId: string) => string | undefined
   onDraftChangeForTab?: (tabId: string, text: string) => void
+  onSelectedModelChangeForTab?: (tabId: string, model: SelectedModel | null) => void
   pendingAskHumanRequests?: ChatTabViewState['pendingAskHumanRequests']
   allPermissionRequests?: ChatTabViewState['allPermissionRequests']
   permissionResponses?: ChatTabViewState['permissionResponses']
@@ -211,6 +212,7 @@ export function ChatSidebar({
   onPresetMessageConsumed,
   getInitialDraft,
   onDraftChangeForTab,
+  onSelectedModelChangeForTab,
   pendingAskHumanRequests = new Map(),
   allPermissionRequests = new Map(),
   permissionResponses = new Map(),
@@ -662,6 +664,7 @@ export function ChatSidebar({
                           runId={tabState.runId}
                           initialDraft={getInitialDraft?.(tab.id)}
                           onDraftChange={onDraftChangeForTab ? (text) => onDraftChangeForTab(tab.id, text) : undefined}
+                          onSelectedModelChange={onSelectedModelChangeForTab ? (m) => onSelectedModelChangeForTab(tab.id, m) : undefined}
                           isRecording={isActive && isRecording}
                           recordingText={isActive ? recordingText : undefined}
                           recordingState={isActive ? recordingState : undefined}

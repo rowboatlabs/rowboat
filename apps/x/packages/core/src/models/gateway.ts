@@ -10,7 +10,7 @@ const authedFetch: typeof fetch = async (input, init) => {
     return fetch(input, { ...init, headers });
 };
 
-export async function getGatewayProvider(): Promise<ProviderV2> {
+export function getGatewayProvider(): ProviderV2 {
     return createOpenRouter({
         baseURL: `${API_URL}/v1/llm`,
         apiKey: 'managed-by-rowboat',

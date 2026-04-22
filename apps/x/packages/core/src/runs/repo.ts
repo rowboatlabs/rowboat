@@ -6,9 +6,28 @@ import fsp from "fs/promises";
 import fs from "fs";
 import readline from "readline";
 import { Run, RunEvent, StartEvent, CreateRunOptions, ListRunsResponse, MessageEvent } from "@x/shared/dist/runs.js";
+import { getDefaultModelAndProvider } from "../models/defaults.js";
+
+/**
+ * Reading-only schemas: extend the canonical `StartEvent` / `RunEvent` to
+ * accept legacy run files written before `model`/`provider` were required.
+ *
+ * `RunEvent.or(LegacyStartEvent)` works because zod unions try left-to-right:
+ * for any non-start event RunEvent matches first; for a strict start event
+ * RunEvent still matches; only a legacy start event falls through and parses
+ * as LegacyStartEvent. New event types stay maintained in one place
+ * (`@x/shared/dist/runs.js`) — the lenient form just adds one fallback variant.
+ */
+const LegacyStartEvent = StartEvent.extend({
+    model: z.string().optional(),
+    provider: z.string().optional(),
+});
+const ReadRunEvent = RunEvent.or(LegacyStartEvent);
+
+export type CreateRunRepoOptions = Required<z.infer<typeof CreateRunOptions>>;
 
 export interface IRunsRepo {
-    create(options: z.infer<typeof CreateRunOptions>): Promise<z.infer<typeof Run>>;
+    create(options: CreateRunRepoOptions): Promise<z.infer<typeof Run>>;
     fetch(id: string): Promise<z.infer<typeof Run>>;
     list(cursor?: string): Promise<z.infer<typeof ListRunsResponse>>;
     appendEvents(runId: string, events: z.infer<typeof RunEvent>[]): Promise<void>;
@@ -69,16 +88,19 @@ export class FSRunsRepo implements IRunsRepo {
     /**
      * Read file line-by-line using streams, stopping early once we have
      * the start event and title (or determine there's no title).
+     *
+     * Parses the start event with `LegacyStartEvent` so runs written before
+     * `model`/`provider` were required still surface in the list view.
      */
     private async readRunMetadata(filePath: string): Promise<{
-        start: z.infer<typeof StartEvent>;
+        start: z.infer<typeof LegacyStartEvent>;
         title: string | undefined;
     } | null> {
         return new Promise((resolve) => {
             const stream = fs.createReadStream(filePath, { encoding: 'utf8' });
             const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
 
-            let start: z.infer<typeof StartEvent> | null = null;
+            let start: z.infer<typeof LegacyStartEvent> | null = null;
             let title: string | undefined;
             let lineIndex = 0;
 
@@ -88,11 +110,10 @@ export class FSRunsRepo implements IRunsRepo {
 
                 try {
                     if (lineIndex === 0) {
-                        // First line should be the start event
-                        start = StartEvent.parse(JSON.parse(trimmed));
+                        start = LegacyStartEvent.parse(JSON.parse(trimmed));
                     } else {
                         // Subsequent lines - look for first user message or assistant response
-                        const event = RunEvent.parse(JSON.parse(trimmed));
+                        const event = ReadRunEvent.parse(JSON.parse(trimmed));
                         if (event.type === 'message') {
                             const msg = event.message;
                             if (msg.role === 'user') {
@@ -157,13 +178,15 @@ export class FSRunsRepo implements IRunsRepo {
         );
     }
 
-    async create(options: z.infer<typeof CreateRunOptions>): Promise<z.infer<typeof Run>> {
+    async create(options: CreateRunRepoOptions): Promise<z.infer<typeof Run>> {
         const runId = await this.idGenerator.next();
         const ts = new Date().toISOString();
         const start: z.infer<typeof StartEvent> = {
             type: "start",
             runId,
             agentName: options.agentId,
+            model: options.model,
+            provider: options.provider,
             subflow: [],
             ts,
         };
@@ -172,24 +195,41 @@ export class FSRunsRepo implements IRunsRepo {
             id: runId,
             createdAt: ts,
             agentId: options.agentId,
+            model: options.model,
+            provider: options.provider,
             log: [start],
         };
     }
 
     async fetch(id: string): Promise<z.infer<typeof Run>> {
         const contents = await fsp.readFile(path.join(WorkDir, 'runs', `${id}.jsonl`), 'utf8');
-        const events = contents.split('\n')
+        // Parse with the lenient schema so legacy start events (no model/provider) load.
+        const rawEvents = contents.split('\n')
             .filter(line => line.trim() !== '')
-            .map(line => RunEvent.parse(JSON.parse(line)));
-        if (events.length === 0 || events[0].type !== 'start') {
+            .map(line => ReadRunEvent.parse(JSON.parse(line)));
+        if (rawEvents.length === 0 || rawEvents[0].type !== 'start') {
             throw new Error('Corrupt run data');
         }
+        // Backfill model/provider on the start event from current defaults if missing,
+        // then promote to the canonical strict types for callers.
+        const rawStart = rawEvents[0];
+        const defaults = (!rawStart.model || !rawStart.provider)
+            ? await getDefaultModelAndProvider()
+            : null;
+        const start: z.infer<typeof StartEvent> = {
+            ...rawStart,
+            model: rawStart.model ?? defaults!.model,
+            provider: rawStart.provider ?? defaults!.provider,
+        };
+        const events: z.infer<typeof RunEvent>[] = [start, ...rawEvents.slice(1) as z.infer<typeof RunEvent>[]];
         const title = this.extractTitle(events);
         return {
             id,
             title,
-            createdAt: events[0].ts!,
-            agentId: events[0].agentName,
+            createdAt: start.ts!,
+            agentId: start.agentName,
+            model: start.model,
+            provider: start.provider,
             log: events,
         };
     }

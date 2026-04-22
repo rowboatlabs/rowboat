@@ -1,5 +1,5 @@
 ---
-model: gpt-4.1
+model: anthropic/claude-haiku-4.5
 tools:
   workspace-readFile:
     type: builtin

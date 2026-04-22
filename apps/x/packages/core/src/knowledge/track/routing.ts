@@ -1,11 +1,8 @@
 import { generateObject } from 'ai';
 import { trackBlock, PrefixLogger } from '@x/shared';
 import type { KnowledgeEvent } from '@x/shared/dist/track-block.js';
-import container from '../../di/container.js';
-import type { IModelConfigRepo } from '../../models/repo.js';
 import { createProvider } from '../../models/models.js';
-import { isSignedIn } from '../../account/account.js';
-import { getGatewayProvider } from '../../models/gateway.js';
+import { getDefaultModelAndProvider, resolveProviderConfig } from '../../models/defaults.js';
 
 const log = new PrefixLogger('TrackRouting');
 
@@ -37,15 +34,9 @@ Rules:
 - For each candidate, return BOTH trackId and filePath exactly as given. trackIds are not globally unique.`;
 
 async function resolveModel() {
-    const repo = container.resolve<IModelConfigRepo>('modelConfigRepo');
-    const config = await repo.getConfig();
-    const signedIn = await isSignedIn();
-    const provider = signedIn
-        ? await getGatewayProvider()
-        : createProvider(config.provider);
-    const modelId = config.knowledgeGraphModel
-        || (signedIn ? 'gpt-5.4' : config.model);
-    return provider.languageModel(modelId);
+    const { model, provider } = await getDefaultModelAndProvider();
+    const config = await resolveProviderConfig(provider);
+    return createProvider(config).languageModel(model);
 }
 
 function buildRoutingPrompt(event: KnowledgeEvent, batch: ParsedTrack[]): string {

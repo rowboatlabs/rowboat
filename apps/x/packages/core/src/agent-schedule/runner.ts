@@ -8,6 +8,7 @@ import { IMonotonicallyIncreasingIdGenerator } from "../application/lib/id-gen.j
 import { AgentScheduleConfig, AgentScheduleEntry } from "@x/shared/dist/agent-schedule.js";
 import { AgentScheduleState, AgentScheduleStateEntry } from "@x/shared/dist/agent-schedule-state.js";
 import { MessageEvent } from "@x/shared/dist/runs.js";
+import { createRun } from "../runs/runs.js";
 import z from "zod";
 
 const DEFAULT_STARTING_MESSAGE = "go";
@@ -162,8 +163,8 @@ async function runAgent(
     });
 
     try {
-        // Create a new run
-        const run = await runsRepo.create({ agentId: agentName });
+        // Create a new run via core (resolves agent + default model+provider).
+        const run = await createRun({ agentId: agentName });
         console.log(`[AgentRunner] Created run ${run.id} for agent ${agentName}`);
 
         // Add the starting message as a user message

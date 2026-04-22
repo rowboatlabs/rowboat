@@ -21,9 +21,8 @@ import { BrowserControlInputSchema, type BrowserControlInput } from "@x/shared/d
 import type { ToolContext } from "./exec-tool.js";
 import { generateText } from "ai";
 import { createProvider } from "../../models/models.js";
-import { IModelConfigRepo } from "../../models/repo.js";
+import { getDefaultModelAndProvider, resolveProviderConfig } from "../../models/defaults.js";
 import { isSignedIn } from "../../account/account.js";
-import { getGatewayProvider } from "../../models/gateway.js";
 import { getAccessToken } from "../../auth/tokens.js";
 import { API_URL } from "../../config/env.js";
 import { updateContent, updateTrackBlock } from "../../knowledge/track/fileops.js";
@@ -746,13 +745,9 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
 
                 const base64 = buffer.toString('base64');
 
-                // Resolve model config from DI container
-                const modelConfigRepo = container.resolve<IModelConfigRepo>('modelConfigRepo');
-                const modelConfig = await modelConfigRepo.getConfig();
-                const provider = await isSignedIn()
-                    ? await getGatewayProvider()
-                    : createProvider(modelConfig.provider);
-                const model = provider.languageModel(modelConfig.model);
+                const { model: modelId, provider: providerName } = await getDefaultModelAndProvider();
+                const providerConfig = await resolveProviderConfig(providerName);
+                const model = createProvider(providerConfig).languageModel(modelId);
 
                 const userPrompt = prompt || 'Convert this file to well-structured markdown.';
 
