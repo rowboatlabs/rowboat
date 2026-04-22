@@ -38,6 +38,7 @@ const SOURCE_FOLDERS = [
     'gmail_sync',
     path.join('knowledge', 'Meetings', 'fireflies'),
     path.join('knowledge', 'Meetings', 'granola'),
+    path.join('knowledge', 'Meetings', 'rowboat'),
 ];
 
 // Voice memos are now created directly in knowledge/Voice Memos/<date>/
