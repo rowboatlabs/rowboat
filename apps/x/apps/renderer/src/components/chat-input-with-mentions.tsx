@@ -81,6 +81,10 @@ export interface SelectedModel {
   model: string
 }
 
+function getSelectedModelDisplayName(model: string) {
+  return model.split('/').pop() || model
+}
+
 function getAttachmentIcon(kind: AttachmentIconKind) {
   switch (kind) {
     case 'audio':
@@ -516,7 +520,7 @@ function ChatInputInner({
             className="flex h-7 shrink-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground"
             title={`${providerDisplayNames[lockedModel.provider] || lockedModel.provider} — fixed for this chat`}
           >
-            <span className="max-w-[150px] truncate">{lockedModel.model}</span>
+            <span className="max-w-[150px] truncate">{getSelectedModelDisplayName(lockedModel.model)}</span>
           </span>
         ) : configuredModels.length > 0 ? (
           <DropdownMenu>
@@ -526,7 +530,7 @@ function ChatInputInner({
                 className="flex h-7 shrink-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               >
                 <span className="max-w-[150px] truncate">
-                  {configuredModels.find((m) => `${m.provider}/${m.model}` === activeModelKey)?.model || configuredModels[0]?.model || 'Model'}
+                  {getSelectedModelDisplayName(configuredModels.find((m) => `${m.provider}/${m.model}` === activeModelKey)?.model || configuredModels[0]?.model || 'Model')}
                 </span>
                 <ChevronDown className="h-3 w-3" />
               </button>
