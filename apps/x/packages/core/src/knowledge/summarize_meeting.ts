@@ -143,7 +143,7 @@ export async function summarizeMeeting(transcript: string, meetingStartTime?: st
     const signedIn = await isSignedIn();
     const provider = signedIn
         ? await getGatewayProvider()
-        : createProvider(config.provider);
+        : await createProvider(config.provider);
     const modelId = config.meetingNotesModel
         || (signedIn ? "gpt-5.4" : config.model);
     const model = provider.languageModel(modelId);

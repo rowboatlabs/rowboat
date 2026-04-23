@@ -162,7 +162,7 @@ function AppearanceSettings() {
 
 // --- Model Settings UI ---
 
-type LlmProviderFlavor = "openai" | "anthropic" | "google" | "openrouter" | "aigateway" | "ollama" | "openai-compatible"
+type LlmProviderFlavor = "openai" | "anthropic" | "google" | "openrouter" | "aigateway" | "ollama" | "openai-compatible" | "github-copilot"
 
 interface LlmModelOption {
   id: string
@@ -181,6 +181,7 @@ const moreProviders: Array<{ id: LlmProviderFlavor; name: string; description: s
   { id: "openrouter", name: "OpenRouter", description: "Multiple models, one key" },
   { id: "aigateway", name: "AI Gateway (Vercel)", description: "Vercel's AI Gateway" },
   { id: "openai-compatible", name: "OpenAI-Compatible", description: "Custom OpenAI-compatible API" },
+  { id: "github-copilot", name: "GitHub Copilot Student", description: "GitHub Copilot with Device Flow" },
 ]
 
 const preferredDefaults: Partial<Record<LlmProviderFlavor, string>> = {
@@ -204,6 +205,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
     aigateway: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "" },
     ollama: { apiKey: "", baseURL: "http://localhost:11434", models: [""], knowledgeGraphModel: "" },
     "openai-compatible": { apiKey: "", baseURL: "http://localhost:1234/v1", models: [""], knowledgeGraphModel: "" },
+    "github-copilot": { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "" },
   })
   const [modelsCatalog, setModelsCatalog] = useState<Record<string, LlmModelOption[]>>({})
   const [modelsLoading, setModelsLoading] = useState(false)
@@ -211,6 +213,8 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
   const [testState, setTestState] = useState<{ status: "idle" | "testing" | "success" | "error"; error?: string }>({ status: "idle" })
   const [configLoading, setConfigLoading] = useState(true)
   const [showMoreProviders, setShowMoreProviders] = useState(false)
+  const [githubCopilotCode, setGithubCopilotCode] = useState<{ userCode: string; verificationUri: string } | null>(null)
+  const [githubCopilotAuthenticated, setGithubCopilotAuthenticated] = useState<boolean>(false)
 
   const activeConfig = providerConfigs[provider]
   const showApiKey = provider === "openai" || provider === "anthropic" || provider === "google" || provider === "openrouter" || provider === "aigateway" || provider === "openai-compatible"
@@ -218,6 +222,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
   const showBaseURL = provider === "ollama" || provider === "openai-compatible" || provider === "aigateway"
   const requiresBaseURL = provider === "ollama" || provider === "openai-compatible"
   const isLocalProvider = provider === "ollama" || provider === "openai-compatible"
+  const isGitHubCopilot = provider === "github-copilot"
   const modelsForProvider = modelsCatalog[provider] || []
   const showModelInput = isLocalProvider || modelsForProvider.length === 0
   const isMoreProvider = moreProviders.some(p => p.id === provider)
@@ -332,6 +337,23 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
 
     loadCurrentConfig()
   }, [dialogOpen])
+
+  // Check GitHub Copilot auth status
+  useEffect(() => {
+    if (!dialogOpen || provider !== "github-copilot") return;
+    
+    async function checkCopilotAuth() {
+      try {
+        const result = await window.ipc.invoke("github-copilot:isAuthenticated", null);
+        setGithubCopilotAuthenticated(!!result.authenticated);
+      } catch (error) {
+        console.error("Error checking Copilot auth:", error);
+        setGithubCopilotAuthenticated(false);
+      }
+    }
+    
+    checkCopilotAuth();
+  }, [dialogOpen, provider]);
 
   // Load models catalog
   useEffect(() => {
@@ -681,6 +703,198 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
                   : "https://ai-gateway.vercel.sh/v1"
             }
           />
+        </div>
+      )}
+
+      {/* GitHub Copilot Authentication */}
+      {isGitHubCopilot && (
+        <div className="space-y-3 border rounded-lg p-3 bg-muted/30">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Authentication</span>
+          
+          {githubCopilotAuthenticated ? (
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center justify-between p-2 border rounded bg-background/50">
+                <div className="flex items-center gap-2 text-sm">
+                  <CheckCircle2 className="size-4 text-green-500" />
+                  <span className="font-medium">Connected to GitHub</span>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
+                  onClick={async () => {
+                    try {
+                      setTestState({ status: "testing" });
+                      const result = await window.ipc.invoke("github-copilot:disconnect", null);
+                      if (result.success) {
+                        setGithubCopilotAuthenticated(false);
+                        setGithubCopilotCode(null);
+                        setTestState({ status: "idle" });
+                        toast.success("Disconnected successfully");
+                      } else {
+                        toast.error(result.error || "Failed to disconnect");
+                        setTestState({ status: "error", error: result.error });
+                      }
+                    } catch (error) {
+                      toast.error("Error disconnecting");
+                      setTestState({ status: "idle" });
+                    }
+                  }}
+                >
+                  Disconnect
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Your device is authenticated. You can select any model from the dropdown above to start using GitHub Copilot.
+              </p>
+            </div>
+          ) : !githubCopilotCode ? (
+            <>
+              <p className="text-xs text-muted-foreground">
+                GitHub Copilot uses Device Flow OAuth. Click below to get a device code.
+              </p>
+              <Button
+                onClick={async () => {
+                  try {
+                    setTestState({ status: "testing" });
+                    const result = await window.ipc.invoke("github-copilot:authenticate", null);
+                    
+                    if (!result.success) {
+                      setTestState({ status: "error", error: result.error });
+                      toast.error(`Error: ${result.error}`);
+                      return;
+                    }
+
+                    // Store code permanently on screen
+                    setGithubCopilotCode({
+                      userCode: result.userCode,
+                      verificationUri: result.verificationUri,
+                    });
+                    
+                    setTestState({ status: "idle" });
+                    toast.success("Device code ready! Follow the instructions below.");
+                    
+                    // Open GitHub automatically
+                    window.open(result.verificationUri, '_blank');
+                  } catch (error) {
+                    const errorMsg = error instanceof Error ? error.message : "Authentication error";
+                    setTestState({ status: "error", error: errorMsg });
+                    toast.error(`Error: ${errorMsg}`);
+                  }
+                }}
+                variant="outline"
+                className="w-full"
+                disabled={testState.status === "testing"}
+              >
+                {testState.status === "testing" ? (
+                  <>
+                    <Loader2 className="size-4 animate-spin mr-2" />
+                    Getting device code...
+                  </>
+                ) : (
+                  "Get Device Code"
+                )}
+              </Button>
+            </>
+          ) : (
+            <>
+              <div className="space-y-3">
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1">1. Enter this code on GitHub:</p>
+                  <div className="flex gap-2">
+                    <code className="flex-1 bg-background border rounded px-3 py-2 text-sm font-mono text-foreground">
+                      {githubCopilotCode.userCode}
+                    </code>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        navigator.clipboard.writeText(githubCopilotCode.userCode);
+                        toast.success("Code copied!");
+                      }}
+                    >
+                      Copy
+                    </Button>
+                  </div>
+                </div>
+
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1">2. Open this URL (already opened in browser):</p>
+                  <Button
+                    variant="link"
+                    size="sm"
+                    className="h-auto p-0 text-xs"
+                    onClick={() => window.open(githubCopilotCode.verificationUri, '_blank')}
+                  >
+                    {githubCopilotCode.verificationUri}
+                  </Button>
+                </div>
+
+                <div>
+                  <p className="text-xs text-muted-foreground mb-2">3. After authorizing on GitHub, click the button below:</p>
+                  <Button
+                    onClick={async () => {
+                      try {
+                        setTestState({ status: "testing" });
+                        const authCheck = await window.ipc.invoke("github-copilot:isAuthenticated", null);
+                        
+                        if (authCheck.authenticated) {
+                          setTestState({ status: "success" });
+                          setGithubCopilotCode(null);
+                          setGithubCopilotAuthenticated(true);
+                          toast.success("GitHub Copilot authenticated!");
+                          
+                          // Reload models
+                          const modelsResult = await window.ipc.invoke("models:list", null);
+                          const catalog: Record<string, any[]> = {};
+                          for (const p of modelsResult.providers || []) {
+                            catalog[p.id] = p.models || [];
+                          }
+                          setModelsCatalog(catalog);
+                        } else {
+                          setTestState({ status: "error", error: "Not authenticated yet. Please complete authorization on GitHub." });
+                          toast.error("Not authenticated yet");
+                        }
+                      } catch (error) {
+                        const errorMsg = error instanceof Error ? error.message : "Error checking auth";
+                        setTestState({ status: "error", error: errorMsg });
+                        toast.error(`Error: ${errorMsg}`);
+                      }
+                    }}
+                    className="w-full"
+                    disabled={testState.status === "testing"}
+                  >
+                    {testState.status === "testing" ? (
+                      <>
+                        <Loader2 className="size-4 animate-spin mr-2" />
+                        Checking...
+                      </>
+                    ) : (
+                      "I've Authorized on GitHub"
+                    )}
+                  </Button>
+                </div>
+
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="w-full text-xs"
+                  onClick={() => {
+                    setGithubCopilotCode(null);
+                    setTestState({ status: "idle" });
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </>
+          )}
+
+          {testState.status === "error" && (
+            <div className="text-xs text-destructive">
+              {testState.error}
+            </div>
+          )}
         </div>
       )}
 

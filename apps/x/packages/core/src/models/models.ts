@@ -10,11 +10,12 @@ import { LlmModelConfig, LlmProvider } from "@x/shared/dist/models.js";
 import z from "zod";
 import { isSignedIn } from "../account/account.js";
 import { getGatewayProvider } from "./gateway.js";
+import { createGitHubCopilotProvider } from "../auth/github-copilot-models.js";
 
 export const Provider = LlmProvider;
 export const ModelConfig = LlmModelConfig;
 
-export function createProvider(config: z.infer<typeof Provider>): ProviderV2 {
+export async function createProvider(config: z.infer<typeof Provider>): Promise<ProviderV2> {
     const { apiKey, baseURL, headers } = config;
     switch (config.flavor) {
         case "openai":
@@ -65,6 +66,9 @@ export function createProvider(config: z.infer<typeof Provider>): ProviderV2 {
                 baseURL,
                 headers,
             }) as unknown as ProviderV2;
+        case "github-copilot":
+            // GitHub Copilot uses Device Flow OAuth for authentication
+            return await createGitHubCopilotProvider(config);
         default:
             throw new Error(`Unsupported provider flavor: ${config.flavor}`);
     }
@@ -82,7 +86,7 @@ export async function testModelConnection(
     try {
         const provider = await isSignedIn()
             ? await getGatewayProvider()
-            : createProvider(providerConfig);
+            : await createProvider(providerConfig);
         const languageModel = provider.languageModel(model);
         await generateText({
             model: languageModel,

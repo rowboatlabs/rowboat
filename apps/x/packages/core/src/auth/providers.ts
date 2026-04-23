@@ -92,6 +92,23 @@ const providerConfigs: ProviderConfig = {
       'profile',
       'email',
     ]
+  },
+  'github-copilot': {
+    discovery: {
+      mode: 'static',
+      authorizationEndpoint: 'https://github.com/login/oauth/authorize',
+      tokenEndpoint: 'https://github.com/login/oauth/access_token',
+      revocationEndpoint: 'https://github.com/settings/connections/applications',
+    },
+    client: {
+      mode: 'static',
+      clientId: 'Iv1.b507a08c87ecfe98',
+    },
+    scopes: [
+      'read:user',
+      'user:email',
+      'gist',
+    ]
   }
 };
 

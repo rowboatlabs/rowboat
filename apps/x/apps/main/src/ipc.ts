@@ -29,6 +29,7 @@ import { isSignedIn } from '@x/core/dist/account/account.js';
 import { listGatewayModels } from '@x/core/dist/models/gateway.js';
 import type { IModelConfigRepo } from '@x/core/dist/models/repo.js';
 import type { IOAuthRepo } from '@x/core/dist/auth/repo.js';
+import { startGitHubCopilotAuthentication, isGitHubCopilotAuthenticated, disconnectGitHubCopilot } from '@x/core/dist/auth/github-copilot-auth.js';
 import { IGranolaConfigRepo } from '@x/core/dist/knowledge/granola/repo.js';
 import { triggerSync as triggerGranolaSync } from '@x/core/dist/knowledge/granola/sync.js';
 import { ISlackConfigRepo } from '@x/core/dist/slack/repo.js';
@@ -509,6 +510,46 @@ export function setupIpcHandlers() {
       const repo = container.resolve<IOAuthRepo>('oauthRepo');
       const config = await repo.getClientFacingConfig();
       return { config };
+    },
+    'github-copilot:authenticate': async () => {
+      try {
+        const authInfo = await startGitHubCopilotAuthentication();
+        // Don't await the token promise - it will complete in the background
+        // Just return the device code info immediately
+        return {
+          success: true,
+          userCode: authInfo.userCode,
+          verificationUri: authInfo.verificationUri,
+          expiresIn: authInfo.expiresIn,
+        };
+      } catch (error) {
+        console.error('[GitHub Copilot] Authentication error:', error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Authentication failed',
+        };
+      }
+    },
+    'github-copilot:isAuthenticated': async () => {
+      try {
+        const authenticated = await isGitHubCopilotAuthenticated();
+        return { authenticated };
+      } catch (error) {
+        console.error('[GitHub Copilot] Error checking authentication:', error);
+        return { authenticated: false };
+      }
+    },
+    'github-copilot:disconnect': async () => {
+      try {
+        await disconnectGitHubCopilot();
+        return { success: true };
+      } catch (error) {
+        console.error('[GitHub Copilot] Disconnect error:', error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Disconnect failed',
+        };
+      }
     },
     'account:getRowboat': async () => {
       const signedIn = await isSignedIn();

@@ -1,0 +1,194 @@
+
+> x@0.1.0 dev
+> npm run deps && concurrently -k "npm:renderer" "npm:main"
+
+
+> x@0.1.0 deps
+> npm run shared && npm run core && npm run preload
+
+
+> x@0.1.0 shared
+> cd packages/shared && npm run build
+
+
+> build
+> rm -rf dist && tsc
+
+
+> x@0.1.0 core
+> cd packages/core && npm run build
+
+
+> build
+> rm -rf dist && tsc
+
+
+> x@0.1.0 preload
+> cd apps/preload && npm run build
+
+
+> build
+> rm -rf dist && tsc && esbuild dist/preload.js --bundle --platform=node --format=cjs --external:electron --outfile=dist/preload.bundle.js && mv dist/preload.bundle.js dist/preload.js
+
+
+  dist/preload.bundle.js  525.9kb
+
+⚡ Done in 15ms
+[renderer] 
+[renderer] > x@0.1.0 renderer
+[renderer] > cd apps/renderer && npm run dev
+[renderer] 
+[main] 
+[main] > x@0.1.0 main
+[main] > wait-on http://localhost:5173 && cd apps/main && npm run build && npm run start
+[main] 
+[renderer] 
+[renderer] > dev
+[renderer] > vite
+[renderer] 
+[renderer] 
+[renderer]   VITE v7.3.0  ready in 221 ms
+[renderer] 
+[renderer]   ➜  Local:   http://localhost:5173/
+[renderer]   ➜  Network: use --host to expose
+[main] 
+[main] > rowboat@0.1.0 build
+[main] > rm -rf dist && tsc && node bundle.mjs
+[main] 
+[main] ✅ Main process bundled to .package/dist-bundle/main.js
+[main] 
+[main] > rowboat@0.1.0 start
+[main] > electron .
+[main] 
+[main] preloadPath /home/wilber/rowboat/apps/x/apps/preload/dist/preload.js
+[main] rendererPath /home/wilber/rowboat/apps/x/apps/renderer/dist
+[main] Starting Gmail Sync (TS)...
+[main] Will sync every 300 seconds.
+[main] Starting Google Calendar & Notes Sync (TS)...
+[main] Will sync every 300 seconds.
+[main] [Fireflies] Starting Fireflies Sync...
+[main] [Fireflies] Will sync every 1800 seconds.
+[main] [Fireflies] Syncing transcripts from the last 7 days.
+[main] [Granola] Starting Granola Sync...
+[main] [Granola] Will sync every 5 minutes.
+[main] [Granola] Notes will be saved to: /home/wilber/.rowboat/knowledge/Meetings/granola
+[main] [Granola] Starting sync...
+[main] [GraphBuilder] Starting Knowledge Graph Builder Service...
+[main] [GraphBuilder] Monitoring folders: gmail_sync, knowledge/Meetings/fireflies, knowledge/Meetings/granola, knowledge/Voice Memos
+[main] [GraphBuilder] Will check for new content every 15 seconds
+[main] [GraphBuilder] Checking for new content in all sources...
+[main] [GraphBuilder] Starting voice memo processing...
+[main] [GraphBuilder] Checking directory: /home/wilber/.rowboat/knowledge/Voice Memos
+[main] [GraphBuilder] Directory does not exist
+[main] [GraphBuilder] No unprocessed voice memos found
+[main] [EmailLabeling] Starting Email Labeling Service...
+[main] [EmailLabeling] Will check for unlabeled emails every 15 seconds
+[main] [EmailLabeling] Checking for unlabeled emails...
+[main] [EmailLabeling] No unlabeled emails found
+[main] [NoteTagging] Starting Note Tagging Service...
+[main] [NoteTagging] Will check for untagged notes every 15 seconds
+[main] [NoteTagging] Checking for untagged notes...
+[main] [NoteTagging] No untagged notes found
+[main] [InlineTasks] Starting Inline Task Service...
+[main] [InlineTasks] Will check for task blocks every 15 seconds
+[main] [InlineTasks] Checking live notes...
+[main] [InlineTasks] Found 1 pending task(s) in knowledge/Today.md
+[main] [InlineTasks] Running task: "Create a daily brief for me..."
+[main] [AgentRunner] Starting background agent runner service
+[main] [AgentNotes] Starting Agent Notes Service...
+[main] [AgentNotes] Will process every 10 seconds
+[main] [ChromeSync] Server disabled, watching config for changes...
+[main] [GraphBuilder] No new content to process
+[main] [Fireflies] Starting sync...
+[main] [Granola] Sync disabled in config
+[main] [Granola] Sleeping for 5 minutes...
+[main] Google OAuth credentials not available or missing required Gmail scope. Sleeping...
+[main] Sleeping for 300 seconds...
+[main] Google OAuth credentials not available or missing required Calendar/Drive scopes. Sleeping...
+[main] Sleeping for 300 seconds...
+[main] [Fireflies] Clearing auth cache
+[main] [Fireflies] No valid client available
+[main] [Fireflies] Sleeping for 1800 seconds...
+[main] [OAuth] Clearing Google auth cache
+[main] 2026-04-17T14:51:34.860Z [run-2026-04-17T14-51-34Z-0033765-000-inline_task_agent] using model: gpt-5.4
+[main] 2026-04-17T14:51:34.860Z [run-2026-04-17T14-51-34Z-0033765-000-inline_task_agent] [iter-1] starting loop iteration
+[main] 2026-04-17T14:51:34.860Z [run-2026-04-17T14-51-34Z-0033765-000-inline_task_agent] [iter-1] dequeued user message 2026-04-17T14-51-34Z-0033765-001
+[main] 2026-04-17T14:51:34.862Z [run-2026-04-17T14-51-34Z-0033765-000-inline_task_agent] [iter-1] running llm turn
+[main] ! SENDING payload to model:  [{"role":"user","content":"Execute the following instruction from the note \"knowledge/Today.md\":\n\n**Instruction:** Create a daily brief for me\n\n**Full note content for context:**\n```markdown\n---\nlive_note: true\n---\n# Today\n\n```task\n{\"instruction\":\"Create a daily brief for me\",\"schedule\":{\"type\":\"cron\",\"expression\":\"*/15 * * * *\",\"startDate\":\"2026-04-17T14:33:30.959Z\",\"endDate\":\"2027-04-17T14:33:30.959Z\"},\"schedule-label\":\"runs every 15 minutes\",\"targetId\":\"dailybrief\"}\n```\n\n<!--task-target:dailybrief-->\n<!--/task-target:dailybrief-->\n\n```"}]
+[main] -> 		stream event {"type":"start"}
+[main] unknown stream event: {"type":"start"}
+[main] LoadAPIKeyError [AI_LoadAPIKeyError]: OpenAI API key is missing. Pass it using the 'apiKey' parameter or the OPENAI_API_KEY environment variable.
+[main]     at loadApiKey (/home/wilber/rowboat/apps/x/apps/main/.package/dist/main.cjs:939803:11)
+[main]     at Object.getHeaders2 [as headers] (/home/wilber/rowboat/apps/x/apps/main/.package/dist/main.cjs:953561:32)
+[main]     at OpenAIResponsesLanguageModel.doStream (/home/wilber/rowboat/apps/x/apps/main/.package/dist/main.cjs:952680:43)
+[main]     at async fn (/home/wilber/rowboat/apps/x/apps/main/.package/dist/main.cjs:948052:27)
+[main]     at async /home/wilber/rowboat/apps/x/apps/main/.package/dist/main.cjs:944761:22
+[main]     at async _retryWithExponentialBackoff (/home/wilber/rowboat/apps/x/apps/main/.package/dist/main.cjs:944900:12)
+[main]     at async streamStep (/home/wilber/rowboat/apps/x/apps/main/.package/dist/main.cjs:948008:15)
+[main]     at async fn (/home/wilber/rowboat/apps/x/apps/main/.package/dist/main.cjs:948349:9)
+[main]     at async /home/wilber/rowboat/apps/x/apps/main/.package/dist/main.cjs:944761:22 {
+[main]   cause: undefined,
+[main]   [Symbol(vercel.ai.error)]: true,
+[main]   [Symbol(vercel.ai.error.AI_LoadAPIKeyError)]: true
+[main] }
+[main] -> 		stream event {"type":"error","error":{"name":"AI_LoadAPIKeyError"}}
+[main] 2026-04-17T14:51:34.901Z [run-2026-04-17T14-51-34Z-0033765-000-inline_task_agent] using model: gpt-5.4
+[main] 2026-04-17T14:51:34.902Z [run-2026-04-17T14-51-34Z-0033765-000-inline_task_agent] [iter-1] starting loop iteration
+[main] 2026-04-17T14:51:34.902Z [run-2026-04-17T14-51-34Z-0033765-000-inline_task_agent] [iter-1] exiting loop, reason: last message is from assistant and text
+[main] [InlineTasks] No response from agent for task
+[main] [InlineTasks] Updated knowledge/Today.md
+[main] [InlineTasks] No pending tasks found
+[main] Error occurred in handler for 'workspace:readFile': [Error: ENOENT: no such file or directory, lstat '/home/wilber/.rowboat/config/exa-search.json'] {
+[main]   errno: -2,
+[main]   code: 'ENOENT',
+[main]   syscall: 'lstat',
+[main]   path: '/home/wilber/.rowboat/config/exa-search.json'
+[main] }
+[main] Error occurred in handler for 'workspace:readFile': [Error: ENOENT: no such file or directory, lstat '/home/wilber/.rowboat/config/exa-search.json'] {
+[main]   errno: -2,
+[main]   code: 'ENOENT',
+[main]   syscall: 'lstat',
+[main]   path: '/home/wilber/.rowboat/config/exa-search.json'
+[main] }
+[main] [OAuth] Clearing Google auth cache
+[main] [EmailLabeling] Checking for unlabeled emails...
+[main] [EmailLabeling] No unlabeled emails found
+[main] [NoteTagging] Checking for untagged notes...
+[main] [NoteTagging] No untagged notes found
+[main] [GraphBuilder] Checking for new content in all sources...
+[main] [GraphBuilder] Starting voice memo processing...
+[main] [GraphBuilder] Checking directory: /home/wilber/.rowboat/knowledge/Voice Memos
+[main] [GraphBuilder] Directory does not exist
+[main] [GraphBuilder] No unprocessed voice memos found
+[main] [GraphBuilder] No new content to process
+[main] [InlineTasks] Checking live notes...
+[main] [InlineTasks] Found 1 pending task(s) in knowledge/Today.md
+[main] [InlineTasks] Running task: "Create a daily brief for me..."
+[main] 2026-04-17T14:51:49.911Z [run-2026-04-17T14-51-49Z-0033765-000-inline_task_agent] using model: gpt-5.4
+[main] 2026-04-17T14:51:49.911Z [run-2026-04-17T14-51-49Z-0033765-000-inline_task_agent] [iter-1] starting loop iteration
+[main] 2026-04-17T14:51:49.911Z [run-2026-04-17T14-51-49Z-0033765-000-inline_task_agent] [iter-1] dequeued user message 2026-04-17T14-51-49Z-0033765-001
+[main] 2026-04-17T14:51:49.912Z [run-2026-04-17T14-51-49Z-0033765-000-inline_task_agent] [iter-1] running llm turn
+[main] ! SENDING payload to model:  [{"role":"user","content":"Execute the following instruction from the note \"knowledge/Today.md\":\n\n**Instruction:** Create a daily brief for me\n\n**Full note content for context:**\n```markdown\n---\nlive_note: true\n---\n# Today\n\n```task\n{\"instruction\":\"Create a daily brief for me\",\"schedule\":{\"type\":\"cron\",\"expression\":\"*/15 * * * *\",\"startDate\":\"2026-04-17T14:33:30.959Z\",\"endDate\":\"2027-04-17T14:33:30.959Z\"},\"schedule-label\":\"runs every 15 minutes\",\"targetId\":\"dailybrief\"}\n```\n\n<!--task-target:dailybrief-->\n<!--/task-target:dailybrief-->\n\n```"}]
+[main] -> 		stream event {"type":"start"}
+[main] unknown stream event: {"type":"start"}
+[main] LoadAPIKeyError [AI_LoadAPIKeyError]: OpenAI API key is missing. Pass it using the 'apiKey' parameter or the OPENAI_API_KEY environment variable.
+[main]     at loadApiKey (/home/wilber/rowboat/apps/x/apps/main/.package/dist/main.cjs:939803:11)
+[main]     at Object.getHeaders2 [as headers] (/home/wilber/rowboat/apps/x/apps/main/.package/dist/main.cjs:953561:32)
+[main]     at OpenAIResponsesLanguageModel.doStream (/home/wilber/rowboat/apps/x/apps/main/.package/dist/main.cjs:952680:43)
+[main]     at async fn (/home/wilber/rowboat/apps/x/apps/main/.package/dist/main.cjs:948052:27)
+[main]     at async /home/wilber/rowboat/apps/x/apps/main/.package/dist/main.cjs:944761:22
+[main]     at async _retryWithExponentialBackoff (/home/wilber/rowboat/apps/x/apps/main/.package/dist/main.cjs:944900:12)
+[main]     at async streamStep (/home/wilber/rowboat/apps/x/apps/main/.package/dist/main.cjs:948008:15)
+[main]     at async fn (/home/wilber/rowboat/apps/x/apps/main/.package/dist/main.cjs:948349:9)
+[main]     at async /home/wilber/rowboat/apps/x/apps/main/.package/dist/main.cjs:944761:22 {
+[main]   cause: undefined,
+[main]   [Symbol(vercel.ai.error)]: true,
+[main]   [Symbol(vercel.ai.error.AI_LoadAPIKeyError)]: true
+[main] }
+[main] -> 		stream event {"type":"error","error":{"name":"AI_LoadAPIKeyError"}}
+[main] 2026-04-17T14:51:49.925Z [run-2026-04-17T14-51-49Z-0033765-000-inline_task_agent] using model: gpt-5.4
+[main] 2026-04-17T14:51:49.925Z [run-2026-04-17T14-51-49Z-0033765-000-inline_task_agent] [iter-1] starting loop iteration
+[main] 2026-04-17T14:51:49.925Z [run-2026-04-17T14-51-49Z-0033765-000-inline_task_agent] [iter-1] exiting loop, reason: last message is from assistant and text
+[main] [InlineTasks] No response from agent for task
+[main] [InlineTasks] Updated knowledge/Today.md
+[main] [InlineTasks] No pending tasks found

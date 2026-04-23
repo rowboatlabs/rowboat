@@ -76,12 +76,19 @@ initializeExecutionEnvironment();
 const preloadPath = app.isPackaged
   ? path.join(__dirname, "../preload/dist/preload.js")
   : path.join(__dirname, "../../../preload/dist/preload.js");
-console.log("preloadPath", preloadPath);
 
 const rendererPath = app.isPackaged
   ? path.join(__dirname, "../renderer/dist") // Production
   : path.join(__dirname, "../../../renderer/dist"); // Development
-console.log("rendererPath", rendererPath);
+
+// Debug logging (wrapped in safe error handler)
+try {
+  if (process.stderr && process.stderr.write) {
+    process.stderr.write(`preloadPath: ${preloadPath}\nrendererPath: ${rendererPath}\n`);
+  }
+} catch {
+  // Silently ignore logging errors
+}
 
 // Register custom protocol for serving built renderer files in production.
 // This keeps SPA routes working when users deep link into the packaged app.
