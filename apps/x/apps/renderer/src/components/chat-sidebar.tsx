@@ -25,6 +25,8 @@ import { Suggestions } from '@/components/ai-elements/suggestions'
 import { type PromptInputMessage, type FileMention } from '@/components/ai-elements/prompt-input'
 import { FileCardProvider } from '@/contexts/file-card-context'
 import { MarkdownPreOverride } from '@/components/ai-elements/markdown-code-override'
+import { defaultRemarkPlugins } from 'streamdown'
+import remarkBreaks from 'remark-breaks'
 import { TabBar, type ChatTab } from '@/components/tab-bar'
 import { ChatInputWithMentions, type StagedAttachment, type SelectedModel } from '@/components/chat-input-with-mentions'
 import { ChatMessageAttachments } from '@/components/chat-message-attachments'
@@ -48,6 +50,11 @@ import {
 } from '@/lib/chat-conversation'
 
 const streamdownComponents = { pre: MarkdownPreOverride }
+
+// Render user messages with markdown so bullets, bold, links, etc. survive the
+// round-trip from the input textarea. `remarkBreaks` turns single newlines
+// into <br> so typed line breaks are preserved without requiring blank lines.
+const userMessageRemarkPlugins = [...Object.values(defaultRemarkPlugins), remarkBreaks]
 
 /* ─── Billing error helpers ─── */
 
@@ -353,7 +360,14 @@ export function ChatSidebar({
                 <ChatMessageAttachments attachments={item.attachments} />
               </MessageContent>
               {item.content && (
-                <MessageContent>{item.content}</MessageContent>
+                <MessageContent>
+                  <MessageResponse
+                    components={streamdownComponents}
+                    remarkPlugins={userMessageRemarkPlugins}
+                  >
+                    {item.content}
+                  </MessageResponse>
+                </MessageContent>
               )}
             </Message>
           )
@@ -374,7 +388,12 @@ export function ChatSidebar({
                   ))}
                 </div>
               )}
-              {message}
+              <MessageResponse
+                components={streamdownComponents}
+                remarkPlugins={userMessageRemarkPlugins}
+              >
+                {message}
+              </MessageResponse>
             </MessageContent>
           </Message>
         )

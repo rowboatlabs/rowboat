@@ -62,6 +62,8 @@ import { BrowserPane } from '@/components/browser-pane/BrowserPane'
 import { VersionHistoryPanel } from '@/components/version-history-panel'
 import { FileCardProvider } from '@/contexts/file-card-context'
 import { MarkdownPreOverride } from '@/components/ai-elements/markdown-code-override'
+import { defaultRemarkPlugins } from 'streamdown'
+import remarkBreaks from 'remark-breaks'
 import { TabBar, type ChatTab, type FileTab } from '@/components/tab-bar'
 import {
   type ChatMessage,
@@ -103,6 +105,11 @@ interface TreeNode extends DirEntry {
 }
 
 const streamdownComponents = { pre: MarkdownPreOverride }
+
+// Render user messages with markdown so bullets, bold, links, etc. survive the
+// round-trip from the input textarea. `remarkBreaks` turns single newlines
+// into <br> so typed line breaks are preserved without requiring blank lines.
+const userMessageRemarkPlugins = [...Object.values(defaultRemarkPlugins), remarkBreaks]
 
 function SmoothStreamingMessage({ text, components }: { text: string; components: typeof streamdownComponents }) {
   const smoothText = useSmoothedText(text)
@@ -3974,7 +3981,14 @@ function App() {
                 <ChatMessageAttachments attachments={item.attachments} />
               </MessageContent>
               {item.content && (
-                <MessageContent>{item.content}</MessageContent>
+                <MessageContent>
+                  <MessageResponse
+                    components={streamdownComponents}
+                    remarkPlugins={userMessageRemarkPlugins}
+                  >
+                    {item.content}
+                  </MessageResponse>
+                </MessageContent>
               )}
             </Message>
           )
@@ -3995,7 +4009,12 @@ function App() {
                   ))}
                 </div>
               )}
-              {message}
+              <MessageResponse
+                components={streamdownComponents}
+                remarkPlugins={userMessageRemarkPlugins}
+              >
+                {message}
+              </MessageResponse>
             </MessageContent>
           </Message>
         )
