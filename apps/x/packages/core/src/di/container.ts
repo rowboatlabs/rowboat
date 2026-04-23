@@ -16,6 +16,7 @@ import { FSAgentScheduleRepo, IAgentScheduleRepo } from "../agent-schedule/repo.
 import { FSAgentScheduleStateRepo, IAgentScheduleStateRepo } from "../agent-schedule/state-repo.js";
 import { FSSlackConfigRepo, ISlackConfigRepo } from "../slack/repo.js";
 import type { IBrowserControlService } from "../application/browser-control/service.js";
+import type { INotificationService } from "../application/notification/service.js";
 
 const container = createContainer({
     injectionMode: InjectionMode.PROXY,
@@ -47,5 +48,11 @@ export default container;
 export function registerBrowserControlService(service: IBrowserControlService): void {
     container.register({
         browserControlService: asValue(service),
+    });
+}
+
+export function registerNotificationService(service: INotificationService): void {
+    container.register({
+        notificationService: asValue(service),
     });
 }
