@@ -100,6 +100,19 @@ const getElementType = (element) => {
   return null;
 };
 
+const isTextEntryElement = (element) => (
+  element instanceof HTMLInputElement
+  || element instanceof HTMLTextAreaElement
+  || (element instanceof HTMLElement && element.isContentEditable)
+);
+
+const shouldRedactVerificationValue = (element) => (
+  element instanceof HTMLInputElement
+    ? !['checkbox', 'radio', 'range', 'button', 'submit', 'reset'].includes((element.type || '').toLowerCase())
+    : element instanceof HTMLTextAreaElement
+      || (element instanceof HTMLElement && element.isContentEditable)
+);
+
 const getElementLabel = (element) => {
   const ariaLabel = truncateText(element.getAttribute('aria-label') ?? '', 120);
   if (ariaLabel) return ariaLabel;
@@ -121,10 +134,12 @@ const getElementLabel = (element) => {
   const placeholder = truncateText(element.getAttribute('placeholder') ?? '', 120);
   if (placeholder) return placeholder;
 
+  if (isTextEntryElement(element)) {
+    return null;
+  }
+
   const text = truncateText(
-    element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement
-      ? element.value
-      : element.textContent ?? '',
+    element.textContent ?? '',
     120,
   );
   return text || null;
@@ -187,7 +202,9 @@ const getVerificationTargetState = (element) => {
         ? element.checked
         : null,
     value:
-      element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement
+      shouldRedactVerificationValue(element)
+        ? null
+        : element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement
         ? truncateText(element.value ?? '', 200)
         : element instanceof HTMLSelectElement
           ? truncateText(element.value ?? '', 200)
