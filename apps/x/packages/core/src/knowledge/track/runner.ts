@@ -1,6 +1,7 @@
 import z from 'zod';
 import { fetchAll, updateTrackBlock } from './fileops.js';
 import { createRun, createMessage } from '../../runs/runs.js';
+import { getTrackBlockModel } from '../../models/defaults.js';
 import { extractAgentResponse, waitForRunCompletion } from '../../agents/utils.js';
 import { trackBus } from './bus.js';
 import type { TrackStateSchema } from './types.js';
@@ -101,8 +102,15 @@ export async function triggerTrackUpdate(
 
         const contentBefore = track.content;
 
-        // Emit start event — runId is set after agent run is created
-        const agentRun = await createRun({ agentId: 'track-run' });
+        // Per-track model/provider overrides win when set; otherwise fall back
+        // to the configured trackBlockModel default and the run-creation
+        // provider default (signed-in: rowboat; BYOK: active provider).
+        const model = track.track.model ?? await getTrackBlockModel();
+        const agentRun = await createRun({
+            agentId: 'track-run',
+            model,
+            ...(track.track.provider ? { provider: track.track.provider } : {}),
+        });
 
         // Set lastRunAt and lastRunId immediately (before agent executes) so
         // the scheduler's next poll won't re-trigger this track.

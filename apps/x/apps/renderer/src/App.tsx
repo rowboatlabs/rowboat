@@ -62,6 +62,8 @@ import { BrowserPane } from '@/components/browser-pane/BrowserPane'
 import { VersionHistoryPanel } from '@/components/version-history-panel'
 import { FileCardProvider } from '@/contexts/file-card-context'
 import { MarkdownPreOverride } from '@/components/ai-elements/markdown-code-override'
+import { defaultRemarkPlugins } from 'streamdown'
+import remarkBreaks from 'remark-breaks'
 import { TabBar, type ChatTab, type FileTab } from '@/components/tab-bar'
 import {
   type ChatMessage,
@@ -103,6 +105,11 @@ interface TreeNode extends DirEntry {
 }
 
 const streamdownComponents = { pre: MarkdownPreOverride }
+
+// Render user messages with markdown so bullets, bold, links, etc. survive the
+// round-trip from the input textarea. `remarkBreaks` turns single newlines
+// into <br> so typed line breaks are preserved without requiring blank lines.
+const userMessageRemarkPlugins = [...Object.values(defaultRemarkPlugins), remarkBreaks]
 
 function SmoothStreamingMessage({ text, components }: { text: string; components: typeof streamdownComponents }) {
   const smoothText = useSmoothedText(text)
@@ -817,6 +824,7 @@ function App() {
   const chatTabIdCounterRef = useRef(0)
   const newChatTabId = () => `chat-tab-${++chatTabIdCounterRef.current}`
   const chatDraftsRef = useRef(new Map<string, string>())
+  const selectedModelByTabRef = useRef(new Map<string, { provider: string; model: string }>())
   const chatScrollTopByTabRef = useRef(new Map<string, number>())
   const [toolOpenByTab, setToolOpenByTab] = useState<Record<string, Record<string, boolean>>>({})
   const [chatViewportAnchorByTab, setChatViewportAnchorByTab] = useState<Record<string, ChatViewportAnchorState>>({})
@@ -2165,8 +2173,10 @@ function App() {
       let isNewRun = false
       let newRunCreatedAt: string | null = null
       if (!currentRunId) {
+        const selected = selectedModelByTabRef.current.get(submitTabId)
         const run = await window.ipc.invoke('runs:create', {
           agentId,
+          ...(selected ? { model: selected.model, provider: selected.provider } : {}),
         })
         currentRunId = run.id
         newRunCreatedAt = run.createdAt
@@ -2471,6 +2481,7 @@ function App() {
       return next
     })
     chatDraftsRef.current.delete(tabId)
+    selectedModelByTabRef.current.delete(tabId)
     chatScrollTopByTabRef.current.delete(tabId)
     setToolOpenByTab((prev) => {
       if (!(tabId in prev)) return prev
@@ -3970,7 +3981,14 @@ function App() {
                 <ChatMessageAttachments attachments={item.attachments} />
               </MessageContent>
               {item.content && (
-                <MessageContent>{item.content}</MessageContent>
+                <MessageContent>
+                  <MessageResponse
+                    components={streamdownComponents}
+                    remarkPlugins={userMessageRemarkPlugins}
+                  >
+                    {item.content}
+                  </MessageResponse>
+                </MessageContent>
               )}
             </Message>
           )
@@ -3991,7 +4009,12 @@ function App() {
                   ))}
                 </div>
               )}
-              {message}
+              <MessageResponse
+                components={streamdownComponents}
+                remarkPlugins={userMessageRemarkPlugins}
+              >
+                {message}
+              </MessageResponse>
             </MessageContent>
           </Message>
         )
@@ -4644,6 +4667,13 @@ function App() {
                             runId={tabState.runId}
                             initialDraft={chatDraftsRef.current.get(tab.id)}
                             onDraftChange={(text) => setChatDraftForTab(tab.id, text)}
+                            onSelectedModelChange={(m) => {
+                              if (m) {
+                                selectedModelByTabRef.current.set(tab.id, m)
+                              } else {
+                                selectedModelByTabRef.current.delete(tab.id)
+                              }
+                            }}
                             isRecording={isActive && isRecording}
                             recordingText={isActive ? voice.interimText : undefined}
                             recordingState={isActive ? (voice.state === 'connecting' ? 'connecting' : 'listening') : undefined}
@@ -4697,6 +4727,13 @@ function App() {
                 onPresetMessageConsumed={() => setPresetMessage(undefined)}
                 getInitialDraft={(tabId) => chatDraftsRef.current.get(tabId)}
                 onDraftChangeForTab={setChatDraftForTab}
+                onSelectedModelChangeForTab={(tabId, m) => {
+                  if (m) {
+                    selectedModelByTabRef.current.set(tabId, m)
+                  } else {
+                    selectedModelByTabRef.current.delete(tabId)
+                  }
+                }}
                 pendingAskHumanRequests={pendingAskHumanRequests}
                 allPermissionRequests={allPermissionRequests}
                 permissionResponses={permissionResponses}

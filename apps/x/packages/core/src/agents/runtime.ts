@@ -16,8 +16,7 @@ import { isBlocked, extractCommandNames } from "../application/lib/command-execu
 import container from "../di/container.js";
 import { IModelConfigRepo } from "../models/repo.js";
 import { createProvider } from "../models/models.js";
-import { isSignedIn } from "../account/account.js";
-import { getGatewayProvider } from "../models/gateway.js";
+import { resolveProviderConfig } from "../models/defaults.js";
 import { IAgentsRepo } from "./repo.js";
 import { IMonotonicallyIncreasingIdGenerator } from "../application/lib/id-gen.js";
 import { IBus } from "../application/lib/bus.js";
@@ -649,6 +648,8 @@ export class AgentState {
     runId: string | null = null;
     agent: z.infer<typeof Agent> | null = null;
     agentName: string | null = null;
+    runModel: string | null = null;
+    runProvider: string | null = null;
     messages: z.infer<typeof MessageList> = [];
     lastAssistantMsg: z.infer<typeof AssistantMessage> | null = null;
     subflowStates: Record<string, AgentState> = {};
@@ -762,13 +763,18 @@ export class AgentState {
             case "start":
                 this.runId = event.runId;
                 this.agentName = event.agentName;
+                this.runModel = event.model;
+                this.runProvider = event.provider;
                 break;
             case "spawn-subflow":
                 // Seed the subflow state with its agent so downstream loadAgent works.
+                // Subflows inherit the parent run's model+provider — there's one pair per run.
                 if (!this.subflowStates[event.toolCallId]) {
                     this.subflowStates[event.toolCallId] = new AgentState();
                 }
                 this.subflowStates[event.toolCallId].agentName = event.agentName;
+                this.subflowStates[event.toolCallId].runModel = this.runModel;
+                this.subflowStates[event.toolCallId].runProvider = this.runProvider;
                 break;
             case "message":
                 this.messages.push(event.message);
@@ -857,35 +863,23 @@ export async function* streamAgent({
         yield event;
     }
 
-    const modelConfig = await modelConfigRepo.getConfig();
-    if (!modelConfig) {
-        throw new Error("Model config not found");
-    }
-
     // set up agent
     const agent = await loadAgent(state.agentName!);
 
     // set up tools
     const tools = await buildTools(agent);
 
-    // set up provider + model
-    const signedIn = await isSignedIn();
-    const provider = signedIn
-        ? await getGatewayProvider()
-        : createProvider(modelConfig.provider);
-    const knowledgeGraphAgents = ["note_creation", "email-draft", "meeting-prep", "labeling_agent", "note_tagging_agent", "agent_notes_agent"];
-    const isKgAgent = knowledgeGraphAgents.includes(state.agentName!);
-    const isInlineTaskAgent = state.agentName === "inline_task_agent";
-    const defaultModel = signedIn ? "gpt-5.4" : modelConfig.model;
-    const defaultKgModel = signedIn ? "anthropic/claude-haiku-4.5" : defaultModel;
-    const defaultInlineTaskModel = signedIn ? "anthropic/claude-sonnet-4.6" : defaultModel;
-    const modelId = isInlineTaskAgent
-        ? defaultInlineTaskModel
-        : (isKgAgent && modelConfig.knowledgeGraphModel)
-            ? modelConfig.knowledgeGraphModel
-            : isKgAgent ? defaultKgModel : defaultModel;
+    // model+provider were resolved and frozen on the run at runs:create time.
+    // Look up the named provider's current credentials from models.json and
+    // instantiate the LLM client. No selection happens here.
+    if (!state.runModel || !state.runProvider) {
+        throw new Error(`Run ${runId} is missing model/provider on its start event`);
+    }
+    const modelId = state.runModel;
+    const providerConfig = await resolveProviderConfig(state.runProvider);
+    const provider = createProvider(providerConfig);
     const model = provider.languageModel(modelId);
-    logger.log(`using model: ${modelId}`);
+    logger.log(`using model: ${modelId} (provider: ${state.runProvider})`);
 
     let loopCounter = 0;
     let voiceInput = false;

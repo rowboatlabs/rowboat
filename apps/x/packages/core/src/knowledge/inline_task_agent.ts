@@ -13,7 +13,6 @@ export function getRaw(): string {
   const defaultEndISO = defaultEnd.toISOString();
 
   return `---
-model: gpt-5.2
 tools:
 ${toolEntries}
 ---

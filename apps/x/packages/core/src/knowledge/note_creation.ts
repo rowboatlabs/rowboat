@@ -3,7 +3,6 @@ import { renderNoteEffectRules } from './tag_system.js';
 
 export function getRaw(): string {
   return `---
-model: gpt-5.2
 tools:
   workspace-writeFile:
     type: builtin

@@ -4,6 +4,7 @@ import { CronExpressionParser } from 'cron-parser';
 import { generateText } from 'ai';
 import { WorkDir } from '../config/config.js';
 import { createRun, createMessage, fetchRun } from '../runs/runs.js';
+import { getKgModel } from '../models/defaults.js';
 import container from '../di/container.js';
 import type { IModelConfigRepo } from '../models/repo.js';
 import { createProvider } from '../models/models.js';
@@ -467,7 +468,7 @@ async function processInlineTasks(): Promise<void> {
             console.log(`[InlineTasks] Running task: "${task.instruction.slice(0, 80)}..."`);
 
             try {
-                const run = await createRun({ agentId: INLINE_TASK_AGENT });
+                const run = await createRun({ agentId: INLINE_TASK_AGENT, model: await getKgModel() });
 
                 const message = [
                     `Execute the following instruction from the note "${relativePath}":`,
@@ -547,7 +548,7 @@ export async function processRowboatInstruction(
     scheduleLabel: string | null;
     response: string | null;
 }> {
-    const run = await createRun({ agentId: INLINE_TASK_AGENT });
+    const run = await createRun({ agentId: INLINE_TASK_AGENT, model: await getKgModel() });
 
     const message = [
         `Process the following @rowboat instruction from the note "${notePath}":`,

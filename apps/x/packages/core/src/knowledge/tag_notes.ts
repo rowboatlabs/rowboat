@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { WorkDir } from '../config/config.js';
 import { createRun, createMessage } from '../runs/runs.js';
+import { getKgModel } from '../models/defaults.js';
 import { bus } from '../runs/bus.js';
 import { waitForRunCompletion } from '../agents/utils.js';
 import { serviceLogger } from '../services/service_logger.js';
@@ -84,6 +85,7 @@ async function tagNoteBatch(
 ): Promise<{ runId: string; filesEdited: Set<string> }> {
     const run = await createRun({
         agentId: NOTE_TAGGING_AGENT,
+        model: await getKgModel(),
     });
 
     let message = `Tag the following ${files.length} knowledge notes by prepending YAML frontmatter with appropriate tags.\n\n`;

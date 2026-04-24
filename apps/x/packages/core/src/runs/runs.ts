@@ -10,11 +10,21 @@ import { IRunsLock } from "./lock.js";
 import { forceCloseAllMcpClients } from "../mcp/mcp.js";
 import { extractCommandNames } from "../application/lib/command-executor.js";
 import { addToSecurityConfig } from "../config/security.js";
+import { loadAgent } from "../agents/runtime.js";
+import { getDefaultModelAndProvider } from "../models/defaults.js";
 
 export async function createRun(opts: z.infer<typeof CreateRunOptions>): Promise<z.infer<typeof Run>> {
     const repo = container.resolve<IRunsRepo>('runsRepo');
     const bus = container.resolve<IBus>('bus');
-    const run = await repo.create(opts);
+
+    // Resolve model+provider once at creation: opts > agent declaration > defaults.
+    // Both fields are plain strings (provider is a name, looked up at runtime).
+    const agent = await loadAgent(opts.agentId);
+    const defaults = await getDefaultModelAndProvider();
+    const model = opts.model ?? agent.model ?? defaults.model;
+    const provider = opts.provider ?? agent.provider ?? defaults.provider;
+
+    const run = await repo.create({ agentId: opts.agentId, model, provider });
     await bus.publish(run.log[0]);
     return run;
 }

@@ -2,7 +2,6 @@ import { renderTagSystemForEmails } from './tag_system.js';
 
 export function getRaw(): string {
   return `---
-model: gpt-5.2
 tools:
   workspace-readFile:
     type: builtin

@@ -1,11 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import { generateText } from 'ai';
-import container from '../di/container.js';
-import type { IModelConfigRepo } from '../models/repo.js';
 import { createProvider } from '../models/models.js';
-import { isSignedIn } from '../account/account.js';
-import { getGatewayProvider } from '../models/gateway.js';
+import { getDefaultModelAndProvider, getMeetingNotesModel, resolveProviderConfig } from '../models/defaults.js';
 import { WorkDir } from '../config/config.js';
 
 const CALENDAR_SYNC_DIR = path.join(WorkDir, 'calendar_sync');
@@ -138,15 +135,10 @@ function loadCalendarEventContext(calendarEventJson: string): string {
 }
 
 export async function summarizeMeeting(transcript: string, meetingStartTime?: string, calendarEventJson?: string): Promise<string> {
-    const repo = container.resolve<IModelConfigRepo>('modelConfigRepo');
-    const config = await repo.getConfig();
-    const signedIn = await isSignedIn();
-    const provider = signedIn
-        ? await getGatewayProvider()
-        : createProvider(config.provider);
-    const modelId = config.meetingNotesModel
-        || (signedIn ? "gpt-5.4" : config.model);
-    const model = provider.languageModel(modelId);
+    const modelId = await getMeetingNotesModel();
+    const { provider: providerName } = await getDefaultModelAndProvider();
+    const providerConfig = await resolveProviderConfig(providerName);
+    const model = createProvider(providerConfig).languageModel(modelId);
 
     // If a specific calendar event was linked, use it directly.
     // Otherwise fall back to scanning events within ±3 hours.

@@ -19,6 +19,8 @@ export const RunProcessingEndEvent = BaseRunEvent.extend({
 export const StartEvent = BaseRunEvent.extend({
     type: z.literal("start"),
     agentName: z.string(),
+    model: z.string(),
+    provider: z.string(),
 });
 
 export const SpawnSubFlowEvent = BaseRunEvent.extend({
@@ -121,6 +123,8 @@ export const Run = z.object({
     title: z.string().optional(),
     createdAt: z.iso.datetime(),
     agentId: z.string(),
+    model: z.string(),
+    provider: z.string(),
     log: z.array(RunEvent),
 });
 
@@ -134,6 +138,8 @@ export const ListRunsResponse = z.object({
     nextCursor: z.string().optional(),
 });
 
-export const CreateRunOptions = Run.pick({
-    agentId: true,
+export const CreateRunOptions = z.object({
+    agentId: z.string(),
+    model: z.string().optional(),
+    provider: z.string().optional(),
 });

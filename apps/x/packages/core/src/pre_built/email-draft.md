@@ -1,5 +1,4 @@
 ---
-model: gpt-4.1
 tools:
   workspace-readFile:
     type: builtin

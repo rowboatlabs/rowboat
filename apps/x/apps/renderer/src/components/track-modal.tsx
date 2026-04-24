@@ -156,6 +156,8 @@ export function TrackModal() {
   const lastRunAt = track?.lastRunAt ?? ''
   const lastRunId = track?.lastRunId ?? ''
   const lastRunSummary = track?.lastRunSummary ?? ''
+  const model = track?.model ?? ''
+  const provider = track?.provider ?? ''
   const scheduleSummary = useMemo(() => summarizeSchedule(schedule), [schedule])
   const triggerType: 'scheduled' | 'event' | 'manual' =
     schedule ? 'scheduled' : eventMatchCriteria ? 'event' : 'manual'
@@ -393,6 +395,12 @@ export function TrackModal() {
                 <dt>Track ID</dt><dd><code>{trackId}</code></dd>
                 <dt>File</dt><dd><code>{detail.filePath}</code></dd>
                 <dt>Status</dt><dd>{active ? 'Active' : 'Paused'}</dd>
+                {model && (<>
+                  <dt>Model</dt><dd><code>{model}</code></dd>
+                </>)}
+                {provider && (<>
+                  <dt>Provider</dt><dd><code>{provider}</code></dd>
+                </>)}
                 {lastRunAt && (<>
                   <dt>Last run</dt><dd>{formatDateTime(lastRunAt)}</dd>
                 </>)}

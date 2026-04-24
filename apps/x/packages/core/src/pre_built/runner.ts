@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { WorkDir } from '../config/config.js';
 import { createRun, createMessage } from '../runs/runs.js';
+import { getKgModel } from '../models/defaults.js';
 import { waitForRunCompletion } from '../agents/utils.js';
 import {
     loadConfig,
@@ -41,6 +42,7 @@ async function runAgent(agentName: string): Promise<void> {
         // The agent file is expected to be in the agents directory with the same name
         const run = await createRun({
             agentId: agentName,
+            model: await getKgModel(),
         });
 
         // Build trigger message with user context
