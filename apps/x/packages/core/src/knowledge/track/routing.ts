@@ -2,7 +2,7 @@ import { generateObject } from 'ai';
 import { trackBlock, PrefixLogger } from '@x/shared';
 import type { KnowledgeEvent } from '@x/shared/dist/track-block.js';
 import { createProvider } from '../../models/models.js';
-import { getDefaultModelAndProvider, resolveProviderConfig } from '../../models/defaults.js';
+import { getDefaultModelAndProvider, getTrackBlockModel, resolveProviderConfig } from '../../models/defaults.js';
 
 const log = new PrefixLogger('TrackRouting');
 
@@ -34,7 +34,8 @@ Rules:
 - For each candidate, return BOTH trackId and filePath exactly as given. trackIds are not globally unique.`;
 
 async function resolveModel() {
-    const { model, provider } = await getDefaultModelAndProvider();
+    const model = await getTrackBlockModel();
+    const { provider } = await getDefaultModelAndProvider();
     const config = await resolveProviderConfig(provider);
     return createProvider(config).languageModel(model);
 }

@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { generateText } from 'ai';
 import { createProvider } from '../models/models.js';
-import { getDefaultModelAndProvider, resolveProviderConfig } from '../models/defaults.js';
+import { getDefaultModelAndProvider, getMeetingNotesModel, resolveProviderConfig } from '../models/defaults.js';
 import { WorkDir } from '../config/config.js';
 
 const CALENDAR_SYNC_DIR = path.join(WorkDir, 'calendar_sync');
@@ -135,7 +135,8 @@ function loadCalendarEventContext(calendarEventJson: string): string {
 }
 
 export async function summarizeMeeting(transcript: string, meetingStartTime?: string, calendarEventJson?: string): Promise<string> {
-    const { model: modelId, provider: providerName } = await getDefaultModelAndProvider();
+    const modelId = await getMeetingNotesModel();
+    const { provider: providerName } = await getDefaultModelAndProvider();
     const providerConfig = await resolveProviderConfig(providerName);
     const model = createProvider(providerConfig).languageModel(modelId);
 

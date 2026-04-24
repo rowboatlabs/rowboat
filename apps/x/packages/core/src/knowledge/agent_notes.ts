@@ -3,6 +3,7 @@ import path from 'path';
 import { google } from 'googleapis';
 import { WorkDir } from '../config/config.js';
 import { createRun, createMessage } from '../runs/runs.js';
+import { getKgModel } from '../models/defaults.js';
 import { waitForRunCompletion } from '../agents/utils.js';
 import { serviceLogger } from '../services/service_logger.js';
 import { loadUserConfig, updateUserEmail } from '../config/user_config.js';
@@ -305,7 +306,7 @@ async function processAgentNotes(): Promise<void> {
         const timestamp = new Date().toISOString();
         const message = `Current timestamp: ${timestamp}\n\nProcess the following source material and update the Agent Notes folder accordingly.\n\n${messageParts.join('\n\n')}`;
 
-        const agentRun = await createRun({ agentId: AGENT_ID });
+        const agentRun = await createRun({ agentId: AGENT_ID, model: await getKgModel() });
         await createMessage(agentRun.id, message);
         await waitForRunCompletion(agentRun.id);
 

@@ -18,8 +18,9 @@ export const LlmModelConfig = z.object({
     model: z.string().optional(),
     models: z.array(z.string()).optional(),
   })).optional(),
-  // Deprecated: per-run model+provider supersedes these. Kept on the schema so
-  // existing settings/onboarding UIs continue to compile until they're cleaned up.
+  // Per-category model overrides (BYOK only — signed-in users always get
+  // the curated gateway defaults). Read by helpers in core/models/defaults.ts.
   knowledgeGraphModel: z.string().optional(),
   meetingNotesModel: z.string().optional(),
+  trackBlockModel: z.string().optional(),
 });

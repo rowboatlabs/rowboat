@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { WorkDir } from '../config/config.js';
 import { createRun, createMessage } from '../runs/runs.js';
+import { getKgModel } from '../models/defaults.js';
 import { bus } from '../runs/bus.js';
 import { waitForRunCompletion } from '../agents/utils.js';
 import { serviceLogger } from '../services/service_logger.js';
@@ -71,6 +72,7 @@ async function labelEmailBatch(
 ): Promise<{ runId: string; filesEdited: Set<string> }> {
     const run = await createRun({
         agentId: LABELING_AGENT,
+        model: await getKgModel(),
     });
 
     let message = `Label the following ${files.length} email files by prepending YAML frontmatter.\n\n`;

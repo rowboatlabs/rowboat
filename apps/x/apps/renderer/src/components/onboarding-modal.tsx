@@ -59,14 +59,14 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   const [modelsCatalog, setModelsCatalog] = useState<Record<string, LlmModelOption[]>>({})
   const [modelsLoading, setModelsLoading] = useState(false)
   const [modelsError, setModelsError] = useState<string | null>(null)
-  const [providerConfigs, setProviderConfigs] = useState<Record<LlmProviderFlavor, { apiKey: string; baseURL: string; model: string; knowledgeGraphModel: string }>>({
-    openai: { apiKey: "", baseURL: "", model: "", knowledgeGraphModel: "" },
-    anthropic: { apiKey: "", baseURL: "", model: "", knowledgeGraphModel: "" },
-    google: { apiKey: "", baseURL: "", model: "", knowledgeGraphModel: "" },
-    openrouter: { apiKey: "", baseURL: "", model: "", knowledgeGraphModel: "" },
-    aigateway: { apiKey: "", baseURL: "", model: "", knowledgeGraphModel: "" },
-    ollama: { apiKey: "", baseURL: "http://localhost:11434", model: "", knowledgeGraphModel: "" },
-    "openai-compatible": { apiKey: "", baseURL: "http://localhost:1234/v1", model: "", knowledgeGraphModel: "" },
+  const [providerConfigs, setProviderConfigs] = useState<Record<LlmProviderFlavor, { apiKey: string; baseURL: string; model: string; knowledgeGraphModel: string; meetingNotesModel: string; trackBlockModel: string }>>({
+    openai: { apiKey: "", baseURL: "", model: "", knowledgeGraphModel: "", meetingNotesModel: "", trackBlockModel: "" },
+    anthropic: { apiKey: "", baseURL: "", model: "", knowledgeGraphModel: "", meetingNotesModel: "", trackBlockModel: "" },
+    google: { apiKey: "", baseURL: "", model: "", knowledgeGraphModel: "", meetingNotesModel: "", trackBlockModel: "" },
+    openrouter: { apiKey: "", baseURL: "", model: "", knowledgeGraphModel: "", meetingNotesModel: "", trackBlockModel: "" },
+    aigateway: { apiKey: "", baseURL: "", model: "", knowledgeGraphModel: "", meetingNotesModel: "", trackBlockModel: "" },
+    ollama: { apiKey: "", baseURL: "http://localhost:11434", model: "", knowledgeGraphModel: "", meetingNotesModel: "", trackBlockModel: "" },
+    "openai-compatible": { apiKey: "", baseURL: "http://localhost:1234/v1", model: "", knowledgeGraphModel: "", meetingNotesModel: "", trackBlockModel: "" },
   })
   const [testState, setTestState] = useState<{ status: "idle" | "testing" | "success" | "error"; error?: string }>({
     status: "idle",
@@ -109,7 +109,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   const [googleCalendarConnecting, setGoogleCalendarConnecting] = useState(false)
 
   const updateProviderConfig = useCallback(
-    (provider: LlmProviderFlavor, updates: Partial<{ apiKey: string; baseURL: string; model: string; knowledgeGraphModel: string }>) => {
+    (provider: LlmProviderFlavor, updates: Partial<{ apiKey: string; baseURL: string; model: string; knowledgeGraphModel: string; meetingNotesModel: string; trackBlockModel: string }>) => {
       setProviderConfigs(prev => ({
         ...prev,
         [provider]: { ...prev[provider], ...updates },
@@ -458,6 +458,8 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
       const baseURL = activeConfig.baseURL.trim() || undefined
       const model = activeConfig.model.trim()
       const knowledgeGraphModel = activeConfig.knowledgeGraphModel.trim() || undefined
+      const meetingNotesModel = activeConfig.meetingNotesModel.trim() || undefined
+      const trackBlockModel = activeConfig.trackBlockModel.trim() || undefined
       const providerConfig = {
         provider: {
           flavor: llmProvider,
@@ -466,6 +468,8 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
         },
         model,
         knowledgeGraphModel,
+        meetingNotesModel,
+        trackBlockModel,
       }
       const result = await window.ipc.invoke("models:test", providerConfig)
       if (result.success) {
@@ -1142,6 +1146,72 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
                 <Select
                   value={activeConfig.knowledgeGraphModel || "__same__"}
                   onValueChange={(value) => updateProviderConfig(llmProvider, { knowledgeGraphModel: value === "__same__" ? "" : value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a model" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__same__">Same as assistant</SelectItem>
+                    {modelsForProvider.map((model) => (
+                      <SelectItem key={model.id} value={model.id}>
+                        {model.name || model.id}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Meeting notes model</span>
+              {modelsLoading ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="size-4 animate-spin" />
+                  Loading...
+                </div>
+              ) : showModelInput ? (
+                <Input
+                  value={activeConfig.meetingNotesModel}
+                  onChange={(e) => updateProviderConfig(llmProvider, { meetingNotesModel: e.target.value })}
+                  placeholder={activeConfig.model || "Enter model"}
+                />
+              ) : (
+                <Select
+                  value={activeConfig.meetingNotesModel || "__same__"}
+                  onValueChange={(value) => updateProviderConfig(llmProvider, { meetingNotesModel: value === "__same__" ? "" : value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a model" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__same__">Same as assistant</SelectItem>
+                    {modelsForProvider.map((model) => (
+                      <SelectItem key={model.id} value={model.id}>
+                        {model.name || model.id}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Track block model</span>
+              {modelsLoading ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="size-4 animate-spin" />
+                  Loading...
+                </div>
+              ) : showModelInput ? (
+                <Input
+                  value={activeConfig.trackBlockModel}
+                  onChange={(e) => updateProviderConfig(llmProvider, { trackBlockModel: e.target.value })}
+                  placeholder={activeConfig.model || "Enter model"}
+                />
+              ) : (
+                <Select
+                  value={activeConfig.trackBlockModel || "__same__"}
+                  onValueChange={(value) => updateProviderConfig(llmProvider, { trackBlockModel: value === "__same__" ? "" : value })}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select a model" />
