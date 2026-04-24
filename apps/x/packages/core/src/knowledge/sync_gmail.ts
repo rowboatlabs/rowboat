@@ -15,7 +15,51 @@ import { createEvent } from './track/events.js';
 const SYNC_DIR = path.join(WorkDir, 'gmail_sync');
 const SYNC_INTERVAL_MS = 5 * 60 * 1000; // Check every 5 minutes
 const REQUIRED_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
+const MAX_THREADS_IN_DIGEST = 10;
 const nhm = new NodeHtmlMarkdown();
+
+interface SyncedThread {
+    threadId: string;
+    markdown: string;
+}
+
+function summarizeGmailSync(threads: SyncedThread[]): string {
+    const lines: string[] = [
+        `# Gmail sync update`,
+        ``,
+        `${threads.length} new/updated thread${threads.length === 1 ? '' : 's'}.`,
+        ``,
+    ];
+
+    const shown = threads.slice(0, MAX_THREADS_IN_DIGEST);
+    const hidden = threads.length - shown.length;
+
+    if (shown.length > 0) {
+        lines.push(`## Threads`, ``);
+        for (const { markdown } of shown) {
+            lines.push(markdown.trimEnd(), ``, `---`, ``);
+        }
+        if (hidden > 0) {
+            lines.push(`_…and ${hidden} more thread(s) omitted from digest._`, ``);
+        }
+    }
+
+    return lines.join('\n');
+}
+
+async function publishGmailSyncEvent(threads: SyncedThread[]): Promise<void> {
+    if (threads.length === 0) return;
+    try {
+        await createEvent({
+            source: 'gmail',
+            type: 'email.synced',
+            createdAt: new Date().toISOString(),
+            payload: summarizeGmailSync(threads),
+        });
+    } catch (err) {
+        console.error('[Gmail] Failed to publish sync event:', err);
+    }
+}
 
 // --- Wake Signal for Immediate Sync Trigger ---
 let wakeResolve: (() => void) | null = null;
@@ -113,14 +157,14 @@ async function saveAttachment(gmail: gmail.Gmail, userId: string, msgId: string,
 
 // --- Sync Logic ---
 
-async function processThread(auth: OAuth2Client, threadId: string, syncDir: string, attachmentsDir: string) {
+async function processThread(auth: OAuth2Client, threadId: string, syncDir: string, attachmentsDir: string): Promise<SyncedThread | null> {
     const gmail = google.gmail({ version: 'v1', auth });
     try {
         const res = await gmail.users.threads.get({ userId: 'me', id: threadId });
         const thread = res.data;
         const messages = thread.messages;
 
-        if (!messages || messages.length === 0) return;
+        if (!messages || messages.length === 0) return null;
 
         // Subject from first message
         const firstHeader = messages[0].payload?.headers;
@@ -173,15 +217,11 @@ async function processThread(auth: OAuth2Client, threadId: string, syncDir: stri
         fs.writeFileSync(path.join(syncDir, `${threadId}.md`), mdContent);
         console.log(`Synced Thread: ${subject} (${threadId})`);
 
-        await createEvent({
-            source: 'gmail',
-            type: 'email.synced',
-            createdAt: new Date().toISOString(),
-            payload: mdContent,
-        });
+        return { threadId, markdown: mdContent };
 
     } catch (error) {
         console.error(`Error processing thread ${threadId}:`, error);
+        return null;
     }
 }
 
@@ -262,9 +302,13 @@ async function fullSync(auth: OAuth2Client, syncDir: string, attachmentsDir: str
             truncated: limitedThreads.truncated,
         });
 
+        const synced: SyncedThread[] = [];
         for (const threadId of threadIds) {
-            await processThread(auth, threadId, syncDir, attachmentsDir);
+            const result = await processThread(auth, threadId, syncDir, attachmentsDir);
+            if (result) synced.push(result);
         }
+
+        await publishGmailSyncEvent(synced);
 
         saveState(currentHistoryId, stateFile);
         await serviceLogger.log({
@@ -365,9 +409,13 @@ async function partialSync(auth: OAuth2Client, startHistoryId: string, syncDir: 
             truncated: limitedThreads.truncated,
         });
 
+        const synced: SyncedThread[] = [];
         for (const tid of threadIdList) {
-            await processThread(auth, tid, syncDir, attachmentsDir);
+            const result = await processThread(auth, tid, syncDir, attachmentsDir);
+            if (result) synced.push(result);
         }
+
+        await publishGmailSyncEvent(synced);
 
         const profile = await gmail.users.getProfile({ userId: 'me' });
         saveState(profile.data.historyId!, stateFile);
@@ -565,7 +613,12 @@ function extractBodyFromPayload(payload: Record<string, unknown>): string {
     return '';
 }
 
-async function processThreadComposio(connectedAccountId: string, threadId: string, syncDir: string): Promise<string | null> {
+interface ComposioThreadResult {
+    synced: SyncedThread | null;
+    newestIsoPlusOne: string | null;
+}
+
+async function processThreadComposio(connectedAccountId: string, threadId: string, syncDir: string): Promise<ComposioThreadResult> {
     let threadResult;
     try {
         threadResult = await executeAction(
@@ -579,40 +632,34 @@ async function processThreadComposio(connectedAccountId: string, threadId: strin
         );
     } catch (error) {
         console.warn(`[Gmail] Skipping thread ${threadId} (fetch failed):`, error instanceof Error ? error.message : error);
-        return null;
+        return { synced: null, newestIsoPlusOne: null };
     }
 
     if (!threadResult.successful || !threadResult.data) {
         console.error(`[Gmail] Failed to fetch thread ${threadId}:`, threadResult.error);
-        return null;
+        return { synced: null, newestIsoPlusOne: null };
     }
 
     const data = threadResult.data as Record<string, unknown>;
     const messages = data.messages as Array<Record<string, unknown>> | undefined;
 
     let newestDate: Date | null = null;
+    let mdContent: string;
+    let subjectForLog: string;
 
     if (!messages || messages.length === 0) {
         const parsed = parseMessageData(data);
-        const mdContent = `# ${parsed.subject}\n\n` +
+        mdContent = `# ${parsed.subject}\n\n` +
             `**Thread ID:** ${threadId}\n` +
             `**Message Count:** 1\n\n---\n\n` +
             `### From: ${parsed.from}\n` +
             `**Date:** ${parsed.date}\n\n` +
             `${parsed.body}\n\n---\n\n`;
-
-        fs.writeFileSync(path.join(syncDir, `${cleanFilename(threadId)}.md`), mdContent);
-        console.log(`[Gmail] Synced Thread: ${parsed.subject} (${threadId})`);
-        await createEvent({
-            source: 'gmail',
-            type: 'email.synced',
-            createdAt: new Date().toISOString(),
-            payload: mdContent,
-        });
+        subjectForLog = parsed.subject;
         newestDate = tryParseDate(parsed.date);
     } else {
         const firstParsed = parseMessageData(messages[0]);
-        let mdContent = `# ${firstParsed.subject}\n\n`;
+        mdContent = `# ${firstParsed.subject}\n\n`;
         mdContent += `**Thread ID:** ${threadId}\n`;
         mdContent += `**Message Count:** ${messages.length}\n\n---\n\n`;
 
@@ -628,19 +675,14 @@ async function processThreadComposio(connectedAccountId: string, threadId: strin
                 newestDate = msgDate;
             }
         }
-
-        fs.writeFileSync(path.join(syncDir, `${cleanFilename(threadId)}.md`), mdContent);
-        console.log(`[Gmail] Synced Thread: ${firstParsed.subject} (${threadId})`);
-        await createEvent({
-            source: 'gmail',
-            type: 'email.synced',
-            createdAt: new Date().toISOString(),
-            payload: mdContent,
-        });
+        subjectForLog = firstParsed.subject;
     }
 
-    if (!newestDate) return null;
-    return new Date(newestDate.getTime() + 1000).toISOString();
+    fs.writeFileSync(path.join(syncDir, `${cleanFilename(threadId)}.md`), mdContent);
+    console.log(`[Gmail] Synced Thread: ${subjectForLog} (${threadId})`);
+
+    const newestIsoPlusOne = newestDate ? new Date(newestDate.getTime() + 1000).toISOString() : null;
+    return { synced: { threadId, markdown: mdContent }, newestIsoPlusOne };
 }
 
 async function performSyncComposio() {
@@ -751,19 +793,22 @@ async function performSyncComposio() {
 
         let highWaterMark: string | null = state?.last_sync ?? null;
         let processedCount = 0;
+        const synced: SyncedThread[] = [];
         for (const threadId of allThreadIds) {
             // Re-check connection in case user disconnected mid-sync
             if (!composioAccountsRepo.isConnected('gmail')) {
                 console.log('[Gmail] Account disconnected during sync. Stopping.');
-                return;
+                break;
             }
             try {
-                const newestInThread = await processThreadComposio(connectedAccountId, threadId, SYNC_DIR);
+                const result = await processThreadComposio(connectedAccountId, threadId, SYNC_DIR);
                 processedCount++;
 
-                if (newestInThread) {
-                    if (!highWaterMark || new Date(newestInThread) > new Date(highWaterMark)) {
-                        highWaterMark = newestInThread;
+                if (result.synced) synced.push(result.synced);
+
+                if (result.newestIsoPlusOne) {
+                    if (!highWaterMark || new Date(result.newestIsoPlusOne) > new Date(highWaterMark)) {
+                        highWaterMark = result.newestIsoPlusOne;
                     }
                     saveComposioState(STATE_FILE, highWaterMark);
                 }
@@ -771,6 +816,8 @@ async function performSyncComposio() {
                 console.error(`[Gmail] Error processing thread ${threadId}, skipping:`, error);
             }
         }
+
+        await publishGmailSyncEvent(synced);
 
         await serviceLogger.log({
             type: 'run_complete',
