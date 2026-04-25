@@ -2,7 +2,6 @@ export interface NotifyInput {
     title?: string;
     message: string;
     link?: string;
-    actionLabel?: string;
 }
 
 export interface INotificationService {

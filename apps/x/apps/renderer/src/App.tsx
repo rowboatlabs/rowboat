@@ -3097,14 +3097,11 @@ function App() {
   useEffect(() => {
     const handle = (url: string) => {
       const view = parseDeepLink(url)
-      console.log('[deeplink renderer] received', url, '→ view', view)
       if (view) void navigateToViewRef.current(view)
     }
     void window.ipc.invoke('app:consumePendingDeepLink', null).then(({ url }) => {
-      console.log('[deeplink renderer] mount drain:', url)
       if (url) handle(url)
     })
-    console.log('[deeplink renderer] listener registered')
     return window.ipc.on('app:openUrl', ({ url }) => handle(url))
   }, [])
 

@@ -6,38 +6,38 @@ const HTTP_URL = /^https?:\/\//i;
 const ROWBOAT_URL = /^rowboat:\/\//i;
 
 export class ElectronNotificationService implements INotificationService {
+    // Holds strong references to active Notification instances so the GC can't
+    // collect them while they're still visible — without this, the click handler
+    // gets dropped and macOS clicks just focus the app silently.
+    private active = new Set<Notification>();
+
     isSupported(): boolean {
         return Notification.isSupported();
     }
 
-    notify({ title = "Rowboat", message, link, actionLabel }: NotifyInput): void {
+    notify({ title = "Rowboat", message, link }: NotifyInput): void {
         const notification = new Notification({
             title,
             body: message,
-            // Action button is only meaningful when there's something to open.
-            // macOS shows the first action inline (Banner) or all (Alert).
-            actions: link ? [{ type: "button", text: actionLabel?.trim() || "Open" }] : [],
         });
 
-        const handleAction = (source: string) => {
-            console.log(`[notification] ${source} fired, link=${link ?? '<none>'}`);
+        this.active.add(notification);
+        const release = () => { this.active.delete(notification); };
+
+        notification.on("click", () => {
             if (link && ROWBOAT_URL.test(link)) {
                 dispatchDeepLink(link);
-                return;
-            }
-            if (link && HTTP_URL.test(link)) {
+            } else if (link && HTTP_URL.test(link)) {
                 shell.openExternal(link).catch((err) => {
                     console.error("[notification] failed to open link:", err);
                 });
-                return;
+            } else {
+                this.focusMainWindow();
             }
-            this.focusMainWindow();
-        };
-
-        // Both events route through the same handler — body click on macOS is
-        // less reliable than action-button click, but we want either to work.
-        notification.on("click", () => handleAction("click"));
-        notification.on("action", () => handleAction("action"));
+            release();
+        });
+        notification.on("close", release);
+        notification.on("failed", release);
 
         notification.show();
     }

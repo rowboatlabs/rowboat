@@ -24,30 +24,19 @@ export function extractDeepLinkFromArgv(argv: readonly string[]): string | null 
 }
 
 export function dispatchDeepLink(url: string): void {
-    console.log(`[deeplink] dispatch ${url}`);
-    if (!url.startsWith(URL_PREFIX)) {
-        console.log(`[deeplink] rejected: bad prefix`);
-        return;
-    }
+    if (!url.startsWith(URL_PREFIX)) return;
 
     pendingUrl = url;
 
     const win = mainWindowRef;
-    if (!win || win.isDestroyed()) {
-        console.log(`[deeplink] no window, buffered`);
-        return;
-    }
+    if (!win || win.isDestroyed()) return;
 
     if (win.isMinimized()) win.restore();
     win.show();
     win.focus();
 
-    if (win.webContents.isLoading()) {
-        console.log(`[deeplink] window loading, buffered`);
-        return;
-    }
+    if (win.webContents.isLoading()) return;
 
-    console.log(`[deeplink] sending app:openUrl to renderer`);
     win.webContents.send("app:openUrl", { url });
     pendingUrl = null;
 }

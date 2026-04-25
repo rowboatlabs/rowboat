@@ -14,15 +14,10 @@ Triggers a native macOS notification. The call returns immediately; it does not 
 ### Parameters
 - **\`title\`** (optional, defaults to \`"Rowboat"\`) — bold headline at the top.
 - **\`message\`** (required) — body text. Keep it short — macOS truncates after a couple of lines.
-- **\`link\`** (optional) — URL to open when the user clicks the notification or its action button. Two kinds accepted:
+- **\`link\`** (optional) — URL to open when the user clicks the notification. Two kinds accepted:
   - **\`https://...\` / \`http://...\`** — opens in the default browser
   - **\`rowboat://...\`** — opens a view inside Rowboat (see deep links below)
   - If omitted, clicking the notification focuses the Rowboat app.
-- **\`actionLabel\`** (optional, defaults to \`"Open"\`) — label for the inline action button. Only shown when \`link\` is set. Keep it to 1-2 words: \`"Open"\`, \`"View"\`, \`"Read"\`, \`"Reply"\`. Pick a verb that names what clicking will do.
-
-### Why the action button matters
-
-When \`link\` is set, an action button is shown inline on the notification (the same way Slack shows "Reply" or Mail shows "Mark as Read"). This button is **the recommended click target** — it's a clear CTA and it's more reliable than expecting the user to click the notification body. Body click also works as a fallback.
 
 ### Examples
 
@@ -43,21 +38,11 @@ External link:
 }
 \`\`\`
 
-Deep link into a Rowboat note (default "Open" button):
+Deep link into a Rowboat note:
 \`\`\`json
 {
   "message": "Daily brief is ready",
   "link": "rowboat://open?type=file&path=knowledge/Daily/2026-04-25.md"
-}
-\`\`\`
-
-Custom action label:
-\`\`\`json
-{
-  "title": "Stripe charge declined",
-  "message": "Card ending 4242 — retry from the dashboard",
-  "link": "https://dashboard.stripe.com/payments/pi_abc",
-  "actionLabel": "Review"
 }
 \`\`\`
 
