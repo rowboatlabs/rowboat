@@ -23,6 +23,7 @@ import { init as initNoteTagging } from "@x/core/dist/knowledge/tag_notes.js";
 import { init as initInlineTasks } from "@x/core/dist/knowledge/inline_tasks.js";
 import { init as initAgentRunner } from "@x/core/dist/agent-schedule/runner.js";
 import { init as initAgentNotes } from "@x/core/dist/knowledge/agent_notes.js";
+import { init as initCalendarNotifications } from "@x/core/dist/knowledge/notify_calendar_meetings.js";
 import { init as initTrackScheduler } from "@x/core/dist/knowledge/track/scheduler.js";
 import { init as initTrackEventProcessor } from "@x/core/dist/knowledge/track/events.js";
 import { init as initLocalSites, shutdown as shutdownLocalSites } from "@x/core/dist/local-sites/server.js";
@@ -336,6 +337,9 @@ app.whenReady().then(async () => {
 
   // start agent notes learning service
   initAgentNotes();
+
+  // start calendar meeting notification service (fires 1-minute warnings)
+  initCalendarNotifications();
 
   // start chrome extension sync server
   initChromeSync();

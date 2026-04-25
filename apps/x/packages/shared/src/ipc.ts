@@ -298,6 +298,13 @@ const ipcSchemas = {
     }),
     res: z.null(),
   },
+  'app:takeMeetingNotes': {
+    req: z.object({
+      // Pass the raw calendar event JSON through; renderer adapts to its existing flow.
+      event: z.unknown(),
+    }),
+    res: z.null(),
+  },
   'app:consumePendingDeepLink': {
     req: z.null(),
     res: z.object({

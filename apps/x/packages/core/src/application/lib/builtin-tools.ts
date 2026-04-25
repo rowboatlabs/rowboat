@@ -1524,6 +1524,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
             link: z.string().url().refine((v) => /^(https?|rowboat):\/\//i.test(v), {
                 message: "link must be an http(s):// or rowboat:// URL",
             }).optional().describe("Optional URL opened when the user clicks the notification. Accepts http(s):// (opens in browser) or rowboat:// (opens a view inside Rowboat — see the notify-user skill for deep-link shapes)."),
+            actionLabel: z.string().min(1).max(20).optional().describe("Optional label for an inline action button on the notification (e.g. 'Open', 'View', 'Take Notes'). Only shown when `link` is set. Click on the button triggers the same action as clicking the notification body. Note: macOS may render the button inline (Banner) or behind a chevron (Alert) depending on the user's notification style for Rowboat."),
         }),
         isAvailable: async () => {
             try {
@@ -1532,13 +1533,13 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 return false;
             }
         },
-        execute: async ({ title, message, link }: { title?: string; message: string; link?: string }) => {
+        execute: async ({ title, message, link, actionLabel }: { title?: string; message: string; link?: string; actionLabel?: string }) => {
             try {
                 const service = container.resolve<INotificationService>('notificationService');
                 if (!service.isSupported()) {
                     return { success: false, error: 'Notifications are not supported on this system' };
                 }
-                service.notify({ title, message, link });
+                service.notify({ title, message, link, actionLabel });
                 return { success: true };
             } catch (error) {
                 return {

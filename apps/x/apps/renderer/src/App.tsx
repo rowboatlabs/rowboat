@@ -3105,6 +3105,35 @@ function App() {
     return window.ipc.on('app:openUrl', ({ url }) => handle(url))
   }, [])
 
+  // Triggered by main when the user clicks a calendar-meeting notification.
+  // Reuses the same flow as the in-app "Join meeting & take notes" button.
+  useEffect(() => {
+    return window.ipc.on('app:takeMeetingNotes', ({ event }) => {
+      const e = event as {
+        summary?: string
+        start?: { dateTime?: string; date?: string; timeZone?: string }
+        end?: { dateTime?: string; date?: string; timeZone?: string }
+        location?: string
+        htmlLink?: string
+        hangoutLink?: string
+        conferenceData?: { entryPoints?: Array<{ entryPointType?: string; uri?: string }> }
+      }
+      if (!e || typeof e !== 'object') return
+      const conferenceLink = e.hangoutLink
+        || e.conferenceData?.entryPoints?.find(p => p.entryPointType === 'video')?.uri
+      window.__pendingCalendarEvent = {
+        summary: e.summary,
+        start: e.start,
+        end: e.end,
+        location: e.location,
+        htmlLink: e.htmlLink,
+        conferenceLink,
+        source: 'calendar-sync',
+      }
+      window.dispatchEvent(new Event('calendar-block:join-meeting'))
+    })
+  }, [])
+
   const handleBaseConfigChange = useCallback((path: string, config: BaseConfig) => {
     setBaseConfigByPath((prev) => ({ ...prev, [path]: config }))
   }, [])

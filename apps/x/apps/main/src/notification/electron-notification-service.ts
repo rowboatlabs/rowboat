@@ -1,6 +1,6 @@
 import { BrowserWindow, Notification, shell } from "electron";
 import type { INotificationService, NotifyInput } from "@x/core/dist/application/notification/service.js";
-import { dispatchDeepLink } from "../deeplink.js";
+import { dispatchUrl } from "../deeplink.js";
 
 const HTTP_URL = /^https?:\/\//i;
 const ROWBOAT_URL = /^rowboat:\/\//i;
@@ -15,18 +15,23 @@ export class ElectronNotificationService implements INotificationService {
         return Notification.isSupported();
     }
 
-    notify({ title = "Rowboat", message, link }: NotifyInput): void {
+    notify({ title = "Rowboat", message, link, actionLabel }: NotifyInput): void {
         const notification = new Notification({
             title,
             body: message,
+            // Action button is only meaningful when there's a link to drive it.
+            // macOS shows the first action inline (Banner) or behind chevron (Alert).
+            actions: link && actionLabel?.trim()
+                ? [{ type: "button", text: actionLabel.trim() }]
+                : [],
         });
 
         this.active.add(notification);
         const release = () => { this.active.delete(notification); };
 
-        notification.on("click", () => {
+        const handleClick = () => {
             if (link && ROWBOAT_URL.test(link)) {
-                dispatchDeepLink(link);
+                dispatchUrl(link);
             } else if (link && HTTP_URL.test(link)) {
                 shell.openExternal(link).catch((err) => {
                     console.error("[notification] failed to open link:", err);
@@ -35,7 +40,13 @@ export class ElectronNotificationService implements INotificationService {
                 this.focusMainWindow();
             }
             release();
-        });
+        };
+
+        // Both events route through the same handler. Body click on macOS is
+        // unreliable when actions are defined, but we register both so either
+        // one (whichever fires) drives the same behavior.
+        notification.on("click", handleClick);
+        notification.on("action", handleClick);
         notification.on("close", release);
         notification.on("failed", release);
 
