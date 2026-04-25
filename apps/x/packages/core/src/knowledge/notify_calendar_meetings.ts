@@ -5,7 +5,7 @@ import { WorkDir } from "../config/config.js";
 import container from "../di/container.js";
 import type { INotificationService } from "../application/notification/service.js";
 
-const TICK_INTERVAL_MS = 60_000;
+const TICK_INTERVAL_MS = 30_000;
 // Notify when an event is between 30s in the past (started just now) and
 // 90s in the future (about to start). The window is wider than 60s so we
 // don't miss an event if the tick lands slightly off the start time.
@@ -160,6 +160,7 @@ export async function init(): Promise<void> {
             const result = await tick(state);
             state = result.state;
             if (result.dirty) {
+                state = gcState(state);
                 try {
                     await saveState(state);
                 } catch (err) {
