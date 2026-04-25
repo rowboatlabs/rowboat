@@ -15,25 +15,39 @@ export class ElectronNotificationService implements INotificationService {
         return Notification.isSupported();
     }
 
-    notify({ title = "Rowboat", message, link, actionLabel }: NotifyInput): void {
+    notify({ title = "Rowboat", message, link, actionLabel, secondaryActions }: NotifyInput): void {
+        // Build the actions array AND a parallel index → link map.
+        // macOS shows actions[0] inline (Banner) or all of them (Alert);
+        // additional ones live behind the chevron menu.
+        const actionDefs: Electron.NotificationConstructorOptions["actions"] = [];
+        const actionLinks: string[] = [];
+
+        const primaryLabel = actionLabel?.trim();
+        if (link && primaryLabel) {
+            actionDefs!.push({ type: "button", text: primaryLabel });
+            actionLinks.push(link);
+        }
+        if (secondaryActions) {
+            for (const sa of secondaryActions) {
+                actionDefs!.push({ type: "button", text: sa.label });
+                actionLinks.push(sa.link);
+            }
+        }
+
         const notification = new Notification({
             title,
             body: message,
-            // Action button is only meaningful when there's a link to drive it.
-            // macOS shows the first action inline (Banner) or behind chevron (Alert).
-            actions: link && actionLabel?.trim()
-                ? [{ type: "button", text: actionLabel.trim() }]
-                : [],
+            actions: actionDefs,
         });
 
         this.active.add(notification);
         const release = () => { this.active.delete(notification); };
 
-        const handleClick = () => {
-            if (link && ROWBOAT_URL.test(link)) {
-                dispatchUrl(link);
-            } else if (link && HTTP_URL.test(link)) {
-                shell.openExternal(link).catch((err) => {
+        const openLink = (target: string | undefined) => {
+            if (target && ROWBOAT_URL.test(target)) {
+                dispatchUrl(target);
+            } else if (target && HTTP_URL.test(target)) {
+                shell.openExternal(target).catch((err) => {
                     console.error("[notification] failed to open link:", err);
                 });
             } else {
@@ -42,11 +56,18 @@ export class ElectronNotificationService implements INotificationService {
             release();
         };
 
-        // Both events route through the same handler. Body click on macOS is
-        // unreliable when actions are defined, but we register both so either
-        // one (whichever fires) drives the same behavior.
-        notification.on("click", handleClick);
-        notification.on("action", handleClick);
+        // Body click: always opens the primary `link` (or focuses the app if none).
+        notification.on("click", () => openLink(link));
+
+        // Action button click: dispatch by index into the actions array.
+        notification.on("action", (_event, index) => {
+            if (index >= 0 && index < actionLinks.length) {
+                openLink(actionLinks[index]);
+            } else {
+                openLink(undefined);
+            }
+        });
+
         notification.on("close", release);
         notification.on("failed", release);
 

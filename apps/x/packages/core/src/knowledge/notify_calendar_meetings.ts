@@ -121,14 +121,22 @@ async function tick(state: NotificationState): Promise<{ state: NotificationStat
         if (msUntilStart < -NOTIFY_GRACE_MS) continue;
 
         const summary = event.summary?.trim() || "Untitled meeting";
-        const link = `rowboat://action?type=take-meeting-notes&eventId=${encodeURIComponent(eventId)}`;
+        const eid = encodeURIComponent(eventId);
 
         try {
             service.notify({
                 title: "Upcoming meeting",
-                message: `${summary} starts in 1 minute. Click to take notes.`,
-                link,
-                actionLabel: "Take Notes",
+                message: `${summary} starts in 1 minute. Click to join and take notes.`,
+                // Primary (body click + first button): join the meeting AND take notes.
+                link: `rowboat://action?type=join-and-take-meeting-notes&eventId=${eid}`,
+                actionLabel: "Join meeting and take notes",
+                // Behind the chevron: just take notes (no join).
+                secondaryActions: [
+                    {
+                        label: "Take notes",
+                        link: `rowboat://action?type=take-meeting-notes&eventId=${eid}`,
+                    },
+                ],
             });
             console.log(`[CalendarNotify] notified for "${summary}" (${eventId})`);
         } catch (err) {

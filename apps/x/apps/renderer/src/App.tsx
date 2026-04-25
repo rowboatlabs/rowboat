@@ -3107,8 +3107,9 @@ function App() {
 
   // Triggered by main when the user clicks a calendar-meeting notification.
   // Reuses the same flow as the in-app "Join meeting & take notes" button.
+  // When `openMeeting` is true, also opens the meeting URL in the system browser.
   useEffect(() => {
-    return window.ipc.on('app:takeMeetingNotes', ({ event }) => {
+    return window.ipc.on('app:takeMeetingNotes', ({ event, openMeeting }) => {
       const e = event as {
         summary?: string
         start?: { dateTime?: string; date?: string; timeZone?: string }
@@ -3119,8 +3120,15 @@ function App() {
         conferenceData?: { entryPoints?: Array<{ entryPointType?: string; uri?: string }> }
       }
       if (!e || typeof e !== 'object') return
-      const conferenceLink = e.hangoutLink
-        || e.conferenceData?.entryPoints?.find(p => p.entryPointType === 'video')?.uri
+      // Order matches extractConferenceLink in calendar-block.tsx:
+      // entryPoints first (covers Zoom/integrated providers), then hangoutLink (Google Meet shortcut).
+      const conferenceLink = e.conferenceData?.entryPoints?.find(p => p.entryPointType === 'video')?.uri
+        || e.hangoutLink
+      if (openMeeting && conferenceLink) {
+        window.open(conferenceLink, '_blank')
+      } else if (openMeeting) {
+        console.warn('[take-meeting-notes] openMeeting requested but event has no conference link', e)
+      }
       window.__pendingCalendarEvent = {
         summary: e.summary,
         start: e.start,

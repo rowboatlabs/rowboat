@@ -3,6 +3,7 @@ export interface NotifyInput {
     message: string;
     link?: string;
     actionLabel?: string;
+    secondaryActions?: Array<{ label: string; link: string }>;
 }
 
 export interface INotificationService {

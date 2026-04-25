@@ -54,12 +54,12 @@ export function dispatchDeepLink(url: string): void {
     pendingUrl = null;
 }
 
-interface TakeMeetingNotesAction {
-    type: "take-meeting-notes";
+interface MeetingNotesAction {
+    type: "take-meeting-notes" | "join-and-take-meeting-notes";
     eventId: string;
 }
 
-type ParsedAction = TakeMeetingNotesAction;
+type ParsedAction = MeetingNotesAction;
 
 function parseAction(url: string): ParsedAction | null {
     if (!url.startsWith(URL_PREFIX)) return null;
@@ -69,7 +69,7 @@ function parseAction(url: string): ParsedAction | null {
     if (host !== ACTION_HOST) return null;
     const params = new URLSearchParams(queryIdx >= 0 ? rest.slice(queryIdx + 1) : "");
     const type = params.get("type");
-    if (type === "take-meeting-notes") {
+    if (type === "take-meeting-notes" || type === "join-and-take-meeting-notes") {
         const eventId = params.get("eventId");
         return eventId ? { type, eventId } : null;
     }
@@ -80,12 +80,11 @@ async function dispatchAction(url: string): Promise<void> {
     const parsed = parseAction(url);
     if (!parsed) return;
 
-    if (parsed.type === "take-meeting-notes") {
-        await handleTakeMeetingNotes(parsed.eventId);
-    }
+    const openMeeting = parsed.type === "join-and-take-meeting-notes";
+    await handleTakeMeetingNotes(parsed.eventId, openMeeting);
 }
 
-async function handleTakeMeetingNotes(eventId: string): Promise<void> {
+async function handleTakeMeetingNotes(eventId: string, openMeeting: boolean): Promise<void> {
     const win = mainWindowRef;
     if (!win || win.isDestroyed()) return;
     focusWindow(win);
@@ -100,14 +99,16 @@ async function handleTakeMeetingNotes(eventId: string): Promise<void> {
         return;
     }
 
+    const payload = { event, openMeeting };
+
     if (win.webContents.isLoading()) {
         win.webContents.once("did-finish-load", () => {
-            win.webContents.send("app:takeMeetingNotes", { event });
+            win.webContents.send("app:takeMeetingNotes", payload);
         });
         return;
     }
 
-    win.webContents.send("app:takeMeetingNotes", { event });
+    win.webContents.send("app:takeMeetingNotes", payload);
 }
 
 function focusWindow(win: BrowserWindow): void {
