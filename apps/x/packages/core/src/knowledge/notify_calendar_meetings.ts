@@ -127,16 +127,11 @@ async function tick(state: NotificationState): Promise<{ state: NotificationStat
             service.notify({
                 title: "Upcoming meeting",
                 message: `${summary} starts in 1 minute. Click to join and take notes.`,
-                // Primary (body click + first button): join the meeting AND take notes.
+                // Single labeled button — adding a secondary action would force
+                // macOS to bundle them into an "Options" dropdown, hiding the
+                // primary label.
                 link: `rowboat://action?type=join-and-take-meeting-notes&eventId=${eid}`,
-                actionLabel: "Join meeting and take notes",
-                // Behind the chevron: just take notes (no join).
-                secondaryActions: [
-                    {
-                        label: "Take notes",
-                        link: `rowboat://action?type=take-meeting-notes&eventId=${eid}`,
-                    },
-                ],
+                actionLabel: "Join & Notes",
             });
             console.log(`[CalendarNotify] notified for "${summary}" (${eventId})`);
         } catch (err) {
