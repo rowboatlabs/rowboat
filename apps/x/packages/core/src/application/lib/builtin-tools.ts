@@ -1521,9 +1521,10 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         inputSchema: z.object({
             title: z.string().min(1).max(120).optional().describe("Bold headline shown at the top of the notification. Defaults to 'Rowboat'."),
             message: z.string().min(1).describe("Body text of the notification."),
-            link: z.string().url().refine((v) => /^https?:\/\//i.test(v), {
-                message: "link must be an http:// or https:// URL",
-            }).optional().describe("Optional http(s) URL opened when the user clicks the notification."),
+            link: z.string().url().refine((v) => /^(https?|rowboat):\/\//i.test(v), {
+                message: "link must be an http(s):// or rowboat:// URL",
+            }).optional().describe("Optional URL opened when the user clicks the notification. Accepts http(s):// (opens in browser) or rowboat:// (opens a view inside Rowboat — see the notify-user skill for deep-link shapes)."),
+            actionLabel: z.string().min(1).max(20).optional().describe("Label for the action button shown when `link` is set. Defaults to 'Open'. Keep it short — 1-2 words like 'Open', 'View', 'Read', 'Reply'. Ignored when no link is provided."),
         }),
         isAvailable: async () => {
             try {
@@ -1532,13 +1533,13 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 return false;
             }
         },
-        execute: async ({ title, message, link }: { title?: string; message: string; link?: string }) => {
+        execute: async ({ title, message, link, actionLabel }: { title?: string; message: string; link?: string; actionLabel?: string }) => {
             try {
                 const service = container.resolve<INotificationService>('notificationService');
                 if (!service.isSupported()) {
                     return { success: false, error: 'Notifications are not supported on this system' };
                 }
-                service.notify({ title, message, link });
+                service.notify({ title, message, link, actionLabel });
                 return { success: true };
             } catch (error) {
                 return {

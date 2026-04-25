@@ -3087,19 +3087,26 @@ function App() {
     void navigateToView({ type: 'file', path })
   }, [navigateToView])
 
-  const handleDeepLinkUrl = useCallback((url: string) => {
-    const view = parseDeepLink(url)
-    if (view) void navigateToView(view)
-  }, [navigateToView])
+  // Deep-link handler kept in a ref so the useEffect below can register the
+  // IPC listener (and run the one-time pending-link drain) just once on mount,
+  // rather than re-running on every navigation when navigateToView's identity
+  // changes.
+  const navigateToViewRef = useRef(navigateToView)
+  useEffect(() => { navigateToViewRef.current = navigateToView }, [navigateToView])
 
   useEffect(() => {
+    const handle = (url: string) => {
+      const view = parseDeepLink(url)
+      console.log('[deeplink renderer] received', url, '→ view', view)
+      if (view) void navigateToViewRef.current(view)
+    }
     void window.ipc.invoke('app:consumePendingDeepLink', null).then(({ url }) => {
-      if (url) handleDeepLinkUrl(url)
+      console.log('[deeplink renderer] mount drain:', url)
+      if (url) handle(url)
     })
-    return window.ipc.on('app:openUrl', ({ url }) => {
-      handleDeepLinkUrl(url)
-    })
-  }, [handleDeepLinkUrl])
+    console.log('[deeplink renderer] listener registered')
+    return window.ipc.on('app:openUrl', ({ url }) => handle(url))
+  }, [])
 
   const handleBaseConfigChange = useCallback((path: string, config: BaseConfig) => {
     setBaseConfigByPath((prev) => ({ ...prev, [path]: config }))
