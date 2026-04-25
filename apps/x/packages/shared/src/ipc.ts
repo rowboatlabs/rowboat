@@ -292,6 +292,18 @@ const ipcSchemas = {
     }),
     res: z.null(),
   },
+  'app:openUrl': {
+    req: z.object({
+      url: z.string(),
+    }),
+    res: z.null(),
+  },
+  'app:consumePendingDeepLink': {
+    req: z.null(),
+    res: z.object({
+      url: z.string().nullable(),
+    }),
+  },
   'granola:getConfig': {
     req: z.null(),
     res: z.object({

@@ -513,6 +513,45 @@ function viewStatesEqual(a: ViewState, b: ViewState): boolean {
   return true // both graph
 }
 
+/**
+ * Parse a rowboat:// deep link into a ViewState. Returns null if the URL is
+ * malformed or names an unknown target.
+ *
+ * Shape: rowboat://open?type=<file|chat|graph|task|suggested-topics>&...
+ *   file:             ?type=file&path=knowledge/foo.md
+ *   chat:             ?type=chat&runId=abc123        (runId optional)
+ *   graph:            ?type=graph
+ *   task:             ?type=task&name=daily-brief
+ *   suggested-topics: ?type=suggested-topics
+ */
+function parseDeepLink(input: string): ViewState | null {
+  const SCHEME = 'rowboat://'
+  if (!input.startsWith(SCHEME)) return null
+  const rest = input.slice(SCHEME.length)
+  const queryIdx = rest.indexOf('?')
+  const host = (queryIdx >= 0 ? rest.slice(0, queryIdx) : rest).replace(/\/$/, '')
+  if (host !== 'open') return null
+  const params = new URLSearchParams(queryIdx >= 0 ? rest.slice(queryIdx + 1) : '')
+  switch (params.get('type')) {
+    case 'file': {
+      const path = params.get('path')
+      return path ? { type: 'file', path } : null
+    }
+    case 'chat':
+      return { type: 'chat', runId: params.get('runId') || null }
+    case 'graph':
+      return { type: 'graph' }
+    case 'task': {
+      const name = params.get('name')
+      return name ? { type: 'task', name } : null
+    }
+    case 'suggested-topics':
+      return { type: 'suggested-topics' }
+    default:
+      return null
+  }
+}
+
 /** Sidebar toggle (fixed position, top-left) */
 function FixedSidebarToggle({
   leftInsetPx,
@@ -3047,6 +3086,20 @@ function App() {
   const navigateToFile = useCallback((path: string) => {
     void navigateToView({ type: 'file', path })
   }, [navigateToView])
+
+  const handleDeepLinkUrl = useCallback((url: string) => {
+    const view = parseDeepLink(url)
+    if (view) void navigateToView(view)
+  }, [navigateToView])
+
+  useEffect(() => {
+    void window.ipc.invoke('app:consumePendingDeepLink', null).then(({ url }) => {
+      if (url) handleDeepLinkUrl(url)
+    })
+    return window.ipc.on('app:openUrl', ({ url }) => {
+      handleDeepLinkUrl(url)
+    })
+  }, [handleDeepLinkUrl])
 
   const handleBaseConfigChange = useCallback((path: string, config: BaseConfig) => {
     setBaseConfigByPath((prev) => ({ ...prev, [path]: config }))

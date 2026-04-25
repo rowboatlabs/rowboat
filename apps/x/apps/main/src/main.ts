@@ -37,6 +37,12 @@ import { browserViewManager, BROWSER_PARTITION } from "./browser/view.js";
 import { setupBrowserEventForwarding } from "./browser/ipc.js";
 import { ElectronBrowserControlService } from "./browser/control-service.js";
 import { ElectronNotificationService } from "./notification/electron-notification-service.js";
+import {
+  DEEP_LINK_SCHEME,
+  dispatchDeepLink,
+  extractDeepLinkFromArgv,
+  setMainWindowForDeepLinks,
+} from "./deeplink.js";
 
 const execAsync = promisify(exec);
 
@@ -45,6 +51,43 @@ const __dirname = dirname(__filename);
 
 // run this as early in the main process as possible
 if (started) app.quit();
+
+// Single-instance lock: route a second launch (e.g. clicking a rowboat:// link)
+// back into the existing process via the 'second-instance' event.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+  process.exit(0);
+}
+
+// Register as the OS handler for rowboat:// URLs.
+// In dev, point at the right argv so the OS can re-invoke us correctly.
+if (process.defaultApp) {
+  if (process.argv.length >= 2) {
+    app.setAsDefaultProtocolClient(DEEP_LINK_SCHEME, process.execPath, [
+      path.resolve(process.argv[1]),
+    ]);
+  }
+} else {
+  app.setAsDefaultProtocolClient(DEEP_LINK_SCHEME);
+}
+
+// First-launch URL on Windows/Linux comes through argv.
+{
+  const initialUrl = extractDeepLinkFromArgv(process.argv);
+  if (initialUrl) dispatchDeepLink(initialUrl);
+}
+
+// macOS sends URLs via 'open-url' (both first launch and while running).
+app.on("open-url", (event, url) => {
+  event.preventDefault();
+  dispatchDeepLink(url);
+});
+
+// Subsequent launches on Windows/Linux land here via the single-instance lock.
+app.on("second-instance", (_event, argv) => {
+  const url = extractDeepLinkFromArgv(argv);
+  if (url) dispatchDeepLink(url);
+});
 
 // Fix PATH for packaged Electron apps on macOS/Linux.
 // Packaged apps inherit a minimal environment that doesn't include paths from
@@ -163,6 +206,9 @@ function createWindow() {
 
   configureSessionPermissions(session.defaultSession);
   configureSessionPermissions(session.fromPartition(BROWSER_PARTITION));
+
+  setMainWindowForDeepLinks(win);
+  win.on("closed", () => setMainWindowForDeepLinks(null));
 
   // Show window when content is ready to prevent blank screen
   win.once("ready-to-show", () => {
