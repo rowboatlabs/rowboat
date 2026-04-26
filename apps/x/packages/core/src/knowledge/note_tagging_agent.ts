@@ -98,7 +98,7 @@ Extract all \`**Key:** value\` fields from the \`## Info\` (or \`## About\`) sec
 - **Topics** (from \`## About\`): keywords, aliases, first_mentioned, last_update
 - **Meetings**: Extract from the note content and file path:
   - \`date\`: meeting date (from the file path \`Meetings/{source}/YYYY/MM/DD/\` or from \`created_at\`/\`Date:\` in content)
-  - \`source\`: \`granola\` or \`fireflies\` (from the file path)
+  - \`source\`: \`granola\` (from the file path)
   - \`attendees\`: list of attendee names (from \`Attendees:\` field or participant list)
   - \`title\`: meeting title
   - \`topic\`: relevant topic tags based on meeting content

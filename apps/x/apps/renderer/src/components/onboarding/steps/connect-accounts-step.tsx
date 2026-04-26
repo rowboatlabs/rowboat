@@ -2,7 +2,7 @@ import { Loader2, CheckCircle2, ArrowLeft, Calendar, FileText } from "lucide-rea
 import { motion } from "motion/react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { GmailIcon, FirefliesIcon } from "../provider-icons"
+import { GmailIcon } from "../provider-icons"
 import type { OnboardingState, ProviderState } from "../use-onboarding-state"
 
 interface ConnectAccountsStepProps {
@@ -177,18 +177,6 @@ export function ConnectAccountsStep({ state }: ConnectAccountsStepProps) {
                 </div>
               </div>
             </motion.div>
-            {providers.includes('fireflies-ai') && (
-              <ProviderCard
-                name="Fireflies"
-                description="Import existing notes."
-                icon={<FirefliesIcon />}
-                iconBg="bg-amber-500/10"
-                iconColor="text-amber-500"
-                providerState={providerStates['fireflies-ai']}
-                onConnect={() => handleConnect('fireflies-ai')}
-                index={cardIndex++}
-              />
-            )}
           </div>
         </div>
       )}

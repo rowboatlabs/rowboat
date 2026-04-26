@@ -36,7 +36,6 @@ const LEGACY_SUGGESTED_TOPICS_KNOWLEDGE_PATH = path.join(WorkDir, 'knowledge', '
 const SYNC_INTERVAL_MS = 15 * 1000; // 15 seconds
 const SOURCE_FOLDERS = [
     'gmail_sync',
-    path.join('knowledge', 'Meetings', 'fireflies'),
     path.join('knowledge', 'Meetings', 'granola'),
     path.join('knowledge', 'Meetings', 'rowboat'),
 ];

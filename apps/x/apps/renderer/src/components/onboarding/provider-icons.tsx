@@ -75,20 +75,6 @@ export function SlackIcon({ className }: IconProps) {
   )
 }
 
-export function FirefliesIcon({ className }: IconProps) {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" className={cn("size-5", className)}>
-      <circle cx="12" cy="6" r="2" opacity="0.9" />
-      <circle cx="7" cy="9" r="1.5" opacity="0.7" />
-      <circle cx="17" cy="9" r="1.5" opacity="0.7" />
-      <circle cx="5" cy="13" r="1" opacity="0.5" />
-      <circle cx="19" cy="13" r="1" opacity="0.5" />
-      <circle cx="8" cy="16" r="1.5" opacity="0.6" />
-      <circle cx="16" cy="16" r="1.5" opacity="0.6" />
-      <circle cx="12" cy="19" r="2" opacity="0.8" />
-    </svg>
-  )
-}
 
 export function GranolaIcon({ className }: IconProps) {
   return (

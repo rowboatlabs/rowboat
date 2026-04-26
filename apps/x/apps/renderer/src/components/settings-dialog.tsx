@@ -952,7 +952,7 @@ function ToolsLibrarySettings({ dialogOpen }: { dialogOpen: boolean }) {
 
 export function SettingsDialog({ children }: SettingsDialogProps) {
   const [open, setOpen] = useState(false)
-  const [activeTab, setActiveTab] = useState<ConfigTab>("account")
+  const [activeTab, setActiveTab] = useState<ConfigTab>("connected-accounts")
   const [content, setContent] = useState("")
   const [originalContent, setOriginalContent] = useState("")
   const [loading, setLoading] = useState(false)
@@ -973,7 +973,7 @@ export function SettingsDialog({ children }: SettingsDialogProps) {
   }
 
   const loadConfig = useCallback(async (tab: ConfigTab) => {
-    if (tab === "appearance" || tab === "models" || tab === "note-tagging" || tab === "account" || tab === "connected-accounts") return
+    if (tab === "appearance" || tab === "models" || tab === "note-tagging" || tab === "connected-accounts") return
     const tabConfig = tabs.find((t) => t.id === tab)!
     if (!tabConfig.path) return
     setLoading(true)

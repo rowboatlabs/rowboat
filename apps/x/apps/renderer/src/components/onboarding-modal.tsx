@@ -1326,7 +1326,6 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
                 <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Meeting Notes</span>
               </div>
               {renderGranolaRow()}
-              {providers.includes('fireflies-ai') && renderOAuthProvider('fireflies-ai', 'Fireflies', <Mic className="size-5" />, 'AI meeting transcripts')}
             </div>
 
             {/* Team Communication Section */}
@@ -1398,12 +1397,6 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <CheckCircle2 className="size-4 text-green-600" />
                     <span>Google (Email & Calendar)</span>
-                  </div>
-                )}
-                {connectedProviders.includes('fireflies-ai') && (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <CheckCircle2 className="size-4 text-green-600" />
-                    <span>Fireflies (Meeting transcripts)</span>
                   </div>
                 )}
                 {granolaEnabled && (

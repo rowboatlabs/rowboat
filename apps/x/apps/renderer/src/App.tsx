@@ -54,7 +54,7 @@ import { Button } from "@/components/ui/button"
 import { Toaster } from "@/components/ui/sonner"
 import { stripKnowledgePrefix, toKnowledgePath, wikiLabel } from '@/lib/wiki-links'
 import { splitFrontmatter, joinFrontmatter } from '@/lib/frontmatter'
-import { OnboardingModal } from '@/components/onboarding'
+const OnboardingModal = React.lazy(() => import('@/components/onboarding'))
 import { CommandPalette, type CommandPaletteContext, type CommandPaletteMention } from '@/components/search-dialog'
 import { TrackModal } from '@/components/track-modal'
 import { BackgroundTaskDetail } from '@/components/background-task-detail'
@@ -4773,10 +4773,12 @@ function App() {
       </SidebarSectionProvider>
       <Toaster />
       <TrackModal />
-      <OnboardingModal
-        open={showOnboarding}
-        onComplete={handleOnboardingComplete}
-      />
+      <React.Suspense fallback={null}>
+        <OnboardingModal
+          open={showOnboarding}
+          onComplete={handleOnboardingComplete}
+        />
+      </React.Suspense>
       <Dialog open={showMeetingPermissions} onOpenChange={setShowMeetingPermissions}>
         <DialogContent showCloseButton={false}>
           <DialogHeader>

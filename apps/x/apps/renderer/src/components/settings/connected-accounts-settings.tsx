@@ -233,19 +233,7 @@ export function ConnectedAccountsSettings({ dialogOpen }: ConnectedAccountsSetti
           </>
         )}
 
-        {/* Meeting Notes Section */}
-        {c.providers.includes('fireflies-ai') && (
-          <>
-            <div className="px-4 py-2">
-              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                Meeting Notes
-              </span>
-            </div>
-
-            {/* Fireflies */}
-            {renderOAuthProvider('fireflies-ai', 'Fireflies', <Mic className="size-4" />, 'AI meeting transcripts')}
-          </>
-        )}
+        {/* Meeting Notes section removed */}
       </div>
     </>
   )

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   ArrowUp,
@@ -186,7 +186,14 @@ function ChatInputInner({
 
   // Load the list of models the user can choose from.
   // Always reads from models.json config (BYOK mode).
+  const modelConfigCache = useRef<{models: ConfiguredModel[], timestamp: number} | null>(null)
+
   const loadModelConfig = useCallback(async () => {
+    const cache = modelConfigCache.current
+    if (cache && Date.now() - cache.timestamp < 30_000) {
+      setConfiguredModels(cache.models)
+      return
+    }
     try {
         const result = await window.ipc.invoke('workspace:readFile', { path: 'config/models.json' })
         const parsed = JSON.parse(result.data)
@@ -204,6 +211,7 @@ function ChatInputInner({
             }
           }
         }
+        modelConfigCache.current = { models, timestamp: Date.now() }
         setConfiguredModels(models)
     } catch {
       // No config yet
@@ -216,7 +224,10 @@ function ChatInputInner({
 
   // Reload when model config changes (e.g. from settings dialog)
   useEffect(() => {
-    const handler = () => { loadModelConfig() }
+    const handler = () => {
+      modelConfigCache.current = null
+      loadModelConfig()
+    }
     window.addEventListener('models-config-changed', handler)
     return () => window.removeEventListener('models-config-changed', handler)
   }, [loadModelConfig])
@@ -665,7 +676,7 @@ export interface ChatInputWithMentionsProps {
   onSelectedModelChange?: (model: SelectedModel | null) => void
 }
 
-export function ChatInputWithMentions({
+export const ChatInputWithMentions = memo(function ChatInputWithMentions({
   knowledgeFiles,
   recentFiles,
   visibleFiles,
@@ -722,4 +733,4 @@ export function ChatInputWithMentions({
       />
     </PromptInputProvider>
   )
-}
+})
