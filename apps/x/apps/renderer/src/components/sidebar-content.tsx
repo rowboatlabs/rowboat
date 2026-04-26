@@ -21,7 +21,6 @@ import {
   SearchIcon,
   SquarePen,
   Table2,
-  Lightbulb,
   LoaderIcon,
   Settings,
   Square,
@@ -172,8 +171,8 @@ type SidebarContentPanelProps = {
   onToggleMeeting?: () => void
   isBrowserOpen?: boolean
   onToggleBrowser?: () => void
-  isSuggestedTopicsOpen?: boolean
-  onOpenSuggestedTopics?: () => void
+  isMeetingsOpen?: boolean
+  onOpenMeetings?: () => void
 } & React.ComponentProps<typeof Sidebar>
 
 const sectionTabs: { id: ActiveSection; label: string }[] = [
@@ -406,8 +405,8 @@ export function SidebarContentPanel({
   onToggleMeeting,
   isBrowserOpen = false,
   onToggleBrowser,
-  isSuggestedTopicsOpen = false,
-  onOpenSuggestedTopics,
+  isMeetingsOpen = false,
+  onOpenMeetings,
   ...props
 }: SidebarContentPanelProps) {
   const { activeSection, setActiveSection } = useSidebarSection()
@@ -533,19 +532,19 @@ export function SidebarContentPanel({
               <span>Run browser task</span>
             </button>
           )}
-          {onOpenSuggestedTopics && (
+          {onOpenMeetings && (
             <button
               type="button"
-              onClick={onOpenSuggestedTopics}
+              onClick={onOpenMeetings}
               className={cn(
                 "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
-                isSuggestedTopicsOpen
+                isMeetingsOpen
                   ? "bg-sidebar-accent text-sidebar-accent-foreground"
                   : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
               )}
             >
-              <Lightbulb className="size-4" />
-              <span>Suggested Topics</span>
+              <Mic className="size-4" />
+              <span>Meetings</span>
             </button>
           )}
         </div>
