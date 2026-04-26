@@ -194,7 +194,7 @@ function EmailBlockView({ node, deleteNode, updateAttributes }: {
             onClick={draftWithAssistant}
           >
             <MessageSquare size={13} />
-            {hasDraft ? 'Refine with Rowboat' : 'Draft with Rowboat'}
+            {hasDraft ? 'Refine with AI' : 'Draft with AI'}
           </button>
           {hasDraft && (
             <button
