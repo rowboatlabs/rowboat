@@ -46,6 +46,11 @@ const MIME_TYPES: Record<string, string> = {
   '.wasm': 'application/wasm',
   '.webp': 'image/webp',
   '.xml': 'application/xml; charset=utf-8',
+  '.pdf': 'application/pdf',
+  '.csv': 'text/csv; charset=utf-8',
+  '.md': 'text/markdown; charset=utf-8',
+  '.doc': 'application/msword',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
 };
 const IFRAME_AUTOSIZE_BOOTSTRAP = String.raw`<script>
 (() => {
@@ -517,6 +522,35 @@ function createLocalSitesApp(): express.Express {
     void sendSiteResponse(req, res).catch((error: unknown) => {
       const message = error instanceof Error ? error.message : 'Unknown error';
       res.status(500).json({ error: message });
+    });
+  });
+
+  // Workspace file serving — lets the embedded browser render any workspace file
+  // via http://localhost:3210/workspace/<relative-path>
+  app.use('/workspace/', (req, res) => {
+    const relPath = req.path.replace(/^\/+/, '');
+    const absPath = path.join(WorkDir, relPath);
+
+    // Prevent path traversal
+    if (!absPath.startsWith(WorkDir)) {
+      res.status(403).json({ error: 'Path traversal not allowed' });
+      return;
+    }
+
+    fs.promises.readFile(absPath).then((data) => {
+      const ext = path.extname(absPath).toLowerCase();
+      const mime = MIME_TYPES[ext] || 'application/octet-stream';
+      res.setHeader('Content-Type', mime);
+      res.setHeader('Content-Disposition', `inline; filename="${path.basename(absPath)}"`);
+      res.send(data);
+    }).catch((err: NodeJS.ErrnoException) => {
+      if (err.code === 'ENOENT') {
+        res.status(404).json({ error: 'File not found' });
+      } else if (err.code === 'EISDIR') {
+        res.status(400).json({ error: 'Is a directory' });
+      } else {
+        res.status(500).json({ error: err.message });
+      }
     });
   });
 

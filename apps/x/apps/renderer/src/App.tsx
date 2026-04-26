@@ -3042,9 +3042,41 @@ function App() {
     return false
   }, [viewHistory.forward, currentViewState])
 
+  const WORKSPACE_BASE_URL = 'http://localhost:3210/workspace'
+
+  const openFileInBrowser = useCallback((filePath: string) => {
+    const url = `${WORKSPACE_BASE_URL}/${filePath}`
+    setIsBrowserOpen(true)
+    setIsChatSidebarOpen(true)
+    setIsRightPaneMaximized(false)
+    void window.ipc.invoke('browser:navigate', { url })
+  }, [WORKSPACE_BASE_URL])
+
+  const openHtmlInBrowser = useCallback(async (html: string) => {
+    const timestamp = Date.now()
+    const tempPath = `knowledge/.tmp/artifact-${timestamp}.html`
+    await window.ipc.invoke('workspace:writeFile', {
+      path: tempPath,
+      data: html,
+      opts: { encoding: 'utf8', mkdirp: true },
+    })
+    const url = `${WORKSPACE_BASE_URL}/${tempPath}`
+    setIsBrowserOpen(true)
+    setIsChatSidebarOpen(true)
+    setIsRightPaneMaximized(false)
+    void window.ipc.invoke('browser:navigate', { url })
+  }, [WORKSPACE_BASE_URL])
+
+  const BROWSER_VIEWABLE_EXTS = new Set(['pdf', 'html', 'svg', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'csv', 'json', 'xml', 'txt', 'doc', 'docx'])
+
   const navigateToFile = useCallback((path: string) => {
+    const ext = path.split('.').pop()?.toLowerCase() ?? ''
+    if (ext !== 'md' && !path.endsWith('.base') && BROWSER_VIEWABLE_EXTS.has(ext)) {
+      openFileInBrowser(path)
+      return
+    }
     void navigateToView({ type: 'file', path })
-  }, [navigateToView])
+  }, [navigateToView, openFileInBrowser])
 
   const handleBaseConfigChange = useCallback((path: string, config: BaseConfig) => {
     setBaseConfigByPath((prev) => ({ ...prev, [path]: config }))
@@ -3813,6 +3845,17 @@ function App() {
     return () => window.removeEventListener('email-block:draft-with-assistant', handler)
   }, [])
 
+  // HTML artifact "Open in browser" event
+  useEffect(() => {
+    const handler = () => {
+      setIsBrowserOpen(true)
+      setIsChatSidebarOpen(true)
+      setIsRightPaneMaximized(false)
+    }
+    window.addEventListener('browser:open', handler)
+    return () => window.removeEventListener('browser:open', handler)
+  }, [])
+
   const ensureWikiFile = useCallback(async (wikiPath: string) => {
     const resolvedPath = toKnowledgePath(wikiPath)
     if (!resolvedPath) return null
@@ -4367,7 +4410,9 @@ function App() {
               </ContentHeader>
 
               {isBrowserOpen ? (
-                <BrowserPane onClose={handleCloseBrowser} />
+                <div className="flex-1 min-h-0 flex flex-col overflow-hidden animate-in fade-in duration-150">
+                  <BrowserPane onClose={handleCloseBrowser} />
+                </div>
               ) : isMeetingsOpen ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                   <MeetingsView
