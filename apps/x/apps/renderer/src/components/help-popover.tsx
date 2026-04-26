@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState } from "react"
-import { MessageCircle } from "lucide-react"
+import { MessageCircle, BookOpen, GitBranch } from "lucide-react"
 
 import {
   Popover,
@@ -23,10 +23,6 @@ interface HelpPopoverProps {
 
 export function HelpPopover({ children, tooltip }: HelpPopoverProps) {
   const [open, setOpen] = useState(false)
-
-  const handleDiscordClick = () => {
-    window.open("https://discord.com/invite/wajrgmJQ6b", "_blank")
-  }
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -55,44 +51,55 @@ export function HelpPopover({ children, tooltip }: HelpPopoverProps) {
         <div className="p-4 border-b">
           <h4 className="font-semibold text-sm">Help & Support</h4>
           <p className="text-xs text-muted-foreground mt-1">
-            Get help from our community
+            Resources and documentation
           </p>
         </div>
-        <div className="p-2">
+        <div className="p-2 space-y-1">
           <Button
             variant="ghost"
             className="w-full justify-start gap-3 h-auto py-3"
-            onClick={handleDiscordClick}
+            onClick={() => window.open("https://github.com/gokulb20/rowboat", "_blank")}
+          >
+            <div className="flex size-8 items-center justify-center rounded-md bg-foreground/10">
+              <GitBranch className="size-4" />
+            </div>
+            <div className="flex flex-col items-start">
+              <span className="text-sm font-medium">GitHub Repository</span>
+              <span className="text-xs text-muted-foreground">
+                Source code and issues
+              </span>
+            </div>
+          </Button>
+          <Button
+            variant="ghost"
+            className="w-full justify-start gap-3 h-auto py-3"
+            onClick={() => window.open("https://discord.com/invite/wajrgmJQ6b", "_blank")}
           >
             <div className="flex size-8 items-center justify-center rounded-md bg-[#5865F2]">
               <MessageCircle className="size-4 text-white" />
             </div>
             <div className="flex flex-col items-start">
-              <span className="text-sm font-medium">Join our Discord</span>
+              <span className="text-sm font-medium">Community Discord</span>
               <span className="text-xs text-muted-foreground">
                 Chat with the community
               </span>
             </div>
           </Button>
-        </div>
-        <div className="px-4 py-3 border-t flex justify-center gap-3 text-xs text-muted-foreground">
-          <a
-            href="https://www.rowboatlabs.com/terms-of-service"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hover:text-foreground transition-colors"
+          <Button
+            variant="ghost"
+            className="w-full justify-start gap-3 h-auto py-3"
+            onClick={() => window.open("https://docs.rowboatlabs.com", "_blank")}
           >
-            Terms of Service
-          </a>
-          <span>·</span>
-          <a
-            href="https://www.rowboatlabs.com/privacy-policy"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hover:text-foreground transition-colors"
-          >
-            Privacy Policy
-          </a>
+            <div className="flex size-8 items-center justify-center rounded-md bg-emerald-500/10">
+              <BookOpen className="size-4 text-emerald-600" />
+            </div>
+            <div className="flex flex-col items-start">
+              <span className="text-sm font-medium">Documentation</span>
+              <span className="text-xs text-muted-foreground">
+                Guides and API reference
+              </span>
+            </div>
+          </Button>
         </div>
       </PopoverContent>
     </Popover>

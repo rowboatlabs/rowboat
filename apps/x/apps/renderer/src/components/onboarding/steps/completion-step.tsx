@@ -113,7 +113,7 @@ export function CompletionStep({ state }: CompletionStepProps) {
           size="lg"
           className="w-full max-w-xs h-12 text-base font-medium"
         >
-          Start Using Rowboat
+          Get Started
         </Button>
       </motion.div>
     </div>

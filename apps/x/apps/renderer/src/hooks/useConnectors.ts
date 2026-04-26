@@ -328,7 +328,7 @@ export function useConnectors(active: boolean) {
       const result = await window.ipc.invoke('oauth:connect', { provider, clientId: credentials?.clientId, clientSecret: credentials?.clientSecret })
 
       if (!result.success) {
-        toast.error(result.error || (provider === 'rowboat' ? 'Failed to log in to Rowboat' : `Failed to connect to ${provider}`))
+        toast.error(result.error || (provider === 'rowboat' ? 'Failed to log in' : `Failed to connect to ${provider}`))
         setProviderStates(prev => ({
           ...prev,
           [provider]: { ...prev[provider], isConnecting: false }
@@ -336,7 +336,7 @@ export function useConnectors(active: boolean) {
       }
     } catch (error) {
       console.error('Failed to connect:', error)
-      toast.error(provider === 'rowboat' ? 'Failed to log in to Rowboat' : `Failed to connect to ${provider}`)
+      toast.error(provider === 'rowboat' ? 'Failed to log in' : `Failed to connect to ${provider}`)
       setProviderStates(prev => ({
         ...prev,
         [provider]: { ...prev[provider], isConnecting: false }
@@ -385,7 +385,7 @@ export function useConnectors(active: boolean) {
           }
         }))
       } else {
-        toast.error(provider === 'rowboat' ? 'Failed to log out of Rowboat' : `Failed to disconnect from ${provider}`)
+        toast.error(provider === 'rowboat' ? 'Failed to log out' : `Failed to disconnect from ${provider}`)
         setProviderStates(prev => ({
           ...prev,
           [provider]: { ...prev[provider], isLoading: false }
@@ -393,7 +393,7 @@ export function useConnectors(active: boolean) {
       }
     } catch (error) {
       console.error('Failed to disconnect:', error)
-      toast.error(provider === 'rowboat' ? 'Failed to log out of Rowboat' : `Failed to disconnect from ${provider}`)
+      toast.error(provider === 'rowboat' ? 'Failed to log out' : `Failed to disconnect from ${provider}`)
       setProviderStates(prev => ({
         ...prev,
         [provider]: { ...prev[provider], isLoading: false }

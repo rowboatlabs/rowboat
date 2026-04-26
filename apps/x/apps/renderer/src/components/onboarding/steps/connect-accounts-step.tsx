@@ -98,7 +98,7 @@ export function ConnectAccountsStep({ state }: ConnectAccountsStepProps) {
         Connect Your Accounts
       </h2>
       <p className="text-base text-muted-foreground text-center leading-relaxed mb-8">
-        Rowboat gets smarter the more it knows about your work. Connect your accounts to get started. You can find more tools in Settings.
+        The assistant gets smarter the more it knows about your work. Connect your accounts to get started. You can find more tools in Settings.
       </p>
 
       {providersLoading ? (
@@ -156,7 +156,7 @@ export function ConnectAccountsStep({ state }: ConnectAccountsStepProps) {
                   <span className="text-green-500"><FileText className="size-5" /></span>
                 </div>
                 <div className="min-w-0">
-                  <div className="text-sm font-semibold">Rowboat Meeting Notes</div>
+                  <div className="text-sm font-semibold">Meeting Notes</div>
                   <div className="text-xs text-muted-foreground truncate">Built in. Ready to use.</div>
                 </div>
               </div>
