@@ -202,17 +202,15 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
             </div>
           ) : (
             <>
-              {/* Email & Calendar Section */}
-              {(c.useComposioForGoogle || c.useComposioForGoogleCalendar || c.providers.includes('google')) && hasUnconnectedEmailCalendar && (
+              {/* Email & Calendar Section (via Composio only) */}
+              {(c.useComposioForGoogle || c.useComposioForGoogleCalendar) && hasUnconnectedEmailCalendar && (
                 <>
                   <div className="px-2 py-1.5">
                     <span className="text-xs font-medium text-muted-foreground">
                       Email & Calendar
                     </span>
                   </div>
-                  {c.useComposioForGoogle ? (
-                    // In unconnected mode, only show if not connected
-                    (!isUnconnectedMode || isGmailUnconnected) ? (
+                  {c.useComposioForGoogle && (!isUnconnectedMode || isGmailUnconnected) ? (
                       <div className="flex items-center justify-between gap-3 rounded-md px-3 py-2 hover:bg-accent">
                         <div className="flex items-center gap-3 min-w-0">
                           <div className="flex size-8 items-center justify-center rounded-md bg-muted">
@@ -258,10 +256,7 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
                           )}
                         </div>
                       </div>
-                    ) : null
-                  ) : (
-                    renderOAuthProvider('google', 'Google', <Mail className="size-4" />, 'Sync emails and calendar')
-                  )}
+                    ) : null}
                   {c.useComposioForGoogleCalendar && (!isUnconnectedMode || isGoogleCalendarUnconnected) && (
                     <div className="flex items-center justify-between gap-3 rounded-md px-3 py-2 hover:bg-accent">
                       <div className="flex items-center gap-3 min-w-0">
