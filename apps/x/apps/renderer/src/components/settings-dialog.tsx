@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug } from "lucide-react"
+import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, Brain } from "lucide-react"
 
 import {
   Dialog,
@@ -22,9 +22,9 @@ import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
 import { useTheme } from "@/contexts/theme-context"
 import { toast } from "sonner"
-import { ConnectedAccountsSettings } from "@/components/settings/connected-accounts-settings"
+import { MemorySettings } from "@/components/settings/memory-settings"
 
-type ConfigTab = "connected-accounts" | "models" | "mcp" | "security" | "appearance" | "tools" | "note-tagging"
+type ConfigTab = "memory" | "models" | "mcp" | "security" | "appearance" | "tools" | "note-tagging"
 
 interface TabConfig {
   id: ConfigTab
@@ -36,10 +36,10 @@ interface TabConfig {
 
 const tabs: TabConfig[] = [
   {
-    id: "connected-accounts",
-    label: "Connected Accounts",
-    icon: Plug,
-    description: "Manage connected services",
+    id: "memory",
+    label: "Memory",
+    icon: Brain,
+    description: "Persistent memory across conversations",
   },
   {
     id: "models",
@@ -952,7 +952,7 @@ function ToolsLibrarySettings({ dialogOpen }: { dialogOpen: boolean }) {
 
 export function SettingsDialog({ children }: SettingsDialogProps) {
   const [open, setOpen] = useState(false)
-  const [activeTab, setActiveTab] = useState<ConfigTab>("connected-accounts")
+  const [activeTab, setActiveTab] = useState<ConfigTab>("memory")
   const [content, setContent] = useState("")
   const [originalContent, setOriginalContent] = useState("")
   const [loading, setLoading] = useState(false)
@@ -973,7 +973,7 @@ export function SettingsDialog({ children }: SettingsDialogProps) {
   }
 
   const loadConfig = useCallback(async (tab: ConfigTab) => {
-    if (tab === "appearance" || tab === "models" || tab === "note-tagging" || tab === "connected-accounts") return
+    if (tab === "appearance" || tab === "models" || tab === "note-tagging" || tab === "memory") return
     const tabConfig = tabs.find((t) => t.id === tab)!
     if (!tabConfig.path) return
     setLoading(true)
@@ -1079,9 +1079,9 @@ export function SettingsDialog({ children }: SettingsDialogProps) {
             </div>
 
             {/* Content */}
-            <div className={cn("flex-1 p-4 min-h-0", (activeTab === "models" || activeTab === "tools" || activeTab === "connected-accounts") ? "overflow-y-auto" : activeTab === "note-tagging" ? "overflow-hidden flex flex-col" : "overflow-hidden")}>
-              {activeTab === "connected-accounts" ? (
-                <ConnectedAccountsSettings dialogOpen={open} />
+            <div className={cn("flex-1 p-4 min-h-0", (activeTab === "models" || activeTab === "tools" || activeTab === "memory") ? "overflow-y-auto" : activeTab === "note-tagging" ? "overflow-hidden flex flex-col" : "overflow-hidden")}>
+              {activeTab === "memory" ? (
+                <MemorySettings dialogOpen={open} />
               ) : activeTab === "models" ? (
                 <ModelSettings dialogOpen={open} />
               ) : activeTab === "note-tagging" ? (

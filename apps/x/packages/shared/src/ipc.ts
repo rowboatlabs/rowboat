@@ -720,6 +720,21 @@ const ipcSchemas = {
     req: BrowserStateSchema,
     res: z.null(),
   },
+  // Supermemory channels
+  'supermemory:is-configured': {
+    req: z.null(),
+    res: z.object({
+      configured: z.boolean(),
+    }),
+  },
+  'supermemory:set-api-key': {
+    req: z.object({ apiKey: z.string() }),
+    res: z.object({ success: z.boolean(), error: z.string().optional() }),
+  },
+  'supermemory:test-connection': {
+    req: z.null(),
+    res: z.object({ success: z.boolean() }),
+  },
   // Billing channels
   'billing:getInfo': {
     req: z.null(),
