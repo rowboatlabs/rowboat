@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { getRowboatConfig } from '../config/rowboat.js';
 
 /**
  * Discovery configuration - how to get OAuth endpoints
@@ -49,23 +48,9 @@ export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
 export type ProviderConfigEntry = ProviderConfig[string];
 
 /**
- * All configured OAuth providers
+ * All configured OAuth providers (Rowboat sign-in removed)
  */
 const providerConfigs: ProviderConfig = {
-  rowboat: {
-    discovery: {
-      mode: 'issuer',
-      issuer: "TBD",
-    },
-    client: {
-      mode: 'dcr',
-    },
-    scopes: [
-      "openid",
-      "email",
-      "profile",
-    ],
-  },
   google: {
     discovery: {
       mode: 'issuer',
@@ -102,13 +87,6 @@ export async function getProviderConfig(providerName: string): Promise<ProviderC
   const config = providerConfigs[providerName];
   if (!config) {
     throw new Error(`Unknown OAuth provider: ${providerName}`);
-  }
-  if (providerName === 'rowboat') {
-    const rowboatConfig = await getRowboatConfig();
-    config.discovery = {
-      mode: 'issuer',
-      issuer: `${rowboatConfig.supabaseUrl}/auth/v1/.well-known/oauth-authorization-server`,
-    }
   }
   return config;
 }

@@ -18,25 +18,16 @@ import {
     ZToolkit,
     type NormalizedToolResult,
 } from "./types.js";
-import { isSignedIn } from "../account/account.js";
-import { getAccessToken } from "../auth/tokens.js";
 import { API_URL } from "../config/env.js";
 
 const COMPOSIO_BASE_URL = 'https://backend.composio.dev/api/v3';
 const CONFIG_FILE = path.join(WorkDir, 'config', 'composio.json');
 
 async function getBaseUrl(): Promise<string> {
-    if (await isSignedIn()) {
-        return `${API_URL}/v1/composio`;
-    }
     return COMPOSIO_BASE_URL;
 }
 
 async function getAuthHeaders(): Promise<Record<string, string>> {
-    if (await isSignedIn()) {
-        const token = await getAccessToken();
-        return { 'Authorization': `Bearer ${token}` };
-    }
     const apiKey = getApiKey();
     if (!apiKey) {
         throw new Error('Composio API key not configured');
@@ -102,7 +93,6 @@ export function setApiKey(apiKey: string): void {
  * Check if Composio is configured
  */
 export async function isConfigured(): Promise<boolean> {
-    if (await isSignedIn()) return true;
     return !!getApiKey();
 }
 
@@ -110,7 +100,6 @@ export async function isConfigured(): Promise<boolean> {
  * Check if Composio should be used for Google services (Gmail, etc.)
  */
 export async function useComposioForGoogle(): Promise<boolean> {
-    if (await isSignedIn()) return true;
     const config = loadConfig();
     return config.use_composio_for_google === true;
 }
@@ -119,7 +108,6 @@ export async function useComposioForGoogle(): Promise<boolean> {
  * Check if Composio should be used for Google Calendar
  */
 export async function useComposioForGoogleCalendar(): Promise<boolean> {
-    if (await isSignedIn()) return true;
     const config = loadConfig();
     return config.use_composio_for_google_calendar === true;
 }

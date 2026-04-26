@@ -624,44 +624,6 @@ export function SidebarContentPanel({
           />
         )}
       </SidebarContent>
-      {/* Billing / upgrade CTA or Log in CTA */}
-      {isRowboatConnected && billing ? (
-        <div className="px-3 py-2">
-          <div className="flex items-center justify-between rounded-lg border border-sidebar-border bg-sidebar-accent/20 px-3 py-2">
-            <div className="min-w-0">
-              <span className="text-xs font-medium capitalize text-sidebar-foreground">
-                {billing.subscriptionPlan ? `${billing.subscriptionPlan} plan` : 'No plan'}
-              </span>
-              {billing.subscriptionStatus === 'trialing' && billing.trialExpiresAt && (() => {
-                const days = Math.max(0, Math.ceil((new Date(billing.trialExpiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
-                return (
-                  <p className="text-[10px] text-sidebar-foreground/60">
-                    {days === 0 ? 'Trial expires today' : days === 1 ? '1 day left' : `${days} days left`}
-                  </p>
-                )
-              })()}
-            </div>
-            <button
-              onClick={() => appUrl && window.open(`${appUrl}?intent=upgrade`)}
-              className="shrink-0 rounded-md bg-sidebar-foreground/10 px-2.5 py-1 text-[11px] font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-foreground/20"
-            >
-              {!billing.subscriptionPlan ? 'Subscribe' : billing.subscriptionPlan === 'starter' ? 'Upgrade' : 'Manage'}
-            </button>
-          </div>
-        </div>
-      ) : null}
-      {/* Sign in CTA */}
-      {!isRowboatConnected && (
-        <div className="px-3 py-2">
-          <button
-            onClick={handleRowboatLogin}
-            disabled={loggingIn}
-            className="flex w-full items-center justify-center rounded-lg border border-sidebar-border bg-sidebar-accent/20 px-3 py-2.5 text-xs font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-accent/40 disabled:opacity-50"
-          >
-            {loggingIn ? 'Signing in…' : 'Sign in to Rowboat'}
-          </button>
-        </div>
-      )}
       {/* Bottom actions */}
       <div className="border-t border-sidebar-border px-2 py-2">
         <div className="flex flex-col gap-1">

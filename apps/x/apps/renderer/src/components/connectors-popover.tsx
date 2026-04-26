@@ -217,22 +217,6 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
             </div>
           ) : (
             <>
-              {/* Rowboat Account - show in "all" mode always, or in "unconnected" mode only when not connected */}
-              {c.providers.includes('rowboat') && (() => {
-                const rowboatState = c.providerStates['rowboat']
-                const isRowboatConnected = rowboatState?.isConnected && !rowboatState?.isLoading
-                if (isUnconnectedMode && isRowboatConnected) return null
-                return (
-                  <>
-                    <div className="px-2 py-1.5">
-                      <span className="text-xs font-medium text-muted-foreground">Account</span>
-                    </div>
-                    {renderOAuthProvider('rowboat', 'Rowboat', <User className="size-4" />, 'Log in to your Rowboat account')}
-                    <Separator className="my-2" />
-                  </>
-                )
-              })()}
-
               {/* Email & Calendar Section */}
               {(c.useComposioForGoogle || c.useComposioForGoogleCalendar || c.providers.includes('google')) && hasUnconnectedEmailCalendar && (
                 <>

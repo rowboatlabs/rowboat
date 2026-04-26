@@ -11,7 +11,6 @@ import { triggerSync as triggerGmailSync } from '@x/core/dist/knowledge/sync_gma
 import { triggerSync as triggerCalendarSync } from '@x/core/dist/knowledge/sync_calendar.js';
 import { triggerSync as triggerFirefliesSync } from '@x/core/dist/knowledge/sync_fireflies.js';
 import { emitOAuthEvent } from './ipc.js';
-import { getBillingInfo } from '@x/core/dist/billing/billing.js';
 
 const REDIRECT_URI = 'http://localhost:8080/oauth/callback';
 
@@ -270,17 +269,6 @@ export async function connectProvider(provider: string, credentials?: { clientId
           triggerCalendarSync();
         } else if (provider === 'fireflies-ai') {
           triggerFirefliesSync();
-        }
-
-        // For Rowboat sign-in, ensure user + Stripe customer exist before
-        // notifying the renderer. Without this, parallel API calls from
-        // multiple renderer hooks race to create the user, causing duplicates.
-        if (provider === 'rowboat') {
-          try {
-            await getBillingInfo();
-          } catch (meError) {
-            console.error('[OAuth] Failed to initialize user via /v1/me:', meError);
-          }
         }
 
         // Emit success event to renderer

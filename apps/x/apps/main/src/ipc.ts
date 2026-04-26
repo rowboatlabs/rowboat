@@ -26,7 +26,6 @@ import container from '@x/core/dist/di/container.js';
 import { listOnboardingModels } from '@x/core/dist/models/models-dev.js';
 import { testModelConnection } from '@x/core/dist/models/models.js';
 import { isSignedIn } from '@x/core/dist/account/account.js';
-import { listGatewayModels } from '@x/core/dist/models/gateway.js';
 import type { IModelConfigRepo } from '@x/core/dist/models/repo.js';
 import type { IOAuthRepo } from '@x/core/dist/auth/repo.js';
 import { IGranolaConfigRepo } from '@x/core/dist/knowledge/granola/repo.js';
@@ -40,10 +39,8 @@ import { triggerRun as triggerAgentScheduleRun } from '@x/core/dist/agent-schedu
 import { search } from '@x/core/dist/search/search.js';
 import { versionHistory, voice } from '@x/core';
 import { classifySchedule, processRowboatInstruction } from '@x/core/dist/knowledge/inline_tasks.js';
-import { getBillingInfo } from '@x/core/dist/billing/billing.js';
 import { summarizeMeeting } from '@x/core/dist/knowledge/summarize_meeting.js';
 import { getAccessToken } from '@x/core/dist/auth/tokens.js';
-import { getRowboatConfig } from '@x/core/dist/config/rowboat.js';
 import { triggerTrackUpdate } from '@x/core/dist/knowledge/track/runner.js';
 import { trackBus } from '@x/core/dist/knowledge/track/bus.js';
 import {
@@ -480,9 +477,6 @@ export function setupIpcHandlers() {
       return { success: true };
     },
     'models:list': async () => {
-      if (await isSignedIn()) {
-        return await listGatewayModels();
-      }
       return await listOnboardingModels();
     },
     'models:test': async (_event, args) => {
@@ -511,19 +505,8 @@ export function setupIpcHandlers() {
       return { config };
     },
     'account:getRowboat': async () => {
-      const signedIn = await isSignedIn();
-      if (!signedIn) {
-        return { signedIn: false, accessToken: null, config: null };
-      }
-
-      const config = await getRowboatConfig();
-
-      try {
-        const accessToken = await getAccessToken();
-        return { signedIn: true, accessToken, config };
-      } catch {
-        return { signedIn: true, accessToken: null, config };
-      }
+      // Rowboat cloud sign-in has been removed
+      return { signedIn: false, accessToken: null, config: null };
     },
     'granola:getConfig': async () => {
       const repo = container.resolve<IGranolaConfigRepo>('granolaConfigRepo');
@@ -822,9 +805,9 @@ export function setupIpcHandlers() {
         return { success: false, error: err instanceof Error ? err.message : String(err) };
       }
     },
-    // Billing handler
+    // Billing handler — no longer available (Rowboat cloud removed)
     'billing:getInfo': async () => {
-      return await getBillingInfo();
+      return { userEmail: null, userId: null, subscriptionPlan: null, subscriptionStatus: null, trialExpiresAt: null, sanctionedCredits: 0, availableCredits: 0 };
     },
     // Embedded browser handlers (WebContentsView + navigation)
     ...browserIpcHandlers,

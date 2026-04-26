@@ -11,8 +11,6 @@ import { GoogleClientIdModal } from "@/components/google-client-id-modal"
 import { ComposioApiKeyModal } from "@/components/composio-api-key-modal"
 import { useOnboardingState } from "./use-onboarding-state"
 import { StepIndicator } from "./step-indicator"
-import { WelcomeStep } from "./steps/welcome-step"
-import { LlmSetupStep } from "./steps/llm-setup-step"
 import { ConnectAccountsStep } from "./steps/connect-accounts-step"
 import { CompletionStep } from "./steps/completion-step"
 
@@ -26,14 +24,12 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
 
   const stepContent = React.useMemo(() => {
     switch (state.currentStep) {
-      case 0:
-        return <WelcomeStep state={state} />
-      case 1:
-        return <LlmSetupStep state={state} />
       case 2:
         return <ConnectAccountsStep state={state} />
       case 3:
         return <CompletionStep state={state} />
+      default:
+        return <ConnectAccountsStep state={state} />
     }
   }, [state.currentStep, state])
 
@@ -61,7 +57,6 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
           <div className="flex flex-col h-full max-h-[85vh] overflow-y-auto p-8 md:p-10">
             <StepIndicator
               currentStep={state.currentStep}
-              path={state.onboardingPath}
             />
             <AnimatePresence mode="wait">
               <motion.div

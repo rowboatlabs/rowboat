@@ -710,16 +710,14 @@ function App() {
     handleToggleMeetingRef.current?.()
   })
 
-  // Check if voice is available on mount and when OAuth state changes
+  // Check if voice is available on mount
   const refreshVoiceAvailability = useCallback(() => {
     Promise.all([
       window.ipc.invoke('voice:getConfig', null),
-      window.ipc.invoke('oauth:getState', null),
-    ]).then(([config, oauthState]) => {
-      const rowboatConnected = oauthState.config?.rowboat?.connected ?? false
-      const hasVoice = !!config.deepgram || rowboatConnected
+    ]).then(([config]) => {
+      const hasVoice = !!config.deepgram
       setVoiceAvailable(hasVoice)
-      setTtsAvailable(!!config.elevenlabs || rowboatConnected)
+      setTtsAvailable(!!config.elevenlabs)
       // Pre-cache auth details so mic click skips IPC round-trips
       if (hasVoice) {
         voice.warmup()
