@@ -191,7 +191,7 @@ interface ChatSidebarProps {
   onComposioConnected?: (toolkitSlug: string) => void
 }
 
-export function ChatSidebar({
+export const ChatSidebar = React.memo(function ChatSidebar({
   defaultWidth = DEFAULT_WIDTH,
   isOpen = true,
   isMaximized = false,
@@ -708,4 +708,4 @@ export function ChatSidebar({
       )}
     </div>
   )
-}
+})

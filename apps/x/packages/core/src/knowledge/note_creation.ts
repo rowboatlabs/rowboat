@@ -163,9 +163,9 @@ workspace-readFile({ path: "{source_file}" })
 
 **Meeting indicators:**
 - Has \`Attendees:\` field
-- Has \`Meeting:\` title
+<arg value>- Has \`Meeting:\` title
 - Transcript format with speaker labels
-- Source file path is under \`knowledge/Meetings/\` (e.g. \`knowledge/Meetings/granola/...\` or \`knowledge/Meetings/fireflies/...\`)
+- Source file path is under \`knowledge/Meetings/\` (e.g. \`knowledge/Meetings/granola/...\`)
 
 **Email indicators:**
 - Has \`From:\` and \`To:\` fields
@@ -832,7 +832,7 @@ One line summarizing this source's relevance to the entity:
 **Important:** Use canonical names with absolute paths from resolution map in all summaries:
 \`\`\`
 # Correct (uses absolute paths and source links):
-**2025-01-15** (meeting): [[People/Sarah Chen]] confirmed timeline with [[People/David Kim]]. Blocked on [[Topics/Security Compliance]]. See [[Meetings/fireflies/abc_Team Sync]]
+**2025-01-15** (meeting): [[People/Sarah Chen]] confirmed timeline with [[People/David Kim]]. Blocked on [[Topics/Security Compliance]]. See [[Meetings/granola/abc_Team Sync]]
 **2025-01-15** (email): [[People/Sarah Chen]] shared the contract draft. [View thread](https://mail.google.com/mail/#inbox/18d5a3b2c1e4f567)
 
 # Incorrect (uses variants or relative links, missing source links):

@@ -94,7 +94,6 @@ import { ConnectorsPopover } from "@/components/connectors-popover"
 import { HelpPopover } from "@/components/help-popover"
 import { SettingsDialog } from "@/components/settings-dialog"
 import { toast } from "@/lib/toast"
-import { useBilling } from "@/hooks/useBilling"
 import { ServiceEvent } from "@x/shared/src/service-events.js"
 import type { MeetingTranscriptionState } from "@/hooks/useMeetingTranscription"
 import z from "zod"
@@ -152,7 +151,6 @@ const RUN_STALE_MS = 2 * 60 * 60 * 1000
 const SERVICE_LABELS: Record<string, string> = {
   gmail: "Syncing Gmail",
   calendar: "Syncing Calendar",
-  fireflies: "Syncing Fireflies",
   granola: "Syncing Granola",
   graph: "Updating knowledge",
   voice_memo: "Processing voice memo",
@@ -432,22 +430,6 @@ export function SidebarContentPanel({
   const [connectorsOpen, setConnectorsOpen] = useState(false)
   const [openConnectorsAfterClose, setOpenConnectorsAfterClose] = useState(false)
   const connectorsButtonRef = useRef<HTMLButtonElement | null>(null)
-  const [isRowboatConnected, setIsRowboatConnected] = useState(false)
-  const [loggingIn, setLoggingIn] = useState(false)
-  const [appUrl, setAppUrl] = useState<string | null>(null)
-  const { billing } = useBilling(isRowboatConnected)
-
-  const handleRowboatLogin = useCallback(async () => {
-    try {
-      setLoggingIn(true)
-      const result = await window.ipc.invoke('oauth:connect', { provider: 'rowboat' })
-      if (!result.success) {
-        setLoggingIn(false)
-      }
-    } catch {
-      setLoggingIn(false)
-    }
-  }, [])
 
   useEffect(() => {
     let mounted = true
@@ -457,36 +439,21 @@ export function SidebarContentPanel({
         const result = await window.ipc.invoke('oauth:getState', null)
         const config = result.config || {}
         const hasError = Object.values(config).some((entry) => Boolean(entry?.error))
-        const connected = config['rowboat']?.connected ?? false
         if (mounted) {
           setHasOauthError(hasError)
-          setIsRowboatConnected(connected)
-          if (!hasError) {
-            setShowOauthAlert(true)
-          }
-        }
-        if (connected && mounted) {
-          try {
-            const account = await window.ipc.invoke('account:getRowboat', null)
-            if (mounted) setAppUrl(account.config?.appUrl ?? null)
-          } catch { /* ignore */ }
+          if (!hasError) setShowOauthAlert(true)
         }
       } catch (error) {
         console.error('Failed to fetch OAuth state:', error)
         if (mounted) {
           setHasOauthError(false)
-          setIsRowboatConnected(false)
           setShowOauthAlert(true)
         }
       }
     }
 
     refreshOauthError()
-    const cleanup = window.ipc.on('oauth:didConnect', () => {
-      refreshOauthError()
-      setLoggingIn(false)
-    })
-
+    const cleanup = window.ipc.on('oauth:didConnect', refreshOauthError)
     return () => {
       mounted = false
       cleanup()

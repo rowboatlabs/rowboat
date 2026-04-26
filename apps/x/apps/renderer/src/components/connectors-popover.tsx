@@ -140,10 +140,7 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
 
   const hasUnconnectedMeetingNotes = (() => {
     if (!isUnconnectedMode) return true
-    if (c.providers.includes('fireflies-ai')) {
-      const firefliesState = c.providerStates['fireflies-ai']
-      if (!firefliesState?.isConnected || c.providerStatus['fireflies-ai']?.error) return true
-    }
+    // Meeting notes removed
     return false
   })()
 
@@ -328,16 +325,8 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
                 </>
               )}
 
-              {/* Meeting Notes Section */}
-              {hasUnconnectedMeetingNotes && (
+              {hasUnconnectedNotes && (
                 <>
-                  <div className="px-2 py-1.5">
-                    <span className="text-xs font-medium text-muted-foreground">Meeting Notes</span>
-                  </div>
-
-                  {/* Fireflies */}
-                  {c.providers.includes('fireflies-ai') && renderOAuthProvider('fireflies-ai', 'Fireflies', <Mic className="size-4" />, 'AI meeting transcripts')}
-
                   <Separator className="my-2" />
                 </>
               )}

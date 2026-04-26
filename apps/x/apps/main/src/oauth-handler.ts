@@ -9,7 +9,6 @@ import { IOAuthRepo } from '@x/core/dist/auth/repo.js';
 import { IClientRegistrationRepo } from '@x/core/dist/auth/client-repo.js';
 import { triggerSync as triggerGmailSync } from '@x/core/dist/knowledge/sync_gmail.js';
 import { triggerSync as triggerCalendarSync } from '@x/core/dist/knowledge/sync_calendar.js';
-import { triggerSync as triggerFirefliesSync } from '@x/core/dist/knowledge/sync_fireflies.js';
 import { emitOAuthEvent } from './ipc.js';
 
 const REDIRECT_URI = 'http://localhost:8080/oauth/callback';
@@ -267,8 +266,6 @@ export async function connectProvider(provider: string, credentials?: { clientId
         if (provider === 'google') {
           triggerGmailSync();
           triggerCalendarSync();
-        } else if (provider === 'fireflies-ai') {
-          triggerFirefliesSync();
         }
 
         // Emit success event to renderer
