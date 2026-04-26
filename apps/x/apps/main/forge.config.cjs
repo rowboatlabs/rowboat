@@ -170,6 +170,53 @@ module.exports = {
             fs.mkdirSync(rendererDest, { recursive: true });
             fs.cpSync(rendererSrc, rendererDest, { recursive: true });
 
+            // Copy runtime-external packages and their transitive deps into .package/node_modules.
+            // These are loaded via _importDynamic at runtime and cannot be bundled
+            // by esbuild (doing so would pull pdfjs-dist DOM polyfills into the
+            // Electron main process). They must exist as real node_modules.
+            const runtimeRoots = ['pdf-parse', 'xlsx', 'papaparse', 'mammoth'];
+            const pnpmModules = path.join(__dirname, '../../node_modules/.pnpm');
+            const destModules = path.join(packageDir, 'node_modules');
+            fs.mkdirSync(destModules, { recursive: true });
+
+            // pnpm stores @scope/pkg as @scope+pkg@version in the .pnpm directory.
+            // Inside that versioned dir, the package lives at node_modules/@scope/pkg.
+            function pnpmDirName(pkg) { return pkg.replace('/', '+'); }
+
+            // Recursively collect all transitive + optional deps from the pnpm store.
+            // optionalDeps are included because @napi-rs/canvas (needed by pdfjs-dist)
+            // ships its native binaries as optional platform-specific packages.
+            function collectDeps(pkgName, visited = new Set()) {
+                if (visited.has(pkgName)) return visited;
+                visited.add(pkgName);
+                const dirName = pnpmDirName(pkgName);
+                const entries = fs.readdirSync(pnpmModules).filter(e => e.startsWith(`${dirName}@`));
+                if (!entries.length) return visited;
+                const pkgJson = path.join(pnpmModules, entries[0], 'node_modules', pkgName, 'package.json');
+                if (!fs.existsSync(pkgJson)) return visited;
+                const d = JSON.parse(fs.readFileSync(pkgJson, 'utf8'));
+                const allDeps = { ...d.dependencies, ...d.optionalDependencies };
+                for (const dep of Object.keys(allDeps)) collectDeps(dep, visited);
+                return visited;
+            }
+
+            const allPkgs = new Set();
+            for (const root of runtimeRoots) collectDeps(root, allPkgs);
+
+            for (const pkg of allPkgs) {
+                const dirName = pnpmDirName(pkg);
+                const entries = fs.readdirSync(pnpmModules).filter(e => e.startsWith(`${dirName}@`));
+                if (!entries.length) continue;
+                const pkgSrc = path.join(pnpmModules, entries[0], 'node_modules', pkg);
+                if (!fs.existsSync(pkgSrc)) continue;
+                // Scoped packages (@scope/pkg) need their parent dir created first
+                const pkgDestDir = path.join(destModules, path.dirname(pkg));
+                if (!fs.existsSync(pkgDestDir)) fs.mkdirSync(pkgDestDir, { recursive: true });
+                const pkgDest = path.join(destModules, pkg);
+                if (!fs.existsSync(pkgDest)) fs.cpSync(pkgSrc, pkgDest, { recursive: true });
+            }
+            console.log(`📦 Copied ${allPkgs.size} packages (parseFile runtime deps) → .package/node_modules/`);
+
             console.log('✅ All assets staged in .package/');
         },
     }
