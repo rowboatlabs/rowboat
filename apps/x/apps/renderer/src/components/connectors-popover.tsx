@@ -138,19 +138,7 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
     return false
   })()
 
-  const hasUnconnectedMeetingNotes = (() => {
-    if (!isUnconnectedMode) return true
-    // Meeting notes removed
-    return false
-  })()
-
-  const isRowboatUnconnected = (() => {
-    if (!c.providers.includes('rowboat')) return false
-    const rowboatState = c.providerStates['rowboat']
-    return !rowboatState?.isConnected || rowboatState?.isLoading
-  })()
-
-  const allConnected = isUnconnectedMode && !isRowboatUnconnected && !hasUnconnectedEmailCalendar && !hasUnconnectedMeetingNotes
+  const allConnected = isUnconnectedMode && !hasUnconnectedEmailCalendar
 
   return (
     <>
@@ -325,11 +313,6 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
                 </>
               )}
 
-              {hasUnconnectedNotes && (
-                <>
-                  <Separator className="my-2" />
-                </>
-              )}
             </>
           )}
         </div>
