@@ -21,8 +21,8 @@ export interface LlmModelOption {
 }
 
 export function useOnboardingState(open: boolean, onComplete: () => void) {
-  const [currentStep, setCurrentStep] = useState<Step>(0)
-  const [onboardingPath, setOnboardingPath] = useState<OnboardingPath>(null)
+  const [currentStep, setCurrentStep] = useState<Step>(2)
+  const [onboardingPath, setOnboardingPath] = useState<OnboardingPath>('byok')
 
   // LLM setup state
   const [llmProvider, setLlmProvider] = useState<LlmProviderFlavor>("openai")
@@ -35,7 +35,7 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
     google: { apiKey: "", baseURL: "", model: "", knowledgeGraphModel: "", meetingNotesModel: "", trackBlockModel: "" },
     openrouter: { apiKey: "", baseURL: "", model: "", knowledgeGraphModel: "", meetingNotesModel: "", trackBlockModel: "" },
     aigateway: { apiKey: "", baseURL: "", model: "", knowledgeGraphModel: "", meetingNotesModel: "", trackBlockModel: "" },
-    ollama: { apiKey: "", baseURL: "http://localhost:11434", model: "", knowledgeGraphModel: "", meetingNotesModel: "", trackBlockModel: "" },
+    ollama: { apiKey: "", baseURL: "https://ollama.com", model: "", knowledgeGraphModel: "", meetingNotesModel: "", trackBlockModel: "" },
     "openai-compatible": { apiKey: "", baseURL: "http://localhost:1234/v1", model: "", knowledgeGraphModel: "", meetingNotesModel: "", trackBlockModel: "" },
   })
   const [testState, setTestState] = useState<{ status: "idle" | "testing" | "success" | "error"; error?: string }>({
@@ -92,7 +92,7 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
   )
 
   const activeConfig = providerConfigs[llmProvider]
-  const showApiKey = llmProvider === "openai" || llmProvider === "anthropic" || llmProvider === "google" || llmProvider === "openrouter" || llmProvider === "aigateway" || llmProvider === "openai-compatible"
+  const showApiKey = llmProvider === "openai" || llmProvider === "anthropic" || llmProvider === "google" || llmProvider === "openrouter" || llmProvider === "aigateway" || llmProvider === "openai-compatible" || llmProvider === "ollama"
   const requiresApiKey = llmProvider === "openai" || llmProvider === "anthropic" || llmProvider === "google" || llmProvider === "openrouter" || llmProvider === "aigateway"
   const requiresBaseURL = llmProvider === "ollama" || llmProvider === "openai-compatible"
   const showBaseURL = llmProvider === "ollama" || llmProvider === "openai-compatible" || llmProvider === "aigateway"
@@ -393,35 +393,17 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
     await startGoogleCalendarConnect()
   }, [startGoogleCalendarConnect])
 
-  // New step flow:
-  // Rowboat path: 0 (welcome) → 2 (connect) → 3 (done)
-  // BYOK path: 0 (welcome) → 1 (llm setup) → 2 (connect) → 3 (done)
+  // Step flow: Connect (step 2) → Done (step 3)
+  // Model config is pre-configured, so model setup step is skipped
   const handleNext = useCallback(() => {
-    if (currentStep === 0) {
-      if (onboardingPath === 'byok') {
-        setCurrentStep(1)
-      } else {
-        setCurrentStep(2)
-      }
-    } else if (currentStep === 1) {
-      setCurrentStep(2)
-    } else if (currentStep === 2) {
+    if (currentStep === 2) {
       setCurrentStep(3)
     }
-  }, [currentStep, onboardingPath])
+  }, [currentStep])
 
   const handleBack = useCallback(() => {
-    if (currentStep === 1) {
-      setCurrentStep(0)
-      setOnboardingPath(null)
-    } else if (currentStep === 2) {
-      if (onboardingPath === 'rowboat') {
-        setCurrentStep(0)
-      } else {
-        setCurrentStep(1)
-      }
-    }
-  }, [currentStep, onboardingPath])
+    // No back from Connect Accounts (first visible step)
+  }, [])
 
   const handleComplete = useCallback(() => {
     onComplete()

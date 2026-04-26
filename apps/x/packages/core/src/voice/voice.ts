@@ -1,9 +1,6 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { isSignedIn } from '../account/account.js';
-import { getAccessToken } from '../auth/tokens.js';
 import { WorkDir } from '../config/config.js';
-import { API_URL } from '../config/env.js';
 
 export interface VoiceConfig {
     deepgram: { apiKey: string } | null;
@@ -34,32 +31,17 @@ export async function getVoiceConfig(): Promise<VoiceConfig> {
 
 export async function synthesizeSpeech(text: string): Promise<{ audioBase64: string; mimeType: string }> {
     const config = await getVoiceConfig();
-    const signedIn = await isSignedIn();
 
-    let url: string;
-    let headers: Record<string, string>;
-
-    if (signedIn) {
-        const voiceId = config.elevenlabs?.voiceId || 'UgBBYS2sOqTuMpoF3BR0';
-        const accessToken = await getAccessToken();
-        url = `${API_URL}/v1/voice/text-to-speech/${voiceId}`;
-        headers = {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-        };
-        console.log('[voice] synthesizing speech via Rowboat proxy, text length:', text.length, 'voiceId:', voiceId);
-    } else {
-        if (!config.elevenlabs) {
-            throw new Error(`ElevenLabs not configured. Create ${path.join(WorkDir, 'config', 'elevenlabs.json')} with { "apiKey": "<your-key>" }`);
-        }
-        const voiceId = config.elevenlabs.voiceId || 'UgBBYS2sOqTuMpoF3BR0';
-        url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`;
-        headers = {
-            'xi-api-key': config.elevenlabs.apiKey,
-            'Content-Type': 'application/json',
-        };
-        console.log('[voice] synthesizing speech via ElevenLabs, text length:', text.length, 'voiceId:', voiceId);
+    if (!config.elevenlabs) {
+        throw new Error(`ElevenLabs not configured. Create ${path.join(WorkDir, 'config', 'elevenlabs.json')} with { "apiKey": "<your-key>" }`);
     }
+    const voiceId = config.elevenlabs.voiceId || 'UgBBYS2sOqTuMpoF3BR0';
+    const url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`;
+    const headers: Record<string, string> = {
+        'xi-api-key': config.elevenlabs.apiKey,
+        'Content-Type': 'application/json',
+    };
+    console.log('[voice] synthesizing speech via ElevenLabs, text length:', text.length, 'voiceId:', voiceId);
 
     const response = await fetch(url, {
         method: 'POST',

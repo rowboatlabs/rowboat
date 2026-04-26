@@ -22,8 +22,6 @@ import type { ToolContext } from "./exec-tool.js";
 import { generateText } from "ai";
 import { createProvider } from "../../models/models.js";
 import { getDefaultModelAndProvider, resolveProviderConfig } from "../../models/defaults.js";
-import { isSignedIn } from "../../account/account.js";
-import { getAccessToken } from "../../auth/tokens.js";
 import { API_URL } from "../../config/env.js";
 import { updateContent, updateTrackBlock } from "../../knowledge/track/fileops.js";
 import type { IBrowserControlService } from "../browser-control/service.js";
@@ -1178,7 +1176,6 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
             category: z.enum(['general', 'company', 'research paper', 'news', 'tweet', 'personal site', 'financial report', 'people']).optional().describe('Search category. Defaults to "general" which searches the entire web. Only use a specific category when the query is clearly about that type (e.g. "research paper" for academic papers, "company" for company info). For everyday queries like weather, restaurants, prices, how-to, etc., use "general" or omit entirely.'),
         }),
         isAvailable: async () => {
-            if (await isSignedIn()) return true;
             try {
                 const exaConfigPath = path.join(WorkDir, 'config', 'exa-search.json');
                 const raw = await fs.readFile(exaConfigPath, 'utf8');
@@ -1207,20 +1204,8 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
 
                 let response: Response;
 
-                if (await isSignedIn()) {
-                    // Use proxy
-                    const accessToken = await getAccessToken();
-                    response = await fetch(`${API_URL}/v1/search/exa`, {
-                        method: 'POST',
-                        headers: {
-                            'Authorization': `Bearer ${accessToken}`,
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify(reqBody),
-                    });
-                } else {
-                    // Read API key from config
-                    const exaConfigPath = path.join(WorkDir, 'config', 'exa-search.json');
+                // Read API key from config
+                const exaConfigPath = path.join(WorkDir, 'config', 'exa-search.json');
 
                     let apiKey: string;
                     try {
@@ -1249,7 +1234,6 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                         },
                         body: JSON.stringify(reqBody),
                     });
-                }
 
                 if (!response.ok) {
                     const text = await response.text();

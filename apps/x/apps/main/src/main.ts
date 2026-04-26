@@ -203,16 +203,9 @@ app.whenReady().then(async () => {
     registerAppProtocol();
   }
 
-  // Initialize auto-updater (only in production)
-  if (app.isPackaged) {
-    updateElectronApp({
-      updateSource: {
-        type: UpdateSourceType.ElectronPublicUpdateService,
-        repo: "rowboatlabs/rowboat",
-      },
-      notifyUser: true, // Shows native dialog when update is available
-    });
-  }
+  // Auto-updater disabled (Rowboat cloud dependencies removed)
+  // To re-enable, point this to your own fork:
+  // repo: "gokulb20/rowboat"
 
   // Ensure agent-slack CLI is available
   try {

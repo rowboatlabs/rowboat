@@ -1,37 +1,9 @@
-import posthog from 'posthog-js'
+// Analytics disabled — all functions are no-ops
 
-export function chatSessionCreated(runId: string) {
-  posthog.capture('chat_session_created', { run_id: runId })
-}
-
-export function chatMessageSent(props: {
-  voiceInput?: boolean
-  voiceOutput?: string
-  searchEnabled?: boolean
-}) {
-  posthog.capture('chat_message_sent', {
-    voice_input: props.voiceInput ?? false,
-    voice_output: props.voiceOutput ?? false,
-    search_enabled: props.searchEnabled ?? false,
-  })
-}
-
-export function oauthConnected(provider: string) {
-  posthog.capture('oauth_connected', { provider })
-}
-
-export function oauthDisconnected(provider: string) {
-  posthog.capture('oauth_disconnected', { provider })
-}
-
-export function voiceInputStarted() {
-  posthog.capture('voice_input_started')
-}
-
-export function searchExecuted(types: string[]) {
-  posthog.capture('search_executed', { types })
-}
-
-export function noteExported(format: string) {
-  posthog.capture('note_exported', { format })
-}
+export function chatSessionCreated(_runId: string) {}
+export function chatMessageSent(_props: { voiceInput?: boolean; voiceOutput?: string; searchEnabled?: boolean }) {}
+export function oauthConnected(_provider: string) {}
+export function oauthDisconnected(_provider: string) {}
+export function voiceInputStarted() {}
+export function searchExecuted(_types: string[]) {}
+export function noteExported(_format: string) {}

@@ -66,10 +66,9 @@ const providerDisplayNames: Record<string, string> = {
   openrouter: 'OpenRouter',
   aigateway: 'AI Gateway',
   'openai-compatible': 'OpenAI-Compatible',
-  rowboat: 'Rowboat',
 }
 
-type ProviderName = "openai" | "anthropic" | "google" | "openrouter" | "aigateway" | "ollama" | "openai-compatible" | "rowboat"
+type ProviderName = "openai" | "anthropic" | "google" | "openrouter" | "aigateway" | "ollama" | "openai-compatible"
 
 interface ConfiguredModel {
   provider: ProviderName
@@ -168,7 +167,6 @@ function ChatInputInner({
   const [lockedModel, setLockedModel] = useState<SelectedModel | null>(null)
   const [searchEnabled, setSearchEnabled] = useState(false)
   const [searchAvailable, setSearchAvailable] = useState(false)
-  const [isRowboatConnected, setIsRowboatConnected] = useState(false)
 
   // When a run exists, freeze the dropdown to the run's resolved model+provider.
   useEffect(() => {
@@ -186,37 +184,10 @@ function ChatInputInner({
     return () => { cancelled = true }
   }, [runId])
 
-  // Check Rowboat sign-in state
-  useEffect(() => {
-    window.ipc.invoke('oauth:getState', null).then((result) => {
-      setIsRowboatConnected(result.config?.rowboat?.connected ?? false)
-    }).catch(() => setIsRowboatConnected(false))
-  }, [isActive])
-
-  // Update sign-in state when OAuth events fire
-  useEffect(() => {
-    const cleanup = window.ipc.on('oauth:didConnect', () => {
-      window.ipc.invoke('oauth:getState', null).then((result) => {
-        setIsRowboatConnected(result.config?.rowboat?.connected ?? false)
-      }).catch(() => setIsRowboatConnected(false))
-    })
-    return cleanup
-  }, [])
-
   // Load the list of models the user can choose from.
-  // Signed-in: gateway model list. Signed-out: providers configured in models.json.
+  // Always reads from models.json config (BYOK mode).
   const loadModelConfig = useCallback(async () => {
     try {
-      if (isRowboatConnected) {
-        const listResult = await window.ipc.invoke('models:list', null)
-        const rowboatProvider = listResult.providers?.find(
-          (p: { id: string }) => p.id === 'rowboat'
-        )
-        const models: ConfiguredModel[] = (rowboatProvider?.models || []).map(
-          (m: { id: string }) => ({ provider: 'rowboat', model: m.id })
-        )
-        setConfiguredModels(models)
-      } else {
         const result = await window.ipc.invoke('workspace:readFile', { path: 'config/models.json' })
         const parsed = JSON.parse(result.data)
         const models: ConfiguredModel[] = []
@@ -234,15 +205,14 @@ function ChatInputInner({
           }
         }
         setConfiguredModels(models)
-      }
     } catch {
       // No config yet
     }
-  }, [isRowboatConnected])
+  }, [])
 
   useEffect(() => {
     loadModelConfig()
-  }, [isActive, loadModelConfig])
+  }, [loadModelConfig])
 
   // Reload when model config changes (e.g. from settings dialog)
   useEffect(() => {
@@ -251,13 +221,9 @@ function ChatInputInner({
     return () => window.removeEventListener('models-config-changed', handler)
   }, [loadModelConfig])
 
-  // Check search tool availability (exa or signed-in via gateway)
+  // Check search tool availability (exa)
   useEffect(() => {
     const checkSearch = async () => {
-      if (isRowboatConnected) {
-        setSearchAvailable(true)
-        return
-      }
       let available = false
       try {
         const raw = await window.ipc.invoke('workspace:readFile', { path: 'config/exa-search.json' })
@@ -267,7 +233,7 @@ function ChatInputInner({
       setSearchAvailable(available)
     }
     checkSearch()
-  }, [isActive, isRowboatConnected])
+  }, [isActive])
 
   // Selecting a model affects only the *next* run created from this tab.
   // Once a run exists, model is frozen on the run and the dropdown is read-only.
