@@ -281,6 +281,17 @@ app.whenReady().then(async () => {
     console.error('[main] Failed to seed Composio API key:', e);
   }
 
+  // seed Supermemory API key from environment if not already configured
+  try {
+    const sm = await import('@x/core/dist/supermemory/client.js');
+    if (!sm.getApiKey() && process.env.SUPERMEMORY_API_KEY) {
+      sm.setApiKey(process.env.SUPERMEMORY_API_KEY);
+      console.log('[main] Seeded Supermemory API key from environment');
+    }
+  } catch (e) {
+    console.error('[main] Failed to seed Supermemory API key:', e);
+  }
+
   // start granola sync — only if configured
   if (fs.existsSync(path.join(WorkDir, 'config', 'granola.json'))) {
     initGranolaSync();

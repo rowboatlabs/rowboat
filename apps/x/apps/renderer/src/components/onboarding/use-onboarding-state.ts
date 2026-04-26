@@ -21,7 +21,7 @@ export interface LlmModelOption {
 }
 
 export function useOnboardingState(open: boolean, onComplete: () => void) {
-  const [currentStep, setCurrentStep] = useState<Step>(2)
+  const [currentStep, setCurrentStep] = useState<Step>(3)
   const [onboardingPath, setOnboardingPath] = useState<OnboardingPath>('byok')
 
   // LLM setup state

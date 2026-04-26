@@ -589,6 +589,24 @@ export function setupIpcHandlers() {
     'composio:use-composio-for-google-calendar': async () => {
       return composioHandler.useComposioForGoogleCalendar();
     },
+    // Supermemory integration handlers
+    'supermemory:is-configured': async () => {
+      const { isConfigured } = await import('@x/core/dist/supermemory/client.js');
+      return { configured: await isConfigured() };
+    },
+    'supermemory:set-api-key': async (_event, args) => {
+      try {
+        const { setApiKey } = await import('@x/core/dist/supermemory/client.js');
+        setApiKey(args.apiKey);
+        return { success: true };
+      } catch (e) {
+        return { success: false, error: e instanceof Error ? e.message : 'Failed to save' };
+      }
+    },
+    'supermemory:test-connection': async () => {
+      const { testConnection } = await import('@x/core/dist/supermemory/client.js');
+      return { success: await testConnection() };
+    },
     // Agent schedule handlers
     'agent-schedule:getConfig': async () => {
       const repo = container.resolve<IAgentScheduleRepo>('agentScheduleRepo');
