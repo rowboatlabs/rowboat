@@ -54,7 +54,7 @@ import { Button } from "@/components/ui/button"
 import { Toaster } from "@/components/ui/sonner"
 import { stripKnowledgePrefix, toKnowledgePath, wikiLabel } from '@/lib/wiki-links'
 import { splitFrontmatter, joinFrontmatter } from '@/lib/frontmatter'
-const OnboardingModal = React.lazy(() => import('@/components/onboarding'))
+const OnboardingModal = React.lazy(() => import('@/components/onboarding').then(m => ({ default: m.OnboardingModal })))
 import { CommandPalette, type CommandPaletteContext, type CommandPaletteMention } from '@/components/search-dialog'
 import { TrackModal } from '@/components/track-modal'
 import { BackgroundTaskDetail } from '@/components/background-task-detail'

@@ -107,13 +107,13 @@ export function ConnectAccountsStep({ state }: ConnectAccountsStepProps) {
         </div>
       ) : (
         <div className="space-y-6">
-          {/* Email & Calendar */}
-          {(useComposioForGoogle || useComposioForGoogleCalendar || providers.includes('google')) && (
+          {/* Email & Calendar (via Composio only) */}
+          {(useComposioForGoogle || useComposioForGoogleCalendar) && (
             <div className="space-y-3">
               <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                 Email & Calendar
               </span>
-              {useComposioForGoogle ? (
+              {useComposioForGoogle && (
                 <ProviderCard
                   name="Gmail"
                   description="Read emails for context and drafts."
@@ -122,17 +122,6 @@ export function ConnectAccountsStep({ state }: ConnectAccountsStepProps) {
                   iconColor="text-red-500"
                   providerState={{ isConnected: gmailConnected, isLoading: gmailLoading, isConnecting: gmailConnecting }}
                   onConnect={handleConnectGmail}
-                  index={cardIndex++}
-                />
-              ) : (
-                <ProviderCard
-                  name="Google"
-                  description="Rowboat uses your email and calendar to provide personalized, context-aware assistance"
-                  icon={<GmailIcon />}
-                  iconBg="bg-red-500/10"
-                  iconColor="text-red-500"
-                  providerState={providerStates['google']}
-                  onConnect={() => handleConnect('google')}
                   index={cardIndex++}
                 />
               )}
