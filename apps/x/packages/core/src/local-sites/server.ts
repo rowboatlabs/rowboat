@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import type { Server } from 'node:http';
 import chokidar, { type FSWatcher } from 'chokidar';
@@ -679,6 +680,54 @@ function createLocalSitesApp(): express.Express {
         res.status(404).json({ error: 'File not found' });
       } else if (err.code === 'EISDIR') {
         res.status(400).json({ error: 'Is a directory' });
+      } else {
+        res.status(500).json({ error: err.message });
+      }
+    });
+  });
+
+  // Local file serving — lets the embedded browser view any local file
+  // via http://localhost:3210/local-file?p=<url-encoded-absolute-path>
+  // Resolves ~ to home directory. Only serves files with viewable extensions.
+  const LOCAL_FILE_ALLOWED_EXTENSIONS = new Set([
+    '.pdf', '.html', '.htm', '.svg',
+    '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.ico',
+    '.csv', '.json', '.xml', '.txt', '.md',
+  ]);
+
+  app.get('/local-file', (req, res) => {
+    const rawPath = req.query.p as string;
+    if (!rawPath) {
+      res.status(400).json({ error: 'Missing ?p= parameter' });
+      return;
+    }
+
+    // Resolve ~ to home directory
+    const resolvedPath = rawPath.startsWith('~')
+      ? path.join(os.homedir(), rawPath.slice(1))
+      : path.resolve(rawPath);
+
+    // Only serve files with allowed extensions
+    const ext = path.extname(resolvedPath).toLowerCase();
+    if (!LOCAL_FILE_ALLOWED_EXTENSIONS.has(ext)) {
+      res.status(403).json({ error: 'File type not supported' });
+      return;
+    }
+
+    // Only serve regular files (no directories, symlinks are fine)
+    fs.promises.stat(resolvedPath).then((stat) => {
+      if (!stat.isFile()) {
+        res.status(400).json({ error: 'Not a regular file' });
+        return;
+      }
+
+      const mime = MIME_TYPES[ext] || 'application/octet-stream';
+      res.setHeader('Content-Type', mime);
+      res.setHeader('Content-Disposition', `inline; filename="${path.basename(resolvedPath)}"`);
+      fs.createReadStream(resolvedPath).pipe(res);
+    }).catch((err: NodeJS.ErrnoException) => {
+      if (err.code === 'ENOENT') {
+        res.status(404).json({ error: 'File not found' });
       } else {
         res.status(500).json({ error: err.message });
       }
