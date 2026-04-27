@@ -665,8 +665,12 @@ function createLocalSitesApp(): express.Express {
 
   // Markdown viewer — renders .md files as styled HTML in the embedded browser
   // via http://localhost:3210/md-view/<relative-path>
-  app.get('/md-view/*', (req, res) => {
-    const relPath = req.path.replace(/^\/+/, '');
+  app.get('/md-view', (req, res) => {
+    const relPath = (req.query.p as string || '').replace(/^\/+/, '');
+    if (!relPath) {
+      res.status(400).json({ error: 'Missing ?p= parameter' });
+      return;
+    }
     const absPath = path.join(WorkDir, relPath);
 
     if (!absPath.startsWith(WorkDir)) {
@@ -745,9 +749,18 @@ function createLocalSitesApp(): express.Express {
     res.json(config);
   });
 
-  app.get('/vault/:alias/*', (req, res) => {
-    const alias = req.params.alias;
-    const relPath = req.path.replace(/^\/vault\/[^/]+\/?/, '');
+  app.use('/vault', (req, res) => {
+    // Route: /vault/<alias>/<relative-path>
+    // Also: /vault.json (handled by the GET route above)
+    if (req.path === '' || req.path === '/') {
+      res.status(400).json({ error: 'Usage: /vault/<alias>/<path>' });
+      return;
+    }
+
+    // Extract alias and relative path from the URL
+    const parts = req.path.replace(/^\/+/, '').split('/');
+    const alias = parts[0];
+    const relPath = parts.slice(1).join('/');
     const config = loadVaultConfig();
     const absPath = resolveVaultPath(alias, relPath, config);
 

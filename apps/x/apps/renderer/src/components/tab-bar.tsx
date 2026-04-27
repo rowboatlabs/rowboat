@@ -37,10 +37,7 @@ export function TabBar<T>({
   return (
     <div
       className={cn(
-        'flex flex-1 self-stretch min-w-0',
-        layout === 'scroll'
-          ? 'overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
-          : 'overflow-hidden'
+        'flex flex-1 self-stretch min-w-0 overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
       )}
     >
       {tabs.map((tab, index) => {
@@ -57,13 +54,12 @@ export function TabBar<T>({
               type="button"
               onClick={() => onSwitchTab(tabId)}
               className={cn(
-                'titlebar-no-drag group/tab relative flex items-center gap-1.5 px-3 self-stretch text-xs transition-colors',
-                layout === 'scroll' ? 'min-w-[140px] max-w-[240px]' : 'min-w-0 max-w-[220px]',
+                'titlebar-no-drag group/tab relative flex items-center gap-1.5 px-3 self-stretch text-xs transition-colors min-w-0',
                 isActive
                   ? 'bg-background text-foreground'
                   : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
               )}
-              style={layout === 'scroll' ? { flex: '0 0 auto' } : { flex: '1 1 0px' }}
+              style={{ flex: '1 1 0px' }}
             >
               <span className="truncate flex-1 text-left">{title}</span>
               {(allowSingleTabClose || tabs.length > 1) && (

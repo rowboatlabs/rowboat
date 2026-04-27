@@ -12,13 +12,10 @@ import {
   FilePlus,
   Folder,
   FolderPlus,
-  Globe,
   HelpCircle,
-  Home,
   Mic,
   Network,
   Pencil,
-  Radio,
   SearchIcon,
   SquarePen,
   Table2,
@@ -81,7 +78,6 @@ import { HelpPopover } from "@/components/help-popover"
 import { SettingsDialog } from "@/components/settings-dialog"
 import { toast } from "@/lib/toast"
 import { ServiceEvent } from "@x/shared/src/service-events.js"
-import type { MeetingTranscriptionState } from "@/hooks/useMeetingTranscription"
 import z from "zod"
 
 interface TreeNode {
@@ -166,15 +162,6 @@ type SidebarContentPanelProps = {
   selectedBackgroundTask?: string | null
   onNewChat?: () => void
   onOpenSearch?: () => void
-  meetingState?: MeetingTranscriptionState
-  meetingSummarizing?: boolean
-  meetingAvailable?: boolean
-  onToggleMeeting?: () => void
-  isBrowserOpen?: boolean
-  onToggleBrowser?: () => void
-  isMeetingsOpen?: boolean
-  onOpenMeetings?: () => void
-  onOpenHome?: () => void
 } & React.ComponentProps<typeof Sidebar>
 
 const sectionTabs: { id: ActiveSection; label: string }[] = [
@@ -401,15 +388,6 @@ export function SidebarContentPanel({
   selectedBackgroundTask,
   onNewChat,
   onOpenSearch,
-  meetingState = 'idle',
-  meetingSummarizing = false,
-  meetingAvailable = false,
-  onToggleMeeting,
-  isBrowserOpen = false,
-  onToggleBrowser,
-  isMeetingsOpen = false,
-  onOpenMeetings,
-  onOpenHome,
   ...props
 }: SidebarContentPanelProps) {
   const { activeSection, setActiveSection } = useSidebarSection()
@@ -470,16 +448,6 @@ export function SidebarContentPanel({
         </div>
         {/* Quick action buttons */}
         <div className="titlebar-no-drag flex flex-col gap-0.5 px-2 pb-1">
-          {onOpenHome && (
-            <button
-              type="button"
-              onClick={onOpenHome}
-              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
-            >
-              <Home className="size-4" />
-              <span>Home</span>
-            </button>
-          )}
           {onNewChat && (
             <button
               type="button"
@@ -498,66 +466,6 @@ export function SidebarContentPanel({
             >
               <SearchIcon className="size-4" />
               <span>Search</span>
-            </button>
-          )}
-          {meetingAvailable && onToggleMeeting && (
-            <button
-              type="button"
-              onClick={onToggleMeeting}
-              disabled={meetingState === 'connecting' || meetingState === 'stopping' || meetingSummarizing}
-              className={cn(
-                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors disabled:pointer-events-none",
-                meetingState === 'recording'
-                  ? "text-red-500 hover:bg-sidebar-accent"
-                  : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-              )}
-            >
-              {meetingSummarizing || meetingState === 'connecting' ? (
-                <LoaderIcon className="size-4 animate-spin" />
-              ) : meetingState === 'recording' ? (
-                <Square className="size-4 animate-pulse" />
-              ) : (
-                <Radio className="size-4" />
-              )}
-              <span>
-                {meetingSummarizing
-                  ? 'Generating notes…'
-                  : meetingState === 'connecting'
-                    ? 'Starting…'
-                    : meetingState === 'recording'
-                      ? 'Stop recording'
-                      : 'Take meeting notes'}
-              </span>
-            </button>
-          )}
-          {onToggleBrowser && (
-            <button
-              type="button"
-              onClick={onToggleBrowser}
-              className={cn(
-                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
-                isBrowserOpen
-                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                  : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-              )}
-            >
-              <Globe className="size-4" />
-              <span>Run browser task</span>
-            </button>
-          )}
-          {onOpenMeetings && (
-            <button
-              type="button"
-              onClick={onOpenMeetings}
-              className={cn(
-                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
-                isMeetingsOpen
-                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                  : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-              )}
-            >
-              <Mic className="size-4" />
-              <span>Meetings</span>
             </button>
           )}
         </div>
