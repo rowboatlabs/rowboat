@@ -14,6 +14,7 @@ import {
   FolderPlus,
   Globe,
   HelpCircle,
+  Home,
   Mic,
   Network,
   Pencil,
@@ -173,6 +174,7 @@ type SidebarContentPanelProps = {
   onToggleBrowser?: () => void
   isMeetingsOpen?: boolean
   onOpenMeetings?: () => void
+  onOpenHome?: () => void
 } & React.ComponentProps<typeof Sidebar>
 
 const sectionTabs: { id: ActiveSection; label: string }[] = [
@@ -407,6 +409,7 @@ export function SidebarContentPanel({
   onToggleBrowser,
   isMeetingsOpen = false,
   onOpenMeetings,
+  onOpenHome,
   ...props
 }: SidebarContentPanelProps) {
   const { activeSection, setActiveSection } = useSidebarSection()
@@ -467,6 +470,16 @@ export function SidebarContentPanel({
         </div>
         {/* Quick action buttons */}
         <div className="titlebar-no-drag flex flex-col gap-0.5 px-2 pb-1">
+          {onOpenHome && (
+            <button
+              type="button"
+              onClick={onOpenHome}
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+            >
+              <Home className="size-4" />
+              <span>Home</span>
+            </button>
+          )}
           {onNewChat && (
             <button
               type="button"

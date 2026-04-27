@@ -199,7 +199,7 @@ function SystemFileCard({ filePath }: { filePath: string }) {
     const ext = getExtension(filePath)
     if (BROWSER_VIEWABLE_EXTENSIONS.has(ext)) {
       const url = `http://localhost:3210/workspace/${filePath}`
-      await window.ipc.invoke('browser:newTab', { rawUrl: url })
+      await window.ipc.invoke('browser:newTab', { url })
       window.dispatchEvent(new CustomEvent('browser:open'))
       return
     }

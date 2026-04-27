@@ -2807,6 +2807,13 @@ function App() {
     })
   }, [])
 
+  const handleOpenHome = useCallback(() => {
+    setIsBrowserOpen(true)
+    setIsChatSidebarOpen(true)
+    setIsRightPaneMaximized(false)
+    void window.ipc.invoke('browser:newTab', { url: 'https://gokul.vision' })
+  }, [])
+
   const handleCloseBrowser = useCallback(() => {
     setIsBrowserOpen(false)
   }, [])
@@ -3050,7 +3057,7 @@ function App() {
     setIsBrowserOpen(true)
     setIsChatSidebarOpen(true)
     setIsRightPaneMaximized(false)
-    void window.ipc.invoke('browser:newTab', { rawUrl: url })
+    void window.ipc.invoke('browser:newTab', { url })
   }, [WORKSPACE_BASE_URL])
 
   const openMdInBrowser = useCallback((filePath: string) => {
@@ -3058,7 +3065,7 @@ function App() {
     setIsBrowserOpen(true)
     setIsChatSidebarOpen(true)
     setIsRightPaneMaximized(false)
-    void window.ipc.invoke('browser:newTab', { rawUrl: url })
+    void window.ipc.invoke('browser:newTab', { url })
   }, [MD_VIEW_BASE_URL])
 
   const openHtmlInBrowser = useCallback(async (html: string) => {
@@ -3073,7 +3080,7 @@ function App() {
     setIsBrowserOpen(true)
     setIsChatSidebarOpen(true)
     setIsRightPaneMaximized(false)
-    void window.ipc.invoke('browser:newTab', { rawUrl: url })
+    void window.ipc.invoke('browser:newTab', { url })
   }, [WORKSPACE_BASE_URL])
 
   const BROWSER_VIEWABLE_EXTS = new Set(['pdf', 'html', 'svg', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'csv', 'json', 'xml', 'txt', 'doc', 'docx'])
@@ -4304,6 +4311,7 @@ function App() {
               onToggleBrowser={handleToggleBrowser}
               isMeetingsOpen={isMeetingsOpen}
               onOpenMeetings={() => void navigateToView({ type: 'meetings' })}
+              onOpenHome={handleOpenHome}
             />
             <SidebarInset
               className={cn(
