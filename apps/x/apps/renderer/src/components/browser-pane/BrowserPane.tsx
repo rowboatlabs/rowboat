@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, Loader2, Plus, RotateCw, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Loader2, RotateCw, X } from 'lucide-react'
 
-import { TabBar } from '@/components/tab-bar'
 import { cn } from '@/lib/utils'
 
 /**
@@ -267,23 +266,6 @@ export function BrowserPane({ onClose }: BrowserPaneProps) {
     }
   }, [syncView])
 
-  const handleNewTab = useCallback(() => {
-    void window.ipc.invoke('browser:newTab', {}).then((res) => {
-      const result = res as { ok: boolean; error?: string }
-      if (!result.ok && result.error) {
-        console.error('browser:newTab failed', result.error)
-      }
-    })
-  }, [])
-
-  const handleSwitchTab = useCallback((tabId: string) => {
-    void window.ipc.invoke('browser:switchTab', { tabId })
-  }, [])
-
-  const handleCloseTab = useCallback((tabId: string) => {
-    void window.ipc.invoke('browser:closeTab', { tabId })
-  }, [])
-
   const handleSubmitAddress = useCallback((e: React.FormEvent) => {
     e.preventDefault()
     const trimmed = addressValue.trim()
@@ -310,26 +292,6 @@ export function BrowserPane({ onClose }: BrowserPaneProps) {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
-      <div className="flex h-9 shrink-0 items-stretch border-b border-border bg-sidebar">
-        <TabBar
-          tabs={state.tabs}
-          activeTabId={state.activeTabId ?? ''}
-          getTabTitle={getBrowserTabTitle}
-          getTabId={(tab) => tab.id}
-          onSwitchTab={handleSwitchTab}
-          onCloseTab={handleCloseTab}
-          layout="scroll"
-        />
-        <button
-          type="button"
-          onClick={handleNewTab}
-          className="flex h-9 w-9 shrink-0 items-center justify-center border-l border-border text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          aria-label="New browser tab"
-        >
-          <Plus className="size-4" />
-        </button>
-      </div>
-
       <div
         className="flex h-10 shrink-0 items-center gap-1 border-b border-border bg-sidebar px-2"
         style={{ minHeight: CHROME_HEIGHT }}

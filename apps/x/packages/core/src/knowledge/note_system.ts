@@ -158,7 +158,7 @@ const DEFAULT_NOTE_TYPE_DEFINITIONS: NoteTypeDefinition[] = [
     folder: "Meetings",
     template: "",
     extractionGuide:
-      "Look for: meeting title, date, attendees, source (granola or fireflies), duration, topics discussed",
+      "Look for: meeting title, date, attendees, source (granola), duration, topics discussed",
   },
 ];
 

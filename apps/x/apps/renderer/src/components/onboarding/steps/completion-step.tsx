@@ -98,17 +98,6 @@ export function CompletionStep({ state }: CompletionStepProps) {
                 <span>Google (Email & Calendar)</span>
               </motion.div>
             )}
-            {connectedProviders.includes('fireflies-ai') && (
-              <motion.div
-                initial={{ opacity: 0, x: -8 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.55 }}
-                className="flex items-center gap-2 text-sm text-muted-foreground"
-              >
-                <CheckCircle2 className="size-4 text-green-600 dark:text-green-400" />
-                <span>Fireflies (Meeting transcripts)</span>
-              </motion.div>
-            )}
           </div>
         </motion.div>
       )}
@@ -124,7 +113,7 @@ export function CompletionStep({ state }: CompletionStepProps) {
           size="lg"
           className="w-full max-w-xs h-12 text-base font-medium"
         >
-          Start Using Rowboat
+          Get Started
         </Button>
       </motion.div>
     </div>

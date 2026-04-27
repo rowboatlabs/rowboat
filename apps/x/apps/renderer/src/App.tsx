@@ -5,7 +5,7 @@ import { RunEvent, ListRunsResponse } from '@x/shared/src/runs.js';
 import type { LanguageModelUsage, ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
-import { CheckIcon, LoaderIcon, PanelLeftIcon, Maximize2, Minimize2, ChevronLeftIcon, ChevronRightIcon, SquarePen, HistoryIcon } from 'lucide-react';
+import { CheckIcon, LoaderIcon, PanelLeftIcon, Maximize2, Minimize2, ChevronLeftIcon, ChevronRightIcon, HistoryIcon, Globe, X as XIcon, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MarkdownEditor, type MarkdownEditorHandle } from './components/markdown-editor';
 import { ChatSidebar } from './components/chat-sidebar';
@@ -15,7 +15,6 @@ import { GraphView, type GraphEdge, type GraphNode } from '@/components/graph-vi
 import { BasesView, type BaseConfig, DEFAULT_BASE_CONFIG } from '@/components/bases-view';
 import { useDebounce } from './hooks/use-debounce';
 import { SidebarContentPanel } from '@/components/sidebar-content';
-import { SuggestedTopicsView } from '@/components/suggested-topics-view';
 import { SidebarSectionProvider } from '@/contexts/sidebar-context';
 import {
   Conversation,
@@ -54,7 +53,7 @@ import { Button } from "@/components/ui/button"
 import { Toaster } from "@/components/ui/sonner"
 import { stripKnowledgePrefix, toKnowledgePath, wikiLabel } from '@/lib/wiki-links'
 import { splitFrontmatter, joinFrontmatter } from '@/lib/frontmatter'
-import { OnboardingModal } from '@/components/onboarding'
+const OnboardingModal = React.lazy(() => import('@/components/onboarding').then(m => ({ default: m.OnboardingModal })))
 import { CommandPalette, type CommandPaletteContext, type CommandPaletteMention } from '@/components/search-dialog'
 import { TrackModal } from '@/components/track-modal'
 import { BackgroundTaskDetail } from '@/components/background-task-detail'
@@ -91,7 +90,6 @@ import { AgentScheduleState } from '@x/shared/dist/agent-schedule-state.js'
 import { toast } from "sonner"
 import { useVoiceMode } from '@/hooks/useVoiceMode'
 import { useVoiceTTS } from '@/hooks/useVoiceTTS'
-import { useMeetingTranscription, type CalendarEventMeta } from '@/hooks/useMeetingTranscription'
 import { useAnalyticsIdentity } from '@/hooks/useAnalyticsIdentity'
 import * as analytics from '@/lib/analytics'
 
@@ -137,7 +135,6 @@ const TITLEBAR_TOGGLE_MARGIN_LEFT_PX = 12
 const TITLEBAR_BUTTONS_COLLAPSED = 1
 const TITLEBAR_BUTTON_GAPS_COLLAPSED = 0
 const GRAPH_TAB_PATH = '__rowboat_graph_view__'
-const SUGGESTED_TOPICS_TAB_PATH = '__rowboat_suggested_topics__'
 const BASES_DEFAULT_TAB_PATH = '__rowboat_bases_default__'
 
 const clampNumber = (value: number, min: number, max: number) =>
@@ -266,7 +263,6 @@ const getAncestorDirectoryPaths = (path: string): string[] => {
 }
 
 const isGraphTabPath = (path: string) => path === GRAPH_TAB_PATH
-const isSuggestedTopicsTabPath = (path: string) => path === SUGGESTED_TOPICS_TAB_PATH
 const isBaseFilePath = (path: string) => path.endsWith('.base') || path === BASES_DEFAULT_TAB_PATH
 
 const getSuggestedTopicTargetFolder = (category?: string) => {
@@ -281,11 +277,7 @@ const getSuggestedTopicTargetFolder = (category?: string) => {
     case 'projects':
     case 'project':
       return 'Projects'
-    case 'meetings':
-    case 'meeting':
-      return 'Meetings'
-    case 'topics':
-    case 'topic':
+    case 'topics':    case 'topic':
     default:
       return 'Topics'
   }
@@ -341,7 +333,7 @@ const normalizeUsage = (usage?: Partial<LanguageModelUsage> | null): LanguageMod
 }
 
 // Sidebar folder ordering — listed folders appear in this order, unlisted ones follow alphabetically
-const FOLDER_ORDER = ['People', 'Organizations', 'Projects', 'Topics', 'Meetings', 'Agent Notes', 'Notes']
+const FOLDER_ORDER = ['People', 'Organizations', 'Projects', 'Topics', 'Agent Notes', 'Notes']
 
 /**
  * Per-folder base view config: which columns to show and default sort.
@@ -368,10 +360,6 @@ const FOLDER_BASE_CONFIGS: Record<string, { visibleColumns: string[]; sort: { fi
     visibleColumns: ['name', 'mtimeMs'],
     sort: { field: 'name', dir: 'asc' },
   },
-  Meetings: {
-    visibleColumns: ['name', 'topic', 'mtimeMs'],
-    sort: { field: 'mtimeMs', dir: 'desc' },
-  },
 }
 
 // Sort nodes (dirs first, ordered folders by FOLDER_ORDER, then alphabetically)
@@ -390,73 +378,6 @@ function sortNodes(nodes: TreeNode[]): TreeNode[] {
     }
     return node
   })
-}
-
-/**
- * Organize Meetings/ source folders into date-grouped subfolders.
- *
- * - rowboat:  rowboat/2026-03-20/meeting-xxx.md  → keeps date folders as-is
- * - granola:  granola/2026/03/18/Title.md         → collapses into "2026-03-18" folders
- * - Files directly under a source folder (no date subfolder) are grouped
- *   by the date prefix in their filename (e.g. meeting-2026-03-17T...).
- */
-function flattenMeetingsTree(nodes: TreeNode[]): TreeNode[] {
-  return nodes.flatMap(node => {
-    if (node.kind !== 'dir' || node.name !== 'Meetings') return [node]
-
-    const flattenedSourceChildren = (node.children ?? []).flatMap(sourceNode => {
-      if (sourceNode.kind !== 'dir') return [sourceNode]
-
-      // Collect all files with their date group label
-      const dateGroups = new Map<string, TreeNode[]>()
-
-      function collectFiles(n: TreeNode, dateParts: string[]) {
-        for (const child of n.children ?? []) {
-          if (child.kind === 'file') {
-            const dateStr = dateParts.join('-')
-            // If file is at root of source folder, try to extract date from filename
-            const groupKey = dateStr || extractDateFromFilename(child.name) || 'other'
-            const group = dateGroups.get(groupKey) ?? []
-            group.push(child)
-            dateGroups.set(groupKey, group)
-          } else if (child.kind === 'dir') {
-            collectFiles(child, [...dateParts, child.name])
-          }
-        }
-      }
-      collectFiles(sourceNode, [])
-
-      if (dateGroups.size === 0) return []
-
-      // Build date folder nodes, sorted reverse chronologically
-      const dateFolderNodes: TreeNode[] = [...dateGroups.entries()]
-        .sort(([a], [b]) => b.localeCompare(a))
-        .map(([dateKey, files]) => {
-          // Sort files within each date group reverse chronologically
-          files.sort((a, b) => b.name.localeCompare(a.name))
-          return {
-            name: dateKey,
-            path: `${sourceNode.path}/${dateKey}`,
-            kind: 'dir' as const,
-            children: files,
-            loaded: true,
-          }
-        })
-
-      return [{ ...sourceNode, children: dateFolderNodes }]
-    })
-
-    // Hide Meetings folder entirely if no source folders have files
-    if (flattenedSourceChildren.length === 0) return []
-
-    return [{ ...node, children: flattenedSourceChildren }]
-  })
-}
-
-/** Extract YYYY-MM-DD from filenames like "meeting-2026-03-17T05-01-47.md" */
-function extractDateFromFilename(name: string): string | null {
-  const match = name.match(/(\d{4}-\d{2}-\d{2})/)
-  return match ? match[1] : null
 }
 
 // Build tree structure from flat entries
@@ -503,7 +424,6 @@ type ViewState =
   | { type: 'file'; path: string }
   | { type: 'graph' }
   | { type: 'task'; name: string }
-  | { type: 'suggested-topics' }
 
 function viewStatesEqual(a: ViewState, b: ViewState): boolean {
   if (a.type !== b.type) return false
@@ -557,7 +477,7 @@ function ContentHeader({
   const isCollapsed = state === "collapsed"
   return (
     <header
-      className="titlebar-drag-region flex h-10 shrink-0 items-stretch border-b border-border bg-sidebar overflow-hidden"
+      className="titlebar-drag-region flex h-10 shrink-0 items-stretch border-b border-border bg-sidebar"
       style={{
         paddingLeft: isCollapsed ? (collapsedLeftPaddingPx ?? 196) : 12,
         paddingRight: 12,
@@ -598,6 +518,17 @@ function App() {
   type ShortcutPane = 'left' | 'right'
   type MarkdownHistoryHandlers = { undo: () => boolean; redo: () => boolean }
 
+  type LeftPane =
+    | { type: 'empty' }
+    | { type: 'browser'; url: string }
+    | { type: 'markdown'; path: string }
+    | { type: 'artifact'; html: string; title: string }
+    | { type: 'graph' }
+    | { type: 'bases'; path: string }
+    | { type: 'task'; name: string }
+
+  const BROWSER_VIEWABLE_EXTS = new Set(['pdf', 'html', 'svg', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'csv', 'json', 'xml', 'txt', 'doc', 'docx'])
+
   useAnalyticsIdentity()
 
   // File browser state (for Knowledge section)
@@ -612,8 +543,9 @@ function App() {
   const [recentWikiFiles, setRecentWikiFiles] = useState<string[]>([])
   const [isGraphOpen, setIsGraphOpen] = useState(false)
   const [isBrowserOpen, setIsBrowserOpen] = useState(false)
-  const [isSuggestedTopicsOpen, setIsSuggestedTopicsOpen] = useState(false)
-  const [expandedFrom, setExpandedFrom] = useState<{ path: string | null; graph: boolean; suggestedTopics: boolean } | null>(null)
+  const [leftPanesByTab, setLeftPanesByTab] = useState<Record<string, LeftPane[]>>({ 'default-chat-tab': [] })
+  const [activeLeftPaneIdxByTab, setActiveLeftPaneIdxByTab] = useState<Record<string, number>>({})
+  const [expandedFrom, setExpandedFrom] = useState<{ path: string | null; graph: boolean } | null>(null)
   const [baseConfigByPath, setBaseConfigByPath] = useState<Record<string, BaseConfig>>({})
   const [graphData, setGraphData] = useState<{ nodes: GraphNode[]; edges: GraphEdge[] }>({
     nodes: [],
@@ -705,21 +637,14 @@ function App() {
   const voiceRef = useRef(voice)
   voiceRef.current = voice
 
-  const handleToggleMeetingRef = useRef<(() => void) | undefined>(undefined)
-  const meetingTranscription = useMeetingTranscription(() => {
-    handleToggleMeetingRef.current?.()
-  })
-
-  // Check if voice is available on mount and when OAuth state changes
+  // Check if voice is available on mount
   const refreshVoiceAvailability = useCallback(() => {
     Promise.all([
       window.ipc.invoke('voice:getConfig', null),
-      window.ipc.invoke('oauth:getState', null),
-    ]).then(([config, oauthState]) => {
-      const rowboatConnected = oauthState.config?.rowboat?.connected ?? false
-      const hasVoice = !!config.deepgram || rowboatConnected
+    ]).then(([config]) => {
+      const hasVoice = !!config.deepgram
       setVoiceAvailable(hasVoice)
-      setTtsAvailable(!!config.elevenlabs || rowboatConnected)
+      setTtsAvailable(!!config.elevenlabs)
       // Pre-cache auth details so mic click skips IPC round-trips
       if (hasVoice) {
         voice.warmup()
@@ -897,6 +822,68 @@ function App() {
     return tab.runId ? processingRunIds.has(tab.runId) : false
   }, [processingRunIds])
 
+  // Left pane helpers — each chat tab has a list of panes (browser/editor/etc.)
+  const getLeftPanesForTab = useCallback((tabId: string): LeftPane[] => {
+    return leftPanesByTab[tabId] ?? []
+  }, [leftPanesByTab])
+
+  const getActiveLeftPaneIdxForTab = useCallback((tabId: string): number => {
+    const panes = leftPanesByTab[tabId] ?? []
+    if (panes.length === 0) return -1
+    const idx = activeLeftPaneIdxByTab[tabId] ?? 0
+    return Math.min(idx, panes.length - 1)
+  }, [leftPanesByTab, activeLeftPaneIdxByTab])
+
+  const getActiveLeftPaneForTab = useCallback((tabId: string): LeftPane => {
+    const panes = leftPanesByTab[tabId] ?? []
+    if (panes.length === 0) return { type: 'empty' }
+    const idx = activeLeftPaneIdxByTab[tabId] ?? 0
+    return panes[Math.min(idx, panes.length - 1)] ?? { type: 'empty' }
+  }, [leftPanesByTab, activeLeftPaneIdxByTab])
+
+  /** Push a new pane to the tab's pane list and activate it */
+  const pushPaneForTab = useCallback((tabId: string, pane: LeftPane) => {
+    setLeftPanesByTab(prev => {
+      const existing = prev[tabId] ?? []
+      return { ...prev, [tabId]: [...existing, pane] }
+    })
+    const newIdx = (leftPanesByTab[tabId] ?? []).length
+    setActiveLeftPaneIdxByTab(prev => ({ ...prev, [tabId]: newIdx }))
+  }, [leftPanesByTab])
+
+  /** Replace a pane at a given index for a tab */
+  const setPaneForTab = useCallback((tabId: string, idx: number, pane: LeftPane) => {
+    setLeftPanesByTab(prev => {
+      const arr = [...(prev[tabId] ?? [])]
+      arr[idx] = pane
+      return { ...prev, [tabId]: arr }
+    })
+  }, [])
+
+  /** Remove a pane at a given index for a tab, adjust active index */
+  const removePaneForTab = useCallback((tabId: string, idx: number) => {
+    setLeftPanesByTab(prev => {
+      const arr = (prev[tabId] ?? []).filter((_, i) => i !== idx)
+      return { ...prev, [tabId]: arr }
+    })
+    setActiveLeftPaneIdxByTab(prev => {
+      const arr = (leftPanesByTab[tabId] ?? []).filter((_, i) => i !== idx)
+      const current = prev[tabId] ?? 0
+      // If we removed the active or one before it, shift index back
+      const newIdx = current >= arr.length ? Math.max(0, arr.length - 1) : (current > idx ? current - 1 : current)
+      return { ...prev, [tabId]: newIdx }
+    })
+  }, [leftPanesByTab])
+
+  // Ref for ensureFileTabForPath — used by syncPaneState to avoid temporal dead zone
+  const ensureFileTabForPathRef = useRef<(path: string) => void>(() => {})
+
+  const activeLeftPanes = leftPanesByTab[activeChatTabId] ?? []
+  const activeLeftPaneIdx = activeLeftPaneIdxByTab[activeChatTabId] ?? 0
+  const activeLeftPane = activeLeftPanes.length === 0
+    ? { type: 'empty' } as LeftPane
+    : activeLeftPanes[Math.min(activeLeftPaneIdx, activeLeftPanes.length - 1)] ?? { type: 'empty' } as LeftPane
+
   // File tab state
   const [fileTabs, setFileTabs] = useState<FileTab[]>([])
   const [activeFileTabId, setActiveFileTabId] = useState<string | null>(null)
@@ -909,7 +896,6 @@ function App() {
 
   const getFileTabTitle = useCallback((tab: FileTab) => {
     if (isGraphTabPath(tab.path)) return 'Graph View'
-    if (isSuggestedTopicsTabPath(tab.path)) return 'Suggested Topics'
     if (tab.path === BASES_DEFAULT_TAB_PATH) return 'Bases'
     if (tab.path.endsWith('.base')) return tab.path.split('/').pop()?.replace(/\.base$/i, '') || 'Base'
     return tab.path.split('/').pop()?.replace(/\.md$/i, '') || tab.path
@@ -993,6 +979,14 @@ function App() {
 
   // Search state
   const [isSearchOpen, setIsSearchOpen] = useState(false)
+
+  // When search opens, immediately hide the browser WebContentsView so
+  // the command palette renders above the browser, not behind it.
+  useEffect(() => {
+    if (isSearchOpen && isBrowserOpen) {
+      void window.ipc.invoke('browser:setVisible', { visible: false })
+    }
+  }, [isSearchOpen, isBrowserOpen])
 
   // Background tasks state
   type BackgroundTaskItem = {
@@ -1138,7 +1132,7 @@ function App() {
           opts: { recursive: false, includeHidden: false, includeStats: true }
         }).catch(() => [] as DirEntry[]),
       ])
-      const knowledgeTree = flattenMeetingsTree(buildTree(knowledgeResult))
+      const knowledgeTree = buildTree(knowledgeResult)
       const basesChildren: TreeNode[] = (basesResult as DirEntry[])
         .filter((e) => e.name.endsWith('.base'))
         .map((e) => ({ ...e, kind: 'file' as const }))
@@ -2439,6 +2433,7 @@ function App() {
     }
     const id = newChatTabId()
     setChatTabs(prev => [...prev, { id, runId: targetRunId }])
+    setLeftPanesByTab(prev => ({ ...prev, [id]: [] }))
     setActiveChatTabId(id)
     loadRun(targetRunId)
   }, [chatTabs, loadRun, restoreChatTabState, cancelRecordingIfActive])
@@ -2457,6 +2452,11 @@ function App() {
     // Cancel stale in-flight loads from previously focused tabs.
     loadRunRequestIdRef.current += 1
     setActiveChatTabId(tabId)
+    // Sync pane state from target tab's active pane
+    const targetPanes = leftPanesByTab[tabId] ?? []
+    const targetIdx = activeLeftPaneIdxByTab[tabId] ?? 0
+    const targetLeftPane = targetPanes[Math.min(targetIdx, targetPanes.length - 1)] ?? { type: 'empty' } as LeftPane
+    if (targetLeftPane.type !== 'empty') syncPaneState(targetLeftPane)
     const restored = restoreChatTabState(tabId, tab.runId)
     if (tab.runId && processingRunIdsRef.current.has(tab.runId)) {
       loadRun(tab.runId)
@@ -2474,6 +2474,18 @@ function App() {
     saveChatScrollForTab(tabId)
     const nextTabs = chatTabs.filter(t => t.id !== tabId)
     setChatTabs(nextTabs)
+    setLeftPanesByTab(prev => {
+      if (!(tabId in prev)) return prev
+      const next = { ...prev }
+      delete next[tabId]
+      return next
+    })
+    setActiveLeftPaneIdxByTab(prev => {
+      if (!(tabId in prev)) return prev
+      const next = { ...prev }
+      delete next[tabId]
+      return next
+    })
     setChatViewStateByTab(prev => {
       if (!(tabId in prev)) return prev
       const next = { ...prev }
@@ -2608,17 +2620,9 @@ function App() {
     if (isGraphTabPath(tab.path)) {
       setSelectedPath(null)
       setIsGraphOpen(true)
-      setIsSuggestedTopicsOpen(false)
-      return
-    }
-    if (isSuggestedTopicsTabPath(tab.path)) {
-      setSelectedPath(null)
-      setIsGraphOpen(false)
-      setIsSuggestedTopicsOpen(true)
       return
     }
     setIsGraphOpen(false)
-    setIsSuggestedTopicsOpen(false)
     setSelectedPath(tab.path)
   }, [fileTabs, isRightPaneMaximized])
 
@@ -2646,7 +2650,6 @@ function App() {
         setActiveFileTabId(null)
         setSelectedPath(null)
         setIsGraphOpen(false)
-        setIsSuggestedTopicsOpen(false)
           return []
       }
       const idx = prev.findIndex(t => t.id === tabId)
@@ -2659,14 +2662,8 @@ function App() {
         if (isGraphTabPath(newActiveTab.path)) {
           setSelectedPath(null)
           setIsGraphOpen(true)
-          setIsSuggestedTopicsOpen(false)
-        } else if (isSuggestedTopicsTabPath(newActiveTab.path)) {
-          setSelectedPath(null)
-          setIsGraphOpen(false)
-          setIsSuggestedTopicsOpen(true)
         } else {
           setIsGraphOpen(false)
-          setIsSuggestedTopicsOpen(false)
               setSelectedPath(newActiveTab.path)
         }
       }
@@ -2692,20 +2689,20 @@ function App() {
       // Create a new tab
       const id = newChatTabId()
       setChatTabs(prev => [...prev, { id, runId: null }])
+      setLeftPanesByTab(prev => ({ ...prev, [id]: [] }))
       setActiveChatTabId(id)
     }
     handleNewChat()
     // Left-pane "new chat" should always open full chat view.
-    if (selectedPath || isGraphOpen || isSuggestedTopicsOpen) {
-      setExpandedFrom({ path: selectedPath, graph: isGraphOpen, suggestedTopics: isSuggestedTopicsOpen })
+    if (selectedPath || isGraphOpen) {
+      setExpandedFrom({ path: selectedPath, graph: isGraphOpen })
     } else {
       setExpandedFrom(null)
     }
     setIsRightPaneMaximized(false)
     setSelectedPath(null)
     setIsGraphOpen(false)
-    setIsSuggestedTopicsOpen(false)
-  }, [chatTabs, activeChatTabId, handleNewChat, selectedPath, isGraphOpen, isSuggestedTopicsOpen])
+  }, [chatTabs, activeChatTabId, handleNewChat, selectedPath, isGraphOpen])
 
   // Sidebar variant: create/switch chat tab without leaving file/graph context.
   const handleNewChatTabInSidebar = useCallback(() => {
@@ -2717,6 +2714,7 @@ function App() {
     } else {
       const id = newChatTabId()
       setChatTabs(prev => [...prev, { id, runId: null }])
+      setLeftPanesByTab(prev => ({ ...prev, [id]: [] }))
       setActiveChatTabId(id)
     }
     handleNewChat()
@@ -2790,28 +2788,36 @@ function App() {
     return () => window.removeEventListener('rowboat:open-copilot-prompt', handler as EventListener)
   }, [submitFromPalette])
 
-  const toggleKnowledgePane = useCallback(() => {
-    setIsRightPaneMaximized(false)
-    setIsChatSidebarOpen(prev => !prev)
-  }, [])
-
   // Browser is an overlay on the middle pane: opening it forces the chat
   // sidebar to be visible on the right; closing it restores whatever the
   // middle pane was showing previously (file/graph/task/chat).
   const handleToggleBrowser = useCallback(() => {
-    setIsBrowserOpen(prev => {
-      const next = !prev
-      if (next) {
-        setIsChatSidebarOpen(true)
-        setIsRightPaneMaximized(false)
-      }
-      return next
-    })
-  }, [])
+    if (activeLeftPane.type === 'browser') {
+      // Close the active browser pane
+      removePaneForTab(activeChatTabId, activeLeftPaneIdx)
+      setIsBrowserOpen(false)
+    } else {
+      // Open a new browser pane
+      pushPaneForTab(activeChatTabId, { type: 'browser', url: 'about:blank' })
+      setIsBrowserOpen(true)
+      setIsChatSidebarOpen(true)
+      setIsRightPaneMaximized(false)
+    }
+  }, [activeChatTabId, activeLeftPane, activeLeftPaneIdx, pushPaneForTab, removePaneForTab])
+
+  const handleOpenHome = useCallback(() => {
+    pushPaneForTab(activeChatTabId, { type: 'browser', url: 'https://gokuls.vision' })
+    setIsBrowserOpen(true)
+    setIsChatSidebarOpen(true)
+    setIsRightPaneMaximized(false)
+    void window.ipc.invoke('browser:newTab', { url: 'https://gokuls.vision' })
+  }, [activeChatTabId, pushPaneForTab])
 
   const handleCloseBrowser = useCallback(() => {
+    // Close the active browser pane
+    removePaneForTab(activeChatTabId, activeLeftPaneIdx)
     setIsBrowserOpen(false)
-  }, [])
+  }, [activeChatTabId, activeLeftPaneIdx, removePaneForTab])
 
   const toggleRightPaneMaximize = useCallback(() => {
     setIsChatSidebarOpen(true)
@@ -2820,26 +2826,20 @@ function App() {
 
   const handleOpenFullScreenChat = useCallback(() => {
     // Remember where we came from so the close button can return
-    if (selectedPath || isGraphOpen || isSuggestedTopicsOpen) {
-      setExpandedFrom({ path: selectedPath, graph: isGraphOpen, suggestedTopics: isSuggestedTopicsOpen })
+    if (selectedPath || isGraphOpen) {
+      setExpandedFrom({ path: selectedPath, graph: isGraphOpen })
     }
     setIsRightPaneMaximized(false)
     setSelectedPath(null)
     setIsGraphOpen(false)
-    setIsSuggestedTopicsOpen(false)
-  }, [selectedPath, isGraphOpen, isSuggestedTopicsOpen])
+  }, [selectedPath, isGraphOpen])
 
   const handleCloseFullScreenChat = useCallback(() => {
     if (expandedFrom) {
       if (expandedFrom.graph) {
         setIsGraphOpen(true)
-        setIsSuggestedTopicsOpen(false)
-      } else if (expandedFrom.suggestedTopics) {
-        setIsGraphOpen(false)
-        setIsSuggestedTopicsOpen(true)
       } else if (expandedFrom.path) {
         setIsGraphOpen(false)
-        setIsSuggestedTopicsOpen(false)
         setSelectedPath(expandedFrom.path)
       }
       setExpandedFrom(null)
@@ -2849,11 +2849,10 @@ function App() {
 
   const currentViewState = React.useMemo<ViewState>(() => {
     if (selectedBackgroundTask) return { type: 'task', name: selectedBackgroundTask }
-    if (isSuggestedTopicsOpen) return { type: 'suggested-topics' }
     if (selectedPath) return { type: 'file', path: selectedPath }
     if (isGraphOpen) return { type: 'graph' }
     return { type: 'chat', runId }
-  }, [selectedBackgroundTask, isSuggestedTopicsOpen, selectedPath, isGraphOpen, runId])
+  }, [selectedBackgroundTask, selectedPath, isGraphOpen, runId])
 
   const appendUnique = useCallback((stack: ViewState[], entry: ViewState) => {
     const last = stack[stack.length - 1]
@@ -2888,6 +2887,29 @@ function App() {
     setActiveFileTabId(id)
   }, [fileTabs, activeFileTabId])
 
+  // Keep ref in sync so syncPaneState can call it without temporal dead zone
+  ensureFileTabForPathRef.current = ensureFileTabForPath
+
+  /** Sync global state to match a pane's data (called when activating a pane) */
+  const syncPaneState = useCallback((pane: LeftPane) => {
+    if (pane.type === 'markdown' || pane.type === 'bases') {
+      setSelectedPath(pane.path)
+      ensureFileTabForPathRef.current(pane.path)
+    } else if (pane.type === 'task') {
+      setSelectedBackgroundTask(pane.name)
+    }
+    setIsBrowserOpen(pane.type === 'browser')
+    setIsGraphOpen(pane.type === 'graph')
+  }, [])
+
+  const activatePaneForTab = useCallback((tabId: string, idx: number) => {
+    setActiveLeftPaneIdxByTab(prev => ({ ...prev, [tabId]: idx }))
+    // Sync global state to the newly active pane
+    const panes = leftPanesByTab[tabId] ?? []
+    const pane = panes[idx]
+    if (pane) syncPaneState(pane)
+  }, [leftPanesByTab, syncPaneState])
+
   const ensureGraphFileTab = useCallback(() => {
     const existingGraphTab = fileTabs.find((tab) => isGraphTabPath(tab.path))
     if (existingGraphTab) {
@@ -2899,40 +2921,46 @@ function App() {
     setActiveFileTabId(id)
   }, [fileTabs])
 
-  const ensureSuggestedTopicsFileTab = useCallback(() => {
-    const existing = fileTabs.find((tab) => isSuggestedTopicsTabPath(tab.path))
-    if (existing) {
-      setActiveFileTabId(existing.id)
-      return
-    }
-    const id = newFileTabId()
-    setFileTabs((prev) => [...prev, { id, path: SUGGESTED_TOPICS_TAB_PATH }])
-    setActiveFileTabId(id)
-  }, [fileTabs])
-
   const applyViewState = useCallback(async (view: ViewState) => {
     switch (view.type) {
       case 'file':
         setSelectedBackgroundTask(null)
         setIsGraphOpen(false)
-        // Navigating to a file dismisses the browser overlay so the file is
-        // visible in the middle pane.
-        setIsBrowserOpen(false)
-        setIsSuggestedTopicsOpen(false)
+        // Navigating to a file — check if it should open in browser or editor
+        {
+          const ext = view.path.split('.').pop()?.toLowerCase() ?? ''
+          if (!view.path.endsWith('.base') && BROWSER_VIEWABLE_EXTS.has(ext)) {
+            // Browser-viewable files (PDF, HTML, images) open in browser left pane
+            const url = `${WORKSPACE_BASE_URL}/${view.path}`
+            pushPaneForTab(activeChatTabId, { type: 'browser', url })
+            setIsBrowserOpen(true)
+            setIsChatSidebarOpen(true)
+            setIsRightPaneMaximized(false)
+            void window.ipc.invoke('browser:newTab', { url })
+          } else if (view.path.endsWith('.base') || view.path === BASES_DEFAULT_TAB_PATH) {
+            // Base files
+            pushPaneForTab(activeChatTabId, { type: 'bases', path: view.path })
+            setIsBrowserOpen(false)
+            setSelectedPath(view.path)
+            ensureFileTabForPath(view.path)
+          } else {
+            // MD and other text files open in markdown editor left pane
+            pushPaneForTab(activeChatTabId, { type: 'markdown', path: view.path })
+            setIsBrowserOpen(false)
+            setSelectedPath(view.path)
+            ensureFileTabForPath(view.path)
+          }
+        }
         setExpandedFrom(null)
-        // Preserve split vs knowledge-max mode when navigating knowledge files.
-        // Only exit chat-only maximize, because that would hide the selected file.
         if (isRightPaneMaximized) {
           setIsRightPaneMaximized(false)
         }
-        setSelectedPath(view.path)
-        ensureFileTabForPath(view.path)
         return
       case 'graph':
         setSelectedBackgroundTask(null)
         setSelectedPath(null)
         setIsBrowserOpen(false)
-        setIsSuggestedTopicsOpen(false)
+        pushPaneForTab(activeChatTabId, { type: 'graph' })
         setExpandedFrom(null)
         setIsGraphOpen(true)
         ensureGraphFileTab()
@@ -2944,20 +2972,10 @@ function App() {
         setSelectedPath(null)
         setIsGraphOpen(false)
         setIsBrowserOpen(false)
-        setIsSuggestedTopicsOpen(false)
+        pushPaneForTab(activeChatTabId, { type: 'task', name: view.name })
         setExpandedFrom(null)
         setIsRightPaneMaximized(false)
         setSelectedBackgroundTask(view.name)
-        return
-      case 'suggested-topics':
-        setSelectedPath(null)
-        setIsGraphOpen(false)
-        setIsBrowserOpen(false)
-        setExpandedFrom(null)
-        setIsRightPaneMaximized(false)
-        setSelectedBackgroundTask(null)
-        setIsSuggestedTopicsOpen(true)
-        ensureSuggestedTopicsFileTab()
         return
       case 'chat':
         setSelectedPath(null)
@@ -2967,7 +2985,6 @@ function App() {
         setExpandedFrom(null)
         setIsRightPaneMaximized(false)
         setSelectedBackgroundTask(null)
-        setIsSuggestedTopicsOpen(false)
         if (view.runId) {
           await loadRun(view.runId)
         } else {
@@ -2975,7 +2992,7 @@ function App() {
         }
         return
     }
-  }, [ensureFileTabForPath, ensureGraphFileTab, ensureSuggestedTopicsFileTab, handleNewChat, isRightPaneMaximized, loadRun])
+  }, [ensureFileTabForPath, ensureGraphFileTab, handleNewChat, isRightPaneMaximized, loadRun])
 
   const navigateToView = useCallback(async (nextView: ViewState) => {
     const current = currentViewState
@@ -3044,9 +3061,43 @@ function App() {
     return false
   }, [viewHistory.forward, currentViewState])
 
+  const WORKSPACE_BASE_URL = 'http://localhost:3210/vault/workspace'
+
+  const openFileInBrowser = useCallback((filePath: string) => {
+    const url = `${WORKSPACE_BASE_URL}/${filePath}`
+    pushPaneForTab(activeChatTabId, { type: 'browser', url })
+    setIsBrowserOpen(true)
+    setIsChatSidebarOpen(true)
+    setIsRightPaneMaximized(false)
+    void window.ipc.invoke('browser:newTab', { url })
+  }, [WORKSPACE_BASE_URL, activeChatTabId, pushPaneForTab])
+
+  const openHtmlInBrowser = useCallback(async (html: string) => {
+    const timestamp = Date.now()
+    const tempPath = `knowledge/.tmp/artifact-${timestamp}.html`
+    await window.ipc.invoke('workspace:writeFile', {
+      path: tempPath,
+      data: html,
+      opts: { encoding: 'utf8', mkdirp: true },
+    })
+    const url = `${WORKSPACE_BASE_URL}/${tempPath}`
+    pushPaneForTab(activeChatTabId, { type: 'browser', url })
+    setIsBrowserOpen(true)
+    setIsChatSidebarOpen(true)
+    setIsRightPaneMaximized(false)
+    void window.ipc.invoke('browser:newTab', { url })
+  }, [WORKSPACE_BASE_URL, activeChatTabId, pushPaneForTab])
+
   const navigateToFile = useCallback((path: string) => {
+    const ext = path.split('.').pop()?.toLowerCase() ?? ''
+    if (!path.endsWith('.base') && BROWSER_VIEWABLE_EXTS.has(ext)) {
+      // Browser-viewable files (PDF, HTML, images) open in browser left pane
+      openFileInBrowser(path)
+      return
+    }
+    // MD and other text files open in Markdown editor left pane
     void navigateToView({ type: 'file', path })
-  }, [navigateToView])
+  }, [navigateToView, openFileInBrowser])
 
   const handleBaseConfigChange = useCallback((path: string, config: BaseConfig) => {
     setBaseConfigByPath((prev) => ({ ...prev, [path]: config }))
@@ -3240,7 +3291,7 @@ function App() {
   }, [])
 
   // Keyboard shortcut: Ctrl+L to toggle main chat view
-  const isFullScreenChat = !selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !selectedBackgroundTask && !isBrowserOpen
+  const isFullScreenChat = activeLeftPanes.length === 0
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'l') {
@@ -3318,16 +3369,14 @@ function App() {
     const handleTabKeyDown = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey
       if (!mod) return
-      const rightPaneAvailable = Boolean((selectedPath || isGraphOpen || isSuggestedTopicsOpen) && isChatSidebarOpen)
+      const rightPaneAvailable = Boolean((selectedPath || isGraphOpen) && isChatSidebarOpen)
       const targetPane: ShortcutPane = rightPaneAvailable
         ? (isRightPaneMaximized ? 'right' : activeShortcutPane)
         : 'left'
-      const inFileView = targetPane === 'left' && Boolean(selectedPath || isGraphOpen || isSuggestedTopicsOpen)
+      const inFileView = targetPane === 'left' && Boolean(selectedPath || isGraphOpen)
       const selectedKnowledgePath = isGraphOpen
         ? GRAPH_TAB_PATH
-        : isSuggestedTopicsOpen
-          ? SUGGESTED_TOPICS_TAB_PATH
-          : selectedPath
+        : selectedPath
       const targetFileTabId = activeFileTabId ?? (
         selectedKnowledgePath
           ? (fileTabs.find((tab) => tab.path === selectedKnowledgePath)?.id ?? null)
@@ -3381,7 +3430,7 @@ function App() {
     }
     document.addEventListener('keydown', handleTabKeyDown)
     return () => document.removeEventListener('keydown', handleTabKeyDown)
-  }, [selectedPath, isGraphOpen, isSuggestedTopicsOpen, isChatSidebarOpen, isRightPaneMaximized, activeShortcutPane, chatTabs, fileTabs, activeChatTabId, activeFileTabId, closeChatTab, closeFileTab, switchChatTab, switchFileTab])
+  }, [selectedPath, isGraphOpen, isChatSidebarOpen, isRightPaneMaximized, activeShortcutPane, chatTabs, fileTabs, activeChatTabId, activeFileTabId, closeChatTab, closeFileTab, switchChatTab, switchFileTab])
 
   const toggleExpand = (path: string, kind: 'file' | 'dir') => {
     if (kind === 'file') {
@@ -3406,8 +3455,7 @@ function App() {
           }),
         },
       }))
-      if (!selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !selectedBackgroundTask) {
-        setIsChatSidebarOpen(false)
+      if (!selectedPath && !isGraphOpen && !selectedBackgroundTask) {
         setIsRightPaneMaximized(false)
       }
       void navigateToView({ type: 'file', path: BASES_DEFAULT_TAB_PATH })
@@ -3528,15 +3576,13 @@ function App() {
     },
     openGraph: () => {
       // From chat-only landing state, open graph directly in full knowledge view.
-      if (!selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !selectedBackgroundTask) {
-        setIsChatSidebarOpen(false)
+      if (!selectedPath && !isGraphOpen && !selectedBackgroundTask) {
         setIsRightPaneMaximized(false)
       }
       void navigateToView({ type: 'graph' })
     },
     openBases: () => {
-      if (!selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !selectedBackgroundTask) {
-        setIsChatSidebarOpen(false)
+      if (!selectedPath && !isGraphOpen && !selectedBackgroundTask) {
         setIsRightPaneMaximized(false)
       }
       void navigateToView({ type: 'file', path: BASES_DEFAULT_TAB_PATH })
@@ -3682,125 +3728,6 @@ function App() {
     navigateToFile(notePath)
   }, [loadDirectory, navigateToFile, fileTabs])
 
-  const meetingNotePathRef = useRef<string | null>(null)
-  const pendingCalendarEventRef = useRef<CalendarEventMeta | undefined>(undefined)
-  const [meetingSummarizing, setMeetingSummarizing] = useState(false)
-  const [showMeetingPermissions, setShowMeetingPermissions] = useState(false)
-
-  const [checkingPermission, setCheckingPermission] = useState(false)
-
-  const startMeetingNow = useCallback(async () => {
-    const calEvent = pendingCalendarEventRef.current
-    pendingCalendarEventRef.current = undefined
-    const notePath = await meetingTranscription.start(calEvent)
-    if (notePath) {
-      meetingNotePathRef.current = notePath
-      await handleVoiceNoteCreated(notePath)
-    }
-  }, [meetingTranscription, handleVoiceNoteCreated])
-
-  const handleCheckPermissionAndRetry = useCallback(async () => {
-    setCheckingPermission(true)
-    try {
-      const { granted } = await window.ipc.invoke('meeting:checkScreenPermission', null)
-      if (granted) {
-        setShowMeetingPermissions(false)
-        await startMeetingNow()
-      }
-    } finally {
-      setCheckingPermission(false)
-    }
-  }, [startMeetingNow])
-
-  const handleOpenScreenRecordingSettings = useCallback(async () => {
-    await window.ipc.invoke('meeting:openScreenRecordingSettings', null)
-  }, [])
-
-  const handleToggleMeeting = useCallback(async () => {
-    if (meetingTranscription.state === 'recording') {
-      await meetingTranscription.stop()
-
-      // Read the final transcript and generate meeting notes via LLM
-      const notePath = meetingNotePathRef.current
-      if (notePath) {
-        setMeetingSummarizing(true)
-        try {
-          const result = await window.ipc.invoke('workspace:readFile', { path: notePath, encoding: 'utf8' })
-          const fileContent = result.data
-          if (fileContent && fileContent.trim()) {
-            // Extract meeting start time and calendar event from frontmatter
-            const dateMatch = fileContent.match(/^date:\s*"(.+)"$/m)
-            const meetingStartTime = dateMatch?.[1]
-            // If a calendar event was linked, pass it directly so the summarizer
-            // skips scanning and uses this event for attendee/title info.
-            const calEventMatch = fileContent.match(/^calendar_event:\s*'(.+)'$/m)
-            const calendarEventJson = calEventMatch?.[1]?.replace(/''/g, "'")
-            const { notes } = await window.ipc.invoke('meeting:summarize', { transcript: fileContent, meetingStartTime, calendarEventJson })
-            if (notes) {
-              // Prepend meeting notes above the existing transcript block
-              const { raw: fm, body } = splitFrontmatter(fileContent)
-              const fmTitleMatch = fileContent.match(/^title:\s*(.+)$/m)
-              const noteTitle = fmTitleMatch?.[1]?.trim() || 'Meeting Notes'
-              const cleanedNotes = notes.replace(/^#{1,2}\s+.+\n+/, '')
-              // Extract the existing transcript block and preserve it as-is
-              const transcriptBlockMatch = body.match(/(```transcript\n[\s\S]*?\n```)/)
-              const transcriptBlock = transcriptBlockMatch?.[1] || ''
-              const newBody = `# ${noteTitle}\n\n` + cleanedNotes + (transcriptBlock ? '\n\n' + transcriptBlock : '')
-              const newContent = fm ? `${fm}\n${newBody}` : newBody
-              await window.ipc.invoke('workspace:writeFile', {
-                path: notePath,
-                data: newContent,
-                opts: { encoding: 'utf8' },
-              })
-              // Refresh the file view
-              await handleVoiceNoteCreated(notePath)
-            }
-          }
-        } catch (err) {
-          console.error('[meeting] Failed to generate meeting notes:', err)
-        }
-        setMeetingSummarizing(false)
-        meetingNotePathRef.current = null
-      }
-    } else if (meetingTranscription.state === 'idle') {
-      // On macOS, check screen recording permission before starting
-      if (isMac) {
-        const result = await window.ipc.invoke('meeting:checkScreenPermission', null)
-        console.log('[meeting] Permission check result:', result)
-        if (!result.granted) {
-          setShowMeetingPermissions(true)
-          return
-        }
-      }
-      await startMeetingNow()
-    }
-  }, [meetingTranscription, handleVoiceNoteCreated, startMeetingNow])
-  handleToggleMeetingRef.current = handleToggleMeeting
-
-  // Listen for calendar block "join meeting & take notes" events
-  useEffect(() => {
-    const handler = () => {
-      // Read calendar event data set by the calendar block on window
-      const pending = window.__pendingCalendarEvent
-      window.__pendingCalendarEvent = undefined
-      if (pending) {
-        pendingCalendarEventRef.current = {
-          summary: pending.summary,
-          start: pending.start,
-          end: pending.end,
-          location: pending.location,
-          htmlLink: pending.htmlLink,
-          conferenceLink: pending.conferenceLink,
-          source: pending.source,
-        }
-      }
-      // Use the same toggle flow — it will pick up pendingCalendarEventRef
-      handleToggleMeetingRef.current?.()
-    }
-    window.addEventListener('calendar-block:join-meeting', handler)
-    return () => window.removeEventListener('calendar-block:join-meeting', handler)
-  }, [])
-
   // Email block: draft with assistant
   useEffect(() => {
     const handler = () => {
@@ -3814,6 +3741,28 @@ function App() {
     window.addEventListener('email-block:draft-with-assistant', handler)
     return () => window.removeEventListener('email-block:draft-with-assistant', handler)
   }, [])
+
+  // HTML artifact "Open in browser" event
+  useEffect(() => {
+    const handler = () => {
+      setIsBrowserOpen(true)
+      setIsChatSidebarOpen(true)
+      setIsRightPaneMaximized(false)
+    }
+    window.addEventListener('browser:open', handler)
+    return () => window.removeEventListener('browser:open', handler)
+  }, [])
+
+  // "Edit Source" button in /md-view/ rendered pages navigates to rowboat://md-edit
+  // which the main process intercepts and forwards as browser:mdEdit IPC event
+  useEffect(() => {
+    const handler = (_event: Electron.IpcRendererEvent, data: { path: string }) => {
+      setIsBrowserOpen(false)
+      void navigateToView({ type: 'file', path: data.path })
+    }
+    const cleanup = window.ipc.on('browser:mdEdit', handler)
+    return cleanup
+  }, [navigateToView])
 
   const ensureWikiFile = useCallback(async (wikiPath: string) => {
     const resolvedPath = toKnowledgePath(wikiPath)
@@ -3867,10 +3816,7 @@ function App() {
         return
       }
 
-      const graphFilePaths = knowledgeFilePaths.filter((p) => {
-        const normalized = stripKnowledgePrefix(p)
-        return !normalized.toLowerCase().startsWith('meetings/')
-      })
+      const graphFilePaths = knowledgeFilePaths
 
       const nodeSet = new Set(graphFilePaths)
       const edges: GraphEdge[] = []
@@ -4119,8 +4065,8 @@ function App() {
   const selectedTask = selectedBackgroundTask
     ? backgroundTasks.find(t => t.name === selectedBackgroundTask)
     : null
-  const isRightPaneContext = Boolean(selectedPath || isGraphOpen || isSuggestedTopicsOpen || isBrowserOpen)
-  const isRightPaneOnlyMode = isRightPaneContext && isChatSidebarOpen && isRightPaneMaximized
+  const isRightPaneContext = activeLeftPanes.length > 0 || isBrowserOpen
+  const isRightPaneOnlyMode = (isRightPaneContext && isChatSidebarOpen && isRightPaneMaximized) || activeLeftPanes.length === 0
   const shouldCollapseLeftPane = isRightPaneOnlyMode
   const openMarkdownTabs = React.useMemo(() => {
     const markdownTabs = fileTabs.filter(tab => tab.path.endsWith('.md'))
@@ -4169,7 +4115,7 @@ function App() {
                 onNewChat: handleNewChatTab,
                 onSelectRun: (runIdToLoad) => {
                   cancelRecordingIfActive()
-                  if (selectedPath || isGraphOpen || isSuggestedTopicsOpen || isBrowserOpen) {
+                  if (selectedPath || isGraphOpen || isBrowserOpen) {
                     setIsChatSidebarOpen(true)
                   }
 
@@ -4180,7 +4126,7 @@ function App() {
                     return
                   }
                   // In two-pane mode (file/graph/browser), keep the middle pane and just swap chat context in the right sidebar.
-                  if (selectedPath || isGraphOpen || isSuggestedTopicsOpen || isBrowserOpen) {
+                  if (selectedPath || isGraphOpen || isBrowserOpen) {
                     setChatTabs(prev => prev.map(t => t.id === activeChatTabId ? { ...t, runId: runIdToLoad } : t))
                     loadRun(runIdToLoad)
                     return
@@ -4204,14 +4150,14 @@ function App() {
                       } else {
                         // Only one tab, reset it to new chat
                         setChatTabs([{ id: tabForRun.id, runId: null }])
-                        if (selectedPath || isGraphOpen || isSuggestedTopicsOpen || isBrowserOpen) {
+                        if (selectedPath || isGraphOpen || isBrowserOpen) {
                           handleNewChat()
                         } else {
                           void navigateToView({ type: 'chat', runId: null })
                         }
                       }
                     } else if (runId === runIdToDelete) {
-                      if (selectedPath || isGraphOpen || isSuggestedTopicsOpen || isBrowserOpen) {
+                      if (selectedPath || isGraphOpen || isBrowserOpen) {
                         setChatTabs(prev => prev.map(t => t.id === activeChatTabId ? { ...t, runId: null } : t))
                         handleNewChat()
                       } else {
@@ -4231,15 +4177,104 @@ function App() {
               selectedBackgroundTask={selectedBackgroundTask}
               onNewChat={handleNewChatTab}
               onOpenSearch={() => setIsSearchOpen(true)}
-              meetingState={meetingTranscription.state}
-              meetingSummarizing={meetingSummarizing}
-              meetingAvailable={voiceAvailable}
-              onToggleMeeting={() => { void handleToggleMeeting() }}
-              isBrowserOpen={isBrowserOpen}
-              onToggleBrowser={handleToggleBrowser}
-              isSuggestedTopicsOpen={isSuggestedTopicsOpen}
-              onOpenSuggestedTopics={() => void navigateToView({ type: 'suggested-topics' })}
             />
+            {/* Content area: header + split pane, stacked vertically */}
+            <div className="flex flex-col flex-1 min-h-0 min-w-0">
+            {/* Unified full-width header - spans both left pane and chat */}
+            <ContentHeader
+              onNavigateBack={() => { void navigateBack() }}
+              onNavigateForward={() => { void navigateForward() }}
+              canNavigateBack={canNavigateBack}
+              canNavigateForward={canNavigateForward}
+              collapsedLeftPaddingPx={collapsedLeftPaddingPx}
+            >
+              <TabBar
+                tabs={chatTabs}
+                activeTabId={activeChatTabId}
+                getTabTitle={(tab) => {
+                  return getChatTabTitle(tab)
+                }}
+                getTabId={(t) => t.id}
+                isProcessing={isChatTabProcessing}
+                onSwitchTab={switchChatTab}
+                onCloseTab={closeChatTab}
+              />
+              {activeLeftPane.type === 'markdown' && (
+                <div className="flex items-center gap-1 text-xs text-muted-foreground self-center shrink-0 pl-2">
+                  {isSaving ? (
+                    <>
+                      <LoaderIcon className="h-3 w-3 animate-spin" />
+                      <span>Saving...</span>
+                    </>
+                  ) : lastSaved ? (
+                    <>
+                      <CheckIcon className="h-3 w-3 text-green-500" />
+                      <span>Saved</span>
+                    </>
+                  ) : null}
+                </div>
+              )}
+              {activeLeftPane.type === 'markdown' && activeLeftPane.path.startsWith('knowledge/') && activeLeftPane.path.endsWith('.md') && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (versionHistoryPath) {
+                          setVersionHistoryPath(null)
+                          setViewingHistoricalVersion(null)
+                        } else {
+                          setVersionHistoryPath(selectedPath)
+                        }
+                      }}
+                      className={cn(
+                        "titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors self-center shrink-0",
+                        versionHistoryPath && "bg-accent text-foreground"
+                      )}
+                      aria-label="Version history"
+                    >
+                      <HistoryIcon className="size-4" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">Version history</TooltipContent>
+                </Tooltip>
+              )}
+              {/* Spacer to push right-side buttons to the end */}
+              <div className="flex-1" />
+              {/* Browser toggle - opens/closes browser in left pane */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={handleToggleBrowser}
+                    className={cn(
+                      "titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors self-center shrink-0",
+                      activeLeftPane.type === 'browser' && "bg-accent text-foreground"
+                    )}
+                    aria-label={activeLeftPane.type === 'browser' ? 'Close browser' : 'Open browser'}
+                  >
+                    <Globe className="size-5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">{activeLeftPane.type === 'browser' ? 'Close browser' : 'Open browser'}</TooltipContent>
+              </Tooltip>
+              {/* Maximize/Minimize chat view */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={isRightPaneMaximized ? () => setIsRightPaneMaximized(false) : isRightPaneContext ? () => { setIsRightPaneMaximized(true); setIsChatSidebarOpen(true) } : handleToggleBrowser}
+                    className="titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors self-center shrink-0 -mr-1"
+                    aria-label={isRightPaneMaximized ? 'Show split view' : 'Maximize chat'}
+                  >
+                    {isRightPaneMaximized ? <Minimize2 className="size-5" /> : <Maximize2 className="size-5" />}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">{isRightPaneMaximized ? 'Show split view' : 'Maximize chat'}</TooltipContent>
+              </Tooltip>
+            </ContentHeader>
+
+            <div className="flex flex-1 min-h-0">
             <SidebarInset
               className={cn(
                 "overflow-hidden! min-h-0 min-w-0 transition-[max-width] duration-200 ease-linear",
@@ -4250,143 +4285,65 @@ function App() {
               onMouseDownCapture={() => setActiveShortcutPane('left')}
               onFocusCapture={() => setActiveShortcutPane('left')}
             >
-              {/* Header - also serves as titlebar drag region, adjusts padding when sidebar collapsed */}
-              <ContentHeader
-                onNavigateBack={() => { void navigateBack() }}
-                onNavigateForward={() => { void navigateForward() }}
-                canNavigateBack={canNavigateBack}
-                canNavigateForward={canNavigateForward}
-                collapsedLeftPaddingPx={collapsedLeftPaddingPx}
-              >
-                {(selectedPath || isGraphOpen || isSuggestedTopicsOpen) && fileTabs.length >= 1 ? (
-                  <TabBar
-                    tabs={fileTabs}
-                    activeTabId={activeFileTabId ?? ''}
-                    getTabTitle={getFileTabTitle}
-                    getTabId={(t) => t.id}
-                    onSwitchTab={switchFileTab}
-                    onCloseTab={closeFileTab}
-                    allowSingleTabClose={fileTabs.length === 1 && (isGraphOpen || isSuggestedTopicsOpen || (selectedPath != null && isBaseFilePath(selectedPath)))}
-                  />
-                ) : (
-                  <TabBar
-                    tabs={chatTabs}
-                    activeTabId={activeChatTabId}
-                    getTabTitle={getChatTabTitle}
-                    getTabId={(t) => t.id}
-                    isProcessing={isChatTabProcessing}
-                    onSwitchTab={switchChatTab}
-                    onCloseTab={closeChatTab}
-                  />
-                )}
-                {selectedPath && selectedPath.endsWith('.md') && (
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground self-center shrink-0 pl-2">
-                    {isSaving ? (
-                      <>
-                        <LoaderIcon className="h-3 w-3 animate-spin" />
-                        <span>Saving...</span>
-                      </>
-                    ) : lastSaved ? (
-                      <>
-                        <CheckIcon className="h-3 w-3 text-green-500" />
-                        <span>Saved</span>
-                      </>
-                    ) : null}
-                  </div>
-                )}
-                {selectedPath && selectedPath.startsWith('knowledge/') && selectedPath.endsWith('.md') && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
+              {/* Left pane sub-tab bar — shown when there are panes */}
+              {activeLeftPanes.length > 0 && (
+                <div className="flex items-center gap-1 border-b border-border bg-sidebar px-2 py-1 titlebar-drag-region">
+                  {activeLeftPanes.map((pane, idx) => {
+                    const isActive = idx === Math.min(activeLeftPaneIdx, activeLeftPanes.length - 1)
+                    const label = pane.type === 'browser'
+                      ? (() => { try { return new URL(pane.url).hostname || 'New tab' } catch { return pane.url === 'about:blank' ? 'New tab' : pane.url } })()
+                      : pane.type === 'markdown'
+                      ? pane.path.split('/').pop() ?? 'Note'
+                      : pane.type === 'graph'
+                      ? 'Graph'
+                      : pane.type === 'bases'
+                      ? 'Bases'
+                      : pane.type === 'task'
+                      ? pane.name
+                      : pane.type === 'artifact'
+                      ? pane.title || 'Artifact'
+                      : 'View'
+                    const icon = pane.type === 'browser' ? <Globe className="size-3 shrink-0" /> : pane.type === 'markdown' ? <FileText className="size-3 shrink-0" /> : null
+                    return (
                       <button
+                        key={idx}
                         type="button"
-                        onClick={() => {
-                          if (versionHistoryPath) {
-                            setVersionHistoryPath(null)
-                            setViewingHistoricalVersion(null)
-                          } else {
-                            setVersionHistoryPath(selectedPath)
-                          }
-                        }}
+                        onClick={() => activatePaneForTab(activeChatTabId, idx)}
                         className={cn(
-                          "titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors self-center shrink-0",
-                          versionHistoryPath && "bg-accent text-foreground"
+                          "titlebar-no-drag flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors",
+                          isActive
+                            ? "bg-accent text-accent-foreground"
+                            : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
                         )}
-                        aria-label="Version history"
                       >
-                        <HistoryIcon className="size-4" />
+                        {icon}
+                        <span className="truncate max-w-[120px]">{label}</span>
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onClick={(e) => { e.stopPropagation(); removePaneForTab(activeChatTabId, idx) }}
+                          onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); removePaneForTab(activeChatTabId, idx) } }}
+                          className="ml-1 shrink-0 rounded-sm p-0.5 hover:bg-accent-foreground/20"
+                        >
+                          <XIcon className="size-3" />
+                        </span>
                       </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">Version history</TooltipContent>
-                  </Tooltip>
-                )}
-                {!selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !selectedTask && !isBrowserOpen && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        onClick={handleNewChatTab}
-                        className="titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors self-center shrink-0"
-                        aria-label="New chat tab"
-                      >
-                        <SquarePen className="size-5" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">New chat tab</TooltipContent>
-                  </Tooltip>
-                )}
-                {!selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isBrowserOpen && expandedFrom && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        onClick={handleCloseFullScreenChat}
-                        className="titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors self-center shrink-0"
-                        aria-label="Restore two-pane view"
-                      >
-                        <Minimize2 className="size-5" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">Restore two-pane view</TooltipContent>
-                  </Tooltip>
-                )}
-                {(selectedPath || isGraphOpen || isSuggestedTopicsOpen) && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        onClick={toggleKnowledgePane}
-                        className="titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors -mr-1 self-center shrink-0"
-                        aria-label={isChatSidebarOpen ? "Maximize knowledge view" : "Restore two-pane view"}
-                      >
-                        {isChatSidebarOpen ? <Maximize2 className="size-5" /> : <Minimize2 className="size-5" />}
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">
-                      {isChatSidebarOpen ? "Maximize knowledge view" : "Restore two-pane view"}
-                    </TooltipContent>
-                  </Tooltip>
-                )}
-              </ContentHeader>
-
-              {isBrowserOpen ? (
-                <BrowserPane onClose={handleCloseBrowser} />
-              ) : isSuggestedTopicsOpen ? (
-                <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-                  <SuggestedTopicsView
-                    onExploreTopic={(topic) => {
-                      const prompt = buildSuggestedTopicExplorePrompt(topic)
-                      submitFromPalette(prompt, null)
-                    }}
-                  />
+                    )
+                  })}
                 </div>
-              ) : selectedPath && isBaseFilePath(selectedPath) ? (
+              )}
+              {activeLeftPane.type === 'browser' || isBrowserOpen ? (
+                <div className="flex-1 min-h-0 flex flex-col overflow-hidden animate-in fade-in duration-150">
+                  <BrowserPane onClose={handleCloseBrowser} />
+                </div>
+              ) : activeLeftPane.type === 'bases' ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                   <BasesView
                     tree={tree}
                     onSelectNote={(path) => navigateToFile(path)}
-                    config={baseConfigByPath[selectedPath] ?? DEFAULT_BASE_CONFIG}
-                    onConfigChange={(cfg) => handleBaseConfigChange(selectedPath, cfg)}
-                    isDefaultBase={selectedPath === BASES_DEFAULT_TAB_PATH}
+                    config={baseConfigByPath[activeLeftPane.path] ?? DEFAULT_BASE_CONFIG}
+                    onConfigChange={(cfg) => handleBaseConfigChange(activeLeftPane.path, cfg)}
+                    isDefaultBase={activeLeftPane.path === BASES_DEFAULT_TAB_PATH}
                     onSave={(name) => void handleBaseSave(name)}
                     externalSearch={externalBaseSearch}
                     onExternalSearchConsumed={() => setExternalBaseSearch(undefined)}
@@ -4397,7 +4354,7 @@ function App() {
                     }}
                   />
                 </div>
-              ) : isGraphOpen ? (
+              ) : activeLeftPane.type === 'graph' ? (
                 <div className="flex-1 min-h-0">
                   <GraphView
                     nodes={graphData.nodes}
@@ -4409,14 +4366,14 @@ function App() {
                     }}
                   />
                 </div>
-              ) : selectedPath ? (
-                selectedPath.endsWith('.md') ? (
+              ) : activeLeftPane.type === 'markdown' ? (
+                activeLeftPane.path.endsWith('.md') ? (
                   <div className="flex-1 min-h-0 flex flex-row overflow-hidden">
                     <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                       {openMarkdownTabs.map((tab) => {
                         const isActive = activeFileTabId
-                          ? tab.id === activeFileTabId || tab.path === selectedPath
-                          : tab.path === selectedPath
+                          ? tab.id === activeFileTabId || tab.path === activeLeftPane.path
+                          : tab.path === activeLeftPane.path
                         const isViewingHistory = viewingHistoricalVersion && isActive && versionHistoryPath === tab.path
                         const tabContent = isViewingHistory
                           ? viewingHistoricalVersion.content
@@ -4526,7 +4483,7 @@ function App() {
                     </pre>
                   </div>
                 )
-              ) : selectedTask ? (
+              ) : activeLeftPane.type === 'task' && selectedTask ? (
                 <div className="flex-1 min-h-0 overflow-hidden">
                   <BackgroundTaskDetail
                     name={selectedTask.name}
@@ -4541,168 +4498,14 @@ function App() {
                     onToggleEnabled={(enabled) => handleToggleBackgroundTask(selectedTask.name, enabled)}
                   />
                 </div>
-              ) : (
-              <FileCardProvider onOpenKnowledgeFile={(path) => { navigateToFile(path) }}>
-              <div className="flex min-h-0 flex-1 flex-col">
-                <div className="relative min-h-0 flex-1">
-                  {chatTabs.map((tab) => {
-                    const isActive = tab.id === activeChatTabId
-                    const tabState = getChatTabStateForRender(tab.id)
-                    const tabHasConversation = tabState.conversation.length > 0 || tabState.currentAssistantMessage
-                    const tabConversationContentClassName = tabHasConversation
-                      ? "mx-auto w-full max-w-4xl pb-28"
-                      : "mx-auto w-full max-w-4xl min-h-full items-center justify-center pb-0"
-                    return (
-                      <div
-                        key={tab.id}
-                        className={cn(
-                          'min-h-0 h-full flex-col',
-                          isActive
-                            ? 'flex'
-                            : 'pointer-events-none invisible absolute inset-0 flex'
-                        )}
-                        data-chat-tab-panel={tab.id}
-                        aria-hidden={!isActive}
-                      >
-                        <Conversation
-                          anchorMessageId={chatViewportAnchorByTab[tab.id]?.messageId}
-                          anchorRequestKey={chatViewportAnchorByTab[tab.id]?.requestKey}
-                          className="relative flex-1"
-                        >
-                          <ConversationContent className={tabConversationContentClassName}>
-                            {!tabHasConversation ? (
-                              <ConversationEmptyState className="h-auto">
-                                <div className="text-2xl font-semibold tracking-tight text-foreground/80 sm:text-3xl md:text-4xl">
-                                  What are we working on?
-                                </div>
-                              </ConversationEmptyState>
-                            ) : (
-                              <>
-                                {tabState.conversation.map(item => {
-                                  const rendered = renderConversationItem(item, tab.id)
-                                  if (isToolCall(item)) {
-                                    const permRequest = tabState.allPermissionRequests.get(item.id)
-                                    if (permRequest) {
-                                      const response = tabState.permissionResponses.get(item.id) || null
-                                      return (
-                                        <React.Fragment key={item.id}>
-                                          {rendered}
-                                          <PermissionRequest
-                                            toolCall={permRequest.toolCall}
-                                            onApprove={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
-                                            onApproveSession={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'session')}
-                                            onApproveAlways={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'always')}
-                                            onDeny={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
-                                            isProcessing={isActive && isProcessing}
-                                            response={response}
-                                          />
-                                        </React.Fragment>
-                                      )
-                                    }
-                                  }
-                                  return rendered
-                                })}
-
-                                {Array.from(tabState.pendingAskHumanRequests.values()).map((request) => (
-                                  <AskHumanRequest
-                                    key={request.toolCallId}
-                                    query={request.query}
-                                    onResponse={(response) => handleAskHumanResponse(request.toolCallId, request.subflow, response)}
-                                    isProcessing={isActive && isProcessing}
-                                  />
-                                ))}
-
-                                {tabState.currentAssistantMessage && (
-                                  <Message from="assistant">
-                                    <MessageContent>
-                                      <SmoothStreamingMessage text={tabState.currentAssistantMessage.replace(/<\/?voice>/g, '')} components={streamdownComponents} />
-                                    </MessageContent>
-                                  </Message>
-                                )}
-
-                                {isActive && isProcessing && !tabState.currentAssistantMessage && (
-                                  <Message from="assistant">
-                                    <MessageContent>
-                                      <Shimmer duration={1}>Thinking...</Shimmer>
-                                    </MessageContent>
-                                  </Message>
-                                )}
-                              </>
-                            )}
-                          </ConversationContent>
-                          <ConversationScrollButton />
-                        </Conversation>
-                      </div>
-                    )
-                  })}
-                </div>
-
-                <div className="sticky bottom-0 z-10 bg-background pb-12 pt-0 shadow-lg">
-                  <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-linear-to-t from-background to-transparent" />
-                  <div className="mx-auto w-full max-w-4xl px-4">
-                    {!hasConversation && (
-                      <Suggestions onSelect={setPresetMessage} className="mb-3 justify-center" />
-                    )}
-                    {chatTabs.map((tab) => {
-                      const isActive = tab.id === activeChatTabId
-                      const tabState = getChatTabStateForRender(tab.id)
-                      return (
-                        <div
-                          key={tab.id}
-                          className={isActive ? 'block' : 'hidden'}
-                          data-chat-input-panel={tab.id}
-                          aria-hidden={!isActive}
-                        >
-                          <ChatInputWithMentions
-                            knowledgeFiles={knowledgeFiles}
-                            recentFiles={recentWikiFiles}
-                            visibleFiles={visibleKnowledgeFiles}
-                            onSubmit={handlePromptSubmit}
-                            onStop={handleStop}
-                            isProcessing={isActive && isProcessing}
-                            isStopping={isActive && isStopping}
-                            isActive={isActive}
-                            presetMessage={isActive ? presetMessage : undefined}
-                            onPresetMessageConsumed={isActive ? () => setPresetMessage(undefined) : undefined}
-                            runId={tabState.runId}
-                            initialDraft={chatDraftsRef.current.get(tab.id)}
-                            onDraftChange={(text) => setChatDraftForTab(tab.id, text)}
-                            onSelectedModelChange={(m) => {
-                              if (m) {
-                                selectedModelByTabRef.current.set(tab.id, m)
-                              } else {
-                                selectedModelByTabRef.current.delete(tab.id)
-                              }
-                            }}
-                            isRecording={isActive && isRecording}
-                            recordingText={isActive ? voice.interimText : undefined}
-                            recordingState={isActive ? (voice.state === 'connecting' ? 'connecting' : 'listening') : undefined}
-                            onStartRecording={isActive ? handleStartRecording : undefined}
-                            onSubmitRecording={isActive ? handleSubmitRecording : undefined}
-                            onCancelRecording={isActive ? handleCancelRecording : undefined}
-                            voiceAvailable={isActive && voiceAvailable}
-                            ttsAvailable={isActive && ttsAvailable}
-                            ttsEnabled={ttsEnabled}
-                            ttsMode={ttsMode}
-                            onToggleTts={isActive ? handleToggleTts : undefined}
-                            onTtsModeChange={isActive ? handleTtsModeChange : undefined}
-                          />
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              </div>
-              </FileCardProvider>
-              )}
+              ) : null}
             </SidebarInset>
 
-            {/* Chat sidebar - shown when viewing files/graph */}
-            {isRightPaneContext && (
-              <ChatSidebar
+            {/* Chat sidebar - always rendered */}
+            <ChatSidebar
                 defaultWidth={460}
                 isOpen={isChatSidebarOpen}
-                isMaximized={isRightPaneMaximized}
+                isMaximized={isRightPaneMaximized || activeLeftPane.type === 'empty'}
                 chatTabs={chatTabs}
                 activeChatTabId={activeChatTabId}
                 getChatTabTitle={getChatTabTitle}
@@ -4710,7 +4513,6 @@ function App() {
                 onSwitchChatTab={switchChatTab}
                 onCloseChatTab={closeChatTab}
                 onNewChatTab={handleNewChatTabInSidebar}
-                onOpenFullScreen={toggleRightPaneMaximize}
                 conversation={conversation}
                 currentAssistantMessage={currentAssistantMessage}
                 chatTabStates={chatViewStateByTab}
@@ -4757,7 +4559,8 @@ function App() {
                 onTtsModeChange={handleTtsModeChange}
                 onComposioConnected={handleComposioConnected}
               />
-            )}
+            </div>
+            </div>
             {/* Rendered last so its no-drag region paints over the sidebar drag region */}
             <FixedSidebarToggle
               leftInsetPx={isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0}
@@ -4775,35 +4578,12 @@ function App() {
       </SidebarSectionProvider>
       <Toaster />
       <TrackModal />
-      <OnboardingModal
-        open={showOnboarding}
-        onComplete={handleOnboardingComplete}
-      />
-      <Dialog open={showMeetingPermissions} onOpenChange={setShowMeetingPermissions}>
-        <DialogContent showCloseButton={false}>
-          <DialogHeader>
-            <DialogTitle>Screen recording permission required</DialogTitle>
-            <DialogDescription>
-              Rowboat needs <strong>Screen Recording</strong> permission to capture meeting audio from other apps (Zoom, Meet, etc.). This feature won't work without it.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3 text-sm text-muted-foreground">
-            <p>To enable this:</p>
-            <ol className="list-decimal list-inside space-y-1.5">
-              <li>Open <strong>System Settings</strong> → <strong>Privacy & Security</strong> → <strong>Screen Recording</strong></li>
-              <li>Toggle on <strong>Rowboat</strong></li>
-              <li>You may need to restart the app after granting permission</li>
-            </ol>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowMeetingPermissions(false)}>Cancel</Button>
-            <Button variant="outline" onClick={() => { void handleOpenScreenRecordingSettings() }}>Open System Settings</Button>
-            <Button onClick={() => { void handleCheckPermissionAndRetry() }} disabled={checkingPermission}>
-              {checkingPermission ? 'Checking...' : 'Check Again'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <React.Suspense fallback={null}>
+        <OnboardingModal
+          open={showOnboarding}
+          onComplete={handleOnboardingComplete}
+        />
+      </React.Suspense>
     </TooltipProvider>
   )
 }

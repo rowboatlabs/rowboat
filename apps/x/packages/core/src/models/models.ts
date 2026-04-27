@@ -8,7 +8,6 @@ import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { LlmModelConfig, LlmProvider } from "@x/shared/dist/models.js";
 import z from "zod";
-import { getGatewayProvider } from "./gateway.js";
 
 export const Provider = LlmProvider;
 export const ModelConfig = LlmModelConfig;
@@ -46,9 +45,14 @@ export function createProvider(config: z.infer<typeof Provider>): ProviderV2 {
             if (ollamaURL && !ollamaURL.replace(/\/+$/, '').endsWith('/api')) {
                 ollamaURL = ollamaURL.replace(/\/+$/, '') + '/api';
             }
+            // For Ollama Cloud, include API key as Bearer token
+            const ollamaHeaders: Record<string, string> = { ...(headers || {}) };
+            if (apiKey) {
+                ollamaHeaders['Authorization'] = `Bearer ${apiKey}`;
+            }
             return createOllama({
                 baseURL: ollamaURL,
-                headers,
+                headers: ollamaHeaders,
             });
         }
         case "openai-compatible":
@@ -64,8 +68,6 @@ export function createProvider(config: z.infer<typeof Provider>): ProviderV2 {
                 baseURL,
                 headers,
             }) as unknown as ProviderV2;
-        case "rowboat":
-            return getGatewayProvider();
         default:
             throw new Error(`Unsupported provider flavor: ${config.flavor}`);
     }

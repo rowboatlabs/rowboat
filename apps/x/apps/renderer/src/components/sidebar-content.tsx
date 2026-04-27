@@ -12,18 +12,13 @@ import {
   FilePlus,
   Folder,
   FolderPlus,
-  Globe,
-  AlertTriangle,
   HelpCircle,
   Mic,
   Network,
   Pencil,
-  Radio,
   SearchIcon,
   SquarePen,
   Table2,
-  Plug,
-  Lightbulb,
   LoaderIcon,
   Settings,
   Square,
@@ -43,17 +38,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import {
   Sidebar,
@@ -90,13 +74,10 @@ import {
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import { type ActiveSection, useSidebarSection } from "@/contexts/sidebar-context"
-import { ConnectorsPopover } from "@/components/connectors-popover"
 import { HelpPopover } from "@/components/help-popover"
 import { SettingsDialog } from "@/components/settings-dialog"
 import { toast } from "@/lib/toast"
-import { useBilling } from "@/hooks/useBilling"
 import { ServiceEvent } from "@x/shared/src/service-events.js"
-import type { MeetingTranscriptionState } from "@/hooks/useMeetingTranscription"
 import z from "zod"
 
 interface TreeNode {
@@ -152,7 +133,6 @@ const RUN_STALE_MS = 2 * 60 * 60 * 1000
 const SERVICE_LABELS: Record<string, string> = {
   gmail: "Syncing Gmail",
   calendar: "Syncing Calendar",
-  fireflies: "Syncing Fireflies",
   granola: "Syncing Granola",
   graph: "Updating knowledge",
   voice_memo: "Processing voice memo",
@@ -182,14 +162,6 @@ type SidebarContentPanelProps = {
   selectedBackgroundTask?: string | null
   onNewChat?: () => void
   onOpenSearch?: () => void
-  meetingState?: MeetingTranscriptionState
-  meetingSummarizing?: boolean
-  meetingAvailable?: boolean
-  onToggleMeeting?: () => void
-  isBrowserOpen?: boolean
-  onToggleBrowser?: () => void
-  isSuggestedTopicsOpen?: boolean
-  onOpenSuggestedTopics?: () => void
 } & React.ComponentProps<typeof Sidebar>
 
 const sectionTabs: { id: ActiveSection; label: string }[] = [
@@ -416,38 +388,10 @@ export function SidebarContentPanel({
   selectedBackgroundTask,
   onNewChat,
   onOpenSearch,
-  meetingState = 'idle',
-  meetingSummarizing = false,
-  meetingAvailable = false,
-  onToggleMeeting,
-  isBrowserOpen = false,
-  onToggleBrowser,
-  isSuggestedTopicsOpen = false,
-  onOpenSuggestedTopics,
   ...props
 }: SidebarContentPanelProps) {
   const { activeSection, setActiveSection } = useSidebarSection()
-  const [hasOauthError, setHasOauthError] = useState(false)
-  const [showOauthAlert, setShowOauthAlert] = useState(true)
-  const [connectorsOpen, setConnectorsOpen] = useState(false)
-  const [openConnectorsAfterClose, setOpenConnectorsAfterClose] = useState(false)
-  const connectorsButtonRef = useRef<HTMLButtonElement | null>(null)
-  const [isRowboatConnected, setIsRowboatConnected] = useState(false)
-  const [loggingIn, setLoggingIn] = useState(false)
-  const [appUrl, setAppUrl] = useState<string | null>(null)
-  const { billing } = useBilling(isRowboatConnected)
 
-  const handleRowboatLogin = useCallback(async () => {
-    try {
-      setLoggingIn(true)
-      const result = await window.ipc.invoke('oauth:connect', { provider: 'rowboat' })
-      if (!result.success) {
-        setLoggingIn(false)
-      }
-    } catch {
-      setLoggingIn(false)
-    }
-  }, [])
 
   useEffect(() => {
     let mounted = true
@@ -457,36 +401,21 @@ export function SidebarContentPanel({
         const result = await window.ipc.invoke('oauth:getState', null)
         const config = result.config || {}
         const hasError = Object.values(config).some((entry) => Boolean(entry?.error))
-        const connected = config['rowboat']?.connected ?? false
         if (mounted) {
           setHasOauthError(hasError)
-          setIsRowboatConnected(connected)
-          if (!hasError) {
-            setShowOauthAlert(true)
-          }
-        }
-        if (connected && mounted) {
-          try {
-            const account = await window.ipc.invoke('account:getRowboat', null)
-            if (mounted) setAppUrl(account.config?.appUrl ?? null)
-          } catch { /* ignore */ }
+          if (!hasError) setShowOauthAlert(true)
         }
       } catch (error) {
         console.error('Failed to fetch OAuth state:', error)
         if (mounted) {
           setHasOauthError(false)
-          setIsRowboatConnected(false)
           setShowOauthAlert(true)
         }
       }
     }
 
     refreshOauthError()
-    const cleanup = window.ipc.on('oauth:didConnect', () => {
-      refreshOauthError()
-      setLoggingIn(false)
-    })
-
+    const cleanup = window.ipc.on('oauth:didConnect', refreshOauthError)
     return () => {
       mounted = false
       cleanup()
@@ -539,66 +468,6 @@ export function SidebarContentPanel({
               <span>Search</span>
             </button>
           )}
-          {meetingAvailable && onToggleMeeting && (
-            <button
-              type="button"
-              onClick={onToggleMeeting}
-              disabled={meetingState === 'connecting' || meetingState === 'stopping' || meetingSummarizing}
-              className={cn(
-                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors disabled:pointer-events-none",
-                meetingState === 'recording'
-                  ? "text-red-500 hover:bg-sidebar-accent"
-                  : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-              )}
-            >
-              {meetingSummarizing || meetingState === 'connecting' ? (
-                <LoaderIcon className="size-4 animate-spin" />
-              ) : meetingState === 'recording' ? (
-                <Square className="size-4 animate-pulse" />
-              ) : (
-                <Radio className="size-4" />
-              )}
-              <span>
-                {meetingSummarizing
-                  ? 'Generating notes…'
-                  : meetingState === 'connecting'
-                    ? 'Starting…'
-                    : meetingState === 'recording'
-                      ? 'Stop recording'
-                      : 'Take meeting notes'}
-              </span>
-            </button>
-          )}
-          {onToggleBrowser && (
-            <button
-              type="button"
-              onClick={onToggleBrowser}
-              className={cn(
-                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
-                isBrowserOpen
-                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                  : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-              )}
-            >
-              <Globe className="size-4" />
-              <span>Run browser task</span>
-            </button>
-          )}
-          {onOpenSuggestedTopics && (
-            <button
-              type="button"
-              onClick={onOpenSuggestedTopics}
-              className={cn(
-                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
-                isSuggestedTopicsOpen
-                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                  : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-              )}
-            >
-              <Lightbulb className="size-4" />
-              <span>Suggested Topics</span>
-            </button>
-          )}
         </div>
       </SidebarHeader>
       <SidebarContent>
@@ -624,110 +493,9 @@ export function SidebarContentPanel({
           />
         )}
       </SidebarContent>
-      {/* Billing / upgrade CTA or Log in CTA */}
-      {isRowboatConnected && billing ? (
-        <div className="px-3 py-2">
-          <div className="flex items-center justify-between rounded-lg border border-sidebar-border bg-sidebar-accent/20 px-3 py-2">
-            <div className="min-w-0">
-              <span className="text-xs font-medium capitalize text-sidebar-foreground">
-                {billing.subscriptionPlan ? `${billing.subscriptionPlan} plan` : 'No plan'}
-              </span>
-              {billing.subscriptionStatus === 'trialing' && billing.trialExpiresAt && (() => {
-                const days = Math.max(0, Math.ceil((new Date(billing.trialExpiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
-                return (
-                  <p className="text-[10px] text-sidebar-foreground/60">
-                    {days === 0 ? 'Trial expires today' : days === 1 ? '1 day left' : `${days} days left`}
-                  </p>
-                )
-              })()}
-            </div>
-            <button
-              onClick={() => appUrl && window.open(`${appUrl}?intent=upgrade`)}
-              className="shrink-0 rounded-md bg-sidebar-foreground/10 px-2.5 py-1 text-[11px] font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-foreground/20"
-            >
-              {!billing.subscriptionPlan ? 'Subscribe' : billing.subscriptionPlan === 'starter' ? 'Upgrade' : 'Manage'}
-            </button>
-          </div>
-        </div>
-      ) : null}
-      {/* Sign in CTA */}
-      {!isRowboatConnected && (
-        <div className="px-3 py-2">
-          <button
-            onClick={handleRowboatLogin}
-            disabled={loggingIn}
-            className="flex w-full items-center justify-center rounded-lg border border-sidebar-border bg-sidebar-accent/20 px-3 py-2.5 text-xs font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-accent/40 disabled:opacity-50"
-          >
-            {loggingIn ? 'Signing in…' : 'Sign in to Rowboat'}
-          </button>
-        </div>
-      )}
       {/* Bottom actions */}
       <div className="border-t border-sidebar-border px-2 py-2">
         <div className="flex flex-col gap-1">
-          <div className="flex items-center gap-2">
-            <ConnectorsPopover open={connectorsOpen} onOpenChange={setConnectorsOpen} mode="unconnected">
-              <button
-                ref={connectorsButtonRef}
-                className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
-              >
-                <Plug className="size-4" />
-                <span>Connect Accounts</span>
-              </button>
-            </ConnectorsPopover>
-            {hasOauthError && (
-              <AlertDialog
-                open={showOauthAlert}
-                onOpenChange={setShowOauthAlert}
-              >
-                <AlertDialogTrigger asChild>
-                  <button
-                    type="button"
-                    className="inline-flex items-center"
-                    aria-label="OAuth connection issues"
-                  >
-                    <AlertTriangle className="size-3 text-amber-500/90 animate-pulse" />
-                  </button>
-                </AlertDialogTrigger>
-                <AlertDialogContent
-                  onCloseAutoFocus={(event) => {
-                    event.preventDefault()
-                    if (openConnectorsAfterClose) {
-                      setOpenConnectorsAfterClose(false)
-                      setConnectorsOpen(true)
-                    }
-                    connectorsButtonRef.current?.focus()
-                  }}
-                >
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Reconnect your accounts</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      One or more connected accounts need attention. Open Connected accounts
-                      to review the status and reconnect if needed.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel
-                      onClick={() => {
-                        setOpenConnectorsAfterClose(false)
-                        setShowOauthAlert(false)
-                      }}
-                    >
-                      Dismiss
-                    </AlertDialogCancel>
-                    <AlertDialogAction
-                      onClick={() => {
-                        setOpenConnectorsAfterClose(true)
-                        setShowOauthAlert(false)
-                      }}
-                    >
-                      View connected accounts
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-            )}
-          </div>
           <SettingsDialog>
             <button className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors">
               <Settings className="size-4" />

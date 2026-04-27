@@ -410,7 +410,7 @@ The ` + "`" + `context` + "`" + ` parameter is extra guidance for the track agen
   > context: "Initial backfill — scan ` + "`" + `gmail_sync/` + "`" + ` for emails from the last 90 days that match this track's topic (Q3 planning, OKRs, roadmap), and synthesize the initial summary."
 
 - New track: "Summarize this week's customer calls" → run with:
-  > context: "Backfill from this week's meeting notes in ` + "`" + `granola_sync/` + "`" + ` and ` + "`" + `fireflies_sync/` + "`" + `."
+  > context: "Backfill from this week's meeting notes in ` + "`" + `granola_sync/` + "`" + `."
 
 - Manual refresh after the user mentions a recent change:
   > context: "Focus on changes from the last 7 days only."

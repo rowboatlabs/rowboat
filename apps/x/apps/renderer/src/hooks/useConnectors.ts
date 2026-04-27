@@ -328,7 +328,7 @@ export function useConnectors(active: boolean) {
       const result = await window.ipc.invoke('oauth:connect', { provider, clientId: credentials?.clientId, clientSecret: credentials?.clientSecret })
 
       if (!result.success) {
-        toast.error(result.error || (provider === 'rowboat' ? 'Failed to log in to Rowboat' : `Failed to connect to ${provider}`))
+        toast.error(result.error || (provider === 'rowboat' ? 'Failed to log in' : `Failed to connect to ${provider}`))
         setProviderStates(prev => ({
           ...prev,
           [provider]: { ...prev[provider], isConnecting: false }
@@ -336,7 +336,7 @@ export function useConnectors(active: boolean) {
       }
     } catch (error) {
       console.error('Failed to connect:', error)
-      toast.error(provider === 'rowboat' ? 'Failed to log in to Rowboat' : `Failed to connect to ${provider}`)
+      toast.error(provider === 'rowboat' ? 'Failed to log in' : `Failed to connect to ${provider}`)
       setProviderStates(prev => ({
         ...prev,
         [provider]: { ...prev[provider], isConnecting: false }
@@ -374,8 +374,8 @@ export function useConnectors(active: boolean) {
         if (provider === 'google') {
           clearGoogleCredentials()
         }
-        const displayName = provider === 'fireflies-ai' ? 'Fireflies' : provider.charAt(0).toUpperCase() + provider.slice(1)
-        toast.success(provider === 'rowboat' ? 'Logged out of Rowboat' : `Disconnected from ${displayName}`)
+        const displayName = provider.charAt(0).toUpperCase() + provider.slice(1)
+        toast.success(`Disconnected from ${displayName}`)
         setProviderStates(prev => ({
           ...prev,
           [provider]: {
@@ -385,7 +385,7 @@ export function useConnectors(active: boolean) {
           }
         }))
       } else {
-        toast.error(provider === 'rowboat' ? 'Failed to log out of Rowboat' : `Failed to disconnect from ${provider}`)
+        toast.error(provider === 'rowboat' ? 'Failed to log out' : `Failed to disconnect from ${provider}`)
         setProviderStates(prev => ({
           ...prev,
           [provider]: { ...prev[provider], isLoading: false }
@@ -393,7 +393,7 @@ export function useConnectors(active: boolean) {
       }
     } catch (error) {
       console.error('Failed to disconnect:', error)
-      toast.error(provider === 'rowboat' ? 'Failed to log out of Rowboat' : `Failed to disconnect from ${provider}`)
+      toast.error(provider === 'rowboat' ? 'Failed to log out' : `Failed to disconnect from ${provider}`)
       setProviderStates(prev => ({
         ...prev,
         [provider]: { ...prev[provider], isLoading: false }
@@ -473,10 +473,8 @@ export function useConnectors(active: boolean) {
       }))
 
       if (success) {
-        const displayName = provider === 'fireflies-ai' ? 'Fireflies' : provider.charAt(0).toUpperCase() + provider.slice(1)
-        if (provider === 'rowboat') {
-          toast.success('Logged in to Rowboat')
-        } else if (provider === 'google' || provider === 'fireflies-ai') {
+        const displayName = provider.charAt(0).toUpperCase() + provider.slice(1)
+        if (provider === 'google') {
           toast.success(`Connected to ${displayName}`, {
             description: 'Syncing your data in the background. This may take a few minutes before changes appear.',
             duration: 8000,

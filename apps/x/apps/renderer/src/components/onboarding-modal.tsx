@@ -919,9 +919,9 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
           <span className="text-lg font-medium text-muted-foreground">Your AI coworker, with memory</span>
         </div>
         <DialogHeader className="space-y-3 mb-8">
-          <DialogTitle className="text-2xl">Sign in to Rowboat</DialogTitle>
+          <DialogTitle className="text-2xl">Sign in</DialogTitle>
           <DialogDescription className="text-base max-w-md mx-auto">
-            Connect your Rowboat account for instant access to all models through our gateway — no API keys needed.
+            Connect your account for instant access to all models through the gateway — no API keys needed.
           </DialogDescription>
         </DialogHeader>
 
@@ -929,7 +929,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
           <div className="flex flex-col items-center gap-4">
             <div className="flex items-center gap-2 text-green-600">
               <CheckCircle2 className="size-5" />
-              <span className="text-sm font-medium">Connected to Rowboat</span>
+              <span className="text-sm font-medium">Account connected</span>
             </div>
             <Button onClick={() => setCurrentStep(3 as Step)} size="lg" className="w-full max-w-xs">
               Continue
@@ -949,7 +949,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
               {rowboatState.isConnecting ? (
                 <><Loader2 className="size-4 animate-spin mr-2" />Waiting for sign in...</>
               ) : (
-                "Sign in with Rowboat"
+                "Sign in"
               )}
             </Button>
             {rowboatState.isConnecting && (
@@ -981,7 +981,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
       <DialogHeader className="text-center mb-6">
         <DialogTitle className="text-2xl">Before you continue</DialogTitle>
         <DialogDescription className="text-base max-w-md mx-auto">
-          With a Rowboat account, you get:
+          With an account, you get:
         </DialogDescription>
       </DialogHeader>
 
@@ -1010,7 +1010,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
       </div>
 
       <p className="text-sm text-muted-foreground text-center mb-6">
-        By continuing, you'll set up your own API keys instead of using Rowboat's managed gateway.
+        By continuing, you'll set up your own API keys instead of using the managed gateway.
       </p>
 
       <div className="flex items-center justify-between">
@@ -1326,7 +1326,6 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
                 <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Meeting Notes</span>
               </div>
               {renderGranolaRow()}
-              {providers.includes('fireflies-ai') && renderOAuthProvider('fireflies-ai', 'Fireflies', <Mic className="size-5" />, 'AI meeting transcripts')}
             </div>
 
             {/* Team Communication Section */}
@@ -1400,12 +1399,6 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
                     <span>Google (Email & Calendar)</span>
                   </div>
                 )}
-                {connectedProviders.includes('fireflies-ai') && (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <CheckCircle2 className="size-4 text-green-600" />
-                    <span>Fireflies (Meeting transcripts)</span>
-                  </div>
-                )}
                 {granolaEnabled && (
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <CheckCircle2 className="size-4 text-green-600" />
@@ -1424,7 +1417,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
         )}
 
         <Button onClick={handleComplete} size="lg" className="mt-8 w-full max-w-xs">
-          Start Using Rowboat
+          Get Started
         </Button>
       </div>
     )

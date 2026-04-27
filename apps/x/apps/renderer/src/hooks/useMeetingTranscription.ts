@@ -4,6 +4,11 @@ import { useRowboatAccount } from '@/hooks/useRowboatAccount';
 
 export type MeetingTranscriptionState = 'idle' | 'connecting' | 'recording' | 'stopping';
 
+export interface TranscriptEntry {
+    speaker: string;
+    text: string;
+}
+
 const DEEPGRAM_PARAMS = new URLSearchParams({
     model: 'nova-3',
     encoding: 'linear16',
@@ -44,11 +49,6 @@ async function detectHeadphones(): Promise<boolean> {
 // ---------------------------------------------------------------------------
 // Transcript formatting
 // ---------------------------------------------------------------------------
-interface TranscriptEntry {
-    speaker: string;
-    text: string;
-}
-
 export interface CalendarEventMeta {
     summary?: string
     start?: { dateTime?: string; date?: string }
@@ -124,6 +124,20 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
     onAutoStopRef.current = onAutoStop;
     const dateRef = useRef<string>('');
     const calendarEventRef = useRef<CalendarEventMeta | undefined>(undefined);
+    const [liveTranscript, setLiveTranscript] = useState<TranscriptEntry[]>([]);
+
+    const syncLiveTranscript = useCallback(() => {
+        const entries = [...transcriptRef.current];
+        for (const interim of interimRef.current.values()) {
+            if (!interim.text) continue;
+            if (entries.length > 0 && entries[entries.length - 1].speaker === interim.speaker) {
+                entries[entries.length - 1] = { speaker: interim.speaker, text: entries[entries.length - 1].text + ' ' + interim.text };
+            } else {
+                entries.push({ speaker: interim.speaker, text: interim.text });
+            }
+        }
+        setLiveTranscript(entries);
+    }, []);
 
     const writeTranscriptToFile = useCallback(async () => {
         if (!notePathRef.current) return;
@@ -273,6 +287,7 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
         // Set up WS message handler
         transcriptRef.current = [];
         interimRef.current = new Map();
+        setLiveTranscript([]);
         ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
             if (!data.channel?.alternatives?.[0]) return;
@@ -312,6 +327,7 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
                 interimRef.current.set(channelIndex, { speaker, text: transcript });
             }
             scheduleDebouncedWrite();
+            syncLiveTranscript();
         };
 
         ws.onclose = () => {
@@ -413,5 +429,5 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
         setState('idle');
     }, [state, cleanup, writeTranscriptToFile]);
 
-    return { state, start, stop };
+    return { state, start, stop, liveTranscript };
 }

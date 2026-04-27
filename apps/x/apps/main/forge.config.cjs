@@ -7,12 +7,12 @@ const pkg = require('./package.json');
 
 module.exports = {
     packagerConfig: {
-        executableName: 'rowboat',
+        executableName: 'assistant',
         icon: './icons/icon',  // .icns extension added automatically
-        appBundleId: 'com.rowboat.app',
+        appBundleId: 'com.assistant.app',
         appCategoryType: 'public.app-category.productivity',
         extendInfo: {
-            NSAudioCaptureUsageDescription: 'Rowboat needs access to system audio to transcribe meetings from other apps (Zoom, Meet, etc.)',
+            NSAudioCaptureUsageDescription: 'This app needs access to system audio to transcribe meetings from other apps (Zoom, Meet, etc.)',
         },
         osxSign: {
             batchCodesignCalls: true,
@@ -43,27 +43,27 @@ module.exports = {
             name: '@electron-forge/maker-dmg',
             config: (arch) => ({
                 format: 'ULFO',
-                name: `Rowboat-darwin-${arch}-${pkg.version}`,  // Architecture-specific name to avoid conflicts
+                name: `Assistant-darwin-${arch}-${pkg.version}`,
             })
         },
         {
             name: '@electron-forge/maker-squirrel',
             config: (arch) => ({
-                authors: 'rowboatlabs',
+                authors: 'gokulb20',
                 description: 'AI coworker with memory',
-                name: `Rowboat-win32-${arch}`,
-                setupExe: `Rowboat-win32-${arch}-${pkg.version}-setup.exe`,
+                name: `Assistant-win32-${arch}`,
+                setupExe: `Assistant-win32-${arch}-${pkg.version}-setup.exe`,
             })
         },
         {
             name: '@electron-forge/maker-deb',
             config: (arch) => ({
                 options: {
-                    name: `Rowboat-linux`,
-                    bin: "rowboat",
+                    name: `Assistant-linux`,
+                    bin: "assistant",
                     description: 'AI coworker with memory',
-                    maintainer: 'rowboatlabs',
-                    homepage: 'https://rowboatlabs.com'
+                    maintainer: 'gokulb20',
+                    homepage: 'https://github.com/gokulb20/rowboat'
                 }
             })
         },
@@ -71,10 +71,10 @@ module.exports = {
             name: '@electron-forge/maker-rpm',
             config: {
                 options: {
-                    name: `Rowboat-linux`,
-                    bin: "rowboat",
+                    name: `Assistant-linux`,
+                    bin: "assistant",
                     description: 'AI coworker with memory',
-                    homepage: 'https://rowboatlabs.com'
+                    homepage: 'https://github.com/gokulb20/rowboat'
                 }
             }
         },
@@ -88,7 +88,7 @@ module.exports = {
             name: '@electron-forge/publisher-github',
             config: {
                 repository: {
-                    owner: 'rowboatlabs',
+                    owner: 'gokulb20',
                     name: 'rowboat'
                 },
                 prerelease: true

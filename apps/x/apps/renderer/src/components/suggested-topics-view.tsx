@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { memo, useCallback, useEffect, useState } from 'react'
 import { ArrowRight, Lightbulb, Loader2 } from 'lucide-react'
 import { SuggestedTopicBlockSchema, type SuggestedTopicBlock } from '@x/shared/dist/blocks.js'
 
@@ -116,7 +116,7 @@ interface SuggestedTopicsViewProps {
   onExploreTopic: (topic: SuggestedTopicBlock) => void
 }
 
-export function SuggestedTopicsView({ onExploreTopic }: SuggestedTopicsViewProps) {
+export const SuggestedTopicsView = memo(function SuggestedTopicsView({ onExploreTopic }: SuggestedTopicsViewProps) {
   const [topics, setTopics] = useState<SuggestedTopicBlock[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -243,4 +243,4 @@ export function SuggestedTopicsView({ onExploreTopic }: SuggestedTopicsViewProps
       </div>
     </div>
   )
-}
+})

@@ -2,7 +2,7 @@ import { Loader2, CheckCircle2, ArrowLeft, Calendar, FileText } from "lucide-rea
 import { motion } from "motion/react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { GmailIcon, FirefliesIcon } from "../provider-icons"
+import { GmailIcon } from "../provider-icons"
 import type { OnboardingState, ProviderState } from "../use-onboarding-state"
 
 interface ConnectAccountsStepProps {
@@ -98,7 +98,7 @@ export function ConnectAccountsStep({ state }: ConnectAccountsStepProps) {
         Connect Your Accounts
       </h2>
       <p className="text-base text-muted-foreground text-center leading-relaxed mb-8">
-        Rowboat gets smarter the more it knows about your work. Connect your accounts to get started. You can find more tools in Settings.
+        The assistant gets smarter the more it knows about your work. Connect your accounts to get started. You can find more tools in Settings.
       </p>
 
       {providersLoading ? (
@@ -107,13 +107,13 @@ export function ConnectAccountsStep({ state }: ConnectAccountsStepProps) {
         </div>
       ) : (
         <div className="space-y-6">
-          {/* Email & Calendar */}
-          {(useComposioForGoogle || useComposioForGoogleCalendar || providers.includes('google')) && (
+          {/* Email & Calendar (via Composio only) */}
+          {(useComposioForGoogle || useComposioForGoogleCalendar) && (
             <div className="space-y-3">
               <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                 Email & Calendar
               </span>
-              {useComposioForGoogle ? (
+              {useComposioForGoogle && (
                 <ProviderCard
                   name="Gmail"
                   description="Read emails for context and drafts."
@@ -122,17 +122,6 @@ export function ConnectAccountsStep({ state }: ConnectAccountsStepProps) {
                   iconColor="text-red-500"
                   providerState={{ isConnected: gmailConnected, isLoading: gmailLoading, isConnecting: gmailConnecting }}
                   onConnect={handleConnectGmail}
-                  index={cardIndex++}
-                />
-              ) : (
-                <ProviderCard
-                  name="Google"
-                  description="Rowboat uses your email and calendar to provide personalized, context-aware assistance"
-                  icon={<GmailIcon />}
-                  iconBg="bg-red-500/10"
-                  iconColor="text-red-500"
-                  providerState={providerStates['google']}
-                  onConnect={() => handleConnect('google')}
                   index={cardIndex++}
                 />
               )}
@@ -167,7 +156,7 @@ export function ConnectAccountsStep({ state }: ConnectAccountsStepProps) {
                   <span className="text-green-500"><FileText className="size-5" /></span>
                 </div>
                 <div className="min-w-0">
-                  <div className="text-sm font-semibold">Rowboat Meeting Notes</div>
+                  <div className="text-sm font-semibold">Meeting Notes</div>
                   <div className="text-xs text-muted-foreground truncate">Built in. Ready to use.</div>
                 </div>
               </div>
@@ -177,18 +166,6 @@ export function ConnectAccountsStep({ state }: ConnectAccountsStepProps) {
                 </div>
               </div>
             </motion.div>
-            {providers.includes('fireflies-ai') && (
-              <ProviderCard
-                name="Fireflies"
-                description="Import existing notes."
-                icon={<FirefliesIcon />}
-                iconBg="bg-amber-500/10"
-                iconColor="text-amber-500"
-                providerState={providerStates['fireflies-ai']}
-                onConnect={() => handleConnect('fireflies-ai')}
-                index={cardIndex++}
-              />
-            )}
           </div>
         </div>
       )}

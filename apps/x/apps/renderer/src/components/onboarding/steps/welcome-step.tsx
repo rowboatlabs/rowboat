@@ -20,7 +20,7 @@ export function WelcomeStep({ state }: WelcomeStepProps) {
         className="relative mb-8"
       >
         <div className="absolute inset-0 size-16 rounded-2xl bg-primary/10 blur-xl scale-[2.5]" />
-        <img src="/logo-only.png" alt="Rowboat" className="relative size-16" />
+        <img src="/logo-only.png" alt="Assistant" className="relative size-16" />
       </motion.div>
 
       {/* Tagline badge */}
@@ -41,7 +41,7 @@ export function WelcomeStep({ state }: WelcomeStepProps) {
         transition={{ delay: 0.2 }}
         className="text-3xl font-bold tracking-tight mb-3"
       >
-        Welcome to Rowboat
+        Welcome to Assistant
       </motion.h1>
       <motion.p
         initial={{ opacity: 0 }}
@@ -49,7 +49,7 @@ export function WelcomeStep({ state }: WelcomeStepProps) {
         transition={{ delay: 0.3 }}
         className="text-base text-muted-foreground leading-relaxed max-w-sm mb-10"
       >
-        Rowboat connects to your work, builds a knowledge graph, and uses that context to help you get things done. Private and on your machine.
+        Assistant connects to your work, builds a knowledge graph, and uses that context to help you get things done. Private and on your machine.
       </motion.p>
 
       {/* Sign in / connected state */}
@@ -63,7 +63,7 @@ export function WelcomeStep({ state }: WelcomeStepProps) {
           <div className="flex flex-col items-center gap-4">
             <div className="flex items-center gap-2 text-green-600 dark:text-green-400">
               <CheckCircle2 className="size-5" />
-              <span className="text-sm font-medium">Connected to Rowboat</span>
+              <span className="text-sm font-medium">Account connected</span>
             </div>
             <Button
               onClick={() => {
@@ -90,7 +90,7 @@ export function WelcomeStep({ state }: WelcomeStepProps) {
               {rowboatState.isConnecting ? (
                 <><Loader2 className="size-5 animate-spin mr-2" />Waiting for sign in...</>
               ) : (
-                "Sign in with Rowboat"
+                "Sign in"
               )}
             </Button>
             {rowboatState.isConnecting && (

@@ -138,22 +138,7 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
     return false
   })()
 
-  const hasUnconnectedMeetingNotes = (() => {
-    if (!isUnconnectedMode) return true
-    if (c.providers.includes('fireflies-ai')) {
-      const firefliesState = c.providerStates['fireflies-ai']
-      if (!firefliesState?.isConnected || c.providerStatus['fireflies-ai']?.error) return true
-    }
-    return false
-  })()
-
-  const isRowboatUnconnected = (() => {
-    if (!c.providers.includes('rowboat')) return false
-    const rowboatState = c.providerStates['rowboat']
-    return !rowboatState?.isConnected || rowboatState?.isLoading
-  })()
-
-  const allConnected = isUnconnectedMode && !isRowboatUnconnected && !hasUnconnectedEmailCalendar && !hasUnconnectedMeetingNotes
+  const allConnected = isUnconnectedMode && !hasUnconnectedEmailCalendar
 
   return (
     <>
@@ -217,33 +202,15 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
             </div>
           ) : (
             <>
-              {/* Rowboat Account - show in "all" mode always, or in "unconnected" mode only when not connected */}
-              {c.providers.includes('rowboat') && (() => {
-                const rowboatState = c.providerStates['rowboat']
-                const isRowboatConnected = rowboatState?.isConnected && !rowboatState?.isLoading
-                if (isUnconnectedMode && isRowboatConnected) return null
-                return (
-                  <>
-                    <div className="px-2 py-1.5">
-                      <span className="text-xs font-medium text-muted-foreground">Account</span>
-                    </div>
-                    {renderOAuthProvider('rowboat', 'Rowboat', <User className="size-4" />, 'Log in to your Rowboat account')}
-                    <Separator className="my-2" />
-                  </>
-                )
-              })()}
-
-              {/* Email & Calendar Section */}
-              {(c.useComposioForGoogle || c.useComposioForGoogleCalendar || c.providers.includes('google')) && hasUnconnectedEmailCalendar && (
+              {/* Email & Calendar Section (via Composio only) */}
+              {(c.useComposioForGoogle || c.useComposioForGoogleCalendar) && hasUnconnectedEmailCalendar && (
                 <>
                   <div className="px-2 py-1.5">
                     <span className="text-xs font-medium text-muted-foreground">
                       Email & Calendar
                     </span>
                   </div>
-                  {c.useComposioForGoogle ? (
-                    // In unconnected mode, only show if not connected
-                    (!isUnconnectedMode || isGmailUnconnected) ? (
+                  {c.useComposioForGoogle && (!isUnconnectedMode || isGmailUnconnected) ? (
                       <div className="flex items-center justify-between gap-3 rounded-md px-3 py-2 hover:bg-accent">
                         <div className="flex items-center gap-3 min-w-0">
                           <div className="flex size-8 items-center justify-center rounded-md bg-muted">
@@ -289,10 +256,7 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
                           )}
                         </div>
                       </div>
-                    ) : null
-                  ) : (
-                    renderOAuthProvider('google', 'Google', <Mail className="size-4" />, 'Sync emails and calendar')
-                  )}
+                    ) : null}
                   {c.useComposioForGoogleCalendar && (!isUnconnectedMode || isGoogleCalendarUnconnected) && (
                     <div className="flex items-center justify-between gap-3 rounded-md px-3 py-2 hover:bg-accent">
                       <div className="flex items-center gap-3 min-w-0">
@@ -344,19 +308,6 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
                 </>
               )}
 
-              {/* Meeting Notes Section */}
-              {hasUnconnectedMeetingNotes && (
-                <>
-                  <div className="px-2 py-1.5">
-                    <span className="text-xs font-medium text-muted-foreground">Meeting Notes</span>
-                  </div>
-
-                  {/* Fireflies */}
-                  {c.providers.includes('fireflies-ai') && renderOAuthProvider('fireflies-ai', 'Fireflies', <Mic className="size-4" />, 'AI meeting transcripts')}
-
-                  <Separator className="my-2" />
-                </>
-              )}
             </>
           )}
         </div>

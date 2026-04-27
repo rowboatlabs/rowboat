@@ -15,7 +15,7 @@ import { dirname } from "node:path";
 import { updateElectronApp, UpdateSourceType } from "update-electron-app";
 import { init as initGmailSync } from "@x/core/dist/knowledge/sync_gmail.js";
 import { init as initCalendarSync } from "@x/core/dist/knowledge/sync_calendar.js";
-import { init as initFirefliesSync } from "@x/core/dist/knowledge/sync_fireflies.js";
+
 import { init as initGranolaSync } from "@x/core/dist/knowledge/granola/sync.js";
 import { init as initGraphBuilder } from "@x/core/dist/knowledge/build_graph.js";
 import { init as initEmailLabeling } from "@x/core/dist/knowledge/label_emails.js";
@@ -28,6 +28,8 @@ import { init as initTrackEventProcessor } from "@x/core/dist/knowledge/track/ev
 import { init as initLocalSites, shutdown as shutdownLocalSites } from "@x/core/dist/local-sites/server.js";
 
 import { initConfigs } from "@x/core/dist/config/initConfigs.js";
+import { WorkDir } from "@x/core/dist/config/config.js";
+import fs from "node:fs";
 import started from "electron-squirrel-startup";
 import { execSync, exec, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
@@ -203,16 +205,9 @@ app.whenReady().then(async () => {
     registerAppProtocol();
   }
 
-  // Initialize auto-updater (only in production)
-  if (app.isPackaged) {
-    updateElectronApp({
-      updateSource: {
-        type: UpdateSourceType.ElectronPublicUpdateService,
-        repo: "rowboatlabs/rowboat",
-      },
-      notifyUser: true, // Shows native dialog when update is available
-    });
-  }
+  // Auto-updater disabled (Rowboat cloud dependencies removed)
+  // To re-enable, point this to your own fork:
+  // repo: "gokulb20/rowboat"
 
   // Ensure agent-slack CLI is available
   try {
@@ -259,17 +254,50 @@ app.whenReady().then(async () => {
   // start track event processor (consumes events/pending/, triggers matching tracks)
   initTrackEventProcessor();
 
-  // start gmail sync
-  initGmailSync();
+  // start gmail sync — only if configured
+  if (fs.existsSync(path.join(WorkDir, 'config', 'composio.json'))) {
+    initGmailSync();
+  } else {
+    console.log('[main] Gmail sync disabled — no Composio config');
+  }
 
-  // start calendar sync
-  initCalendarSync();
+  // start calendar sync — only if configured
+  if (fs.existsSync(path.join(WorkDir, 'config', 'composio.json'))) {
+    initCalendarSync();
+  } else {
+    console.log('[main] Calendar sync disabled — no Composio config');
+  }
 
-  // start fireflies sync
-  initFirefliesSync();
+  // fireflies sync removed — not used
 
-  // start granola sync
-  initGranolaSync();
+  // seed Composio API key from environment if not already configured
+  try {
+    const { getApiKey, setApiKey } = await import('@x/core/dist/composio/client.js');
+    if (!getApiKey() && process.env.COMPOSIO_API_KEY) {
+      setApiKey(process.env.COMPOSIO_API_KEY);
+      console.log('[main] Seeded Composio API key from environment');
+    }
+  } catch (e) {
+    console.error('[main] Failed to seed Composio API key:', e);
+  }
+
+  // seed Supermemory API key from environment if not already configured
+  try {
+    const sm = await import('@x/core/dist/supermemory/client.js');
+    if (!sm.getApiKey() && process.env.SUPERMEMORY_API_KEY) {
+      sm.setApiKey(process.env.SUPERMEMORY_API_KEY);
+      console.log('[main] Seeded Supermemory API key from environment');
+    }
+  } catch (e) {
+    console.error('[main] Failed to seed Supermemory API key:', e);
+  }
+
+  // start granola sync — only if configured
+  if (fs.existsSync(path.join(WorkDir, 'config', 'granola.json'))) {
+    initGranolaSync();
+  } else {
+    console.log('[main] Granola sync disabled — no config');
+  }
 
   // start knowledge graph builder
   initGraphBuilder();

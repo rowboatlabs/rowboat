@@ -29,7 +29,7 @@ const primaryProviders: Array<{ id: LlmProviderFlavor; name: string; description
   { id: "openai", name: "OpenAI", description: "GPT models", color: "bg-green-500/10 text-green-600 dark:text-green-400", icon: <OpenAIIcon /> },
   { id: "anthropic", name: "Anthropic", description: "Claude models", color: "bg-orange-500/10 text-orange-600 dark:text-orange-400", icon: <AnthropicIcon /> },
   { id: "google", name: "Gemini", description: "Google AI Studio", color: "bg-blue-500/10 text-blue-600 dark:text-blue-400", icon: <GoogleIcon /> },
-  { id: "ollama", name: "Ollama", description: "Local models", color: "bg-purple-500/10 text-purple-600 dark:text-purple-400", icon: <OllamaIcon /> },
+  { id: "ollama", name: "Ollama", description: "Local or cloud models", color: "bg-purple-500/10 text-purple-600 dark:text-purple-400", icon: <OllamaIcon /> },
 ]
 
 const moreProviders: Array<{ id: LlmProviderFlavor; name: string; description: string; color: string; icon: React.ReactNode }> = [
@@ -44,7 +44,6 @@ export function LlmSetupStep({ state }: LlmSetupStepProps) {
     activeConfig, testState, setTestState, showApiKey,
     showBaseURL, isLocalProvider, canTest, showMoreProviders, setShowMoreProviders,
     updateProviderConfig, handleTestAndSaveLlmConfig, handleBack,
-    upsellDismissed, setUpsellDismissed, handleSwitchToRowboat,
   } = state
 
   const isMoreProvider = moreProviders.some(p => p.id === llmProvider)
@@ -92,35 +91,6 @@ export function LlmSetupStep({ state }: LlmSetupStepProps) {
       <p className="text-base text-muted-foreground text-center mb-6">
         Select a provider and configure your API key
       </p>
-
-      {/* Inline Rowboat upsell callout */}
-      {!upsellDismissed && (
-        <motion.div
-          initial={{ opacity: 0, y: -8 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, height: 0 }}
-          className="rounded-xl bg-primary/5 border border-primary/20 p-4 mb-6 flex items-start gap-3"
-        >
-          <Lightbulb className="size-5 text-primary shrink-0 mt-0.5" />
-          <div className="flex-1 min-w-0">
-            <p className="text-sm text-foreground">
-              <span className="font-medium">Tip:</span> Sign in with Rowboat for instant access to leading models. No API keys needed.
-            </p>
-            <button
-              onClick={handleSwitchToRowboat}
-              className="text-sm text-primary font-medium hover:underline mt-1 inline-block"
-            >
-              Sign in instead
-            </button>
-          </div>
-          <button
-            onClick={() => setUpsellDismissed(true)}
-            className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
-          >
-            <X className="size-4" />
-          </button>
-        </motion.div>
-      )}
 
       {/* Provider selection */}
       <div className="space-y-3 mb-4">
@@ -297,6 +267,7 @@ export function LlmSetupStep({ state }: LlmSetupStepProps) {
           <div className="space-y-2">
             <label className="text-xs font-medium text-muted-foreground">
               API Key {!state.requiresApiKey && "(optional)"}
+              {llmProvider === "ollama" && " \u2014 required for Ollama Cloud"}
             </label>
             <Input
               type="password"
@@ -318,7 +289,7 @@ export function LlmSetupStep({ state }: LlmSetupStepProps) {
               onChange={(e) => updateProviderConfig(llmProvider, { baseURL: e.target.value })}
               placeholder={
                 llmProvider === "ollama"
-                  ? "http://localhost:11434"
+                  ? "http://localhost:11434 or https://ollama.com"
                   : llmProvider === "openai-compatible"
                     ? "http://localhost:1234/v1"
                     : "https://ai-gateway.vercel.sh/v1"

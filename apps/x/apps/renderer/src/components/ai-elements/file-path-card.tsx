@@ -9,6 +9,11 @@ const AUDIO_EXTENSIONS = new Set(['.wav', '.mp3', '.m4a', '.ogg', '.flac', '.aac
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico'])
 const VIDEO_EXTENSIONS = new Set(['.mp4', '.mov', '.avi', '.mkv', '.webm'])
 const DOCUMENT_EXTENSIONS = new Set(['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.txt', '.rtf', '.csv'])
+const BROWSER_VIEWABLE_EXTENSIONS = new Set([
+  '.html', '.htm', '.svg', '.pdf',
+  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.ico',
+  '.csv', '.json', '.xml', '.txt', '.md',
+])
 
 function getExtension(filePath: string): string {
   const dot = filePath.lastIndexOf('.')
@@ -191,6 +196,23 @@ function SystemFileCard({ filePath }: { filePath: string }) {
   }, [filePath, isImage])
 
   const handleOpen = async () => {
+    const ext = getExtension(filePath)
+    if (BROWSER_VIEWABLE_EXTENSIONS.has(ext)) {
+      // Workspace-relative paths (e.g. knowledge/...) use /vault/workspace/ endpoint
+      // External/absolute paths (e.g. ~/Desktop/file.pdf) use /local-file endpoint
+      const isWorkspacePath = !filePath.startsWith('/') && !filePath.startsWith('~') && !filePath.includes(':')
+      const url = isWorkspacePath
+        ? `http://localhost:3210/vault/workspace/${filePath}`
+        : `http://localhost:3210/local-file?p=${encodeURIComponent(filePath)}`
+      try {
+        await window.ipc.invoke('browser:newTab', { url })
+        window.dispatchEvent(new CustomEvent('browser:open'))
+        return
+      } catch (err) {
+        console.error('Failed to open in browser, falling back to system viewer:', err)
+        // Fall through to shell:openPath
+      }
+    }
     await window.ipc.invoke('shell:openPath', { path: filePath })
   }
 

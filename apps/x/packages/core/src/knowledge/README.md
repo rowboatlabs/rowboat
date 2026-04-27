@@ -16,11 +16,11 @@ State management module that tracks which files have been processed:
 - Stores state in `WorkDir/knowledge_graph_state.json`
 - Provides modular functions for state operations
 
-### `sync_gmail.ts` & `sync_fireflies.ts`
-Sync scripts that:
-- Pull data from Gmail and Fireflies
-- Save as markdown files in their respective directories
-- Trigger knowledge graph build after successful sync
+### `sync_gmail.ts` — Gmail sync
+Sync script that:
+- Pulls data from Gmail
+- Saves as markdown files in their respective directories
+- Triggers knowledge graph build after successful sync
 
 ## How It Works
 
@@ -55,7 +55,7 @@ This is efficient (only hashes potentially changed files) and reliable (confirms
 
 ### Processing Flow
 
-1. **Sync runs** (Gmail or Fireflies)
+1. **Sync runs** (Gmail)
    - Fetches new/updated data
    - Saves as markdown files
    - Calls `buildGraph(SYNC_DIR)`

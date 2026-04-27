@@ -1,33 +1,23 @@
 import * as React from "react"
 import { CheckCircle2 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import type { Step, OnboardingPath } from "./use-onboarding-state"
+import type { Step } from "./use-onboarding-state"
 
-const ROWBOAT_STEPS = [
-  { step: 0 as Step, label: "Welcome" },
-  { step: 2 as Step, label: "Connect" },
-  { step: 3 as Step, label: "Done" },
-]
-
-const BYOK_STEPS = [
-  { step: 0 as Step, label: "Welcome" },
-  { step: 1 as Step, label: "Model" },
+const STEPS = [
   { step: 2 as Step, label: "Connect" },
   { step: 3 as Step, label: "Done" },
 ]
 
 interface StepIndicatorProps {
   currentStep: Step
-  path: OnboardingPath
 }
 
-export function StepIndicator({ currentStep, path }: StepIndicatorProps) {
-  const steps = path === 'byok' ? BYOK_STEPS : ROWBOAT_STEPS
-  const currentIndex = steps.findIndex(s => s.step === currentStep)
+export function StepIndicator({ currentStep }: StepIndicatorProps) {
+  const currentIndex = STEPS.findIndex(s => s.step === currentStep)
 
   return (
     <div className="flex items-center gap-2 mb-8 px-4">
-      {steps.map((s, i) => (
+      {STEPS.map((s, i) => (
         <React.Fragment key={s.step}>
           {i > 0 && (
             <div

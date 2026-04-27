@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Maximize2, Minimize2, SquarePen } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -27,7 +26,7 @@ import { FileCardProvider } from '@/contexts/file-card-context'
 import { MarkdownPreOverride } from '@/components/ai-elements/markdown-code-override'
 import { defaultRemarkPlugins } from 'streamdown'
 import remarkBreaks from 'remark-breaks'
-import { TabBar, type ChatTab } from '@/components/tab-bar'
+import { type ChatTab } from '@/components/tab-bar'
 import { ChatInputWithMentions, type StagedAttachment, type SelectedModel } from '@/components/chat-input-with-mentions'
 import { ChatMessageAttachments } from '@/components/chat-message-attachments'
 import { wikiLabel } from '@/lib/wiki-links'
@@ -62,7 +61,7 @@ const BILLING_ERROR_PATTERNS = [
   {
     pattern: /upgrade required/i,
     title: 'A subscription is required',
-    subtitle: 'Get started with a plan to access AI features in Rowboat.',
+    subtitle: 'A subscription is required to access AI features.',
     cta: 'Subscribe',
   },
   {
@@ -148,7 +147,6 @@ interface ChatSidebarProps {
   onSwitchChatTab: (tabId: string) => void
   onCloseChatTab: (tabId: string) => void
   onNewChatTab: () => void
-  onOpenFullScreen?: () => void
   conversation: ConversationItem[]
   currentAssistantMessage: string
   chatTabStates?: Record<string, ChatTabViewState>
@@ -191,7 +189,7 @@ interface ChatSidebarProps {
   onComposioConnected?: (toolkitSlug: string) => void
 }
 
-export function ChatSidebar({
+export const ChatSidebar = React.memo(function ChatSidebar({
   defaultWidth = DEFAULT_WIDTH,
   isOpen = true,
   isMaximized = false,
@@ -202,7 +200,6 @@ export function ChatSidebar({
   onSwitchChatTab,
   onCloseChatTab,
   onNewChatTab,
-  onOpenFullScreen,
   conversation,
   currentAssistantMessage,
   chatTabStates = {},
@@ -498,7 +495,8 @@ export function ChatSidebar({
       onMouseDownCapture={onActivate}
       onFocusCapture={onActivate}
       className={cn(
-        'relative flex min-w-0 flex-col overflow-hidden border-l border-border bg-background',
+        'relative flex min-w-0 flex-col overflow-hidden bg-background',
+        !isMaximized && 'border-l border-border',
         !isResizing && !justToggledMaximize && 'transition-[width] duration-200 ease-linear'
       )}
       style={paneStyle}
@@ -517,49 +515,6 @@ export function ChatSidebar({
 
       {showContent && (
         <>
-          <header className="titlebar-drag-region flex h-10 shrink-0 items-stretch border-b border-border bg-sidebar">
-            <TabBar
-              tabs={chatTabs}
-              activeTabId={activeChatTabId}
-              getTabTitle={getChatTabTitle}
-              getTabId={(tab) => tab.id}
-              isProcessing={isChatTabProcessing}
-              onSwitchTab={onSwitchChatTab}
-              onCloseTab={onCloseChatTab}
-            />
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={onNewChatTab}
-                  className="titlebar-no-drag my-1 h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
-                >
-                  <SquarePen className="size-5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">New chat tab</TooltipContent>
-            </Tooltip>
-            {onOpenFullScreen && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={onOpenFullScreen}
-                    className="titlebar-no-drag my-1 mr-2 h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
-                    aria-label={isMaximized ? 'Restore two-pane view' : 'Maximize chat view'}
-                  >
-                    {isMaximized ? <Minimize2 className="size-5" /> : <Maximize2 className="size-5" />}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">
-                  {isMaximized ? 'Restore two-pane view' : 'Maximize chat view'}
-                </TooltipContent>
-              </Tooltip>
-            )}
-          </header>
-
           <FileCardProvider onOpenKnowledgeFile={onOpenKnowledgeFile ?? (() => {})}>
             <div className="flex min-h-0 flex-1 flex-col">
               <div className="relative min-h-0 flex-1">
@@ -708,4 +663,4 @@ export function ChatSidebar({
       )}
     </div>
   )
-}
+})

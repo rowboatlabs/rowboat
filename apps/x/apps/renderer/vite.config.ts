@@ -17,5 +17,13 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'settings': ['./src/components/settings-dialog.tsx', './src/components/settings/connected-accounts-settings.tsx'],
+          'onboarding': ['./src/components/onboarding-modal.tsx'],
+        }
+      }
+    }
   },
 })
