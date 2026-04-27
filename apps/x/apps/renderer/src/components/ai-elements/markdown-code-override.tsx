@@ -61,7 +61,7 @@ function HtmlBlock({ html }: { html: string }) {
       opts: { encoding: 'utf8', mkdirp: true },
     })
     const url = `http://localhost:3210/workspace/${tempPath}`
-    await window.ipc.invoke('browser:navigate', { url })
+    await window.ipc.invoke('browser:newTab', { rawUrl: url })
     window.dispatchEvent(new CustomEvent('browser:open'))
   }
 

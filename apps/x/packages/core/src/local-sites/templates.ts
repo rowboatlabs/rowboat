@@ -622,4 +622,54 @@ async function refresh() {
 refresh();
 setInterval(refresh, 120000);
 `,
+  'homepage/index.html': `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Home</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0a0a0f; --fg: #e5e5ef; --muted: #7c7c8a; --accent: #6366f1;
+    --card: rgba(255,255,255,0.04); --border: rgba(255,255,255,0.08); --hover: rgba(255,255,255,0.07);
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f8f8fb; --fg: #1a1a2e; --muted: #6b6b7b; --accent: #4f46e5;
+      --card: rgba(0,0,0,0.03); --border: rgba(0,0,0,0.08); --hover: rgba(0,0,0,0.05);
+    }
+  }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--fg); min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+  .shell { max-width: 640px; width: 100%; padding: 40px 24px; }
+  h1 { font-size: 1.75rem; font-weight: 700; margin-bottom: 8px; }
+  .subtitle { color: var(--muted); font-size: 0.95rem; margin-bottom: 32px; line-height: 1.5; }
+  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+  @media (max-width: 480px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; text-decoration: none; color: var(--fg); transition: background 0.15s; display: flex; flex-direction: column; gap: 6px; }
+  .card:hover { background: var(--hover); }
+  .card-title { font-weight: 600; font-size: 0.95rem; }
+  .card-desc { color: var(--muted); font-size: 0.82rem; line-height: 1.4; }
+  .footer { margin-top: 40px; color: var(--muted); font-size: 0.78rem; text-align: center; }
+  .footer a { color: var(--accent); text-decoration: none; }
+</style>
+</head>
+<body>
+<div class="shell">
+  <h1>Welcome home</h1>
+  <p class="subtitle">Your local dashboard. Edit <code>~/.rowboat/sites/homepage/index.html</code> to customize this page.</p>
+  <div class="grid">
+    <a class="card" href="http://localhost:3210/workspace/">
+      <span class="card-title">Workspace</span>
+      <span class="card-desc">Browse your project files</span>
+    </a>
+    <a class="card" href="http://localhost:3210/sites/example-dashboard/">
+      <span class="card-title">Example Dashboard</span>
+      <span class="card-desc">Live signals demo</span>
+    </a>
+  </div>
+  <p class="footer">Serving from <a href="http://localhost:3210">localhost:3210</a></p>
+</div>
+</body>
+</html>`,
 }

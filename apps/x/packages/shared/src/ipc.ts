@@ -720,6 +720,10 @@ const ipcSchemas = {
     req: BrowserStateSchema,
     res: z.null(),
   },
+  'browser:mdEdit': {
+    req: z.object({ path: z.string() }),
+    res: z.null(),
+  },
   // Supermemory channels
   'supermemory:is-configured': {
     req: z.null(),

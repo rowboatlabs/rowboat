@@ -492,6 +492,111 @@ async function sendSiteResponse(req: express.Request, res: express.Response): Pr
   await respondWithFile(res, spaFallback, req.method);
 }
 
+// --- Lightweight markdown-to-HTML converter for the /md-view/ endpoint ---
+
+function markdownToHtml(md: string, filePath: string): string {
+  const fileName = filePath.split('/').pop() || filePath;
+
+  // Extract title from first heading or filename
+  const titleMatch = md.match(/^#{1,6}\s+(.+)$/m);
+  const pageTitle = titleMatch ? titleMatch[1].replace(/[*_`[\]()!]/g, '').trim() : fileName.replace(/\.md$/i, '');
+
+  let html = escapeHtml(md);
+
+  // Fenced code blocks (```...```)
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_m, lang, code) =>
+    `<pre><code class="language-${lang}">${code}</code></pre>`
+  );
+
+  // Inline code
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+  // Headings
+  html = html.replace(/^######\s+(.+)$/gm, '<h6>$1</h6>');
+  html = html.replace(/^#####\s+(.+)$/gm, '<h5>$1</h5>');
+  html = html.replace(/^####\s+(.+)$/gm, '<h4>$1</h4>');
+  html = html.replace(/^###\s+(.+)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^##\s+(.+)$/gm, '<h2>$1</h2>');
+  html = html.replace(/^#\s+(.+)$/gm, '<h1>$1</h1>');
+
+  // Horizontal rules
+  html = html.replace(/^---+$/gm, '<hr>');
+
+  // Bold and italic
+  html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+  html = html.replace(/___(.+?)___/g, '<strong><em>$1</em></strong>');
+  html = html.replace(/__(.+?)__/g, '<strong>$1</strong>');
+  html = html.replace(/_(.+?)_/g, '<em>$1</em>');
+
+  // Links and images
+  html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img alt="$1" src="$2" />');
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+
+  // Blockquotes
+  html = html.replace(/^&gt;\s?(.+)$/gm, '<blockquote>$1</blockquote>');
+
+  // Unordered lists
+  html = html.replace(/^[-*]\s+(.+)$/gm, '<li>$1</li>');
+
+  // Paragraphs — wrap remaining lines
+  html = html.replace(/^(?!<[hupblo]|<li|<hr|<code|<pre|<blockquote)(.+)$/gm, '<p>$1</p>');
+
+  // Collapse adjacent blockquotes
+  html = html.replace(/<\/blockquote>\s*<blockquote>/g, '<br>');
+
+  // Wrap consecutive <li> in <ul>
+  html = html.replace(/((?:<li>[\s\S]*?<\/li>\s*)+)/g, '<ul>$1</ul>');
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${escapeHtml(pageTitle)}</title>
+<style>
+  :root { --bg: #ffffff; --fg: #1a1a1a; --muted: #6b7280; --accent: #3b82f6; --border: #e5e7eb; --code-bg: #f3f4f6; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #0a0a0a; --fg: #e5e5e5; --muted: #9ca3af; --accent: #60a5fa; --border: #374151; --code-bg: #1f2937; } }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 760px; margin: 0 auto; padding: 40px 24px; background: var(--bg); color: var(--fg); line-height: 1.7; }
+  h1 { font-size: 2em; margin: 0.8em 0 0.4em; border-bottom: 1px solid var(--border); padding-bottom: 0.3em; }
+  h2 { font-size: 1.5em; margin: 0.8em 0 0.4em; }
+  h3 { font-size: 1.25em; margin: 0.6em 0 0.3em; }
+  h4, h5, h6 { font-size: 1em; margin: 0.5em 0 0.2em; }
+  p { margin: 0.5em 0; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  strong { font-weight: 600; }
+  blockquote { border-left: 3px solid var(--accent); padding: 0.5em 1em; margin: 0.5em 0; color: var(--muted); background: var(--code-bg); border-radius: 0 6px 6px 0; }
+  code { font-family: 'SF Mono', 'Fira Code', monospace; background: var(--code-bg); padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
+  pre { background: var(--code-bg); padding: 16px; border-radius: 8px; overflow-x: auto; margin: 1em 0; }
+  pre code { background: none; padding: 0; }
+  ul, ol { padding-left: 1.5em; margin: 0.5em 0; }
+  li { margin: 0.25em 0; }
+  hr { border: none; border-top: 1px solid var(--border); margin: 2em 0; }
+  img { max-width: 100%; border-radius: 8px; margin: 0.5em 0; }
+  table { border-collapse: collapse; width: 100%; margin: 1em 0; }
+  th, td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; }
+  th { background: var(--code-bg); font-weight: 600; }
+  .edit-bar { position: fixed; top: 12px; right: 12px; z-index: 10; }
+  .edit-btn { display: inline-flex; align-items: center; gap: 4px; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--fg); font-size: 13px; cursor: pointer; transition: background 0.15s; }
+  .edit-btn:hover { background: var(--code-bg); }
+</style>
+</head>
+<body>
+  <div class="edit-bar">
+    <button class="edit-btn" onclick="window.location.href='rowboat://md-edit?path='+encodeURIComponent('${escapeHtml(filePath)}')">Edit Source</button>
+  </div>
+  ${html}
+</body>
+</html>`;
+}
+
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 function createLocalSitesApp(): express.Express {
   const app = express();
 
@@ -543,6 +648,32 @@ function createLocalSitesApp(): express.Express {
       res.setHeader('Content-Type', mime);
       res.setHeader('Content-Disposition', `inline; filename="${path.basename(absPath)}"`);
       res.send(data);
+    }).catch((err: NodeJS.ErrnoException) => {
+      if (err.code === 'ENOENT') {
+        res.status(404).json({ error: 'File not found' });
+      } else if (err.code === 'EISDIR') {
+        res.status(400).json({ error: 'Is a directory' });
+      } else {
+        res.status(500).json({ error: err.message });
+      }
+    });
+  });
+
+  // Markdown viewer — renders .md files as styled HTML in the embedded browser
+  // via http://localhost:3210/md-view/<relative-path>
+  app.get('/md-view/*', (req, res) => {
+    const relPath = req.path.replace(/^\/+/, '');
+    const absPath = path.join(WorkDir, relPath);
+
+    if (!absPath.startsWith(WorkDir)) {
+      res.status(403).json({ error: 'Path traversal not allowed' });
+      return;
+    }
+
+    fs.promises.readFile(absPath, 'utf-8').then((md) => {
+      const html = markdownToHtml(md, relPath);
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.send(html);
     }).catch((err: NodeJS.ErrnoException) => {
       if (err.code === 'ENOENT') {
         res.status(404).json({ error: 'File not found' });

@@ -9,6 +9,11 @@ const AUDIO_EXTENSIONS = new Set(['.wav', '.mp3', '.m4a', '.ogg', '.flac', '.aac
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico'])
 const VIDEO_EXTENSIONS = new Set(['.mp4', '.mov', '.avi', '.mkv', '.webm'])
 const DOCUMENT_EXTENSIONS = new Set(['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.txt', '.rtf', '.csv'])
+const BROWSER_VIEWABLE_EXTENSIONS = new Set([
+  '.html', '.htm', '.svg', '.pdf',
+  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.ico',
+  '.csv', '.json', '.xml', '.txt', '.md',
+])
 
 function getExtension(filePath: string): string {
   const dot = filePath.lastIndexOf('.')
@@ -191,6 +196,13 @@ function SystemFileCard({ filePath }: { filePath: string }) {
   }, [filePath, isImage])
 
   const handleOpen = async () => {
+    const ext = getExtension(filePath)
+    if (BROWSER_VIEWABLE_EXTENSIONS.has(ext)) {
+      const url = `http://localhost:3210/workspace/${filePath}`
+      await window.ipc.invoke('browser:newTab', { rawUrl: url })
+      window.dispatchEvent(new CustomEvent('browser:open'))
+      return
+    }
     await window.ipc.invoke('shell:openPath', { path: filePath })
   }
 

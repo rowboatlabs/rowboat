@@ -3043,14 +3043,23 @@ function App() {
   }, [viewHistory.forward, currentViewState])
 
   const WORKSPACE_BASE_URL = 'http://localhost:3210/workspace'
+  const MD_VIEW_BASE_URL = 'http://localhost:3210/md-view'
 
   const openFileInBrowser = useCallback((filePath: string) => {
     const url = `${WORKSPACE_BASE_URL}/${filePath}`
     setIsBrowserOpen(true)
     setIsChatSidebarOpen(true)
     setIsRightPaneMaximized(false)
-    void window.ipc.invoke('browser:navigate', { url })
+    void window.ipc.invoke('browser:newTab', { rawUrl: url })
   }, [WORKSPACE_BASE_URL])
+
+  const openMdInBrowser = useCallback((filePath: string) => {
+    const url = `${MD_VIEW_BASE_URL}/${filePath}`
+    setIsBrowserOpen(true)
+    setIsChatSidebarOpen(true)
+    setIsRightPaneMaximized(false)
+    void window.ipc.invoke('browser:newTab', { rawUrl: url })
+  }, [MD_VIEW_BASE_URL])
 
   const openHtmlInBrowser = useCallback(async (html: string) => {
     const timestamp = Date.now()
@@ -3064,19 +3073,23 @@ function App() {
     setIsBrowserOpen(true)
     setIsChatSidebarOpen(true)
     setIsRightPaneMaximized(false)
-    void window.ipc.invoke('browser:navigate', { url })
+    void window.ipc.invoke('browser:newTab', { rawUrl: url })
   }, [WORKSPACE_BASE_URL])
 
   const BROWSER_VIEWABLE_EXTS = new Set(['pdf', 'html', 'svg', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'csv', 'json', 'xml', 'txt', 'doc', 'docx'])
 
   const navigateToFile = useCallback((path: string) => {
     const ext = path.split('.').pop()?.toLowerCase() ?? ''
-    if (ext !== 'md' && !path.endsWith('.base') && BROWSER_VIEWABLE_EXTS.has(ext)) {
+    if (ext === 'md') {
+      openMdInBrowser(path)
+      return
+    }
+    if (!path.endsWith('.base') && BROWSER_VIEWABLE_EXTS.has(ext)) {
       openFileInBrowser(path)
       return
     }
     void navigateToView({ type: 'file', path })
-  }, [navigateToView, openFileInBrowser])
+  }, [navigateToView, openFileInBrowser, openMdInBrowser])
 
   const handleBaseConfigChange = useCallback((path: string, config: BaseConfig) => {
     setBaseConfigByPath((prev) => ({ ...prev, [path]: config }))
@@ -3855,6 +3868,17 @@ function App() {
     window.addEventListener('browser:open', handler)
     return () => window.removeEventListener('browser:open', handler)
   }, [])
+
+  // "Edit Source" button in /md-view/ rendered pages navigates to rowboat://md-edit
+  // which the main process intercepts and forwards as browser:mdEdit IPC event
+  useEffect(() => {
+    const handler = (_event: Electron.IpcRendererEvent, data: { path: string }) => {
+      setIsBrowserOpen(false)
+      void navigateToView({ type: 'file', path: data.path })
+    }
+    const cleanup = window.ipc.on('browser:mdEdit', handler)
+    return cleanup
+  }, [navigateToView])
 
   const ensureWikiFile = useCallback(async (wikiPath: string) => {
     const resolvedPath = toKnowledgePath(wikiPath)

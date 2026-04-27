@@ -41,7 +41,7 @@ export const BROWSER_PARTITION = 'persist:rowboat-browser';
 const SPOOF_UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
 
-const HOME_URL = 'https://www.google.com';
+const HOME_URL = 'http://localhost:3210/sites/homepage/';
 const NAVIGATION_TIMEOUT_MS = 10000;
 const POST_ACTION_IDLE_MS = 400;
 const POST_ACTION_MAX_ELEMENTS = 25;
@@ -230,6 +230,20 @@ export class BrowserViewManager extends EventEmitter {
         void shell.openExternal(url);
       }
       return { action: 'deny' };
+    });
+
+    // Intercept rowboat:// protocol URLs for internal actions (e.g. md-edit)
+    wc.on('will-navigate', (event, url) => {
+      if (url.startsWith('rowboat://')) {
+        event.preventDefault();
+        const parsed = new URL(url);
+        if (parsed.host === 'md-edit') {
+          const filePath = parsed.searchParams.get('path');
+          if (filePath && this.window && !this.window.isDestroyed()) {
+            this.window.webContents.send('browser:mdEdit', { path: filePath });
+          }
+        }
+      }
     });
   }
 
