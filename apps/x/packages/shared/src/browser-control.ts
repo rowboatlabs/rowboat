@@ -51,6 +51,7 @@ export const BrowserControlActionSchema = z.enum([
   'press',
   'scroll',
   'wait',
+  'eval',
 ]);
 
 const BrowserElementTargetFields = {
@@ -70,6 +71,7 @@ export const BrowserControlInputSchema = z.object({
   ms: z.number().int().positive().max(30000).optional(),
   maxElements: z.number().int().positive().max(100).optional(),
   maxTextLength: z.number().int().positive().max(20000).optional(),
+  code: z.string().min(1).max(50000).optional(),
   ...BrowserElementTargetFields,
 }).strict().superRefine((value, ctx) => {
   const needsElementTarget = value.action === 'click' || value.action === 'type';
@@ -114,6 +116,20 @@ export const BrowserControlInputSchema = z.object({
       message: 'Provide an element index or selector.',
     });
   }
+
+  if (value.action === 'eval' && !value.code) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['code'],
+      message: 'code is required for eval.',
+    });
+  }
+});
+
+export const SuggestedBrowserSkillSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  path: z.string(),
 });
 
 export const BrowserControlResultSchema = z.object({
@@ -123,6 +139,8 @@ export const BrowserControlResultSchema = z.object({
   error: z.string().optional(),
   browser: BrowserStateSchema,
   page: BrowserPageSnapshotSchema.optional(),
+  result: z.unknown().optional(),
+  suggestedSkills: z.array(SuggestedBrowserSkillSchema).optional(),
 });
 
 export type BrowserTabState = z.infer<typeof BrowserTabStateSchema>;
@@ -132,3 +150,4 @@ export type BrowserPageSnapshot = z.infer<typeof BrowserPageSnapshotSchema>;
 export type BrowserControlAction = z.infer<typeof BrowserControlActionSchema>;
 export type BrowserControlInput = z.infer<typeof BrowserControlInputSchema>;
 export type BrowserControlResult = z.infer<typeof BrowserControlResultSchema>;
+export type SuggestedBrowserSkill = z.infer<typeof SuggestedBrowserSkillSchema>;

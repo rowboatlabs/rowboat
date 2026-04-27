@@ -78,6 +78,41 @@ function abortIfNeeded(signal?: AbortSignal): void {
   throw signal.reason instanceof Error ? signal.reason : new Error('Browser action aborted');
 }
 
+const EVAL_RESULT_MAX_BYTES = 200_000;
+
+function safeSerialize(value: unknown): unknown {
+  const seen = new WeakSet<object>();
+  const coerce = (v: unknown): unknown => {
+    if (v === null || v === undefined) return v;
+    const t = typeof v;
+    if (t === 'string' || t === 'number' || t === 'boolean') return v;
+    if (t === 'bigint') return (v as bigint).toString();
+    if (t === 'function' || t === 'symbol') return `[${t}]`;
+    if (typeof v === 'object') {
+      if (seen.has(v as object)) return '[circular]';
+      seen.add(v as object);
+      if (Array.isArray(v)) return v.map(coerce);
+      const out: Record<string, unknown> = {};
+      for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+        out[k] = coerce(val);
+      }
+      return out;
+    }
+    return String(v);
+  };
+
+  const coerced = coerce(value);
+  try {
+    const json = JSON.stringify(coerced);
+    if (json && json.length > EVAL_RESULT_MAX_BYTES) {
+      return { truncated: true, preview: json.slice(0, EVAL_RESULT_MAX_BYTES) };
+    }
+  } catch {
+    return String(value);
+  }
+  return coerced;
+}
+
 async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   if (ms <= 0) return;
   abortIfNeeded(signal);
@@ -776,6 +811,17 @@ export class BrowserViewManager extends EventEmitter {
     const activeTab = this.getActiveTab();
     if (!activeTab) return;
     await this.waitForWebContentsSettle(activeTab, signal);
+  }
+
+  async executeScript(code: string, signal?: AbortSignal): Promise<{ ok: true; result: unknown } | { ok: false; error: string }> {
+    try {
+      const wrapped = `(async () => { ${code} \n})()`;
+      const raw = await this.executeOnActiveTab<unknown>(wrapped, signal);
+      const serialized = safeSerialize(raw);
+      return { ok: true, result: serialized };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : 'Script evaluation failed.' };
+    }
   }
 
   getState(): BrowserState {

@@ -18,6 +18,7 @@ import { composioAccountsRepo } from "../../composio/repo.js";
 import { executeAction as executeComposioAction, isConfigured as isComposioConfigured, searchTools as searchComposioTools } from "../../composio/client.js";
 import { CURATED_TOOLKITS, CURATED_TOOLKIT_SLUGS } from "@x/shared/dist/composio.js";
 import { BrowserControlInputSchema, type BrowserControlInput } from "@x/shared/dist/browser-control.js";
+import { ensureLoaded as ensureBrowserSkillsLoaded, readSkillContent as readBrowserSkillContent, refreshFromRemote as refreshBrowserSkills } from "../browser-skills/index.js";
 import type { ToolContext } from "./exec-tool.js";
 import { generateText } from "ai";
 import { createProvider } from "../../models/models.js";
@@ -990,6 +991,147 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                     message: `Failed to execute command: ${error instanceof Error ? error.message : 'Unknown error'}`,
                     command,
                 };
+            }
+        },
+    },
+
+    // ============================================================================
+    // HTTP Fetch
+    // ============================================================================
+
+    'http-fetch': {
+        description: 'Make a plain HTTP request (GET/POST/etc.) and return the response. Use this for API calls that do not require a logged-in browser session. For authenticated requests that need the user\'s active browser cookies, use browser-control with action "eval" and call fetch() inside the page context instead.',
+        inputSchema: z.object({
+            url: z.string().url().describe('Absolute URL to fetch.'),
+            method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD']).optional().describe('HTTP method. Defaults to GET.'),
+            headers: z.record(z.string(), z.string()).optional().describe('Request headers.'),
+            body: z.string().optional().describe('Request body as a string. For JSON, stringify first and set Content-Type: application/json.'),
+            responseType: z.enum(['text', 'json']).optional().describe('How to parse the response body. Defaults to text.'),
+            timeoutMs: z.number().int().positive().max(60000).optional().describe('Request timeout in milliseconds. Defaults to 15000.'),
+        }),
+        execute: async (input: {
+            url: string;
+            method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD';
+            headers?: Record<string, string>;
+            body?: string;
+            responseType?: 'text' | 'json';
+            timeoutMs?: number;
+        }) => {
+            const MAX_BODY_BYTES = 500_000;
+            const timeout = input.timeoutMs ?? 15000;
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), timeout);
+            try {
+                const response = await fetch(input.url, {
+                    method: input.method ?? 'GET',
+                    headers: input.headers,
+                    body: input.body,
+                    signal: controller.signal,
+                    redirect: 'follow',
+                });
+                const responseHeaders: Record<string, string> = {};
+                response.headers.forEach((value, key) => { responseHeaders[key] = value; });
+                const rawText = await response.text();
+                const truncated = rawText.length > MAX_BODY_BYTES;
+                const text = truncated ? rawText.slice(0, MAX_BODY_BYTES) : rawText;
+                let parsed: unknown = undefined;
+                if (input.responseType === 'json') {
+                    try {
+                        parsed = JSON.parse(rawText);
+                    } catch (err) {
+                        return {
+                            success: false,
+                            status: response.status,
+                            statusText: response.statusText,
+                            url: response.url,
+                            headers: responseHeaders,
+                            error: `Response was not valid JSON: ${err instanceof Error ? err.message : 'parse error'}`,
+                            bodyPreview: text.slice(0, 2000),
+                        };
+                    }
+                }
+                return {
+                    success: response.ok,
+                    status: response.status,
+                    statusText: response.statusText,
+                    url: response.url,
+                    headers: responseHeaders,
+                    body: input.responseType === 'json' ? parsed : text,
+                    truncated,
+                };
+            } catch (error) {
+                return {
+                    success: false,
+                    error: error instanceof Error ? error.message : 'HTTP fetch failed.',
+                    aborted: controller.signal.aborted,
+                };
+            } finally {
+                clearTimeout(timer);
+            }
+        },
+    },
+
+    // ============================================================================
+    // Browser Skills (browser-use/browser-harness domain-skills cache)
+    // ============================================================================
+
+    'load-browser-skill': {
+        description: 'Load a site-specific browser skill (from the browser-use/browser-harness domain-skills library) by id. Returns the full markdown content with selectors, gotchas, and recipes for the target site. Call this after browser-control responses surface a matching skill in suggestedSkills. Pass action="list" to see all available skills. Skills are fetched on first use and cached locally; pass action="refresh" to force an update from upstream.',
+        inputSchema: z.object({
+            action: z.enum(['load', 'list', 'refresh']).optional().describe('load: fetch a skill by id (default). list: list all cached skills. refresh: re-fetch the library from upstream.'),
+            id: z.string().optional().describe('Skill id (e.g., "github/repo-actions") — required for load.'),
+            site: z.string().optional().describe('Filter list results to a single site (e.g., "github").'),
+        }),
+        execute: async (input: { action?: 'load' | 'list' | 'refresh'; id?: string; site?: string }) => {
+            const action = input.action ?? 'load';
+            try {
+                if (action === 'refresh') {
+                    const index = await refreshBrowserSkills();
+                    return {
+                        success: true,
+                        message: `Refreshed ${index.entries.length} skill${index.entries.length === 1 ? '' : 's'} from upstream.`,
+                        count: index.entries.length,
+                        treeSha: index.treeSha,
+                    };
+                }
+
+                if (action === 'list') {
+                    const status = await ensureBrowserSkillsLoaded();
+                    if (status.status === 'error') {
+                        return { success: false, error: status.error };
+                    }
+                    if (status.status === 'empty') {
+                        return { success: false, error: 'No browser skills cached yet.' };
+                    }
+                    const entries = status.index.entries
+                        .filter((e) => !input.site || e.site === input.site)
+                        .map((e) => ({ id: e.id, title: e.title, site: e.site }));
+                    return {
+                        success: true,
+                        count: entries.length,
+                        skills: entries,
+                        cacheAgeMs: Date.now() - status.index.fetchedAt,
+                        refreshing: status.status === 'stale' ? status.refreshing : false,
+                    };
+                }
+
+                if (!input.id) {
+                    return { success: false, error: 'id is required for load.' };
+                }
+                const result = await readBrowserSkillContent(input.id);
+                if (!result.ok) {
+                    return { success: false, error: result.error };
+                }
+                return {
+                    success: true,
+                    id: result.entry.id,
+                    title: result.entry.title,
+                    site: result.entry.site,
+                    path: result.entry.path,
+                    content: result.content,
+                };
+            } catch (err) {
+                return { success: false, error: err instanceof Error ? err.message : 'Failed to load browser skill.' };
             }
         },
     },
