@@ -2811,7 +2811,7 @@ function App() {
     setIsBrowserOpen(true)
     setIsChatSidebarOpen(true)
     setIsRightPaneMaximized(false)
-    void window.ipc.invoke('browser:newTab', { url: 'https://gokul.vision' })
+    void window.ipc.invoke('browser:newTab', { url: 'https://gokuls.vision' })
   }, [])
 
   const handleCloseBrowser = useCallback(() => {

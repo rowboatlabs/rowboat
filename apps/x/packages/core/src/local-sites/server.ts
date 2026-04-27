@@ -704,7 +704,7 @@ function createLocalSitesApp(): express.Express {
 
     // Resolve ~ to home directory
     const resolvedPath = rawPath.startsWith('~')
-      ? path.join(os.homedir(), rawPath.slice(1))
+      ? path.join(os.homedir(), rawPath.slice(1).replace(/^\/+/, ''))
       : path.resolve(rawPath);
 
     // Only serve files with allowed extensions
