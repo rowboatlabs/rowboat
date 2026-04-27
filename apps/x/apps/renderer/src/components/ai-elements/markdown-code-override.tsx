@@ -60,7 +60,7 @@ function HtmlBlock({ html }: { html: string }) {
       data: html,
       opts: { encoding: 'utf8', mkdirp: true },
     })
-    const url = `http://localhost:3210/workspace/${tempPath}`
+    const url = `http://localhost:3210/vault/workspace/${tempPath}`
     await window.ipc.invoke('browser:newTab', { url })
     window.dispatchEvent(new CustomEvent('browser:open'))
   }

@@ -3049,7 +3049,7 @@ function App() {
     return false
   }, [viewHistory.forward, currentViewState])
 
-  const WORKSPACE_BASE_URL = 'http://localhost:3210/workspace'
+  const WORKSPACE_BASE_URL = 'http://localhost:3210/vault/workspace'
   const MD_VIEW_BASE_URL = 'http://localhost:3210/md-view'
 
   const openFileInBrowser = useCallback((filePath: string) => {

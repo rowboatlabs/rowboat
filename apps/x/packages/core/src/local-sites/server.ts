@@ -7,6 +7,7 @@ import chokidar, { type FSWatcher } from 'chokidar';
 import express from 'express';
 import { WorkDir } from '../config/config.js';
 import { LOCAL_SITE_SCAFFOLD } from './templates.js';
+import { ensureVaultConfig, loadVaultConfig, resolveVaultPath } from './vault.js';
 
 export const LOCAL_SITES_PORT = 3210;
 export const LOCAL_SITES_BASE_URL = `http://localhost:${LOCAL_SITES_PORT}`;
@@ -253,6 +254,8 @@ async function ensureLocalSiteScaffold(): Promise<void> {
       writeIfMissing(path.join(LOCAL_SITES_DIR, relativePath), content),
     ),
   );
+
+  ensureVaultConfig();
 }
 
 function injectIframeAutosizeBootstrap(html: string): string {
@@ -728,6 +731,47 @@ function createLocalSitesApp(): express.Express {
     }).catch((err: NodeJS.ErrnoException) => {
       if (err.code === 'ENOENT') {
         res.status(404).json({ error: 'File not found' });
+      } else {
+        res.status(500).json({ error: err.message });
+      }
+    });
+  });
+
+  // Vault — unified file access with alias-based routing
+  // /vault/<alias>/<relative-path> serves files from the designated folder
+  // /vault.json returns the current vault configuration
+  app.get('/vault.json', (_req, res) => {
+    const config = loadVaultConfig();
+    res.json(config);
+  });
+
+  app.get('/vault/:alias/*', (req, res) => {
+    const alias = req.params.alias;
+    const relPath = req.path.replace(/^\/vault\/[^/]+\/?/, '');
+    const config = loadVaultConfig();
+    const absPath = resolveVaultPath(alias, relPath, config);
+
+    if (!absPath) {
+      res.status(404).json({ error: 'Vault alias not found or path traversal blocked' });
+      return;
+    }
+
+    const ext = path.extname(absPath).toLowerCase();
+    const mime = MIME_TYPES[ext] || 'application/octet-stream';
+
+    fs.promises.stat(absPath).then((stat) => {
+      if (!stat.isFile()) {
+        res.status(400).json({ error: 'Not a regular file' });
+        return;
+      }
+      res.setHeader('Content-Type', mime);
+      res.setHeader('Content-Disposition', `inline; filename="${path.basename(absPath)}"`);
+      fs.createReadStream(absPath).pipe(res);
+    }).catch((err: NodeJS.ErrnoException) => {
+      if (err.code === 'ENOENT') {
+        res.status(404).json({ error: 'File not found' });
+      } else if (err.code === 'EACCES') {
+        res.status(403).json({ error: 'Permission denied' });
       } else {
         res.status(500).json({ error: err.message });
       }

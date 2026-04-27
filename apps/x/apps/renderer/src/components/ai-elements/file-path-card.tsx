@@ -198,11 +198,11 @@ function SystemFileCard({ filePath }: { filePath: string }) {
   const handleOpen = async () => {
     const ext = getExtension(filePath)
     if (BROWSER_VIEWABLE_EXTENSIONS.has(ext)) {
-      // Workspace-relative paths (e.g. knowledge/...) use /workspace/ endpoint
+      // Workspace-relative paths (e.g. knowledge/...) use /vault/workspace/ endpoint
       // External/absolute paths (e.g. ~/Desktop/file.pdf) use /local-file endpoint
       const isWorkspacePath = !filePath.startsWith('/') && !filePath.startsWith('~') && !filePath.includes(':')
       const url = isWorkspacePath
-        ? `http://localhost:3210/workspace/${filePath}`
+        ? `http://localhost:3210/vault/workspace/${filePath}`
         : `http://localhost:3210/local-file?p=${encodeURIComponent(filePath)}`
       await window.ipc.invoke('browser:newTab', { url })
       window.dispatchEvent(new CustomEvent('browser:open'))
