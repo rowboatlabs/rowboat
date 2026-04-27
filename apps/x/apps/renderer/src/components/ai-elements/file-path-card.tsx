@@ -204,9 +204,14 @@ function SystemFileCard({ filePath }: { filePath: string }) {
       const url = isWorkspacePath
         ? `http://localhost:3210/vault/workspace/${filePath}`
         : `http://localhost:3210/local-file?p=${encodeURIComponent(filePath)}`
-      await window.ipc.invoke('browser:newTab', { url })
-      window.dispatchEvent(new CustomEvent('browser:open'))
-      return
+      try {
+        await window.ipc.invoke('browser:newTab', { url })
+        window.dispatchEvent(new CustomEvent('browser:open'))
+        return
+      } catch (err) {
+        console.error('Failed to open in browser, falling back to system viewer:', err)
+        // Fall through to shell:openPath
+      }
     }
     await window.ipc.invoke('shell:openPath', { path: filePath })
   }
