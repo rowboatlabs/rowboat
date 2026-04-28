@@ -54,6 +54,7 @@ import { Button } from "@/components/ui/button"
 import { Toaster } from "@/components/ui/sonner"
 import { stripKnowledgePrefix, toKnowledgePath, wikiLabel } from '@/lib/wiki-links'
 import { splitFrontmatter, joinFrontmatter } from '@/lib/frontmatter'
+import { extractConferenceLink } from '@/lib/calendar-event'
 import { OnboardingModal } from '@/components/onboarding'
 import { CommandPalette, type CommandPaletteContext, type CommandPaletteMention } from '@/components/search-dialog'
 import { TrackModal } from '@/components/track-modal'
@@ -3120,10 +3121,7 @@ function App() {
         conferenceData?: { entryPoints?: Array<{ entryPointType?: string; uri?: string }> }
       }
       if (!e || typeof e !== 'object') return
-      // Order matches extractConferenceLink in calendar-block.tsx:
-      // entryPoints first (covers Zoom/integrated providers), then hangoutLink (Google Meet shortcut).
-      const conferenceLink = e.conferenceData?.entryPoints?.find(p => p.entryPointType === 'video')?.uri
-        || e.hangoutLink
+      const conferenceLink = extractConferenceLink(e as Record<string, unknown>)
       if (openMeeting && conferenceLink) {
         window.open(conferenceLink, '_blank')
       } else if (openMeeting) {

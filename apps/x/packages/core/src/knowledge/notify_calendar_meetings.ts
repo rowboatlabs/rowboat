@@ -48,7 +48,12 @@ async function loadState(): Promise<NotificationState> {
 }
 
 async function saveState(state: NotificationState): Promise<void> {
-    await fs.writeFile(STATE_FILE, JSON.stringify(state, null, 2), "utf-8");
+    // Write to a sibling tmp file then rename so a mid-write crash can't leave
+    // the JSON corrupt — a corrupt state file would make every event in the
+    // 90s notify window re-fire on next start.
+    const tmp = `${STATE_FILE}.tmp`;
+    await fs.writeFile(tmp, JSON.stringify(state, null, 2), "utf-8");
+    await fs.rename(tmp, STATE_FILE);
 }
 
 function gcState(state: NotificationState): NotificationState {
