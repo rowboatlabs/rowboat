@@ -86,6 +86,8 @@ async function tagNoteBatch(
     const run = await createRun({
         agentId: NOTE_TAGGING_AGENT,
         model: await getKgModel(),
+        useCase: 'knowledge_sync',
+        subUseCase: 'tag_notes',
     });
 
     let message = `Tag the following ${files.length} knowledge notes by prepending YAML frontmatter with appropriate tags.\n\n`;

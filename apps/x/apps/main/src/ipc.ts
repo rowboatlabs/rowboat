@@ -46,6 +46,8 @@ import { getAccessToken } from '@x/core/dist/auth/tokens.js';
 import { getRowboatConfig } from '@x/core/dist/config/rowboat.js';
 import { triggerTrackUpdate } from '@x/core/dist/knowledge/track/runner.js';
 import { trackBus } from '@x/core/dist/knowledge/track/bus.js';
+import { getInstallationId } from '@x/core/dist/analytics/installation.js';
+import { API_URL } from '@x/core/dist/config/env.js';
 import {
   fetchYaml,
   updateTrackBlock,
@@ -342,7 +344,7 @@ function emitServiceEvent(event: z.infer<typeof ServiceEvent>): void {
   }
 }
 
-export function emitOAuthEvent(event: { provider: string; success: boolean; error?: string }): void {
+export function emitOAuthEvent(event: { provider: string; success: boolean; error?: string; userId?: string }): void {
   const windows = BrowserWindow.getAllWindows();
   for (const win of windows) {
     if (!win.isDestroyed() && win.webContents) {
@@ -414,6 +416,12 @@ export function setupIpcHandlers() {
     'app:getVersions': async () => {
       // args is null for this channel (no request payload)
       return getVersions();
+    },
+    'analytics:bootstrap': async () => {
+      return {
+        installationId: getInstallationId(),
+        apiUrl: API_URL,
+      };
     },
     'workspace:getRoot': async () => {
       return workspace.getRoot();

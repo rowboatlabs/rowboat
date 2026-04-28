@@ -73,6 +73,8 @@ async function labelEmailBatch(
     const run = await createRun({
         agentId: LABELING_AGENT,
         model: await getKgModel(),
+        useCase: 'knowledge_sync',
+        subUseCase: 'label_emails',
     });
 
     let message = `Label the following ${files.length} email files by prepending YAML frontmatter.\n\n`;

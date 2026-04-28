@@ -58,15 +58,29 @@ export function useAnalyticsIdentity() {
   // Listen for OAuth connect/disconnect events to update identity
   useEffect(() => {
     const cleanup = window.ipc.on('oauth:didConnect', (event) => {
-      if (!event.success) return
-
-      // If Rowboat provider connected, identify user
-      if (event.provider === 'rowboat' && event.userId) {
-        posthog.identify(event.userId)
-        posthog.people.set({ signed_in: true })
+      if (event.provider !== 'rowboat') {
+        // Other providers: just toggle the connection flag
+        if (event.success) {
+          posthog.people.set({ [`${event.provider}_connected`]: true })
+        }
+        return
       }
 
-      posthog.people.set({ [`${event.provider}_connected`]: true })
+      // Rowboat sign-in
+      if (event.success) {
+        if (event.userId) {
+          posthog.identify(event.userId)
+        }
+        posthog.people.set({ signed_in: true, rowboat_connected: true })
+        posthog.capture('user_signed_in')
+        return
+      }
+
+      // Rowboat sign-out — flip flags, capture, and reset distinct_id so
+      // future events on this device don't get attributed to the prior user.
+      posthog.people.set({ signed_in: false, rowboat_connected: false })
+      posthog.capture('user_signed_out')
+      posthog.reset()
     })
 
     return cleanup

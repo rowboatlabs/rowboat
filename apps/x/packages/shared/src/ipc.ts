@@ -25,6 +25,13 @@ const ipcSchemas = {
       electron: z.string(),
     }),
   },
+  'analytics:bootstrap': {
+    req: z.null(),
+    res: z.object({
+      installationId: z.string(),
+      apiUrl: z.string(),
+    }),
+  },
   'workspace:getRoot': {
     req: z.null(),
     res: z.object({

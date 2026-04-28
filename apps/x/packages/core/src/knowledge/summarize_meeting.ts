@@ -4,6 +4,7 @@ import { generateText } from 'ai';
 import { createProvider } from '../models/models.js';
 import { getDefaultModelAndProvider, getMeetingNotesModel, resolveProviderConfig } from '../models/defaults.js';
 import { WorkDir } from '../config/config.js';
+import { captureLlmUsage } from '../analytics/usage.js';
 
 const CALENDAR_SYNC_DIR = path.join(WorkDir, 'calendar_sync');
 
@@ -155,6 +156,13 @@ export async function summarizeMeeting(transcript: string, meetingStartTime?: st
         model,
         system: SYSTEM_PROMPT,
         prompt,
+    });
+
+    captureLlmUsage({
+        useCase: 'meeting_note',
+        model: modelId,
+        provider: providerName,
+        usage: result.usage,
     });
 
     return result.text.trim();

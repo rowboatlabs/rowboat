@@ -5,7 +5,7 @@ import path from "path";
 import fsp from "fs/promises";
 import fs from "fs";
 import readline from "readline";
-import { Run, RunEvent, StartEvent, CreateRunOptions, ListRunsResponse, MessageEvent } from "@x/shared/dist/runs.js";
+import { Run, RunEvent, StartEvent, ListRunsResponse, MessageEvent, UseCase } from "@x/shared/dist/runs.js";
 import { getDefaultModelAndProvider } from "../models/defaults.js";
 
 /**
@@ -24,7 +24,13 @@ const LegacyStartEvent = StartEvent.extend({
 });
 const ReadRunEvent = RunEvent.or(LegacyStartEvent);
 
-export type CreateRunRepoOptions = Required<z.infer<typeof CreateRunOptions>>;
+export type CreateRunRepoOptions = {
+    agentId: string;
+    model: string;
+    provider: string;
+    useCase: z.infer<typeof UseCase>;
+    subUseCase?: string;
+};
 
 export interface IRunsRepo {
     create(options: CreateRunRepoOptions): Promise<z.infer<typeof Run>>;
@@ -187,6 +193,8 @@ export class FSRunsRepo implements IRunsRepo {
             agentName: options.agentId,
             model: options.model,
             provider: options.provider,
+            useCase: options.useCase,
+            ...(options.subUseCase ? { subUseCase: options.subUseCase } : {}),
             subflow: [],
             ts,
         };
@@ -197,6 +205,8 @@ export class FSRunsRepo implements IRunsRepo {
             agentId: options.agentId,
             model: options.model,
             provider: options.provider,
+            useCase: options.useCase,
+            ...(options.subUseCase ? { subUseCase: options.subUseCase } : {}),
             log: [start],
         };
     }
@@ -230,6 +240,8 @@ export class FSRunsRepo implements IRunsRepo {
             agentId: start.agentName,
             model: start.model,
             provider: start.provider,
+            ...(start.useCase ? { useCase: start.useCase } : {}),
+            ...(start.subUseCase ? { subUseCase: start.subUseCase } : {}),
             log: events,
         };
     }

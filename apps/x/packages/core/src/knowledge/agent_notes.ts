@@ -306,7 +306,12 @@ async function processAgentNotes(): Promise<void> {
         const timestamp = new Date().toISOString();
         const message = `Current timestamp: ${timestamp}\n\nProcess the following source material and update the Agent Notes folder accordingly.\n\n${messageParts.join('\n\n')}`;
 
-        const agentRun = await createRun({ agentId: AGENT_ID, model: await getKgModel() });
+        const agentRun = await createRun({
+            agentId: AGENT_ID,
+            model: await getKgModel(),
+            useCase: 'knowledge_sync',
+            subUseCase: 'agent_notes',
+        });
         await createMessage(agentRun.id, message);
         await waitForRunCompletion(agentRun.id);
 

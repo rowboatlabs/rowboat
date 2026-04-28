@@ -23,8 +23,15 @@ export async function createRun(opts: z.infer<typeof CreateRunOptions>): Promise
     const defaults = await getDefaultModelAndProvider();
     const model = opts.model ?? agent.model ?? defaults.model;
     const provider = opts.provider ?? agent.provider ?? defaults.provider;
+    const useCase = opts.useCase ?? "copilot_chat";
 
-    const run = await repo.create({ agentId: opts.agentId, model, provider });
+    const run = await repo.create({
+        agentId: opts.agentId,
+        model,
+        provider,
+        useCase,
+        ...(opts.subUseCase ? { subUseCase: opts.subUseCase } : {}),
+    });
     await bus.publish(run.log[0]);
     return run;
 }
