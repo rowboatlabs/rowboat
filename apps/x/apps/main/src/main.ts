@@ -27,6 +27,7 @@ import { init as initTrackScheduler } from "@x/core/dist/knowledge/track/schedul
 import { init as initTrackEventProcessor } from "@x/core/dist/knowledge/track/events.js";
 import { init as initLocalSites, shutdown as shutdownLocalSites } from "@x/core/dist/local-sites/server.js";
 import { shutdown as shutdownAnalytics } from "@x/core/dist/analytics/posthog.js";
+import { identifyIfSignedIn } from "@x/core/dist/analytics/identify.js";
 
 import { initConfigs } from "@x/core/dist/config/initConfigs.js";
 import started from "electron-squirrel-startup";
@@ -230,6 +231,13 @@ app.whenReady().then(async () => {
 
   // Initialize all config files before UI can access them
   await initConfigs();
+
+  // PostHog identify() is idempotent — call it on every startup so existing
+  // signed-in installs (and every cold start of v0.3.4+) get re-identified.
+  // Otherwise main-process events stay anonymous until the user re-signs-in.
+  identifyIfSignedIn().catch((error) => {
+    console.error('[Analytics] Failed to identify on startup:', error);
+  });
 
   registerBrowserControlService(new ElectronBrowserControlService());
 
