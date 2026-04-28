@@ -54,6 +54,7 @@ import { Button } from "@/components/ui/button"
 import { Toaster } from "@/components/ui/sonner"
 import { stripKnowledgePrefix, toKnowledgePath, wikiLabel } from '@/lib/wiki-links'
 import { splitFrontmatter, joinFrontmatter } from '@/lib/frontmatter'
+import { extractConferenceLink } from '@/lib/calendar-event'
 import { OnboardingModal } from '@/components/onboarding'
 import { CommandPalette, type CommandPaletteContext, type CommandPaletteMention } from '@/components/search-dialog'
 import { TrackModal } from '@/components/track-modal'
@@ -511,6 +512,45 @@ function viewStatesEqual(a: ViewState, b: ViewState): boolean {
   if (a.type === 'file' && b.type === 'file') return a.path === b.path
   if (a.type === 'task' && b.type === 'task') return a.name === b.name
   return true // both graph
+}
+
+/**
+ * Parse a rowboat:// deep link into a ViewState. Returns null if the URL is
+ * malformed or names an unknown target.
+ *
+ * Shape: rowboat://open?type=<file|chat|graph|task|suggested-topics>&...
+ *   file:             ?type=file&path=knowledge/foo.md
+ *   chat:             ?type=chat&runId=abc123        (runId optional)
+ *   graph:            ?type=graph
+ *   task:             ?type=task&name=daily-brief
+ *   suggested-topics: ?type=suggested-topics
+ */
+function parseDeepLink(input: string): ViewState | null {
+  const SCHEME = 'rowboat://'
+  if (!input.startsWith(SCHEME)) return null
+  const rest = input.slice(SCHEME.length)
+  const queryIdx = rest.indexOf('?')
+  const host = (queryIdx >= 0 ? rest.slice(0, queryIdx) : rest).replace(/\/$/, '')
+  if (host !== 'open') return null
+  const params = new URLSearchParams(queryIdx >= 0 ? rest.slice(queryIdx + 1) : '')
+  switch (params.get('type')) {
+    case 'file': {
+      const path = params.get('path')
+      return path ? { type: 'file', path } : null
+    }
+    case 'chat':
+      return { type: 'chat', runId: params.get('runId') || null }
+    case 'graph':
+      return { type: 'graph' }
+    case 'task': {
+      const name = params.get('name')
+      return name ? { type: 'task', name } : null
+    }
+    case 'suggested-topics':
+      return { type: 'suggested-topics' }
+    default:
+      return null
+  }
 }
 
 /** Sidebar toggle (fixed position, top-left) */
@@ -3047,6 +3087,58 @@ function App() {
   const navigateToFile = useCallback((path: string) => {
     void navigateToView({ type: 'file', path })
   }, [navigateToView])
+
+  // Deep-link handler kept in a ref so the useEffect below can register the
+  // IPC listener (and run the one-time pending-link drain) just once on mount,
+  // rather than re-running on every navigation when navigateToView's identity
+  // changes.
+  const navigateToViewRef = useRef(navigateToView)
+  useEffect(() => { navigateToViewRef.current = navigateToView }, [navigateToView])
+
+  useEffect(() => {
+    const handle = (url: string) => {
+      const view = parseDeepLink(url)
+      if (view) void navigateToViewRef.current(view)
+    }
+    void window.ipc.invoke('app:consumePendingDeepLink', null).then(({ url }) => {
+      if (url) handle(url)
+    })
+    return window.ipc.on('app:openUrl', ({ url }) => handle(url))
+  }, [])
+
+  // Triggered by main when the user clicks a calendar-meeting notification.
+  // Reuses the same flow as the in-app "Join meeting & take notes" button.
+  // When `openMeeting` is true, also opens the meeting URL in the system browser.
+  useEffect(() => {
+    return window.ipc.on('app:takeMeetingNotes', ({ event, openMeeting }) => {
+      const e = event as {
+        summary?: string
+        start?: { dateTime?: string; date?: string; timeZone?: string }
+        end?: { dateTime?: string; date?: string; timeZone?: string }
+        location?: string
+        htmlLink?: string
+        hangoutLink?: string
+        conferenceData?: { entryPoints?: Array<{ entryPointType?: string; uri?: string }> }
+      }
+      if (!e || typeof e !== 'object') return
+      const conferenceLink = extractConferenceLink(e as Record<string, unknown>)
+      if (openMeeting && conferenceLink) {
+        window.open(conferenceLink, '_blank')
+      } else if (openMeeting) {
+        console.warn('[take-meeting-notes] openMeeting requested but event has no conference link', e)
+      }
+      window.__pendingCalendarEvent = {
+        summary: e.summary,
+        start: e.start,
+        end: e.end,
+        location: e.location,
+        htmlLink: e.htmlLink,
+        conferenceLink,
+        source: 'calendar-sync',
+      }
+      window.dispatchEvent(new Event('calendar-block:join-meeting'))
+    })
+  }, [])
 
   const handleBaseConfigChange = useCallback((path: string, config: BaseConfig) => {
     setBaseConfigByPath((prev) => ({ ...prev, [path]: config }))

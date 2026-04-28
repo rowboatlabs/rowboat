@@ -23,6 +23,7 @@ import { init as initNoteTagging } from "@x/core/dist/knowledge/tag_notes.js";
 import { init as initInlineTasks } from "@x/core/dist/knowledge/inline_tasks.js";
 import { init as initAgentRunner } from "@x/core/dist/agent-schedule/runner.js";
 import { init as initAgentNotes } from "@x/core/dist/knowledge/agent_notes.js";
+import { init as initCalendarNotifications } from "@x/core/dist/knowledge/notify_calendar_meetings.js";
 import { init as initTrackScheduler } from "@x/core/dist/knowledge/track/scheduler.js";
 import { init as initTrackEventProcessor } from "@x/core/dist/knowledge/track/events.js";
 import { init as initLocalSites, shutdown as shutdownLocalSites } from "@x/core/dist/local-sites/server.js";
@@ -32,10 +33,17 @@ import started from "electron-squirrel-startup";
 import { execSync, exec, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { init as initChromeSync } from "@x/core/dist/knowledge/chrome-extension/server/server.js";
-import { registerBrowserControlService } from "@x/core/dist/di/container.js";
+import { registerBrowserControlService, registerNotificationService } from "@x/core/dist/di/container.js";
 import { browserViewManager, BROWSER_PARTITION } from "./browser/view.js";
 import { setupBrowserEventForwarding } from "./browser/ipc.js";
 import { ElectronBrowserControlService } from "./browser/control-service.js";
+import { ElectronNotificationService } from "./notification/electron-notification-service.js";
+import {
+  DEEP_LINK_SCHEME,
+  dispatchDeepLink,
+  extractDeepLinkFromArgv,
+  setMainWindowForDeepLinks,
+} from "./deeplink.js";
 
 const execAsync = promisify(exec);
 
@@ -44,6 +52,43 @@ const __dirname = dirname(__filename);
 
 // run this as early in the main process as possible
 if (started) app.quit();
+
+// Single-instance lock: route a second launch (e.g. clicking a rowboat:// link)
+// back into the existing process via the 'second-instance' event.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+  process.exit(0);
+}
+
+// Register as the OS handler for rowboat:// URLs.
+// In dev, point at the right argv so the OS can re-invoke us correctly.
+if (process.defaultApp) {
+  if (process.argv.length >= 2) {
+    app.setAsDefaultProtocolClient(DEEP_LINK_SCHEME, process.execPath, [
+      path.resolve(process.argv[1]),
+    ]);
+  }
+} else {
+  app.setAsDefaultProtocolClient(DEEP_LINK_SCHEME);
+}
+
+// First-launch URL on Windows/Linux comes through argv.
+{
+  const initialUrl = extractDeepLinkFromArgv(process.argv);
+  if (initialUrl) dispatchDeepLink(initialUrl);
+}
+
+// macOS sends URLs via 'open-url' (both first launch and while running).
+app.on("open-url", (event, url) => {
+  event.preventDefault();
+  dispatchDeepLink(url);
+});
+
+// Subsequent launches on Windows/Linux land here via the single-instance lock.
+app.on("second-instance", (_event, argv) => {
+  const url = extractDeepLinkFromArgv(argv);
+  if (url) dispatchDeepLink(url);
+});
 
 // Fix PATH for packaged Electron apps on macOS/Linux.
 // Packaged apps inherit a minimal environment that doesn't include paths from
@@ -163,6 +208,9 @@ function createWindow() {
   configureSessionPermissions(session.defaultSession);
   configureSessionPermissions(session.fromPartition(BROWSER_PARTITION));
 
+  setMainWindowForDeepLinks(win);
+  win.on("closed", () => setMainWindowForDeepLinks(null));
+
   // Show window when content is ready to prevent blank screen
   win.once("ready-to-show", () => {
     win.maximize();
@@ -231,6 +279,7 @@ app.whenReady().then(async () => {
   await initConfigs();
 
   registerBrowserControlService(new ElectronBrowserControlService());
+  registerNotificationService(new ElectronNotificationService());
 
   setupIpcHandlers();
   setupBrowserEventForwarding();
@@ -288,6 +337,9 @@ app.whenReady().then(async () => {
 
   // start agent notes learning service
   initAgentNotes();
+
+  // start calendar meeting notification service (fires 1-minute warnings)
+  initCalendarNotifications();
 
   // start chrome extension sync server
   initChromeSync();

@@ -85,6 +85,8 @@ ${thirdPartyBlock}**Meeting Prep:** When users ask you to prepare for a meeting,
 **Tracks (Auto-Updating Note Blocks):** When users ask you to **track**, **monitor**, **watch**, or **keep an eye on** something in a note — or say things like "every morning tell me X", "show the current Y in this note", "pin live updates of Z here" — load the \`tracks\` skill first. Also load it when a user presses Cmd+K with a note open and requests auto-refreshing content at the cursor. Track blocks are YAML-fenced scheduled blocks whose output is rewritten on each run — useful for weather, news, prices, status pages, and personal dashboards.
 **Browser Control:** When users ask you to open a website, browse in-app, search the web in the embedded browser, or interact with a live webpage inside Rowboat, load the \`browser-control\` skill first. It explains the \`read-page -> indexed action -> refreshed page\` workflow for the browser pane.
 
+**Notifications:** When you need to send a desktop notification — completion alert after a long task, time-sensitive update, or a clickable result that lands the user on a specific note/view — load the \`notify-user\` skill first. It documents the \`notify-user\` tool and the \`rowboat://\` deep links you can attach to it.
+
 
 ## Learning About the User (save-to-memory)
 

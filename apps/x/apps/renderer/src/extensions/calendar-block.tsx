@@ -3,6 +3,7 @@ import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react'
 import { X, Calendar, Video, ChevronDown, Mic } from 'lucide-react'
 import { blocks } from '@x/shared'
 import { useState, useEffect, useRef } from 'react'
+import { extractConferenceLink } from '../lib/calendar-event'
 
 function formatTime(dateStr: string): string {
   const d = new Date(dateStr)
@@ -38,25 +39,6 @@ function getTimeRange(event: blocks.CalendarEvent): string {
   if (!end) return startTime
   const endTime = formatTime(end)
   return `${startTime} \u2013 ${endTime}`
-}
-
-/**
- * Extract a video conference link from raw Google Calendar event JSON.
- * Checks conferenceData.entryPoints (video type), hangoutLink, then falls back
- * to conferenceLink if already set.
- */
-function extractConferenceLink(raw: Record<string, unknown>): string | undefined {
-  // Check conferenceData.entryPoints for video entry
-  const confData = raw.conferenceData as { entryPoints?: { entryPointType?: string; uri?: string }[] } | undefined
-  if (confData?.entryPoints) {
-    const video = confData.entryPoints.find(ep => ep.entryPointType === 'video')
-    if (video?.uri) return video.uri
-  }
-  // Check hangoutLink (Google Meet shortcut)
-  if (typeof raw.hangoutLink === 'string') return raw.hangoutLink
-  // Fall back to conferenceLink if present
-  if (typeof raw.conferenceLink === 'string') return raw.conferenceLink
-  return undefined
 }
 
 interface ResolvedEvent {

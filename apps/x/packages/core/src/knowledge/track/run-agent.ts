@@ -263,6 +263,7 @@ You have the full workspace toolkit. Quick reference for common cases:
 - **\`parseFile\`, \`LLMParse\`** — parse PDFs, spreadsheets, Word docs if a track aggregates from attached files.
 - **\`composio-*\`, \`listMcpTools\`, \`executeMcpTool\`** — user-connected integrations (Gmail, Calendar, etc.). Prefer these when a track needs structured data from a connected service the user has authorized.
 - **\`browser-control\`** — only when a required source has no API / search alternative and requires JS rendering.
+- **\`notify-user\`** — send a native desktop notification when this run produces something time-sensitive (threshold breach, urgent change, "the thing the user asked you to watch for just happened"). Skip it for routine refreshes — the note itself is the artifact. Load the \`notify-user\` skill via \`loadSkill\` for parameters and \`rowboat://\` deep-link shapes (so the click lands on the right note/view).
 
 # The Knowledge Graph
 

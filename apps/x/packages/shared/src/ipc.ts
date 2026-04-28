@@ -292,6 +292,28 @@ const ipcSchemas = {
     }),
     res: z.null(),
   },
+  'app:openUrl': {
+    req: z.object({
+      url: z.string(),
+    }),
+    res: z.null(),
+  },
+  'app:takeMeetingNotes': {
+    req: z.object({
+      // Pass the raw calendar event JSON through; renderer adapts to its existing flow.
+      event: z.unknown(),
+      // When true, the renderer should also open the meeting URL (Zoom/Meet/etc.)
+      // in addition to triggering the take-notes flow.
+      openMeeting: z.boolean().optional(),
+    }),
+    res: z.null(),
+  },
+  'app:consumePendingDeepLink': {
+    req: z.null(),
+    res: z.object({
+      url: z.string().nullable(),
+    }),
+  },
   'granola:getConfig': {
     req: z.null(),
     res: z.object({

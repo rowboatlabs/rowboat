@@ -14,6 +14,7 @@ import appNavigationSkill from "./app-navigation/skill.js";
 import browserControlSkill from "./browser-control/skill.js";
 import composioIntegrationSkill from "./composio-integration/skill.js";
 import tracksSkill from "./tracks/skill.js";
+import notifyUserSkill from "./notify-user/skill.js";
 
 const CURRENT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const CATALOG_PREFIX = "src/application/assistant/skills";
@@ -111,6 +112,12 @@ const definitions: SkillDefinition[] = [
     title: "Browser Control",
     summary: "Control the embedded browser pane - open sites, inspect page state, and interact with indexed page elements.",
     content: browserControlSkill,
+  },
+  {
+    id: "notify-user",
+    title: "Notify User",
+    summary: "Send native desktop notifications with optional clickable links — including rowboat:// deep links that open a specific note, chat, or view inside the app.",
+    content: notifyUserSkill,
   },
 ];
 
