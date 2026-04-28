@@ -26,6 +26,8 @@ import { IRunsLock } from "../runs/lock.js";
 import { IAbortRegistry } from "../runs/abort-registry.js";
 import { PrefixLogger } from "@x/shared";
 import { parse } from "yaml";
+import { captureLlmUsage } from "../analytics/usage.js";
+import { enterUseCase, type UseCase } from "../analytics/use_case.js";
 import { getRaw as getNoteCreationRaw } from "../knowledge/note_creation.js";
 import { getRaw as getLabelingAgentRaw } from "../knowledge/labeling_agent.js";
 import { getRaw as getNoteTaggingAgentRaw } from "../knowledge/note_tagging_agent.js";
@@ -650,6 +652,8 @@ export class AgentState {
     agentName: string | null = null;
     runModel: string | null = null;
     runProvider: string | null = null;
+    runUseCase: UseCase | null = null;
+    runSubUseCase: string | null = null;
     messages: z.infer<typeof MessageList> = [];
     lastAssistantMsg: z.infer<typeof AssistantMessage> | null = null;
     subflowStates: Record<string, AgentState> = {};
@@ -765,6 +769,8 @@ export class AgentState {
                 this.agentName = event.agentName;
                 this.runModel = event.model;
                 this.runProvider = event.provider;
+                this.runUseCase = event.useCase ?? null;
+                this.runSubUseCase = event.subUseCase ?? null;
                 break;
             case "spawn-subflow":
                 // Seed the subflow state with its agent so downstream loadAgent works.
@@ -775,6 +781,8 @@ export class AgentState {
                 this.subflowStates[event.toolCallId].agentName = event.agentName;
                 this.subflowStates[event.toolCallId].runModel = this.runModel;
                 this.subflowStates[event.toolCallId].runProvider = this.runProvider;
+                this.subflowStates[event.toolCallId].runUseCase = this.runUseCase;
+                this.subflowStates[event.toolCallId].runSubUseCase = this.runSubUseCase;
                 break;
             case "message":
                 this.messages.push(event.message);
@@ -880,6 +888,14 @@ export async function* streamAgent({
     const provider = createProvider(providerConfig);
     const model = provider.languageModel(modelId);
     logger.log(`using model: ${modelId} (provider: ${state.runProvider})`);
+
+    // Install use-case context for tool-internal LLM calls (e.g. parseFile)
+    // so they can tag their `llm_usage` events with the parent run's category.
+    enterUseCase({
+        useCase: state.runUseCase ?? "copilot_chat",
+        ...(state.runSubUseCase ? { subUseCase: state.runSubUseCase } : {}),
+        ...(state.agentName ? { agentName: state.agentName } : {}),
+    });
 
     let loopCounter = 0;
     let voiceInput = false;
@@ -1114,6 +1130,13 @@ export async function* streamAgent({
             instructionsWithDateTime,
             tools,
             signal,
+            {
+                useCase: state.runUseCase ?? "copilot_chat",
+                ...(state.runSubUseCase ? { subUseCase: state.runSubUseCase } : {}),
+                agentName: state.agentName ?? undefined,
+                modelId,
+                providerName: state.runProvider!,
+            },
         )) {
             messageBuilder.ingest(event);
             yield* processEvent({
@@ -1201,12 +1224,21 @@ export async function* streamAgent({
     }
 }
 
+interface StreamLlmAnalytics {
+    useCase: UseCase;
+    subUseCase?: string;
+    agentName?: string;
+    modelId: string;
+    providerName: string;
+}
+
 async function* streamLlm(
     model: LanguageModel,
     messages: z.infer<typeof MessageList>,
     instructions: string,
     tools: ToolSet,
     signal?: AbortSignal,
+    analytics?: StreamLlmAnalytics,
 ): AsyncGenerator<z.infer<typeof LlmStepStreamEvent>, void, unknown> {
     const converted = convertFromMessages(messages);
     console.log(`! SENDING payload to model: `, JSON.stringify(converted))
@@ -1277,6 +1309,16 @@ async function* streamLlm(
                 };
                 break;
             case "finish-step":
+                if (analytics) {
+                    captureLlmUsage({
+                        useCase: analytics.useCase,
+                        ...(analytics.subUseCase ? { subUseCase: analytics.subUseCase } : {}),
+                        ...(analytics.agentName ? { agentName: analytics.agentName } : {}),
+                        model: analytics.modelId,
+                        provider: analytics.providerName,
+                        usage: event.usage,
+                    });
+                }
                 yield {
                     type: "finish-step",
                     usage: event.usage,

@@ -37,6 +37,7 @@
     "openid-client": "^6.8.1",
     "papaparse": "^5.5.3",
     "pdf-parse": "^2.4.5",
+    "posthog-node": "^4.18.0",
     "react": "^19.2.3",
     "xlsx": "^0.18.5",
     "yaml": "^2.8.2",

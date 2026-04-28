@@ -164,7 +164,11 @@ async function runAgent(
 
     try {
         // Create a new run via core (resolves agent + default model+provider).
-        const run = await createRun({ agentId: agentName });
+        const run = await createRun({
+            agentId: agentName,
+            useCase: 'copilot_chat',
+            subUseCase: 'scheduled',
+        });
         console.log(`[AgentRunner] Created run ${run.id} for agent ${agentName}`);
 
         // Add the starting message as a user message

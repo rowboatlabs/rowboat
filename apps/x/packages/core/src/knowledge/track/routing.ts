@@ -3,6 +3,7 @@ import { trackBlock, PrefixLogger } from '@x/shared';
 import type { KnowledgeEvent } from '@x/shared/dist/track-block.js';
 import { createProvider } from '../../models/models.js';
 import { getDefaultModelAndProvider, getTrackBlockModel, resolveProviderConfig } from '../../models/defaults.js';
+import { captureLlmUsage } from '../../analytics/usage.js';
 
 const log = new PrefixLogger('TrackRouting');
 
@@ -34,10 +35,14 @@ Rules:
 - For each candidate, return BOTH trackId and filePath exactly as given. trackIds are not globally unique.`;
 
 async function resolveModel() {
-    const model = await getTrackBlockModel();
+    const modelId = await getTrackBlockModel();
     const { provider } = await getDefaultModelAndProvider();
     const config = await resolveProviderConfig(provider);
-    return createProvider(config).languageModel(model);
+    return {
+        model: createProvider(config).languageModel(modelId),
+        modelId,
+        providerName: provider,
+    };
 }
 
 function buildRoutingPrompt(event: KnowledgeEvent, batch: ParsedTrack[]): string {
@@ -84,19 +89,26 @@ export async function findCandidates(
 
     log.log(`Routing event ${event.id} against ${filtered.length} track(s)`);
 
-    const model = await resolveModel();
+    const { model, modelId, providerName } = await resolveModel();
     const candidateKeys = new Set<string>();
 
     for (let i = 0; i < filtered.length; i += BATCH_SIZE) {
         const batch = filtered.slice(i, i + BATCH_SIZE);
         try {
-            const { object } = await generateObject({
+            const result = await generateObject({
                 model,
                 system: ROUTING_SYSTEM_PROMPT,
                 prompt: buildRoutingPrompt(event, batch),
                 schema: trackBlock.Pass1OutputSchema,
             });
-            for (const c of object.candidates) {
+            captureLlmUsage({
+                useCase: 'track_block',
+                subUseCase: 'routing',
+                model: modelId,
+                provider: providerName,
+                usage: result.usage,
+            });
+            for (const c of result.object.candidates) {
                 candidateKeys.add(trackKey(c.trackId, c.filePath));
             }
         } catch (err) {

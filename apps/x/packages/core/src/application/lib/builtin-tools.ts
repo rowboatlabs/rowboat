@@ -22,6 +22,8 @@ import type { ToolContext } from "./exec-tool.js";
 import { generateText } from "ai";
 import { createProvider } from "../../models/models.js";
 import { getDefaultModelAndProvider, resolveProviderConfig } from "../../models/defaults.js";
+import { captureLlmUsage } from "../../analytics/usage.js";
+import { getCurrentUseCase } from "../../analytics/use_case.js";
 import { isSignedIn } from "../../account/account.js";
 import { getAccessToken } from "../../auth/tokens.js";
 import { API_URL } from "../../config/env.js";
@@ -762,6 +764,16 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                             ],
                         },
                     ],
+                });
+
+                const ctx = getCurrentUseCase();
+                captureLlmUsage({
+                    useCase: ctx?.useCase ?? 'copilot_chat',
+                    subUseCase: 'file_parse',
+                    ...(ctx?.agentName ? { agentName: ctx.agentName } : {}),
+                    model: modelId,
+                    provider: providerName,
+                    usage: response.usage,
                 });
 
                 return {

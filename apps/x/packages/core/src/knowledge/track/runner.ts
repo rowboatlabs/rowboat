@@ -110,6 +110,8 @@ export async function triggerTrackUpdate(
             agentId: 'track-run',
             model,
             ...(track.track.provider ? { provider: track.track.provider } : {}),
+            useCase: 'track_block',
+            subUseCase: 'run',
         });
 
         // Set lastRunAt and lastRunId immediately (before agent executes) so

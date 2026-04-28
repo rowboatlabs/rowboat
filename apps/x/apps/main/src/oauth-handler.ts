@@ -12,6 +12,7 @@ import { triggerSync as triggerCalendarSync } from '@x/core/dist/knowledge/sync_
 import { triggerSync as triggerFirefliesSync } from '@x/core/dist/knowledge/sync_fireflies.js';
 import { emitOAuthEvent } from './ipc.js';
 import { getBillingInfo } from '@x/core/dist/billing/billing.js';
+import { capture as analyticsCapture, identify as analyticsIdentify, reset as analyticsReset } from '@x/core/dist/analytics/posthog.js';
 
 const REDIRECT_URI = 'http://localhost:8080/oauth/callback';
 
@@ -275,16 +276,33 @@ export async function connectProvider(provider: string, credentials?: { clientId
         // For Rowboat sign-in, ensure user + Stripe customer exist before
         // notifying the renderer. Without this, parallel API calls from
         // multiple renderer hooks race to create the user, causing duplicates.
+        let signedInUserId: string | undefined;
         if (provider === 'rowboat') {
           try {
-            await getBillingInfo();
+            const billing = await getBillingInfo();
+            if (billing.userId) {
+              signedInUserId = billing.userId;
+              analyticsIdentify(billing.userId, {
+                ...(billing.userEmail ? { email: billing.userEmail } : {}),
+                plan: billing.subscriptionPlan,
+                status: billing.subscriptionStatus,
+              });
+              analyticsCapture('user_signed_in', {
+                plan: billing.subscriptionPlan,
+                status: billing.subscriptionStatus,
+              });
+            }
           } catch (meError) {
             console.error('[OAuth] Failed to initialize user via /v1/me:', meError);
           }
         }
 
         // Emit success event to renderer
-        emitOAuthEvent({ provider, success: true });
+        emitOAuthEvent({
+          provider,
+          success: true,
+          ...(signedInUserId ? { userId: signedInUserId } : {}),
+        });
       } catch (error) {
         console.error('OAuth token exchange failed:', error);
         // Log cause chain for debugging (e.g. OAUTH_INVALID_RESPONSE -> OperationProcessingError)
@@ -347,6 +365,10 @@ export async function disconnectProvider(provider: string): Promise<{ success: b
   try {
     const oauthRepo = getOAuthRepo();
     await oauthRepo.delete(provider);
+    if (provider === 'rowboat') {
+      analyticsCapture('user_signed_out');
+      analyticsReset();
+    }
     // Notify renderer so sidebar, voice, and billing re-check state
     emitOAuthEvent({ provider, success: false });
     return { success: true };
