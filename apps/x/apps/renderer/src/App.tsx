@@ -35,7 +35,7 @@ import {
 
 import { Shimmer } from '@/components/ai-elements/shimmer';
 import { useSmoothedText } from './hooks/useSmoothedText';
-import { Tool, ToolContent, ToolHeader, ToolTabbedContent } from '@/components/ai-elements/tool';
+import { Tool, ToolContent, ToolGroupComponent, ToolHeader, ToolTabbedContent } from '@/components/ai-elements/tool';
 import { WebSearchResult } from '@/components/ai-elements/web-search-result';
 import { AppActionCard } from '@/components/ai-elements/app-action-card';
 import { ComposioConnectCard } from '@/components/ai-elements/composio-connect-card';
@@ -76,10 +76,12 @@ import {
   getAppActionCardData,
   getComposioConnectCardData,
   getToolDisplayName,
+  groupConversationItems,
   inferRunTitleFromMessage,
   isChatMessage,
   isErrorMessage,
   isToolCall,
+  isToolGroup,
   normalizeToolInput,
   normalizeToolOutput,
   parseAttachedFiles,
@@ -4578,7 +4580,20 @@ function App() {
                               </ConversationEmptyState>
                             ) : (
                               <>
-                                {tabState.conversation.map(item => {
+                                {groupConversationItems(
+                                  tabState.conversation,
+                                  (id) => !!tabState.allPermissionRequests.get(id)
+                                ).map(item => {
+                                  if (isToolGroup(item)) {
+                                    return (
+                                      <ToolGroupComponent
+                                        key={item.groupId}
+                                        group={item}
+                                        isToolOpen={(toolId) => isToolOpenForTab(tab.id, toolId)}
+                                        onToolOpenChange={(toolId, open) => setToolOpenForTab(tab.id, toolId, open)}
+                                      />
+                                    )
+                                  }
                                   const rendered = renderConversationItem(item, tab.id)
                                   if (isToolCall(item)) {
                                     const permRequest = tabState.allPermissionRequests.get(item.id)

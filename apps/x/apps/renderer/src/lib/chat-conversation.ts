@@ -586,6 +586,72 @@ export const getComposioActionCardData = (tool: ToolCall): ComposioActionCardDat
   return null
 }
 
+export type ToolGroup = {
+  type: 'tool-group'
+  items: ToolCall[]
+  groupId: string
+}
+
+export type GroupedConversationItem = ConversationItem | ToolGroup
+
+export const isToolGroup = (item: GroupedConversationItem): item is ToolGroup =>
+  'type' in item && (item as ToolGroup).type === 'tool-group'
+
+const isPlainToolCall = (item: ConversationItem): item is ToolCall => {
+  if (!isToolCall(item)) return false
+  if (getWebSearchCardData(item)) return false
+  if (getComposioConnectCardData(item)) return false
+  if (getAppActionCardData(item)) return false
+  return true
+}
+
+export const groupConversationItems = (
+  items: ConversationItem[],
+  hasPermissionRequest: (id: string) => boolean
+): GroupedConversationItem[] => {
+  const result: GroupedConversationItem[] = []
+  let i = 0
+
+  while (i < items.length) {
+    const item = items[i]
+    if (isPlainToolCall(item) && !hasPermissionRequest(item.id)) {
+      const group: ToolCall[] = [item]
+      i++
+      while (
+        i < items.length &&
+        isPlainToolCall(items[i] as ConversationItem) &&
+        !hasPermissionRequest((items[i] as ToolCall).id)
+      ) {
+        group.push(items[i] as ToolCall)
+        i++
+      }
+      if (group.length === 1) {
+        result.push(group[0])
+      } else {
+        result.push({ type: 'tool-group', items: group, groupId: group[0].id })
+      }
+    } else {
+      result.push(item)
+      i++
+    }
+  }
+
+  return result
+}
+
+export const getToolGroupSummary = (tools: ToolCall[]): string => {
+  const seen = new Set<string>()
+  const names: string[] = []
+  for (const tool of tools) {
+    const name = getToolDisplayName(tool)
+    if (!seen.has(name)) {
+      seen.add(name)
+      names.push(name)
+    }
+  }
+  return names.join(' · ')
+}
+
 export const inferRunTitleFromMessage = (content: string): string | undefined => {
   const { message } = parseAttachedFiles(content)
   const normalized = message.replace(/\s+/g, ' ').trim()
