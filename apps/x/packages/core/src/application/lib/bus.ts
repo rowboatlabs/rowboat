@@ -29,7 +29,8 @@ export class InMemoryBus implements IBus {
         }
         this.subscribers.get(runId)!.push(handler);
         return () => {
-            this.subscribers.get(runId)!.splice(this.subscribers.get(runId)!.indexOf(handler), 1);
+            const idx = this.subscribers.get(runId)!.indexOf(handler);
+            if (idx !== -1) this.subscribers.get(runId)!.splice(idx, 1);
         };
     }
 }
