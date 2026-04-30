@@ -11,8 +11,46 @@ import { triggerSync as triggerGmailSync } from '@x/core/dist/knowledge/sync_gma
 import { triggerSync as triggerCalendarSync } from '@x/core/dist/knowledge/sync_calendar.js';
 import { triggerSync as triggerFirefliesSync } from '@x/core/dist/knowledge/sync_fireflies.js';
 import { emitOAuthEvent } from './ipc.js';
+import { getBillingInfo } from '@x/core/dist/billing/billing.js';
 
 const REDIRECT_URI = 'http://localhost:8080/oauth/callback';
+
+/** Top-level openid-client messages that often wrap a more specific cause. */
+const OPAQUE_OAUTH_TOP_MESSAGES = new Set(['invalid response encountered']);
+
+function firstCauseMessage(error: unknown): string | undefined {
+  if (error == null || typeof error !== 'object' || !('cause' in error)) {
+    return undefined;
+  }
+  const cause = (error as { cause?: unknown }).cause;
+  if (cause instanceof Error && cause.message.trim()) {
+    return cause.message;
+  }
+  if (typeof cause === 'string' && cause.trim()) {
+    return cause;
+  }
+  return undefined;
+}
+
+/**
+ * User-facing message for token-exchange failures. Prefer the first cause message when
+ * the top-level message is opaque (common for openid-client) or when code is OAUTH_INVALID_RESPONSE.
+ * The catch block below still logs the full cause chain for any error; this helper stays conservative.
+ */
+function getOAuthErrorMessage(error: unknown): string {
+  const msg = error instanceof Error ? error.message : 'Unknown error';
+  const code = error != null && typeof error === 'object' && 'code' in error
+    ? (error as { code?: string }).code
+    : undefined;
+  const causeMsg = firstCauseMessage(error);
+  if (code === 'OAUTH_INVALID_RESPONSE' && causeMsg) {
+    return causeMsg;
+  }
+  if (causeMsg && OPAQUE_OAUTH_TOP_MESSAGES.has(msg.trim().toLowerCase())) {
+    return causeMsg;
+  }
+  return msg;
+}
 
 // Store active OAuth flows (state -> { codeVerifier, provider, config })
 const activeFlows = new Map<string, {
@@ -74,19 +112,19 @@ function getClientRegistrationRepo(): IClientRegistrationRepo {
 /**
  * Get or create OAuth configuration for a provider
  */
-async function getProviderConfiguration(provider: string, clientIdOverride?: string): Promise<Configuration> {
-  const config = getProviderConfig(provider);
-  const resolveClientId = async (): Promise<string> => {
+async function getProviderConfiguration(provider: string, credentialsOverride?: { clientId: string; clientSecret: string }): Promise<Configuration> {
+  const config = await getProviderConfig(provider);
+  const resolveClientCredentials = async (): Promise<{ clientId: string; clientSecret?: string }> => {
     if (config.client.mode === 'static' && config.client.clientId) {
-      return config.client.clientId;
+      return { clientId: config.client.clientId, clientSecret: credentialsOverride?.clientSecret };
     }
-    if (clientIdOverride) {
-      return clientIdOverride;
+    if (credentialsOverride) {
+      return { clientId: credentialsOverride.clientId, clientSecret: credentialsOverride.clientSecret };
     }
     const oauthRepo = getOAuthRepo();
-    const { clientId } = await oauthRepo.read(provider);
-    if (clientId) {
-      return clientId;
+    const connection = await oauthRepo.read(provider);
+    if (connection.clientId) {
+      return { clientId: connection.clientId, clientSecret: connection.clientSecret ?? undefined };
     }
     throw new Error(`${provider} client ID not configured. Please provide a client ID.`);
   };
@@ -95,10 +133,11 @@ async function getProviderConfiguration(provider: string, clientIdOverride?: str
     if (config.client.mode === 'static') {
       // Discover endpoints, use static client ID
       console.log(`[OAuth] ${provider}: Discovery from issuer with static client ID`);
-      const clientId = await resolveClientId();
+      const { clientId, clientSecret } = await resolveClientCredentials();
       return await oauthClient.discoverConfiguration(
         config.discovery.issuer,
-        clientId
+        clientId,
+        clientSecret
       );
     } else {
       // DCR mode - check for existing registration or register new
@@ -135,12 +174,13 @@ async function getProviderConfiguration(provider: string, clientIdOverride?: str
     }
     
     console.log(`[OAuth] ${provider}: Using static endpoints (no discovery)`);
-    const clientId = await resolveClientId();
+    const { clientId, clientSecret } = await resolveClientCredentials();
     return oauthClient.createStaticConfiguration(
       config.discovery.authorizationEndpoint,
       config.discovery.tokenEndpoint,
       clientId,
-      config.discovery.revocationEndpoint
+      config.discovery.revocationEndpoint,
+      clientSecret
     );
   }
 }
@@ -148,7 +188,7 @@ async function getProviderConfiguration(provider: string, clientIdOverride?: str
 /**
  * Initiate OAuth flow for a provider
  */
-export async function connectProvider(provider: string, clientId?: string): Promise<{ success: boolean; error?: string }> {
+export async function connectProvider(provider: string, credentials?: { clientId: string; clientSecret: string }): Promise<{ success: boolean; error?: string }> {
   try {
     console.log(`[OAuth] Starting connection flow for ${provider}...`);
 
@@ -156,16 +196,16 @@ export async function connectProvider(provider: string, clientId?: string): Prom
     cancelActiveFlow('new_flow_started');
 
     const oauthRepo = getOAuthRepo();
-    const providerConfig = getProviderConfig(provider);
+    const providerConfig = await getProviderConfig(provider);
 
     if (provider === 'google') {
-      if (!clientId) {
-        return { success: false, error: 'Google client ID is required to connect.' };
+      if (!credentials?.clientId || !credentials?.clientSecret) {
+        return { success: false, error: 'Google client ID and client secret are required to connect.' };
       }
     }
 
     // Get or create OAuth configuration
-    const config = await getProviderConfiguration(provider, clientId);
+    const config = await getProviderConfiguration(provider, credentials);
 
     // Generate PKCE codes
     const { verifier: codeVerifier, challenge: codeChallenge } = await oauthClient.generatePKCE();
@@ -187,11 +227,16 @@ export async function connectProvider(provider: string, clientId?: string): Prom
 
     // Create callback server
     let callbackHandled = false;
-    const { server } = await createAuthServer(8080, async (code, receivedState) => {
+    const { server } = await createAuthServer(8080, async (callbackUrl) => {
       // Guard against duplicate callbacks (browser may send multiple requests)
       if (callbackHandled) return;
       callbackHandled = true;
-      // Validate state
+      const receivedState = callbackUrl.searchParams.get('state');
+      if (receivedState == null || receivedState === '') {
+        throw new Error(
+          'OAuth callback missing state parameter. Complete sign-in in the browser or check the redirect URI.'
+        );
+      }
       if (receivedState !== state) {
         throw new Error('Invalid state parameter - possible CSRF attack');
       }
@@ -202,10 +247,7 @@ export async function connectProvider(provider: string, clientId?: string): Prom
       }
 
       try {
-        // Build callback URL for token exchange
-        const callbackUrl = new URL(`${REDIRECT_URI}?code=${code}&state=${receivedState}`);
-
-        // Exchange code for tokens
+        // Use full callback URL (includes iss, scope, etc.) so openid-client validation succeeds
         console.log(`[OAuth] Exchanging authorization code for tokens (${provider})...`);
         const tokens = await oauthClient.exchangeCodeForTokens(
           flow.config,
@@ -214,13 +256,13 @@ export async function connectProvider(provider: string, clientId?: string): Prom
           state
         );
 
-        // Save tokens
+        // Save tokens and credentials
         console.log(`[OAuth] Token exchange successful for ${provider}`);
-        await oauthRepo.upsert(provider, { tokens });
-        if (provider === 'google' && clientId) {
-          await oauthRepo.upsert(provider, { clientId });
-        }
-        await oauthRepo.upsert(provider, { error: null });
+        await oauthRepo.upsert(provider, {
+          tokens,
+          ...(credentials ? { clientId: credentials.clientId, clientSecret: credentials.clientSecret } : {}),
+          error: null,
+        });
 
         // Trigger immediate sync for relevant providers
         if (provider === 'google') {
@@ -230,11 +272,30 @@ export async function connectProvider(provider: string, clientId?: string): Prom
           triggerFirefliesSync();
         }
 
+        // For Rowboat sign-in, ensure user + Stripe customer exist before
+        // notifying the renderer. Without this, parallel API calls from
+        // multiple renderer hooks race to create the user, causing duplicates.
+        if (provider === 'rowboat') {
+          try {
+            await getBillingInfo();
+          } catch (meError) {
+            console.error('[OAuth] Failed to initialize user via /v1/me:', meError);
+          }
+        }
+
         // Emit success event to renderer
         emitOAuthEvent({ provider, success: true });
       } catch (error) {
         console.error('OAuth token exchange failed:', error);
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        // Log cause chain for debugging (e.g. OAUTH_INVALID_RESPONSE -> OperationProcessingError)
+        let cause: unknown = error;
+        while (cause != null && typeof cause === 'object' && 'cause' in cause) {
+          cause = (cause as { cause?: unknown }).cause;
+          if (cause != null) {
+            console.error('[OAuth] Caused by:', cause);
+          }
+        }
+        const errorMessage = getOAuthErrorMessage(error);
         emitOAuthEvent({ provider, success: false, error: errorMessage });
         throw error;
       } finally {
@@ -302,8 +363,8 @@ export async function disconnectProvider(provider: string): Promise<{ success: b
 export async function getAccessToken(provider: string): Promise<string | null> {
   try {
     const oauthRepo = getOAuthRepo();
-    
-    const { tokens } = await oauthRepo.read(provider);
+
+    let { tokens } = await oauthRepo.read(provider);
     if (!tokens) {
       return null;
     }
@@ -319,11 +380,12 @@ export async function getAccessToken(provider: string): Promise<string | null> {
       try {
         // Get configuration for refresh
         const config = await getProviderConfiguration(provider);
-        
+
         // Refresh token, preserving existing scopes
         const existingScopes = tokens.scopes;
         const refreshedTokens = await oauthClient.refreshTokens(config, tokens.refresh_token, existingScopes);
-        await oauthRepo.upsert(provider, { tokens });
+        await oauthRepo.upsert(provider, { tokens: refreshedTokens });
+        tokens = refreshedTokens;
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Token refresh failed';
         await oauthRepo.upsert(provider, { error: message });

@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState } from "react"
-import { AlertTriangle, Loader2, Mic, Mail, Calendar, MessageSquare, User } from "lucide-react"
+import { AlertTriangle, Loader2, Mic, Mail, Calendar, User } from "lucide-react"
 
 import {
   Popover,
@@ -15,7 +15,6 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { Button } from "@/components/ui/button"
-import { Switch } from "@/components/ui/switch"
 import { Separator } from "@/components/ui/separator"
 import { GoogleClientIdModal } from "@/components/google-client-id-modal"
 import { ComposioApiKeyModal } from "@/components/composio-api-key-modal"
@@ -126,8 +125,6 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
   // Check if Gmail is unconnected (for filtering in unconnected mode)
   const isGmailUnconnected = c.useComposioForGoogle ? !c.gmailConnected && !c.gmailLoading : true
   const isGoogleCalendarUnconnected = c.useComposioForGoogleCalendar ? !c.googleCalendarConnected && !c.googleCalendarLoading : true
-  const isGranolaUnconnected = !c.granolaEnabled && !c.granolaLoading
-  const isSlackUnconnected = !c.slackEnabled && !c.slackLoading
 
   // For unconnected mode, check if there's anything to show
   const hasUnconnectedEmailCalendar = (() => {
@@ -143,7 +140,6 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
 
   const hasUnconnectedMeetingNotes = (() => {
     if (!isUnconnectedMode) return true
-    if (isGranolaUnconnected) return true
     if (c.providers.includes('fireflies-ai')) {
       const firefliesState = c.providerStates['fireflies-ai']
       if (!firefliesState?.isConnected || c.providerStatus['fireflies-ai']?.error) return true
@@ -151,15 +147,13 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
     return false
   })()
 
-  const hasUnconnectedSlack = !isUnconnectedMode || isSlackUnconnected
-
   const isRowboatUnconnected = (() => {
     if (!c.providers.includes('rowboat')) return false
     const rowboatState = c.providerStates['rowboat']
     return !rowboatState?.isConnected || rowboatState?.isLoading
   })()
 
-  const allConnected = isUnconnectedMode && !isRowboatUnconnected && !hasUnconnectedEmailCalendar && !hasUnconnectedMeetingNotes && !hasUnconnectedSlack
+  const allConnected = isUnconnectedMode && !isRowboatUnconnected && !hasUnconnectedEmailCalendar && !hasUnconnectedMeetingNotes
 
   return (
     <>
@@ -357,126 +351,10 @@ export function ConnectorsPopover({ children, tooltip, open: openProp, onOpenCha
                     <span className="text-xs font-medium text-muted-foreground">Meeting Notes</span>
                   </div>
 
-                  {/* Granola - show in unconnected mode only if not enabled */}
-                  {(!isUnconnectedMode || isGranolaUnconnected) && (
-                    <div className="flex items-center justify-between gap-3 rounded-md px-3 py-2 hover:bg-accent">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="flex size-8 items-center justify-center rounded-md bg-muted">
-                          <Mic className="size-4" />
-                        </div>
-                        <div className="flex flex-col min-w-0">
-                          <span className="text-sm font-medium truncate">Granola</span>
-                          <span className="text-xs text-muted-foreground truncate">
-                            Local meeting notes
-                          </span>
-                        </div>
-                      </div>
-                      <div className="shrink-0 flex items-center gap-2">
-                        {c.granolaLoading && (
-                          <Loader2 className="size-3 animate-spin" />
-                        )}
-                        <Switch
-                          checked={c.granolaEnabled}
-                          onCheckedChange={c.handleGranolaToggle}
-                          disabled={c.granolaLoading}
-                        />
-                      </div>
-                    </div>
-                  )}
-
                   {/* Fireflies */}
                   {c.providers.includes('fireflies-ai') && renderOAuthProvider('fireflies-ai', 'Fireflies', <Mic className="size-4" />, 'AI meeting transcripts')}
 
                   <Separator className="my-2" />
-                </>
-              )}
-
-              {/* Team Communication Section */}
-              {hasUnconnectedSlack && (
-                <>
-                  <div className="px-2 py-1.5">
-                    <span className="text-xs font-medium text-muted-foreground">Team Communication</span>
-                  </div>
-
-                  <div className="rounded-md px-3 py-2 hover:bg-accent">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="flex size-8 items-center justify-center rounded-md bg-muted">
-                          <MessageSquare className="size-4" />
-                        </div>
-                        <div className="flex flex-col min-w-0">
-                          <span className="text-sm font-medium truncate">Slack</span>
-                          {c.slackEnabled && c.slackWorkspaces.length > 0 ? (
-                            <span className="text-xs text-muted-foreground truncate">
-                              {c.slackWorkspaces.map(w => w.name).join(', ')}
-                            </span>
-                          ) : (
-                            <span className="text-xs text-muted-foreground truncate">
-                              Send messages and view channels
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="shrink-0 flex items-center gap-2">
-                        {(c.slackLoading || c.slackDiscovering) && (
-                          <Loader2 className="size-3 animate-spin" />
-                        )}
-                        {c.slackEnabled ? (
-                          <Switch
-                            checked={true}
-                            onCheckedChange={() => c.handleSlackDisable()}
-                            disabled={c.slackLoading}
-                          />
-                        ) : (
-                          <Button
-                            variant="default"
-                            size="sm"
-                            onClick={c.handleSlackEnable}
-                            disabled={c.slackLoading || c.slackDiscovering}
-                            className="h-7 px-2 text-xs"
-                          >
-                            Enable
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                    {c.slackPickerOpen && (
-                      <div className="mt-2 ml-11 space-y-2">
-                        {c.slackDiscoverError ? (
-                          <p className="text-xs text-muted-foreground">{c.slackDiscoverError}</p>
-                        ) : (
-                          <>
-                            {c.slackAvailableWorkspaces.map(w => (
-                              <label key={w.url} className="flex items-center gap-2 text-sm cursor-pointer">
-                                <input
-                                  type="checkbox"
-                                  checked={c.slackSelectedUrls.has(w.url)}
-                                  onChange={(e) => {
-                                    c.setSlackSelectedUrls(prev => {
-                                      const next = new Set(prev)
-                                      if (e.target.checked) next.add(w.url)
-                                      else next.delete(w.url)
-                                      return next
-                                    })
-                                  }}
-                                  className="rounded border-border"
-                                />
-                                <span className="truncate">{w.name}</span>
-                              </label>
-                            ))}
-                            <Button
-                              size="sm"
-                              onClick={c.handleSlackSaveWorkspaces}
-                              disabled={c.slackSelectedUrls.size === 0 || c.slackLoading}
-                              className="h-7 px-3 text-xs"
-                            >
-                              Save
-                            </Button>
-                          </>
-                        )}
-                      </div>
-                    )}
-                  </div>
                 </>
               )}
             </>

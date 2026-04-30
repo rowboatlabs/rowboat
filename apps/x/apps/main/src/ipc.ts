@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow, shell, dialog } from 'electron';
+import { ipcMain, BrowserWindow, shell, dialog, systemPreferences, desktopCapturer } from 'electron';
 import { ipc } from '@x/shared';
 import path from 'node:path';
 import os from 'node:os';
@@ -44,6 +44,17 @@ import { versionHistory, voice } from '@x/core';
 import { classifySchedule, processRowboatInstruction } from '@x/core/dist/knowledge/inline_tasks.js';
 import { getBillingInfo } from '@x/core/dist/billing/billing.js';
 import { summarizeMeeting } from '@x/core/dist/knowledge/summarize_meeting.js';
+import { getAccessToken } from '@x/core/dist/auth/tokens.js';
+import { getRowboatConfig } from '@x/core/dist/config/rowboat.js';
+import { triggerTrackUpdate } from '@x/core/dist/knowledge/track/runner.js';
+import { trackBus } from '@x/core/dist/knowledge/track/bus.js';
+import {
+  fetchYaml,
+  updateTrackBlock,
+  replaceTrackBlockYaml,
+  deleteTrackBlock,
+} from '@x/core/dist/knowledge/track/fileops.js';
+import { browserIpcHandlers } from './browser/ipc.js';
 
 /**
  * Convert markdown to a styled HTML document for PDF/DOCX export.
@@ -110,6 +121,18 @@ function markdownToHtml(markdown: string, title: string): string {
 </style></head><body>${html}</body></html>`
 }
 
+function resolveShellPath(filePath: string): string {
+  if (filePath.startsWith('~')) {
+    return path.join(os.homedir(), filePath.slice(1));
+  }
+
+  if (path.isAbsolute(filePath)) {
+    return filePath;
+  }
+
+  return workspace.resolveWorkspacePath(filePath);
+}
+
 type InvokeChannels = ipc.InvokeChannels;
 type IPCChannels = ipc.IPCChannels;
 
@@ -146,10 +169,10 @@ export function registerIpcHandlers(handlers: InvokeHandlers) {
     ipcMain.handle(channel, async (event, rawArgs) => {
       // Validate request payload
       const args = ipc.validateRequest(channel, rawArgs);
-      
+
       // Call handler
       const result = await handler(event, args);
-      
+
       // Validate response payload
       return ipc.validateResponse(channel, result);
     });
@@ -271,7 +294,7 @@ function handleWorkspaceChange(event: z.infer<typeof workspaceShared.WorkspaceCh
 
 /**
  * Start workspace watcher
- * Watches ~/.rowboat recursively and emits change events to renderer
+ * Watches the configured workspace root recursively and emits change events to renderer
  * 
  * This should be called once when the app starts (from main.ts).
  * The watcher runs as a main-process service and catches ALL filesystem changes
@@ -350,6 +373,19 @@ export async function startServicesWatcher(): Promise<void> {
   });
 }
 
+let tracksWatcher: (() => void) | null = null;
+export function startTracksWatcher(): void {
+  if (tracksWatcher) return;
+  tracksWatcher = trackBus.subscribe((event) => {
+    const windows = BrowserWindow.getAllWindows();
+    for (const win of windows) {
+      if (!win.isDestroyed() && win.webContents) {
+        win.webContents.send('tracks:events', event);
+      }
+    }
+  });
+}
+
 export function stopRunsWatcher(): void {
   if (runsWatcher) {
     runsWatcher();
@@ -421,7 +457,7 @@ export function setupIpcHandlers() {
       return runsCore.createRun(args);
     },
     'runs:createMessage': async (_event, args) => {
-      return { messageId: await runsCore.createMessage(args.runId, args.message, args.voiceInput, args.voiceOutput, args.searchEnabled) };
+      return { messageId: await runsCore.createMessage(args.runId, args.message, args.voiceInput, args.voiceOutput, args.searchEnabled, args.middlePaneContext) };
     },
     'runs:authorizePermission': async (_event, args) => {
       await runsCore.authorizePermission(args.runId, args.authorization);
@@ -460,7 +496,10 @@ export function setupIpcHandlers() {
       return { success: true };
     },
     'oauth:connect': async (_event, args) => {
-      return await connectProvider(args.provider, args.clientId?.trim());
+      const credentials = args.clientId && args.clientSecret
+        ? { clientId: args.clientId.trim(), clientSecret: args.clientSecret.trim() }
+        : undefined;
+      return await connectProvider(args.provider, credentials);
     },
     'oauth:disconnect': async (_event, args) => {
       return await disconnectProvider(args.provider);
@@ -472,6 +511,21 @@ export function setupIpcHandlers() {
       const repo = container.resolve<IOAuthRepo>('oauthRepo');
       const config = await repo.getClientFacingConfig();
       return { config };
+    },
+    'account:getRowboat': async () => {
+      const signedIn = await isSignedIn();
+      if (!signedIn) {
+        return { signedIn: false, accessToken: null, config: null };
+      }
+
+      const config = await getRowboatConfig();
+
+      try {
+        const accessToken = await getAccessToken();
+        return { signedIn: true, accessToken, config };
+      } catch {
+        return { signedIn: true, accessToken: null, config };
+      }
     },
     'granola:getConfig': async () => {
       const repo = container.resolve<IGranolaConfigRepo>('granolaConfigRepo');
@@ -544,8 +598,9 @@ export function setupIpcHandlers() {
     'composio:list-connected': async () => {
       return composioHandler.listConnected();
     },
-    'composio:execute-action': async (_event, args) => {
-      return composioHandler.executeAction(args.actionSlug, args.toolkitSlug, args.input);
+    // Composio Tools Library handlers
+    'composio:list-toolkits': async () => {
+      return composioHandler.listToolkits();
     },
     'composio:use-composio-for-google': async () => {
       return composioHandler.useComposioForGoogle();
@@ -588,24 +643,12 @@ export function setupIpcHandlers() {
     },
     // Shell integration handlers
     'shell:openPath': async (_event, args) => {
-      let filePath = args.path;
-      if (filePath.startsWith('~')) {
-        filePath = path.join(os.homedir(), filePath.slice(1));
-      } else if (!path.isAbsolute(filePath)) {
-        // Workspace-relative path — resolve against ~/.rowboat/
-        filePath = path.join(os.homedir(), '.rowboat', filePath);
-      }
+      const filePath = resolveShellPath(args.path);
       const error = await shell.openPath(filePath);
       return { error: error || undefined };
     },
     'shell:readFileBase64': async (_event, args) => {
-      let filePath = args.path;
-      if (filePath.startsWith('~')) {
-        filePath = path.join(os.homedir(), filePath.slice(1));
-      } else if (!path.isAbsolute(filePath)) {
-        // Workspace-relative path — resolve against ~/.rowboat/
-        filePath = path.join(os.homedir(), '.rowboat', filePath);
-      }
+      const filePath = resolveShellPath(args.path);
       const stat = await fs.stat(filePath);
       if (stat.size > 10 * 1024 * 1024) {
         throw new Error('File too large (>10MB)');
@@ -704,6 +747,24 @@ export function setupIpcHandlers() {
 
       return { success: false, error: 'Unknown format' };
     },
+    'meeting:checkScreenPermission': async () => {
+      if (process.platform !== 'darwin') return { granted: true };
+      const status = systemPreferences.getMediaAccessStatus('screen');
+      console.log('[meeting] Screen recording permission status:', status);
+      if (status === 'granted') return { granted: true };
+      // Not granted — call desktopCapturer.getSources() to register the app
+      // in the macOS Screen Recording list. On first call this shows the
+      // native permission prompt (signed apps are remembered across restarts).
+      try { await desktopCapturer.getSources({ types: ['screen'] }); } catch { /* ignore */ }
+      // Re-check after the native prompt was dismissed
+      const statusAfter = systemPreferences.getMediaAccessStatus('screen');
+      console.log('[meeting] Screen recording permission status after prompt:', statusAfter);
+      return { granted: statusAfter === 'granted' };
+    },
+    'meeting:openScreenRecordingSettings': async () => {
+      await shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
+      return { success: true };
+    },
     'meeting:summarize': async (_event, args) => {
       const notes = await summarizeMeeting(args.transcript, args.meetingStartTime, args.calendarEventJson);
       return { notes };
@@ -721,8 +782,47 @@ export function setupIpcHandlers() {
     'voice:synthesize': async (_event, args) => {
       return voice.synthesizeSpeech(args.text);
     },
-    'voice:getDeepgramToken': async () => {
-      return voice.getDeepgramToken();
+    // Track handlers
+    'track:run': async (_event, args) => {
+      const result = await triggerTrackUpdate(args.trackId, args.filePath);
+      return { success: !result.error, summary: result.summary ?? undefined, error: result.error };
+    },
+    'track:get': async (_event, args) => {
+      try {
+        const yaml = await fetchYaml(args.filePath, args.trackId);
+        if (yaml === null) return { success: false, error: 'Track not found' };
+        return { success: true, yaml };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'track:update': async (_event, args) => {
+      try {
+        await updateTrackBlock(args.filePath, args.trackId, args.updates as Record<string, unknown>);
+        const yaml = await fetchYaml(args.filePath, args.trackId);
+        if (yaml === null) return { success: false, error: 'Track vanished after update' };
+        return { success: true, yaml };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'track:replaceYaml': async (_event, args) => {
+      try {
+        await replaceTrackBlockYaml(args.filePath, args.trackId, args.yaml);
+        const yaml = await fetchYaml(args.filePath, args.trackId);
+        if (yaml === null) return { success: false, error: 'Track vanished after replace' };
+        return { success: true, yaml };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'track:delete': async (_event, args) => {
+      try {
+        await deleteTrackBlock(args.filePath, args.trackId);
+        return { success: true };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
     },
     // Skills handlers
     'skills:list': async () => {
@@ -752,5 +852,7 @@ export function setupIpcHandlers() {
     'billing:getInfo': async () => {
       return await getBillingInfo();
     },
+    // Embedded browser handlers (WebContentsView + navigation)
+    ...browserIpcHandlers,
   });
 }

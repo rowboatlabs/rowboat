@@ -9,6 +9,7 @@ import { serviceLogger, type ServiceRunContext } from '../services/service_logge
 import { limitEventItems } from './limit_event_items.js';
 import { executeAction, useComposioForGoogle } from '../composio/client.js';
 import { composioAccountsRepo } from '../composio/repo.js';
+import { createEvent } from './track/events.js';
 
 // Configuration
 const SYNC_DIR = path.join(WorkDir, 'gmail_sync');
@@ -171,6 +172,13 @@ async function processThread(auth: OAuth2Client, threadId: string, syncDir: stri
 
         fs.writeFileSync(path.join(syncDir, `${threadId}.md`), mdContent);
         console.log(`Synced Thread: ${subject} (${threadId})`);
+
+        await createEvent({
+            source: 'gmail',
+            type: 'email.synced',
+            createdAt: new Date().toISOString(),
+            payload: mdContent,
+        });
 
     } catch (error) {
         console.error(`Error processing thread ${threadId}:`, error);
@@ -410,7 +418,7 @@ async function partialSync(auth: OAuth2Client, startHistoryId: string, syncDir: 
 }
 
 async function performSync() {
-    const LOOKBACK_DAYS = 30; // Default to 1 month
+    const LOOKBACK_DAYS = 7; // Default to 1 week
     const ATTACHMENTS_DIR = path.join(SYNC_DIR, 'attachments');
     const STATE_FILE = path.join(SYNC_DIR, 'sync_state.json');
 
@@ -444,7 +452,7 @@ async function performSync() {
 
 // --- Composio-based Sync ---
 
-const COMPOSIO_LOOKBACK_DAYS = 30;
+const COMPOSIO_LOOKBACK_DAYS = 7;
 
 interface ComposioSyncState {
     last_sync: string; // ISO string
@@ -595,6 +603,12 @@ async function processThreadComposio(connectedAccountId: string, threadId: strin
 
         fs.writeFileSync(path.join(syncDir, `${cleanFilename(threadId)}.md`), mdContent);
         console.log(`[Gmail] Synced Thread: ${parsed.subject} (${threadId})`);
+        await createEvent({
+            source: 'gmail',
+            type: 'email.synced',
+            createdAt: new Date().toISOString(),
+            payload: mdContent,
+        });
         newestDate = tryParseDate(parsed.date);
     } else {
         const firstParsed = parseMessageData(messages[0]);
@@ -617,6 +631,12 @@ async function processThreadComposio(connectedAccountId: string, threadId: strin
 
         fs.writeFileSync(path.join(syncDir, `${cleanFilename(threadId)}.md`), mdContent);
         console.log(`[Gmail] Synced Thread: ${firstParsed.subject} (${threadId})`);
+        await createEvent({
+            source: 'gmail',
+            type: 'email.synced',
+            createdAt: new Date().toISOString(),
+            payload: mdContent,
+        });
     }
 
     if (!newestDate) return null;
@@ -732,6 +752,11 @@ async function performSyncComposio() {
         let highWaterMark: string | null = state?.last_sync ?? null;
         let processedCount = 0;
         for (const threadId of allThreadIds) {
+            // Re-check connection in case user disconnected mid-sync
+            if (!composioAccountsRepo.isConnected('gmail')) {
+                console.log('[Gmail] Account disconnected during sync. Stopping.');
+                return;
+            }
             try {
                 const newestInThread = await processThreadComposio(connectedAccountId, threadId, SYNC_DIR);
                 processedCount++;

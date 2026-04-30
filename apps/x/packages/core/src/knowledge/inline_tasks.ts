@@ -4,11 +4,11 @@ import { CronExpressionParser } from 'cron-parser';
 import { generateText } from 'ai';
 import { WorkDir } from '../config/config.js';
 import { createRun, createMessage, fetchRun } from '../runs/runs.js';
-import { bus } from '../runs/bus.js';
 import container from '../di/container.js';
 import type { IModelConfigRepo } from '../models/repo.js';
 import { createProvider } from '../models/models.js';
 import { inlineTask } from '@x/shared';
+import { extractAgentResponse, waitForRunCompletion } from '../agents/utils.js';
 
 const SYNC_INTERVAL_MS = 15 * 1000; // 15 seconds
 const INLINE_TASK_AGENT = 'inline_task_agent';
@@ -127,46 +127,6 @@ function scanDirectoryRecursive(dir: string): string[] {
         }
     }
     return files;
-}
-
-/**
- * Wait for a run to complete by listening for run-processing-end event
- */
-async function waitForRunCompletion(runId: string): Promise<void> {
-    return new Promise(async (resolve) => {
-        const unsubscribe = await bus.subscribe('*', async (event) => {
-            if (event.type === 'run-processing-end' && event.runId === runId) {
-                unsubscribe();
-                resolve();
-            }
-        });
-    });
-}
-
-/**
- * Extract the assistant's final text response from a run's log.
- */
-async function extractAgentResponse(runId: string): Promise<string | null> {
-    const run = await fetchRun(runId);
-    // Walk backwards through the log to find the last assistant message
-    for (let i = run.log.length - 1; i >= 0; i--) {
-        const event = run.log[i];
-        if (event.type === 'message' && event.message.role === 'assistant') {
-            const content = event.message.content;
-            if (typeof content === 'string') {
-                return content;
-            }
-            // Content may be an array of parts — concatenate text parts
-            if (Array.isArray(content)) {
-                const text = content
-                    .filter((p) => p.type === 'text')
-                    .map((p) => (p as { type: 'text'; text: string }).text)
-                    .join('');
-                return text || null;
-            }
-        }
-    }
-    return null;
 }
 
 interface InlineTask {

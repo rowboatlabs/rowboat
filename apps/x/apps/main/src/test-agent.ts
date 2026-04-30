@@ -3,7 +3,7 @@ import { bus } from '@x/core/dist/runs/bus.js';
 
 async function main() {
     const { id } = await runsCore.createRun({
-        // this will expect an agent file to exist at ~/.rowboat/agents/test-agent.md
+        // this expects an agent file to exist at WorkDir/agents/test-agent.md
         agentId: 'test-agent',
     });
     console.log(`created run: ${id}`);

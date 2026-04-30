@@ -266,7 +266,7 @@ function ChatInputInner({
     return () => window.removeEventListener('models-config-changed', handler)
   }, [loadModelConfig])
 
-  // Check search tool availability (brave or exa, or signed-in via gateway)
+  // Check search tool availability (exa or signed-in via gateway)
   useEffect(() => {
     const checkSearch = async () => {
       if (isRowboatConnected) {
@@ -275,17 +275,10 @@ function ChatInputInner({
       }
       let available = false
       try {
-        const raw = await window.ipc.invoke('workspace:readFile', { path: 'config/brave-search.json' })
+        const raw = await window.ipc.invoke('workspace:readFile', { path: 'config/exa-search.json' })
         const config = JSON.parse(raw.data)
         if (config.apiKey) available = true
       } catch { /* not configured */ }
-      if (!available) {
-        try {
-          const raw = await window.ipc.invoke('workspace:readFile', { path: 'config/exa-search.json' })
-          const config = JSON.parse(raw.data)
-          if (config.apiKey) available = true
-        } catch { /* not configured */ }
-      }
       setSearchAvailable(available)
     }
     checkSearch()
@@ -570,7 +563,7 @@ function ChatInputInner({
                 className="flex h-7 shrink-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               >
                 <span className="max-w-[150px] truncate">
-                  {configuredModels.find((m) => `${m.flavor}/${m.model}` === activeModelKey)?.model || 'Model'}
+                  {configuredModels.find((m) => `${m.flavor}/${m.model}` === activeModelKey)?.model || configuredModels[0]?.model || 'Model'}
                 </span>
                 <ChevronDown className="h-3 w-3" />
               </button>

@@ -1,6 +1,8 @@
 import { z, ZodType } from "zod";
 import * as path from "path";
 import * as fs from "fs/promises";
+import { createReadStream } from "fs";
+import { createInterface } from "readline";
 import { execSync } from "child_process";
 import { glob } from "glob";
 import { executeCommand, executeCommandAbortable } from "./command-executor.js";
@@ -12,6 +14,10 @@ import { McpServerDefinition } from "@x/shared/dist/mcp.js";
 import * as workspace from "../../workspace/workspace.js";
 import { IAgentsRepo } from "../../agents/repo.js";
 import { WorkDir } from "../../config/config.js";
+import { composioAccountsRepo } from "../../composio/repo.js";
+import { executeAction as executeComposioAction, isConfigured as isComposioConfigured, searchTools as searchComposioTools } from "../../composio/client.js";
+import { CURATED_TOOLKITS, CURATED_TOOLKIT_SLUGS } from "@x/shared/dist/composio.js";
+import { BrowserControlInputSchema, type BrowserControlInput } from "@x/shared/dist/browser-control.js";
 import type { ToolContext } from "./exec-tool.js";
 import { generateText } from "ai";
 import { createProvider } from "../../models/models.js";
@@ -20,6 +26,8 @@ import { isSignedIn } from "../../account/account.js";
 import { getGatewayProvider } from "../../models/gateway.js";
 import { getAccessToken } from "../../auth/tokens.js";
 import { API_URL } from "../../config/env.js";
+import { updateContent, updateTrackBlock } from "../../knowledge/track/fileops.js";
+import type { IBrowserControlService } from "../browser-control/service.js";
 // Parser libraries are loaded dynamically inside parseFile.execute()
 // to avoid pulling pdfjs-dist's DOM polyfills into the main bundle.
 // Import paths are computed so esbuild cannot statically resolve them.
@@ -184,14 +192,119 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
     },
 
     'workspace-readFile': {
-        description: 'Read file contents from the workspace. Supports utf8, base64, and binary encodings.',
+        description: 'Read a file from the workspace. For text files (utf8, the default), returns the content with each line prefixed by its 1-indexed line number (e.g. `12: some text`). Use the `offset` and `limit` parameters to page through large files; defaults read up to 2000 lines starting at line 1. Output is wrapped in `<path>`, `<type>`, `<content>` tags and ends with a footer indicating whether the read reached end-of-file or was truncated. Line numbers in the output are display-only — do NOT include them when later writing or editing the file. For `base64` / `binary` encodings, returns the raw bytes as a string and ignores `offset` / `limit`.',
         inputSchema: z.object({
             path: z.string().min(1).describe('Workspace-relative file path'),
+            offset: z.coerce.number().int().min(1).optional().describe('1-indexed line to start reading from (default: 1). Utf8 only.'),
+            limit: z.coerce.number().int().min(1).optional().describe('Maximum number of lines to read (default: 2000). Utf8 only.'),
             encoding: z.enum(['utf8', 'base64', 'binary']).optional().describe('File encoding (default: utf8)'),
         }),
-        execute: async ({ path: relPath, encoding = 'utf8' }: { path: string; encoding?: 'utf8' | 'base64' | 'binary' }) => {
+        execute: async ({
+            path: relPath,
+            offset,
+            limit,
+            encoding = 'utf8',
+        }: {
+            path: string;
+            offset?: number;
+            limit?: number;
+            encoding?: 'utf8' | 'base64' | 'binary';
+        }) => {
             try {
-                return await workspace.readFile(relPath, encoding);
+                if (encoding !== 'utf8') {
+                    return await workspace.readFile(relPath, encoding);
+                }
+
+                const DEFAULT_READ_LIMIT = 2000;
+                const MAX_LINE_LENGTH = 2000;
+                const MAX_LINE_SUFFIX = `... (line truncated to ${MAX_LINE_LENGTH} chars)`;
+                const MAX_BYTES = 50 * 1024;
+                const MAX_BYTES_LABEL = `${MAX_BYTES / 1024} KB`;
+
+                const absPath = workspace.resolveWorkspacePath(relPath);
+                const stats = await fs.lstat(absPath);
+                const stat = workspace.statToSchema(stats, 'file');
+                const etag = workspace.computeEtag(stats.size, stats.mtimeMs);
+
+                const effectiveOffset = offset ?? 1;
+                const effectiveLimit = limit ?? DEFAULT_READ_LIMIT;
+                const start = effectiveOffset - 1;
+
+                const stream = createReadStream(absPath, { encoding: 'utf8' });
+                const rl = createInterface({ input: stream, crlfDelay: Infinity });
+
+                const collected: string[] = [];
+                let totalLines = 0;
+                let bytes = 0;
+                let truncatedByBytes = false;
+                let hasMoreLines = false;
+
+                try {
+                    for await (const text of rl) {
+                        totalLines += 1;
+                        if (totalLines <= start) continue;
+
+                        if (collected.length >= effectiveLimit) {
+                            hasMoreLines = true;
+                            continue;
+                        }
+
+                        const line = text.length > MAX_LINE_LENGTH
+                            ? text.substring(0, MAX_LINE_LENGTH) + MAX_LINE_SUFFIX
+                            : text;
+                        const size = Buffer.byteLength(line, 'utf-8') + (collected.length > 0 ? 1 : 0);
+                        if (bytes + size > MAX_BYTES) {
+                            truncatedByBytes = true;
+                            hasMoreLines = true;
+                            break;
+                        }
+
+                        collected.push(line);
+                        bytes += size;
+                    }
+                } finally {
+                    rl.close();
+                    stream.destroy();
+                }
+
+                if (totalLines < effectiveOffset && !(totalLines === 0 && effectiveOffset === 1)) {
+                    return { error: `Offset ${effectiveOffset} is out of range for this file (${totalLines} lines)` };
+                }
+
+                const prefixed = collected.map((line, index) => `${index + effectiveOffset}: ${line}`);
+                const lastReadLine = effectiveOffset + collected.length - 1;
+                const nextOffset = lastReadLine + 1;
+
+                let footer: string;
+                if (truncatedByBytes) {
+                    footer = `(Output capped at ${MAX_BYTES_LABEL}. Showing lines ${effectiveOffset}-${lastReadLine}. Use offset=${nextOffset} to continue.)`;
+                } else if (hasMoreLines) {
+                    footer = `(Showing lines ${effectiveOffset}-${lastReadLine} of ${totalLines}. Use offset=${nextOffset} to continue.)`;
+                } else {
+                    footer = `(End of file - total ${totalLines} lines)`;
+                }
+
+                const content = [
+                    `<path>${relPath}</path>`,
+                    `<type>file</type>`,
+                    `<content>`,
+                    prefixed.join('\n'),
+                    '',
+                    footer,
+                    `</content>`,
+                ].join('\n');
+
+                return {
+                    path: relPath,
+                    encoding: 'utf8' as const,
+                    content,
+                    stat,
+                    etag,
+                    offset: effectiveOffset,
+                    limit: effectiveLimit,
+                    totalLines,
+                    hasMore: hasMoreLines || truncatedByBytes,
+                };
             } catch (error) {
                 return {
                     error: error instanceof Error ? error.message : 'Unknown error',
@@ -468,7 +581,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                         count: matches.length,
                         tool: 'ripgrep',
                     };
-                } catch (rgError) {
+                } catch {
                     // Fallback to basic grep if ripgrep not available or failed
                     const grepArgs = [
                         '-rn',
@@ -904,6 +1017,39 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
     },
 
     // ============================================================================
+    // Browser Control
+    // ============================================================================
+
+    'browser-control': {
+        description: 'Control the embedded browser pane. Read the current page, inspect indexed interactable elements, and navigate/click/type/press keys in the active browser tab.',
+        inputSchema: BrowserControlInputSchema,
+        isAvailable: async () => {
+            try {
+                container.resolve<IBrowserControlService>('browserControlService');
+                return true;
+            } catch {
+                return false;
+            }
+        },
+        execute: async (input: BrowserControlInput, ctx?: ToolContext) => {
+            try {
+                const browserControlService = container.resolve<IBrowserControlService>('browserControlService');
+                return await browserControlService.execute(input, { signal: ctx?.signal });
+            } catch (error) {
+                return {
+                    success: false,
+                    action: input.action,
+                    error: error instanceof Error ? error.message : 'Browser control is unavailable.',
+                    browser: {
+                        activeTabId: null,
+                        tabs: [],
+                    },
+                };
+            }
+        },
+    },
+
+    // ============================================================================
     // App Navigation
     // ============================================================================
 
@@ -1043,123 +1189,15 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
     },
 
     // ============================================================================
-    // Web Search (Brave Search API)
+    // Web Search (Exa Search API)
     // ============================================================================
 
     'web-search': {
-        description: 'Search the web using Brave Search. Returns web results with titles, URLs, and descriptions.',
-        inputSchema: z.object({
-            query: z.string().describe('The search query'),
-            count: z.number().optional().describe('Number of results to return (default: 5, max: 20)'),
-            freshness: z.string().optional().describe('Filter by freshness: pd (past day), pw (past week), pm (past month), py (past year)'),
-        }),
-        isAvailable: async () => {
-            if (await isSignedIn()) return true;
-            try {
-                const braveConfigPath = path.join(WorkDir, 'config', 'brave-search.json');
-                const raw = await fs.readFile(braveConfigPath, 'utf8');
-                const config = JSON.parse(raw);
-                return !!config.apiKey;
-            } catch {
-                return false;
-            }
-        },
-        execute: async ({ query, count, freshness }: { query: string; count?: number; freshness?: string }) => {
-            try {
-                const resultCount = Math.min(Math.max(count || 5, 1), 20);
-                const params = new URLSearchParams({
-                    q: query,
-                    count: String(resultCount),
-                });
-                if (freshness) {
-                    params.set('freshness', freshness);
-                }
-
-                let response: Response;
-
-                if (await isSignedIn()) {
-                    // Use proxy
-                    const accessToken = await getAccessToken();
-                    response = await fetch(`${API_URL}/v1/search/brave?${params.toString()}`, {
-                        headers: {
-                            'Authorization': `Bearer ${accessToken}`,
-                            'Accept': 'application/json',
-                        },
-                    });
-                } else {
-                    // Read API key from config
-                    const braveConfigPath = path.join(WorkDir, 'config', 'brave-search.json');
-
-                    let apiKey: string;
-                    try {
-                        const raw = await fs.readFile(braveConfigPath, 'utf8');
-                        const config = JSON.parse(raw);
-                        apiKey = config.apiKey;
-                    } catch {
-                        return {
-                            success: false,
-                            error: 'Brave Search API key not configured. Create ~/.rowboat/config/brave-search.json with { "apiKey": "<your-key>" }',
-                        };
-                    }
-
-                    if (!apiKey) {
-                        return {
-                            success: false,
-                            error: 'Brave Search API key is empty. Set "apiKey" in ~/.rowboat/config/brave-search.json',
-                        };
-                    }
-
-                    response = await fetch(`https://api.search.brave.com/res/v1/web/search?${params.toString()}`, {
-                        headers: {
-                            'X-Subscription-Token': apiKey,
-                            'Accept': 'application/json',
-                        },
-                    });
-                }
-
-                if (!response.ok) {
-                    const body = await response.text();
-                    return {
-                        success: false,
-                        error: `Brave Search API error (${response.status}): ${body}`,
-                    };
-                }
-
-                const data = await response.json() as {
-                    web?: { results?: Array<{ title?: string; url?: string; description?: string }> };
-                };
-
-                const results = (data.web?.results || []).map((r: { title?: string; url?: string; description?: string }) => ({
-                    title: r.title || '',
-                    url: r.url || '',
-                    description: r.description || '',
-                }));
-
-                return {
-                    success: true,
-                    query,
-                    results,
-                    count: results.length,
-                };
-            } catch (error) {
-                return {
-                    success: false,
-                    error: error instanceof Error ? error.message : 'Unknown error',
-                };
-            }
-        },
-    },
-
-    // ============================================================================
-    // Research Search (Exa Search API)
-    // ============================================================================
-
-    'research-search': {
-        description: 'Use this for finding articles, blog posts, papers, companies, people, or exploring a topic in depth. Best for discovery and research where you need quality sources, not a quick fact.',
+        description: 'Search the web for articles, blog posts, papers, companies, people, news, or explore a topic in depth. Returns rich results with full text, highlights, and metadata.',
         inputSchema: z.object({
             query: z.string().describe('The search query'),
             numResults: z.number().optional().describe('Number of results to return (default: 5, max: 20)'),
-            category: z.enum(['company', 'research paper', 'news', 'tweet', 'personal site', 'financial report', 'people']).optional().describe('Filter results by category'),
+            category: z.enum(['general', 'company', 'research paper', 'news', 'tweet', 'personal site', 'financial report', 'people']).optional().describe('Search category. Defaults to "general" which searches the entire web. Only use a specific category when the query is clearly about that type (e.g. "research paper" for academic papers, "company" for company info). For everyday queries like weather, restaurants, prices, how-to, etc., use "general" or omit entirely.'),
         }),
         isAvailable: async () => {
             if (await isSignedIn()) return true;
@@ -1185,7 +1223,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                         highlights: true,
                     },
                 };
-                if (category) {
+                if (category && category !== 'general') {
                     reqBody.category = category;
                 }
 
@@ -1214,14 +1252,14 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                     } catch {
                         return {
                             success: false,
-                            error: 'Exa Search API key not configured. Create ~/.rowboat/config/exa-search.json with { "apiKey": "<your-key>" }',
+                            error: `Exa Search API key not configured. Create ${exaConfigPath} with { "apiKey": "<your-key>" }`,
                         };
                     }
 
                     if (!apiKey) {
                         return {
                             success: false,
-                            error: 'Exa Search API key is empty. Set "apiKey" in ~/.rowboat/config/exa-search.json',
+                            error: `Exa Search API key is empty. Set "apiKey" in ${exaConfigPath}`,
                         };
                     }
 
@@ -1274,6 +1312,227 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                     success: false,
                     error: error instanceof Error ? error.message : 'Unknown error',
                 };
+            }
+        },
+    },
+    'save-to-memory': {
+        description: "Save a note about the user to the agent memory inbox. Use this when you observe something worth remembering — their preferences, communication patterns, relationship context, scheduling habits, or explicit instructions about how they want things done.",
+        inputSchema: z.object({
+            note: z.string().describe("The observation or preference to remember. Be specific and concise."),
+        }),
+        execute: async ({ note }: { note: string }) => {
+            const inboxPath = path.join(WorkDir, 'knowledge', 'Agent Notes', 'inbox.md');
+            const dir = path.dirname(inboxPath);
+            await fs.mkdir(dir, { recursive: true });
+
+            const timestamp = new Date().toISOString();
+            const entry = `\n- [${timestamp}] ${note}\n`;
+
+            await fs.appendFile(inboxPath, entry, 'utf-8');
+
+            return {
+                success: true,
+                message: `Saved to memory: ${note}`,
+            };
+        },
+    },
+
+    // ========================================================================
+    // Composio Meta-Tools
+    // ========================================================================
+
+    'composio-list-toolkits': {
+        description: 'List available Composio integrations (Gmail, Slack, GitHub, etc.) and their connection status. Use this to show the user what services they can connect to.',
+        inputSchema: z.object({
+            category: z.enum(['all', 'communication', 'productivity', 'development', 'crm', 'social', 'storage', 'support']).optional()
+                .describe('Filter by category. Defaults to "all".'),
+        }),
+        execute: async ({ category }: { category?: string }) => {
+            const toolkits = CURATED_TOOLKITS
+                .filter(t => !category || category === 'all' || t.category === category)
+                .map(t => ({
+                    slug: t.slug,
+                    name: t.displayName,
+                    category: t.category,
+                    isConnected: composioAccountsRepo.isConnected(t.slug),
+                }));
+
+            const connectedCount = toolkits.filter(t => t.isConnected).length;
+            return {
+                toolkits,
+                connectedCount,
+                totalCount: toolkits.length,
+            };
+        },
+        isAvailable: async () => isComposioConfigured(),
+    },
+
+    'composio-search-tools': {
+        description: 'Search for Composio tools by use case across connected services. Returns tool slugs, descriptions, and input schemas so you can call composio-execute-tool with the right parameters. Example: search "send email" to find Gmail tools, "create issue" to find GitHub/Jira tools.',
+        inputSchema: z.object({
+            query: z.string().describe('Natural language description of what you want to do (e.g., "send an email", "create a GitHub issue", "schedule a meeting")'),
+            toolkitSlug: z.string().optional().describe('Optional: limit search to a specific toolkit (e.g., "gmail", "github")'),
+        }),
+        execute: async ({ query, toolkitSlug }: { query: string; toolkitSlug?: string }) => {
+            try {
+                const toolkitFilter = toolkitSlug ? [toolkitSlug] : undefined;
+                const result = await searchComposioTools(query, toolkitFilter);
+
+                // Filter to curated toolkits only (skip if a specific toolkit was requested —
+                // the API already filtered server-side)
+                const filtered = toolkitSlug
+                    ? result.items
+                    : result.items.filter(t => CURATED_TOOLKIT_SLUGS.has(t.toolkitSlug));
+
+                // Annotate with connection status
+                const tools = filtered.map(t => ({
+                    slug: t.slug,
+                    name: t.name,
+                    description: t.description,
+                    toolkitSlug: t.toolkitSlug,
+                    isConnected: composioAccountsRepo.isConnected(t.toolkitSlug),
+                    inputSchema: t.inputParameters,
+                }));
+
+                return {
+                    tools,
+                    resultCount: tools.length,
+                    hint: tools.some(t => !t.isConnected)
+                        ? 'Some tools require connecting the toolkit first. Use composio-connect-toolkit to help the user authenticate.'
+                        : undefined,
+                };
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                return { tools: [], resultCount: 0, error: message };
+            }
+        },
+        isAvailable: async () => isComposioConfigured(),
+    },
+
+    'composio-execute-tool': {
+        description: 'Execute a Composio tool by its slug. You MUST pass the arguments field with all required parameters from the search results inputSchema. Example: composio-execute-tool({ toolSlug: "GITHUB_ISSUES_LIST_FOR_REPO", toolkitSlug: "github", arguments: { owner: "rowboatlabs", repo: "rowboat", state: "open", per_page: 100 } })',
+        inputSchema: z.object({
+            toolSlug: z.string().describe('EXACT tool slug from search results (e.g., "GITHUB_ISSUES_LIST_FOR_REPO"). Copy it exactly — do not modify it.'),
+            toolkitSlug: z.string().describe('The toolkit slug (e.g., "gmail", "github")'),
+            arguments: z.record(z.string(), z.unknown()).describe('REQUIRED: Tool input parameters as key-value pairs. Get the required fields from the inputSchema returned by composio-search-tools. Never omit this.'),
+        }),
+        execute: async ({ toolSlug, toolkitSlug, arguments: args }: { toolSlug: string; toolkitSlug: string; arguments?: Record<string, unknown> }) => {
+            // Default arguments to {} if the LLM omits the field entirely
+            const toolArgs = args ?? {};
+
+            // Check connection
+            const account = composioAccountsRepo.getAccount(toolkitSlug);
+            if (!account || account.status !== 'ACTIVE') {
+                return {
+                    successful: false,
+                    data: null,
+                    error: `Toolkit "${toolkitSlug}" is not connected. Use composio-connect-toolkit to help the user connect it first.`,
+                };
+            }
+
+            try {
+                return await executeComposioAction(toolSlug, {
+                    connected_account_id: account.id,
+                    user_id: 'rowboat-user',
+                    version: 'latest',
+                    arguments: toolArgs,
+                });
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                console.error(`[Composio] Tool execution failed for ${toolSlug}:`, message);
+                return {
+                    successful: false,
+                    data: null,
+                    error: `Failed to execute ${toolSlug}: ${message}. If fields are missing, check the inputSchema and retry with the correct arguments.`,
+                };
+            }
+        },
+        isAvailable: async () => isComposioConfigured(),
+    },
+
+    'composio-connect-toolkit': {
+        description: 'Connect a Composio service (Gmail, Slack, GitHub, etc.) via OAuth. Shows a connect card for the user to authenticate.',
+        inputSchema: z.object({
+            toolkitSlug: z.string().describe('The toolkit slug to connect (e.g., "gmail", "github", "slack", "notion")'),
+        }),
+        execute: async ({ toolkitSlug }: { toolkitSlug: string }) => {
+            // Validate against curated list
+            if (!CURATED_TOOLKIT_SLUGS.has(toolkitSlug)) {
+                const available = CURATED_TOOLKITS.map(t => `${t.slug} (${t.displayName})`).join(', ');
+                return {
+                    success: false,
+                    error: `Unknown toolkit "${toolkitSlug}". Available toolkits: ${available}`,
+                };
+            }
+
+            // Check if already connected
+            if (composioAccountsRepo.isConnected(toolkitSlug)) {
+                return {
+                    success: true,
+                    message: `${toolkitSlug} is already connected. You can search for and execute its tools.`,
+                    alreadyConnected: true,
+                };
+            }
+
+            // Return signal — the UI renders a ComposioConnectCard with a Connect button.
+            // OAuth only starts when the user clicks that button.
+            const toolkit = CURATED_TOOLKITS.find(t => t.slug === toolkitSlug);
+            return {
+                success: true,
+                message: `Please connect ${toolkit?.displayName ?? toolkitSlug} to continue.`,
+            };
+        },
+        isAvailable: async () => isComposioConfigured(),
+    },
+    'update-track-content': {
+        description: "Update the output content of a track block in a knowledge note. This replaces the content inside the track's target region (between <!--track-target:ID--> markers), or creates the target region if it doesn't exist. Also updates the track's lastRunAt timestamp.",
+        inputSchema: z.object({
+            filePath: z.string().describe("Workspace-relative path to the note file (e.g., 'knowledge/Notes/my-note.md')"),
+            trackId: z.string().describe("The track block's trackId"),
+            content: z.string().describe("The new content to place inside the track's target region"),
+        }),
+        execute: async ({ filePath, trackId, content }: { filePath: string; trackId: string; content: string }) => {
+            try {
+                await updateContent(filePath, trackId, content);
+                await updateTrackBlock(filePath, trackId, { lastRunAt: new Date().toISOString() });
+                return { success: true, message: `Updated track ${trackId} in ${filePath}` };
+            } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                return { success: false, error: msg };
+            }
+        },
+    },
+
+    'run-track-block': {
+        description: "Manually trigger a track block to run now. Equivalent to the user clicking the Play button on the block, but you can pass extra `context` to bias what the track agent does this run — most useful for backfills (e.g. seeding a new email-tracking block from existing synced emails) or focused refreshes. Returns the action taken, summary, and the new content.",
+        inputSchema: z.object({
+            filePath: z.string().describe("Workspace-relative path to the note file (e.g., 'knowledge/Notes/my-note.md')"),
+            trackId: z.string().describe("The track block's trackId (must exist in the file)"),
+            context: z.string().optional().describe(
+                "Optional extra context for the track agent to consider for THIS run only — does not modify the block's instruction. " +
+                "Use it to drive backfills (e.g. 'Backfill from existing synced emails in gmail_sync/ from the last 90 days about this topic') " +
+                "or focused refreshes (e.g. 'Focus on changes from the last 7 days'). " +
+                "Omit for a plain refresh."
+            ),
+        }),
+        execute: async ({ filePath, trackId, context }: { filePath: string; trackId: string; context?: string }) => {
+            const knowledgeRelativePath = filePath.replace(/^knowledge\//, '');
+            try {
+                // Lazy import to break a module-init cycle:
+                // builtin-tools → track/runner → runs/runs → agents/runtime → builtin-tools
+                const { triggerTrackUpdate } = await import("../../knowledge/track/runner.js");
+                const result = await triggerTrackUpdate(trackId, knowledgeRelativePath, context, 'manual');
+                return {
+                    success: !result.error,
+                    runId: result.runId,
+                    action: result.action,
+                    summary: result.summary,
+                    contentAfter: result.contentAfter,
+                    error: result.error,
+                };
+            } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                return { success: false, error: msg };
             }
         },
     },

@@ -1,9 +1,10 @@
-import { app, BrowserWindow, desktopCapturer, protocol, net, shell, session } from "electron";
+import { app, BrowserWindow, desktopCapturer, protocol, net, shell, session, type Session } from "electron";
 import path from "node:path";
 import {
   setupIpcHandlers,
   startRunsWatcher,
   startServicesWatcher,
+  startTracksWatcher,
   startWorkspaceWatcher,
   stopRunsWatcher,
   stopServicesWatcher,
@@ -22,9 +23,22 @@ import { init as initNoteTagging } from "@x/core/dist/knowledge/tag_notes.js";
 import { init as initInlineTasks } from "@x/core/dist/knowledge/inline_tasks.js";
 import { init as initAgentRunner } from "@x/core/dist/agent-schedule/runner.js";
 import { init as initSkillSync } from "@x/core/dist/skills/sync.js";
+import { init as initAgentNotes } from "@x/core/dist/knowledge/agent_notes.js";
+import { init as initTrackScheduler } from "@x/core/dist/knowledge/track/scheduler.js";
+import { init as initTrackEventProcessor } from "@x/core/dist/knowledge/track/events.js";
+import { init as initLocalSites, shutdown as shutdownLocalSites } from "@x/core/dist/local-sites/server.js";
+
 import { initConfigs } from "@x/core/dist/config/initConfigs.js";
 import started from "electron-squirrel-startup";
-import { execSync } from "node:child_process";
+import { execSync, exec, execFileSync } from "node:child_process";
+import { promisify } from "node:util";
+import { init as initChromeSync } from "@x/core/dist/knowledge/chrome-extension/server/server.js";
+import { registerBrowserControlService } from "@x/core/dist/di/container.js";
+import { browserViewManager, BROWSER_PARTITION } from "./browser/view.js";
+import { setupBrowserEventForwarding } from "./browser/ipc.js";
+import { ElectronBrowserControlService } from "./browser/control-service.js";
+
+const execAsync = promisify(exec);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -34,25 +48,30 @@ if (started) app.quit();
 
 // Fix PATH for packaged Electron apps on macOS/Linux.
 // Packaged apps inherit a minimal environment that doesn't include paths from
-// the user's shell profile (nvm, Homebrew, etc.). Spawn the user's login shell
-// to resolve the full PATH, using delimiters to safely extract it from any
-// surrounding shell output (motd, greeting messages, etc.).
-if (process.platform !== 'win32') {
+// the user's shell profile (such as those provided by nvm, Homebrew, etc.).
+// The function below spawns the user's login shell and runs a Node.js one-liner
+// to print the full environment as JSON, then merges it into process.env.
+// This ensures the Electron app has the same PATH and environment as user shell
+// (helping find tools installed via Homebrew/nvm/npm, etc.)
+function initializeExecutionEnvironment(): void {
+  if (process.platform === 'win32') return;
+
+  const shell = process.env.SHELL || '/bin/zsh';
+
   try {
-    const userShell = process.env.SHELL || '/bin/zsh';
-    const delimiter = '__ROWBOAT_PATH__';
-    const output = execSync(
-      `${userShell} -lc 'echo -n "${delimiter}$PATH${delimiter}"'`,
-      { encoding: 'utf-8', timeout: 5000 },
-    );
-    const match = output.match(new RegExp(`${delimiter}(.+?)${delimiter}`));
-    if (match?.[1]) {
-      process.env.PATH = match[1];
-    }
-  } catch {
-    // Silently fall back to the existing PATH if shell resolution fails
+    const stdout = execFileSync(
+      shell,
+      ['-l', '-c', `node -p "JSON.stringify(process.env)"`],
+      { encoding: 'utf8' }
+    ).trim();
+
+    const env = JSON.parse(stdout) as Record<string, string>;
+    process.env = { ...env, ...process.env };
+  } catch (error) {
+    console.error('Failed to load shell environment', error);
   }
 }
+initializeExecutionEnvironment();
 
 // Path resolution differs between development and production:
 const preloadPath = app.isPackaged
@@ -99,10 +118,36 @@ protocol.registerSchemesAsPrivileged([
   },
 ]);
 
+const ALLOWED_SESSION_PERMISSIONS = new Set(["media", "display-capture", "clipboard-read", "clipboard-sanitized-write"]);
+
+function configureSessionPermissions(targetSession: Session): void {
+  targetSession.setPermissionCheckHandler((_webContents, permission) => {
+    return ALLOWED_SESSION_PERMISSIONS.has(permission);
+  });
+
+  targetSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+    callback(ALLOWED_SESSION_PERMISSIONS.has(permission));
+  });
+
+  // Auto-approve display media requests and route system audio as loopback.
+  // Electron requires a video source in the callback even if we only want audio.
+  // We pass the first available screen source; the renderer discards the video track.
+  targetSession.setDisplayMediaRequestHandler(async (_request, callback) => {
+    const sources = await desktopCapturer.getSources({ types: ['screen'] });
+    if (sources.length === 0) {
+      callback({});
+      return;
+    }
+    callback({ video: sources[0], audio: 'loopback' });
+  });
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
+    minWidth: 600,
+    minHeight: 480,
     show: false, // Don't show until ready
     backgroundColor: "#252525", // Prevent white flash (matches dark mode)
     titleBarStyle: "hiddenInset",
@@ -116,26 +161,8 @@ function createWindow() {
     },
   });
 
-  // Grant microphone and display-capture permissions
-  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
-    if (permission === 'media' || permission === 'display-capture') {
-      callback(true);
-    } else {
-      callback(false);
-    }
-  });
-
-  // Auto-approve display media requests and route system audio as loopback.
-  // Electron requires a video source in the callback even if we only want audio.
-  // We pass the first available screen source; the renderer discards the video track.
-  session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {
-    const sources = await desktopCapturer.getSources({ types: ['screen'] });
-    if (sources.length === 0) {
-      callback({});
-      return;
-    }
-    callback({ video: sources[0], audio: 'loopback' });
-  });
+  configureSessionPermissions(session.defaultSession);
+  configureSessionPermissions(session.fromPartition(BROWSER_PARTITION));
 
   // Show window when content is ready to prevent blank screen
   win.once("ready-to-show", () => {
@@ -159,6 +186,10 @@ function createWindow() {
       shell.openExternal(url);
     }
   });
+
+  // Attach the embedded browser pane manager to this window.
+  // The WebContentsView is created lazily on first `browser:setVisible`.
+  browserViewManager.attach(win);
 
   if (app.isPackaged) {
     win.loadURL("app://-/index.html");
@@ -184,10 +215,26 @@ app.whenReady().then(async () => {
     });
   }
 
+  // Ensure agent-slack CLI is available
+  try {
+    execSync('agent-slack --version', { stdio: 'ignore', timeout: 5000 });
+  } catch {
+    try {
+      console.log('agent-slack not found, installing...');
+      await execAsync('npm install -g agent-slack', { timeout: 60000 });
+      console.log('agent-slack installed successfully');
+    } catch (e) {
+      console.error('Failed to install agent-slack:', e);
+    }
+  }
+
   // Initialize all config files before UI can access them
   await initConfigs();
 
+  registerBrowserControlService(new ElectronBrowserControlService());
+
   setupIpcHandlers();
+  setupBrowserEventForwarding();
 
   createWindow();
 
@@ -203,6 +250,15 @@ app.whenReady().then(async () => {
 
   // start services watcher
   startServicesWatcher();
+
+  // start tracks watcher
+  startTracksWatcher();
+
+  // start track scheduler (cron/window/once)
+  initTrackScheduler();
+
+  // start track event processor (consumes events/pending/, triggers matching tracks)
+  initTrackEventProcessor();
 
   // start gmail sync
   initGmailSync();
@@ -231,8 +287,19 @@ app.whenReady().then(async () => {
   // start background agent runner (scheduled agents)
   initAgentRunner();
 
-  // start skill sync service (pulls from GitHub repo hourly)
+  // start skill sync service
   initSkillSync();
+
+  // start agent notes learning service
+  initAgentNotes();
+
+  // start chrome extension sync server
+  initChromeSync();
+
+  // start local sites server for iframe dashboards and other mini apps
+  initLocalSites().catch((error) => {
+    console.error('[LocalSites] Failed to start:', error);
+  });
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -252,4 +319,7 @@ app.on("before-quit", () => {
   stopWorkspaceWatcher();
   stopRunsWatcher();
   stopServicesWatcher();
+  shutdownLocalSites().catch((error) => {
+    console.error('[LocalSites] Failed to shut down cleanly:', error);
+  });
 });

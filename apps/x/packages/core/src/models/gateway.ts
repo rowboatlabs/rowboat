@@ -3,11 +3,18 @@ import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { getAccessToken } from '../auth/tokens.js';
 import { API_URL } from '../config/env.js';
 
+const authedFetch: typeof fetch = async (input, init) => {
+    const token = await getAccessToken();
+    const headers = new Headers(init?.headers);
+    headers.set('Authorization', `Bearer ${token}`);
+    return fetch(input, { ...init, headers });
+};
+
 export async function getGatewayProvider(): Promise<ProviderV2> {
-    const accessToken = await getAccessToken();
     return createOpenRouter({
         baseURL: `${API_URL}/v1/llm`,
-        apiKey: accessToken,
+        apiKey: 'managed-by-rowboat',
+        fetch: authedFetch,
     });
 }
 

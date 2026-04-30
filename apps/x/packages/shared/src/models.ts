@@ -12,4 +12,5 @@ export const LlmModelConfig = z.object({
   model: z.string(),
   models: z.array(z.string()).optional(),
   knowledgeGraphModel: z.string().optional(),
+  meetingNotesModel: z.string().optional(),
 });

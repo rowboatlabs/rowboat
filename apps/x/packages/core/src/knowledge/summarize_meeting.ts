@@ -4,6 +4,8 @@ import { generateText } from 'ai';
 import container from '../di/container.js';
 import type { IModelConfigRepo } from '../models/repo.js';
 import { createProvider } from '../models/models.js';
+import { isSignedIn } from '../account/account.js';
+import { getGatewayProvider } from '../models/gateway.js';
 import { WorkDir } from '../config/config.js';
 
 const CALENDAR_SYNC_DIR = path.join(WorkDir, 'calendar_sync');
@@ -13,7 +15,8 @@ const SYSTEM_PROMPT = `You are a meeting notes assistant. Given a raw meeting tr
 ## Calendar matching
 You will be given the transcript (with a timestamp of when recording started) and recent calendar events with their titles, times, and attendees. If a calendar event clearly matches this meeting (overlapping time + content aligns), then:
 - Do NOT output a title or heading — the title is already set by the caller.
-- Replace generic speaker labels ("Speaker 0", "Speaker 1", "System audio") with actual attendee names, but ONLY if you have HIGH CONFIDENCE about which speaker is which based on the discussion content. If unsure, use "They" instead of "Speaker 0" etc.
+- ONLY use names from the calendar event attendee list. Do NOT introduce names that are not in the attendee list — any unrecognized names in the transcript are transcription errors.
+- Replace generic speaker labels ("Speaker 0", "Speaker 1", "System audio") with actual attendee names from the list, but ONLY if you have HIGH CONFIDENCE about which speaker is which based on the discussion content. If unsure, use "They" instead of "Speaker 0" etc.
 - "You" in the transcript is the local user — if the calendar event has an organizer or you can identify who "You" is from context, use their name.
 
 If no calendar event matches with high confidence, or if no calendar events are provided, use "They" for all non-"You" speakers.
@@ -137,8 +140,13 @@ function loadCalendarEventContext(calendarEventJson: string): string {
 export async function summarizeMeeting(transcript: string, meetingStartTime?: string, calendarEventJson?: string): Promise<string> {
     const repo = container.resolve<IModelConfigRepo>('modelConfigRepo');
     const config = await repo.getConfig();
-    const provider = createProvider(config.provider);
-    const model = provider.languageModel(config.model);
+    const signedIn = await isSignedIn();
+    const provider = signedIn
+        ? await getGatewayProvider()
+        : createProvider(config.provider);
+    const modelId = config.meetingNotesModel
+        || (signedIn ? "gpt-5.4" : config.model);
+    const model = provider.languageModel(modelId);
 
     // If a specific calendar event was linked, use it directly.
     // Otherwise fall back to scanning events within ±3 hours.

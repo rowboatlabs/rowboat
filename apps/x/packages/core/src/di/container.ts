@@ -1,4 +1,4 @@
-import { asClass, createContainer, InjectionMode } from "awilix";
+import { asClass, asValue, createContainer, InjectionMode } from "awilix";
 import { FSModelConfigRepo, IModelConfigRepo } from "../models/repo.js";
 import { FSMcpConfigRepo, IMcpConfigRepo } from "../mcp/repo.js";
 import { FSAgentsRepo, IAgentsRepo } from "../agents/repo.js";
@@ -18,6 +18,7 @@ import { FSSlackConfigRepo, ISlackConfigRepo } from "../slack/repo.js";
 import { FSSkillsRepo, ISkillsRepo } from "../skills/repo.js";
 import { FSOfficialSkillsRepo, IOfficialSkillsRepo } from "../skills/official-repo.js";
 import { SkillResolver, ISkillResolver } from "../skills/resolver.js";
+import type { IBrowserControlService } from "../application/browser-control/service.js";
 
 const container = createContainer({
     injectionMode: InjectionMode.PROXY,
@@ -48,3 +49,9 @@ container.register({
 });
 
 export default container;
+
+export function registerBrowserControlService(service: IBrowserControlService): void {
+    container.register({
+        browserControlService: asValue(service),
+    });
+}

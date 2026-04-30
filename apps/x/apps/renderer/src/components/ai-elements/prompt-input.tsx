@@ -91,11 +91,12 @@ export type FileMention = {
   id: string;
   path: string;         // "knowledge/notes.md"
   displayName: string;  // "notes"
+  lineNumber?: number;  // 1-indexed source-line reference (for editor-context mentions)
 };
 
 export type MentionsContext = {
   mentions: FileMention[];
-  addMention: (path: string, displayName: string) => void;
+  addMention: (path: string, displayName: string, lineNumber?: number) => void;
   removeMention: (id: string) => void;
   clearMentions: () => void;
 };
@@ -279,13 +280,13 @@ export function PromptInputProvider({
   // ----- mentions state (for @ file mentions)
   const [mentionsList, setMentionsList] = useState<FileMention[]>([]);
 
-  const addMention = useCallback((path: string, displayName: string) => {
+  const addMention = useCallback((path: string, displayName: string, lineNumber?: number) => {
     setMentionsList((prev) => {
-      // Avoid duplicates
-      if (prev.some((m) => m.path === path)) {
+      // Avoid duplicates (same path AND same lineNumber — line-specific mentions are distinct)
+      if (prev.some((m) => m.path === path && m.lineNumber === lineNumber)) {
         return prev;
       }
-      return [...prev, { id: nanoid(), path, displayName }];
+      return [...prev, { id: nanoid(), path, displayName, lineNumber }];
     });
   }, []);
 

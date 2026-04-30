@@ -3,6 +3,7 @@ import path from 'path';
 import { WorkDir } from '../config/config.js';
 import { createRun, createMessage } from '../runs/runs.js';
 import { bus } from '../runs/bus.js';
+import { waitForRunCompletion } from '../agents/utils.js';
 import { serviceLogger, type ServiceRunContext } from '../services/service_logger.js';
 import {
     loadState,
@@ -15,6 +16,7 @@ import {
 import { buildKnowledgeIndex, formatIndexForPrompt } from './knowledge_index.js';
 import { limitEventItems } from './limit_event_items.js';
 import { commitAll } from './version_history.js';
+import { getTagDefinitions } from './tag_system.js';
 
 /**
  * Build obsidian-style knowledge graph by running topic extraction
@@ -23,9 +25,15 @@ import { commitAll } from './version_history.js';
 
 const NOTES_OUTPUT_DIR = path.join(WorkDir, 'knowledge');
 const NOTE_CREATION_AGENT = 'note_creation';
+const SUGGESTED_TOPICS_REL_PATH = 'suggested-topics.md';
+const SUGGESTED_TOPICS_PATH = path.join(WorkDir, 'suggested-topics.md');
+const LEGACY_SUGGESTED_TOPICS_REL_PATH = 'config/suggested-topics.md';
+const LEGACY_SUGGESTED_TOPICS_PATH = path.join(WorkDir, 'config', 'suggested-topics.md');
+const LEGACY_SUGGESTED_TOPICS_KNOWLEDGE_REL_PATH = 'knowledge/Notes/Suggested Topics.md';
+const LEGACY_SUGGESTED_TOPICS_KNOWLEDGE_PATH = path.join(WorkDir, 'knowledge', 'Notes', 'Suggested Topics.md');
 
 // Configuration for the graph builder service
-const SYNC_INTERVAL_MS = 30 * 1000; // Check every 30 seconds
+const SYNC_INTERVAL_MS = 15 * 1000; // 15 seconds
 const SOURCE_FOLDERS = [
     'gmail_sync',
     path.join('knowledge', 'Meetings', 'fireflies'),
@@ -35,12 +43,97 @@ const SOURCE_FOLDERS = [
 // Voice memos are now created directly in knowledge/Voice Memos/<date>/
 const VOICE_MEMOS_KNOWLEDGE_DIR = path.join(NOTES_OUTPUT_DIR, 'Voice Memos');
 
+/**
+ * Check if email frontmatter contains any noise/skip filter tags.
+ * Returns true if the email should be skipped.
+ */
+function hasNoiseLabels(content: string): boolean {
+    if (!content.startsWith('---')) return false;
+
+    const endIdx = content.indexOf('---', 3);
+    if (endIdx === -1) return false;
+
+    const frontmatter = content.slice(3, endIdx);
+
+    const noiseTags = new Set(
+        getTagDefinitions()
+            .filter(t => t.type === 'noise')
+            .map(t => t.tag)
+    );
+
+    // Match list items under filter: key
+    const filterMatch = frontmatter.match(/filter:\s*\n((?:\s+-\s+.+\n?)*)/);
+    if (filterMatch) {
+        const filterLines = filterMatch[1].match(/^\s+-\s+(.+)$/gm);
+        if (filterLines) {
+            for (const line of filterLines) {
+                const tag = line.replace(/^\s+-\s+/, '').trim().replace(/['"]/g, '');
+                if (noiseTags.has(tag)) return true;
+            }
+        }
+    }
+
+    // Match inline array like filter: ['cold-outreach'] or filter: [cold-outreach]
+    const inlineMatch = frontmatter.match(/filter:\s*\[([^\]]*)\]/);
+    if (inlineMatch && inlineMatch[1].trim()) {
+        const tags = inlineMatch[1].split(',').map(t => t.trim().replace(/['"]/g, ''));
+        for (const tag of tags) {
+            if (noiseTags.has(tag)) return true;
+        }
+    }
+
+    return false;
+}
+
 function extractPathFromToolInput(input: string): string | null {
     try {
         const parsed = JSON.parse(input) as { path?: string };
         return typeof parsed.path === 'string' ? parsed.path : null;
     } catch {
         return null;
+    }
+}
+
+function ensureSuggestedTopicsFileLocation(): string {
+    if (fs.existsSync(SUGGESTED_TOPICS_PATH)) {
+        return SUGGESTED_TOPICS_PATH;
+    }
+
+    const legacyCandidates: Array<{ absPath: string; relPath: string }> = [
+        { absPath: LEGACY_SUGGESTED_TOPICS_PATH, relPath: LEGACY_SUGGESTED_TOPICS_REL_PATH },
+        { absPath: LEGACY_SUGGESTED_TOPICS_KNOWLEDGE_PATH, relPath: LEGACY_SUGGESTED_TOPICS_KNOWLEDGE_REL_PATH },
+    ];
+
+    for (const legacy of legacyCandidates) {
+        if (!fs.existsSync(legacy.absPath)) {
+            continue;
+        }
+
+        try {
+            fs.renameSync(legacy.absPath, SUGGESTED_TOPICS_PATH);
+            console.log(`[buildGraph] Moved suggested topics file from ${legacy.relPath} to ${SUGGESTED_TOPICS_REL_PATH}`);
+            return SUGGESTED_TOPICS_PATH;
+        } catch (error) {
+            console.error(`[buildGraph] Failed to move suggested topics file from ${legacy.relPath} to ${SUGGESTED_TOPICS_REL_PATH}:`, error);
+            return legacy.absPath;
+        }
+    }
+
+    return SUGGESTED_TOPICS_PATH;
+}
+
+function readSuggestedTopicsFile(): string {
+    try {
+        const suggestedTopicsPath = ensureSuggestedTopicsFileLocation();
+        if (!fs.existsSync(suggestedTopicsPath)) {
+            return '_No existing suggested topics file._';
+        }
+
+        const content = fs.readFileSync(suggestedTopicsPath, 'utf-8').trim();
+        return content.length > 0 ? content : '_Existing suggested topics file is empty._';
+    } catch (error) {
+        console.error(`[buildGraph] Error reading suggested topics file:`, error);
+        return '_Failed to read existing suggested topics file._';
     }
 }
 
@@ -143,20 +236,6 @@ async function readFileContents(filePaths: string[]): Promise<{ path: string; co
 }
 
 /**
- * Wait for a run to complete by listening for run-processing-end event
- */
-async function waitForRunCompletion(runId: string): Promise<void> {
-    return new Promise(async (resolve) => {
-        const unsubscribe = await bus.subscribe('*', async (event) => {
-            if (event.type === 'run-processing-end' && event.runId === runId) {
-                unsubscribe();
-                resolve();
-            }
-        });
-    });
-}
-
-/**
  * Run note creation agent on a batch of files to extract entities and create/update notes
  */
 async function createNotesFromBatch(
@@ -173,6 +252,7 @@ async function createNotesFromBatch(
     const run = await createRun({
         agentId: NOTE_CREATION_AGENT,
     });
+    const suggestedTopicsContent = readSuggestedTopicsFile();
 
     // Build message with index and all files in the batch
     let message = `Process the following ${files.length} source files and create/update obsidian notes.\n\n`;
@@ -180,14 +260,20 @@ async function createNotesFromBatch(
     message += `- Use the KNOWLEDGE BASE INDEX below to resolve entities - DO NOT grep/search for existing notes\n`;
     message += `- Extract entities (people, organizations, projects, topics) from ALL files below\n`;
     message += `- Create or update notes in "knowledge" directory (workspace-relative paths like "knowledge/People/Name.md")\n`;
+    message += `- You may also create or update "${SUGGESTED_TOPICS_REL_PATH}" to maintain curated suggested-topic cards\n`;
     message += `- If the same entity appears in multiple files, merge the information into a single note\n`;
-    message += `- Use workspace tools to read existing notes (when you need full content) and write updates\n`;
+    message += `- Use workspace tools to read existing notes or "${SUGGESTED_TOPICS_REL_PATH}" (when you need full content) and write updates\n`;
     message += `- Follow the note templates and guidelines in your instructions\n\n`;
 
     // Add the knowledge base index
     message += `---\n\n`;
     message += knowledgeIndex;
     message += `\n---\n\n`;
+
+    message += `# Current Suggested Topics File\n\n`;
+    message += `Path: ${SUGGESTED_TOPICS_REL_PATH}\n\n`;
+    message += suggestedTopicsContent;
+    message += `\n\n---\n\n`;
 
     // Add each file's content
     message += `# Source Files to Process\n\n`;
@@ -366,16 +452,23 @@ export async function buildGraph(sourceDir: string): Promise<void> {
     // Get files that need processing (new or changed)
     let filesToProcess = getFilesToProcess(sourceDir, state);
 
-    // For gmail_sync, only process emails that have been labeled (have YAML frontmatter)
+    // For gmail_sync, only process emails that have been labeled AND don't have noise filter tags
     if (sourceDir.endsWith('gmail_sync')) {
         filesToProcess = filesToProcess.filter(filePath => {
             try {
                 const content = fs.readFileSync(filePath, 'utf-8');
-                return content.startsWith('---');
+                if (!content.startsWith('---')) return false;
+                if (hasNoiseLabels(content)) {
+                    console.log(`[buildGraph] Skipping noise email: ${path.basename(filePath)}`);
+                    markFileAsProcessed(filePath, state);
+                    return false;
+                }
+                return true;
             } catch {
                 return false;
             }
         });
+        saveState(state);
     }
 
     if (filesToProcess.length === 0) {
@@ -535,7 +628,7 @@ async function processVoiceMemosForKnowledge(): Promise<boolean> {
 /**
  * Process all configured source directories
  */
-async function processAllSources(): Promise<void> {
+export async function processAllSources(): Promise<void> {
     console.log('[GraphBuilder] Checking for new content in all sources...');
 
 
@@ -568,16 +661,23 @@ async function processAllSources(): Promise<void> {
         try {
             let filesToProcess = getFilesToProcess(sourceDir, state);
 
-            // For gmail_sync, only process emails that have been labeled (have YAML frontmatter)
+            // For gmail_sync, only process emails that have been labeled AND don't have noise filter tags
             if (folder === 'gmail_sync') {
                 filesToProcess = filesToProcess.filter(filePath => {
                     try {
                         const content = fs.readFileSync(filePath, 'utf-8');
-                        return content.startsWith('---');
+                        if (!content.startsWith('---')) return false;
+                        if (hasNoiseLabels(content)) {
+                            console.log(`[GraphBuilder] Skipping noise email: ${path.basename(filePath)}`);
+                            markFileAsProcessed(filePath, state);
+                            return false;
+                        }
+                        return true;
                     } catch {
                         return false;
                     }
                 });
+                saveState(state);
             }
 
             if (filesToProcess.length > 0) {

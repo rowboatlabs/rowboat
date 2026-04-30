@@ -25,7 +25,7 @@ export function HelpPopover({ children, tooltip }: HelpPopoverProps) {
   const [open, setOpen] = useState(false)
 
   const handleDiscordClick = () => {
-    window.open("https://discord.gg/htdKpBZF", "_blank")
+    window.open("https://discord.com/invite/wajrgmJQ6b", "_blank")
   }
 
   return (

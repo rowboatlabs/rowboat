@@ -10,14 +10,20 @@ import {
   Copy,
   ExternalLink,
   FilePlus,
+  Folder,
   FolderPlus,
+  Globe,
   AlertTriangle,
   HelpCircle,
   Mic,
   Network,
   Pencil,
+  Radio,
+  SearchIcon,
+  SquarePen,
   Table2,
   Plug,
+  Lightbulb,
   LoaderIcon,
   Settings,
   Square,
@@ -57,6 +63,7 @@ import {
   SidebarGroupContent,
   SidebarHeader,
   SidebarMenu,
+  SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarMenuSub,
@@ -89,6 +96,7 @@ import { SettingsDialog } from "@/components/settings-dialog"
 import { toast } from "@/lib/toast"
 import { useBilling } from "@/hooks/useBilling"
 import { ServiceEvent } from "@x/shared/src/service-events.js"
+import type { MeetingTranscriptionState } from "@/hooks/useMeetingTranscription"
 import z from "zod"
 
 interface TreeNode {
@@ -163,6 +171,7 @@ type SidebarContentPanelProps = {
   selectedPath: string | null
   expandedPaths: Set<string>
   onSelectFile: (path: string, kind: "file" | "dir") => void
+  onToggleFolder?: (path: string) => void
   knowledgeActions: KnowledgeActions
   onVoiceNoteCreated?: (path: string) => void
   runs?: RunListItem[]
@@ -171,6 +180,16 @@ type SidebarContentPanelProps = {
   tasksActions?: TasksActions
   backgroundTasks?: BackgroundTaskItem[]
   selectedBackgroundTask?: string | null
+  onNewChat?: () => void
+  onOpenSearch?: () => void
+  meetingState?: MeetingTranscriptionState
+  meetingSummarizing?: boolean
+  meetingAvailable?: boolean
+  onToggleMeeting?: () => void
+  isBrowserOpen?: boolean
+  onToggleBrowser?: () => void
+  isSuggestedTopicsOpen?: boolean
+  onOpenSuggestedTopics?: () => void
 } & React.ComponentProps<typeof Sidebar>
 
 const sectionTabs: { id: ActiveSection; label: string }[] = [
@@ -204,7 +223,7 @@ function formatRunTime(ts: string): string {
 }
 
 function SyncStatusBar() {
-  const { state, isMobile } = useSidebar()
+  const { state } = useSidebar()
   const [activeServices, setActiveServices] = useState<Map<string, string>>(new Map())
   const [popoverOpen, setPopoverOpen] = useState(false)
   const [logEvents, setLogEvents] = useState<ServiceEventType[]>([])
@@ -300,7 +319,7 @@ function SyncStatusBar() {
 
   return (
     <>
-      {!isMobile && isCollapsed && isSyncing && (
+      {isCollapsed && isSyncing && (
         <div
           className="fixed bottom-4 z-40 flex h-8 w-8 items-center justify-center rounded-full border border-border bg-background shadow-sm"
           style={{ left: "0.5rem" }}
@@ -386,6 +405,7 @@ export function SidebarContentPanel({
   selectedPath,
   expandedPaths,
   onSelectFile,
+  onToggleFolder,
   knowledgeActions,
   onVoiceNoteCreated,
   runs = [],
@@ -394,6 +414,16 @@ export function SidebarContentPanel({
   tasksActions,
   backgroundTasks = [],
   selectedBackgroundTask,
+  onNewChat,
+  onOpenSearch,
+  meetingState = 'idle',
+  meetingSummarizing = false,
+  meetingAvailable = false,
+  onToggleMeeting,
+  isBrowserOpen = false,
+  onToggleBrowser,
+  isSuggestedTopicsOpen = false,
+  onOpenSuggestedTopics,
   ...props
 }: SidebarContentPanelProps) {
   const { activeSection, setActiveSection } = useSidebarSection()
@@ -404,6 +434,7 @@ export function SidebarContentPanel({
   const connectorsButtonRef = useRef<HTMLButtonElement | null>(null)
   const [isRowboatConnected, setIsRowboatConnected] = useState(false)
   const [loggingIn, setLoggingIn] = useState(false)
+  const [appUrl, setAppUrl] = useState<string | null>(null)
   const { billing } = useBilling(isRowboatConnected)
   const [skillUpdateCount, setSkillUpdateCount] = useState(0)
 
@@ -427,12 +458,19 @@ export function SidebarContentPanel({
         const result = await window.ipc.invoke('oauth:getState', null)
         const config = result.config || {}
         const hasError = Object.values(config).some((entry) => Boolean(entry?.error))
+        const connected = config['rowboat']?.connected ?? false
         if (mounted) {
           setHasOauthError(hasError)
-          setIsRowboatConnected(config['rowboat']?.connected ?? false)
+          setIsRowboatConnected(connected)
           if (!hasError) {
             setShowOauthAlert(true)
           }
+        }
+        if (connected && mounted) {
+          try {
+            const account = await window.ipc.invoke('account:getRowboat', null)
+            if (mounted) setAppUrl(account.config?.appUrl ?? null)
+          } catch { /* ignore */ }
         }
       } catch (error) {
         console.error('Failed to fetch OAuth state:', error)
@@ -488,6 +526,89 @@ export function SidebarContentPanel({
             ))}
           </div>
         </div>
+        {/* Quick action buttons */}
+        <div className="titlebar-no-drag flex flex-col gap-0.5 px-2 pb-1">
+          {onNewChat && (
+            <button
+              type="button"
+              onClick={onNewChat}
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+            >
+              <SquarePen className="size-4" />
+              <span>New chat</span>
+            </button>
+          )}
+          {onOpenSearch && (
+            <button
+              type="button"
+              onClick={onOpenSearch}
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+            >
+              <SearchIcon className="size-4" />
+              <span>Search</span>
+            </button>
+          )}
+          {meetingAvailable && onToggleMeeting && (
+            <button
+              type="button"
+              onClick={onToggleMeeting}
+              disabled={meetingState === 'connecting' || meetingState === 'stopping' || meetingSummarizing}
+              className={cn(
+                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors disabled:pointer-events-none",
+                meetingState === 'recording'
+                  ? "text-red-500 hover:bg-sidebar-accent"
+                  : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+              )}
+            >
+              {meetingSummarizing || meetingState === 'connecting' ? (
+                <LoaderIcon className="size-4 animate-spin" />
+              ) : meetingState === 'recording' ? (
+                <Square className="size-4 animate-pulse" />
+              ) : (
+                <Radio className="size-4" />
+              )}
+              <span>
+                {meetingSummarizing
+                  ? 'Generating notes…'
+                  : meetingState === 'connecting'
+                    ? 'Starting…'
+                    : meetingState === 'recording'
+                      ? 'Stop recording'
+                      : 'Take meeting notes'}
+              </span>
+            </button>
+          )}
+          {onToggleBrowser && (
+            <button
+              type="button"
+              onClick={onToggleBrowser}
+              className={cn(
+                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
+                isBrowserOpen
+                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                  : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+              )}
+            >
+              <Globe className="size-4" />
+              <span>Run browser task</span>
+            </button>
+          )}
+          {onOpenSuggestedTopics && (
+            <button
+              type="button"
+              onClick={onOpenSuggestedTopics}
+              className={cn(
+                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
+                isSuggestedTopicsOpen
+                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                  : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+              )}
+            >
+              <Lightbulb className="size-4" />
+              <span>Suggested Topics</span>
+            </button>
+          )}
+        </div>
       </SidebarHeader>
       <SidebarContent>
         {activeSection === "knowledge" && (
@@ -496,6 +617,7 @@ export function SidebarContentPanel({
             selectedPath={selectedPath}
             expandedPaths={expandedPaths}
             onSelectFile={onSelectFile}
+            onToggleFolder={onToggleFolder}
             actions={knowledgeActions}
             onVoiceNoteCreated={onVoiceNoteCreated}
           />
@@ -515,11 +637,24 @@ export function SidebarContentPanel({
       {isRowboatConnected && billing ? (
         <div className="px-3 py-2">
           <div className="flex items-center justify-between rounded-lg border border-sidebar-border bg-sidebar-accent/20 px-3 py-2">
-            <span className="text-xs font-medium capitalize text-sidebar-foreground">
-              {billing.subscriptionPlan ?? 'Free'} plan
-            </span>
-            <button className="rounded-md bg-sidebar-foreground/10 px-2.5 py-1 text-[11px] font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-foreground/20">
-              Upgrade
+            <div className="min-w-0">
+              <span className="text-xs font-medium capitalize text-sidebar-foreground">
+                {billing.subscriptionPlan ? `${billing.subscriptionPlan} plan` : 'No plan'}
+              </span>
+              {billing.subscriptionStatus === 'trialing' && billing.trialExpiresAt && (() => {
+                const days = Math.max(0, Math.ceil((new Date(billing.trialExpiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
+                return (
+                  <p className="text-[10px] text-sidebar-foreground/60">
+                    {days === 0 ? 'Trial expires today' : days === 1 ? '1 day left' : `${days} days left`}
+                  </p>
+                )
+              })()}
+            </div>
+            <button
+              onClick={() => appUrl && window.open(`${appUrl}?intent=upgrade`)}
+              className="shrink-0 rounded-md bg-sidebar-foreground/10 px-2.5 py-1 text-[11px] font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-foreground/20"
+            >
+              {!billing.subscriptionPlan ? 'Subscribe' : billing.subscriptionPlan === 'starter' ? 'Upgrade' : 'Manage'}
             </button>
           </div>
         </div>
@@ -876,6 +1011,7 @@ function KnowledgeSection({
   selectedPath,
   expandedPaths,
   onSelectFile,
+  onToggleFolder,
   actions,
   onVoiceNoteCreated,
 }: {
@@ -883,6 +1019,7 @@ function KnowledgeSection({
   selectedPath: string | null
   expandedPaths: Set<string>
   onSelectFile: (path: string, kind: "file" | "dir") => void
+  onToggleFolder?: (path: string) => void
   actions: KnowledgeActions
   onVoiceNoteCreated?: (path: string) => void
 }) {
@@ -972,6 +1109,7 @@ function KnowledgeSection({
                     selectedPath={selectedPath}
                     expandedPaths={expandedPaths}
                     onSelect={onSelectFile}
+                    onToggleFolder={onToggleFolder}
                     actions={actions}
                   />
                 ))}
@@ -994,18 +1132,28 @@ function KnowledgeSection({
   )
 }
 
+function countFiles(node: TreeNode): number {
+  if (node.kind === 'file') return 1
+  return (node.children ?? []).reduce((sum, child) => sum + countFiles(child), 0)
+}
+
+/** Display name overrides for top-level knowledge folders */
+const FOLDER_DISPLAY_NAMES: Record<string, string> = {}
+
 // Tree component for file browser
 function Tree({
   item,
   selectedPath,
   expandedPaths,
   onSelect,
+  onToggleFolder,
   actions,
 }: {
   item: TreeNode
   selectedPath: string | null
   expandedPaths: Set<string>
   onSelect: (path: string, kind: "file" | "dir") => void
+  onToggleFolder?: (path: string) => void
   actions: KnowledgeActions
 }) {
   const isDir = item.kind === 'dir'
@@ -1013,6 +1161,7 @@ function Tree({
   const isSelected = selectedPath === item.path
   const [isRenaming, setIsRenaming] = useState(false)
   const isSubmittingRef = React.useRef(false)
+  const displayName = (isDir && FOLDER_DISPLAY_NAMES[item.name]) || item.name
 
   // For files, strip .md extension for editing
   const baseName = !isDir && item.name.endsWith('.md')
@@ -1141,6 +1290,61 @@ function Tree({
     )
   }
 
+  // Top-level knowledge folders open bases view — render as flat items
+  const parts = item.path.split('/')
+  const isBasesFolder = isDir && parts.length === 2 && parts[0] === 'knowledge'
+
+  if (isBasesFolder) {
+    return (
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <SidebarMenuItem className="group/file-item">
+            <SidebarMenuButton onClick={() => onSelect(item.path, item.kind)}>
+              <Folder className="size-4 shrink-0" />
+              <div className="flex w-full items-center gap-1 min-w-0">
+                <span className="min-w-0 flex-1 truncate">{displayName}</span>
+                <span className="text-xs text-sidebar-foreground/50 tabular-nums shrink-0">{countFiles(item)}</span>
+              </div>
+            </SidebarMenuButton>
+            {onToggleFolder && (item.children?.length ?? 0) > 0 && (
+              <SidebarMenuAction
+                showOnHover
+                aria-label={isExpanded ? "Collapse folder" : "Expand folder"}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onToggleFolder(item.path)
+                }}
+              >
+                <ChevronRight
+                  className={cn(
+                    "transition-transform",
+                    isExpanded && "rotate-90",
+                  )}
+                />
+              </SidebarMenuAction>
+            )}
+            {isExpanded && (
+              <SidebarMenuSub>
+                {(item.children ?? []).map((subItem, index) => (
+                  <Tree
+                    key={index}
+                    item={subItem}
+                    selectedPath={selectedPath}
+                    expandedPaths={expandedPaths}
+                    onSelect={onSelect}
+                    onToggleFolder={onToggleFolder}
+                    actions={actions}
+                  />
+                ))}
+              </SidebarMenuSub>
+            )}
+          </SidebarMenuItem>
+        </ContextMenuTrigger>
+        {contextMenuContent}
+      </ContextMenu>
+    )
+  }
+
   if (!isDir) {
     return (
       <ContextMenu>
@@ -1183,7 +1387,10 @@ function Tree({
             <CollapsibleTrigger asChild>
               <SidebarMenuButton>
                 <ChevronRight className="transition-transform size-4" />
-                <span>{item.name}</span>
+                <div className="flex w-full items-center gap-1 min-w-0">
+                  <span className="min-w-0 flex-1 truncate">{displayName}</span>
+                  <span className="text-xs text-sidebar-foreground/50 tabular-nums shrink-0">{countFiles(item)}</span>
+                </div>
               </SidebarMenuButton>
             </CollapsibleTrigger>
             <CollapsibleContent>
@@ -1195,6 +1402,7 @@ function Tree({
                     selectedPath={selectedPath}
                     expandedPaths={expandedPaths}
                     onSelect={onSelect}
+                    onToggleFolder={onToggleFolder}
                     actions={actions}
                   />
                 ))}
@@ -1300,9 +1508,6 @@ function TasksSection({
                         }}
                       >
                         <div className="flex w-full items-center gap-2 min-w-0">
-                          {processingRunIds?.has(run.id) ? (
-                            <span className="size-2 shrink-0 rounded-full bg-emerald-500 animate-pulse" />
-                          ) : null}
                           <span className="min-w-0 flex-1 truncate text-sm">{run.title || '(Untitled chat)'}</span>
                           {run.createdAt ? (
                             <span className="shrink-0 text-[10px] text-muted-foreground">

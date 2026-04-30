@@ -7,6 +7,7 @@ import { RemoveOptions, WriteFileOptions, WriteFileResult } from 'packages/share
 import { WorkDir } from '../config/config.js';
 import { rewriteWikiLinksForRenamedKnowledgeFile } from './wiki-link-rewrite.js';
 import { commitAll } from '../knowledge/version_history.js';
+import { withFileLock } from '../knowledge/file-lock.js';
 
 // ============================================================================
 // Path Utilities
@@ -249,38 +250,42 @@ export async function writeFile(
     await fs.mkdir(path.dirname(filePath), { recursive: true });
   }
 
-  // Check expectedEtag if provided (conflict detection)
-  if (opts?.expectedEtag) {
-    const existingStats = await fs.lstat(filePath);
-    const existingEtag = computeEtag(existingStats.size, existingStats.mtimeMs);
-    if (existingEtag !== opts.expectedEtag) {
-      throw new Error('File was modified (ETag mismatch)');
+  const result = await withFileLock(filePath, async () => {
+    // Check expectedEtag if provided (conflict detection)
+    if (opts?.expectedEtag) {
+      const existingStats = await fs.lstat(filePath);
+      const existingEtag = computeEtag(existingStats.size, existingStats.mtimeMs);
+      if (existingEtag !== opts.expectedEtag) {
+        throw new Error('File was modified (ETag mismatch)');
+      }
     }
-  }
 
-  // Convert data to buffer based on encoding
-  let buffer: Buffer;
-  if (encoding === 'utf8') {
-    buffer = Buffer.from(data, 'utf8');
-  } else if (encoding === 'base64') {
-    buffer = Buffer.from(data, 'base64');
-  } else {
-    // binary: assume data is base64-encoded
-    buffer = Buffer.from(data, 'base64');
-  }
+    // Convert data to buffer based on encoding
+    let buffer: Buffer;
+    if (encoding === 'utf8') {
+      buffer = Buffer.from(data, 'utf8');
+    } else if (encoding === 'base64') {
+      buffer = Buffer.from(data, 'base64');
+    } else {
+      // binary: assume data is base64-encoded
+      buffer = Buffer.from(data, 'base64');
+    }
 
-  if (atomic) {
-    // Atomic write: write to temp file, then rename
-    const tempPath = filePath + '.tmp.' + Date.now() + Math.random().toString(36).slice(2);
-    await fs.writeFile(tempPath, buffer);
-    await fs.rename(tempPath, filePath);
-  } else {
-    await fs.writeFile(filePath, buffer);
-  }
+    if (atomic) {
+      // Atomic write: write to temp file, then rename
+      const tempPath = filePath + '.tmp.' + Date.now() + Math.random().toString(36).slice(2);
+      await fs.writeFile(tempPath, buffer);
+      await fs.rename(tempPath, filePath);
+    } else {
+      await fs.writeFile(filePath, buffer);
+    }
 
-  const stats = await fs.lstat(filePath);
-  const stat = statToSchema(stats, 'file');
-  const etag = computeEtag(stats.size, stats.mtimeMs);
+    const stats = await fs.lstat(filePath);
+    const stat = statToSchema(stats, 'file');
+    const etag = computeEtag(stats.size, stats.mtimeMs);
+
+    return { stat, etag };
+  });
 
   // Schedule a debounced version history commit for knowledge files
   if (relPath.startsWith('knowledge/') && relPath.endsWith('.md')) {
@@ -289,8 +294,8 @@ export async function writeFile(
 
   return {
     path: relPath,
-    stat,
-    etag,
+    stat: result.stat,
+    etag: result.etag,
   };
 }
 

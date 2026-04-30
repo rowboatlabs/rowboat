@@ -14,7 +14,7 @@ const defaultConfig: z.infer<typeof ModelConfig> = {
     provider: {
         flavor: "openai",
     },
-    model: "gpt-4.1",
+    model: "gpt-5.4",
 };
 
 export class FSModelConfigRepo implements IModelConfigRepo {
@@ -51,6 +51,7 @@ export class FSModelConfigRepo implements IModelConfigRepo {
             model: config.model,
             models: config.models,
             knowledgeGraphModel: config.knowledgeGraphModel,
+            meetingNotesModel: config.meetingNotesModel,
         };
 
         const toWrite = { ...config, providers: existingProviders };

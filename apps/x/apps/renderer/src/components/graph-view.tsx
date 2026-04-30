@@ -1,6 +1,6 @@
 import type * as React from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Loader2, Search, X } from 'lucide-react'
+import { Search, X } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 
 export type GraphNode = {
@@ -48,7 +48,7 @@ const FLOAT_VARIANCE = 2
 const FLOAT_SPEED_BASE = 0.0006
 const FLOAT_SPEED_VARIANCE = 0.00025
 
-export function GraphView({ nodes, edges, isLoading, error, onSelectNode }: GraphViewProps) {
+export function GraphView({ nodes, edges, error, onSelectNode }: GraphViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const positionsRef = useRef<Map<string, NodePosition>>(new Map())
   const motionSeedsRef = useRef<Map<string, { phase: number; amplitude: number; speed: number }>>(new Map())
@@ -456,22 +456,13 @@ export function GraphView({ nodes, edges, isLoading, error, onSelectNode }: Grap
 
   return (
     <div ref={containerRef} className="graph-view relative h-full w-full">
-      {isLoading ? (
-        <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/70 backdrop-blur-sm">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" />
-            <span>Building graph…</span>
-          </div>
-        </div>
-      ) : null}
-
-      {error ? (
+{error ? (
         <div className="absolute inset-0 z-10 flex items-center justify-center text-sm text-destructive">
           {error}
         </div>
       ) : null}
 
-      {!isLoading && !error && nodes.length === 0 ? (
+      {!error && nodes.length === 0 ? (
         <div className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground">
           No notes found.
         </div>

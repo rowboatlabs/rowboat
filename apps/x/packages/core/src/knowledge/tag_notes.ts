@@ -3,6 +3,7 @@ import path from 'path';
 import { WorkDir } from '../config/config.js';
 import { createRun, createMessage } from '../runs/runs.js';
 import { bus } from '../runs/bus.js';
+import { waitForRunCompletion } from '../agents/utils.js';
 import { serviceLogger } from '../services/service_logger.js';
 import { limitEventItems } from './limit_event_items.js';
 import {
@@ -13,7 +14,7 @@ import {
 } from './note_tagging_state.js';
 import { getNoteTypeDefinitions } from './note_system.js';
 
-const SYNC_INTERVAL_MS = 30 * 1000; // 30 seconds
+const SYNC_INTERVAL_MS = 15 * 1000; // 15 seconds
 const BATCH_SIZE = 15;
 const NOTE_TAGGING_AGENT = 'note_tagging_agent';
 const KNOWLEDGE_DIR = path.join(WorkDir, 'knowledge');
@@ -76,20 +77,6 @@ function getUntaggedNotes(state: NoteTaggingState): string[] {
 }
 
 /**
- * Wait for a run to complete by listening for run-processing-end event
- */
-async function waitForRunCompletion(runId: string): Promise<void> {
-    return new Promise(async (resolve) => {
-        const unsubscribe = await bus.subscribe('*', async (event) => {
-            if (event.type === 'run-processing-end' && event.runId === runId) {
-                unsubscribe();
-                resolve();
-            }
-        });
-    });
-}
-
-/**
  * Tag a batch of note files using the tagging agent
  */
 async function tagNoteBatch(
@@ -143,7 +130,7 @@ async function tagNoteBatch(
 /**
  * Process all untagged notes in batches
  */
-async function processUntaggedNotes(): Promise<void> {
+export async function processUntaggedNotes(): Promise<void> {
     console.log('[NoteTagging] Checking for untagged notes...');
 
     const state = loadNoteTaggingState();

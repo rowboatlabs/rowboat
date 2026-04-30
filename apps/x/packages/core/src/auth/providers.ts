@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { SUPABASE_PROJECT_URL } from '../config/env.js';
+import { getRowboatConfig } from '../config/rowboat.js';
 
 /**
  * Discovery configuration - how to get OAuth endpoints
@@ -55,7 +55,7 @@ const providerConfigs: ProviderConfig = {
   rowboat: {
     discovery: {
       mode: 'issuer',
-      issuer: `${SUPABASE_PROJECT_URL}/auth/v1/.well-known/oauth-authorization-server`,
+      issuer: "TBD",
     },
     client: {
       mode: 'dcr',
@@ -98,19 +98,19 @@ const providerConfigs: ProviderConfig = {
 /**
  * Get provider configuration by name
  */
-export function getProviderConfig(providerName: string): ProviderConfigEntry {
+export async function getProviderConfig(providerName: string): Promise<ProviderConfigEntry> {
   const config = providerConfigs[providerName];
   if (!config) {
     throw new Error(`Unknown OAuth provider: ${providerName}`);
   }
+  if (providerName === 'rowboat') {
+    const rowboatConfig = await getRowboatConfig();
+    config.discovery = {
+      mode: 'issuer',
+      issuer: `${rowboatConfig.supabaseUrl}/auth/v1/.well-known/oauth-authorization-server`,
+    }
+  }
   return config;
-}
-
-/**
- * Get all provider configurations
- */
-export function getAllProviderConfigs(): ProviderConfig {
-  return providerConfigs;
 }
 
 /**

@@ -104,7 +104,7 @@ export function LlmSetupStep({ state }: LlmSetupStepProps) {
           <Lightbulb className="size-5 text-primary shrink-0 mt-0.5" />
           <div className="flex-1 min-w-0">
             <p className="text-sm text-foreground">
-              <span className="font-medium">Tip:</span> Sign in with Rowboat for instant access to all models — no API keys needed.
+              <span className="font-medium">Tip:</span> Sign in with Rowboat for instant access to leading models. No API keys needed.
             </p>
             <button
               onClick={handleSwitchToRowboat}

@@ -29,7 +29,6 @@ export function TabBar<T>({
   activeTabId,
   getTabTitle,
   getTabId,
-  isProcessing,
   onSwitchTab,
   onCloseTab,
   layout = 'fill',
@@ -47,7 +46,6 @@ export function TabBar<T>({
       {tabs.map((tab, index) => {
         const tabId = getTabId(tab)
         const isActive = tabId === activeTabId
-        const processing = isProcessing?.(tab) ?? false
         const title = getTabTitle(tab)
 
         return (
@@ -67,9 +65,6 @@ export function TabBar<T>({
               )}
               style={layout === 'scroll' ? { flex: '0 0 auto' } : { flex: '1 1 0px' }}
             >
-              {processing && (
-                <span className="size-1.5 shrink-0 rounded-full bg-emerald-500 animate-pulse" />
-              )}
               <span className="truncate flex-1 text-left">{title}</span>
               {(allowSingleTabClose || tabs.length > 1) && (
                 <span

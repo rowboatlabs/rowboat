@@ -24,7 +24,7 @@ const API_DELAY_MS = 1000; // 1 second delay between API calls
 const RATE_LIMIT_RETRY_DELAY_MS = 60 * 1000; // Wait 1 minute on rate limit
 const MAX_RETRIES = 3; // Maximum retries for rate-limited requests
 const MAX_BATCH_SIZE = 10; // Process max 10 documents per folder per sync
-const LOOKBACK_DAYS = 30; // Only sync documents from the last 30 days
+const LOOKBACK_DAYS = 7; // Only sync documents from the last 1 week
 
 // --- Wake Signal for Immediate Sync Trigger ---
 let wakeResolve: (() => void) | null = null;

@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Tags, Mail, BookOpen, ChevronRight, Plus, X, User, Plug, Sparkles } from "lucide-react"
+import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, Sparkles } from "lucide-react"
 
 import {
   Dialog,
@@ -26,7 +26,7 @@ import { AccountSettings } from "@/components/settings/account-settings"
 import { ConnectedAccountsSettings } from "@/components/settings/connected-accounts-settings"
 import { SkillsSettings } from "@/components/settings/skills-settings"
 
-export type ConfigTab = "account" | "connected-accounts" | "models" | "mcp" | "security" | "appearance" | "note-tagging" | "skills"
+export type ConfigTab = "account" | "connected-accounts" | "models" | "mcp" | "security" | "appearance" | "tools" | "note-tagging" | "skills"
 
 interface TabConfig {
   id: ConfigTab
@@ -75,6 +75,12 @@ const tabs: TabConfig[] = [
     label: "Appearance",
     icon: Palette,
     description: "Customize the look and feel",
+  },
+  {
+    id: "tools",
+    label: "Tools Library",
+    icon: Wrench,
+    description: "Browse and enable toolkits",
   },
   {
     id: "note-tagging",
@@ -715,6 +721,325 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
   )
 }
 
+// --- Tools Library Settings ---
+
+interface ToolkitInfo {
+  slug: string
+  name: string
+  meta: { description: string; logo: string; tools_count: number; triggers_count: number }
+  no_auth?: boolean
+  auth_schemes?: string[]
+  composio_managed_auth_schemes?: string[]
+}
+
+function ToolsLibrarySettings({ dialogOpen, rowboatConnected }: { dialogOpen: boolean; rowboatConnected: boolean }) {
+  // API key state
+  const [apiKeyConfigured, setApiKeyConfigured] = useState(false)
+  const [apiKeyInput, setApiKeyInput] = useState("")
+  const [apiKeySaving, setApiKeySaving] = useState(false)
+  const [showApiKeyInput, setShowApiKeyInput] = useState(false)
+
+  // Toolkit browsing state
+  const [toolkits, setToolkits] = useState<ToolkitInfo[]>([])
+  const [toolkitsLoading, setToolkitsLoading] = useState(false)
+  const [searchQuery, setSearchQuery] = useState("")
+
+  // Connection state
+  const [connectedToolkits, setConnectedToolkits] = useState<Set<string>>(new Set())
+  const [connectingToolkit, setConnectingToolkit] = useState<string | null>(null)
+
+  // Check API key configuration
+  const checkApiKey = useCallback(async () => {
+    try {
+      const result = await window.ipc.invoke("composio:is-configured", null)
+      setApiKeyConfigured(result.configured)
+      if (!result.configured) {
+        setShowApiKeyInput(true)
+      }
+    } catch {
+      setApiKeyConfigured(false)
+    }
+  }, [])
+
+  // Load connected toolkits
+  const loadConnected = useCallback(async () => {
+    try {
+      const result = await window.ipc.invoke("composio:list-connected", null)
+      setConnectedToolkits(new Set(result.toolkits))
+    } catch {
+      // ignore
+    }
+  }, [])
+
+  // Load toolkits
+  const loadToolkits = useCallback(async () => {
+    setToolkitsLoading(true)
+    try {
+      const result = await window.ipc.invoke("composio:list-toolkits", {})
+      setToolkits(result.items)
+    } catch {
+      toast.error("Failed to load toolkits")
+    } finally {
+      setToolkitsLoading(false)
+    }
+  }, [])
+
+  // Initial load
+  useEffect(() => {
+    if (!dialogOpen) return
+    checkApiKey()
+    loadConnected()
+  }, [dialogOpen, checkApiKey, loadConnected])
+
+  // Load toolkits when API key is configured
+  useEffect(() => {
+    if (dialogOpen && apiKeyConfigured) {
+      loadToolkits()
+    }
+  }, [dialogOpen, apiKeyConfigured, loadToolkits])
+
+  // Listen for composio connection events
+  useEffect(() => {
+    const cleanup = window.ipc.on('composio:didConnect', (event) => {
+      const { toolkitSlug, success, error } = event
+      setConnectingToolkit(null)
+      if (success) {
+        setConnectedToolkits(prev => new Set([...prev, toolkitSlug]))
+        toast.success(`Connected to ${toolkitSlug}`)
+      } else {
+        toast.error(error || `Failed to connect to ${toolkitSlug}`)
+      }
+    })
+    return cleanup
+  }, [])
+
+  // Save API key
+  const handleSaveApiKey = async () => {
+    const trimmed = apiKeyInput.trim()
+    if (!trimmed) return
+    setApiKeySaving(true)
+    try {
+      const result = await window.ipc.invoke("composio:set-api-key", { apiKey: trimmed })
+      if (result.success) {
+        setApiKeyConfigured(true)
+        setShowApiKeyInput(false)
+        setApiKeyInput("")
+        toast.success("Composio API key saved")
+      } else {
+        toast.error(result.error || "Failed to save API key")
+      }
+    } catch {
+      toast.error("Failed to save API key")
+    } finally {
+      setApiKeySaving(false)
+    }
+  }
+
+  // Connect a toolkit
+  const handleConnect = async (toolkitSlug: string) => {
+    setConnectingToolkit(toolkitSlug)
+    try {
+      const result = await window.ipc.invoke("composio:initiate-connection", { toolkitSlug })
+      if (!result.success) {
+        toast.error(result.error || "Failed to connect")
+        setConnectingToolkit(null)
+      }
+      // Success will be handled by composio:didConnect event
+    } catch {
+      toast.error("Failed to connect")
+      setConnectingToolkit(null)
+    }
+  }
+
+  // Disconnect a toolkit
+  const handleDisconnect = async (toolkitSlug: string) => {
+    try {
+      await window.ipc.invoke("composio:disconnect", { toolkitSlug })
+      setConnectedToolkits(prev => {
+        const next = new Set(prev)
+        next.delete(toolkitSlug)
+        return next
+      })
+      toast.success(`Disconnected from ${toolkitSlug}`)
+    } catch {
+      toast.error("Failed to disconnect")
+    }
+  }
+
+  // Filter toolkits by search
+  const filteredToolkits = searchQuery.trim()
+    ? toolkits.filter(t =>
+        t.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        t.slug.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        t.meta.description.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    : toolkits
+
+  return (
+    <div className="space-y-4">
+      {/* Section A: API Key (only in BYOK mode) */}
+      {!rowboatConnected && (
+        <div className="space-y-2">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Composio API Key</span>
+          {apiKeyConfigured && !showApiKeyInput ? (
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5 text-sm text-green-600">
+                <CheckCircle2 className="size-4" />
+                API key configured
+              </div>
+              <button
+                onClick={() => setShowApiKeyInput(true)}
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Change
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-xs text-muted-foreground">
+                Enter your Composio API key to browse and enable tool integrations.
+                Get your key from{" "}
+                <a
+                  href="https://app.composio.dev/settings"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:underline"
+                >
+                  app.composio.dev/settings
+                </a>
+              </p>
+              <div className="flex gap-2">
+                <Input
+                  type="password"
+                  value={apiKeyInput}
+                  onChange={(e) => setApiKeyInput(e.target.value)}
+                  placeholder="Paste your Composio API key"
+                  onKeyDown={(e) => e.key === "Enter" && handleSaveApiKey()}
+                  className="flex-1"
+                />
+                <Button
+                  onClick={handleSaveApiKey}
+                  disabled={!apiKeyInput.trim() || apiKeySaving}
+                  size="sm"
+                >
+                  {apiKeySaving ? <Loader2 className="size-4 animate-spin" /> : "Save"}
+                </Button>
+                {apiKeyConfigured && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => { setShowApiKeyInput(false); setApiKeyInput("") }}
+                  >
+                    Cancel
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Section B: Toolkit Browser (only when API key configured) */}
+      {apiKeyConfigured && (
+        <>
+          <div className="space-y-2">
+            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Available Toolkits</span>
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+              <Input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search toolkits..."
+                className="pl-8"
+              />
+            </div>
+          </div>
+
+          {toolkitsLoading ? (
+            <div className="flex items-center justify-center py-8 text-muted-foreground text-sm">
+              <Loader2 className="size-4 animate-spin mr-2" />
+              Loading toolkits...
+            </div>
+          ) : (
+            <div className="space-y-1.5 max-h-[400px] overflow-y-auto pr-1">
+              {filteredToolkits.map((toolkit) => {
+                const isConnected = connectedToolkits.has(toolkit.slug)
+                const isConnecting = connectingToolkit === toolkit.slug
+
+                return (
+                  <div key={toolkit.slug} className="border rounded-lg overflow-hidden">
+                    <div className="flex items-center gap-3 px-3 py-2.5">
+                      {/* Logo */}
+                      {toolkit.meta.logo ? (
+                        <img
+                          src={toolkit.meta.logo}
+                          alt=""
+                          className="size-7 rounded object-contain shrink-0"
+                          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+                        />
+                      ) : (
+                        <div className="size-7 rounded bg-muted flex items-center justify-center shrink-0">
+                          <Wrench className="size-3.5 text-muted-foreground" />
+                        </div>
+                      )}
+
+                      {/* Name & description */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm font-medium truncate">{toolkit.name}</span>
+                          {isConnected && (
+                            <span className="rounded-full bg-green-500/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-green-600">
+                              Connected
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground truncate">
+                          {toolkit.meta.description}
+                        </p>
+                      </div>
+
+                      {/* Connect / Disconnect button */}
+                      {isConnected ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleDisconnect(toolkit.slug)}
+                          className="text-xs h-7 shrink-0"
+                        >
+                          Disconnect
+                        </Button>
+                      ) : (
+                        <Button
+                          size="sm"
+                          onClick={() => handleConnect(toolkit.slug)}
+                          disabled={isConnecting}
+                          className="text-xs h-7 shrink-0"
+                        >
+                          {isConnecting ? (
+                            <><Loader2 className="size-3 animate-spin mr-1" />Connecting...</>
+                          ) : (
+                            <><Link2 className="size-3 mr-1" />Connect</>
+                          )}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+
+              {filteredToolkits.length === 0 && !toolkitsLoading && (
+                <div className="text-center py-6 text-sm text-muted-foreground">
+                  {searchQuery ? "No toolkits match your search" : "No toolkits available"}
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
 // --- Rowboat Model Settings (when signed in via Rowboat) ---
 
 function RowboatModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
@@ -851,7 +1176,7 @@ const NOTE_TAG_TYPE_ORDER = [
 ]
 
 const EMAIL_TAG_TYPE_ORDER = [
-  "relationship", "topic", "email-type", "filter", "action", "status",
+  "relationship", "topic", "email-type", "noise", "action", "status",
 ]
 
 const TAG_TYPE_LABELS: Record<string, string> = {
@@ -859,73 +1184,12 @@ const TAG_TYPE_LABELS: Record<string, string> = {
   "relationship-sub": "Relationship Sub-Tags",
   "topic": "Topic",
   "email-type": "Email Type",
-  "filter": "Filter",
+  "noise": "Noise",
   "action": "Action",
   "status": "Status",
   "source": "Source",
 }
 
-const DEFAULT_TAGS: TagDef[] = [
-  { tag: "investor", type: "relationship", applicability: "both", noteEffect: "create", description: "Investors, VCs, or angels", example: "Following up on our meeting — we'd like to move forward with the Series A term sheet." },
-  { tag: "customer", type: "relationship", applicability: "both", noteEffect: "create", description: "Paying customers", example: "We're seeing great results with Rowboat. Can we discuss expanding to more teams?" },
-  { tag: "prospect", type: "relationship", applicability: "both", noteEffect: "create", description: "Potential customers", example: "Thanks for the demo yesterday. We're interested in starting a pilot." },
-  { tag: "partner", type: "relationship", applicability: "both", noteEffect: "create", description: "Business partners", example: "Let's discuss how we can promote the integration to both our user bases." },
-  { tag: "vendor", type: "relationship", applicability: "both", noteEffect: "create", description: "Service providers you work with", example: "Here are the updated employment agreements you requested." },
-  { tag: "product", type: "relationship", applicability: "both", noteEffect: "skip", description: "Products or services you use (automated)", example: "Your AWS bill for January 2025 is now available." },
-  { tag: "candidate", type: "relationship", applicability: "both", noteEffect: "create", description: "Job applicants", example: "Thanks for reaching out. I'd love to learn more about the engineering role." },
-  { tag: "team", type: "relationship", applicability: "both", noteEffect: "create", description: "Internal team members", example: "Here's the updated roadmap for Q2. Let's discuss in our sync." },
-  { tag: "advisor", type: "relationship", applicability: "both", noteEffect: "create", description: "Advisors, mentors, or board members", example: "I've reviewed the deck. Here are my thoughts on the GTM strategy." },
-  { tag: "personal", type: "relationship", applicability: "both", noteEffect: "create", description: "Family or friends", example: "Are you coming to Thanksgiving this year? Let me know your travel dates." },
-  { tag: "press", type: "relationship", applicability: "both", noteEffect: "create", description: "Journalists or media", example: "I'm writing a piece on AI agents. Would you be available for an interview?" },
-  { tag: "community", type: "relationship", applicability: "both", noteEffect: "create", description: "Users, peers, or open source contributors", example: "Love what you're building with Rowboat. Here's a bug I found..." },
-  { tag: "government", type: "relationship", applicability: "both", noteEffect: "create", description: "Government agencies", example: "Your Delaware franchise tax is due by March 1, 2025." },
-  { tag: "primary", type: "relationship-sub", applicability: "notes", noteEffect: "none", description: "Main contact or decision maker", example: "Sarah Chen — VP Engineering, your main point of contact at Acme." },
-  { tag: "secondary", type: "relationship-sub", applicability: "notes", noteEffect: "none", description: "Supporting contact, involved but not the lead", example: "David Kim — Engineer CC'd on customer emails." },
-  { tag: "executive-assistant", type: "relationship-sub", applicability: "notes", noteEffect: "none", description: "EA or admin handling scheduling and logistics", example: "Lisa — Sarah's EA who schedules all her meetings." },
-  { tag: "cc", type: "relationship-sub", applicability: "notes", noteEffect: "none", description: "Person who's CC'd but not actively engaged", example: "Manager looped in for visibility on deal." },
-  { tag: "referred-by", type: "relationship-sub", applicability: "notes", noteEffect: "none", description: "Person who made an introduction or referral", example: "David Park — Investor who intro'd you to Sarah." },
-  { tag: "former", type: "relationship-sub", applicability: "notes", noteEffect: "none", description: "Previously held this relationship, no longer active", example: "John — Former customer who churned last year." },
-  { tag: "champion", type: "relationship-sub", applicability: "notes", noteEffect: "none", description: "Internal advocate pushing for you", example: "Engineer who loves your product and is selling internally." },
-  { tag: "blocker", type: "relationship-sub", applicability: "notes", noteEffect: "none", description: "Person opposing or blocking progress", example: "CFO resistant to spending on new tools." },
-  { tag: "sales", type: "topic", applicability: "both", noteEffect: "create", description: "Sales conversations, deals, and revenue", example: "Here's the pricing proposal we discussed. Let me know if you have questions." },
-  { tag: "support", type: "topic", applicability: "both", noteEffect: "create", description: "Help requests, issues, and customer support", example: "We're seeing an error when trying to export. Can you help?" },
-  { tag: "legal", type: "topic", applicability: "both", noteEffect: "create", description: "Contracts, terms, compliance, and legal matters", example: "Legal has reviewed the MSA. Attached are our requested changes." },
-  { tag: "finance", type: "topic", applicability: "both", noteEffect: "create", description: "Money, invoices, payments, banking, and taxes", example: "Your invoice #1234 for $5,000 is attached. Payment due in 30 days." },
-  { tag: "hiring", type: "topic", applicability: "both", noteEffect: "create", description: "Recruiting, interviews, and employment", example: "We'd like to move forward with a final round interview. Are you available Thursday?" },
-  { tag: "fundraising", type: "topic", applicability: "both", noteEffect: "create", description: "Raising money and investor relations", example: "Thanks for sending the deck. We'd like to schedule a partner meeting." },
-  { tag: "travel", type: "topic", applicability: "both", noteEffect: "skip", description: "Flights, hotels, trips, and travel logistics", example: "Your flight to Tokyo on March 15 is confirmed. Confirmation #ABC123." },
-  { tag: "event", type: "topic", applicability: "both", noteEffect: "create", description: "Conferences, meetups, and gatherings", example: "You're invited to speak at TechCrunch Disrupt. Can you confirm your availability?" },
-  { tag: "shopping", type: "topic", applicability: "both", noteEffect: "skip", description: "Purchases, orders, and returns", example: "Your order #12345 has shipped. Track it here." },
-  { tag: "health", type: "topic", applicability: "both", noteEffect: "skip", description: "Medical, wellness, and health-related matters", example: "Your appointment with Dr. Smith is confirmed for Monday at 2pm." },
-  { tag: "learning", type: "topic", applicability: "both", noteEffect: "skip", description: "Courses, education, and skill-building", example: "Welcome to the Advanced Python course. Here's your access link." },
-  { tag: "research", type: "topic", applicability: "both", noteEffect: "create", description: "Research requests and information gathering", example: "Here's the market analysis you requested on the AI agent space." },
-  { tag: "intro", type: "email-type", applicability: "both", noteEffect: "create", description: "Warm introduction from someone you know", example: "I'd like to introduce you to Sarah Chen, VP Engineering at Acme." },
-  { tag: "followup", type: "email-type", applicability: "both", noteEffect: "create", description: "Following up on a previous conversation", example: "Following up on our call last week. Have you had a chance to review the proposal?" },
-  { tag: "scheduling", type: "email-type", applicability: "email", noteEffect: "skip", description: "Meeting and calendar scheduling", example: "Are you available for a call next Tuesday at 2pm?" },
-  { tag: "cold-outreach", type: "email-type", applicability: "email", noteEffect: "skip", description: "Unsolicited contact from someone you don't know", example: "Hi, I noticed your company is growing fast. I'd love to show you how we can help with..." },
-  { tag: "newsletter", type: "email-type", applicability: "email", noteEffect: "skip", description: "Newsletters, marketing emails, and subscriptions", example: "This week in AI: The latest developments in agent frameworks..." },
-  { tag: "notification", type: "email-type", applicability: "email", noteEffect: "skip", description: "Automated alerts, receipts, and system notifications", example: "Your password was changed successfully. If this wasn't you, contact support." },
-  { tag: "spam", type: "filter", applicability: "email", noteEffect: "skip", description: "Junk and unwanted email", example: "Congratulations! You've won $1,000,000..." },
-  { tag: "promotion", type: "filter", applicability: "email", noteEffect: "skip", description: "Marketing offers and sales pitches", example: "50% off all items this weekend only!" },
-  { tag: "social", type: "filter", applicability: "email", noteEffect: "skip", description: "Social media notifications", example: "John Smith commented on your post." },
-  { tag: "forums", type: "filter", applicability: "email", noteEffect: "skip", description: "Mailing lists and group discussions", example: "Re: [dev-list] Question about API design" },
-  { tag: "action-required", type: "action", applicability: "both", noteEffect: "create", description: "Needs a response or action from you", example: "Can you send me the pricing by Friday?" },
-  { tag: "fyi", type: "action", applicability: "email", noteEffect: "skip", description: "Informational only, no action needed", example: "Just wanted to let you know the deal closed. Thanks for your help!" },
-  { tag: "urgent", type: "action", applicability: "both", noteEffect: "create", description: "Time-sensitive, needs immediate attention", example: "We need your signature on the contract by EOD today or we lose the deal." },
-  { tag: "waiting", type: "action", applicability: "both", noteEffect: "create", description: "Waiting on a response from them" },
-  { tag: "unread", type: "status", applicability: "email", noteEffect: "none", description: "Not yet processed" },
-  { tag: "to-reply", type: "status", applicability: "email", noteEffect: "none", description: "Need to respond" },
-  { tag: "done", type: "status", applicability: "email", noteEffect: "none", description: "Handled, can be archived" },
-  { tag: "active", type: "status", applicability: "notes", noteEffect: "none", description: "Currently relevant, recent activity" },
-  { tag: "archived", type: "status", applicability: "notes", noteEffect: "none", description: "No longer active, kept for reference" },
-  { tag: "stale", type: "status", applicability: "notes", noteEffect: "none", description: "No activity in 60+ days, needs attention or archive" },
-  { tag: "email", type: "source", applicability: "notes", noteEffect: "none", description: "Created or updated from email" },
-  { tag: "meeting", type: "source", applicability: "notes", noteEffect: "none", description: "Created or updated from meeting transcript" },
-  { tag: "browser", type: "source", applicability: "notes", noteEffect: "none", description: "Content captured from web browsing" },
-  { tag: "web-search", type: "source", applicability: "notes", noteEffect: "none", description: "Information from web search" },
-  { tag: "manual", type: "source", applicability: "notes", noteEffect: "none", description: "Manually entered by user" },
-  { tag: "import", type: "source", applicability: "notes", noteEffect: "none", description: "Imported from another system" },
-]
 
 function TagGroupTable({
   group,
@@ -1056,8 +1320,8 @@ function NoteTaggingSettings({ dialogOpen }: { dialogOpen: boolean }) {
         setTags(parsed)
         setOriginalTags(parsed)
       } catch {
-        setTags([...DEFAULT_TAGS])
-        setOriginalTags([...DEFAULT_TAGS])
+        setTags([])
+        setOriginalTags([])
       } finally {
         setLoading(false)
       }
@@ -1118,7 +1382,7 @@ function NoteTaggingSettings({ dialogOpen }: { dialogOpen: boolean }) {
     const isEmailSection = activeSection === "email"
     const applicability = isEmailSection ? "email" as const : "notes" as const
     // For email-only types, always use "email"; for notes-only types, always use "notes"; otherwise use "both"
-    const emailOnlyTypes = ["email-type", "filter"]
+    const emailOnlyTypes = ["email-type", "noise"]
     const notesOnlyTypes = ["relationship-sub", "source"]
     let finalApplicability: "email" | "notes" | "both" = "both"
     if (emailOnlyTypes.includes(type)) finalApplicability = "email"
@@ -1155,11 +1419,6 @@ function NoteTaggingSettings({ dialogOpen }: { dialogOpen: boolean }) {
       setSaving(false)
     }
   }, [tags])
-
-  const handleReset = useCallback(() => {
-    if (!confirm("Reset all tags to defaults? This will discard your changes.")) return
-    setTags([...DEFAULT_TAGS])
-  }, [])
 
   const toggleGroup = useCallback((type: string) => {
     setCollapsedGroups(prev => {
@@ -1232,9 +1491,6 @@ function NoteTaggingSettings({ dialogOpen }: { dialogOpen: boolean }) {
           )}
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={handleReset}>
-            Reset to defaults
-          </Button>
           <Button size="sm" onClick={handleSave} disabled={saving || !hasChanges}>
             {saving ? "Saving..." : "Save"}
           </Button>
@@ -1248,7 +1504,7 @@ function NoteTaggingSettings({ dialogOpen }: { dialogOpen: boolean }) {
 
 export function SettingsDialog({ children, initialTab }: SettingsDialogProps) {
   const [open, setOpen] = useState(false)
-  const [activeTab, setActiveTab] = useState<ConfigTab>(initialTab ?? "models")
+  const [activeTab, setActiveTab] = useState<ConfigTab>(initialTab ?? "account")
   const [content, setContent] = useState("")
   const [originalContent, setOriginalContent] = useState("")
   const [loading, setLoading] = useState(false)
@@ -1269,7 +1525,6 @@ export function SettingsDialog({ children, initialTab }: SettingsDialogProps) {
     })
   }, [open])
 
-  // Check for skill updates
   useEffect(() => {
     if (!open) return
     window.ipc.invoke('skills:list', null).then((result) => {
@@ -1280,14 +1535,13 @@ export function SettingsDialog({ children, initialTab }: SettingsDialogProps) {
     })
   }, [open])
 
-  // Handle initialTab changes (e.g. when opened from sidebar notification)
   useEffect(() => {
     if (initialTab && open) {
       setActiveTab(initialTab)
     }
   }, [initialTab, open])
 
-  const visibleTabs = useMemo(() => tabs, [])
+  const visibleTabs = useMemo(() => rowboatConnected ? tabs.filter(t => t.id !== "models") : tabs, [rowboatConnected])
 
   const activeTabConfig = visibleTabs.find((t) => t.id === activeTab) ?? visibleTabs[0]
   const isJsonTab = activeTab === "mcp" || activeTab === "security"
@@ -1420,7 +1674,7 @@ export function SettingsDialog({ children, initialTab }: SettingsDialogProps) {
             </div>
 
             {/* Content */}
-            <div className={cn("flex-1 p-4 min-h-0", activeTab === "models" ? "overflow-y-auto" : activeTab === "account" || activeTab === "connected-accounts" ? "overflow-y-auto" : activeTab === "note-tagging" ? "overflow-hidden flex flex-col" : activeTab === "skills" ? "overflow-hidden flex flex-col" : "overflow-hidden")}>
+            <div className={cn("flex-1 p-4 min-h-0", (activeTab === "models" || activeTab === "tools" || activeTab === "account" || activeTab === "connected-accounts") ? "overflow-y-auto" : (activeTab === "note-tagging" || activeTab === "skills") ? "overflow-hidden flex flex-col" : "overflow-hidden")}>
               {activeTab === "account" ? (
                 <AccountSettings dialogOpen={open} />
               ) : activeTab === "connected-accounts" ? (
@@ -1435,6 +1689,8 @@ export function SettingsDialog({ children, initialTab }: SettingsDialogProps) {
                 <AppearanceSettings />
               ) : activeTab === "skills" ? (
                 <SkillsSettings dialogOpen={open} onExpandRequest={setSkillsExpanded} />
+              ) : activeTab === "tools" ? (
+                <ToolsLibrarySettings dialogOpen={open} rowboatConnected={rowboatConnected} />
               ) : loading ? (
                 <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
                   Loading...

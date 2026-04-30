@@ -1,0 +1,311 @@
+/* =============================================================
+   Track Modal — dialog overlay for track block details / edits
+   ============================================================= */
+
+.track-modal-content {
+  --track-accent: #64748b;
+}
+
+.track-modal-content[data-trigger="scheduled"] { --track-accent: #6366f1; }
+.track-modal-content[data-trigger="event"]     { --track-accent: #a855f7; }
+.track-modal-content[data-trigger="manual"]    { --track-accent: #64748b; }
+.track-modal-content[data-active="false"]      { --track-accent: color-mix(in srgb, var(--foreground) 30%, transparent); }
+
+/* Header */
+.track-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--track-accent) 6%, transparent);
+  border-left: 4px solid var(--track-accent);
+}
+
+.track-modal-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
+}
+
+.track-modal-icon-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--track-accent) 15%, transparent);
+  color: var(--track-accent);
+  flex-shrink: 0;
+}
+
+.track-modal-title-col {
+  min-width: 0;
+  flex: 1;
+}
+
+.track-modal-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--foreground);
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.track-modal-subtitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: color-mix(in srgb, var(--foreground) 60%, transparent);
+  margin-top: 2px;
+}
+
+.track-modal-subtitle-sep {
+  margin-left: 2px;
+}
+
+.track-modal-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.track-modal-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.track-modal-toggle-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: color-mix(in srgb, var(--foreground) 70%, transparent);
+}
+
+/* Tabs */
+.track-modal-tabs {
+  display: flex;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.track-modal-tab {
+  padding: 10px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  color: color-mix(in srgb, var(--foreground) 55%, transparent);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color 0.1s ease, border-color 0.1s ease;
+  white-space: nowrap;
+}
+
+.track-modal-tab:hover {
+  color: var(--foreground);
+}
+
+.track-modal-tab-active {
+  color: var(--track-accent);
+  border-bottom-color: var(--track-accent);
+}
+
+/* Body */
+.track-modal-body {
+  padding: 18px 20px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.track-modal-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: color-mix(in srgb, var(--foreground) 50%, transparent);
+  margin-bottom: 10px;
+}
+
+.track-modal-prose {
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--foreground);
+}
+
+.track-modal-markdown {
+  user-select: text;
+}
+
+.track-modal-markdown > *:first-child { margin-top: 0; }
+.track-modal-markdown > *:last-child { margin-bottom: 0; }
+
+.track-modal-empty {
+  color: color-mix(in srgb, var(--foreground) 40%, transparent);
+  font-style: italic;
+}
+
+/* When-to-run panel */
+.track-modal-when {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.track-modal-when-headline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--track-accent);
+  padding: 12px 14px;
+  background: color-mix(in srgb, var(--track-accent) 10%, transparent);
+  border-radius: 8px;
+  border-left: 3px solid var(--track-accent);
+}
+
+/* Description list (Details / When) */
+.track-modal-dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: 16px;
+  row-gap: 8px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.track-modal-dl dt {
+  color: color-mix(in srgb, var(--foreground) 55%, transparent);
+  font-weight: 500;
+}
+
+.track-modal-dl dd {
+  margin: 0;
+  color: var(--foreground);
+  word-break: break-word;
+}
+
+.track-modal-dl code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  padding: 1px 6px;
+  background: color-mix(in srgb, var(--foreground) 6%, transparent);
+  border-radius: 3px;
+}
+
+/* Advanced / raw YAML disclosure */
+.track-modal-advanced {
+  margin-top: 20px;
+  padding-top: 14px;
+  border-top: 1px dashed color-mix(in srgb, var(--foreground) 12%, transparent);
+}
+
+.track-modal-advanced-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  font-size: 11px;
+  font-weight: 500;
+  color: color-mix(in srgb, var(--foreground) 55%, transparent);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.track-modal-advanced-toggle:hover {
+  color: var(--foreground);
+}
+
+.track-modal-raw-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.track-modal-textarea {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  min-height: 200px;
+}
+
+.track-modal-raw-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* Danger zone */
+.track-modal-danger-zone {
+  margin-top: 20px;
+  padding-top: 14px;
+  border-top: 1px dashed color-mix(in srgb, var(--destructive, #ef4444) 20%, transparent);
+}
+
+.track-modal-delete-btn {
+  color: color-mix(in srgb, var(--destructive, #ef4444) 85%, var(--foreground));
+  border-color: color-mix(in srgb, var(--destructive, #ef4444) 30%, transparent);
+}
+
+.track-modal-delete-btn:hover {
+  background: color-mix(in srgb, var(--destructive, #ef4444) 10%, transparent);
+  color: var(--destructive, #ef4444);
+}
+
+.track-modal-confirm {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  background: color-mix(in srgb, var(--destructive, #ef4444) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--destructive, #ef4444) 25%, transparent);
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  flex-wrap: wrap;
+}
+
+.track-modal-confirm-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* Error */
+.track-modal-error {
+  margin: 0 20px 14px 20px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--destructive, #ef4444) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--destructive, #ef4444) 25%, transparent);
+  color: var(--destructive, #ef4444);
+  font-size: 12px;
+}
+
+/* Footer */
+.track-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--foreground) 3%, transparent);
+}
+
+.track-modal-run-btn {
+  background: var(--track-accent);
+  color: white;
+}
+
+.track-modal-run-btn:hover {
+  background: color-mix(in srgb, var(--track-accent) 85%, black);
+}

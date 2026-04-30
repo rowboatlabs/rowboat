@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 import { GoogleClientIdModal } from "@/components/google-client-id-modal"
-import { getGoogleClientId, setGoogleClientId } from "@/lib/google-client-id-store"
+import { setGoogleCredentials } from "@/lib/google-credentials-store"
 import { toast } from "sonner"
 import { ComposioApiKeyModal } from "@/components/composio-api-key-modal"
 
@@ -589,14 +589,14 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   }, [])
 
 
-  const startConnect = useCallback(async (provider: string, clientId?: string) => {
+  const startConnect = useCallback(async (provider: string, credentials?: { clientId: string; clientSecret: string }) => {
     setProviderStates(prev => ({
       ...prev,
       [provider]: { ...prev[provider], isConnecting: true }
     }))
 
     try {
-      const result = await window.ipc.invoke('oauth:connect', { provider, clientId })
+      const result = await window.ipc.invoke('oauth:connect', { provider, clientId: credentials?.clientId, clientSecret: credentials?.clientSecret })
 
       if (!result.success) {
         toast.error(result.error || `Failed to connect to ${provider}`)
@@ -618,22 +618,17 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   // Connect to a provider
   const handleConnect = useCallback(async (provider: string) => {
     if (provider === 'google') {
-      const existingClientId = getGoogleClientId()
-      if (!existingClientId) {
-        setGoogleClientIdOpen(true)
-        return
-      }
-      await startConnect(provider, existingClientId)
+      setGoogleClientIdOpen(true)
       return
     }
 
     await startConnect(provider)
   }, [startConnect])
 
-  const handleGoogleClientIdSubmit = useCallback((clientId: string) => {
-    setGoogleClientId(clientId)
+  const handleGoogleClientIdSubmit = useCallback((clientId: string, clientSecret: string) => {
+    setGoogleCredentials(clientId, clientSecret)
     setGoogleClientIdOpen(false)
-    startConnect('google', clientId)
+    startConnect('google', { clientId, clientSecret })
   }, [startConnect])
 
   // Step indicator - dynamic based on path
