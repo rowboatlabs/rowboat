@@ -1511,10 +1511,7 @@ export function SettingsDialog({ children, initialTab }: SettingsDialogProps) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [rowboatConnected, setRowboatConnected] = useState(false)
-  const [skillUpdateCount, setSkillUpdateCount] = useState(0)
-  const [skillsExpanded, setSkillsExpanded] = useState(false)
 
-  // Check if user is signed in to Rowboat
   useEffect(() => {
     if (!open) return
     window.ipc.invoke('oauth:getState', null).then((result) => {
@@ -1522,16 +1519,6 @@ export function SettingsDialog({ children, initialTab }: SettingsDialogProps) {
       setRowboatConnected(connected)
     }).catch(() => {
       setRowboatConnected(false)
-    })
-  }, [open])
-
-  useEffect(() => {
-    if (!open) return
-    window.ipc.invoke('skills:list', null).then((result) => {
-      const count = result.skills.filter((s: { hasUpdate?: boolean }) => s.hasUpdate).length
-      setSkillUpdateCount(count)
-    }).catch(() => {
-      setSkillUpdateCount(0)
     })
   }, [open])
 
@@ -1623,14 +1610,7 @@ export function SettingsDialog({ children, initialTab }: SettingsDialogProps) {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>{children}</DialogTrigger>
-      <DialogContent
-        className={cn(
-          "p-0 gap-0 overflow-hidden transition-all duration-200",
-          skillsExpanded
-            ? "max-w-[1200px]! w-[1200px] h-[80vh]"
-            : "max-w-[900px]! w-[900px] h-[600px]"
-        )}
-      >
+      <DialogContent className="p-0 gap-0 overflow-hidden max-w-[900px]! w-[900px] h-[600px]">
         <div className="flex h-full overflow-hidden">
           {/* Sidebar */}
           <div className="w-48 border-r bg-muted/30 p-2 flex flex-col">
@@ -1651,11 +1631,6 @@ export function SettingsDialog({ children, initialTab }: SettingsDialogProps) {
                 >
                   <tab.icon className="size-4" />
                   <span className="flex-1">{tab.label}</span>
-                  {tab.id === "skills" && skillUpdateCount > 0 && (
-                    <span className="flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-white text-[10px] font-medium">
-                      {skillUpdateCount}
-                    </span>
-                  )}
                 </button>
               ))}
             </nav>
@@ -1688,7 +1663,7 @@ export function SettingsDialog({ children, initialTab }: SettingsDialogProps) {
               ) : activeTab === "appearance" ? (
                 <AppearanceSettings />
               ) : activeTab === "skills" ? (
-                <SkillsSettings dialogOpen={open} onExpandRequest={setSkillsExpanded} />
+                <SkillsSettings dialogOpen={open} />
               ) : activeTab === "tools" ? (
                 <ToolsLibrarySettings dialogOpen={open} rowboatConnected={rowboatConnected} />
               ) : loading ? (

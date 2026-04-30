@@ -8,7 +8,7 @@ import { AgentScheduleState } from './agent-schedule-state.js';
 import { ServiceEvent } from './service-events.js';
 import { TrackEvent } from './track-block.js';
 import { UserMessageContent } from './message.js';
-import { ResolvedSkill, SkillOverride } from './skill.js';
+import { ResolvedSkill } from './skill.js';
 import { RowboatApiConfig } from './rowboat-account.js';
 import { ZListToolkitsResponse } from './composio.js';
 import { BrowserStateSchema } from './browser-control.js';
@@ -734,30 +734,6 @@ const ipcSchemas = {
       id: z.string(),
     }),
     res: ResolvedSkill.nullable(),
-  },
-  'skills:getOfficial': {
-    req: z.object({
-      id: z.string(),
-    }),
-    res: ResolvedSkill.nullable(),
-  },
-  'skills:saveOverride': {
-    req: z.object({
-      skillId: z.string(),
-      meta: SkillOverride,
-      content: z.string(),
-    }),
-    res: z.object({
-      success: z.literal(true),
-    }),
-  },
-  'skills:deleteOverride': {
-    req: z.object({
-      skillId: z.string(),
-    }),
-    res: z.object({
-      success: z.literal(true),
-    }),
   },
   'billing:getInfo': {
     req: z.null(),

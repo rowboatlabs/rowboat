@@ -22,7 +22,6 @@ import { init as initEmailLabeling } from "@x/core/dist/knowledge/label_emails.j
 import { init as initNoteTagging } from "@x/core/dist/knowledge/tag_notes.js";
 import { init as initInlineTasks } from "@x/core/dist/knowledge/inline_tasks.js";
 import { init as initAgentRunner } from "@x/core/dist/agent-schedule/runner.js";
-import { init as initSkillSync } from "@x/core/dist/skills/sync.js";
 import { init as initAgentNotes } from "@x/core/dist/knowledge/agent_notes.js";
 import { init as initTrackScheduler } from "@x/core/dist/knowledge/track/scheduler.js";
 import { init as initTrackEventProcessor } from "@x/core/dist/knowledge/track/events.js";
@@ -33,7 +32,7 @@ import started from "electron-squirrel-startup";
 import { execSync, exec, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { init as initChromeSync } from "@x/core/dist/knowledge/chrome-extension/server/server.js";
-import { registerBrowserControlService } from "@x/core/dist/di/container.js";
+import { registerBrowserControlService, registerSkillsDir } from "@x/core/dist/di/container.js";
 import { browserViewManager, BROWSER_PARTITION } from "./browser/view.js";
 import { setupBrowserEventForwarding } from "./browser/ipc.js";
 import { ElectronBrowserControlService } from "./browser/control-service.js";
@@ -42,6 +41,17 @@ const execAsync = promisify(exec);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+function resolveSkillsDir(): string {
+  if (app.isPackaged) {
+    // forge.config.cjs ships apps/skills/ as extraResource → Resources/skills/
+    return path.join(process.resourcesPath, "skills");
+  }
+  // Dev: walk up to repo root from this file's bundled location.
+  // main runs from apps/x/apps/main/.package/dist/main.cjs, so 5 levels up
+  // lands at <repo>/apps/x; one more lands at <repo>/apps; skills is its sibling.
+  return path.resolve(__dirname, "..", "..", "..", "..", "..", "skills");
+}
 
 // run this as early in the main process as possible
 if (started) app.quit();
@@ -233,6 +243,10 @@ app.whenReady().then(async () => {
 
   registerBrowserControlService(new ElectronBrowserControlService());
 
+  // Skills ship with the app. Register the source directory before any
+  // consumer (resolver, IPC handlers, copilot instructions) resolves.
+  registerSkillsDir(resolveSkillsDir());
+
   setupIpcHandlers();
   setupBrowserEventForwarding();
 
@@ -286,9 +300,6 @@ app.whenReady().then(async () => {
 
   // start background agent runner (scheduled agents)
   initAgentRunner();
-
-  // start skill sync service
-  initSkillSync();
 
   // start agent notes learning service
   initAgentNotes();

@@ -1,6 +1,5 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { WorkDir } from "../config/config.js";
 import { parseSkillMd } from "./skill-md-parser.js";
 import type { SkillDefinition } from "./types.js";
 
@@ -10,7 +9,11 @@ export interface IOfficialSkillsRepo {
 }
 
 export class FSOfficialSkillsRepo implements IOfficialSkillsRepo {
-    private readonly officialDir = path.join(WorkDir, "skills", "official");
+    private readonly officialDir: string;
+
+    constructor({ skillsDir }: { skillsDir: string }) {
+        this.officialDir = skillsDir;
+    }
 
     async listOfficial(): Promise<SkillDefinition[]> {
         const result: SkillDefinition[] = [];

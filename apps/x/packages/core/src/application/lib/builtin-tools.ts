@@ -87,7 +87,6 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
             return {
                 success: true,
                 skillName: resolved.id,
-                source: resolved.source,
                 content: resolved.content,
             };
         },
