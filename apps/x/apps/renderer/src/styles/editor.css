@@ -661,8 +661,8 @@
 
 .tiptap-editor .ProseMirror .track-block-chip-wrapper {
   --track-accent: #64748b; /* default: manual/slate */
-  margin: 4px 0;
-  display: inline-block;
+  margin: 8px 0;
+  display: block;
 }
 
 .tiptap-editor .ProseMirror .track-block-chip-wrapper[data-trigger="scheduled"] { --track-accent: #6366f1; }
@@ -674,24 +674,22 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  max-width: 100%;
-  padding: 6px 12px;
+  width: 100%;
+  padding: 24px 16px;
   font-family: inherit;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.3;
   color: var(--foreground);
-  background: color-mix(in srgb, var(--track-accent) 8%, transparent);
-  border: 1px solid color-mix(in srgb, var(--track-accent) 35%, transparent);
-  border-left: 3px solid var(--track-accent);
-  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 40%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 8px;
   cursor: pointer;
-  transition: background-color 0.12s ease, box-shadow 0.12s ease, transform 0.06s ease;
+  transition: background-color 0.15s ease;
   user-select: none;
 }
 
 .tiptap-editor .ProseMirror .track-block-chip:hover {
-  background: color-mix(in srgb, var(--track-accent) 14%, transparent);
-  box-shadow: 0 1px 4px color-mix(in srgb, var(--track-accent) 20%, transparent);
+  background: color-mix(in srgb, var(--muted) 70%, transparent);
 }
 
 .tiptap-editor .ProseMirror .track-block-chip:active {
@@ -719,12 +717,18 @@
 
 .tiptap-editor .ProseMirror .track-block-chip-icon {
   flex-shrink: 0;
-  color: var(--track-accent);
+  color: color-mix(in srgb, var(--foreground) 45%, transparent);
 }
+
+.tiptap-editor .ProseMirror .track-block-chip-wrapper[data-trackid="up-next"]         .track-block-chip-icon { color: #3b82f6; }
+.tiptap-editor .ProseMirror .track-block-chip-wrapper[data-trackid="calendar"]        .track-block-chip-icon { color: #22c55e; }
+.tiptap-editor .ProseMirror .track-block-chip-wrapper[data-trackid="emails"]          .track-block-chip-icon { color: #f59e0b; }
+.tiptap-editor .ProseMirror .track-block-chip-wrapper[data-trackid="what-you-missed"] .track-block-chip-icon { color: #3b82f6; }
+.tiptap-editor .ProseMirror .track-block-chip-wrapper[data-trackid="priorities"]      .track-block-chip-icon { color: #ef4444; }
 
 .tiptap-editor .ProseMirror .track-block-chip-id {
   font-weight: 600;
-  color: var(--track-accent);
+  color: color-mix(in srgb, var(--foreground) 75%, transparent);
   white-space: nowrap;
   flex-shrink: 0;
 }
@@ -735,7 +739,7 @@
 }
 
 .tiptap-editor .ProseMirror .track-block-chip-instruction {
-  color: color-mix(in srgb, var(--foreground) 80%, transparent);
+  color: color-mix(in srgb, var(--foreground) 55%, transparent);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
