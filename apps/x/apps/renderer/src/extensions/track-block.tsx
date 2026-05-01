@@ -108,8 +108,8 @@ function TrackBlockView({ node, deleteNode, extension }: {
       >
         <span className="track-block-chip-icon">
           {isRunning
-            ? <Loader2 size={16} className="animate-spin" />
-            : <TrackIcon trackId={trackId} size={16} />}
+            ? <Loader2 size={24} className="animate-spin" />
+            : <TrackIcon trackId={trackId} size={24} />}
         </span>
         <span className="track-block-chip-id">{trackId || 'track'}</span>
         {instruction && <span className="track-block-chip-sep">·</span>}
