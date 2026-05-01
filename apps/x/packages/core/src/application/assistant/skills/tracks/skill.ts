@@ -87,6 +87,23 @@ ${schemaYaml}
 
 **Runtime-managed fields — never write these yourself:** ` + "`" + `lastRunAt` + "`" + `, ` + "`" + `lastRunId` + "`" + `, ` + "`" + `lastRunSummary` + "`" + `.
 
+## Do Not Set ` + "`" + `model` + "`" + ` or ` + "`" + `provider` + "`" + ` (almost always)
+
+The schema includes optional ` + "`" + `model` + "`" + ` and ` + "`" + `provider` + "`" + ` fields. **Omit them.** A user-configurable global default already picks the right model and provider for tracks; setting per-track values bypasses that and is almost always wrong.
+
+The only time these belong on a track:
+
+- The user **explicitly** named a model or provider for *this specific track* in their request ("use Claude Opus for this one", "force this track onto OpenAI"). Quote the user's wording back when confirming.
+
+Things that are **not** reasons to set these:
+
+- "Tracks should be fast" / "I want a small model" — that's a global preference, not a per-track one. Leave it; the global default exists.
+- "This track is complex" — write a clearer instruction; don't reach for a different model.
+- "Just to be safe" / "in case it matters" — this is the antipattern. Leave them out.
+- The user changed their main chat model — that has nothing to do with tracks. Leave them out.
+
+When in doubt: omit both fields. Never volunteer them. Never include them in a starter template you suggest. If you find yourself adding them as a sensible default, stop — you're wrong.
+
 ## Choosing a trackId
 
 - Kebab-case, short, descriptive: ` + "`" + `chicago-time` + "`" + `, ` + "`" + `sfo-weather` + "`" + `, ` + "`" + `hn-top5` + "`" + `, ` + "`" + `btc-usd` + "`" + `.

@@ -1,5 +1,4 @@
 ---
-model: anthropic/claude-haiku-4.5
 tools:
   workspace-readFile:
     type: builtin

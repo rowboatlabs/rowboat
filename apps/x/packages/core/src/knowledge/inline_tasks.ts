@@ -4,11 +4,13 @@ import { CronExpressionParser } from 'cron-parser';
 import { generateText } from 'ai';
 import { WorkDir } from '../config/config.js';
 import { createRun, createMessage, fetchRun } from '../runs/runs.js';
+import { getKgModel } from '../models/defaults.js';
 import container from '../di/container.js';
 import type { IModelConfigRepo } from '../models/repo.js';
 import { createProvider } from '../models/models.js';
 import { inlineTask } from '@x/shared';
 import { extractAgentResponse, waitForRunCompletion } from '../agents/utils.js';
+import { captureLlmUsage } from '../analytics/usage.js';
 
 const SYNC_INTERVAL_MS = 15 * 1000; // 15 seconds
 const INLINE_TASK_AGENT = 'inline_task_agent';
@@ -467,7 +469,12 @@ async function processInlineTasks(): Promise<void> {
             console.log(`[InlineTasks] Running task: "${task.instruction.slice(0, 80)}..."`);
 
             try {
-                const run = await createRun({ agentId: INLINE_TASK_AGENT });
+                const run = await createRun({
+                    agentId: INLINE_TASK_AGENT,
+                    model: await getKgModel(),
+                    useCase: 'knowledge_sync',
+                    subUseCase: 'inline_task_run',
+                });
 
                 const message = [
                     `Execute the following instruction from the note "${relativePath}":`,
@@ -547,7 +554,12 @@ export async function processRowboatInstruction(
     scheduleLabel: string | null;
     response: string | null;
 }> {
-    const run = await createRun({ agentId: INLINE_TASK_AGENT });
+    const run = await createRun({
+        agentId: INLINE_TASK_AGENT,
+        model: await getKgModel(),
+        useCase: 'knowledge_sync',
+        subUseCase: 'inline_task_run',
+    });
 
     const message = [
         `Process the following @rowboat instruction from the note "${notePath}":`,
@@ -656,6 +668,14 @@ Respond with ONLY valid JSON: either a schedule object or null. No other text.`;
             model,
             system: systemPrompt,
             prompt: instruction,
+        });
+
+        captureLlmUsage({
+            useCase: 'knowledge_sync',
+            subUseCase: 'inline_task_classify',
+            model: config.model,
+            provider: config.provider.flavor,
+            usage: result.usage,
         });
 
         let text = result.text.trim();

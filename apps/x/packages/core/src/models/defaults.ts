@@ -6,6 +6,8 @@ import container from "../di/container.js";
 
 const SIGNED_IN_DEFAULT_MODEL = "gpt-5.4";
 const SIGNED_IN_DEFAULT_PROVIDER = "rowboat";
+const SIGNED_IN_KG_MODEL = "anthropic/claude-haiku-4.5";
+const SIGNED_IN_TRACK_BLOCK_MODEL = "anthropic/claude-haiku-4.5";
 
 /**
  * The single source of truth for "what model+provider should we use when
@@ -50,4 +52,37 @@ export async function resolveProviderConfig(name: string): Promise<z.infer<typeo
         return cfg.provider;
     }
     throw new Error(`Provider '${name}' is referenced but not configured`);
+}
+
+/**
+ * Model used by knowledge-graph agents (note_creation, labeling_agent, etc.)
+ * when they're the top-level of a run. Signed-in: curated default.
+ * BYOK: user override (`knowledgeGraphModel`) or assistant model.
+ */
+export async function getKgModel(): Promise<string> {
+    if (await isSignedIn()) return SIGNED_IN_KG_MODEL;
+    const cfg = await container.resolve<IModelConfigRepo>("modelConfigRepo").getConfig();
+    return cfg.knowledgeGraphModel ?? cfg.model;
+}
+
+/**
+ * Model used by track-block runner + routing classifier.
+ * Signed-in: curated default. BYOK: user override (`trackBlockModel`) or
+ * assistant model.
+ */
+export async function getTrackBlockModel(): Promise<string> {
+    if (await isSignedIn()) return SIGNED_IN_TRACK_BLOCK_MODEL;
+    const cfg = await container.resolve<IModelConfigRepo>("modelConfigRepo").getConfig();
+    return cfg.trackBlockModel ?? cfg.model;
+}
+
+/**
+ * Model used by the meeting-notes summarizer. No special signed-in default —
+ * historically meetings used the assistant model. BYOK: user override
+ * (`meetingNotesModel`) or assistant model.
+ */
+export async function getMeetingNotesModel(): Promise<string> {
+    if (await isSignedIn()) return SIGNED_IN_DEFAULT_MODEL;
+    const cfg = await container.resolve<IModelConfigRepo>("modelConfigRepo").getConfig();
+    return cfg.meetingNotesModel ?? cfg.model;
 }

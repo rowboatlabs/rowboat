@@ -13,7 +13,6 @@ export function getRaw(): string {
   const defaultEndISO = defaultEnd.toISOString();
 
   return `---
-model: anthropic/claude-sonnet-4.6
 tools:
 ${toolEntries}
 ---

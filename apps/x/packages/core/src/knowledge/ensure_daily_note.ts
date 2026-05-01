@@ -21,14 +21,14 @@ const SECTIONS: Section[] = [
             instruction:
 `Write 1-3 sentences of plain markdown giving the user a shoulder-tap about what's next on their calendar today.
 
-Data: read today's events from calendar_sync/ (workspace-readdir, then workspace-readFile each .json file). Filter to events whose start datetime is today and hasn't started yet.
+This section refreshes on calendar changes, not on a clock tick — do NOT promise live minute countdowns. Frame urgency in buckets based on the event's start time relative to now:
+- Start time is in the past or within roughly half an hour → imminent: name the meeting and say it's starting soon (e.g. "Standup is starting — join link in the Calendar section below.").
+- Start time is later this morning or this afternoon → upcoming: name the meeting and roughly when (e.g. "Design review later this morning." / "1:1 with Sam this afternoon.").
+- Start time is several hours out or nothing before then → focus block: frame the gap (e.g. "Next up is the all-hands at 3pm — good long focus block until then.").
 
-Lead based on how soon the next event is:
-- Under 15 minutes → urgent ("Standup starts in 10 minutes — join link in the Calendar section below.")
-- Under 2 hours → lead with the event ("Design review in 40 minutes.")
-- 2+ hours → frame the gap as focus time ("Next up is standup at noon — you've got a solid 3-hour focus block.")
+Use the event's start time of day ("at 3pm", "this afternoon") rather than a countdown ("in 40 minutes"). Countdowns go stale between syncs.
 
-Always compute minutes-to-start against the actual current local time — never say "nothing in the next X hours" if an event is in that window.
+Data: read today's events from calendar_sync/ (workspace-readdir, then workspace-readFile each .json file). Filter to events whose start datetime is today and hasn't ended yet — for finding the next event, pick the earliest upcoming one; if all have passed, treat as clear.
 
 If you find quick context in knowledge/ that's genuinely useful, add one short clause ("Ramnique pushed the OAuth PR yesterday — might come up"). Use workspace-grep / workspace-readFile conservatively; don't stall on deep research.
 
@@ -38,10 +38,6 @@ Plain markdown prose only — no calendar block, no email block, no headings.`,
             eventMatchCriteria:
 `Calendar event changes affecting today — new meetings, reschedules, cancellations, meetings starting soon. Skip changes to events on other days.`,
             active: true,
-            schedule: {
-                type: 'cron',
-                expression: '*/15 * * * *',
-            },
         },
     },
     {
@@ -53,16 +49,14 @@ Plain markdown prose only — no calendar block, no email block, no headings.`,
 
 Data: read calendar_sync/ via workspace-readdir, then workspace-readFile each .json event file. Filter to events occurring today. After 10am local time, drop meetings that have already ended — only include meetings that haven't ended yet.
 
+This section refreshes on calendar changes, not on a clock tick — the "drop ended meetings" rule applies on each refresh, so an ended meeting disappears the next time any calendar event changes (not exactly on the clock hour). That's fine.
+
 Always emit the calendar block, even when there are no remaining events (in that case use events: [] and showJoinButton: false). Set showJoinButton: true whenever any event has a conferenceLink.
 
 After the block, you MAY add one short markdown line per event giving useful prep context pulled from knowledge/ ("Design review: last week we agreed to revisit the type-picker UX."). Keep it tight — one line each, only when meaningful. Skip routine/recurring meetings.`,
             eventMatchCriteria:
 `Calendar event changes affecting today — additions, updates, cancellations, reschedules.`,
             active: true,
-            schedule: {
-                type: 'cron',
-                expression: '0 * * * *',
-            },
         },
     },
     {
@@ -72,7 +66,7 @@ After the block, you MAY add one short markdown line per event giving useful pre
             instruction:
 `Maintain a digest of email threads worth the user's attention today, rendered as zero or more email blocks (one per thread).
 
-Event-driven path (primary): the agent message will include a freshly-synced thread's markdown as the event payload. Decide whether THIS thread warrants surfacing. If it's marketing, an auto-notification, a thread already closed out, or otherwise low-signal, skip the update — do NOT call update-track-content. If it's attention-worthy, integrate it into the digest: add a new email block, or update the existing one if the same threadId is already shown.
+Event-driven path (primary): the agent message will include a "Gmail sync update" digest payload describing one or more freshly-synced threads from a single sync run. The digest lists each thread with its subject, sender, date, threadId, and body. Iterate over every thread in the payload and decide per thread whether it warrants surfacing. Skip marketing, auto-notifications, closed-out threads, and other low-signal mail. For threads that are attention-worthy, integrate them into the existing digest: add a new email block for a new threadId, or update the existing block if the threadId is already shown. If NONE of the threads in the payload are attention-worthy, skip the update — do NOT call update-track-content. Emit at most one update-track-content call that covers the full set of changes from this event.
 
 Manual path (fallback): with no event payload, scan gmail_sync/ via workspace-readdir (skip sync_state.json and attachments/). Read threads with workspace-readFile. Prioritize threads whose frontmatter action field is "reply" or "respond", plus other high-signal recent threads.
 

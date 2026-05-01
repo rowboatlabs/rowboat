@@ -196,14 +196,14 @@ const defaultBaseURLs: Partial<Record<LlmProviderFlavor, string>> = {
 function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
   const [provider, setProvider] = useState<LlmProviderFlavor>("openai")
   const [defaultProvider, setDefaultProvider] = useState<LlmProviderFlavor | null>(null)
-  const [providerConfigs, setProviderConfigs] = useState<Record<LlmProviderFlavor, { apiKey: string; baseURL: string; models: string[]; knowledgeGraphModel: string }>>({
-    openai: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "" },
-    anthropic: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "" },
-    google: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "" },
-    openrouter: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "" },
-    aigateway: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "" },
-    ollama: { apiKey: "", baseURL: "http://localhost:11434", models: [""], knowledgeGraphModel: "" },
-    "openai-compatible": { apiKey: "", baseURL: "http://localhost:1234/v1", models: [""], knowledgeGraphModel: "" },
+  const [providerConfigs, setProviderConfigs] = useState<Record<LlmProviderFlavor, { apiKey: string; baseURL: string; models: string[]; knowledgeGraphModel: string; meetingNotesModel: string; trackBlockModel: string }>>({
+    openai: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", trackBlockModel: "" },
+    anthropic: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", trackBlockModel: "" },
+    google: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", trackBlockModel: "" },
+    openrouter: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", trackBlockModel: "" },
+    aigateway: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", trackBlockModel: "" },
+    ollama: { apiKey: "", baseURL: "http://localhost:11434", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", trackBlockModel: "" },
+    "openai-compatible": { apiKey: "", baseURL: "http://localhost:1234/v1", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", trackBlockModel: "" },
   })
   const [modelsCatalog, setModelsCatalog] = useState<Record<string, LlmModelOption[]>>({})
   const [modelsLoading, setModelsLoading] = useState(false)
@@ -229,7 +229,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
     (!requiresBaseURL || activeConfig.baseURL.trim().length > 0)
 
   const updateConfig = useCallback(
-    (prov: LlmProviderFlavor, updates: Partial<{ apiKey: string; baseURL: string; models: string[]; knowledgeGraphModel: string }>) => {
+    (prov: LlmProviderFlavor, updates: Partial<{ apiKey: string; baseURL: string; models: string[]; knowledgeGraphModel: string; meetingNotesModel: string; trackBlockModel: string }>) => {
       setProviderConfigs(prev => ({
         ...prev,
         [prov]: { ...prev[prov], ...updates },
@@ -302,6 +302,8 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
                     baseURL: e.baseURL || (defaultBaseURLs[key as LlmProviderFlavor] || ""),
                     models: savedModels,
                     knowledgeGraphModel: e.knowledgeGraphModel || "",
+                    meetingNotesModel: e.meetingNotesModel || "",
+                    trackBlockModel: e.trackBlockModel || "",
                   };
                 }
               }
@@ -318,6 +320,8 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
                 baseURL: parsed.provider.baseURL || (defaultBaseURLs[flavor] || ""),
                 models: activeModels.length > 0 ? activeModels : [""],
                 knowledgeGraphModel: parsed.knowledgeGraphModel || "",
+                meetingNotesModel: parsed.meetingNotesModel || "",
+                trackBlockModel: parsed.trackBlockModel || "",
               };
             }
             return next;
@@ -391,6 +395,8 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
         model: allModels[0] || "",
         models: allModels,
         knowledgeGraphModel: activeConfig.knowledgeGraphModel.trim() || undefined,
+        meetingNotesModel: activeConfig.meetingNotesModel.trim() || undefined,
+        trackBlockModel: activeConfig.trackBlockModel.trim() || undefined,
       }
       const result = await window.ipc.invoke("models:test", providerConfig)
       if (result.success) {
@@ -423,6 +429,8 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
         model: allModels[0],
         models: allModels,
         knowledgeGraphModel: config.knowledgeGraphModel.trim() || undefined,
+        meetingNotesModel: config.meetingNotesModel.trim() || undefined,
+        trackBlockModel: config.trackBlockModel.trim() || undefined,
       })
       setDefaultProvider(prov)
       window.dispatchEvent(new Event('models-config-changed'))
@@ -452,6 +460,8 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
         parsed.model = defModels[0] || ""
         parsed.models = defModels
         parsed.knowledgeGraphModel = defConfig.knowledgeGraphModel.trim() || undefined
+        parsed.meetingNotesModel = defConfig.meetingNotesModel.trim() || undefined
+        parsed.trackBlockModel = defConfig.trackBlockModel.trim() || undefined
       }
       await window.ipc.invoke("workspace:writeFile", {
         path: "config/models.json",
@@ -459,7 +469,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
       })
       setProviderConfigs(prev => ({
         ...prev,
-        [prov]: { apiKey: "", baseURL: defaultBaseURLs[prov] || "", models: [""], knowledgeGraphModel: "" },
+        [prov]: { apiKey: "", baseURL: defaultBaseURLs[prov] || "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", trackBlockModel: "" },
       }))
       setTestState({ status: "idle" })
       window.dispatchEvent(new Event('models-config-changed'))
@@ -634,6 +644,74 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
             <Select
               value={activeConfig.knowledgeGraphModel || "__same__"}
               onValueChange={(value) => updateConfig(provider, { knowledgeGraphModel: value === "__same__" ? "" : value })}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select a model" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__same__">Same as assistant</SelectItem>
+                {modelsForProvider.map((m) => (
+                  <SelectItem key={m.id} value={m.id}>
+                    {m.name || m.id}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </div>
+
+        {/* Meeting notes model */}
+        <div className="space-y-2">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Meeting notes model</span>
+          {modelsLoading ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" />
+              Loading...
+            </div>
+          ) : showModelInput ? (
+            <Input
+              value={activeConfig.meetingNotesModel}
+              onChange={(e) => updateConfig(provider, { meetingNotesModel: e.target.value })}
+              placeholder={primaryModel || "Enter model"}
+            />
+          ) : (
+            <Select
+              value={activeConfig.meetingNotesModel || "__same__"}
+              onValueChange={(value) => updateConfig(provider, { meetingNotesModel: value === "__same__" ? "" : value })}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select a model" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__same__">Same as assistant</SelectItem>
+                {modelsForProvider.map((m) => (
+                  <SelectItem key={m.id} value={m.id}>
+                    {m.name || m.id}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </div>
+
+        {/* Track block model */}
+        <div className="space-y-2">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Track block model</span>
+          {modelsLoading ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" />
+              Loading...
+            </div>
+          ) : showModelInput ? (
+            <Input
+              value={activeConfig.trackBlockModel}
+              onChange={(e) => updateConfig(provider, { trackBlockModel: e.target.value })}
+              placeholder={primaryModel || "Enter model"}
+            />
+          ) : (
+            <Select
+              value={activeConfig.trackBlockModel || "__same__"}
+              onValueChange={(value) => updateConfig(provider, { trackBlockModel: value === "__same__" ? "" : value })}
             >
               <SelectTrigger>
                 <SelectValue placeholder="Select a model" />

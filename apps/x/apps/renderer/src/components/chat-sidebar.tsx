@@ -16,7 +16,7 @@ import {
   MessageResponse,
 } from '@/components/ai-elements/message'
 import { Shimmer } from '@/components/ai-elements/shimmer'
-import { Tool, ToolContent, ToolHeader, ToolTabbedContent } from '@/components/ai-elements/tool'
+import { Tool, ToolContent, ToolGroupComponent, ToolHeader, ToolTabbedContent } from '@/components/ai-elements/tool'
 import { WebSearchResult } from '@/components/ai-elements/web-search-result'
 import { ComposioConnectCard } from '@/components/ai-elements/composio-connect-card'
 import { PermissionRequest } from '@/components/ai-elements/permission-request'
@@ -40,9 +40,11 @@ import {
   getWebSearchCardData,
   getComposioConnectCardData,
   getToolDisplayName,
+  groupConversationItems,
   isChatMessage,
   isErrorMessage,
   isToolCall,
+  isToolGroup,
   normalizeToolInput,
   normalizeToolOutput,
   parseAttachedFiles,
@@ -591,7 +593,20 @@ export function ChatSidebar({
                             </ConversationEmptyState>
                           ) : (
                             <>
-                              {tabState.conversation.map((item) => {
+                              {groupConversationItems(
+                                tabState.conversation,
+                                (id) => !!tabState.allPermissionRequests.get(id)
+                              ).map((item) => {
+                                if (isToolGroup(item)) {
+                                  return (
+                                    <ToolGroupComponent
+                                      key={item.groupId}
+                                      group={item}
+                                      isToolOpen={(toolId) => isToolOpenForTab?.(tab.id, toolId) ?? false}
+                                      onToolOpenChange={(toolId, open) => onToolOpenChangeForTab?.(tab.id, toolId, open)}
+                                    />
+                                  )
+                                }
                                 const rendered = renderConversationItem(item, tab.id)
                                 if (isToolCall(item) && onPermissionResponse) {
                                   const permRequest = tabState.allPermissionRequests.get(item.id)

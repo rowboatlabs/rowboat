@@ -252,6 +252,8 @@ async function createNotesFromBatch(
     // Create a run for the note creation agent
     const run = await createRun({
         agentId: NOTE_CREATION_AGENT,
+        useCase: 'knowledge_sync',
+        subUseCase: 'build_graph',
     });
     const suggestedTopicsContent = readSuggestedTopicsFile();
 

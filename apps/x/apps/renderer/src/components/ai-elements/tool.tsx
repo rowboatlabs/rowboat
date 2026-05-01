@@ -17,6 +17,9 @@ import {
   XCircleIcon,
 } from "lucide-react";
 import { type ComponentProps, type ReactNode, isValidElement, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
+import type { ToolCall, ToolGroup as ToolGroupType } from "@/lib/chat-conversation";
+import { getToolDisplayName, getToolGroupSummary, toToolState } from "@/lib/chat-conversation";
 
 const formatToolValue = (value: unknown) => {
   if (typeof value === "string") return value;
@@ -224,3 +227,89 @@ export const ToolTabbedContent = ({
     </div>
   );
 };
+
+export type ToolGroupProps = {
+  group: ToolGroupType
+  isToolOpen: (toolId: string) => boolean
+  onToolOpenChange: (toolId: string, open: boolean) => void
+}
+
+const getGroupState = (tools: ToolCall[]): ToolUIPart["state"] => {
+  if (tools.some(t => t.status === 'error')) return 'output-error'
+  if (tools.some(t => t.status === 'running')) return 'input-available'
+  if (tools.some(t => t.status === 'pending')) return 'input-streaming'
+  return 'output-available'
+}
+
+export const ToolGroupComponent = ({ group, isToolOpen, onToolOpenChange }: ToolGroupProps) => {
+  const [open, setOpen] = useState(false)
+  const state = getGroupState(group.items)
+  const isCompleted = state === 'output-available' || state === 'output-error'
+  const runningTool = group.items.find(t => t.status === 'running' || t.status === 'pending')
+  const currentTool = runningTool ?? group.items[group.items.length - 1]
+  const summary = isCompleted
+    ? `Ran ${group.items.length} tool${group.items.length !== 1 ? 's' : ''}`
+    : currentTool ? getToolDisplayName(currentTool) : getToolGroupSummary(group.items)
+
+  return (
+    <Collapsible
+      open={open}
+      onOpenChange={setOpen}
+      className="not-prose mb-4 w-full rounded-md border"
+    >
+      <CollapsibleTrigger className="flex w-full items-center justify-between gap-4 p-3">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <WrenchIcon className="size-4 shrink-0 text-muted-foreground" />
+          <div className="relative min-w-0 flex-1 overflow-hidden" style={{ height: '1.25rem' }}>
+            <AnimatePresence mode="popLayout" initial={false}>
+              <motion.span
+                key={summary}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.18, ease: 'easeOut' }}
+                className="absolute inset-0 truncate text-left font-medium text-sm leading-5"
+                title={summary}
+              >
+                {summary}
+              </motion.span>
+            </AnimatePresence>
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-3">
+          {getStatusBadge(state)}
+          <ChevronDownIcon className={cn("size-4 text-muted-foreground transition-transform", open && "rotate-180")} />
+        </div>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="border-t">
+        <div className="flex flex-col gap-2 p-2">
+          {group.items.map((tool) => {
+            const toolState = toToolState(tool.status)
+            const isOpen = isToolOpen(tool.id)
+            return (
+              <Tool
+                key={tool.id}
+                open={isOpen}
+                onOpenChange={(o) => onToolOpenChange(tool.id, o)}
+                className="mb-0 border-border/60"
+              >
+                <ToolHeader
+                  title={getToolDisplayName(tool)}
+                  type={`tool-${tool.name}`}
+                  state={toolState}
+                />
+                <ToolContent>
+                  <ToolTabbedContent
+                    input={tool.input as ToolUIPart["input"]}
+                    output={tool.result as ToolUIPart["output"]}
+                    errorText={tool.status === 'error' ? 'Tool error' : undefined}
+                  />
+                </ToolContent>
+              </Tool>
+            )
+          })}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  )
+}
