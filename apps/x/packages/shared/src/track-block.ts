@@ -27,6 +27,7 @@ export const TrackBlockSchema = z.object({
     schedule: TrackScheduleSchema.optional(),
     model: z.string().optional().describe('ADVANCED — leave unset. Per-track LLM model override (e.g. "anthropic/claude-sonnet-4.6"). Only set when the user explicitly asked for a specific model for THIS track. The global default already picks a tuned model for tracks; overriding usually makes things worse, not better.'),
     provider: z.string().optional().describe('ADVANCED — leave unset. Per-track provider name override (e.g. "openai", "anthropic"). Only set when the user explicitly asked for a specific provider for THIS track. Almost always omitted; the global default flows through correctly.'),
+    icon: z.string().optional().describe('Lucide icon name for the chip (e.g. "clock", "calendar-days", "mail", "history", "list-todo"). Omit to use the default icon for this track.'),
     lastRunAt: z.string().optional().describe('Runtime-managed — never write this yourself'),
     lastRunId: z.string().optional().describe('Runtime-managed — never write this yourself'),
     lastRunSummary: z.string().optional().describe('Runtime-managed — never write this yourself'),

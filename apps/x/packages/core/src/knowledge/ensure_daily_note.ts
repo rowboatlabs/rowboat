@@ -18,6 +18,7 @@ const SECTIONS: Section[] = [
         heading: '## Up Next',
         track: {
             trackId: 'up-next',
+            icon: 'clock',
             instruction:
 `Write 1-3 sentences of plain markdown giving the user a shoulder-tap about what's next on their calendar today.
 
@@ -44,6 +45,7 @@ Plain markdown prose only — no calendar block, no email block, no headings.`,
         heading: '## Calendar',
         track: {
             trackId: 'calendar',
+            icon: 'calendar-days',
             instruction:
 `Emit today's meetings as a calendar block titled "Today's Meetings".
 
@@ -63,6 +65,7 @@ After the block, you MAY add one short markdown line per event giving useful pre
         heading: '## Emails',
         track: {
             trackId: 'emails',
+            icon: 'mail',
             instruction:
 `Maintain a digest of email threads worth the user's attention today, rendered as zero or more email blocks (one per thread).
 
@@ -84,6 +87,7 @@ Do NOT re-list threads the user has already seen unless their state changed (new
         heading: '## What You Missed',
         track: {
             trackId: 'what-you-missed',
+            icon: 'history',
             instruction:
 `Short markdown summary of what happened yesterday that matters this morning.
 
@@ -109,6 +113,7 @@ Do NOT manufacture content to fill the section.`,
         heading: '## Today\'s Priorities',
         track: {
             trackId: 'priorities',
+            icon: 'list-todo',
             instruction:
 `Ranked markdown list of the real, actionable items the user should focus on today.
 

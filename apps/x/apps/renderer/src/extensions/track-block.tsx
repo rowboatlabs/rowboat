@@ -1,18 +1,28 @@
 import { z } from 'zod'
-import { useMemo } from 'react'
+import { useMemo, type ComponentType } from 'react'
 import { mergeAttributes, Node } from '@tiptap/react'
 import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react'
-import { Radio, Loader2, CalendarDays, Mail, Clock, ListTodo, History } from 'lucide-react'
+import { Radio, Loader2, type LucideProps } from 'lucide-react'
+import * as LucideIcons from 'lucide-react'
 import { parse as parseYaml } from 'yaml'
 import { TrackBlockSchema } from '@x/shared/dist/track-block.js'
 import { useTrackStatus } from '@/hooks/use-track-status'
 
-function TrackIcon({ trackId, size }: { trackId: string; size: number }) {
-  if (trackId === 'up-next') return <Clock size={size} />
-  if (trackId === 'calendar') return <CalendarDays size={size} />
-  if (trackId === 'emails') return <Mail size={size} />
-  if (trackId === 'what-you-missed') return <History size={size} />
-  if (trackId === 'priorities') return <ListTodo size={size} />
+function resolveIcon(iconName: string): ComponentType<LucideProps> | null {
+  const key = iconName
+    .split('-')
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join('')
+  const component = (LucideIcons as Record<string, unknown>)[key]
+  if (component != null) return component as ComponentType<LucideProps>
+  return null
+}
+
+function TrackIcon({ icon, size }: { icon?: string; size: number }) {
+  if (icon) {
+    const Icon = resolveIcon(icon)
+    if (Icon) return <Icon size={size} />
+  }
   return <Radio size={size} />
 }
 
@@ -109,7 +119,7 @@ function TrackBlockView({ node, deleteNode, extension }: {
         <span className="track-block-chip-icon">
           {isRunning
             ? <Loader2 size={24} className="animate-spin" />
-            : <TrackIcon trackId={trackId} size={24} />}
+            : <TrackIcon icon={track?.icon} size={24} />}
         </span>
         <span className="track-block-chip-id">{trackId || 'track'}</span>
         {instruction && <span className="track-block-chip-sep">·</span>}
