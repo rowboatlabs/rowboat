@@ -34,7 +34,8 @@ function formatFullDate(dateStr: string): string {
 function extractName(from: string): string {
   const match = from.match(/^([^<]+)</)
   if (match) return match[1].trim()
-  return from.replace(/@.*/, '').replace(/[._+]/g, ' ').trim()
+  const username = from.replace(/@.*/, '').replace(/[._+]/g, ' ').trim()
+  return username.replace(/\b\w/g, c => c.toUpperCase())
 }
 
 function getInitial(from: string): string {
@@ -132,7 +133,7 @@ function EmailExpandedBody({
       <div className="email-gmail-exp-meta">
         <div className="email-gmail-exp-avatar" style={{ backgroundColor: color }}>{initial}</div>
         <div className="email-gmail-exp-meta-right">
-          <div className="email-gmail-exp-sender">{senderName}</div>
+          <div className="email-gmail-exp-sender">{config.from || 'Unknown'}</div>
           <div className="email-gmail-exp-to-date">
             {config.to && <span>to {config.to}</span>}
             {config.date && <span className="email-gmail-exp-fulldate">{formatFullDate(config.date)}</span>}
@@ -269,7 +270,7 @@ function EmailsBlockView({ node, deleteNode }: {
 
   return (
     <NodeViewWrapper className="email-block-wrapper" data-type="emails-block">
-      <div className="email-inbox-card" onMouseDown={(e) => e.stopPropagation()}>
+      <div className="email-block-card email-inbox-card" onMouseDown={(e) => e.stopPropagation()}>
         <button className="email-block-delete" onClick={deleteNode} aria-label="Remove block"><X size={14} /></button>
 
         {config.title && (
