@@ -1,6 +1,6 @@
 import { mergeAttributes, Node } from '@tiptap/react'
 import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react'
-import { X, Mail, ChevronDown, ExternalLink, Copy, Check, MessageSquare } from 'lucide-react'
+import { X, ExternalLink, Copy, Check, MessageSquare, ChevronDown } from 'lucide-react'
 import { blocks } from '@x/shared'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useTheme } from '@/contexts/theme-context'
@@ -11,17 +11,57 @@ function formatEmailDate(dateStr: string): string {
   try {
     const d = new Date(dateStr)
     if (isNaN(d.getTime())) return dateStr
-    return d.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) +
-      ' ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+    const now = new Date()
+    const isToday = d.getDate() === now.getDate() && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()
+    if (isToday) return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+    return d.toLocaleDateString([], { month: 'short', day: 'numeric' })
   } catch {
     return dateStr
   }
 }
 
-/** Extract just the name part from "Name <email>" format */
-function senderFirstName(from: string): string {
-  const name = from.replace(/<.*>/, '').trim()
-  return name.split(/\s+/)[0] || name
+function formatFullDate(dateStr: string): string {
+  try {
+    const d = new Date(dateStr)
+    if (isNaN(d.getTime())) return dateStr
+    return d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) +
+      ', ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  } catch {
+    return dateStr
+  }
+}
+
+/** Extract display name from "Name <email>" or plain email */
+function extractName(from: string): string {
+  const match = from.match(/^([^<]+)</)
+  if (match) return match[1].trim()
+  return from.replace(/@.*/, '').replace(/[._+]/g, ' ').trim()
+}
+
+/** Get first initial for avatar */
+function getInitial(from: string): string {
+  const name = extractName(from)
+  return (name[0] || '?').toUpperCase()
+}
+
+// Gmail-style deterministic avatar colors based on sender
+const GMAIL_AVATAR_COLORS = [
+  '#1a73e8', // blue
+  '#e8453c', // red
+  '#34a853', // green
+  '#8430ce', // purple
+  '#f29900', // orange
+  '#00796b', // teal
+  '#c62828', // dark red
+  '#1565c0', // dark blue
+  '#6a1b9a', // deep purple
+  '#2e7d32', // dark green
+]
+
+function avatarColor(from: string): string {
+  let hash = 0
+  for (let i = 0; i < from.length; i++) hash = (hash * 31 + from.charCodeAt(i)) >>> 0
+  return GMAIL_AVATAR_COLORS[hash % GMAIL_AVATAR_COLORS.length]
 }
 
 declare global {
@@ -51,13 +91,11 @@ function EmailBlockView({ node, deleteNode, updateAttributes }: {
 
   const { resolvedTheme } = useTheme()
 
-  // Local draft state for editing
   const [draftBody, setDraftBody] = useState(config?.draft_response || '')
-  const [emailExpanded, setEmailExpanded] = useState(false)
+  const [expanded, setExpanded] = useState(false)
   const [copied, setCopied] = useState(false)
   const bodyRef = useRef<HTMLTextAreaElement>(null)
 
-  // Sync draft from external changes
   useEffect(() => {
     try {
       const parsed = blocks.EmailBlockSchema.parse(JSON.parse(raw))
@@ -65,7 +103,6 @@ function EmailBlockView({ node, deleteNode, updateAttributes }: {
     } catch { /* ignore */ }
   }, [raw])
 
-  // Auto-resize textarea
   useEffect(() => {
     if (bodyRef.current) {
       bodyRef.current.style.height = 'auto'
@@ -102,7 +139,6 @@ function EmailBlockView({ node, deleteNode, updateAttributes }: {
     return (
       <NodeViewWrapper className="email-block-wrapper" data-type="email-block">
         <div className="email-block-card email-block-error">
-          <Mail size={16} />
           <span>Invalid email block</span>
         </div>
       </NodeViewWrapper>
@@ -113,11 +149,13 @@ function EmailBlockView({ node, deleteNode, updateAttributes }: {
     ? `https://mail.google.com/mail/u/0/#all/${config.threadId}`
     : null
 
-  // Build summary: use explicit summary, or auto-generate from sender + subject
-  const summary = config.summary
-    || (config.from && config.subject
-      ? `${senderFirstName(config.from)} reached out about ${config.subject}`
-      : config.subject || 'New email')
+  const senderName = config.from ? extractName(config.from) : 'Unknown'
+  const initial = config.from ? getInitial(config.from) : '?'
+  const color = config.from ? avatarColor(config.from) : '#5f6368'
+
+  // Snippet: use summary if present, else truncate latest_email
+  const snippet = config.summary
+    || (config.latest_email ? config.latest_email.slice(0, 120).replace(/\s+/g, ' ').trim() : '')
 
   return (
     <NodeViewWrapper className="email-block-wrapper" data-type="email-block">
@@ -126,110 +164,168 @@ function EmailBlockView({ node, deleteNode, updateAttributes }: {
           <X size={14} />
         </button>
 
-        {/* Header: Email badge */}
-        <div className="email-block-badge">
-          <Mail size={13} />
-          Email
-        </div>
-
-        {/* Summary */}
-        <div className="email-block-summary">{summary}</div>
-
-        {/* Expandable email details */}
-        <button
-          className="email-block-expand-btn"
-          onClick={(e) => { e.stopPropagation(); setEmailExpanded(!emailExpanded) }}
+        {/* Gmail-style two-column row */}
+        <div
+          className={`email-gmail-row${expanded ? ' email-gmail-row-expanded' : ''}`}
+          onClick={(e) => { e.stopPropagation(); setExpanded(!expanded) }}
           onMouseDown={(e) => e.stopPropagation()}
         >
-          <ChevronDown size={13} className={`email-block-toggle-chevron ${emailExpanded ? 'email-block-toggle-chevron-open' : ''}`} />
-          {emailExpanded ? 'Hide email' : 'Show email'}
-          {config.from && <span className="email-block-expand-meta">· From {senderFirstName(config.from)}</span>}
-          {config.date && <span className="email-block-expand-meta">· {formatEmailDate(config.date)}</span>}
-        </button>
+          {/* Avatar */}
+          <div
+            className="email-gmail-avatar"
+            style={{ backgroundColor: color }}
+            aria-hidden="true"
+          >
+            {initial}
+          </div>
 
-        {emailExpanded && (
-          <div className="email-block-email-details">
-            <div className="email-block-message">
-              <div className="email-block-message-header">
-                <div className="email-block-sender-info">
-                  <div className="email-block-sender-row">
-                    <div className="email-block-sender-name">{config.from || 'Unknown'}</div>
-                    {config.date && <div className="email-block-sender-date">{formatEmailDate(config.date)}</div>}
-                  </div>
-                  {config.subject && <div className="email-block-subject-line">Subject: {config.subject}</div>}
+          {/* Content */}
+          <div className="email-gmail-content">
+            <div className="email-gmail-top-row">
+              <span className="email-gmail-sender">{senderName}</span>
+              {config.date && (
+                <span className="email-gmail-date">{formatEmailDate(config.date)}</span>
+              )}
+            </div>
+            <div className="email-gmail-bottom-row">
+              {config.subject && (
+                <span className="email-gmail-subject">{config.subject}</span>
+              )}
+              {snippet && (
+                <span className="email-gmail-snippet">
+                  {config.subject ? ` — ${snippet}` : snippet}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Chevron */}
+          <ChevronDown
+            size={15}
+            className={`email-gmail-chevron${expanded ? ' email-gmail-chevron-open' : ''}`}
+          />
+        </div>
+
+        {/* Expanded email detail */}
+        {expanded && (
+          <div className="email-gmail-expanded">
+            {/* Subject heading */}
+            {config.subject && (
+              <div className="email-gmail-exp-subject">{config.subject}</div>
+            )}
+
+            {/* Metadata strip */}
+            <div className="email-gmail-exp-meta">
+              <div
+                className="email-gmail-exp-avatar"
+                style={{ backgroundColor: color }}
+              >
+                {initial}
+              </div>
+              <div className="email-gmail-exp-meta-right">
+                <div className="email-gmail-exp-sender">{config.from || 'Unknown'}</div>
+                <div className="email-gmail-exp-to-date">
+                  {config.to && <span>to {config.to}</span>}
+                  {config.date && <span className="email-gmail-exp-fulldate">{formatFullDate(config.date)}</span>}
                 </div>
               </div>
-              <div className="email-block-message-body">{config.latest_email}</div>
+              {gmailUrl && (
+                <button
+                  className="email-gmail-open-btn"
+                  onClick={(e) => { e.stopPropagation(); window.open(gmailUrl, '_blank') }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  title="Open in Gmail"
+                >
+                  <ExternalLink size={14} />
+                </button>
+              )}
             </div>
+
+            {/* Email body */}
+            <div className="email-gmail-exp-body">{config.latest_email}</div>
+
+            {/* Earlier conversation */}
             {hasPastSummary && (
-              <div className="email-block-context-section">
-                <div className="email-block-context-label">Earlier conversation</div>
-                <div className="email-block-context-summary">{config.past_summary}</div>
+              <div className="email-gmail-exp-history">
+                <div className="email-gmail-exp-history-label">Earlier conversation</div>
+                <div className="email-gmail-exp-history-body">{config.past_summary}</div>
+              </div>
+            )}
+
+            {/* Draft compose area */}
+            {hasDraft && (
+              <div className="email-gmail-compose">
+                <div className="email-gmail-compose-to">
+                  <span className="email-gmail-compose-to-label">Reply</span>
+                  {config.from && (
+                    <span className="email-gmail-compose-to-addr">{config.from}</span>
+                  )}
+                </div>
+                <textarea
+                  key={resolvedTheme}
+                  ref={bodyRef}
+                  className="email-gmail-compose-body"
+                  value={draftBody}
+                  onChange={(e) => setDraftBody(e.target.value)}
+                  onBlur={() => commitDraft(draftBody)}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => e.stopPropagation()}
+                  placeholder="Write your reply..."
+                  rows={3}
+                />
+                <div className="email-gmail-compose-footer">
+                  <button
+                    className="email-gmail-btn email-gmail-btn-primary"
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onClick={(e) => { e.stopPropagation(); draftWithAssistant() }}
+                  >
+                    <MessageSquare size={13} />
+                    {hasDraft ? 'Refine with Rowboat' : 'Draft with Rowboat'}
+                  </button>
+                  {hasDraft && (
+                    <button
+                      className="email-gmail-btn"
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        navigator.clipboard.writeText(draftBody).then(() => {
+                          setCopied(true)
+                          setTimeout(() => setCopied(false), 2000)
+                        }).catch(() => {
+                          const textarea = document.createElement('textarea')
+                          textarea.value = draftBody
+                          document.body.appendChild(textarea)
+                          textarea.select()
+                          document.execCommand('copy')
+                          document.body.removeChild(textarea)
+                          setCopied(true)
+                          setTimeout(() => setCopied(false), 2000)
+                        })
+                      }}
+                    >
+                      {copied ? <Check size={13} /> : <Copy size={13} />}
+                      {copied ? 'Copied!' : 'Copy draft'}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Actions when no draft yet */}
+            {!hasDraft && (
+              <div className="email-gmail-actions">
+                <button
+                  className="email-gmail-btn email-gmail-btn-primary"
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => { e.stopPropagation(); draftWithAssistant() }}
+                >
+                  <MessageSquare size={13} />
+                  Draft with Rowboat
+                </button>
               </div>
             )}
           </div>
         )}
-
-        {/* Draft section */}
-        {hasDraft && (
-          <div className="email-block-draft-section">
-            <div className="email-block-draft-label">Draft reply</div>
-            <textarea
-              key={resolvedTheme}
-              ref={bodyRef}
-              className="email-draft-block-body-input"
-              value={draftBody}
-              onChange={(e) => setDraftBody(e.target.value)}
-              onBlur={() => commitDraft(draftBody)}
-              placeholder="Write your reply..."
-              rows={3}
-            />
-          </div>
-        )}
-
-        {/* Action buttons */}
-        <div className="email-block-actions">
-          <button
-            className="email-block-gmail-btn email-block-gmail-btn-primary"
-            onClick={draftWithAssistant}
-          >
-            <MessageSquare size={13} />
-            {hasDraft ? 'Refine with Rowboat' : 'Draft with Rowboat'}
-          </button>
-          {hasDraft && (
-            <button
-              className="email-block-gmail-btn email-block-gmail-btn-primary"
-              onClick={() => {
-                navigator.clipboard.writeText(draftBody).then(() => {
-                  setCopied(true)
-                  setTimeout(() => setCopied(false), 2000)
-                }).catch(() => {
-                  // Fallback for Electron contexts where clipboard API may fail
-                  const textarea = document.createElement('textarea')
-                  textarea.value = draftBody
-                  document.body.appendChild(textarea)
-                  textarea.select()
-                  document.execCommand('copy')
-                  document.body.removeChild(textarea)
-                  setCopied(true)
-                  setTimeout(() => setCopied(false), 2000)
-                })
-              }}
-            >
-              {copied ? <Check size={13} /> : <Copy size={13} />}
-              {copied ? 'Copied!' : 'Copy draft'}
-            </button>
-          )}
-          {gmailUrl && (
-            <button
-              className="email-block-gmail-btn"
-              onClick={() => window.open(gmailUrl, '_blank')}
-            >
-              <ExternalLink size={13} />
-              Open in Gmail
-            </button>
-          )}
-        </div>
       </div>
     </NodeViewWrapper>
   )
