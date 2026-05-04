@@ -1757,6 +1757,194 @@
   font-size: 14px;
 }
 
+/* Reply / Forward pill buttons (in expanded view) */
+.tiptap-editor .ProseMirror .email-gmail-reply-row {
+  display: flex;
+  gap: 8px;
+  padding-left: 50px;
+}
+
+.tiptap-editor .ProseMirror .email-gmail-reply-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 20px;
+  font-size: 13px;
+  font-weight: 500;
+  color: color-mix(in srgb, var(--foreground) 65%, transparent);
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--foreground) 22%, transparent);
+  border-radius: 18px;
+  cursor: pointer;
+  transition: background 0.12s ease, box-shadow 0.12s ease;
+  font-family: 'Google Sans', Roboto, RobotoDraft, Helvetica, Arial, sans-serif;
+}
+
+.tiptap-editor .ProseMirror .email-gmail-reply-btn:hover {
+  background: color-mix(in srgb, var(--foreground) 6%, transparent);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+  color: var(--foreground);
+}
+
+.tiptap-editor .ProseMirror .email-gmail-reply-row-end {
+  margin-left: auto;
+}
+
+/* Icon-only buttons (open in Gmail, remove) */
+.tiptap-editor .ProseMirror .email-gmail-icon-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  background: none;
+  color: color-mix(in srgb, var(--foreground) 45%, transparent);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.tiptap-editor .ProseMirror .email-gmail-icon-btn:hover {
+  background: color-mix(in srgb, var(--foreground) 8%, transparent);
+  color: var(--foreground);
+}
+
+.tiptap-editor .ProseMirror .email-gmail-exp-meta-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* ---- Emails inbox block (language-emails) ---- */
+
+.tiptap-editor .ProseMirror .email-inbox-card {
+  position: relative;
+  background-color: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 1px 2px 0 rgba(0,0,0,0.1), 0 1px 3px 1px rgba(0,0,0,0.06);
+  overflow: hidden;
+  font-family: 'Google Sans', Roboto, RobotoDraft, Helvetica, Arial, sans-serif;
+}
+
+.tiptap-editor .ProseMirror .email-inbox-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: color-mix(in srgb, var(--foreground) 40%, transparent);
+  padding: 10px 16px 6px;
+  border-bottom: 1px solid color-mix(in srgb, var(--foreground) 7%, transparent);
+}
+
+.tiptap-editor .ProseMirror .email-inbox-list {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Each email row */
+.tiptap-editor .ProseMirror .email-inbox-row {
+  border-bottom: 1px solid color-mix(in srgb, var(--foreground) 7%, transparent);
+}
+
+.tiptap-editor .ProseMirror .email-inbox-row:last-child {
+  border-bottom: none;
+}
+
+.tiptap-editor .ProseMirror .email-inbox-row-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px 8px 10px;
+  cursor: pointer;
+  transition: background 0.1s ease;
+  user-select: none;
+}
+
+.tiptap-editor .ProseMirror .email-inbox-row-header:hover {
+  background: color-mix(in srgb, var(--foreground) 4%, transparent);
+}
+
+.tiptap-editor .ProseMirror .email-inbox-row.email-inbox-row-expanded .email-inbox-row-header {
+  background: color-mix(in srgb, var(--foreground) 3%, transparent);
+}
+
+/* Avatar */
+.tiptap-editor .ProseMirror .email-inbox-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 500;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+/* Sender name — fixed width, like Gmail's column */
+.tiptap-editor .ProseMirror .email-inbox-sender {
+  width: 160px;
+  flex-shrink: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: 'Google Sans', Roboto, RobotoDraft, Helvetica, Arial, sans-serif;
+}
+
+/* Subject + snippet — fills remaining space */
+.tiptap-editor .ProseMirror .email-inbox-middle {
+  flex: 1;
+  min-width: 0;
+  font-size: 13.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tiptap-editor .ProseMirror .email-inbox-subject {
+  font-weight: 500;
+  color: var(--foreground);
+}
+
+.tiptap-editor .ProseMirror .email-inbox-snippet {
+  color: color-mix(in srgb, var(--foreground) 45%, transparent);
+  font-weight: 400;
+}
+
+/* Date */
+.tiptap-editor .ProseMirror .email-inbox-date {
+  font-size: 12px;
+  color: color-mix(in srgb, var(--foreground) 50%, transparent);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* Expand chevron */
+.tiptap-editor .ProseMirror .email-inbox-chevron {
+  flex-shrink: 0;
+  color: color-mix(in srgb, var(--foreground) 35%, transparent);
+  transition: transform 0.15s ease;
+}
+
+.tiptap-editor .ProseMirror .email-inbox-chevron.email-inbox-chevron-open {
+  transform: rotate(180deg);
+}
+
+/* Expanded content padding */
+.tiptap-editor .ProseMirror .email-inbox-expanded-wrap {
+  padding: 0 16px 16px 16px;
+  border-top: 1px solid color-mix(in srgb, var(--foreground) 6%, transparent);
+}
+
 /* Transcript block */
 .tiptap-editor .ProseMirror .transcript-block-toggle {
   display: flex;

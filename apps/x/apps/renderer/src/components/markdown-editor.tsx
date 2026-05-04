@@ -20,7 +20,7 @@ import { IframeBlockExtension } from '@/extensions/iframe-block'
 import { ChartBlockExtension } from '@/extensions/chart-block'
 import { TableBlockExtension } from '@/extensions/table-block'
 import { CalendarBlockExtension } from '@/extensions/calendar-block'
-import { EmailBlockExtension } from '@/extensions/email-block'
+import { EmailBlockExtension, EmailsBlockExtension } from '@/extensions/email-block'
 import { TranscriptBlockExtension } from '@/extensions/transcript-block'
 import { MermaidBlockExtension } from '@/extensions/mermaid-block'
 import { Markdown } from 'tiptap-markdown'
@@ -707,6 +707,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       ChartBlockExtension,
       TableBlockExtension,
       CalendarBlockExtension,
+      EmailsBlockExtension,
       EmailBlockExtension,
       TranscriptBlockExtension,
       MermaidBlockExtension,
