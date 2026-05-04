@@ -107,15 +107,12 @@ Security: ` + "`eval`" + ` runs in the active tab's origin with the user's cooki
 
 ## Companion Tools
 
-### http-fetch
-Use for **unauthenticated** API calls (e.g., ` + "`api.github.com`" + `, public REST endpoints) where you don't need the browser's logged-in session. Often faster and cleaner than DOM scraping — many sites expose a public API that returns the same data. For authenticated requests that require the user's browser cookies, use ` + "`browser-control`" + ` with ` + "`action: \"eval\"`" + ` and call ` + "`fetch()`" + ` inside the page context instead.
-
 ### load-browser-skill
 Rowboat caches a library of browser skills (from ` + "`browser-use/browser-harness`" + `) indexed by both **domain** (github, linkedin, amazon, booking, …) and **interaction type** within a domain (e.g. ` + "`github/repo-actions`" + `, ` + "`github/scraping`" + `, ` + "`arxiv-bulk/*`" + `). Whenever ` + "`browser-control`" + ` returns a ` + "`suggestedSkills`" + ` array — which it does on ` + "`navigate`" + `, ` + "`new-tab`" + `, and ` + "`read-page`" + ` — treat it as a required reading step, not optional. Pick the entry that matches the current task (domain match first, then the interaction-specific variant if one exists) and call ` + "`load-browser-skill({ id: \"<id>\" })`" + ` before attempting the action.
 
 You can also proactively call ` + "`load-browser-skill({ action: \"list\", site: \"<site>\" })`" + ` when you know you're about to work on a site, to see what skills exist even if ` + "`suggestedSkills`" + ` is empty (e.g. before navigating).
 
-These skills are written against a Python harness, so treat them as **reference knowledge** — adapt the recipes into the actions above (especially ` + "`eval`" + ` + ` + "`http-fetch`" + ` for the ` + "`js(...)`" + ` and ` + "`http_get(...)`" + ` calls they use). The selectors, DOM gotchas, and sequencing are the durable part; the exact function names are not.
+These skills are written against a Python harness, so treat them as **reference knowledge** — adapt the recipes into the actions above, especially structured browser actions plus ` + "`eval`" + ` for the ` + "`js(...)`" + ` and ` + "`http_get(...)`" + ` style calls they use. **Do not look for or call ` + "`http-fetch`" + ` — it is not available.** If a harness recipe suggests hitting a public API directly, either use ` + "`eval`" + ` with ` + "`fetch()`" + ` inside the page context when that is truly necessary, or fall back to reading and interacting with the page itself. The selectors, DOM gotchas, and sequencing are the durable part; the exact function names are not.
 
 ## Important Rules
 
@@ -125,7 +122,7 @@ These skills are written against a Python harness, so treat them as **reference 
 - After navigation, clicking, typing, pressing, or scrolling, use the returned page snapshot instead of assuming the page state.
 - **Always check ` + "`suggestedSkills`" + ` after ` + "`navigate`" + `, ` + "`new-tab`" + `, or ` + "`read-page`" + `, and load the matching domain or interaction skill before acting.** Skipping this step is the single most common way to waste a dozen failed clicks on a site whose quirks are already documented. If the array is empty, proceed normally — but don't skip the check.
 - Prefer structured actions (click/type/press) over ` + "`eval`" + ` when both work. Reach for ` + "`eval`" + ` when the site fights synthetic events, when you need to submit a form directly, or when you need to read DOM state the structured actions don't surface.
-- For read-only data, check if ` + "`http-fetch`" + ` against the site's public API works before scraping the DOM.
+- Do not try to use ` + "`http-fetch`" + `. If a browser-harness recipe mentions ` + "`http_get(...)`" + ` or a public API shortcut, adapt it to ` + "`eval`" + ` or DOM-based browsing instead.
 - Use Rowboat's browser for live interaction. Use web search tools for research where a live session is unnecessary.
 - Do not wrap browser URLs or browser pages in ` + "```filepath" + ` blocks. Filepath cards are only for real files on disk, not web pages or browser tabs.
 - If you mention a page the browser opened, use plain text for the URL/title instead of trying to create a clickable file card.
