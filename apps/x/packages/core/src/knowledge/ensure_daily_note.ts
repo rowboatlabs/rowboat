@@ -64,13 +64,11 @@ After the block, you MAY add one short markdown line per event giving useful pre
         track: {
             trackId: 'emails',
             instruction:
-`Maintain a digest of email threads worth the user's attention today, rendered as zero or more email blocks (one per thread).
+`Maintain a digest of email threads worth the user's attention today. Output everything as a single fenced code block with language "emails" (plural) — never individual "email" (singular) blocks. The content must be a JSON object: {"title":"Today's Emails","emails":[...]} where each entry has threadId, subject, from, date, summary, and latest_email. For threads that need a reply, add draft_response written in the user's voice — direct, informal, no fluff. For FYI threads, omit draft_response.
 
-Event-driven path (primary): the agent message will include a "Gmail sync update" digest payload describing one or more freshly-synced threads from a single sync run. The digest lists each thread with its subject, sender, date, threadId, and body. Iterate over every thread in the payload and decide per thread whether it warrants surfacing. Skip marketing, auto-notifications, closed-out threads, and other low-signal mail. For threads that are attention-worthy, integrate them into the existing digest: add a new email block for a new threadId, or update the existing block if the threadId is already shown. If NONE of the threads in the payload are attention-worthy, skip the update — do NOT call update-track-content. Emit at most one update-track-content call that covers the full set of changes from this event.
+Event-driven path (primary): the agent message will include a "Gmail sync update" digest payload describing one or more freshly-synced threads from a single sync run. The digest lists each thread with its subject, sender, date, threadId, and body. Iterate over every thread in the payload and decide per thread whether it warrants surfacing. Skip marketing, auto-notifications, closed-out threads, and other low-signal mail. For threads that are attention-worthy, integrate them into the existing digest: add a new entry for a new threadId, or update the existing entry if the threadId is already shown. If NONE of the threads in the payload are attention-worthy, skip the update — do NOT call update-track-content. Emit at most one update-track-content call that covers the full set of changes from this event.
 
 Manual path (fallback): with no event payload, scan gmail_sync/ via workspace-readdir (skip sync_state.json and attachments/). Read threads with workspace-readFile. Prioritize threads whose frontmatter action field is "reply" or "respond", plus other high-signal recent threads.
-
-Each email block should include threadId, subject, from, date, summary, and latest_email. For threads that need a reply, add a draft_response written in the user's voice — direct, informal, no fluff. For FYI threads, omit draft_response.
 
 If there is genuinely nothing to surface, output the single line: No new emails.
 

@@ -163,15 +163,15 @@ If there are events, include them:
 1. Use \`workspace-readdir\` with path \`gmail_sync\` to list files (skip \`sync_state.json\` and \`attachments/\`)
 2. Use \`workspace-readFile\` to read the email markdown files (e.g. \`gmail_sync/threadid123.md\`)
 3. Check the frontmatter \`action\` field — emails with \`action: reply\` or \`action: respond\` need a response
-4. For emails needing a response, output \\\`\\\`\\\`email blocks with a \`draft_response\`. Write the draft in the user's voice — direct, informal, no fluff. Example:
+4. Output ALL emails (both action items and FYI) in a single \\\`\\\`\\\`emails block as a JSON array. Emails needing a response get a \`draft_response\`. Write drafts in the user's voice — direct, informal, no fluff. Example:
 
 \`\`\`
-\\\`\\\`\\\`email
-{"threadId":"abc123","summary":"Payment confirmation","subject":"Google services payment","from":"Sender <sender@example.com>","date":"2026-04-01T11:28:39+05:30","latest_email":"Hi, I've made the payment...","draft_response":"Thanks for confirming. I'll update our records."}
+\\\`\\\`\\\`emails
+{"title":"Today's Emails","emails":[{"threadId":"abc123","summary":"Payment confirmation","subject":"Google services payment","from":"Sender <sender@example.com>","date":"2026-04-01T11:28:39+05:30","latest_email":"Hi, I've made the payment...","draft_response":"Thanks for confirming. I'll update our records."},{"threadId":"def456","summary":"Security alert","subject":"New sign-in from Chrome","from":"Google <no-reply@accounts.google.com>","date":"2026-04-01T09:15:00+05:30","latest_email":"A new sign-in to your account was detected."}]}
 \\\`\\\`\\\`
 \`\`\`
 
-5. For other important/recent emails, output \\\`\\\`\\\`email blocks without \`draft_response\` as FYI items
+5. FYI emails go in the same \`emails\` array without a \`draft_response\`
 6. **Recency matters.** Since this refreshes every 15 minutes, prioritize emails that arrived since the last refresh. On the first run of the day (morning), include notable emails from the last 24 hours. On subsequent runs, focus on what's new — don't re-list emails the user has already seen unless their status changed (e.g., a thread got a new reply).
 7. Add a brief take on emails where it's helpful — flag what's worth reading vs. what's noise. Be direct: "This is a cold pitch, probably skip" or "Worth reading — they're asking about pricing for a team of 50."
 8. If no new emails have come in since the last refresh, just say "No new emails" or omit the section entirely. Don't re-surface stale items.
@@ -200,7 +200,7 @@ This is NOT a generic task list. These are the things the user should actually f
 ## Output format
 - Start with the date heading as described above
 - Use clean markdown with the section headers (## Up Next, ## Calendar, ## Emails, ## What You Missed, ## Today's Priorities)
-- Use \\\`\\\`\\\`calendar and \\\`\\\`\\\`email code blocks where specified — these render as interactive UI blocks
+- Use \\\`\\\`\\\`calendar and \\\`\\\`\\\`emails (plural) code blocks where specified — these render as interactive UI blocks. Never use \\\`\\\`\\\`email (singular)
 - Keep the overall brief **scannable and concise** — this should take under 30 seconds to read on a refresh, under 60 seconds for the morning brief
 - Write in a natural, conversational tone throughout — you're briefing a person, not generating a report
 - **Sections can be omitted** if they have nothing to show. Don't include empty sections with filler text. The brief should get shorter as the day goes on and things get resolved.

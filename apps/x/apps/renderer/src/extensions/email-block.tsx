@@ -296,20 +296,20 @@ function EmailsBlockView({ node, deleteNode }: {
                 >
                   <div className="email-inbox-avatar" style={{ backgroundColor: color }}>{initial}</div>
 
-                  <div className="email-inbox-sender">{senderName}</div>
-
-                  <div className="email-inbox-middle">
-                    {email.subject && <span className="email-inbox-subject">{email.subject}</span>}
-                    {snippet && (
-                      <span className="email-inbox-snippet">
-                        {email.subject ? ` — ${snippet}` : snippet}
-                      </span>
-                    )}
+                  <div className="email-inbox-content">
+                    <div className="email-inbox-top-row">
+                      <span className="email-inbox-sender">{senderName}</span>
+                      {email.date && <span className="email-inbox-date">{formatEmailDate(email.date)}</span>}
+                    </div>
+                    <div className="email-inbox-bottom-row">
+                      {email.subject && <span className="email-inbox-subject">{email.subject}</span>}
+                      {snippet && (
+                        <span className="email-inbox-snippet">
+                          {email.subject ? ` — ${snippet}` : snippet}
+                        </span>
+                      )}
+                    </div>
                   </div>
-
-                  {email.date && (
-                    <div className="email-inbox-date">{formatEmailDate(email.date)}</div>
-                  )}
 
                   <ChevronDown
                     size={14}
