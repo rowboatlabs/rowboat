@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
+
 /* Tiptap Editor Styles */
 
 .tiptap-editor {
@@ -1424,6 +1426,10 @@
   box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.1), 0 1px 3px 1px rgba(0, 0, 0, 0.06);
 }
 
+.tiptap-editor .ProseMirror .email-block-card-gmail {
+  font-family: 'Google Sans', Roboto, RobotoDraft, Helvetica, Arial, sans-serif;
+}
+
 .tiptap-editor .ProseMirror .email-block-card-gmail:hover {
   background-color: var(--background);
 }
@@ -1484,6 +1490,7 @@
 .tiptap-editor .ProseMirror .email-gmail-sender {
   font-size: 14px;
   font-weight: 600;
+  font-family: 'Google Sans', Roboto, RobotoDraft, Helvetica, Arial, sans-serif;
   color: var(--foreground);
   white-space: nowrap;
   overflow: hidden;
