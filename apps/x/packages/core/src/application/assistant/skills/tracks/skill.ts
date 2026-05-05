@@ -349,6 +349,20 @@ In that flow:
 6. Keep the surrounding note scaffolding minimal but useful. The track block should be the core of the note.
 7. If the target folder is one of the structured knowledge folders (` + "`" + `knowledge/People/` + "`" + `, ` + "`" + `knowledge/Organizations/` + "`" + `, ` + "`" + `knowledge/Projects/` + "`" + `, ` + "`" + `knowledge/Topics/` + "`" + `), mirror the local note style by quickly checking a nearby note or config before writing if needed.
 
+### Background agent setup flow
+
+Sometimes the user arrives from the Background agents panel and wants help creating a new background agent without naming a note yet.
+
+In this flow, treat "background agent" and "track block" as the same feature. The user-facing term can stay "background agent", but the implementation is a track block inside a note. Do **not** claim these are different systems, and do **not** redirect the user toward standalone agent files or ` + "`" + `agent-schedule.json` + "`" + ` unless they explicitly ask for that architecture.
+
+In that flow:
+1. On the first turn, **do not create or modify anything yet**. Briefly explain what you can set up, say you will put it in ` + "`" + `knowledge/Tasks/` + "`" + ` by default, and ask what it should monitor plus how often it should run.
+2. **Do not** ask the user where the results should live unless they explicitly said they want a different folder or there is a real ambiguity you cannot resolve.
+3. If the user clearly confirms later, treat ` + "`" + `knowledge/Tasks/` + "`" + ` as the default target folder.
+4. Before creating a new note there, search ` + "`" + `knowledge/Tasks/` + "`" + ` for an existing matching note and update it if one already exists.
+5. If ` + "`" + `knowledge/Tasks/` + "`" + ` does not exist, create it as part of setup instead of bouncing back to ask.
+6. Keep the surrounding note scaffolding minimal but useful. The track block should be the core of the note.
+
 ## The Exact Text to Insert
 
 Write it verbatim like this (including the blank line between fence and target):

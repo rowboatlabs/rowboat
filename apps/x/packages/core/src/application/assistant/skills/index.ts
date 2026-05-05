@@ -7,7 +7,6 @@ import draftEmailsSkill from "./draft-emails/skill.js";
 import mcpIntegrationSkill from "./mcp-integration/skill.js";
 import meetingPrepSkill from "./meeting-prep/skill.js";
 import organizeFilesSkill from "./organize-files/skill.js";
-import backgroundAgentsSkill from "./background-agents/skill.js";
 import createPresentationsSkill from "./create-presentations/skill.js";
 
 import appNavigationSkill from "./app-navigation/skill.js";
@@ -64,12 +63,6 @@ const definitions: SkillDefinition[] = [
     title: "Organize Files",
     summary: "Find, organize, and tidy up files on the user's machine. Move files to folders, clean up Desktop/Downloads, locate specific files.",
     content: organizeFilesSkill,
-  },
-  {
-    id: "background-agents",
-    title: "Background Agents",
-    summary: "Creating, editing, and scheduling background agents. Configure schedules in agent-schedule.json and build multi-agent workflows.",
-    content: backgroundAgentsSkill,
   },
   {
     id: "builtin-tools",

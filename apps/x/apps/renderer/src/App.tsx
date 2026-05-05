@@ -330,6 +330,24 @@ const buildSuggestedTopicExplorePrompt = ({
   ].join('\n')
 }
 
+const buildBackgroundAgentSetupPrompt = () => [
+  'Help me set up a background agent.',
+  'In this flow, a background agent is the same thing as a note-based track block. Do not tell me they are separate concepts.',
+  'Do not propose a separate standalone agent, workflow file, or agent-schedule.json setup unless I explicitly ask for that.',
+  'Assume the default home for this setup is knowledge/Tasks/. If that folder does not exist, create it later when setting things up.',
+  'Start with a short, plain-English explanation of what a background agent is.',
+  'Do not make the explanation too terse.',
+  'Give 2 or 3 simple examples of the kinds of things a background agent could help keep updated.',
+  'Do not mention triggers, event-based vs schedule-based behavior, track blocks, skills, note paths, or other internal implementation details unless I ask.',
+  'In the first reply, tell me that you will create this in my Tasks folder by default.',
+  'Do not ask me where it should save or update results unless I explicitly say I want it somewhere else.',
+  'Then ask only what I want it to monitor or update and how often I want it to run.',
+  'Keep it concise and friendly, but not abrupt.',
+  'Do not give me a long taxonomy, a big list of options, or a multi-step breakdown unless I ask for more detail.',
+  'Do not create or modify anything yet.',
+  'If I confirm later, load the tracks skill, check for a matching note under knowledge/Tasks/ first, and create one there if needed.',
+].join('\n')
+
 const normalizeUsage = (usage?: Partial<LanguageModelUsage> | null): LanguageModelUsage | null => {
   if (!usage) return null
   const hasNumbers = Object.values(usage).some((value) => typeof value === 'number')
@@ -4610,6 +4628,9 @@ function App() {
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                   <BackgroundAgentsView
                     onOpenNote={(path) => navigateToFile(path)}
+                    onAddNewBackgroundAgent={() => {
+                      submitFromPalette(buildBackgroundAgentSetupPrompt(), null)
+                    }}
                   />
                 </div>
               ) : selectedPath && isBaseFilePath(selectedPath) ? (
