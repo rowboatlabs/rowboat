@@ -89,6 +89,7 @@ import {
 } from "@/components/ui/context-menu"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
+import { stripKnowledgePrefix, wikiLabel } from "@/lib/wiki-links"
 import { type ActiveSection, useSidebarSection } from "@/contexts/sidebar-context"
 import { ConnectorsPopover } from "@/components/connectors-popover"
 import { HelpPopover } from "@/components/help-popover"
@@ -144,6 +145,11 @@ type BackgroundTaskItem = {
   lastRunAt?: string | null
 }
 
+type TrackNoteItem = {
+  path: string
+  trackCount: number
+}
+
 type ServiceEventType = z.infer<typeof ServiceEvent>
 
 const MAX_SYNC_EVENTS = 1000
@@ -178,6 +184,151 @@ function collectServiceErrors(events: ServiceEventType[]): Map<string, string> {
     }
   }
   return errors
+}
+
+function isKnowledgeMarkdownPath(path: string | undefined): boolean {
+  return typeof path === "string" && path.startsWith("knowledge/") && path.endsWith(".md")
+}
+
+function BackgroundAgentsShortcut({
+  selectedPath,
+  onSelectFile,
+}: {
+  selectedPath: string | null
+  onSelectFile: (path: string, kind: "file" | "dir") => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [notes, setNotes] = useState<TrackNoteItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const reloadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const loadNotes = useCallback(async () => {
+    setLoading(true)
+    try {
+      const result = await window.ipc.invoke("track:listNotes", null)
+      setNotes(result.notes)
+      setError(null)
+    } catch (err) {
+      console.error("Failed to load background agent notes:", err)
+      setError("Couldn't load background agents.")
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadNotes()
+  }, [loadNotes])
+
+  useEffect(() => {
+    const scheduleReload = () => {
+      if (reloadTimeoutRef.current) clearTimeout(reloadTimeoutRef.current)
+      reloadTimeoutRef.current = setTimeout(() => {
+        reloadTimeoutRef.current = null
+        void loadNotes()
+      }, 200)
+    }
+
+    const cleanup = window.ipc.on("workspace:didChange", (event) => {
+      switch (event.type) {
+        case "created":
+        case "deleted":
+        case "changed":
+          if (isKnowledgeMarkdownPath(event.path)) scheduleReload()
+          break
+        case "moved":
+          if (isKnowledgeMarkdownPath(event.from) || isKnowledgeMarkdownPath(event.to)) {
+            scheduleReload()
+          }
+          break
+        case "bulkChanged":
+          if (!event.paths || event.paths.some(isKnowledgeMarkdownPath)) {
+            scheduleReload()
+          }
+          break
+      }
+    })
+
+    return () => {
+      cleanup()
+      if (reloadTimeoutRef.current) clearTimeout(reloadTimeoutRef.current)
+    }
+  }, [loadNotes])
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen} className="flex flex-col gap-0.5">
+      <CollapsibleTrigger asChild>
+        <button
+          type="button"
+          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-sidebar-foreground/80 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+        >
+          <Bot className="size-4" />
+          <span className="min-w-0 flex-1 text-left">Background agents</span>
+          {loading ? (
+            <LoaderIcon className="size-3.5 animate-spin text-sidebar-foreground/50" />
+          ) : notes.length > 0 ? (
+            <span className="rounded-full bg-sidebar-accent px-1.5 py-0.5 text-[10px] font-medium leading-none text-sidebar-foreground/70">
+              {notes.length}
+            </span>
+          ) : null}
+          <ChevronRight className={cn("size-4 shrink-0 transition-transform", open && "rotate-90")} />
+        </button>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="pl-6">
+        <div className="flex flex-col gap-1 py-1 pr-1">
+          {loading ? (
+            <div className="flex items-center gap-2 px-2 py-1 text-xs text-sidebar-foreground/60">
+              <LoaderIcon className="size-3.5 animate-spin" />
+              <span>Loading notes…</span>
+            </div>
+          ) : error ? (
+            <p className="px-2 py-1 text-xs text-sidebar-foreground/60">{error}</p>
+          ) : notes.length === 0 ? (
+            <p className="px-2 py-1 text-xs text-sidebar-foreground/60">
+              No notes with background agents yet.
+            </p>
+          ) : (
+            notes.map((note) => {
+              const relativePath = stripKnowledgePrefix(note.path)
+              const lastSlash = relativePath.lastIndexOf("/")
+              const folderPath = lastSlash >= 0 ? relativePath.slice(0, lastSlash) : ""
+              const isSelected = selectedPath === note.path
+
+              return (
+                <button
+                  key={note.path}
+                  type="button"
+                  onClick={() => onSelectFile(note.path, "file")}
+                  title={relativePath}
+                  className={cn(
+                    "flex items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors",
+                    isSelected
+                      ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                      : "text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                  )}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-xs font-medium">{wikiLabel(note.path)}</div>
+                    {folderPath && (
+                      <div className="truncate text-[10px] text-sidebar-foreground/50">
+                        {folderPath}
+                      </div>
+                    )}
+                  </div>
+                  {note.trackCount > 1 && (
+                    <span className="shrink-0 rounded-full bg-sidebar-accent px-1.5 py-0.5 text-[10px] font-medium leading-none text-sidebar-foreground/70">
+                      {note.trackCount}
+                    </span>
+                  )}
+                </button>
+              )
+            })
+          )}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  )
 }
 
 type TasksActions = {
@@ -679,6 +830,10 @@ export function SidebarContentPanel({
               <span>Suggested Topics</span>
             </button>
           )}
+          <BackgroundAgentsShortcut
+            selectedPath={selectedPath}
+            onSelectFile={onSelectFile}
+          />
         </div>
       </SidebarHeader>
       <SidebarContent>

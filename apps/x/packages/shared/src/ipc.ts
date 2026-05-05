@@ -662,6 +662,15 @@ const ipcSchemas = {
       error: z.string().optional(),
     }),
   },
+  'track:listNotes': {
+    req: z.null(),
+    res: z.object({
+      notes: z.array(z.object({
+        path: RelPath,
+        trackCount: z.number().int().positive(),
+      })),
+    }),
+  },
   // Embedded browser (WebContentsView) channels
   'browser:setBounds': {
     req: z.object({

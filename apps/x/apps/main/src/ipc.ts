@@ -52,6 +52,7 @@ import { getInstallationId } from '@x/core/dist/analytics/installation.js';
 import { API_URL } from '@x/core/dist/config/env.js';
 import {
   fetchYaml,
+  listNotesWithTracks,
   updateTrackBlock,
   replaceTrackBlockYaml,
   deleteTrackBlock,
@@ -831,6 +832,10 @@ export function setupIpcHandlers() {
       } catch (err) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };
       }
+    },
+    'track:listNotes': async () => {
+      const notes = await listNotesWithTracks();
+      return { notes };
     },
     // Billing handler
     'billing:getInfo': async () => {

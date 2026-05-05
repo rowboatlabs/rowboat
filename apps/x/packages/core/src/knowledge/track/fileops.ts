@@ -70,6 +70,56 @@ export async function fetch(filePath: string, trackId: string): Promise<z.infer<
     return blocks.find(b => b.track.trackId === trackId) ?? null;
 }
 
+export async function listNotesWithTracks(): Promise<Array<{ path: string; trackCount: number }>> {
+    async function walk(relativeDir = ''): Promise<string[]> {
+        const dirPath = absPath(relativeDir);
+        try {
+            const entries = await fs.readdir(dirPath, { withFileTypes: true });
+            const files: string[] = [];
+
+            for (const entry of entries) {
+                if (entry.name.startsWith('.')) continue;
+
+                const childRelPath = relativeDir
+                    ? path.posix.join(relativeDir, entry.name)
+                    : entry.name;
+
+                if (entry.isDirectory()) {
+                    files.push(...await walk(childRelPath));
+                    continue;
+                }
+
+                if (entry.isFile() && entry.name.toLowerCase().endsWith('.md')) {
+                    files.push(childRelPath);
+                }
+            }
+
+            return files;
+        } catch {
+            return [];
+        }
+    }
+
+    const markdownFiles = await walk();
+    const notes = await Promise.all(markdownFiles.map(async (relativePath) => {
+        const tracks = await fetchAll(relativePath);
+        if (tracks.length === 0) return null;
+        return {
+            path: `knowledge/${relativePath}`,
+            trackCount: tracks.length,
+        };
+    }));
+
+    return notes
+        .filter((note): note is { path: string; trackCount: number } => note !== null)
+        .sort((a, b) => {
+            const aName = path.basename(a.path, '.md').toLowerCase();
+            const bName = path.basename(b.path, '.md').toLowerCase();
+            if (aName !== bName) return aName.localeCompare(bName);
+            return a.path.localeCompare(b.path);
+        });
+}
+
 /**
  * Fetch a track block and return its canonical YAML string (or null if not found).
  * Useful for IPC handlers that need to return the fresh YAML without taking a
