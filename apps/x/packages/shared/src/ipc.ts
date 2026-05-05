@@ -662,12 +662,32 @@ const ipcSchemas = {
       error: z.string().optional(),
     }),
   },
+  'track:setNoteActive': {
+    req: z.object({
+      path: RelPath,
+      active: z.boolean(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      note: z.object({
+        path: RelPath,
+        trackCount: z.number().int().positive(),
+        createdAt: z.string().nullable(),
+        lastRunAt: z.string().nullable(),
+        isActive: z.boolean(),
+      }).optional(),
+      error: z.string().optional(),
+    }),
+  },
   'track:listNotes': {
     req: z.null(),
     res: z.object({
       notes: z.array(z.object({
         path: RelPath,
         trackCount: z.number().int().positive(),
+        createdAt: z.string().nullable(),
+        lastRunAt: z.string().nullable(),
+        isActive: z.boolean(),
       })),
     }),
   },

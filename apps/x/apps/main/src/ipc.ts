@@ -53,6 +53,7 @@ import { API_URL } from '@x/core/dist/config/env.js';
 import {
   fetchYaml,
   listNotesWithTracks,
+  setNoteTracksActive,
   updateTrackBlock,
   replaceTrackBlockYaml,
   deleteTrackBlock,
@@ -134,6 +135,14 @@ function resolveShellPath(filePath: string): string {
   }
 
   return workspace.resolveWorkspacePath(filePath);
+}
+
+function toKnowledgeTrackPath(filePath: string): string {
+  const normalized = filePath.replace(/\\/g, '/').replace(/^\/+/, '');
+  if (!normalized.startsWith('knowledge/')) {
+    throw new Error('Track note path must be within knowledge/')
+  }
+  return normalized.slice('knowledge/'.length)
 }
 
 type InvokeChannels = ipc.InvokeChannels;
@@ -829,6 +838,15 @@ export function setupIpcHandlers() {
       try {
         await deleteTrackBlock(args.filePath, args.trackId);
         return { success: true };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'track:setNoteActive': async (_event, args) => {
+      try {
+        const note = await setNoteTracksActive(toKnowledgeTrackPath(args.path), args.active);
+        if (!note) return { success: false, error: 'No track blocks found in note' };
+        return { success: true, note };
       } catch (err) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };
       }
