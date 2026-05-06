@@ -2111,7 +2111,7 @@ function App() {
             return next
           })
 
-          if (event.toolCallId) {
+          if (event.toolCallId && event.toolName !== 'executeCommand') {
             setToolOpenForTab(activeChatTabIdRef.current, event.toolCallId, false)
           }
 
@@ -4361,7 +4361,7 @@ function App() {
             state={toToolState(item.status)}
           />
           <ToolContent>
-            {item.streamingOutput && item.status === 'running' ? (
+            {item.streamingOutput ? (
               <AutoScrollPre className="max-h-80 overflow-auto px-4 py-3 font-mono text-xs whitespace-pre-wrap text-foreground/90">
                 <TerminalOutput raw={item.streamingOutput} />
               </AutoScrollPre>

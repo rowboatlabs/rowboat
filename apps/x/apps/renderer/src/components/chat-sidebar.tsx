@@ -20,6 +20,7 @@ import { Tool, ToolContent, ToolGroupComponent, ToolHeader, ToolTabbedContent } 
 import { WebSearchResult } from '@/components/ai-elements/web-search-result'
 import { ComposioConnectCard } from '@/components/ai-elements/composio-connect-card'
 import { PermissionRequest } from '@/components/ai-elements/permission-request'
+import { TerminalOutput } from '@/components/terminal-output'
 import { AskHumanRequest } from '@/components/ai-elements/ask-human-request'
 import { Suggestions } from '@/components/ai-elements/suggestions'
 import { type PromptInputMessage, type FileMention } from '@/components/ai-elements/prompt-input'
@@ -58,6 +59,31 @@ const streamdownComponents = { pre: MarkdownPreOverride }
 // round-trip from the input textarea. `remarkBreaks` turns single newlines
 // into <br> so typed line breaks are preserved without requiring blank lines.
 const userMessageRemarkPlugins = [...Object.values(defaultRemarkPlugins), remarkBreaks]
+
+function AutoScrollPre({ className, children }: { className?: string; children: React.ReactNode }) {
+  const ref = useRef<HTMLPreElement>(null)
+  const stickToBottom = useRef(true)
+
+  useEffect(() => {
+    const el = ref.current
+    if (el && stickToBottom.current) {
+      el.scrollTop = el.scrollHeight
+    }
+  }, [children])
+
+  const handleScroll = useCallback(() => {
+    const el = ref.current
+    if (!el) return
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 24
+    stickToBottom.current = atBottom
+  }, [])
+
+  return (
+    <pre ref={ref} onScroll={handleScroll} className={className}>
+      {children}
+    </pre>
+  )
+}
 
 /* ─── Billing error helpers ─── */
 
@@ -452,7 +478,13 @@ export function ChatSidebar({
         >
           <ToolHeader title={toolTitle} type={`tool-${item.name}`} state={toToolState(item.status)} />
           <ToolContent>
-            <ToolTabbedContent input={input} output={output} errorText={errorText} />
+            {item.streamingOutput ? (
+              <AutoScrollPre className="max-h-80 overflow-auto px-4 py-3 font-mono text-xs whitespace-pre-wrap text-foreground/90">
+                <TerminalOutput raw={item.streamingOutput} />
+              </AutoScrollPre>
+            ) : (
+              <ToolTabbedContent input={input} output={output} errorText={errorText} />
+            )}
           </ToolContent>
         </Tool>
       )
