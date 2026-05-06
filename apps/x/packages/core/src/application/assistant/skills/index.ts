@@ -7,13 +7,13 @@ import draftEmailsSkill from "./draft-emails/skill.js";
 import mcpIntegrationSkill from "./mcp-integration/skill.js";
 import meetingPrepSkill from "./meeting-prep/skill.js";
 import organizeFilesSkill from "./organize-files/skill.js";
-import backgroundAgentsSkill from "./background-agents/skill.js";
 import createPresentationsSkill from "./create-presentations/skill.js";
 
 import appNavigationSkill from "./app-navigation/skill.js";
 import browserControlSkill from "./browser-control/skill.js";
 import composioIntegrationSkill from "./composio-integration/skill.js";
 import tracksSkill from "./tracks/skill.js";
+import notifyUserSkill from "./notify-user/skill.js";
 
 const CURRENT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const CATALOG_PREFIX = "src/application/assistant/skills";
@@ -65,12 +65,6 @@ const definitions: SkillDefinition[] = [
     content: organizeFilesSkill,
   },
   {
-    id: "background-agents",
-    title: "Background Agents",
-    summary: "Creating, editing, and scheduling background agents. Configure schedules in agent-schedule.json and build multi-agent workflows.",
-    content: backgroundAgentsSkill,
-  },
-  {
     id: "builtin-tools",
     title: "Builtin Tools Reference",
     summary: "Understanding and using builtin tools (especially executeCommand for bash/shell) in agent definitions.",
@@ -111,6 +105,12 @@ const definitions: SkillDefinition[] = [
     title: "Browser Control",
     summary: "Control the embedded browser pane - open sites, inspect page state, and interact with indexed page elements.",
     content: browserControlSkill,
+  },
+  {
+    id: "notify-user",
+    title: "Notify User",
+    summary: "Send native desktop notifications with optional clickable links — including rowboat:// deep links that open a specific note, chat, or view inside the app.",
+    content: notifyUserSkill,
   },
 ];
 

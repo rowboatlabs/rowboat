@@ -70,6 +70,122 @@ export async function fetch(filePath: string, trackId: string): Promise<z.infer<
     return blocks.find(b => b.track.trackId === trackId) ?? null;
 }
 
+type TrackNoteSummary = {
+    path: string;
+    trackCount: number;
+    createdAt: string | null;
+    lastRunAt: string | null;
+    isActive: boolean;
+};
+
+async function summarizeTrackNote(
+    filePath: string,
+    tracks: z.infer<typeof TrackStateSchema>[],
+): Promise<TrackNoteSummary | null> {
+    if (tracks.length === 0) return null;
+
+    const stats = await fs.stat(absPath(filePath));
+    const createdMs = stats.birthtimeMs > 0 ? stats.birthtimeMs : stats.ctimeMs;
+
+    let latestRunAt: string | null = null;
+    let latestRunMs = -1;
+    for (const { track } of tracks) {
+        if (!track.lastRunAt) continue;
+        const candidateMs = Date.parse(track.lastRunAt);
+        if (Number.isNaN(candidateMs) || candidateMs <= latestRunMs) continue;
+        latestRunMs = candidateMs;
+        latestRunAt = track.lastRunAt;
+    }
+
+    return {
+        path: `knowledge/${filePath}`,
+        trackCount: tracks.length,
+        createdAt: createdMs > 0 ? new Date(createdMs).toISOString() : null,
+        lastRunAt: latestRunAt,
+        isActive: tracks.every(({ track }) => track.active !== false),
+    };
+}
+
+export async function listNotesWithTracks(): Promise<TrackNoteSummary[]> {
+    async function walk(relativeDir = ''): Promise<string[]> {
+        const dirPath = absPath(relativeDir);
+        try {
+            const entries = await fs.readdir(dirPath, { withFileTypes: true });
+            const files: string[] = [];
+
+            for (const entry of entries) {
+                if (entry.name.startsWith('.')) continue;
+
+                const childRelPath = relativeDir
+                    ? path.posix.join(relativeDir, entry.name)
+                    : entry.name;
+
+                if (entry.isDirectory()) {
+                    files.push(...await walk(childRelPath));
+                    continue;
+                }
+
+                if (entry.isFile() && entry.name.toLowerCase().endsWith('.md')) {
+                    files.push(childRelPath);
+                }
+            }
+
+            return files;
+        } catch {
+            return [];
+        }
+    }
+
+    const markdownFiles = await walk();
+    const notes = await Promise.all(markdownFiles.map(async (relativePath) => {
+        try {
+            const tracks = await fetchAll(relativePath);
+            return await summarizeTrackNote(relativePath, tracks);
+        } catch {
+            return null;
+        }
+    }));
+
+    return notes
+        .filter((note): note is TrackNoteSummary => note !== null)
+        .sort((a, b) => {
+            const aName = path.basename(a.path, '.md').toLowerCase();
+            const bName = path.basename(b.path, '.md').toLowerCase();
+            if (aName !== bName) return aName.localeCompare(bName);
+            return a.path.localeCompare(b.path);
+        });
+}
+
+export async function setNoteTracksActive(filePath: string, active: boolean): Promise<TrackNoteSummary | null> {
+    return withFileLock(absPath(filePath), async () => {
+        const blocks = await fetchAll(filePath);
+        if (blocks.length === 0) return null;
+
+        const alreadyMatches = blocks.every(({ track }) => (track.active !== false) === active);
+        if (alreadyMatches) {
+            return summarizeTrackNote(filePath, blocks);
+        }
+
+        const content = await fs.readFile(absPath(filePath), 'utf-8');
+        const lines = content.split('\n');
+        const updatedBlocks = blocks
+            .map((block) => ({
+                ...block,
+                track: { ...block.track, active },
+            }))
+            .sort((a, b) => b.fenceStart - a.fenceStart);
+
+        for (const block of updatedBlocks) {
+            const yaml = stringifyYaml(block.track).trimEnd();
+            const yamlLines = yaml ? yaml.split('\n') : [];
+            lines.splice(block.fenceStart, block.fenceEnd - block.fenceStart + 1, '```track', ...yamlLines, '```');
+        }
+
+        await fs.writeFile(absPath(filePath), lines.join('\n'), 'utf-8');
+        return summarizeTrackNote(filePath, updatedBlocks);
+    });
+}
+
 /**
  * Fetch a track block and return its canonical YAML string (or null if not found).
  * Useful for IPC handlers that need to return the fresh YAML without taking a

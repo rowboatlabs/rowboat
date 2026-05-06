@@ -25,6 +25,13 @@ const ipcSchemas = {
       electron: z.string(),
     }),
   },
+  'analytics:bootstrap': {
+    req: z.null(),
+    res: z.object({
+      installationId: z.string(),
+      apiUrl: z.string(),
+    }),
+  },
   'workspace:getRoot': {
     req: z.null(),
     res: z.object({
@@ -292,6 +299,28 @@ const ipcSchemas = {
     }),
     res: z.null(),
   },
+  'app:openUrl': {
+    req: z.object({
+      url: z.string(),
+    }),
+    res: z.null(),
+  },
+  'app:takeMeetingNotes': {
+    req: z.object({
+      // Pass the raw calendar event JSON through; renderer adapts to its existing flow.
+      event: z.unknown(),
+      // When true, the renderer should also open the meeting URL (Zoom/Meet/etc.)
+      // in addition to triggering the take-notes flow.
+      openMeeting: z.boolean().optional(),
+    }),
+    res: z.null(),
+  },
+  'app:consumePendingDeepLink': {
+    req: z.null(),
+    res: z.object({
+      url: z.string().nullable(),
+    }),
+  },
   'granola:getConfig': {
     req: z.null(),
     res: z.object({
@@ -400,16 +429,10 @@ const ipcSchemas = {
       toolkits: z.array(z.string()),
     }),
   },
-  'composio:use-composio-for-google': {
+  'migration:check-composio-google': {
     req: z.null(),
     res: z.object({
-      enabled: z.boolean(),
-    }),
-  },
-  'composio:use-composio-for-google-calendar': {
-    req: z.null(),
-    res: z.object({
-      enabled: z.boolean(),
+      shouldShow: z.boolean(),
     }),
   },
   'composio:didConnect': {
@@ -637,6 +660,35 @@ const ipcSchemas = {
     res: z.object({
       success: z.boolean(),
       error: z.string().optional(),
+    }),
+  },
+  'track:setNoteActive': {
+    req: z.object({
+      path: RelPath,
+      active: z.boolean(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      note: z.object({
+        path: RelPath,
+        trackCount: z.number().int().positive(),
+        createdAt: z.string().nullable(),
+        lastRunAt: z.string().nullable(),
+        isActive: z.boolean(),
+      }).optional(),
+      error: z.string().optional(),
+    }),
+  },
+  'track:listNotes': {
+    req: z.null(),
+    res: z.object({
+      notes: z.array(z.object({
+        path: RelPath,
+        trackCount: z.number().int().positive(),
+        createdAt: z.string().nullable(),
+        lastRunAt: z.string().nullable(),
+        isActive: z.boolean(),
+      })),
     }),
   },
   // Embedded browser (WebContentsView) channels

@@ -109,19 +109,62 @@ export class BrowserViewManager extends EventEmitter {
   private visible = false;
   private bounds: BrowserBounds = { x: 0, y: 0, width: 0, height: 0 };
   private snapshotCache = new Map<string, CachedSnapshot>();
+  private cleanupWindowListeners: (() => void) | null = null;
 
   attach(window: BrowserWindow): void {
+    this.cleanupWindowListeners?.();
+    this.cleanupWindowListeners = null;
     this.window = window;
-    window.on('closed', () => {
+    const hostWebContents = window.webContents;
+
+    const resetForHostWindowNavigation = () => {
+      // Renderer refreshes do not run React unmount cleanup reliably, so the
+      // native browser view must be detached from the main process side.
+      this.visible = false;
+      this.bounds = { x: 0, y: 0, width: 0, height: 0 };
+      this.syncAttachedView();
+    };
+
+    const handleDidStartLoading = () => {
+      resetForHostWindowNavigation();
+    };
+
+    const handleRenderProcessGone = () => {
+      resetForHostWindowNavigation();
+    };
+
+    const handleClosed = () => {
+      if (this.window !== window) return;
+
+      const tabs = [...this.tabs.values()];
+      this.cleanupWindowListeners = null;
       this.window = null;
       this.browserSession = null;
+      this.bounds = { x: 0, y: 0, width: 0, height: 0 };
+      for (const tab of tabs) {
+        this.destroyTab(tab);
+      }
       this.tabs.clear();
       this.tabOrder = [];
       this.activeTabId = null;
       this.attachedTabId = null;
       this.visible = false;
       this.snapshotCache.clear();
-    });
+    };
+
+    hostWebContents.on('did-start-loading', handleDidStartLoading);
+    hostWebContents.on('render-process-gone', handleRenderProcessGone);
+    window.on('closed', handleClosed);
+
+    this.cleanupWindowListeners = () => {
+      if (!hostWebContents.isDestroyed()) {
+        hostWebContents.removeListener('did-start-loading', handleDidStartLoading);
+        hostWebContents.removeListener('render-process-gone', handleRenderProcessGone);
+      }
+      if (!window.isDestroyed()) {
+        window.removeListener('closed', handleClosed);
+      }
+    };
   }
 
   private getSession(): Session {

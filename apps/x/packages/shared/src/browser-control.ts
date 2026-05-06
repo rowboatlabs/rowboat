@@ -116,6 +116,12 @@ export const BrowserControlInputSchema = z.object({
   }
 });
 
+export const SuggestedBrowserSkillSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  path: z.string(),
+});
+
 export const BrowserControlResultSchema = z.object({
   success: z.boolean(),
   action: BrowserControlActionSchema,
@@ -123,6 +129,7 @@ export const BrowserControlResultSchema = z.object({
   error: z.string().optional(),
   browser: BrowserStateSchema,
   page: BrowserPageSnapshotSchema.optional(),
+  suggestedSkills: z.array(SuggestedBrowserSkillSchema).optional(),
 });
 
 export type BrowserTabState = z.infer<typeof BrowserTabStateSchema>;
@@ -132,3 +139,4 @@ export type BrowserPageSnapshot = z.infer<typeof BrowserPageSnapshotSchema>;
 export type BrowserControlAction = z.infer<typeof BrowserControlActionSchema>;
 export type BrowserControlInput = z.infer<typeof BrowserControlInputSchema>;
 export type BrowserControlResult = z.infer<typeof BrowserControlResultSchema>;
+export type SuggestedBrowserSkill = z.infer<typeof SuggestedBrowserSkillSchema>;

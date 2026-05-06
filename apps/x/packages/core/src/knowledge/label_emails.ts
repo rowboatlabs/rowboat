@@ -4,7 +4,7 @@ import { WorkDir } from '../config/config.js';
 import { createRun, createMessage } from '../runs/runs.js';
 import { getKgModel } from '../models/defaults.js';
 import { bus } from '../runs/bus.js';
-import { waitForRunCompletion } from '../agents/utils.js';
+import { getErrorDetails, waitForRunCompletion } from '../agents/utils.js';
 import { serviceLogger } from '../services/service_logger.js';
 import { limitEventItems } from './limit_event_items.js';
 import {
@@ -73,6 +73,8 @@ async function labelEmailBatch(
     const run = await createRun({
         agentId: LABELING_AGENT,
         model: await getKgModel(),
+        useCase: 'knowledge_sync',
+        subUseCase: 'label_emails',
     });
 
     let message = `Label the following ${files.length} email files by prepending YAML frontmatter.\n\n`;
@@ -110,8 +112,11 @@ async function labelEmailBatch(
     });
 
     await createMessage(run.id, message);
-    await waitForRunCompletion(run.id);
-    unsubscribe();
+    try {
+        await waitForRunCompletion(run.id, { throwOnError: true });
+    } finally {
+        unsubscribe();
+    }
 
     return { runId: run.id, filesEdited };
 }
@@ -173,6 +178,7 @@ export async function processUnlabeledEmails(concurrency: number = DEFAULT_CONCU
     const totalBatches = batches.length;
     let totalEdited = 0;
     let hadError = false;
+    let failedBatches = 0;
 
     // Process batches with concurrency limit
     for (let i = 0; i < batches.length; i += concurrency) {
@@ -207,14 +213,16 @@ export async function processUnlabeledEmails(concurrency: number = DEFAULT_CONCU
                 return result.filesEdited.size;
             } catch (error) {
                 hadError = true;
+                failedBatches++;
+                const errorDetails = getErrorDetails(error);
                 console.error(`[EmailLabeling] Error processing batch ${batchNumber}:`, error);
                 await serviceLogger.log({
                     type: 'error',
                     service: run.service,
                     runId: run.runId,
                     level: 'error',
-                    message: `Error processing batch ${batchNumber}`,
-                    error: error instanceof Error ? error.message : String(error),
+                    message: `Email labeling batch ${batchNumber}/${totalBatches} failed`,
+                    error: errorDetails,
                     context: { batchNumber },
                 });
                 return 0;
@@ -236,12 +244,15 @@ export async function processUnlabeledEmails(concurrency: number = DEFAULT_CONCU
         service: run.service,
         runId: run.runId,
         level: hadError ? 'error' : 'info',
-        message: `Email labeling complete: ${totalEdited} files labeled`,
+        message: hadError
+            ? `Email labeling finished with errors: ${totalEdited} files labeled`
+            : `Email labeling complete: ${totalEdited} files labeled`,
         durationMs: Date.now() - run.startedAt,
         outcome: hadError ? 'error' : 'ok',
         summary: {
             totalEmails: unlabeled.length,
             filesLabeled: totalEdited,
+            failedBatches,
         },
     });
 

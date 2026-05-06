@@ -66,16 +66,16 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
   // Inline upsell callout dismissed
   const [upsellDismissed, setUpsellDismissed] = useState(false)
 
-  // Composio/Gmail state (used when signed in with Rowboat account)
-  const [useComposioForGoogle, setUseComposioForGoogle] = useState(false)
+  // Composio Gmail/Calendar sync was removed — flags are seeded false and
+  // never flipped. Kept here so legacy gating expressions still type-check.
+  const [useComposioForGoogle] = useState(false)
   const [gmailConnected, setGmailConnected] = useState(false)
   const [gmailLoading, setGmailLoading] = useState(true)
   const [gmailConnecting, setGmailConnecting] = useState(false)
   const [composioApiKeyOpen, setComposioApiKeyOpen] = useState(false)
   const [composioApiKeyTarget, setComposioApiKeyTarget] = useState<'slack' | 'gmail'>('gmail')
 
-  // Composio/Google Calendar state
-  const [useComposioForGoogleCalendar, setUseComposioForGoogleCalendar] = useState(false)
+  const [useComposioForGoogleCalendar] = useState(false)
   const [googleCalendarConnected, setGoogleCalendarConnected] = useState(false)
   const [googleCalendarLoading, setGoogleCalendarLoading] = useState(true)
   const [googleCalendarConnecting, setGoogleCalendarConnecting] = useState(false)
@@ -123,25 +123,8 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
         setProvidersLoading(false)
       }
     }
-    async function loadComposioForGoogleFlag() {
-      try {
-        const result = await window.ipc.invoke('composio:use-composio-for-google', null)
-        setUseComposioForGoogle(result.enabled)
-      } catch (error) {
-        console.error('Failed to check composio-for-google flag:', error)
-      }
-    }
-    async function loadComposioForGoogleCalendarFlag() {
-      try {
-        const result = await window.ipc.invoke('composio:use-composio-for-google-calendar', null)
-        setUseComposioForGoogleCalendar(result.enabled)
-      } catch (error) {
-        console.error('Failed to check composio-for-google-calendar flag:', error)
-      }
-    }
+    // (Composio Gmail/Calendar flag fetches removed — sync was deleted; flags stay false.)
     loadProviders()
-    loadComposioForGoogleFlag()
-    loadComposioForGoogleCalendarFlag()
   }, [open])
 
   // Load LLM models catalog on open
@@ -539,17 +522,7 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
 
     const cleanup = window.ipc.on('oauth:didConnect', async (event) => {
       if (event.provider === 'rowboat' && event.success) {
-        // Re-check composio flags now that the account is connected
-        try {
-          const [googleResult, calendarResult] = await Promise.all([
-            window.ipc.invoke('composio:use-composio-for-google', null),
-            window.ipc.invoke('composio:use-composio-for-google-calendar', null),
-          ])
-          setUseComposioForGoogle(googleResult.enabled)
-          setUseComposioForGoogleCalendar(calendarResult.enabled)
-        } catch (error) {
-          console.error('Failed to re-check composio flags:', error)
-        }
+        // (Composio Gmail/Calendar flag re-check removed — sync was deleted.)
         setCurrentStep(2) // Go to Connect Accounts
       }
     })
@@ -609,12 +582,20 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
   // Connect to a provider
   const handleConnect = useCallback(async (provider: string) => {
     if (provider === 'google') {
+      // Signed-in users use the rowboat (managed-credentials) flow: opens
+      // the webapp in the browser, no BYOK modal. Falls back to BYOK modal
+      // for not-signed-in users. (Mirrors useConnectors.handleConnect.)
+      const isSignedIntoRowboat = providerStates.rowboat?.isConnected ?? false
+      if (isSignedIntoRowboat) {
+        await startConnect('google')
+        return
+      }
       setGoogleClientIdOpen(true)
       return
     }
 
     await startConnect(provider)
-  }, [startConnect])
+  }, [startConnect, providerStates])
 
   const handleGoogleClientIdSubmit = useCallback((clientId: string, clientSecret: string) => {
     setGoogleCredentials(clientId, clientSecret)

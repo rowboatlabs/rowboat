@@ -807,6 +807,43 @@ The summary should answer: **"Who is this person and why do I know them?"**
 
 **Focus on the relationship, not the communication method.**
 
+## Knowing Vs Meeting
+
+Distinguish between **knowing someone** and **having met or heard from them once**.
+
+- Use **"I know X through Y"** only when there is an actual ongoing relationship
+- In that construction, **Y** should be a person, organization, or recurring context such as YC, an investor relationship, a customer relationship, or an ongoing project
+- For one-off encounters, use **"I met X at/on/during..."** or lead with what they did, such as **"X reached out about..."**, **"X joined..."**, or **"X was part of..."**
+- Do **not** use **"I know X through [an event]"** when the thing is a specific meeting, dinner, conference, demo day, call, or other one-off event
+- Events are **when or where I met someone**, not **how I know them**
+- If the source only shows a single meeting, a single inbound email, or a one-time introduction, do not imply an ongoing relationship unless the broader context clearly supports it
+
+Examples:
+
+- Incorrect: \`I know him through a YC dinner.\`
+- Correct: \`I met him at a YC dinner.\`
+- Incorrect: \`I know her through a call about pricing.\`
+- Correct: \`She reached out about pricing.\`
+- Correct: \`I know her through YC and ongoing investor conversations.\`
+
+## Perspective And Self-Reference
+
+These knowledge notes are written from the **user's first-person perspective**.
+
+- When the user's identity is known, **"I / me / my" refer to the user**
+- When the company or team is the actor, use **"we / us / our"** when natural
+- Name other participants normally
+- **Do not refer to the user by name, email, or in third person inside first-person narration**
+- Do not write broken combinations like **"I know him ... that met with Arjun"** when Arjun is the user
+- Apply this consistently across **all note types and sections**: summaries, activity entries, timelines, decisions, open items, and any narrative prose
+
+Examples:
+
+- Incorrect: \`I know him as part of the Standard Capital team that met with Arjun and Ramnique.\`
+- Correct: \`I know him as part of the Standard Capital team that met with me and Ramnique.\`
+- Incorrect: \`Arjun discussed pricing with [[People/Sarah Chen]].\`
+- Correct: \`I discussed pricing with [[People/Sarah Chen]].\`
+
 ## Activity Summary
 
 One line summarizing this source's relevance to the entity:

@@ -16,6 +16,7 @@ import { BasesView, type BaseConfig, DEFAULT_BASE_CONFIG } from '@/components/ba
 import { useDebounce } from './hooks/use-debounce';
 import { SidebarContentPanel } from '@/components/sidebar-content';
 import { SuggestedTopicsView } from '@/components/suggested-topics-view';
+import { BackgroundAgentsView } from '@/components/background-agents-view';
 import { SidebarSectionProvider } from '@/contexts/sidebar-context';
 import {
   Conversation,
@@ -35,7 +36,7 @@ import {
 
 import { Shimmer } from '@/components/ai-elements/shimmer';
 import { useSmoothedText } from './hooks/useSmoothedText';
-import { Tool, ToolContent, ToolHeader, ToolTabbedContent } from '@/components/ai-elements/tool';
+import { Tool, ToolContent, ToolGroupComponent, ToolHeader, ToolTabbedContent } from '@/components/ai-elements/tool';
 import { WebSearchResult } from '@/components/ai-elements/web-search-result';
 import { AppActionCard } from '@/components/ai-elements/app-action-card';
 import { ComposioConnectCard } from '@/components/ai-elements/composio-connect-card';
@@ -54,7 +55,9 @@ import { Button } from "@/components/ui/button"
 import { Toaster } from "@/components/ui/sonner"
 import { stripKnowledgePrefix, toKnowledgePath, wikiLabel } from '@/lib/wiki-links'
 import { splitFrontmatter, joinFrontmatter } from '@/lib/frontmatter'
+import { extractConferenceLink } from '@/lib/calendar-event'
 import { OnboardingModal } from '@/components/onboarding'
+import { ComposioGoogleMigrationModal } from '@/components/composio-google-migration-modal'
 import { CommandPalette, type CommandPaletteContext, type CommandPaletteMention } from '@/components/search-dialog'
 import { TrackModal } from '@/components/track-modal'
 import { BackgroundTaskDetail } from '@/components/background-task-detail'
@@ -76,10 +79,12 @@ import {
   getAppActionCardData,
   getComposioConnectCardData,
   getToolDisplayName,
+  groupConversationItems,
   inferRunTitleFromMessage,
   isChatMessage,
   isErrorMessage,
   isToolCall,
+  isToolGroup,
   normalizeToolInput,
   normalizeToolOutput,
   parseAttachedFiles,
@@ -138,6 +143,7 @@ const TITLEBAR_BUTTONS_COLLAPSED = 1
 const TITLEBAR_BUTTON_GAPS_COLLAPSED = 0
 const GRAPH_TAB_PATH = '__rowboat_graph_view__'
 const SUGGESTED_TOPICS_TAB_PATH = '__rowboat_suggested_topics__'
+const BACKGROUND_AGENTS_TAB_PATH = '__rowboat_background_agents__'
 const BASES_DEFAULT_TAB_PATH = '__rowboat_bases_default__'
 
 const clampNumber = (value: number, min: number, max: number) =>
@@ -267,6 +273,7 @@ const getAncestorDirectoryPaths = (path: string): string[] => {
 
 const isGraphTabPath = (path: string) => path === GRAPH_TAB_PATH
 const isSuggestedTopicsTabPath = (path: string) => path === SUGGESTED_TOPICS_TAB_PATH
+const isBackgroundAgentsTabPath = (path: string) => path === BACKGROUND_AGENTS_TAB_PATH
 const isBaseFilePath = (path: string) => path.endsWith('.base') || path === BASES_DEFAULT_TAB_PATH
 
 const getSuggestedTopicTargetFolder = (category?: string) => {
@@ -322,6 +329,24 @@ const buildSuggestedTopicExplorePrompt = ({
     'Do not ask me to choose a note path unless there is a real ambiguity you cannot resolve from the card.',
   ].join('\n')
 }
+
+const buildBackgroundAgentSetupPrompt = () => [
+  'Help me set up a background agent.',
+  'In this flow, a background agent is the same thing as a note-based track block. Do not tell me they are separate concepts.',
+  'Do not propose a separate standalone agent, workflow file, or agent-schedule.json setup unless I explicitly ask for that.',
+  'Assume the default home for this setup is knowledge/Tasks/. If that folder does not exist, create it later when setting things up.',
+  'Start with a short, plain-English explanation of what a background agent is.',
+  'Do not make the explanation too terse.',
+  'Give 2 or 3 simple examples of the kinds of things a background agent could help keep updated.',
+  'Do not mention triggers, event-based vs schedule-based behavior, track blocks, skills, note paths, or other internal implementation details unless I ask.',
+  'In the first reply, tell me that you will create this in my Tasks folder by default.',
+  'Do not ask me where it should save or update results unless I explicitly say I want it somewhere else.',
+  'Then ask only what I want it to monitor or update and how often I want it to run.',
+  'Keep it concise and friendly, but not abrupt.',
+  'Do not give me a long taxonomy, a big list of options, or a multi-step breakdown unless I ask for more detail.',
+  'Do not create or modify anything yet.',
+  'If I confirm later, load the tracks skill, check for a matching note under knowledge/Tasks/ first, and create one there if needed.',
+].join('\n')
 
 const normalizeUsage = (usage?: Partial<LanguageModelUsage> | null): LanguageModelUsage | null => {
   if (!usage) return null
@@ -504,6 +529,7 @@ type ViewState =
   | { type: 'graph' }
   | { type: 'task'; name: string }
   | { type: 'suggested-topics' }
+  | { type: 'background-agents' }
 
 function viewStatesEqual(a: ViewState, b: ViewState): boolean {
   if (a.type !== b.type) return false
@@ -511,6 +537,48 @@ function viewStatesEqual(a: ViewState, b: ViewState): boolean {
   if (a.type === 'file' && b.type === 'file') return a.path === b.path
   if (a.type === 'task' && b.type === 'task') return a.name === b.name
   return true // both graph
+}
+
+/**
+ * Parse a rowboat:// deep link into a ViewState. Returns null if the URL is
+ * malformed or names an unknown target.
+ *
+ * Shape: rowboat://open?type=<file|chat|graph|task|suggested-topics|background-agents>&...
+ *   file:             ?type=file&path=knowledge/foo.md
+ *   chat:             ?type=chat&runId=abc123        (runId optional)
+ *   graph:            ?type=graph
+ *   task:             ?type=task&name=daily-brief
+ *   suggested-topics: ?type=suggested-topics
+ *   background-agents: ?type=background-agents
+ */
+function parseDeepLink(input: string): ViewState | null {
+  const SCHEME = 'rowboat://'
+  if (!input.startsWith(SCHEME)) return null
+  const rest = input.slice(SCHEME.length)
+  const queryIdx = rest.indexOf('?')
+  const host = (queryIdx >= 0 ? rest.slice(0, queryIdx) : rest).replace(/\/$/, '')
+  if (host !== 'open') return null
+  const params = new URLSearchParams(queryIdx >= 0 ? rest.slice(queryIdx + 1) : '')
+  switch (params.get('type')) {
+    case 'file': {
+      const path = params.get('path')
+      return path ? { type: 'file', path } : null
+    }
+    case 'chat':
+      return { type: 'chat', runId: params.get('runId') || null }
+    case 'graph':
+      return { type: 'graph' }
+    case 'task': {
+      const name = params.get('name')
+      return name ? { type: 'task', name } : null
+    }
+    case 'suggested-topics':
+      return { type: 'suggested-topics' }
+    case 'background-agents':
+      return { type: 'background-agents' }
+    default:
+      return null
+  }
 }
 
 /** Sidebar toggle (fixed position, top-left) */
@@ -613,7 +681,13 @@ function App() {
   const [isGraphOpen, setIsGraphOpen] = useState(false)
   const [isBrowserOpen, setIsBrowserOpen] = useState(false)
   const [isSuggestedTopicsOpen, setIsSuggestedTopicsOpen] = useState(false)
-  const [expandedFrom, setExpandedFrom] = useState<{ path: string | null; graph: boolean; suggestedTopics: boolean } | null>(null)
+  const [isBackgroundAgentsOpen, setIsBackgroundAgentsOpen] = useState(false)
+  const [expandedFrom, setExpandedFrom] = useState<{
+    path: string | null
+    graph: boolean
+    suggestedTopics: boolean
+    backgroundAgents: boolean
+  } | null>(null)
   const [baseConfigByPath, setBaseConfigByPath] = useState<Record<string, BaseConfig>>({})
   const [graphData, setGraphData] = useState<{ nodes: GraphNode[]; edges: GraphEdge[] }>({
     nodes: [],
@@ -737,6 +811,30 @@ function App() {
     })
     return cleanup
   }, [refreshVoiceAvailability])
+
+  // One-time Composio→native Google migration check. Runs on mount and again
+  // after the user signs in to Rowboat (so we catch users who weren't signed
+  // in at startup). The IPC is idempotent — once `dismissed_at` is set on the
+  // main side, every subsequent call returns `{shouldShow: false}`.
+  useEffect(() => {
+    const run = async () => {
+      try {
+        const result = await window.ipc.invoke('migration:check-composio-google', null)
+        if (result.shouldShow) {
+          setShowComposioGoogleMigration(true)
+        }
+      } catch (error) {
+        console.error('[migration] check-composio-google failed:', error)
+      }
+    }
+    void run()
+    const cleanup = window.ipc.on('oauth:didConnect', (event) => {
+      if (event.provider === 'rowboat' && event.success) {
+        void run()
+      }
+    })
+    return cleanup
+  }, [])
 
   const handleStartRecording = useCallback(() => {
     setIsRecording(true)
@@ -910,6 +1008,7 @@ function App() {
   const getFileTabTitle = useCallback((tab: FileTab) => {
     if (isGraphTabPath(tab.path)) return 'Graph View'
     if (isSuggestedTopicsTabPath(tab.path)) return 'Suggested Topics'
+    if (isBackgroundAgentsTabPath(tab.path)) return 'Background agents'
     if (tab.path === BASES_DEFAULT_TAB_PATH) return 'Bases'
     if (tab.path.endsWith('.base')) return tab.path.split('/').pop()?.replace(/\.base$/i, '') || 'Base'
     return tab.path.split('/').pop()?.replace(/\.md$/i, '') || tab.path
@@ -990,6 +1089,9 @@ function App() {
 
   // Onboarding state
   const [showOnboarding, setShowOnboarding] = useState(false)
+
+  // One-time Composio→native Google migration modal
+  const [showComposioGoogleMigration, setShowComposioGoogleMigration] = useState(false)
 
   // Search state
   const [isSearchOpen, setIsSearchOpen] = useState(false)
@@ -2358,6 +2460,10 @@ function App() {
     }
   }, [runId])
 
+  const dismissBrowserOverlay = useCallback(() => {
+    setIsBrowserOpen(false)
+  }, [])
+
   const handleNewChat = useCallback(() => {
     // Invalidate any in-flight run loads (rapid switching can otherwise "pop" old conversations back in)
     loadRunRequestIdRef.current += 1
@@ -2581,10 +2687,13 @@ function App() {
 
   // File tab operations
   const openFileInNewTab = useCallback((path: string) => {
+    dismissBrowserOverlay()
     const existingTab = fileTabs.find(t => t.path === path)
     if (existingTab) {
       setActiveFileTabId(existingTab.id)
       setIsGraphOpen(false)
+      setIsSuggestedTopicsOpen(false)
+      setIsBackgroundAgentsOpen(false)
       setSelectedPath(path)
       return
     }
@@ -2592,12 +2701,15 @@ function App() {
     setFileTabs(prev => [...prev, { id, path }])
     setActiveFileTabId(id)
     setIsGraphOpen(false)
+    setIsSuggestedTopicsOpen(false)
+    setIsBackgroundAgentsOpen(false)
     setSelectedPath(path)
-  }, [fileTabs])
+  }, [fileTabs, dismissBrowserOverlay])
 
   const switchFileTab = useCallback((tabId: string) => {
     const tab = fileTabs.find(t => t.id === tabId)
     if (!tab) return
+    dismissBrowserOverlay()
     setActiveFileTabId(tabId)
     setSelectedBackgroundTask(null)
     setExpandedFrom(null)
@@ -2609,18 +2721,28 @@ function App() {
       setSelectedPath(null)
       setIsGraphOpen(true)
       setIsSuggestedTopicsOpen(false)
+      setIsBackgroundAgentsOpen(false)
       return
     }
     if (isSuggestedTopicsTabPath(tab.path)) {
       setSelectedPath(null)
       setIsGraphOpen(false)
       setIsSuggestedTopicsOpen(true)
+      setIsBackgroundAgentsOpen(false)
+      return
+    }
+    if (isBackgroundAgentsTabPath(tab.path)) {
+      setSelectedPath(null)
+      setIsGraphOpen(false)
+      setIsSuggestedTopicsOpen(false)
+      setIsBackgroundAgentsOpen(true)
       return
     }
     setIsGraphOpen(false)
     setIsSuggestedTopicsOpen(false)
+    setIsBackgroundAgentsOpen(false)
     setSelectedPath(tab.path)
-  }, [fileTabs, isRightPaneMaximized])
+  }, [fileTabs, isRightPaneMaximized, dismissBrowserOverlay])
 
   const closeFileTab = useCallback((tabId: string) => {
     const closingTab = fileTabs.find(t => t.id === tabId)
@@ -2647,6 +2769,7 @@ function App() {
         setSelectedPath(null)
         setIsGraphOpen(false)
         setIsSuggestedTopicsOpen(false)
+        setIsBackgroundAgentsOpen(false)
           return []
       }
       const idx = prev.findIndex(t => t.id === tabId)
@@ -2660,13 +2783,21 @@ function App() {
           setSelectedPath(null)
           setIsGraphOpen(true)
           setIsSuggestedTopicsOpen(false)
+          setIsBackgroundAgentsOpen(false)
         } else if (isSuggestedTopicsTabPath(newActiveTab.path)) {
           setSelectedPath(null)
           setIsGraphOpen(false)
           setIsSuggestedTopicsOpen(true)
+          setIsBackgroundAgentsOpen(false)
+        } else if (isBackgroundAgentsTabPath(newActiveTab.path)) {
+          setSelectedPath(null)
+          setIsGraphOpen(false)
+          setIsSuggestedTopicsOpen(false)
+          setIsBackgroundAgentsOpen(true)
         } else {
           setIsGraphOpen(false)
           setIsSuggestedTopicsOpen(false)
+          setIsBackgroundAgentsOpen(false)
               setSelectedPath(newActiveTab.path)
         }
       }
@@ -2692,12 +2823,18 @@ function App() {
       // Create a new tab
       const id = newChatTabId()
       setChatTabs(prev => [...prev, { id, runId: null }])
-      setActiveChatTabId(id)
+        setActiveChatTabId(id)
     }
+    dismissBrowserOverlay()
     handleNewChat()
     // Left-pane "new chat" should always open full chat view.
-    if (selectedPath || isGraphOpen || isSuggestedTopicsOpen) {
-      setExpandedFrom({ path: selectedPath, graph: isGraphOpen, suggestedTopics: isSuggestedTopicsOpen })
+    if (selectedPath || isGraphOpen || isSuggestedTopicsOpen || isBackgroundAgentsOpen) {
+      setExpandedFrom({
+        path: selectedPath,
+        graph: isGraphOpen,
+        suggestedTopics: isSuggestedTopicsOpen,
+        backgroundAgents: isBackgroundAgentsOpen,
+      })
     } else {
       setExpandedFrom(null)
     }
@@ -2705,7 +2842,8 @@ function App() {
     setSelectedPath(null)
     setIsGraphOpen(false)
     setIsSuggestedTopicsOpen(false)
-  }, [chatTabs, activeChatTabId, handleNewChat, selectedPath, isGraphOpen, isSuggestedTopicsOpen])
+    setIsBackgroundAgentsOpen(false)
+  }, [chatTabs, activeChatTabId, dismissBrowserOverlay, handleNewChat, selectedPath, isGraphOpen, isSuggestedTopicsOpen, isBackgroundAgentsOpen])
 
   // Sidebar variant: create/switch chat tab without leaving file/graph context.
   const handleNewChatTabInSidebar = useCallback(() => {
@@ -2820,26 +2958,40 @@ function App() {
 
   const handleOpenFullScreenChat = useCallback(() => {
     // Remember where we came from so the close button can return
-    if (selectedPath || isGraphOpen || isSuggestedTopicsOpen) {
-      setExpandedFrom({ path: selectedPath, graph: isGraphOpen, suggestedTopics: isSuggestedTopicsOpen })
+    if (selectedPath || isGraphOpen || isSuggestedTopicsOpen || isBackgroundAgentsOpen) {
+      setExpandedFrom({
+        path: selectedPath,
+        graph: isGraphOpen,
+        suggestedTopics: isSuggestedTopicsOpen,
+        backgroundAgents: isBackgroundAgentsOpen,
+      })
     }
+    dismissBrowserOverlay()
     setIsRightPaneMaximized(false)
     setSelectedPath(null)
     setIsGraphOpen(false)
     setIsSuggestedTopicsOpen(false)
-  }, [selectedPath, isGraphOpen, isSuggestedTopicsOpen])
+    setIsBackgroundAgentsOpen(false)
+  }, [selectedPath, isGraphOpen, isSuggestedTopicsOpen, isBackgroundAgentsOpen, dismissBrowserOverlay])
 
   const handleCloseFullScreenChat = useCallback(() => {
     if (expandedFrom) {
       if (expandedFrom.graph) {
         setIsGraphOpen(true)
         setIsSuggestedTopicsOpen(false)
+        setIsBackgroundAgentsOpen(false)
       } else if (expandedFrom.suggestedTopics) {
         setIsGraphOpen(false)
         setIsSuggestedTopicsOpen(true)
+        setIsBackgroundAgentsOpen(false)
+      } else if (expandedFrom.backgroundAgents) {
+        setIsGraphOpen(false)
+        setIsSuggestedTopicsOpen(false)
+        setIsBackgroundAgentsOpen(true)
       } else if (expandedFrom.path) {
         setIsGraphOpen(false)
         setIsSuggestedTopicsOpen(false)
+        setIsBackgroundAgentsOpen(false)
         setSelectedPath(expandedFrom.path)
       }
       setExpandedFrom(null)
@@ -2849,11 +3001,12 @@ function App() {
 
   const currentViewState = React.useMemo<ViewState>(() => {
     if (selectedBackgroundTask) return { type: 'task', name: selectedBackgroundTask }
+    if (isBackgroundAgentsOpen) return { type: 'background-agents' }
     if (isSuggestedTopicsOpen) return { type: 'suggested-topics' }
     if (selectedPath) return { type: 'file', path: selectedPath }
     if (isGraphOpen) return { type: 'graph' }
     return { type: 'chat', runId }
-  }, [selectedBackgroundTask, isSuggestedTopicsOpen, selectedPath, isGraphOpen, runId])
+  }, [selectedBackgroundTask, isBackgroundAgentsOpen, isSuggestedTopicsOpen, selectedPath, isGraphOpen, runId])
 
   const appendUnique = useCallback((stack: ViewState[], entry: ViewState) => {
     const last = stack[stack.length - 1]
@@ -2910,6 +3063,17 @@ function App() {
     setActiveFileTabId(id)
   }, [fileTabs])
 
+  const ensureBackgroundAgentsFileTab = useCallback(() => {
+    const existing = fileTabs.find((tab) => isBackgroundAgentsTabPath(tab.path))
+    if (existing) {
+      setActiveFileTabId(existing.id)
+      return
+    }
+    const id = newFileTabId()
+    setFileTabs((prev) => [...prev, { id, path: BACKGROUND_AGENTS_TAB_PATH }])
+    setActiveFileTabId(id)
+  }, [fileTabs])
+
   const applyViewState = useCallback(async (view: ViewState) => {
     switch (view.type) {
       case 'file':
@@ -2919,6 +3083,7 @@ function App() {
         // visible in the middle pane.
         setIsBrowserOpen(false)
         setIsSuggestedTopicsOpen(false)
+        setIsBackgroundAgentsOpen(false)
         setExpandedFrom(null)
         // Preserve split vs knowledge-max mode when navigating knowledge files.
         // Only exit chat-only maximize, because that would hide the selected file.
@@ -2933,6 +3098,7 @@ function App() {
         setSelectedPath(null)
         setIsBrowserOpen(false)
         setIsSuggestedTopicsOpen(false)
+        setIsBackgroundAgentsOpen(false)
         setExpandedFrom(null)
         setIsGraphOpen(true)
         ensureGraphFileTab()
@@ -2945,6 +3111,7 @@ function App() {
         setIsGraphOpen(false)
         setIsBrowserOpen(false)
         setIsSuggestedTopicsOpen(false)
+        setIsBackgroundAgentsOpen(false)
         setExpandedFrom(null)
         setIsRightPaneMaximized(false)
         setSelectedBackgroundTask(view.name)
@@ -2957,17 +3124,29 @@ function App() {
         setIsRightPaneMaximized(false)
         setSelectedBackgroundTask(null)
         setIsSuggestedTopicsOpen(true)
+        setIsBackgroundAgentsOpen(false)
         ensureSuggestedTopicsFileTab()
         return
-      case 'chat':
+      case 'background-agents':
         setSelectedPath(null)
         setIsGraphOpen(false)
-        // Don't touch isBrowserOpen here — chat navigation should land in
-        // the right sidebar when the browser overlay is active.
+        setIsBrowserOpen(false)
         setExpandedFrom(null)
         setIsRightPaneMaximized(false)
         setSelectedBackgroundTask(null)
         setIsSuggestedTopicsOpen(false)
+        setIsBackgroundAgentsOpen(true)
+        ensureBackgroundAgentsFileTab()
+        return
+      case 'chat':
+        setSelectedPath(null)
+        setIsGraphOpen(false)
+        setIsBrowserOpen(false)
+        setExpandedFrom(null)
+        setIsRightPaneMaximized(false)
+        setSelectedBackgroundTask(null)
+        setIsSuggestedTopicsOpen(false)
+        setIsBackgroundAgentsOpen(false)
         if (view.runId) {
           await loadRun(view.runId)
         } else {
@@ -2975,11 +3154,16 @@ function App() {
         }
         return
     }
-  }, [ensureFileTabForPath, ensureGraphFileTab, ensureSuggestedTopicsFileTab, handleNewChat, isRightPaneMaximized, loadRun])
+  }, [ensureBackgroundAgentsFileTab, ensureFileTabForPath, ensureGraphFileTab, ensureSuggestedTopicsFileTab, handleNewChat, isRightPaneMaximized, loadRun])
 
   const navigateToView = useCallback(async (nextView: ViewState) => {
     const current = currentViewState
-    if (viewStatesEqual(current, nextView)) return
+    if (viewStatesEqual(current, nextView)) {
+      if (isBrowserOpen) {
+        dismissBrowserOverlay()
+      }
+      return
+    }
 
     cancelRecordingIfActive()
     const nextHistory = {
@@ -2988,7 +3172,7 @@ function App() {
     }
     setHistory(nextHistory)
     await applyViewState(nextView)
-  }, [appendUnique, applyViewState, cancelRecordingIfActive, currentViewState, setHistory])
+  }, [appendUnique, applyViewState, cancelRecordingIfActive, currentViewState, setHistory, isBrowserOpen, dismissBrowserOverlay])
 
   const navigateBack = useCallback(async () => {
     const { back, forward } = historyRef.current
@@ -3047,6 +3231,58 @@ function App() {
   const navigateToFile = useCallback((path: string) => {
     void navigateToView({ type: 'file', path })
   }, [navigateToView])
+
+  // Deep-link handler kept in a ref so the useEffect below can register the
+  // IPC listener (and run the one-time pending-link drain) just once on mount,
+  // rather than re-running on every navigation when navigateToView's identity
+  // changes.
+  const navigateToViewRef = useRef(navigateToView)
+  useEffect(() => { navigateToViewRef.current = navigateToView }, [navigateToView])
+
+  useEffect(() => {
+    const handle = (url: string) => {
+      const view = parseDeepLink(url)
+      if (view) void navigateToViewRef.current(view)
+    }
+    void window.ipc.invoke('app:consumePendingDeepLink', null).then(({ url }) => {
+      if (url) handle(url)
+    })
+    return window.ipc.on('app:openUrl', ({ url }) => handle(url))
+  }, [])
+
+  // Triggered by main when the user clicks a calendar-meeting notification.
+  // Reuses the same flow as the in-app "Join meeting & take notes" button.
+  // When `openMeeting` is true, also opens the meeting URL in the system browser.
+  useEffect(() => {
+    return window.ipc.on('app:takeMeetingNotes', ({ event, openMeeting }) => {
+      const e = event as {
+        summary?: string
+        start?: { dateTime?: string; date?: string; timeZone?: string }
+        end?: { dateTime?: string; date?: string; timeZone?: string }
+        location?: string
+        htmlLink?: string
+        hangoutLink?: string
+        conferenceData?: { entryPoints?: Array<{ entryPointType?: string; uri?: string }> }
+      }
+      if (!e || typeof e !== 'object') return
+      const conferenceLink = extractConferenceLink(e as Record<string, unknown>)
+      if (openMeeting && conferenceLink) {
+        window.open(conferenceLink, '_blank')
+      } else if (openMeeting) {
+        console.warn('[take-meeting-notes] openMeeting requested but event has no conference link', e)
+      }
+      window.__pendingCalendarEvent = {
+        summary: e.summary,
+        start: e.start,
+        end: e.end,
+        location: e.location,
+        htmlLink: e.htmlLink,
+        conferenceLink,
+        source: 'calendar-sync',
+      }
+      window.dispatchEvent(new Event('calendar-block:join-meeting'))
+    })
+  }, [])
 
   const handleBaseConfigChange = useCallback((path: string, config: BaseConfig) => {
     setBaseConfigByPath((prev) => ({ ...prev, [path]: config }))
@@ -3240,7 +3476,7 @@ function App() {
   }, [])
 
   // Keyboard shortcut: Ctrl+L to toggle main chat view
-  const isFullScreenChat = !selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !selectedBackgroundTask && !isBrowserOpen
+  const isFullScreenChat = !selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isBackgroundAgentsOpen && !selectedBackgroundTask && !isBrowserOpen
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'l') {
@@ -3318,15 +3554,17 @@ function App() {
     const handleTabKeyDown = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey
       if (!mod) return
-      const rightPaneAvailable = Boolean((selectedPath || isGraphOpen || isSuggestedTopicsOpen) && isChatSidebarOpen)
+      const rightPaneAvailable = Boolean((selectedPath || isGraphOpen || isSuggestedTopicsOpen || isBackgroundAgentsOpen) && isChatSidebarOpen)
       const targetPane: ShortcutPane = rightPaneAvailable
         ? (isRightPaneMaximized ? 'right' : activeShortcutPane)
         : 'left'
-      const inFileView = targetPane === 'left' && Boolean(selectedPath || isGraphOpen || isSuggestedTopicsOpen)
+      const inFileView = targetPane === 'left' && Boolean(selectedPath || isGraphOpen || isSuggestedTopicsOpen || isBackgroundAgentsOpen)
       const selectedKnowledgePath = isGraphOpen
         ? GRAPH_TAB_PATH
         : isSuggestedTopicsOpen
           ? SUGGESTED_TOPICS_TAB_PATH
+          : isBackgroundAgentsOpen
+            ? BACKGROUND_AGENTS_TAB_PATH
           : selectedPath
       const targetFileTabId = activeFileTabId ?? (
         selectedKnowledgePath
@@ -3381,7 +3619,7 @@ function App() {
     }
     document.addEventListener('keydown', handleTabKeyDown)
     return () => document.removeEventListener('keydown', handleTabKeyDown)
-  }, [selectedPath, isGraphOpen, isSuggestedTopicsOpen, isChatSidebarOpen, isRightPaneMaximized, activeShortcutPane, chatTabs, fileTabs, activeChatTabId, activeFileTabId, closeChatTab, closeFileTab, switchChatTab, switchFileTab])
+  }, [selectedPath, isGraphOpen, isSuggestedTopicsOpen, isBackgroundAgentsOpen, isChatSidebarOpen, isRightPaneMaximized, activeShortcutPane, chatTabs, fileTabs, activeChatTabId, activeFileTabId, closeChatTab, closeFileTab, switchChatTab, switchFileTab])
 
   const toggleExpand = (path: string, kind: 'file' | 'dir') => {
     if (kind === 'file') {
@@ -3406,7 +3644,7 @@ function App() {
           }),
         },
       }))
-      if (!selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !selectedBackgroundTask) {
+      if (!selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isBackgroundAgentsOpen && !selectedBackgroundTask) {
         setIsChatSidebarOpen(false)
         setIsRightPaneMaximized(false)
       }
@@ -3528,14 +3766,14 @@ function App() {
     },
     openGraph: () => {
       // From chat-only landing state, open graph directly in full knowledge view.
-      if (!selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !selectedBackgroundTask) {
+      if (!selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isBackgroundAgentsOpen && !selectedBackgroundTask) {
         setIsChatSidebarOpen(false)
         setIsRightPaneMaximized(false)
       }
       void navigateToView({ type: 'graph' })
     },
     openBases: () => {
-      if (!selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !selectedBackgroundTask) {
+      if (!selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isBackgroundAgentsOpen && !selectedBackgroundTask) {
         setIsChatSidebarOpen(false)
         setIsRightPaneMaximized(false)
       }
@@ -4119,7 +4357,7 @@ function App() {
   const selectedTask = selectedBackgroundTask
     ? backgroundTasks.find(t => t.name === selectedBackgroundTask)
     : null
-  const isRightPaneContext = Boolean(selectedPath || isGraphOpen || isSuggestedTopicsOpen || isBrowserOpen)
+  const isRightPaneContext = Boolean(selectedPath || isGraphOpen || isSuggestedTopicsOpen || isBackgroundAgentsOpen || isBrowserOpen)
   const isRightPaneOnlyMode = isRightPaneContext && isChatSidebarOpen && isRightPaneMaximized
   const shouldCollapseLeftPane = isRightPaneOnlyMode
   const openMarkdownTabs = React.useMemo(() => {
@@ -4136,7 +4374,7 @@ function App() {
   return (
     <TooltipProvider delayDuration={0}>
       <SidebarSectionProvider defaultSection="tasks" onSectionChange={(section) => {
-        if (section === 'knowledge' && !selectedPath && !isGraphOpen) {
+        if (section === 'knowledge' && !selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isBackgroundAgentsOpen) {
           void navigateToView({ type: 'file', path: BASES_DEFAULT_TAB_PATH })
         }
       }}>
@@ -4169,7 +4407,7 @@ function App() {
                 onNewChat: handleNewChatTab,
                 onSelectRun: (runIdToLoad) => {
                   cancelRecordingIfActive()
-                  if (selectedPath || isGraphOpen || isSuggestedTopicsOpen || isBrowserOpen) {
+                  if (selectedPath || isGraphOpen || isSuggestedTopicsOpen || isBackgroundAgentsOpen || isBrowserOpen) {
                     setIsChatSidebarOpen(true)
                   }
 
@@ -4180,7 +4418,7 @@ function App() {
                     return
                   }
                   // In two-pane mode (file/graph/browser), keep the middle pane and just swap chat context in the right sidebar.
-                  if (selectedPath || isGraphOpen || isSuggestedTopicsOpen || isBrowserOpen) {
+                  if (selectedPath || isGraphOpen || isSuggestedTopicsOpen || isBackgroundAgentsOpen || isBrowserOpen) {
                     setChatTabs(prev => prev.map(t => t.id === activeChatTabId ? { ...t, runId: runIdToLoad } : t))
                     loadRun(runIdToLoad)
                     return
@@ -4204,14 +4442,14 @@ function App() {
                       } else {
                         // Only one tab, reset it to new chat
                         setChatTabs([{ id: tabForRun.id, runId: null }])
-                        if (selectedPath || isGraphOpen || isSuggestedTopicsOpen || isBrowserOpen) {
+                        if (selectedPath || isGraphOpen || isSuggestedTopicsOpen || isBackgroundAgentsOpen || isBrowserOpen) {
                           handleNewChat()
                         } else {
                           void navigateToView({ type: 'chat', runId: null })
                         }
                       }
                     } else if (runId === runIdToDelete) {
-                      if (selectedPath || isGraphOpen || isSuggestedTopicsOpen || isBrowserOpen) {
+                      if (selectedPath || isGraphOpen || isSuggestedTopicsOpen || isBackgroundAgentsOpen || isBrowserOpen) {
                         setChatTabs(prev => prev.map(t => t.id === activeChatTabId ? { ...t, runId: null } : t))
                         handleNewChat()
                       } else {
@@ -4235,10 +4473,14 @@ function App() {
               meetingSummarizing={meetingSummarizing}
               meetingAvailable={voiceAvailable}
               onToggleMeeting={() => { void handleToggleMeeting() }}
+              isSearchOpen={isSearchOpen}
+              isMeetingActionActive={showMeetingPermissions || meetingSummarizing || meetingTranscription.state !== 'idle'}
               isBrowserOpen={isBrowserOpen}
               onToggleBrowser={handleToggleBrowser}
               isSuggestedTopicsOpen={isSuggestedTopicsOpen}
               onOpenSuggestedTopics={() => void navigateToView({ type: 'suggested-topics' })}
+              isBackgroundAgentsOpen={isBackgroundAgentsOpen}
+              onOpenBackgroundAgents={() => void navigateToView({ type: 'background-agents' })}
             />
             <SidebarInset
               className={cn(
@@ -4258,7 +4500,7 @@ function App() {
                 canNavigateForward={canNavigateForward}
                 collapsedLeftPaddingPx={collapsedLeftPaddingPx}
               >
-                {(selectedPath || isGraphOpen || isSuggestedTopicsOpen) && fileTabs.length >= 1 ? (
+                {(selectedPath || isGraphOpen || isSuggestedTopicsOpen || isBackgroundAgentsOpen) && fileTabs.length >= 1 ? (
                   <TabBar
                     tabs={fileTabs}
                     activeTabId={activeFileTabId ?? ''}
@@ -4266,7 +4508,7 @@ function App() {
                     getTabId={(t) => t.id}
                     onSwitchTab={switchFileTab}
                     onCloseTab={closeFileTab}
-                    allowSingleTabClose={fileTabs.length === 1 && (isGraphOpen || isSuggestedTopicsOpen || (selectedPath != null && isBaseFilePath(selectedPath)))}
+                    allowSingleTabClose={fileTabs.length === 1 && (isGraphOpen || isSuggestedTopicsOpen || isBackgroundAgentsOpen || (selectedPath != null && isBaseFilePath(selectedPath)))}
                   />
                 ) : (
                   <TabBar
@@ -4319,7 +4561,7 @@ function App() {
                     <TooltipContent side="bottom">Version history</TooltipContent>
                   </Tooltip>
                 )}
-                {!selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !selectedTask && !isBrowserOpen && (
+                {!selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isBackgroundAgentsOpen && !selectedTask && !isBrowserOpen && (
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
@@ -4334,7 +4576,7 @@ function App() {
                     <TooltipContent side="bottom">New chat tab</TooltipContent>
                   </Tooltip>
                 )}
-                {!selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isBrowserOpen && expandedFrom && (
+                {!selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isBackgroundAgentsOpen && !isBrowserOpen && expandedFrom && (
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
@@ -4349,7 +4591,7 @@ function App() {
                     <TooltipContent side="bottom">Restore two-pane view</TooltipContent>
                   </Tooltip>
                 )}
-                {(selectedPath || isGraphOpen || isSuggestedTopicsOpen) && (
+                {(selectedPath || isGraphOpen || isSuggestedTopicsOpen || isBackgroundAgentsOpen) && (
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
@@ -4369,13 +4611,25 @@ function App() {
               </ContentHeader>
 
               {isBrowserOpen ? (
-                <BrowserPane onClose={handleCloseBrowser} />
+                <BrowserPane
+                  onClose={handleCloseBrowser}
+                  forceHidden={isSearchOpen || showMeetingPermissions}
+                />
               ) : isSuggestedTopicsOpen ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                   <SuggestedTopicsView
                     onExploreTopic={(topic) => {
                       const prompt = buildSuggestedTopicExplorePrompt(topic)
                       submitFromPalette(prompt, null)
+                    }}
+                  />
+                </div>
+              ) : isBackgroundAgentsOpen ? (
+                <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+                  <BackgroundAgentsView
+                    onOpenNote={(path) => navigateToFile(path)}
+                    onAddNewBackgroundAgent={() => {
+                      submitFromPalette(buildBackgroundAgentSetupPrompt(), null)
                     }}
                   />
                 </div>
@@ -4578,7 +4832,20 @@ function App() {
                               </ConversationEmptyState>
                             ) : (
                               <>
-                                {tabState.conversation.map(item => {
+                                {groupConversationItems(
+                                  tabState.conversation,
+                                  (id) => !!tabState.allPermissionRequests.get(id)
+                                ).map(item => {
+                                  if (isToolGroup(item)) {
+                                    return (
+                                      <ToolGroupComponent
+                                        key={item.groupId}
+                                        group={item}
+                                        isToolOpen={(toolId) => isToolOpenForTab(tab.id, toolId)}
+                                        onToolOpenChange={(toolId, open) => setToolOpenForTab(tab.id, toolId, open)}
+                                      />
+                                    )
+                                  }
                                   const rendered = renderConversationItem(item, tab.id)
                                   if (isToolCall(item)) {
                                     const permRequest = tabState.allPermissionRequests.get(item.id)
@@ -4743,6 +5010,7 @@ function App() {
                 onToolOpenChangeForTab={setToolOpenForTab}
                 onOpenKnowledgeFile={(path) => { navigateToFile(path) }}
                 onActivate={() => setActiveShortcutPane('right')}
+                collapsedLeftPaddingPx={collapsedLeftPaddingPx}
                 isRecording={isRecording}
                 recordingText={voice.interimText}
                 recordingState={voice.state === 'connecting' ? 'connecting' : 'listening'}
@@ -4778,6 +5046,17 @@ function App() {
       <OnboardingModal
         open={showOnboarding}
         onComplete={handleOnboardingComplete}
+      />
+      <ComposioGoogleMigrationModal
+        open={showComposioGoogleMigration}
+        onOpenChange={setShowComposioGoogleMigration}
+        onReconnect={() => {
+          // Trigger the rowboat-mode Google connect flow. With no credentials
+          // and the user signed in to Rowboat, the main process opens the
+          // webapp `/oauth/google/start` URL. The deep link returns and
+          // completeRowboatGoogleConnect persists the tokens.
+          void window.ipc.invoke('oauth:connect', { provider: 'google' })
+        }}
       />
       <Dialog open={showMeetingPermissions} onOpenChange={setShowMeetingPermissions}>
         <DialogContent showCloseButton={false}>

@@ -12,6 +12,10 @@ import { triggerSync as triggerCalendarSync } from '@x/core/dist/knowledge/sync_
 import { triggerSync as triggerFirefliesSync } from '@x/core/dist/knowledge/sync_fireflies.js';
 import { emitOAuthEvent } from './ipc.js';
 import { getBillingInfo } from '@x/core/dist/billing/billing.js';
+import { capture as analyticsCapture, identify as analyticsIdentify, reset as analyticsReset } from '@x/core/dist/analytics/posthog.js';
+import { isSignedIn } from '@x/core/dist/account/account.js';
+import { getWebappUrl } from '@x/core/dist/config/remote-config.js';
+import { claimTokensViaBackend } from '@x/core/dist/auth/google-backend-oauth.js';
 
 const REDIRECT_URI = 'http://localhost:8080/oauth/callback';
 
@@ -200,6 +204,23 @@ export async function connectProvider(provider: string, credentials?: { clientId
 
     if (provider === 'google') {
       if (!credentials?.clientId || !credentials?.clientSecret) {
+        // No credentials → rowboat mode if the user is signed in to Rowboat
+        // (we use the company-owned Google client via the api + webapp).
+        // Otherwise it's BYOK with missing creds → error.
+        if (await isSignedIn()) {
+          try {
+            const webappUrl = await getWebappUrl();
+            await shell.openExternal(`${webappUrl}/oauth/google/start`);
+            console.log('[OAuth] Started rowboat-mode Google connect (browser opened to webapp)');
+            return { success: true };
+          } catch (error) {
+            console.error('[OAuth] Failed to start rowboat-mode Google connect:', error);
+            return {
+              success: false,
+              error: error instanceof Error ? error.message : 'Failed to open browser',
+            };
+          }
+        }
         return { success: false, error: 'Google client ID and client secret are required to connect.' };
       }
     }
@@ -256,11 +277,15 @@ export async function connectProvider(provider: string, credentials?: { clientId
           state
         );
 
-        // Save tokens and credentials
+        // Save tokens and credentials. For Google, BYOK is the only path
+        // that reaches this token exchange (rowboat path returns above
+        // before any local server runs); stamp mode: 'byok' so a future
+        // refresh / reconnect can't get confused with a rowboat entry.
         console.log(`[OAuth] Token exchange successful for ${provider}`);
         await oauthRepo.upsert(provider, {
           tokens,
           ...(credentials ? { clientId: credentials.clientId, clientSecret: credentials.clientSecret } : {}),
+          ...(provider === 'google' ? { mode: 'byok' as const } : {}),
           error: null,
         });
 
@@ -275,16 +300,33 @@ export async function connectProvider(provider: string, credentials?: { clientId
         // For Rowboat sign-in, ensure user + Stripe customer exist before
         // notifying the renderer. Without this, parallel API calls from
         // multiple renderer hooks race to create the user, causing duplicates.
+        let signedInUserId: string | undefined;
         if (provider === 'rowboat') {
           try {
-            await getBillingInfo();
+            const billing = await getBillingInfo();
+            if (billing.userId) {
+              signedInUserId = billing.userId;
+              analyticsIdentify(billing.userId, {
+                ...(billing.userEmail ? { email: billing.userEmail } : {}),
+                plan: billing.subscriptionPlan,
+                status: billing.subscriptionStatus,
+              });
+              analyticsCapture('user_signed_in', {
+                plan: billing.subscriptionPlan,
+                status: billing.subscriptionStatus,
+              });
+            }
           } catch (meError) {
             console.error('[OAuth] Failed to initialize user via /v1/me:', meError);
           }
         }
 
         // Emit success event to renderer
-        emitOAuthEvent({ provider, success: true });
+        emitOAuthEvent({
+          provider,
+          success: true,
+          ...(signedInUserId ? { userId: signedInUserId } : {}),
+        });
       } catch (error) {
         console.error('OAuth token exchange failed:', error);
         // Log cause chain for debugging (e.g. OAUTH_INVALID_RESPONSE -> OperationProcessingError)
@@ -341,12 +383,69 @@ export async function connectProvider(provider: string, credentials?: { clientId
 }
 
 /**
+ * Complete a rowboat-mode Google connect: claim the tokens parked under
+ * `state` by the webapp callback, persist them locally, and trigger sync.
+ *
+ * Called by the deep-link dispatcher (deeplink.ts) when the OS hands us a
+ * rowboat://oauth/google/done?session=<state> URL.
+ */
+export async function completeRowboatGoogleConnect(state: string): Promise<void> {
+  try {
+    console.log('[OAuth] Claiming rowboat-mode Google tokens...');
+    const tokens = await claimTokensViaBackend(state);
+    const oauthRepo = getOAuthRepo();
+    await oauthRepo.upsert('google', {
+      tokens,
+      mode: 'rowboat',
+      // Explicitly null these — no client_id/secret on the desktop in this mode.
+      clientId: null,
+      clientSecret: null,
+      error: null,
+    });
+    triggerGmailSync();
+    triggerCalendarSync();
+    emitOAuthEvent({ provider: 'google', success: true });
+    console.log('[OAuth] Rowboat-mode Google connect complete');
+  } catch (error) {
+    console.error('[OAuth] Failed to complete rowboat-mode Google connect:', error);
+    emitOAuthEvent({
+      provider: 'google',
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to claim Google tokens',
+    });
+  }
+}
+
+/**
  * Disconnect a provider (clear tokens)
  */
 export async function disconnectProvider(provider: string): Promise<{ success: boolean }> {
   try {
     const oauthRepo = getOAuthRepo();
+
+    // For rowboat-mode Google, best-effort revoke at Google before clearing
+    // local state. Google's revoke endpoint accepts an unauthenticated POST
+    // with the access_token; failure is logged but doesn't block disconnect.
+    if (provider === 'google') {
+      const connection = await oauthRepo.read(provider);
+      if (connection.mode === 'rowboat' && connection.tokens?.access_token) {
+        try {
+          const revokeUrl = `https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(connection.tokens.access_token)}`;
+          const res = await fetch(revokeUrl, { method: 'POST' });
+          if (!res.ok) {
+            console.warn(`[OAuth] Google revoke returned ${res.status}; continuing with local disconnect`);
+          }
+        } catch (error) {
+          console.warn('[OAuth] Google revoke failed; continuing with local disconnect:', error);
+        }
+      }
+    }
+
     await oauthRepo.delete(provider);
+    if (provider === 'rowboat') {
+      analyticsCapture('user_signed_out');
+      analyticsReset();
+    }
     // Notify renderer so sidebar, voice, and billing re-check state
     emitOAuthEvent({ provider, success: false });
     return { success: true };

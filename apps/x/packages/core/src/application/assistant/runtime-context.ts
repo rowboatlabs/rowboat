@@ -9,7 +9,15 @@ export interface RuntimeContext {
 }
 
 export function getExecutionShell(platform: NodeJS.Platform = process.platform): string {
-  return platform === 'win32' ? (process.env.ComSpec || 'cmd.exe') : '/bin/sh';
+  if (platform === 'win32') {
+    return process.env.ComSpec || 'cmd.exe';
+  }
+
+  if (process.env.SHELL) {
+    return process.env.SHELL;
+  }
+
+  return platform === 'darwin' ? '/bin/zsh' : '/bin/sh';
 }
 
 export function getRuntimeContext(platform: NodeJS.Platform = process.platform): RuntimeContext {

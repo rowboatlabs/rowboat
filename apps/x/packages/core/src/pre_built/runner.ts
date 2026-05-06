@@ -43,6 +43,8 @@ async function runAgent(agentName: string): Promise<void> {
         const run = await createRun({
             agentId: agentName,
             model: await getKgModel(),
+            useCase: 'knowledge_sync',
+            subUseCase: 'pre_built',
         });
 
         // Build trigger message with user context

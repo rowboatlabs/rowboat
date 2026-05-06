@@ -96,14 +96,14 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   const [slackDiscovering, setSlackDiscovering] = useState(false)
   const [slackDiscoverError, setSlackDiscoverError] = useState<string | null>(null)
 
-  // Composio/Gmail state
-  const [useComposioForGoogle, setUseComposioForGoogle] = useState(false)
+  // Composio Gmail/Calendar sync was removed — flags are seeded false and
+  // never flipped. Kept here so legacy gating expressions still type-check.
+  const [useComposioForGoogle] = useState(false)
   const [gmailConnected, setGmailConnected] = useState(false)
   const [gmailLoading, setGmailLoading] = useState(true)
   const [gmailConnecting, setGmailConnecting] = useState(false)
 
-  // Composio/Google Calendar state
-  const [useComposioForGoogleCalendar, setUseComposioForGoogleCalendar] = useState(false)
+  const [useComposioForGoogleCalendar] = useState(false)
   const [googleCalendarConnected, setGoogleCalendarConnected] = useState(false)
   const [googleCalendarLoading, setGoogleCalendarLoading] = useState(true)
   const [googleCalendarConnecting, setGoogleCalendarConnecting] = useState(false)
@@ -151,25 +151,8 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
         setProvidersLoading(false)
       }
     }
-    async function loadComposioForGoogleFlag() {
-      try {
-        const result = await window.ipc.invoke('composio:use-composio-for-google', null)
-        setUseComposioForGoogle(result.enabled)
-      } catch (error) {
-        console.error('Failed to check composio-for-google flag:', error)
-      }
-    }
-    async function loadComposioForGoogleCalendarFlag() {
-      try {
-        const result = await window.ipc.invoke('composio:use-composio-for-google-calendar', null)
-        setUseComposioForGoogleCalendar(result.enabled)
-      } catch (error) {
-        console.error('Failed to check composio-for-google-calendar flag:', error)
-      }
-    }
+    // (Composio Gmail/Calendar flag fetches removed — sync was deleted.)
     loadProviders()
-    loadComposioForGoogleFlag()
-    loadComposioForGoogleCalendarFlag()
   }, [open])
 
   // Load LLM models catalog on open
@@ -622,12 +605,20 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   // Connect to a provider
   const handleConnect = useCallback(async (provider: string) => {
     if (provider === 'google') {
+      // Signed-in users use the rowboat (managed-credentials) flow: opens
+      // the webapp in the browser, no BYOK modal. Falls back to BYOK modal
+      // for not-signed-in users. (Mirrors useConnectors.handleConnect.)
+      const isSignedIntoRowboat = providerStates.rowboat?.isConnected ?? false
+      if (isSignedIntoRowboat) {
+        await startConnect('google')
+        return
+      }
       setGoogleClientIdOpen(true)
       return
     }
 
     await startConnect(provider)
-  }, [startConnect])
+  }, [startConnect, providerStates])
 
   const handleGoogleClientIdSubmit = useCallback((clientId: string, clientSecret: string) => {
     setGoogleCredentials(clientId, clientSecret)

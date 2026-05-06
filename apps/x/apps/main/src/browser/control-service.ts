@@ -1,7 +1,23 @@
 import type { IBrowserControlService } from '@x/core/dist/application/browser-control/service.js';
-import type { BrowserControlAction, BrowserControlInput, BrowserControlResult } from '@x/shared/dist/browser-control.js';
+import type { BrowserControlAction, BrowserControlInput, BrowserControlResult, SuggestedBrowserSkill } from '@x/shared/dist/browser-control.js';
+import { ensureLoaded, matchSkillsForUrl } from '@x/core/dist/application/browser-skills/index.js';
 import { browserViewManager } from './view.js';
 import { normalizeNavigationTarget } from './navigation.js';
+
+async function getSuggestedSkills(url: string | undefined): Promise<SuggestedBrowserSkill[] | undefined> {
+  if (!url) return undefined;
+  try {
+    const status = await ensureLoaded();
+    if (status.status === 'ready' || status.status === 'stale') {
+      const matched = matchSkillsForUrl(status.index, url);
+      if (matched.length === 0) return undefined;
+      return matched.map((e) => ({ id: e.id, title: e.title, path: e.path }));
+    }
+  } catch (err) {
+    console.warn('[browser-control] suggestedSkills lookup failed:', err);
+  }
+  return undefined;
+}
 
 function buildSuccessResult(
   action: BrowserControlAction,
@@ -52,11 +68,13 @@ export class ElectronBrowserControlService implements IBrowserControlService {
           }
           await browserViewManager.ensureActiveTabReady(signal);
           const page = await browserViewManager.readPageSummary(signal, { waitForReady: false }) ?? undefined;
-          return buildSuccessResult(
+          const suggestedSkills = await getSuggestedSkills(page?.url);
+          const success = buildSuccessResult(
             'new-tab',
             target ? `Opened a new tab for ${target}.` : 'Opened a new tab.',
             page,
           );
+          return suggestedSkills ? { ...success, suggestedSkills } : success;
         }
 
         case 'switch-tab': {
@@ -99,7 +117,9 @@ export class ElectronBrowserControlService implements IBrowserControlService {
           }
           await browserViewManager.ensureActiveTabReady(signal);
           const page = await browserViewManager.readPageSummary(signal, { waitForReady: false }) ?? undefined;
-          return buildSuccessResult('navigate', `Navigated to ${target}.`, page);
+          const suggestedSkills = await getSuggestedSkills(page?.url);
+          const success = buildSuccessResult('navigate', `Navigated to ${target}.`, page);
+          return suggestedSkills ? { ...success, suggestedSkills } : success;
         }
 
         case 'back': {
@@ -140,7 +160,9 @@ export class ElectronBrowserControlService implements IBrowserControlService {
           if (!result.ok || !result.page) {
             return buildErrorResult('read-page', result.error ?? 'Failed to read the current page.');
           }
-          return buildSuccessResult('read-page', 'Read the current page.', result.page);
+          const suggestedSkills = await getSuggestedSkills(result.page.url);
+          const success = buildSuccessResult('read-page', 'Read the current page.', result.page);
+          return suggestedSkills ? { ...success, suggestedSkills } : success;
         }
 
         case 'click': {

@@ -26,7 +26,7 @@ const DEFAULT_NOTE_TYPE_DEFINITIONS: NoteTypeDefinition[] = [
 **Last update:** {YYYY-MM-DD}
 
 ## Summary
-{2-3 sentences: Who they are, why you know them, what you're working on together.}
+{2-3 sentences: Who they are, whether I know them through an ongoing relationship or met them in a specific encounter, and what we're discussing or working on together if applicable.}
 
 ## Connected to
 - [[Organizations/{Organization}]] — works at
@@ -59,7 +59,7 @@ const DEFAULT_NOTE_TYPE_DEFINITIONS: NoteTypeDefinition[] = [
 **Last update:** {YYYY-MM-DD}
 
 ## Summary
-{2-3 sentences: What this org is, what your relationship is.}
+{2-3 sentences: What this org is, how I know or work with them.}
 
 ## People
 - [[People/{Person}]] — {role}
@@ -93,7 +93,7 @@ const DEFAULT_NOTE_TYPE_DEFINITIONS: NoteTypeDefinition[] = [
 **Last update:** {YYYY-MM-DD}
 
 ## Summary
-{2-3 sentences: What this project is, goal, current state.}
+{2-3 sentences: What this project is, the goal, current state, and my/our involvement where relevant.}
 
 ## People
 - [[People/{Person}]] — {role}

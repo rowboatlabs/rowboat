@@ -156,6 +156,28 @@ const SERVICE_LABELS: Record<string, string> = {
   granola: "Syncing Granola",
   graph: "Updating knowledge",
   voice_memo: "Processing voice memo",
+  email_labeling: "Labeling emails",
+  note_tagging: "Tagging notes",
+  agent_notes: "Updating agent notes",
+}
+
+function summarizeServiceError(error: string): string {
+  const firstLine = error.split("\n").find((line) => line.trim().length > 0)
+  return firstLine?.trim() || error.trim()
+}
+
+function collectServiceErrors(events: ServiceEventType[]): Map<string, string> {
+  const errors = new Map<string, string>()
+  for (const event of events) {
+    if (event.type === "error") {
+      errors.set(event.service, summarizeServiceError(event.error))
+      continue
+    }
+    if (event.type === "run_complete" && event.outcome !== "error") {
+      errors.delete(event.service)
+    }
+  }
+  return errors
 }
 
 type TasksActions = {
@@ -186,10 +208,14 @@ type SidebarContentPanelProps = {
   meetingSummarizing?: boolean
   meetingAvailable?: boolean
   onToggleMeeting?: () => void
+  isSearchOpen?: boolean
+  isMeetingActionActive?: boolean
   isBrowserOpen?: boolean
   onToggleBrowser?: () => void
   isSuggestedTopicsOpen?: boolean
   onOpenSuggestedTopics?: () => void
+  isBackgroundAgentsOpen?: boolean
+  onOpenBackgroundAgents?: () => void
 } & React.ComponentProps<typeof Sidebar>
 
 const sectionTabs: { id: ActiveSection; label: string }[] = [
@@ -225,6 +251,7 @@ function formatRunTime(ts: string): string {
 function SyncStatusBar() {
   const { state } = useSidebar()
   const [activeServices, setActiveServices] = useState<Map<string, string>>(new Map())
+  const [serviceErrors, setServiceErrors] = useState<Map<string, string>>(new Map())
   const [popoverOpen, setPopoverOpen] = useState(false)
   const [logEvents, setLogEvents] = useState<ServiceEventType[]>([])
   const [logLoading, setLogLoading] = useState(false)
@@ -258,11 +285,25 @@ function SyncStatusBar() {
           next.delete(nextEvent.runId)
           return next
         })
+        if (nextEvent.outcome !== 'error') {
+          setServiceErrors((prev) => {
+            if (!prev.has(nextEvent.service)) return prev
+            const next = new Map(prev)
+            next.delete(nextEvent.service)
+            return next
+          })
+        }
         const existingTimeout = runTimeoutsRef.current.get(nextEvent.runId)
         if (existingTimeout) {
           clearTimeout(existingTimeout)
           runTimeoutsRef.current.delete(nextEvent.runId)
         }
+      } else if (nextEvent.type === 'error') {
+        setServiceErrors((prev) => {
+          const next = new Map(prev)
+          next.set(nextEvent.service, summarizeServiceError(nextEvent.error))
+          return next
+        })
       }
     })
     return cleanup
@@ -296,10 +337,14 @@ function SyncStatusBar() {
             // skip malformed lines
           }
         }
+        setServiceErrors(collectServiceErrors(parsed))
         // Newest first, limit to 1000
         setLogEvents(parsed.reverse().slice(0, MAX_SYNC_EVENTS))
       } catch {
-        if (!cancelled) setLogEvents([])
+        if (!cancelled) {
+          setLogEvents([])
+          setServiceErrors(new Map())
+        }
       } finally {
         if (!cancelled) setLogLoading(false)
       }
@@ -310,12 +355,19 @@ function SyncStatusBar() {
 
   const isSyncing = activeServices.size > 0
   const isCollapsed = state === "collapsed"
+  const errorEntries = Array.from(serviceErrors.entries())
+  const primaryErrorService = errorEntries[0]?.[0] ?? null
+  const hasServiceErrors = errorEntries.length > 0
 
   // Build status label from active services
   const activeServiceNames = [...new Set(activeServices.values())]
   const statusLabel = isSyncing
     ? activeServiceNames.map((s) => SERVICE_LABELS[s] || s).join(", ")
-    : "All caught up"
+    : hasServiceErrors
+      ? errorEntries.length === 1
+        ? `${SERVICE_LABELS[primaryErrorService ?? ""] || primaryErrorService} failed`
+        : "Recent sync issues"
+      : "All caught up"
 
   return (
     <>
@@ -333,11 +385,16 @@ function SyncStatusBar() {
           <PopoverTrigger asChild>
             <button
               type="button"
-              className="flex w-full items-center justify-between rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-sidebar-accent"
+              className={cn(
+                "flex w-full items-center justify-between rounded-md px-2 py-1 text-xs hover:bg-sidebar-accent",
+                hasServiceErrors && !isSyncing ? "text-red-600 dark:text-red-400" : "text-muted-foreground",
+              )}
             >
               <span className="flex items-center gap-2 min-w-0">
                 {isSyncing ? (
                   <LoaderIcon className="h-3 w-3 shrink-0 animate-spin" />
+                ) : hasServiceErrors ? (
+                  <AlertTriangle className="h-3 w-3 shrink-0" />
                 ) : (
                   <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/60" />
                 )}
@@ -355,7 +412,7 @@ function SyncStatusBar() {
             <div className="p-3 border-b">
               <h4 className="font-semibold text-sm">Sync Activity</h4>
               <p className="text-xs text-muted-foreground mt-0.5">
-                {isSyncing ? statusLabel : "All services up to date"}
+                {isSyncing || hasServiceErrors ? statusLabel : "All services up to date"}
               </p>
             </div>
             <div className="max-h-80 overflow-y-auto p-2">
@@ -387,7 +444,17 @@ function SyncStatusBar() {
                           {SERVICE_LABELS[event.service]?.split(" ").slice(-1)[0] || event.service}
                         </span>
                       </span>
-                      <span className="leading-4 text-foreground/80">{event.message}</span>
+                      <div className="min-w-0 flex-1">
+                        <p className="leading-4 text-foreground/80">{event.message}</p>
+                        {event.type === 'error' && (
+                          <p
+                            className="truncate text-[11px] leading-4 text-red-600/90 dark:text-red-400/90"
+                            title={event.error}
+                          >
+                            {summarizeServiceError(event.error)}
+                          </p>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -420,10 +487,14 @@ export function SidebarContentPanel({
   meetingSummarizing = false,
   meetingAvailable = false,
   onToggleMeeting,
+  isSearchOpen = false,
+  isMeetingActionActive = false,
   isBrowserOpen = false,
   onToggleBrowser,
   isSuggestedTopicsOpen = false,
   onOpenSuggestedTopics,
+  isBackgroundAgentsOpen = false,
+  onOpenBackgroundAgents,
   ...props
 }: SidebarContentPanelProps) {
   const { activeSection, setActiveSection } = useSidebarSection()
@@ -436,6 +507,10 @@ export function SidebarContentPanel({
   const [loggingIn, setLoggingIn] = useState(false)
   const [appUrl, setAppUrl] = useState<string | null>(null)
   const { billing } = useBilling(isRowboatConnected)
+  const isMeetingQuickActionSelected = isMeetingActionActive
+  const isBrowserQuickActionSelected = isBrowserOpen && !isSearchOpen && !isMeetingQuickActionSelected
+  const isSuggestedTopicsQuickActionSelected = isSuggestedTopicsOpen && !isBrowserOpen
+  const isBackgroundAgentsQuickActionSelected = isBackgroundAgentsOpen && !isBrowserOpen
 
   const handleRowboatLogin = useCallback(async () => {
     try {
@@ -533,7 +608,12 @@ export function SidebarContentPanel({
             <button
               type="button"
               onClick={onOpenSearch}
-              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+              className={cn(
+                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
+                isSearchOpen
+                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                  : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+              )}
             >
               <SearchIcon className="size-4" />
               <span>Search</span>
@@ -546,9 +626,14 @@ export function SidebarContentPanel({
               disabled={meetingState === 'connecting' || meetingState === 'stopping' || meetingSummarizing}
               className={cn(
                 "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors disabled:pointer-events-none",
+                isMeetingQuickActionSelected
+                  ? "bg-sidebar-accent"
+                  : "hover:bg-sidebar-accent",
                 meetingState === 'recording'
-                  ? "text-red-500 hover:bg-sidebar-accent"
-                  : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                  ? "text-red-500"
+                  : isMeetingQuickActionSelected
+                    ? "text-sidebar-accent-foreground"
+                    : "text-sidebar-foreground/80 hover:text-sidebar-accent-foreground"
               )}
             >
               {meetingSummarizing || meetingState === 'connecting' ? (
@@ -575,7 +660,7 @@ export function SidebarContentPanel({
               onClick={onToggleBrowser}
               className={cn(
                 "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
-                isBrowserOpen
+                isBrowserQuickActionSelected
                   ? "bg-sidebar-accent text-sidebar-accent-foreground"
                   : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
               )}
@@ -590,13 +675,28 @@ export function SidebarContentPanel({
               onClick={onOpenSuggestedTopics}
               className={cn(
                 "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
-                isSuggestedTopicsOpen
+                isSuggestedTopicsQuickActionSelected
                   ? "bg-sidebar-accent text-sidebar-accent-foreground"
                   : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
               )}
             >
               <Lightbulb className="size-4" />
               <span>Suggested Topics</span>
+            </button>
+          )}
+          {onOpenBackgroundAgents && (
+            <button
+              type="button"
+              onClick={onOpenBackgroundAgents}
+              className={cn(
+                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
+                isBackgroundAgentsQuickActionSelected
+                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                  : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+              )}
+            >
+              <Bot className="size-4" />
+              <span>Background agents</span>
             </button>
           )}
         </div>

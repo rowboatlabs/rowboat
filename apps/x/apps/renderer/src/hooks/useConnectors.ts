@@ -38,16 +38,21 @@ export function useConnectors(active: boolean) {
   const [slackDiscovering, setSlackDiscovering] = useState(false)
   const [slackDiscoverError, setSlackDiscoverError] = useState<string | null>(null)
 
-  // Composio/Gmail state
-  const [useComposioForGoogle, setUseComposioForGoogle] = useState(false)
+  // Composio Gmail/Calendar sync was removed. These flags are seeded false
+  // and never flipped — the IPC that used to set them is gone. The setters
+  // remain so the legacy Composio-Gmail handlers below still type-check,
+  // but those handlers are no longer reachable in the UI (the gating
+  // condition `useComposioForGoogle` stays false).
+  // TODO follow-up: drop these flags entirely and prune the dead UI branches
+  // in connectors-popover, connected-accounts-settings, and onboarding-modal.
+  const [useComposioForGoogle] = useState(false)
   const [gmailConnected, setGmailConnected] = useState(false)
-  const [gmailLoading, setGmailLoading] = useState(true)
+  const [gmailLoading, setGmailLoading] = useState(false)
   const [gmailConnecting, setGmailConnecting] = useState(false)
 
-  // Composio/Google Calendar state
-  const [useComposioForGoogleCalendar, setUseComposioForGoogleCalendar] = useState(false)
+  const [useComposioForGoogleCalendar] = useState(false)
   const [googleCalendarConnected, setGoogleCalendarConnected] = useState(false)
-  const [googleCalendarLoading, setGoogleCalendarLoading] = useState(true)
+  const [googleCalendarLoading, setGoogleCalendarLoading] = useState(false)
   const [googleCalendarConnecting, setGoogleCalendarConnecting] = useState(false)
 
   // Load available providers on mount
@@ -67,28 +72,7 @@ export function useConnectors(active: boolean) {
     loadProviders()
   }, [])
 
-  // Re-check composio-for-google flags when active
-  useEffect(() => {
-    if (!active) return
-    async function loadComposioForGoogleFlag() {
-      try {
-        const result = await window.ipc.invoke('composio:use-composio-for-google', null)
-        setUseComposioForGoogle(result.enabled)
-      } catch (error) {
-        console.error('Failed to check composio-for-google flag:', error)
-      }
-    }
-    async function loadComposioForGoogleCalendarFlag() {
-      try {
-        const result = await window.ipc.invoke('composio:use-composio-for-google-calendar', null)
-        setUseComposioForGoogleCalendar(result.enabled)
-      } catch (error) {
-        console.error('Failed to check composio-for-google-calendar flag:', error)
-      }
-    }
-    loadComposioForGoogleFlag()
-    loadComposioForGoogleCalendarFlag()
-  }, [active])
+  // (Composio Gmail/Calendar flag-check effect removed — flags are constant false now.)
 
   // Load Granola config
   const refreshGranolaConfig = useCallback(async () => {
@@ -346,13 +330,22 @@ export function useConnectors(active: boolean) {
 
   const handleConnect = useCallback(async (provider: string) => {
     if (provider === 'google') {
+      // Signed-in users use the rowboat (managed-credentials) flow: opens
+      // the webapp in the browser, no BYOK modal. Main process detects
+      // signed-in via isSignedIn() when oauth:connect arrives without creds.
+      // Falls back to the BYOK modal for not-signed-in users.
+      const isSignedIntoRowboat = providerStates.rowboat?.isConnected ?? false
+      if (isSignedIntoRowboat) {
+        await startConnect('google')
+        return
+      }
       setGoogleClientIdDescription(undefined)
       setGoogleClientIdOpen(true)
       return
     }
 
     await startConnect(provider)
-  }, [startConnect])
+  }, [startConnect, providerStates])
 
   const handleGoogleClientIdSubmit = useCallback((clientId: string, clientSecret: string) => {
     setGoogleCredentials(clientId, clientSecret)
@@ -483,19 +476,6 @@ export function useConnectors(active: boolean) {
           })
         } else {
           toast.success(`Connected to ${displayName}`)
-        }
-
-        if (provider === 'rowboat') {
-          try {
-            const [googleResult, calendarResult] = await Promise.all([
-              window.ipc.invoke('composio:use-composio-for-google', null),
-              window.ipc.invoke('composio:use-composio-for-google-calendar', null),
-            ])
-            setUseComposioForGoogle(googleResult.enabled)
-            setUseComposioForGoogleCalendar(calendarResult.enabled)
-          } catch (err) {
-            console.error('Failed to re-check composio flags:', err)
-          }
         }
 
         refreshAllStatuses()

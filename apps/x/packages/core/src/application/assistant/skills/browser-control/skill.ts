@@ -14,8 +14,10 @@ Use this skill when the user asks you to open a website, browse in-app, search t
    - page ` + "`url`" + ` and ` + "`title`" + `
    - visible page text
    - interactable elements with numbered ` + "`index`" + ` values
-4. Prefer acting on those numbered indices with ` + "`click`" + ` / ` + "`type`" + ` / ` + "`press`" + `.
-5. After each action, read the returned page snapshot before deciding the next step.
+   - ` + "`suggestedSkills`" + ` — site-specific and interaction-specific skill hints for the current page
+4. **Always inspect ` + "`suggestedSkills`" + ` before acting.** If any skill in the list matches what the user asked for (site or task), call ` + "`load-browser-skill({ id: \"<id>\" })`" + ` *first*, read it in full, then plan your actions. These skills encode selectors, timing, and gotchas that would otherwise cost you several failed attempts to rediscover. If no skill matches, proceed — but do not skip this check.
+5. Prefer acting on those numbered indices with ` + "`click`" + ` / ` + "`type`" + ` / ` + "`press`" + `.
+6. After each action, read the returned page snapshot before deciding the next step — including re-checking ` + "`suggestedSkills`" + ` if the navigation landed you on a new domain.
 
 ## Actions
 
@@ -92,12 +94,23 @@ Wait for the page to settle, useful after async UI changes.
 Parameters:
 - ` + "`ms`" + `: milliseconds to wait (optional)
 
+## Companion Tools
+
+### load-browser-skill
+Rowboat caches a library of browser skills (from ` + "`browser-use/browser-harness`" + `) indexed by both **domain** (github, linkedin, amazon, booking, …) and **interaction type** within a domain (e.g. ` + "`github/repo-actions`" + `, ` + "`github/scraping`" + `, ` + "`arxiv-bulk/*`" + `). Whenever ` + "`browser-control`" + ` returns a ` + "`suggestedSkills`" + ` array — which it does on ` + "`navigate`" + `, ` + "`new-tab`" + `, and ` + "`read-page`" + ` — treat it as a required reading step, not optional. Pick the entry that matches the current task (domain match first, then the interaction-specific variant if one exists) and call ` + "`load-browser-skill({ id: \"<id>\" })`" + ` before attempting the action.
+
+You can also proactively call ` + "`load-browser-skill({ action: \"list\", site: \"<site>\" })`" + ` when you know you're about to work on a site, to see what skills exist even if ` + "`suggestedSkills`" + ` is empty (e.g. before navigating).
+
+These skills are written against a Python harness, so treat them as **reference knowledge**. Reuse the selectors, timing, and sequencing, but adapt them to Rowboat's structured browser actions. **Do not look for or call ` + "`http-fetch`" + `.** If a browser-harness recipe suggests ` + "`js(...)`" + ` or ` + "`http_get(...)`" + ` style shortcuts, treat those as non-portable and fall back to reading and interacting with the page itself.
+
 ## Important Rules
 
 - Prefer ` + "`read-page`" + ` before interacting.
 - Prefer element ` + "`index`" + ` over CSS selectors.
 - If the tool says the snapshot is stale, call ` + "`read-page`" + ` again.
 - After navigation, clicking, typing, pressing, or scrolling, use the returned page snapshot instead of assuming the page state.
+- **Always check ` + "`suggestedSkills`" + ` after ` + "`navigate`" + `, ` + "`new-tab`" + `, or ` + "`read-page`" + `, and load the matching domain or interaction skill before acting.** Skipping this step is the single most common way to waste a dozen failed clicks on a site whose quirks are already documented. If the array is empty, proceed normally — but don't skip the check.
+- Do not try to use ` + "`http-fetch`" + `. If a browser-harness recipe mentions ` + "`http_get(...)`" + ` or a public API shortcut, adapt it to DOM-based browsing instead.
 - Use Rowboat's browser for live interaction. Use web search tools for research where a live session is unnecessary.
 - Do not wrap browser URLs or browser pages in ` + "```filepath" + ` blocks. Filepath cards are only for real files on disk, not web pages or browser tabs.
 - If you mention a page the browser opened, use plain text for the URL/title instead of trying to create a clickable file card.

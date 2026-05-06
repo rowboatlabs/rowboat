@@ -4,7 +4,7 @@ import { WorkDir } from '../config/config.js';
 import { createRun, createMessage } from '../runs/runs.js';
 import { getKgModel } from '../models/defaults.js';
 import { bus } from '../runs/bus.js';
-import { waitForRunCompletion } from '../agents/utils.js';
+import { getErrorDetails, waitForRunCompletion } from '../agents/utils.js';
 import { serviceLogger } from '../services/service_logger.js';
 import { limitEventItems } from './limit_event_items.js';
 import {
@@ -86,6 +86,8 @@ async function tagNoteBatch(
     const run = await createRun({
         agentId: NOTE_TAGGING_AGENT,
         model: await getKgModel(),
+        useCase: 'knowledge_sync',
+        subUseCase: 'tag_notes',
     });
 
     let message = `Tag the following ${files.length} knowledge notes by prepending YAML frontmatter with appropriate tags.\n\n`;
@@ -123,8 +125,11 @@ async function tagNoteBatch(
     });
 
     await createMessage(run.id, message);
-    await waitForRunCompletion(run.id);
-    unsubscribe();
+    try {
+        await waitForRunCompletion(run.id, { throwOnError: true });
+    } finally {
+        unsubscribe();
+    }
 
     return { runId: run.id, filesEdited };
 }
@@ -167,6 +172,7 @@ export async function processUntaggedNotes(): Promise<void> {
     const totalBatches = Math.ceil(untagged.length / BATCH_SIZE);
     let totalEdited = 0;
     let hadError = false;
+    let failedBatches = 0;
 
     for (let i = 0; i < untagged.length; i += BATCH_SIZE) {
         const batchPaths = untagged.slice(i, i + BATCH_SIZE);
@@ -215,14 +221,16 @@ export async function processUntaggedNotes(): Promise<void> {
             console.log(`[NoteTagging] Batch ${batchNumber}/${totalBatches} complete, ${result.filesEdited.size} files tagged`);
         } catch (error) {
             hadError = true;
+            failedBatches++;
+            const errorDetails = getErrorDetails(error);
             console.error(`[NoteTagging] Error processing batch ${batchNumber}:`, error);
             await serviceLogger.log({
                 type: 'error',
                 service: run.service,
                 runId: run.runId,
                 level: 'error',
-                message: `Error processing batch ${batchNumber}`,
-                error: error instanceof Error ? error.message : String(error),
+                message: `Note tagging batch ${batchNumber}/${totalBatches} failed`,
+                error: errorDetails,
                 context: { batchNumber },
             });
         }
@@ -236,12 +244,15 @@ export async function processUntaggedNotes(): Promise<void> {
         service: run.service,
         runId: run.runId,
         level: hadError ? 'error' : 'info',
-        message: `Note tagging complete: ${totalEdited} notes tagged`,
+        message: hadError
+            ? `Note tagging finished with errors: ${totalEdited} notes tagged`
+            : `Note tagging complete: ${totalEdited} notes tagged`,
         durationMs: Date.now() - run.startedAt,
         outcome: hadError ? 'error' : 'ok',
         summary: {
             totalNotes: untagged.length,
             notesTagged: totalEdited,
+            failedBatches,
         },
     });
 

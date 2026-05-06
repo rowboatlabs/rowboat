@@ -49,6 +49,7 @@ const BLOCKING_OVERLAY_SLOTS = new Set([
 
 interface BrowserPaneProps {
   onClose: () => void
+  forceHidden?: boolean
 }
 
 const getActiveTab = (state: BrowserState) =>
@@ -85,7 +86,7 @@ const getBrowserTabTitle = (tab: BrowserTabState) => {
   }
 }
 
-export function BrowserPane({ onClose }: BrowserPaneProps) {
+export function BrowserPane({ onClose, forceHidden = false }: BrowserPaneProps) {
   const [state, setState] = useState<BrowserState>(EMPTY_STATE)
   const [addressValue, setAddressValue] = useState('')
 
@@ -175,6 +176,12 @@ export function BrowserPane({ onClose }: BrowserPaneProps) {
   }, [])
 
   const syncView = useCallback(() => {
+    if (forceHidden) {
+      lastBoundsRef.current = null
+      setViewVisible(false)
+      return null
+    }
+
     const doc = viewportRef.current?.ownerDocument
     if (doc && hasBlockingOverlay(doc)) {
       lastBoundsRef.current = null
@@ -191,7 +198,7 @@ export function BrowserPane({ onClose }: BrowserPaneProps) {
     pushBounds(bounds)
     setViewVisible(true)
     return bounds
-  }, [measureBounds, pushBounds, setViewVisible])
+  }, [forceHidden, measureBounds, pushBounds, setViewVisible])
 
   useEffect(() => {
     syncView()

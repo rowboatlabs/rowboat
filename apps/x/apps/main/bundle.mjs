@@ -31,6 +31,11 @@ await esbuild.build({
   // Replace import.meta.url directly with our polyfill variable
   define: {
     'import.meta.url': '__import_meta_url',
+    // Inject PostHog credentials at build time. Reuse the renderer's
+    // VITE_PUBLIC_* envs so packaging only needs one set of values.
+    // Empty strings disable analytics gracefully.
+    'process.env.POSTHOG_KEY': JSON.stringify(process.env.VITE_PUBLIC_POSTHOG_KEY ?? ''),
+    'process.env.POSTHOG_HOST': JSON.stringify(process.env.VITE_PUBLIC_POSTHOG_HOST ?? 'https://us.i.posthog.com'),
   },
 });
 

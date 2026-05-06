@@ -1,6 +1,35 @@
 import { bus } from "../runs/bus.js";
 import { fetchRun } from "../runs/runs.js";
 
+type RunRecord = Awaited<ReturnType<typeof fetchRun>>;
+
+function extractRunErrors(run: RunRecord): string[] {
+    return run.log.flatMap((event) => event.type === "error" ? [event.error] : []);
+}
+
+export class RunFailedError extends Error {
+    readonly runId: string;
+    readonly errors: string[];
+
+    constructor(runId: string, errors: string[]) {
+        const firstError = errors.find(Boolean) ?? null;
+        super(firstError ? `Run ${runId} failed: ${firstError}` : `Run ${runId} failed`);
+        this.name = "RunFailedError";
+        this.runId = runId;
+        this.errors = errors;
+    }
+}
+
+export function getErrorDetails(error: unknown): string {
+    if (error instanceof RunFailedError) {
+        return error.errors.join("\n\n");
+    }
+    if (error instanceof Error) {
+        return error.message;
+    }
+    return String(error);
+}
+
 /**
  * Extract the assistant's final text response from a run's log.
  * @param runId 
@@ -28,13 +57,28 @@ export async function extractAgentResponse(runId: string): Promise<string | null
 /**
  * Wait for a run to complete by listening for run-processing-end event
  */
-export async function waitForRunCompletion(runId: string): Promise<void> {
-    return new Promise(async (resolve) => {
-        const unsubscribe = await bus.subscribe('*', async (event) => {
-            if (event.type === 'run-processing-end' && event.runId === runId) {
-                unsubscribe();
-                resolve();
-            }
-        });
+export async function waitForRunCompletion(
+    runId: string,
+    opts: { throwOnError?: boolean } = {},
+): Promise<RunRecord> {
+    return new Promise((resolve, reject) => {
+        void (async () => {
+            const unsubscribe = await bus.subscribe('*', async (event) => {
+                if (event.type === 'run-processing-end' && event.runId === runId) {
+                    unsubscribe();
+                    try {
+                        const run = await fetchRun(runId);
+                        const errors = extractRunErrors(run);
+                        if (opts.throwOnError && errors.length > 0) {
+                            reject(new RunFailedError(runId, errors));
+                            return;
+                        }
+                        resolve(run);
+                    } catch (error) {
+                        reject(error);
+                    }
+                }
+            });
+        })().catch(reject);
     });
 }

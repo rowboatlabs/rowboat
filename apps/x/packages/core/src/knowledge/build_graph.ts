@@ -3,7 +3,7 @@ import path from 'path';
 import { WorkDir } from '../config/config.js';
 import { createRun, createMessage } from '../runs/runs.js';
 import { bus } from '../runs/bus.js';
-import { waitForRunCompletion } from '../agents/utils.js';
+import { getErrorDetails, waitForRunCompletion } from '../agents/utils.js';
 import { serviceLogger, type ServiceRunContext } from '../services/service_logger.js';
 import {
     loadState,
@@ -252,6 +252,8 @@ async function createNotesFromBatch(
     // Create a run for the note creation agent
     const run = await createRun({
         agentId: NOTE_CREATION_AGENT,
+        useCase: 'knowledge_sync',
+        subUseCase: 'build_graph',
     });
     const suggestedTopicsContent = readSuggestedTopicsFile();
 
@@ -310,8 +312,11 @@ async function createNotesFromBatch(
     await createMessage(run.id, message);
 
     // Wait for the run to complete
-    await waitForRunCompletion(run.id);
-    unsubscribe();
+    try {
+        await waitForRunCompletion(run.id, { throwOnError: true });
+    } finally {
+        unsubscribe();
+    }
 
     return { runId: run.id, notesCreated, notesModified };
 }
@@ -426,7 +431,7 @@ async function buildGraphWithFiles(
                     runId: run.runId,
                     level: 'error',
                     message: `Error processing batch ${batchNumber}`,
-                    error: error instanceof Error ? error.message : String(error),
+                    error: getErrorDetails(error),
                     context: { batchNumber },
                 });
             }
@@ -598,7 +603,7 @@ async function processVoiceMemosForKnowledge(): Promise<boolean> {
                 runId: run.runId,
                 level: 'error',
                 message: `Error processing voice memo batch ${batchNumber}`,
-                error: error instanceof Error ? error.message : String(error),
+                error: getErrorDetails(error),
                 context: { batchNumber },
             });
         }

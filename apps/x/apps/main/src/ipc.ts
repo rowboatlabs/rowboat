@@ -34,6 +34,8 @@ import { triggerSync as triggerGranolaSync } from '@x/core/dist/knowledge/granol
 import { ISlackConfigRepo } from '@x/core/dist/slack/repo.js';
 import { isOnboardingComplete, markOnboardingComplete } from '@x/core/dist/config/note_creation_config.js';
 import * as composioHandler from './composio-handler.js';
+import { consumePendingDeepLink } from './deeplink.js';
+import { qualifyAndDisconnectComposioGoogle } from '@x/core/dist/migrations/composio-google-migration.js';
 import { IAgentScheduleRepo } from '@x/core/dist/agent-schedule/repo.js';
 import { IAgentScheduleStateRepo } from '@x/core/dist/agent-schedule/state-repo.js';
 import { triggerRun as triggerAgentScheduleRun } from '@x/core/dist/agent-schedule/runner.js';
@@ -46,8 +48,12 @@ import { getAccessToken } from '@x/core/dist/auth/tokens.js';
 import { getRowboatConfig } from '@x/core/dist/config/rowboat.js';
 import { triggerTrackUpdate } from '@x/core/dist/knowledge/track/runner.js';
 import { trackBus } from '@x/core/dist/knowledge/track/bus.js';
+import { getInstallationId } from '@x/core/dist/analytics/installation.js';
+import { API_URL } from '@x/core/dist/config/env.js';
 import {
   fetchYaml,
+  listNotesWithTracks,
+  setNoteTracksActive,
   updateTrackBlock,
   replaceTrackBlockYaml,
   deleteTrackBlock,
@@ -129,6 +135,14 @@ function resolveShellPath(filePath: string): string {
   }
 
   return workspace.resolveWorkspacePath(filePath);
+}
+
+function toKnowledgeTrackPath(filePath: string): string {
+  const normalized = filePath.replace(/\\/g, '/').replace(/^\/+/, '');
+  if (!normalized.startsWith('knowledge/')) {
+    throw new Error('Track note path must be within knowledge/')
+  }
+  return normalized.slice('knowledge/'.length)
 }
 
 type InvokeChannels = ipc.InvokeChannels;
@@ -342,7 +356,7 @@ function emitServiceEvent(event: z.infer<typeof ServiceEvent>): void {
   }
 }
 
-export function emitOAuthEvent(event: { provider: string; success: boolean; error?: string }): void {
+export function emitOAuthEvent(event: { provider: string; success: boolean; error?: string; userId?: string }): void {
   const windows = BrowserWindow.getAllWindows();
   for (const win of windows) {
     if (!win.isDestroyed() && win.webContents) {
@@ -414,6 +428,15 @@ export function setupIpcHandlers() {
     'app:getVersions': async () => {
       // args is null for this channel (no request payload)
       return getVersions();
+    },
+    'app:consumePendingDeepLink': async () => {
+      return { url: consumePendingDeepLink() };
+    },
+    'analytics:bootstrap': async () => {
+      return {
+        installationId: getInstallationId(),
+        apiUrl: API_URL,
+      };
     },
     'workspace:getRoot': async () => {
       return workspace.getRoot();
@@ -600,11 +623,8 @@ export function setupIpcHandlers() {
     'composio:list-toolkits': async () => {
       return composioHandler.listToolkits();
     },
-    'composio:use-composio-for-google': async () => {
-      return composioHandler.useComposioForGoogle();
-    },
-    'composio:use-composio-for-google-calendar': async () => {
-      return composioHandler.useComposioForGoogleCalendar();
+    'migration:check-composio-google': async () => {
+      return qualifyAndDisconnectComposioGoogle();
     },
     // Agent schedule handlers
     'agent-schedule:getConfig': async () => {
@@ -821,6 +841,19 @@ export function setupIpcHandlers() {
       } catch (err) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };
       }
+    },
+    'track:setNoteActive': async (_event, args) => {
+      try {
+        const note = await setNoteTracksActive(toKnowledgeTrackPath(args.path), args.active);
+        if (!note) return { success: false, error: 'No track blocks found in note' };
+        return { success: true, note };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'track:listNotes': async () => {
+      const notes = await listNotesWithTracks();
+      return { notes };
     },
     // Billing handler
     'billing:getInfo': async () => {
