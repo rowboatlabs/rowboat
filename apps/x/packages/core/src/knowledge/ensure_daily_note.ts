@@ -1,6 +1,6 @@
 import path from 'path';
 import fs from 'fs';
-import { stringify as stringifyYaml } from 'yaml';
+import { stringify as stringifyYaml, parse as parseYaml } from 'yaml';
 import { TrackBlockSchema } from '@x/shared/dist/track-block.js';
 import { WorkDir } from '../config/config.js';
 import z from 'zod';
@@ -179,8 +179,37 @@ function migrateEmojiHeadings(): void {
     }
 }
 
+function migrateTrackIcons(): void {
+    if (!fs.existsSync(DAILY_NOTE_PATH)) return;
+    let content = fs.readFileSync(DAILY_NOTE_PATH, 'utf-8');
+    const original = content;
+
+    const iconMap = new Map<string, string>(
+        SECTIONS.flatMap(({ track }) => track.icon ? [[track.trackId, track.icon]] : [])
+    );
+
+    content = content.replace(/```track\n([\s\S]*?)\n```/g, (match, yaml) => {
+        try {
+            const parsed = parseYaml(yaml) as Record<string, unknown>;
+            if (!parsed.trackId || parsed.icon) return match;
+            const icon = iconMap.get(parsed.trackId as string);
+            if (!icon) return match;
+            const updated = yaml.replace(/^(trackId: .+)$/m, `$1\nicon: ${icon}`);
+            return '```track\n' + updated + '\n```';
+        } catch {
+            return match;
+        }
+    });
+
+    if (content !== original) {
+        fs.writeFileSync(DAILY_NOTE_PATH, content, 'utf-8');
+        console.log('[DailyNote] Migrated track icons');
+    }
+}
+
 export function ensureDailyNote(): void {
     migrateEmojiHeadings();
+    migrateTrackIcons();
     if (fs.existsSync(DAILY_NOTE_PATH)) return;
     fs.writeFileSync(DAILY_NOTE_PATH, buildDailyNoteContent(), 'utf-8');
     console.log('[DailyNote] Created today.md');
