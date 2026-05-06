@@ -1,6 +1,6 @@
 import { mergeAttributes, Node } from '@tiptap/react'
 import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react'
-import { X, ExternalLink, Copy, Check, MessageSquare, ChevronDown, Reply, Forward } from 'lucide-react'
+import { X, ExternalLink, Copy, Check, MessageSquare, ChevronDown } from 'lucide-react'
 import { blocks } from '@x/shared'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useTheme } from '@/contexts/theme-context'
@@ -65,11 +65,9 @@ declare global {
 function EmailExpandedBody({
   config,
   resolvedTheme,
-  onDelete,
 }: {
   config: blocks.EmailBlock
   resolvedTheme: string
-  onDelete?: () => void
 }) {
   const [draftBody, setDraftBody] = useState(config.draft_response || '')
   const [copied, setCopied] = useState(false)
@@ -139,28 +137,6 @@ function EmailExpandedBody({
             {config.date && <span className="email-gmail-exp-fulldate">{formatFullDate(config.date)}</span>}
           </div>
         </div>
-        <div className="email-gmail-exp-meta-actions">
-          {gmailUrl && (
-            <button
-              className="email-gmail-icon-btn"
-              onClick={(e) => { e.stopPropagation(); window.open(gmailUrl, '_blank') }}
-              onMouseDown={(e) => e.stopPropagation()}
-              title="Open in Gmail"
-            >
-              <ExternalLink size={15} />
-            </button>
-          )}
-          {onDelete && (
-            <button
-              className="email-gmail-icon-btn"
-              onClick={(e) => { e.stopPropagation(); onDelete() }}
-              onMouseDown={(e) => e.stopPropagation()}
-              title="Remove"
-            >
-              <X size={15} />
-            </button>
-          )}
-        </div>
       </div>
 
       <div className="email-gmail-exp-body">{config.latest_email}</div>
@@ -172,35 +148,28 @@ function EmailExpandedBody({
         </div>
       )}
 
-      {/* Reply / Forward / Draft with Rowboat row */}
-      <div className="email-gmail-reply-row">
-        <button
-          className="email-gmail-reply-btn"
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={(e) => { e.stopPropagation(); draftWithAssistant() }}
-        >
-          <Reply size={14} />
-          Reply
-        </button>
-        {gmailUrl && (
+      {!hasDraft && (
+        <div className="email-gmail-reply-row">
+          {gmailUrl && (
+            <button
+              className="email-gmail-btn"
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); window.open(gmailUrl, '_blank') }}
+            >
+              <ExternalLink size={13} />
+              Open in Gmail
+            </button>
+          )}
           <button
-            className="email-gmail-reply-btn"
+            className="email-gmail-btn email-gmail-btn-primary email-gmail-reply-row-end"
             onMouseDown={(e) => e.stopPropagation()}
-            onClick={(e) => { e.stopPropagation(); window.open(gmailUrl, '_blank') }}
+            onClick={(e) => { e.stopPropagation(); draftWithAssistant() }}
           >
-            <Forward size={14} />
-            Forward
+            <MessageSquare size={13} />
+            Draft with Rowboat
           </button>
-        )}
-        <button
-          className="email-gmail-btn email-gmail-btn-primary email-gmail-reply-row-end"
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={(e) => { e.stopPropagation(); draftWithAssistant() }}
-        >
-          <MessageSquare size={13} />
-          {hasDraft ? 'Refine with Rowboat' : 'Draft with Rowboat'}
-        </button>
-      </div>
+        </div>
+      )}
 
       {hasDraft && (
         <div className="email-gmail-compose">
@@ -236,6 +205,16 @@ function EmailExpandedBody({
               {copied ? <Check size={13} /> : <Copy size={13} />}
               {copied ? 'Copied!' : 'Copy draft'}
             </button>
+            {gmailUrl && (
+              <button
+                className="email-gmail-btn"
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => { e.stopPropagation(); window.open(gmailUrl, '_blank') }}
+              >
+                <ExternalLink size={13} />
+                Open in Gmail
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -443,7 +422,6 @@ function EmailBlockView({ node, deleteNode, updateAttributes }: {
           <EmailExpandedBody
             config={config}
             resolvedTheme={resolvedTheme}
-            onDelete={deleteNode}
           />
         )}
       </div>

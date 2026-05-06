@@ -1822,35 +1822,6 @@
   margin-left: auto;
 }
 
-/* Icon-only buttons (open in Gmail, remove) */
-.tiptap-editor .ProseMirror .email-gmail-icon-btn {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  border: none;
-  background: none;
-  color: color-mix(in srgb, var(--foreground) 45%, transparent);
-  cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease;
-}
-
-.tiptap-editor .ProseMirror .email-gmail-icon-btn:hover {
-  background: color-mix(in srgb, var(--foreground) 8%, transparent);
-  color: var(--foreground);
-}
-
-.tiptap-editor .ProseMirror .email-gmail-exp-meta-actions {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  margin-left: auto;
-  flex-shrink: 0;
-}
-
 /* ---- Emails inbox block (language-emails) ---- */
 
 .tiptap-editor .ProseMirror .email-inbox-card {
