@@ -94,17 +94,6 @@ Wait for the page to settle, useful after async UI changes.
 Parameters:
 - ` + "`ms`" + `: milliseconds to wait (optional)
 
-### eval
-Run arbitrary JavaScript in the active tab and return its value. Use this as an escape hatch when the structured actions above are insufficient — for example, submitting a form (` + "`form.submit()`" + `), reading DOM state (` + "`document.querySelector(...).textContent`" + `), or computing something that requires page-scoped APIs.
-
-Parameters:
-- ` + "`code`" + `: JavaScript source. The code runs inside an ` + "`async`" + ` IIFE, so you can ` + "`await`" + ` freely. The final expression's value (or a ` + "`return`" + `ed value) is serialized back. Non-serializable values (DOM nodes, functions) are coerced to placeholder strings. Large results are truncated.
-
-Example:
-- ` + "`{ action: \"eval\", code: \"return document.querySelector('meta[name=user-login]')?.content ?? null\" }`" + `
-
-Security: ` + "`eval`" + ` runs in the active tab's origin with the user's cookies. Do not exfiltrate credentials, cookies, or localStorage contents to third-party origins.
-
 ## Companion Tools
 
 ### load-browser-skill
@@ -112,7 +101,7 @@ Rowboat caches a library of browser skills (from ` + "`browser-use/browser-harne
 
 You can also proactively call ` + "`load-browser-skill({ action: \"list\", site: \"<site>\" })`" + ` when you know you're about to work on a site, to see what skills exist even if ` + "`suggestedSkills`" + ` is empty (e.g. before navigating).
 
-These skills are written against a Python harness, so treat them as **reference knowledge** — adapt the recipes into the actions above, especially structured browser actions plus ` + "`eval`" + ` for the ` + "`js(...)`" + ` and ` + "`http_get(...)`" + ` style calls they use. **Do not look for or call ` + "`http-fetch`" + ` — it is not available.** If a harness recipe suggests hitting a public API directly, either use ` + "`eval`" + ` with ` + "`fetch()`" + ` inside the page context when that is truly necessary, or fall back to reading and interacting with the page itself. The selectors, DOM gotchas, and sequencing are the durable part; the exact function names are not.
+These skills are written against a Python harness, so treat them as **reference knowledge**. Reuse the selectors, timing, and sequencing, but adapt them to Rowboat's structured browser actions. **Do not look for or call ` + "`http-fetch`" + `.** If a browser-harness recipe suggests ` + "`js(...)`" + ` or ` + "`http_get(...)`" + ` style shortcuts, treat those as non-portable and fall back to reading and interacting with the page itself.
 
 ## Important Rules
 
@@ -121,8 +110,7 @@ These skills are written against a Python harness, so treat them as **reference 
 - If the tool says the snapshot is stale, call ` + "`read-page`" + ` again.
 - After navigation, clicking, typing, pressing, or scrolling, use the returned page snapshot instead of assuming the page state.
 - **Always check ` + "`suggestedSkills`" + ` after ` + "`navigate`" + `, ` + "`new-tab`" + `, or ` + "`read-page`" + `, and load the matching domain or interaction skill before acting.** Skipping this step is the single most common way to waste a dozen failed clicks on a site whose quirks are already documented. If the array is empty, proceed normally — but don't skip the check.
-- Prefer structured actions (click/type/press) over ` + "`eval`" + ` when both work. Reach for ` + "`eval`" + ` when the site fights synthetic events, when you need to submit a form directly, or when you need to read DOM state the structured actions don't surface.
-- Do not try to use ` + "`http-fetch`" + `. If a browser-harness recipe mentions ` + "`http_get(...)`" + ` or a public API shortcut, adapt it to ` + "`eval`" + ` or DOM-based browsing instead.
+- Do not try to use ` + "`http-fetch`" + `. If a browser-harness recipe mentions ` + "`http_get(...)`" + ` or a public API shortcut, adapt it to DOM-based browsing instead.
 - Use Rowboat's browser for live interaction. Use web search tools for research where a live session is unnecessary.
 - Do not wrap browser URLs or browser pages in ` + "```filepath" + ` blocks. Filepath cards are only for real files on disk, not web pages or browser tabs.
 - If you mention a page the browser opened, use plain text for the URL/title instead of trying to create a clickable file card.

@@ -254,20 +254,6 @@ export class ElectronBrowserControlService implements IBrowserControlService {
           const page = await browserViewManager.readPageSummary(signal, { waitForReady: false }) ?? undefined;
           return buildSuccessResult('wait', `Waited ${duration}ms for the page to settle.`, page);
         }
-
-        case 'eval': {
-          const code = input.code;
-          if (!code) {
-            return buildErrorResult('eval', 'code is required for eval.');
-          }
-          await browserViewManager.ensureActiveTabReady(signal);
-          const result = await browserViewManager.executeScript(code, signal);
-          if (!result.ok) {
-            return buildErrorResult('eval', result.error);
-          }
-          const success = buildSuccessResult('eval', 'Evaluated script in the active tab.');
-          return { ...success, result: result.result };
-        }
       }
     } catch (error) {
       return buildErrorResult(
