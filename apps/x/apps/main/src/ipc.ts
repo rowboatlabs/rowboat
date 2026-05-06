@@ -685,6 +685,19 @@ export function setupIpcHandlers() {
       const mimeType = mimeMap[ext] || 'application/octet-stream';
       return { data: buffer.toString('base64'), mimeType, size: stat.size };
     },
+    'dialog:openDirectory': async (event, args) => {
+      const win = BrowserWindow.fromWebContents(event.sender);
+      const defaultPath = args.defaultPath ? resolveShellPath(args.defaultPath) : os.homedir();
+      const result = await dialog.showOpenDialog(win!, {
+        title: args.title ?? 'Choose work directory',
+        defaultPath,
+        properties: ['openDirectory', 'createDirectory'],
+      });
+      if (result.canceled || result.filePaths.length === 0) {
+        return { path: null };
+      }
+      return { path: result.filePaths[0] ?? null };
+    },
     // Knowledge version history handlers
     'knowledge:history': async (_event, args) => {
       const commits = await versionHistory.getFileHistory(args.path);

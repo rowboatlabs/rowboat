@@ -35,6 +35,19 @@ import { getRaw as getInlineTaskAgentRaw } from "../knowledge/inline_task_agent.
 import { getRaw as getAgentNotesAgentRaw } from "../knowledge/agent_notes_agent.js";
 
 const AGENT_NOTES_DIR = path.join(WorkDir, 'knowledge', 'Agent Notes');
+const WORKDIR_CONFIG_FILE = path.join(WorkDir, 'config', 'workdir.json');
+
+function loadUserWorkDir(): string | null {
+    try {
+        if (!fs.existsSync(WORKDIR_CONFIG_FILE)) return null;
+        const raw = fs.readFileSync(WORKDIR_CONFIG_FILE, 'utf-8');
+        const parsed = JSON.parse(raw) as { path?: unknown };
+        const value = typeof parsed.path === 'string' ? parsed.path.trim() : '';
+        return value || null;
+    } catch {
+        return null;
+    }
+}
 
 function loadAgentNotesContext(): string | null {
     const sections: string[] = [];
@@ -1093,6 +1106,28 @@ export async function* streamAgent({
             const agentNotesContext = loadAgentNotesContext();
             if (agentNotesContext) {
                 instructionsWithDateTime += `\n\n${agentNotesContext}`;
+            }
+            const userWorkDir = loadUserWorkDir();
+            if (userWorkDir) {
+                loopLogger.log('injecting user work directory', userWorkDir);
+                instructionsWithDateTime += `\n\n# User Work Directory
+The user has chosen the following directory as their current **work directory**:
+
+\`${userWorkDir}\`
+
+Treat this as the **default location** for file operations whenever the user refers to files generically:
+- "list the files", "show me what's in here", "what's the latest report" — list or look in the work directory.
+- "save this", "export it", "write that to a file" — write the output into the work directory unless the user names another location.
+- "open the file I was just working on", "the doc from earlier" — assume the work directory first.
+
+Use absolute paths rooted at this directory. On macOS/Linux call \`executeCommand\` with POSIX commands (\`ls\`, \`cat\`, \`cp\`, etc.) operating on \`${userWorkDir}\`. On Windows use the equivalent cmd syntax. For reading file contents use \`parseFile\` or \`LLMParse\` with the absolute path; you do NOT need to copy the file into the workspace first.
+
+**Exceptions — these ALWAYS take precedence over the work directory default:**
+1. **Knowledge base questions.** If the user asks about anything in the knowledge graph (notes, people, organizations, projects, topics) or paths starting with \`knowledge/\`, use the workspace tools against \`knowledge/\` as documented above. Do NOT redirect those into the work directory.
+2. **Explicit paths.** If the user names a different directory or gives an absolute/relative path (e.g. "in ~/Downloads", "from /tmp/foo", "the Desktop"), honor that path exactly and ignore the work-directory default for that request.
+3. **Workspace-specific operations.** Anything that obviously belongs in the Rowboat workspace (config files, MCP servers, agent schedules, etc.) stays in the workspace, not the work directory.
+
+Do not announce the work directory unless it's relevant. Just use it.`;
             }
             // Always inject a Middle Pane section so the LLM has a clear, up-to-date signal
             // that supersedes any earlier middle-pane mention in the conversation history.

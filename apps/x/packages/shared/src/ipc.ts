@@ -483,6 +483,16 @@ const ipcSchemas = {
     req: z.object({ path: z.string() }),
     res: z.object({ data: z.string(), mimeType: z.string(), size: z.number() }),
   },
+  // Native dialog channels
+  'dialog:openDirectory': {
+    req: z.object({
+      defaultPath: z.string().optional(),
+      title: z.string().optional(),
+    }),
+    res: z.object({
+      path: z.string().nullable(),
+    }),
+  },
   // Knowledge version history channels
   'knowledge:history': {
     req: z.object({ path: RelPath }),

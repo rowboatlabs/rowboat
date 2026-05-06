@@ -10,8 +10,10 @@ import {
   FileSpreadsheet,
   FileText,
   FileVideo,
+  FolderCog,
   Globe,
   Headphones,
+  ImagePlus,
   LoaderIcon,
   Mic,
   Plus,
@@ -23,8 +25,10 @@ import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import {
@@ -169,6 +173,7 @@ function ChatInputInner({
   const [searchEnabled, setSearchEnabled] = useState(false)
   const [searchAvailable, setSearchAvailable] = useState(false)
   const [isRowboatConnected, setIsRowboatConnected] = useState(false)
+  const [workDir, setWorkDir] = useState<string | null>(null)
 
   // When a run exists, freeze the dropdown to the run's resolved model+provider.
   useEffect(() => {
@@ -250,6 +255,55 @@ function ChatInputInner({
     window.addEventListener('models-config-changed', handler)
     return () => window.removeEventListener('models-config-changed', handler)
   }, [loadModelConfig])
+
+  // Load currently configured work directory
+  const loadWorkDir = useCallback(async () => {
+    try {
+      const result = await window.ipc.invoke('workspace:readFile', { path: 'config/workdir.json' })
+      const parsed = JSON.parse(result.data)
+      const value = typeof parsed?.path === 'string' ? parsed.path.trim() : ''
+      setWorkDir(value || null)
+    } catch {
+      setWorkDir(null)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadWorkDir()
+  }, [isActive, loadWorkDir])
+
+  const handleSetWorkDir = useCallback(async () => {
+    try {
+      const { path: chosen } = await window.ipc.invoke('dialog:openDirectory', {
+        title: 'Choose work directory',
+        defaultPath: workDir ?? undefined,
+      })
+      if (!chosen) return
+      await window.ipc.invoke('workspace:writeFile', {
+        path: 'config/workdir.json',
+        data: JSON.stringify({ path: chosen }, null, 2),
+      })
+      setWorkDir(chosen)
+      toast.success(`Work directory set: ${chosen}`)
+    } catch (err) {
+      console.error('Failed to set work directory', err)
+      toast.error('Failed to set work directory')
+    }
+  }, [workDir])
+
+  const handleClearWorkDir = useCallback(async () => {
+    try {
+      await window.ipc.invoke('workspace:writeFile', {
+        path: 'config/workdir.json',
+        data: JSON.stringify({}, null, 2),
+      })
+      setWorkDir(null)
+      toast.success('Work directory cleared')
+    } catch (err) {
+      console.error('Failed to clear work directory', err)
+      toast.error('Failed to clear work directory')
+    }
+  }, [])
 
   // Check search tool availability (exa or signed-in via gateway)
   useEffect(() => {
@@ -484,14 +538,53 @@ function ChatInputInner({
         />
       </div>
       <div className="flex items-center gap-2 px-4 pb-3">
-        <button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          aria-label="Attach files"
-        >
-          <Plus className="h-4 w-4" />
-        </button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              aria-label="Add"
+            >
+              <Plus className="h-4 w-4" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="min-w-56">
+            <DropdownMenuItem onSelect={() => fileInputRef.current?.click()}>
+              <ImagePlus className="size-4" />
+              <span>Add files or photos</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => { void handleSetWorkDir() }}>
+              <FolderCog className="size-4" />
+              <span>{workDir ? 'Change work directory' : 'Set work directory'}</span>
+            </DropdownMenuItem>
+            {workDir && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => { void handleClearWorkDir() }}>
+                  <X className="size-4" />
+                  <span>Clear work directory</span>
+                </DropdownMenuItem>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+        {workDir && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={handleSetWorkDir}
+                className="flex h-7 max-w-[180px] shrink-0 items-center gap-1.5 rounded-full border border-border bg-muted/40 px-2.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <FolderCog className="h-3.5 w-3.5" />
+                <span className="truncate">{workDir.split('/').pop() || workDir}</span>
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              Work directory: {workDir}
+            </TooltipContent>
+          </Tooltip>
+        )}
         {searchAvailable && (
           searchEnabled ? (
             <button
