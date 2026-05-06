@@ -143,6 +143,7 @@ export function executeCommandAbortable(
     timeout?: number;
     maxBuffer?: number;
     signal?: AbortSignal;
+    onData?: (chunk: string) => void;
   }
 ): { promise: Promise<AbortableCommandResult>; process: ChildProcess } {
   // Check if already aborted before spawning
@@ -177,16 +178,20 @@ export function executeCommandAbortable(
 
     // Collect output
     proc.stdout?.on('data', (chunk: Buffer) => {
+      const text = chunk.toString();
       const maxBuffer = options?.maxBuffer || 1024 * 1024;
       if (stdout.length < maxBuffer) {
-        stdout += chunk.toString();
+        stdout += text;
       }
+      options?.onData?.(text);
     });
     proc.stderr?.on('data', (chunk: Buffer) => {
+      const text = chunk.toString();
       const maxBuffer = options?.maxBuffer || 1024 * 1024;
       if (stderr.length < maxBuffer) {
-        stderr += chunk.toString();
+        stderr += text;
       }
+      options?.onData?.(text);
     });
 
     // Abort handler

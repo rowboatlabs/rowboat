@@ -63,6 +63,13 @@ export const ToolResultEvent = BaseRunEvent.extend({
     result: z.any(),
 });
 
+export const ToolOutputStreamEvent = BaseRunEvent.extend({
+    type: z.literal("tool-output-stream"),
+    toolCallId: z.string(),
+    toolName: z.string(),
+    output: z.string(),
+});
+
 export const AskHumanRequestEvent = BaseRunEvent.extend({
     type: z.literal("ask-human-request"),
     toolCallId: z.string(),
@@ -106,6 +113,7 @@ export const RunEvent = z.union([
     MessageEvent,
     ToolInvocationEvent,
     ToolResultEvent,
+    ToolOutputStreamEvent,
     AskHumanRequestEvent,
     AskHumanResponseEvent,
     ToolPermissionRequestEvent,

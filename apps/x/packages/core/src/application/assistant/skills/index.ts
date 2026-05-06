@@ -11,6 +11,7 @@ import createPresentationsSkill from "./create-presentations/skill.js";
 
 import appNavigationSkill from "./app-navigation/skill.js";
 import browserControlSkill from "./browser-control/skill.js";
+import codeWithAgentsSkill from "./code-with-agents/skill.js";
 import composioIntegrationSkill from "./composio-integration/skill.js";
 import tracksSkill from "./tracks/skill.js";
 import notifyUserSkill from "./notify-user/skill.js";
@@ -93,6 +94,12 @@ const definitions: SkillDefinition[] = [
     title: "App Navigation",
     summary: "Navigate the app UI - open notes, switch views, filter/search the knowledge base, and manage saved views.",
     content: appNavigationSkill,
+  },
+  {
+    id: "code-with-agents",
+    title: "Code with Agents",
+    summary: "Write code, build projects, create scripts, or fix bugs by delegating to Claude Code or Codex via acpx.",
+    content: codeWithAgentsSkill,
   },
   {
     id: "tracks",

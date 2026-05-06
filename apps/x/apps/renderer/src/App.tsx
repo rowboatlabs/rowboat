@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { useCallback, useEffect, useState, useRef } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useState, useRef } from 'react'
 import { workspace } from '@x/shared';
 import { RunEvent, ListRunsResponse } from '@x/shared/src/runs.js';
 import type { LanguageModelUsage, ToolUIPart } from 'ai';
@@ -41,6 +41,7 @@ import { WebSearchResult } from '@/components/ai-elements/web-search-result';
 import { AppActionCard } from '@/components/ai-elements/app-action-card';
 import { ComposioConnectCard } from '@/components/ai-elements/composio-connect-card';
 import { PermissionRequest } from '@/components/ai-elements/permission-request';
+import { TerminalOutput } from '@/components/terminal-output';
 import { AskHumanRequest } from '@/components/ai-elements/ask-human-request';
 import { Suggestions } from '@/components/ai-elements/suggestions';
 import { ToolPermissionRequestEvent, AskHumanRequestEvent } from '@x/shared/src/runs.js';
@@ -119,6 +120,31 @@ const userMessageRemarkPlugins = [...Object.values(defaultRemarkPlugins), remark
 function SmoothStreamingMessage({ text, components }: { text: string; components: typeof streamdownComponents }) {
   const smoothText = useSmoothedText(text)
   return <MessageResponse components={components}>{smoothText}</MessageResponse>
+}
+
+function AutoScrollPre({ className, children }: { className?: string; children: React.ReactNode }) {
+  const ref = useRef<HTMLPreElement>(null)
+  const stickToBottom = useRef(true)
+
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (el && stickToBottom.current) {
+      el.scrollTop = el.scrollHeight
+    }
+  }, [children])
+
+  const handleScroll = useCallback(() => {
+    const el = ref.current
+    if (!el) return
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 24
+    stickToBottom.current = atBottom
+  }, [])
+
+  return (
+    <pre ref={ref} onScroll={handleScroll} className={className}>
+      {children}
+    </pre>
+  )
 }
 
 const DEFAULT_SIDEBAR_WIDTH = 256
@@ -2085,6 +2111,10 @@ function App() {
             return next
           })
 
+          if (event.toolCallId) {
+            setToolOpenForTab(activeChatTabIdRef.current, event.toolCallId, false)
+          }
+
           // Handle app-navigation tool results — trigger UI side effects
           if (event.toolName === 'app-navigation') {
             const result = event.result as { success?: boolean; action?: string; [key: string]: unknown } | undefined
@@ -2095,6 +2125,23 @@ function App() {
 
           break
         }
+
+      case 'tool-output-stream': {
+        if (!isActiveRun) return
+        setConversation(prev => prev.map(item => {
+          if (
+            isToolCall(item)
+            && item.id === event.toolCallId
+          ) {
+            if (!item.streamingOutput) {
+              setToolOpenForTab(activeChatTabIdRef.current, item.id, true)
+            }
+            return { ...item, streamingOutput: (item.streamingOutput ?? '') + event.output }
+          }
+          return item
+        }))
+        break
+      }
 
       case 'tool-permission-request': {
         if (!isActiveRun) return
@@ -4314,7 +4361,13 @@ function App() {
             state={toToolState(item.status)}
           />
           <ToolContent>
-            <ToolTabbedContent input={input} output={output} errorText={errorText} />
+            {item.streamingOutput && item.status === 'running' ? (
+              <AutoScrollPre className="max-h-80 overflow-auto px-4 py-3 font-mono text-xs whitespace-pre-wrap text-foreground/90">
+                <TerminalOutput raw={item.streamingOutput} />
+              </AutoScrollPre>
+            ) : (
+              <ToolTabbedContent input={input} output={output} errorText={errorText} />
+            )}
           </ToolContent>
         </Tool>
       )

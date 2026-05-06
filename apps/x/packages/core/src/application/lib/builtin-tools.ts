@@ -969,6 +969,16 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                     const { promise, process: proc } = executeCommandAbortable(command, {
                         cwd: workingDir,
                         signal: ctx.signal,
+                        onData: (chunk: string) => {
+                            ctx.publish({
+                                runId: ctx.runId,
+                                type: "tool-output-stream",
+                                toolCallId: ctx.toolCallId,
+                                toolName: "executeCommand",
+                                output: chunk,
+                                subflow: [],
+                            });
+                        },
                     });
 
                     // Register process with abort registry for force-kill

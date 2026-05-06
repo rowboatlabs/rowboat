@@ -1,4 +1,5 @@
 import { ToolAttachment } from "@x/shared/dist/agent.js";
+import { RunEvent } from "@x/shared/dist/runs.js";
 import { z } from "zod";
 import { BuiltinTools } from "./builtin-tools.js";
 import { executeTool } from "../../mcp/mcp.js";
@@ -9,8 +10,10 @@ import { IAbortRegistry } from "../../runs/abort-registry.js";
  */
 export interface ToolContext {
     runId: string;
+    toolCallId: string;
     signal: AbortSignal;
     abortRegistry: IAbortRegistry;
+    publish: (event: z.infer<typeof RunEvent>) => Promise<void>;
 }
 
 async function execMcpTool(agentTool: z.infer<typeof ToolAttachment> & { type: "mcp" }, input: Record<string, unknown>): Promise<unknown> {

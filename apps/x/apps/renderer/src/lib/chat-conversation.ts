@@ -24,6 +24,7 @@ export interface ToolCall {
   name: string
   input: ToolUIPart['input']
   result?: ToolUIPart['output']
+  streamingOutput?: string
   status: 'pending' | 'running' | 'completed' | 'error'
   timestamp: number
 }
