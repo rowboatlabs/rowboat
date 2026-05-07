@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { useCallback, useEffect, useState, useRef } from 'react'
 import { workspace } from '@x/shared';
-import { RunEvent, ListRunsResponse } from '@x/shared/src/runs.js';
+import { RunEvent, ListRunsResponse, monotonicIdToIsoTimestamp } from '@x/shared/src/runs.js';
 import type { LanguageModelUsage, ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
@@ -138,6 +138,18 @@ const MACOS_TRAFFIC_LIGHTS_RESERVED_PX = 16 + 12 * 3 + 8 * 2
 const TITLEBAR_BUTTON_PX = 32
 const TITLEBAR_BUTTON_GAP_PX = 4
 const TITLEBAR_HEADER_GAP_PX = 8
+
+type RunListItem = {
+  id: string
+  title?: string
+  createdAt: string
+  lastMessageAt?: string
+  agentId: string
+}
+
+function upsertRunWithLatestActivity(runs: RunListItem[], nextRun: RunListItem): RunListItem[] {
+  return [nextRun, ...runs.filter((run) => run.id !== nextRun.id)]
+}
 const TITLEBAR_TOGGLE_MARGIN_LEFT_PX = 12
 const TITLEBAR_BUTTONS_COLLAPSED = 1
 const TITLEBAR_BUTTON_GAPS_COLLAPSED = 0
@@ -909,7 +921,6 @@ function App() {
   }, [])
 
   // Runs history state
-  type RunListItem = { id: string; title?: string; createdAt: string; agentId: string }
   const [runs, setRuns] = useState<RunListItem[]>([])
 
   // Chat tab state
@@ -1983,16 +1994,21 @@ function App() {
       case 'message':
         {
           const msg = event.message
-          if (msg.role === 'user' && typeof msg.content === 'string') {
-            const inferredTitle = inferRunTitleFromMessage(msg.content)
-            if (inferredTitle) {
-              setRuns(prev => prev.map(run => (
-                run.id === event.runId && !run.title
-                  ? { ...run, title: inferredTitle }
-                  : run
-              )))
-            }
-          }
+          const lastMessageAt = event.ts ?? monotonicIdToIsoTimestamp(event.messageId) ?? new Date().toISOString()
+          setRuns((prev) => {
+            const existingRun = prev.find((run) => run.id === event.runId)
+            if (!existingRun) return prev
+
+            const inferredTitle = msg.role === 'user' && typeof msg.content === 'string'
+              ? inferRunTitleFromMessage(msg.content)
+              : undefined
+
+            return upsertRunWithLatestActivity(prev, {
+              ...existingRun,
+              title: existingRun.title ?? inferredTitle,
+              lastMessageAt,
+            })
+          })
           if (!isActiveRun) {
             if (msg.role === 'assistant') {
               clearStreamingBuffer(event.runId)
@@ -2272,8 +2288,8 @@ function App() {
 
     try {
       let currentRunId = runId
-      let isNewRun = false
       let newRunCreatedAt: string | null = null
+      let persistedMessageId: string | null = null
       if (!currentRunId) {
         const selected = selectedModelByTabRef.current.get(submitTabId)
         const run = await window.ipc.invoke('runs:create', {
@@ -2290,7 +2306,6 @@ function App() {
             ? { ...tab, runId: currentRunId }
             : tab
         )))
-        isNewRun = true
       }
 
       let titleSource = userMessage
@@ -2341,7 +2356,7 @@ function App() {
         // Shared IPC payload types can lag until package rebuilds; runtime validation still enforces schema.
         const attachmentPayload = contentParts as unknown as string
         const middlePaneContext = await buildMiddlePaneContext()
-        await window.ipc.invoke('runs:createMessage', {
+        const result = await window.ipc.invoke('runs:createMessage', {
           runId: currentRunId,
           message: attachmentPayload,
           voiceInput: pendingVoiceInputRef.current || undefined,
@@ -2349,6 +2364,7 @@ function App() {
           searchEnabled: searchEnabled || undefined,
           middlePaneContext,
         })
+        persistedMessageId = result.messageId
         analytics.chatMessageSent({
           voiceInput: pendingVoiceInputRef.current || undefined,
           voiceOutput: ttsEnabledRef.current ? ttsModeRef.current : undefined,
@@ -2356,7 +2372,7 @@ function App() {
         })
       } else {
         const middlePaneContext = await buildMiddlePaneContext()
-        await window.ipc.invoke('runs:createMessage', {
+        const result = await window.ipc.invoke('runs:createMessage', {
           runId: currentRunId,
           message: userMessage,
           voiceInput: pendingVoiceInputRef.current || undefined,
@@ -2364,6 +2380,7 @@ function App() {
           searchEnabled: searchEnabled || undefined,
           middlePaneContext,
         })
+        persistedMessageId = result.messageId
         analytics.chatMessageSent({
           voiceInput: pendingVoiceInputRef.current || undefined,
           voiceOutput: ttsEnabledRef.current ? ttsModeRef.current : undefined,
@@ -2373,18 +2390,18 @@ function App() {
 
       pendingVoiceInputRef.current = false
 
-      if (isNewRun) {
-        const inferredTitle = inferRunTitleFromMessage(titleSource)
-        setRuns((prev) => {
-          const withoutCurrent = prev.filter((run) => run.id !== currentRunId)
-          return [{
-            id: currentRunId!,
-            title: inferredTitle,
-            createdAt: newRunCreatedAt ?? new Date().toISOString(),
-            agentId,
-          }, ...withoutCurrent]
+      const inferredTitle = inferRunTitleFromMessage(titleSource)
+      const lastMessageAt = monotonicIdToIsoTimestamp(persistedMessageId ?? '') ?? new Date().toISOString()
+      setRuns((prev) => {
+        const existingRun = prev.find((run) => run.id === currentRunId)
+        return upsertRunWithLatestActivity(prev, {
+          id: currentRunId!,
+          title: existingRun?.title ?? inferredTitle,
+          createdAt: existingRun?.createdAt ?? newRunCreatedAt ?? new Date().toISOString(),
+          lastMessageAt,
+          agentId: existingRun?.agentId ?? agentId,
         })
-      }
+      })
     } catch (error) {
       console.error('Failed to send message:', error)
     }

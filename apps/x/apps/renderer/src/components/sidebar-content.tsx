@@ -124,6 +124,7 @@ type RunListItem = {
   id: string
   title?: string
   createdAt: string
+  lastMessageAt?: string
   agentId: string
 }
 
@@ -1595,9 +1596,9 @@ function TasksSection({
                       >
                         <div className="flex w-full items-center gap-2 min-w-0">
                           <span className="min-w-0 flex-1 truncate text-sm">{run.title || '(Untitled chat)'}</span>
-                          {run.createdAt ? (
+                          {(run.lastMessageAt ?? run.createdAt) ? (
                             <span className="shrink-0 text-[10px] text-muted-foreground">
-                              {formatRunTime(run.createdAt)}
+                              {formatRunTime(run.lastMessageAt ?? run.createdAt)}
                             </span>
                           ) : null}
                         </div>

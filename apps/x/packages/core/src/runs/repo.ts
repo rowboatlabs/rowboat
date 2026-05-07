@@ -5,7 +5,7 @@ import path from "path";
 import fsp from "fs/promises";
 import fs from "fs";
 import readline from "readline";
-import { Run, RunEvent, StartEvent, ListRunsResponse, MessageEvent, UseCase } from "@x/shared/dist/runs.js";
+import { Run, RunEvent, StartEvent, ListRunsResponse, MessageEvent, UseCase, monotonicIdToIsoTimestamp } from "@x/shared/dist/runs.js";
 import { getDefaultModelAndProvider } from "../models/defaults.js";
 
 /**
@@ -92,8 +92,8 @@ export class FSRunsRepo implements IRunsRepo {
     }
 
     /**
-     * Read file line-by-line using streams, stopping early once we have
-     * the start event and title (or determine there's no title).
+     * Read file line-by-line using streams to capture the start event, first
+     * user-message title, and the latest message timestamp for list sorting.
      *
      * Parses the start event with `LegacyStartEvent` so runs written before
      * `model`/`provider` were required still surface in the list view.
@@ -101,6 +101,8 @@ export class FSRunsRepo implements IRunsRepo {
     private async readRunMetadata(filePath: string): Promise<{
         start: z.infer<typeof LegacyStartEvent>;
         title: string | undefined;
+        lastMessageAt: string | undefined;
+        lastMessageSortKey: string;
     } | null> {
         return new Promise((resolve) => {
             const stream = fs.createReadStream(filePath, { encoding: 'utf8' });
@@ -108,6 +110,8 @@ export class FSRunsRepo implements IRunsRepo {
 
             let start: z.infer<typeof LegacyStartEvent> | null = null;
             let title: string | undefined;
+            let lastMessageAt: string | undefined;
+            let lastMessageSortKey = path.basename(filePath, '.jsonl');
             let lineIndex = 0;
 
             rl.on('line', (line) => {
@@ -117,13 +121,14 @@ export class FSRunsRepo implements IRunsRepo {
                 try {
                     if (lineIndex === 0) {
                         start = LegacyStartEvent.parse(JSON.parse(trimmed));
+                        lastMessageSortKey = start.runId;
                     } else {
-                        // Subsequent lines - look for first user message or assistant response
+                        // Subsequent lines - keep the first user message as the title and
+                        // track the latest message for chat-history ordering.
                         const event = ReadRunEvent.parse(JSON.parse(trimmed));
                         if (event.type === 'message') {
                             const msg = event.message;
-                            if (msg.role === 'user') {
-                                // Found first user message - use as title
+                            if (msg.role === 'user' && title === undefined) {
                                 const content = msg.content;
                                 let textContent: string | undefined;
                                 if (typeof content === 'string') {
@@ -140,16 +145,9 @@ export class FSRunsRepo implements IRunsRepo {
                                         title = cleaned.length > 100 ? cleaned.substring(0, 100) : cleaned;
                                     }
                                 }
-                                // Stop reading
-                                rl.close();
-                                stream.destroy();
-                                return;
-                            } else if (msg.role === 'assistant') {
-                                // Assistant responded before any user message - no title
-                                rl.close();
-                                stream.destroy();
-                                return;
                             }
+                            lastMessageAt = event.ts ?? monotonicIdToIsoTimestamp(event.messageId);
+                            lastMessageSortKey = event.messageId;
                         }
                     }
                     lineIndex++;
@@ -160,7 +158,7 @@ export class FSRunsRepo implements IRunsRepo {
 
             rl.on('close', () => {
                 if (start) {
-                    resolve({ start, title });
+                    resolve({ start, title, lastMessageAt, lastMessageSortKey });
                 } else {
                     resolve(null);
                 }
@@ -178,9 +176,10 @@ export class FSRunsRepo implements IRunsRepo {
     }
 
     async appendEvents(runId: string, events: z.infer<typeof RunEvent>[]): Promise<void> {
+        const appendedAt = new Date().toISOString();
         await fsp.appendFile(
             path.join(WorkDir, 'runs', `${runId}.jsonl`),
-            events.map(event => JSON.stringify(event)).join("\n") + "\n"
+            events.map(event => JSON.stringify(event.ts ? event : { ...event, ts: appendedAt })).join("\n") + "\n"
         );
     }
 
@@ -264,40 +263,55 @@ export class FSRunsRepo implements IRunsRepo {
             throw err;
         }
 
-        files.sort((a, b) => b.localeCompare(a));
+        type RunListEntry = {
+            fileName: string;
+            sortKey: string;
+            run: {
+                id: string;
+                title?: string;
+                createdAt: string;
+                lastMessageAt?: string;
+                agentId: string;
+            };
+        };
 
-        const cursorFile = cursor;
-        let startIndex = 0;
-        if (cursorFile) {
-            const exact = files.indexOf(cursorFile);
-            if (exact >= 0) {
-                startIndex = exact + 1;
-            } else {
-                const firstOlder = files.findIndex(name => name.localeCompare(cursorFile) < 0);
-                startIndex = firstOlder === -1 ? files.length : firstOlder;
-            }
-        }
-
-        const selected = files.slice(startIndex, startIndex + PAGE_SIZE);
-        const runs: z.infer<typeof ListRunsResponse>['runs'] = [];
-
-        for (const name of selected) {
-            const runId = name.slice(0, -'.jsonl'.length);
+        const loadedEntries = await Promise.all(files.map(async (name): Promise<RunListEntry | null> => {
             const metadata = await this.readRunMetadata(path.join(runsDir, name));
             if (!metadata) {
-                continue;
+                return null;
             }
-            runs.push({
-                id: runId,
-                title: metadata.title,
-                createdAt: metadata.start.ts!,
-                agentId: metadata.start.agentName,
-            });
-        }
+            return {
+                fileName: name,
+                sortKey: metadata.lastMessageSortKey,
+                run: {
+                    id: name.slice(0, -'.jsonl'.length),
+                    title: metadata.title,
+                    createdAt: metadata.start.ts!,
+                    lastMessageAt: metadata.lastMessageAt,
+                    agentId: metadata.start.agentName,
+                },
+            };
+        }));
 
-        const hasMore = startIndex + PAGE_SIZE < files.length;
+        const runEntries: RunListEntry[] = loadedEntries.filter((entry): entry is RunListEntry => entry !== null);
+
+        runEntries.sort((a, b) => {
+            const byActivity = b.sortKey.localeCompare(a.sortKey);
+            if (byActivity !== 0) return byActivity;
+            return b.fileName.localeCompare(a.fileName);
+        });
+
+        const cursorFile = cursor;
+        const startIndex = cursorFile
+            ? Math.max(0, runEntries.findIndex(entry => entry.fileName === cursorFile) + 1)
+            : 0;
+
+        const selected = runEntries.slice(startIndex, startIndex + PAGE_SIZE);
+        const runs = selected.map(({ run }) => run);
+
+        const hasMore = startIndex + PAGE_SIZE < runEntries.length;
         const nextCursor = hasMore && selected.length > 0
-            ? selected[selected.length - 1]
+            ? selected[selected.length - 1].fileName
             : undefined;
 
         return {
