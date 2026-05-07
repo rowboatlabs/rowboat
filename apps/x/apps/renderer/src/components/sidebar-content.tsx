@@ -109,7 +109,7 @@ interface TreeNode {
 
 type KnowledgeActions = {
   createNote: (parentPath?: string) => void
-  createFolder: (parentPath?: string) => void
+  createFolder: (parentPath?: string) => Promise<string>
   openGraph: () => void
   openBases: () => void
   expandAll: () => void
@@ -1111,6 +1111,8 @@ function KnowledgeSection({
 }) {
   const isExpanded = expandedPaths.size > 0
   const treeContainerRef = React.useRef<HTMLDivElement | null>(null)
+  const [selectedFolderPath, setSelectedFolderPath] = useState<string | null>(null)
+  const [renameTarget, setRenameTarget] = useState<string | null>(null)
 
   useEffect(() => {
     if (!selectedPath) return
@@ -1141,9 +1143,36 @@ function KnowledgeSection({
     }
   }, [selectedPath, expandedPaths, tree])
 
+  // Intercept file/folder clicks to track the active folder context
+  const handleSelect = React.useCallback((path: string, kind: "file" | "dir") => {
+    if (kind === 'dir') {
+      setSelectedFolderPath(path)
+    } else {
+      const parts = path.split('/')
+      setSelectedFolderPath(parts.length > 1 ? parts.slice(0, -1).join('/') : 'knowledge')
+    }
+    onSelectFile(path, kind)
+  }, [onSelectFile])
+
+  // Resolve the parent path for new items based on current context
+  const deriveParent = React.useCallback((): string => {
+    return selectedFolderPath ?? 'knowledge'
+  }, [selectedFolderPath])
+
+  // Wrap actions to inject context-aware parent and capture rename target
+  const wrappedActions = React.useMemo<KnowledgeActions>(() => ({
+    ...actions,
+    createNote: (parentPath?: string) => actions.createNote(parentPath ?? deriveParent()),
+    createFolder: async (parentPath?: string): Promise<string> => {
+      const newPath = await actions.createFolder(parentPath ?? deriveParent())
+      setRenameTarget(newPath)
+      return newPath
+    },
+  }), [actions, deriveParent])
+
   const quickActions = [
-    { icon: FilePlus, label: "New Note", action: () => actions.createNote() },
-    { icon: FolderPlus, label: "New Folder", action: () => actions.createFolder() },
+    { icon: FilePlus, label: "New Note", action: () => wrappedActions.createNote() },
+    { icon: FolderPlus, label: "New Folder", action: () => void wrappedActions.createFolder() },
     { icon: Network, label: "Graph View", action: () => actions.openGraph() },
     { icon: Table2, label: "Bases", action: () => actions.openBases() },
   ]
@@ -1194,9 +1223,12 @@ function KnowledgeSection({
                     item={item}
                     selectedPath={selectedPath}
                     expandedPaths={expandedPaths}
-                    onSelect={onSelectFile}
+                    onSelect={handleSelect}
                     onToggleFolder={onToggleFolder}
-                    actions={actions}
+                    actions={wrappedActions}
+                    selectedFolderPath={selectedFolderPath}
+                    renameTarget={renameTarget}
+                    onRenameTargetConsumed={() => setRenameTarget(null)}
                   />
                 ))}
               </SidebarMenu>
@@ -1205,11 +1237,11 @@ function KnowledgeSection({
         </SidebarGroup>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-48">
-        <ContextMenuItem onClick={() => actions.createNote()}>
+        <ContextMenuItem onClick={() => wrappedActions.createNote()}>
           <FilePlus className="mr-2 size-4" />
           New Note
         </ContextMenuItem>
-        <ContextMenuItem onClick={() => actions.createFolder()}>
+        <ContextMenuItem onClick={() => void wrappedActions.createFolder()}>
           <FolderPlus className="mr-2 size-4" />
           New Folder
         </ContextMenuItem>
@@ -1234,6 +1266,9 @@ function Tree({
   onSelect,
   onToggleFolder,
   actions,
+  selectedFolderPath,
+  renameTarget,
+  onRenameTargetConsumed,
 }: {
   item: TreeNode
   selectedPath: string | null
@@ -1241,10 +1276,14 @@ function Tree({
   onSelect: (path: string, kind: "file" | "dir") => void
   onToggleFolder?: (path: string) => void
   actions: KnowledgeActions
+  selectedFolderPath?: string | null
+  renameTarget?: string | null
+  onRenameTargetConsumed?: () => void
 }) {
   const isDir = item.kind === 'dir'
   const isExpanded = expandedPaths.has(item.path)
   const isSelected = selectedPath === item.path
+  const isFolderSelected = isDir && selectedFolderPath === item.path
   const [isRenaming, setIsRenaming] = useState(false)
   const isSubmittingRef = React.useRef(false)
   const displayName = (isDir && FOLDER_DISPLAY_NAMES[item.name]) || item.name
@@ -1254,6 +1293,17 @@ function Tree({
     ? item.name.slice(0, -3)
     : item.name
   const [newName, setNewName] = useState(baseName)
+
+  // Auto-enter rename mode when this node is the rename target
+  React.useEffect(() => {
+    if (renameTarget === item.path) {
+      setNewName(baseName)
+      isSubmittingRef.current = false
+      setIsRenaming(true)
+      onRenameTargetConsumed?.()
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [renameTarget, item.path])
 
   // Sync newName when baseName changes (e.g., after external rename)
   React.useEffect(() => {
@@ -1385,7 +1435,7 @@ function Tree({
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <SidebarMenuItem className="group/file-item">
-            <SidebarMenuButton onClick={() => onSelect(item.path, item.kind)}>
+            <SidebarMenuButton isActive={isFolderSelected} onClick={() => onSelect(item.path, item.kind)}>
               <Folder className="size-4 shrink-0" />
               <div className="flex w-full items-center gap-1 min-w-0">
                 <span className="min-w-0 flex-1 truncate">{displayName}</span>
@@ -1420,6 +1470,9 @@ function Tree({
                     onSelect={onSelect}
                     onToggleFolder={onToggleFolder}
                     actions={actions}
+                    selectedFolderPath={selectedFolderPath}
+                    renameTarget={renameTarget}
+                    onRenameTargetConsumed={onRenameTargetConsumed}
                   />
                 ))}
               </SidebarMenuSub>
@@ -1471,7 +1524,7 @@ function Tree({
             className="group/collapsible [&[data-state=open]>button>svg:first-child]:rotate-90"
           >
             <CollapsibleTrigger asChild>
-              <SidebarMenuButton>
+              <SidebarMenuButton isActive={isFolderSelected}>
                 <ChevronRight className="transition-transform size-4" />
                 <div className="flex w-full items-center gap-1 min-w-0">
                   <span className="min-w-0 flex-1 truncate">{displayName}</span>
@@ -1490,6 +1543,9 @@ function Tree({
                     onSelect={onSelect}
                     onToggleFolder={onToggleFolder}
                     actions={actions}
+                    selectedFolderPath={selectedFolderPath}
+                    renameTarget={renameTarget}
+                    onRenameTargetConsumed={onRenameTargetConsumed}
                   />
                 ))}
               </SidebarMenuSub>

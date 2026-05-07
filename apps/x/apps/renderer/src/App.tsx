@@ -477,7 +477,8 @@ function flattenMeetingsTree(nodes: TreeNode[]): TreeNode[] {
       }
       collectFiles(sourceNode, [])
 
-      if (dateGroups.size === 0) return []
+      // Pass through user-created folders that have no meeting-style date files
+      if (dateGroups.size === 0) return [sourceNode]
 
       // Build date folder nodes, sorted reverse chronologically
       const dateFolderNodes: TreeNode[] = [...dateGroups.entries()]
@@ -3770,7 +3771,7 @@ function App() {
   }, [])
 
   const knowledgeActions = React.useMemo(() => ({
-    createNote: async (parentPath: string = 'knowledge/Notes') => {
+    createNote: async (parentPath: string = 'knowledge') => {
       try {
         let index = 0
         let name = untitledBaseName
@@ -3787,18 +3788,22 @@ function App() {
           data: `# ${name}\n\n`,
           opts: { encoding: 'utf8' }
         })
+        setExpandedPaths(prev => new Set([...prev, parentPath]))
         navigateToFile(fullPath)
       } catch (err) {
         console.error('Failed to create note:', err)
         throw err
       }
     },
-    createFolder: async (parentPath: string = 'knowledge/Notes') => {
+    createFolder: async (parentPath: string = 'knowledge'): Promise<string> => {
+      const newPath = `${parentPath}/new-folder-${Date.now()}`
       try {
         await window.ipc.invoke('workspace:mkdir', {
-          path: `${parentPath}/new-folder-${Date.now()}`,
+          path: newPath,
           recursive: true
         })
+        setExpandedPaths(prev => new Set([...prev, parentPath]))
+        return newPath
       } catch (err) {
         console.error('Failed to create folder:', err)
         throw err
