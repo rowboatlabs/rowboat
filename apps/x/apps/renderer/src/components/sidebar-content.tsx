@@ -1143,21 +1143,25 @@ function KnowledgeSection({
     }
   }, [selectedPath, expandedPaths, tree])
 
-  // Intercept file/folder clicks to track the active folder context
+  // Folder clicks highlight the folder; file clicks clear folder highlight
   const handleSelect = React.useCallback((path: string, kind: "file" | "dir") => {
     if (kind === 'dir') {
       setSelectedFolderPath(path)
     } else {
-      const parts = path.split('/')
-      setSelectedFolderPath(parts.length > 1 ? parts.slice(0, -1).join('/') : 'knowledge')
+      setSelectedFolderPath(null)
     }
     onSelectFile(path, kind)
   }, [onSelectFile])
 
-  // Resolve the parent path for new items based on current context
+  // Resolve the parent path for new items: explicit folder > open file's parent > root
   const deriveParent = React.useCallback((): string => {
-    return selectedFolderPath ?? 'knowledge'
-  }, [selectedFolderPath])
+    if (selectedFolderPath) return selectedFolderPath
+    if (selectedPath) {
+      const parts = selectedPath.split('/')
+      if (parts.length > 1) return parts.slice(0, -1).join('/')
+    }
+    return 'knowledge'
+  }, [selectedFolderPath, selectedPath])
 
   // Wrap actions to inject context-aware parent and capture rename target
   const wrappedActions = React.useMemo<KnowledgeActions>(() => ({
