@@ -33,6 +33,7 @@ import { getRaw as getLabelingAgentRaw } from "../knowledge/labeling_agent.js";
 import { getRaw as getNoteTaggingAgentRaw } from "../knowledge/note_tagging_agent.js";
 import { getRaw as getInlineTaskAgentRaw } from "../knowledge/inline_task_agent.js";
 import { getRaw as getAgentNotesAgentRaw } from "../knowledge/agent_notes_agent.js";
+import { truncateMessagesToFit } from "./context-utils.js";
 
 const AGENT_NOTES_DIR = path.join(WorkDir, 'knowledge', 'Agent Notes');
 const WORKDIR_CONFIG_FILE = path.join(WorkDir, 'config', 'workdir.json');
@@ -1285,7 +1286,9 @@ async function* streamLlm(
     signal?: AbortSignal,
     analytics?: StreamLlmAnalytics,
 ): AsyncGenerator<z.infer<typeof LlmStepStreamEvent>, void, unknown> {
-    const converted = convertFromMessages(messages);
+
+    const truncated = truncateMessagesToFit(messages);
+    const converted = convertFromMessages(truncated);
     console.log(`! SENDING payload to model: `, JSON.stringify(converted))
     const { fullStream } = streamText({
         model,
