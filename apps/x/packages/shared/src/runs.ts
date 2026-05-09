@@ -49,6 +49,14 @@ export const MessageEvent = BaseRunEvent.extend({
     message: Message,
 });
 
+const MONOTONIC_ID_TIMESTAMP_RE = /^(\d{4}-\d{2}-\d{2}T\d{2})-(\d{2})-(\d{2})Z(?:-|$)/;
+
+export function monotonicIdToIsoTimestamp(id: string): string | undefined {
+    const match = MONOTONIC_ID_TIMESTAMP_RE.exec(id);
+    if (!match) return undefined;
+    return `${match[1]}:${match[2]}:${match[3]}Z`;
+}
+
 export const ToolInvocationEvent = BaseRunEvent.extend({
     type: z.literal("tool-invocation"),
     toolCallId: z.string().optional(),
@@ -146,6 +154,7 @@ export const Run = z.object({
     id: z.string(),
     title: z.string().optional(),
     createdAt: z.iso.datetime(),
+    lastMessageAt: z.iso.datetime().optional(),
     agentId: z.string(),
     model: z.string(),
     provider: z.string(),
@@ -159,6 +168,7 @@ export const ListRunsResponse = z.object({
         id: true,
         title: true,
         createdAt: true,
+        lastMessageAt: true,
         agentId: true,
     })),
     nextCursor: z.string().optional(),
