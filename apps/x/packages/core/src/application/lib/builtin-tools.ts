@@ -1,7 +1,7 @@
 import { z, ZodType } from "zod";
 import * as path from "path";
 import * as fs from "fs/promises";
-import { createReadStream } from "fs";
+import { createReadStream, existsSync, readFileSync } from "fs";
 import { createInterface } from "readline";
 import { execSync } from "child_process";
 import { glob } from "glob";
@@ -66,6 +66,44 @@ const LLMPARSE_MIME_TYPES: Record<string, string> = {
     '.bmp': 'image/bmp',
     '.tiff': 'image/tiff',
 };
+
+// Windows-only workaround: the Claude ACP bridge spawns CLAUDE_CODE_EXECUTABLE
+// without `shell: true`, and Node refuses to spawn .cmd files that way (EINVAL).
+// When the LLM invokes acpx via executeCommand, pre-resolve claude's real .exe
+// from the npm-shim layout and inject it via env so the bridge can spawn it.
+function resolveClaudeExeOnWindows(): string | undefined {
+    const pathDirs = (process.env.PATH ?? '').split(';');
+    for (const dir of pathDirs) {
+        const trimmed = dir.trim();
+        if (!trimmed) continue;
+        const cmdPath = path.join(trimmed, 'claude.cmd');
+        if (!existsSync(cmdPath)) continue;
+        const exeFromLayout = path.join(trimmed, 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe');
+        if (existsSync(exeFromLayout)) return exeFromLayout;
+        try {
+            const content = readFileSync(cmdPath, 'utf-8');
+            const absMatch = content.match(/[A-Z]:[\\/][^\s"]*claude\.exe/i);
+            if (absMatch && existsSync(absMatch[0])) return absMatch[0];
+            const relMatch = content.match(/%~dp0[\\/]?([^\s"%]+claude\.exe)/i);
+            if (relMatch) {
+                const resolved = path.join(trimmed, relMatch[1]);
+                if (existsSync(resolved)) return resolved;
+            }
+        } catch {
+            // ignore shim parse failures
+        }
+    }
+    return undefined;
+}
+
+function envForCommand(command: string): NodeJS.ProcessEnv | undefined {
+    if (process.platform !== 'win32') return undefined;
+    if (!/\bacpx\b/.test(command)) return undefined;
+    if (process.env.CLAUDE_CODE_EXECUTABLE) return undefined;
+    const exe = resolveClaudeExeOnWindows();
+    if (!exe) return undefined;
+    return { ...process.env, CLAUDE_CODE_EXECUTABLE: exe };
+}
 
 export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
     loadSkill: {
@@ -963,11 +1001,14 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 //     };
                 // }
 
+                const envOverride = envForCommand(command);
+
                 // Use abortable version when we have a signal
                 if (ctx?.signal) {
                     const { promise, process: proc } = executeCommandAbortable(command, {
                         cwd: workingDir,
                         signal: ctx.signal,
+                        env: envOverride,
                         onData: (chunk: string) => {
                             ctx.publish({
                                 runId: ctx.runId,

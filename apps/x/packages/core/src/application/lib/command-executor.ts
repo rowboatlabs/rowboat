@@ -144,6 +144,7 @@ export function executeCommandAbortable(
     maxBuffer?: number;
     signal?: AbortSignal;
     onData?: (chunk: string) => void;
+    env?: NodeJS.ProcessEnv;
   }
 ): { promise: Promise<AbortableCommandResult>; process: ChildProcess } {
   // Check if already aborted before spawning
@@ -166,6 +167,7 @@ export function executeCommandAbortable(
   const proc = spawn(command, [], {
     shell,
     cwd: options?.cwd,
+    env: options?.env,
     detached: process.platform !== 'win32', // Create process group on Unix
     stdio: ['ignore', 'pipe', 'pipe'],
   });
