@@ -1598,7 +1598,6 @@ export function SettingsDialog({ children, initialTab }: SettingsDialogProps) {
   }, [open, activeTab, isJsonTab, loadConfig])
 
   const handleTabChange = (tab: ConfigTab) => {
-    if (tab !== "skills") setSkillsExpanded(false)
     if (isJsonTab && hasChanges) {
       if (!confirm("You have unsaved changes. Discard them?")) {
         return
