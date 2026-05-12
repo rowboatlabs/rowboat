@@ -2,6 +2,15 @@ packages:
   - apps/*
   - packages/*
 
+allowBuilds:
+  core-js: true
+  electron: true
+  electron-winstaller: true
+  esbuild: true
+  fs-xattr: true
+  macos-alias: true
+  protobufjs: true
+
 onlyBuiltDependencies:
   - core-js
   - electron

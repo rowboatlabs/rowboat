@@ -79,7 +79,7 @@ function extractAccessToken(): string | null {
 
         // workos_tokens is a JSON string that needs to be parsed
         const tokens: WorkosTokens = JSON.parse(supabaseJson.workos_tokens);
-        
+
         if (!tokens.access_token) {
             console.log('[Granola] access_token not found in workos_tokens');
             return null;
@@ -98,6 +98,13 @@ function sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+class RateLimitError extends Error {
+    constructor(message: string, public readonly retryAfterMs?: number) {
+        super(message);
+        this.name = 'RateLimitError';
+    }
+}
+
 async function callWithRateLimit<T>(
     operation: () => Promise<T>,
     operationName: string
@@ -110,23 +117,35 @@ async function callWithRateLimit<T>(
             const result = await operation();
             return result;
         } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : String(error);
+            let retryAfterMs: number | undefined;
+            let isRateLimit = false;
 
-            // Check if it's a rate limit error (429 Too Many Requests)
-            if (errorMessage.includes('429') ||
-                errorMessage.includes('Too Many Requests') ||
-                errorMessage.includes('too many requests') ||
-                errorMessage.includes('rate limit')) {
+            if (error instanceof RateLimitError) {
+                isRateLimit = true;
+                retryAfterMs = error.retryAfterMs;
+            } else {
+                const errorMessage = error instanceof Error ? error.message : String(error);
 
+                // Check if it's a rate limit error (429 Too Many Requests)
+                if (errorMessage.includes('429') ||
+                    errorMessage.includes('Too Many Requests') ||
+                    errorMessage.includes('too many requests') ||
+                    errorMessage.includes('rate limit')) {
+                    isRateLimit = true;
+                }
+            }
+
+            if (isRateLimit) {
                 retries++;
-                console.log(`[Granola] Rate limit hit for ${operationName}. Retry ${retries}/${MAX_RETRIES} in ${delay/1000}s...`);
+                const currentDelay = retryAfterMs !== undefined ? retryAfterMs : delay;
+                console.log(`[Granola] Rate limit hit for ${operationName}. Retry ${retries}/${MAX_RETRIES} in ${currentDelay / 1000}s...`);
 
                 if (retries >= MAX_RETRIES) {
                     console.error(`[Granola] Max retries reached for ${operationName}. Skipping.`);
                     return null;
                 }
 
-                await sleep(delay);
+                await sleep(currentDelay);
                 delay *= 2; // Exponential backoff
             } else {
                 // Not a rate limit error, throw it
@@ -163,6 +182,23 @@ async function apiCall<T>(
 
     if (!response.ok) {
         const errorText = await response.text().catch(() => 'no body');
+
+        if (response.status === 429) {
+            const retryAfter = response.headers.get('Retry-After');
+            let retryAfterMs: number | undefined;
+            if (retryAfter) {
+                if (/^\d+$/.test(retryAfter)) {
+                    retryAfterMs = parseInt(retryAfter, 10) * 1000;
+                } else {
+                    const date = new Date(retryAfter);
+                    if (!isNaN(date.getTime())) {
+                        retryAfterMs = Math.max(0, date.getTime() - Date.now());
+                    }
+                }
+            }
+            throw new RateLimitError(`${response.status}: ${response.statusText}`, retryAfterMs);
+        }
+
         console.error(`[Granola] API error ${response.status}: ${response.statusText} - ${errorText.slice(0, 200)}`);
         // Throw error with status code so rate limit handler can detect 429
         throw new Error(`${response.status}: ${response.statusText}`);
