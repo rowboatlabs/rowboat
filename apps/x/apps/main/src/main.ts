@@ -5,6 +5,7 @@ import {
   startRunsWatcher,
   startServicesWatcher,
   startLiveNoteAgentWatcher,
+  startBackgroundTaskAgentWatcher,
   startWorkspaceWatcher,
   stopRunsWatcher,
   stopServicesWatcher,
@@ -25,7 +26,10 @@ import { init as initAgentRunner } from "@x/core/dist/agent-schedule/runner.js";
 import { init as initAgentNotes } from "@x/core/dist/knowledge/agent_notes.js";
 import { init as initCalendarNotifications } from "@x/core/dist/knowledge/notify_calendar_meetings.js";
 import { init as initLiveNoteScheduler } from "@x/core/dist/knowledge/live-note/scheduler.js";
-import { init as initLiveNoteEventProcessor } from "@x/core/dist/knowledge/live-note/events.js";
+import { init as initEventProcessor, registerConsumer } from "@x/core/dist/events/init.js";
+import { liveNoteEventConsumer } from "@x/core/dist/knowledge/live-note/event-consumer.js";
+import { init as initBackgroundTaskScheduler } from "@x/core/dist/background-tasks/scheduler.js";
+import { backgroundTaskEventConsumer } from "@x/core/dist/background-tasks/event-consumer.js";
 import { init as initLocalSites, shutdown as shutdownLocalSites } from "@x/core/dist/local-sites/server.js";
 import { shutdown as shutdownAnalytics } from "@x/core/dist/analytics/posthog.js";
 import { identifyIfSignedIn } from "@x/core/dist/analytics/identify.js";
@@ -331,11 +335,21 @@ app.whenReady().then(async () => {
   // start live-note agent event watcher (forwards bus → renderer)
   startLiveNoteAgentWatcher();
 
+  // start bg-task agent event watcher (forwards bus → renderer)
+  startBackgroundTaskAgentWatcher();
+
   // start live-note scheduler (cron / window)
   initLiveNoteScheduler();
 
-  // start live-note event processor (consumes events/pending/, routes to matching live notes)
-  initLiveNoteEventProcessor();
+  // start bg-task scheduler (cron / window)
+  initBackgroundTaskScheduler();
+
+  // register event consumers and start the shared event processor
+  // (consumes $WorkDir/events/pending/, routes events to all consumers
+  // concurrently for Pass-1, then fires each consumer's candidates in parallel)
+  registerConsumer(liveNoteEventConsumer);
+  registerConsumer(backgroundTaskEventConsumer);
+  initEventProcessor();
 
   // start gmail sync
   initGmailSync();

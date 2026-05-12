@@ -23,6 +23,7 @@ import { useDebounce } from './hooks/use-debounce';
 import { SidebarContentPanel } from '@/components/sidebar-content';
 import { SuggestedTopicsView } from '@/components/suggested-topics-view';
 import { LiveNotesView } from '@/components/live-notes-view';
+import { BgTasksView } from '@/components/bg-tasks-view';
 import { SidebarSectionProvider } from '@/contexts/sidebar-context';
 import {
   Conversation,
@@ -176,6 +177,7 @@ const TITLEBAR_BUTTON_GAPS_COLLAPSED = 0
 const GRAPH_TAB_PATH = '__rowboat_graph_view__'
 const SUGGESTED_TOPICS_TAB_PATH = '__rowboat_suggested_topics__'
 const LIVE_NOTES_TAB_PATH = '__rowboat_live_notes__'
+const BG_TASKS_TAB_PATH = '__rowboat_bg_tasks__'
 const BASES_DEFAULT_TAB_PATH = '__rowboat_bases_default__'
 
 const clampNumber = (value: number, min: number, max: number) =>
@@ -306,6 +308,7 @@ const getAncestorDirectoryPaths = (path: string): string[] => {
 const isGraphTabPath = (path: string) => path === GRAPH_TAB_PATH
 const isSuggestedTopicsTabPath = (path: string) => path === SUGGESTED_TOPICS_TAB_PATH
 const isLiveNotesTabPath = (path: string) => path === LIVE_NOTES_TAB_PATH
+const isBgTasksTabPath = (path: string) => path === BG_TASKS_TAB_PATH
 const isBaseFilePath = (path: string) => path.endsWith('.base') || path === BASES_DEFAULT_TAB_PATH
 
 const getSuggestedTopicTargetFolder = (category?: string) => {
@@ -364,6 +367,12 @@ const buildSuggestedTopicExplorePrompt = ({
 
 const buildLiveNoteSetupPrompt = () =>
   'I want to set up a Live note / task.'
+
+const buildBgTaskSetupPrompt = (description: string) =>
+  `Create a background task for me. Here's what I want it to do:\n\n${description}`
+
+const buildBgTaskEditPrompt = (slug: string) =>
+  `Let's tweak the background task \`${slug}\`. Please load the \`background-task\` skill first, read the task's current \`bg-tasks/${slug}/task.yaml\`, then ask me what I want to change.`
 
 const normalizeUsage = (usage?: Partial<LanguageModelUsage> | null): LanguageModelUsage | null => {
   if (!usage) return null
@@ -700,6 +709,7 @@ function App() {
   const [isBrowserOpen, setIsBrowserOpen] = useState(false)
   const [isSuggestedTopicsOpen, setIsSuggestedTopicsOpen] = useState(false)
   const [isLiveNotesOpen, setIsLiveNotesOpen] = useState(false)
+  const [isBgTasksOpen, setIsBgTasksOpen] = useState(false)
   const [expandedFrom, setExpandedFrom] = useState<{
     path: string | null
     graph: boolean
@@ -1030,6 +1040,7 @@ function App() {
     if (isGraphTabPath(tab.path)) return 'Graph View'
     if (isSuggestedTopicsTabPath(tab.path)) return 'Suggested Topics'
     if (isLiveNotesTabPath(tab.path)) return 'Live notes'
+    if (isBgTasksTabPath(tab.path)) return 'Background tasks'
     if (tab.path === BASES_DEFAULT_TAB_PATH) return 'Bases'
     if (tab.path.endsWith('.base')) return tab.path.split('/').pop()?.replace(/\.base$/i, '') || 'Base'
     return tab.path.split('/').pop()?.replace(/\.md$/i, '') || tab.path
@@ -2742,7 +2753,7 @@ function App() {
       setActiveFileTabId(existingTab.id)
       setIsGraphOpen(false)
       setIsSuggestedTopicsOpen(false)
-      setIsLiveNotesOpen(false)
+      setIsLiveNotesOpen(false); setIsBgTasksOpen(false)
       setSelectedPath(path)
       return
     }
@@ -2751,7 +2762,7 @@ function App() {
     setActiveFileTabId(id)
     setIsGraphOpen(false)
     setIsSuggestedTopicsOpen(false)
-    setIsLiveNotesOpen(false)
+    setIsLiveNotesOpen(false); setIsBgTasksOpen(false)
     setSelectedPath(path)
   }, [fileTabs, dismissBrowserOverlay])
 
@@ -2770,14 +2781,14 @@ function App() {
       setSelectedPath(null)
       setIsGraphOpen(true)
       setIsSuggestedTopicsOpen(false)
-      setIsLiveNotesOpen(false)
+      setIsLiveNotesOpen(false); setIsBgTasksOpen(false)
       return
     }
     if (isSuggestedTopicsTabPath(tab.path)) {
       setSelectedPath(null)
       setIsGraphOpen(false)
       setIsSuggestedTopicsOpen(true)
-      setIsLiveNotesOpen(false)
+      setIsLiveNotesOpen(false); setIsBgTasksOpen(false)
       return
     }
     if (isLiveNotesTabPath(tab.path)) {
@@ -2789,7 +2800,7 @@ function App() {
     }
     setIsGraphOpen(false)
     setIsSuggestedTopicsOpen(false)
-    setIsLiveNotesOpen(false)
+    setIsLiveNotesOpen(false); setIsBgTasksOpen(false)
     setSelectedPath(tab.path)
   }, [fileTabs, isRightPaneMaximized, dismissBrowserOverlay])
 
@@ -2818,7 +2829,7 @@ function App() {
         setSelectedPath(null)
         setIsGraphOpen(false)
         setIsSuggestedTopicsOpen(false)
-        setIsLiveNotesOpen(false)
+        setIsLiveNotesOpen(false); setIsBgTasksOpen(false)
           return []
       }
       const idx = prev.findIndex(t => t.id === tabId)
@@ -2832,12 +2843,12 @@ function App() {
           setSelectedPath(null)
           setIsGraphOpen(true)
           setIsSuggestedTopicsOpen(false)
-          setIsLiveNotesOpen(false)
+          setIsLiveNotesOpen(false); setIsBgTasksOpen(false)
         } else if (isSuggestedTopicsTabPath(newActiveTab.path)) {
           setSelectedPath(null)
           setIsGraphOpen(false)
           setIsSuggestedTopicsOpen(true)
-          setIsLiveNotesOpen(false)
+          setIsLiveNotesOpen(false); setIsBgTasksOpen(false)
         } else if (isLiveNotesTabPath(newActiveTab.path)) {
           setSelectedPath(null)
           setIsGraphOpen(false)
@@ -2846,7 +2857,7 @@ function App() {
         } else {
           setIsGraphOpen(false)
           setIsSuggestedTopicsOpen(false)
-          setIsLiveNotesOpen(false)
+          setIsLiveNotesOpen(false); setIsBgTasksOpen(false)
               setSelectedPath(newActiveTab.path)
         }
       }
@@ -2877,7 +2888,7 @@ function App() {
     dismissBrowserOverlay()
     handleNewChat()
     // Left-pane "new chat" should always open full chat view.
-    if (selectedPath || isGraphOpen || isSuggestedTopicsOpen || isLiveNotesOpen) {
+    if (selectedPath || isGraphOpen || isSuggestedTopicsOpen || isLiveNotesOpen || isBgTasksOpen) {
       setExpandedFrom({
         path: selectedPath,
         graph: isGraphOpen,
@@ -2891,8 +2902,8 @@ function App() {
     setSelectedPath(null)
     setIsGraphOpen(false)
     setIsSuggestedTopicsOpen(false)
-    setIsLiveNotesOpen(false)
-  }, [chatTabs, activeChatTabId, dismissBrowserOverlay, handleNewChat, selectedPath, isGraphOpen, isSuggestedTopicsOpen, isLiveNotesOpen])
+    setIsLiveNotesOpen(false); setIsBgTasksOpen(false)
+  }, [chatTabs, activeChatTabId, dismissBrowserOverlay, handleNewChat, selectedPath, isGraphOpen, isSuggestedTopicsOpen, isLiveNotesOpen, isBgTasksOpen])
 
   // Sidebar variant: create/switch chat tab without leaving file/graph context.
   const handleNewChatTabInSidebar = useCallback(() => {
@@ -3024,7 +3035,7 @@ function App() {
 
   const handleOpenFullScreenChat = useCallback(() => {
     // Remember where we came from so the close button can return
-    if (selectedPath || isGraphOpen || isSuggestedTopicsOpen || isLiveNotesOpen) {
+    if (selectedPath || isGraphOpen || isSuggestedTopicsOpen || isLiveNotesOpen || isBgTasksOpen) {
       setExpandedFrom({
         path: selectedPath,
         graph: isGraphOpen,
@@ -3037,19 +3048,19 @@ function App() {
     setSelectedPath(null)
     setIsGraphOpen(false)
     setIsSuggestedTopicsOpen(false)
-    setIsLiveNotesOpen(false)
-  }, [selectedPath, isGraphOpen, isSuggestedTopicsOpen, isLiveNotesOpen, dismissBrowserOverlay])
+    setIsLiveNotesOpen(false); setIsBgTasksOpen(false)
+  }, [selectedPath, isGraphOpen, isSuggestedTopicsOpen, isLiveNotesOpen, isBgTasksOpen, dismissBrowserOverlay])
 
   const handleCloseFullScreenChat = useCallback(() => {
     if (expandedFrom) {
       if (expandedFrom.graph) {
         setIsGraphOpen(true)
         setIsSuggestedTopicsOpen(false)
-        setIsLiveNotesOpen(false)
+        setIsLiveNotesOpen(false); setIsBgTasksOpen(false)
       } else if (expandedFrom.suggestedTopics) {
         setIsGraphOpen(false)
         setIsSuggestedTopicsOpen(true)
-        setIsLiveNotesOpen(false)
+        setIsLiveNotesOpen(false); setIsBgTasksOpen(false)
       } else if (expandedFrom.liveNotes) {
         setIsGraphOpen(false)
         setIsSuggestedTopicsOpen(false)
@@ -3057,7 +3068,7 @@ function App() {
       } else if (expandedFrom.path) {
         setIsGraphOpen(false)
         setIsSuggestedTopicsOpen(false)
-        setIsLiveNotesOpen(false)
+        setIsLiveNotesOpen(false); setIsBgTasksOpen(false)
         setSelectedPath(expandedFrom.path)
       }
       setExpandedFrom(null)
@@ -3072,7 +3083,7 @@ function App() {
     if (selectedPath) return { type: 'file', path: selectedPath }
     if (isGraphOpen) return { type: 'graph' }
     return { type: 'chat', runId }
-  }, [selectedBackgroundTask, isLiveNotesOpen, isSuggestedTopicsOpen, selectedPath, isGraphOpen, runId])
+  }, [selectedBackgroundTask, isLiveNotesOpen, isBgTasksOpen, isSuggestedTopicsOpen, selectedPath, isGraphOpen, runId])
 
   const appendUnique = useCallback((stack: ViewState[], entry: ViewState) => {
     const last = stack[stack.length - 1]
@@ -3140,6 +3151,30 @@ function App() {
     setActiveFileTabId(id)
   }, [fileTabs])
 
+  const ensureBgTasksFileTab = useCallback(() => {
+    const existing = fileTabs.find((tab) => isBgTasksTabPath(tab.path))
+    if (existing) {
+      setActiveFileTabId(existing.id)
+      return
+    }
+    const id = newFileTabId()
+    setFileTabs((prev) => [...prev, { id, path: BG_TASKS_TAB_PATH }])
+    setActiveFileTabId(id)
+  }, [fileTabs])
+
+  const openBgTasksView = useCallback(() => {
+    setSelectedPath(null)
+    setIsGraphOpen(false)
+    setIsBrowserOpen(false)
+    setIsSuggestedTopicsOpen(false)
+    setIsLiveNotesOpen(false); setIsBgTasksOpen(false)
+    setSelectedBackgroundTask(null)
+    setExpandedFrom(null)
+    setIsRightPaneMaximized(false)
+    setIsBgTasksOpen(true)
+    ensureBgTasksFileTab()
+  }, [ensureBgTasksFileTab])
+
   const applyViewState = useCallback(async (view: ViewState) => {
     switch (view.type) {
       case 'file':
@@ -3149,7 +3184,7 @@ function App() {
         // visible in the middle pane.
         setIsBrowserOpen(false)
         setIsSuggestedTopicsOpen(false)
-        setIsLiveNotesOpen(false)
+        setIsLiveNotesOpen(false); setIsBgTasksOpen(false)
         setExpandedFrom(null)
         // Preserve split vs knowledge-max mode when navigating knowledge files.
         // Only exit chat-only maximize, because that would hide the selected file.
@@ -3164,7 +3199,7 @@ function App() {
         setSelectedPath(null)
         setIsBrowserOpen(false)
         setIsSuggestedTopicsOpen(false)
-        setIsLiveNotesOpen(false)
+        setIsLiveNotesOpen(false); setIsBgTasksOpen(false)
         setExpandedFrom(null)
         setIsGraphOpen(true)
         ensureGraphFileTab()
@@ -3177,7 +3212,7 @@ function App() {
         setIsGraphOpen(false)
         setIsBrowserOpen(false)
         setIsSuggestedTopicsOpen(false)
-        setIsLiveNotesOpen(false)
+        setIsLiveNotesOpen(false); setIsBgTasksOpen(false)
         setExpandedFrom(null)
         setIsRightPaneMaximized(false)
         setSelectedBackgroundTask(view.name)
@@ -3190,7 +3225,7 @@ function App() {
         setIsRightPaneMaximized(false)
         setSelectedBackgroundTask(null)
         setIsSuggestedTopicsOpen(true)
-        setIsLiveNotesOpen(false)
+        setIsLiveNotesOpen(false); setIsBgTasksOpen(false)
         ensureSuggestedTopicsFileTab()
         return
       case 'live-notes':
@@ -3212,7 +3247,7 @@ function App() {
         setIsRightPaneMaximized(false)
         setSelectedBackgroundTask(null)
         setIsSuggestedTopicsOpen(false)
-        setIsLiveNotesOpen(false)
+        setIsLiveNotesOpen(false); setIsBgTasksOpen(false)
         if (view.runId) {
           await loadRun(view.runId)
         } else {
@@ -3542,7 +3577,7 @@ function App() {
   }, [])
 
   // Keyboard shortcut: Ctrl+L to toggle main chat view
-  const isFullScreenChat = !selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isLiveNotesOpen && !selectedBackgroundTask && !isBrowserOpen
+  const isFullScreenChat = !selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isLiveNotesOpen && !isBgTasksOpen && !selectedBackgroundTask && !isBrowserOpen
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'l') {
@@ -3615,17 +3650,19 @@ function App() {
     const handleTabKeyDown = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey
       if (!mod) return
-      const rightPaneAvailable = Boolean((selectedPath || isGraphOpen || isSuggestedTopicsOpen || isLiveNotesOpen) && isChatSidebarOpen)
+      const rightPaneAvailable = Boolean((selectedPath || isGraphOpen || isSuggestedTopicsOpen || isLiveNotesOpen || isBgTasksOpen) && isChatSidebarOpen)
       const targetPane: ShortcutPane = rightPaneAvailable
         ? (isRightPaneMaximized ? 'right' : activeShortcutPane)
         : 'left'
-      const inFileView = targetPane === 'left' && Boolean(selectedPath || isGraphOpen || isSuggestedTopicsOpen || isLiveNotesOpen)
+      const inFileView = targetPane === 'left' && Boolean(selectedPath || isGraphOpen || isSuggestedTopicsOpen || isLiveNotesOpen || isBgTasksOpen)
       const selectedKnowledgePath = isGraphOpen
         ? GRAPH_TAB_PATH
         : isSuggestedTopicsOpen
           ? SUGGESTED_TOPICS_TAB_PATH
           : isLiveNotesOpen
             ? LIVE_NOTES_TAB_PATH
+          : isBgTasksOpen
+            ? BG_TASKS_TAB_PATH
           : selectedPath
       const targetFileTabId = activeFileTabId ?? (
         selectedKnowledgePath
@@ -3680,7 +3717,7 @@ function App() {
     }
     document.addEventListener('keydown', handleTabKeyDown)
     return () => document.removeEventListener('keydown', handleTabKeyDown)
-  }, [selectedPath, isGraphOpen, isSuggestedTopicsOpen, isLiveNotesOpen, isChatSidebarOpen, isRightPaneMaximized, activeShortcutPane, chatTabs, fileTabs, activeChatTabId, activeFileTabId, closeChatTab, closeFileTab, switchChatTab, switchFileTab])
+  }, [selectedPath, isGraphOpen, isSuggestedTopicsOpen, isLiveNotesOpen, isBgTasksOpen, isChatSidebarOpen, isRightPaneMaximized, activeShortcutPane, chatTabs, fileTabs, activeChatTabId, activeFileTabId, closeChatTab, closeFileTab, switchChatTab, switchFileTab])
 
   const toggleExpand = (path: string, kind: 'file' | 'dir') => {
     if (kind === 'file') {
@@ -3705,7 +3742,7 @@ function App() {
           }),
         },
       }))
-      if (!selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isLiveNotesOpen && !selectedBackgroundTask) {
+      if (!selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isLiveNotesOpen && !isBgTasksOpen && !selectedBackgroundTask) {
         setIsChatSidebarOpen(false)
         setIsRightPaneMaximized(false)
       }
@@ -3831,14 +3868,14 @@ function App() {
     },
     openGraph: () => {
       // From chat-only landing state, open graph directly in full knowledge view.
-      if (!selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isLiveNotesOpen && !selectedBackgroundTask) {
+      if (!selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isLiveNotesOpen && !isBgTasksOpen && !selectedBackgroundTask) {
         setIsChatSidebarOpen(false)
         setIsRightPaneMaximized(false)
       }
       void navigateToView({ type: 'graph' })
     },
     openBases: () => {
-      if (!selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isLiveNotesOpen && !selectedBackgroundTask) {
+      if (!selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isLiveNotesOpen && !isBgTasksOpen && !selectedBackgroundTask) {
         setIsChatSidebarOpen(false)
         setIsRightPaneMaximized(false)
       }
@@ -4428,7 +4465,7 @@ function App() {
   const selectedTask = selectedBackgroundTask
     ? backgroundTasks.find(t => t.name === selectedBackgroundTask)
     : null
-  const isRightPaneContext = Boolean(selectedPath || isGraphOpen || isSuggestedTopicsOpen || isLiveNotesOpen || isBrowserOpen)
+  const isRightPaneContext = Boolean(selectedPath || isGraphOpen || isSuggestedTopicsOpen || isLiveNotesOpen || isBgTasksOpen || isBrowserOpen)
   const isRightPaneOnlyMode = isRightPaneContext && isChatSidebarOpen && isRightPaneMaximized
   const shouldCollapseLeftPane = isRightPaneOnlyMode
   const openMarkdownTabs = React.useMemo(() => {
@@ -4445,7 +4482,7 @@ function App() {
   return (
     <TooltipProvider delayDuration={0}>
       <SidebarSectionProvider defaultSection="tasks" onSectionChange={(section) => {
-        if (section === 'knowledge' && !selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isLiveNotesOpen) {
+        if (section === 'knowledge' && !selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isLiveNotesOpen && !isBgTasksOpen) {
           void navigateToView({ type: 'file', path: BASES_DEFAULT_TAB_PATH })
         }
       }}>
@@ -4478,7 +4515,7 @@ function App() {
                 onNewChat: handleNewChatTab,
                 onSelectRun: (runIdToLoad) => {
                   cancelRecordingIfActive()
-                  if (selectedPath || isGraphOpen || isSuggestedTopicsOpen || isLiveNotesOpen || isBrowserOpen) {
+                  if (selectedPath || isGraphOpen || isSuggestedTopicsOpen || isLiveNotesOpen || isBgTasksOpen || isBrowserOpen) {
                     setIsChatSidebarOpen(true)
                   }
 
@@ -4489,7 +4526,7 @@ function App() {
                     return
                   }
                   // In two-pane mode (file/graph/browser), keep the middle pane and just swap chat context in the right sidebar.
-                  if (selectedPath || isGraphOpen || isSuggestedTopicsOpen || isLiveNotesOpen || isBrowserOpen) {
+                  if (selectedPath || isGraphOpen || isSuggestedTopicsOpen || isLiveNotesOpen || isBgTasksOpen || isBrowserOpen) {
                     setChatTabs(prev => prev.map(t => t.id === activeChatTabId ? { ...t, runId: runIdToLoad } : t))
                     loadRun(runIdToLoad)
                     return
@@ -4513,14 +4550,14 @@ function App() {
                       } else {
                         // Only one tab, reset it to new chat
                         setChatTabs([{ id: tabForRun.id, runId: null }])
-                        if (selectedPath || isGraphOpen || isSuggestedTopicsOpen || isLiveNotesOpen || isBrowserOpen) {
+                        if (selectedPath || isGraphOpen || isSuggestedTopicsOpen || isLiveNotesOpen || isBgTasksOpen || isBrowserOpen) {
                           handleNewChat()
                         } else {
                           void navigateToView({ type: 'chat', runId: null })
                         }
                       }
                     } else if (runId === runIdToDelete) {
-                      if (selectedPath || isGraphOpen || isSuggestedTopicsOpen || isLiveNotesOpen || isBrowserOpen) {
+                      if (selectedPath || isGraphOpen || isSuggestedTopicsOpen || isLiveNotesOpen || isBgTasksOpen || isBrowserOpen) {
                         setChatTabs(prev => prev.map(t => t.id === activeChatTabId ? { ...t, runId: null } : t))
                         handleNewChat()
                       } else {
@@ -4552,6 +4589,8 @@ function App() {
               onOpenSuggestedTopics={() => void navigateToView({ type: 'suggested-topics' })}
               isLiveNotesOpen={isLiveNotesOpen}
               onOpenLiveNotes={() => void navigateToView({ type: 'live-notes' })}
+              isBgTasksOpen={isBgTasksOpen}
+              onOpenBgTasks={openBgTasksView}
             />
             <SidebarInset
               className={cn(
@@ -4571,7 +4610,7 @@ function App() {
                 canNavigateForward={canNavigateForward}
                 collapsedLeftPaddingPx={collapsedLeftPaddingPx}
               >
-                {(selectedPath || isGraphOpen || isSuggestedTopicsOpen || isLiveNotesOpen) && fileTabs.length >= 1 ? (
+                {(selectedPath || isGraphOpen || isSuggestedTopicsOpen || isLiveNotesOpen || isBgTasksOpen) && fileTabs.length >= 1 ? (
                   <TabBar
                     tabs={fileTabs}
                     activeTabId={activeFileTabId ?? ''}
@@ -4579,7 +4618,7 @@ function App() {
                     getTabId={(t) => t.id}
                     onSwitchTab={switchFileTab}
                     onCloseTab={closeFileTab}
-                    allowSingleTabClose={fileTabs.length === 1 && (isGraphOpen || isSuggestedTopicsOpen || isLiveNotesOpen || (selectedPath != null && isBaseFilePath(selectedPath)))}
+                    allowSingleTabClose={fileTabs.length === 1 && (isGraphOpen || isSuggestedTopicsOpen || isLiveNotesOpen || isBgTasksOpen || (selectedPath != null && isBaseFilePath(selectedPath)))}
                   />
                 ) : (
                   <TabBar
@@ -4632,7 +4671,7 @@ function App() {
                     <TooltipContent side="bottom">Version history</TooltipContent>
                   </Tooltip>
                 )}
-                {!selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isLiveNotesOpen && !selectedTask && !isBrowserOpen && (
+                {!selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isLiveNotesOpen && !isBgTasksOpen && !selectedTask && !isBrowserOpen && (
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
@@ -4647,7 +4686,7 @@ function App() {
                     <TooltipContent side="bottom">New chat tab</TooltipContent>
                   </Tooltip>
                 )}
-                {!selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isLiveNotesOpen && !isBrowserOpen && expandedFrom && (
+                {!selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isLiveNotesOpen && !isBgTasksOpen && !isBrowserOpen && expandedFrom && (
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
@@ -4662,7 +4701,7 @@ function App() {
                     <TooltipContent side="bottom">Restore two-pane view</TooltipContent>
                   </Tooltip>
                 )}
-                {(selectedPath || isGraphOpen || isSuggestedTopicsOpen || isLiveNotesOpen) && (
+                {(selectedPath || isGraphOpen || isSuggestedTopicsOpen || isLiveNotesOpen || isBgTasksOpen) && (
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
@@ -4701,6 +4740,17 @@ function App() {
                     onOpenNote={(path) => navigateToFile(path)}
                     onAddNewLiveNote={() => {
                       submitFromPalette(buildLiveNoteSetupPrompt(), null)
+                    }}
+                  />
+                </div>
+              ) : isBgTasksOpen ? (
+                <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+                  <BgTasksView
+                    onCreateWithCopilot={(description) => {
+                      submitFromPalette(buildBgTaskSetupPrompt(description), null)
+                    }}
+                    onEditWithCopilot={(slug) => {
+                      submitFromPalette(buildBgTaskEditPrompt(slug), null)
                     }}
                   />
                 </div>

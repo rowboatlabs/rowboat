@@ -24,6 +24,7 @@ import {
   Table2,
   Plug,
   Lightbulb,
+  ListChecks,
   LoaderIcon,
   Settings,
   Square,
@@ -217,6 +218,8 @@ type SidebarContentPanelProps = {
   onOpenSuggestedTopics?: () => void
   isLiveNotesOpen?: boolean
   onOpenLiveNotes?: () => void
+  isBgTasksOpen?: boolean
+  onOpenBgTasks?: () => void
 } & React.ComponentProps<typeof Sidebar>
 
 const sectionTabs: { id: ActiveSection; label: string }[] = [
@@ -477,6 +480,8 @@ export function SidebarContentPanel({
   onOpenSuggestedTopics,
   isLiveNotesOpen = false,
   onOpenLiveNotes,
+  isBgTasksOpen = false,
+  onOpenBgTasks,
   ...props
 }: SidebarContentPanelProps) {
   const { activeSection, setActiveSection } = useSidebarSection()
@@ -493,6 +498,7 @@ export function SidebarContentPanel({
   const isBrowserQuickActionSelected = isBrowserOpen && !isSearchOpen && !isMeetingQuickActionSelected
   const isSuggestedTopicsQuickActionSelected = isSuggestedTopicsOpen && !isBrowserOpen
   const isLiveNotesQuickActionSelected = isLiveNotesOpen && !isBrowserOpen
+  const isBgTasksQuickActionSelected = isBgTasksOpen && !isBrowserOpen
 
   const handleRowboatLogin = useCallback(async () => {
     try {
@@ -664,6 +670,21 @@ export function SidebarContentPanel({
             >
               <Lightbulb className="size-4" />
               <span>Suggested Topics</span>
+            </button>
+          )}
+          {onOpenBgTasks && (
+            <button
+              type="button"
+              onClick={onOpenBgTasks}
+              className={cn(
+                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
+                isBgTasksQuickActionSelected
+                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                  : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+              )}
+            >
+              <ListChecks className="size-4" />
+              <span>Background tasks</span>
             </button>
           )}
           {onOpenLiveNotes && (

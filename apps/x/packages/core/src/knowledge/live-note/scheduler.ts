@@ -2,7 +2,7 @@ import { PrefixLogger } from '@x/shared';
 import * as workspace from '../../workspace/workspace.js';
 import { fetchLiveNote } from './fileops.js';
 import { runLiveNoteAgent } from './runner.js';
-import { backoffRemainingMs, dueTimedTrigger } from './schedule-utils.js';
+import { backoffRemainingMs, dueTimedTrigger } from '../../schedule/utils.js';
 
 const log = new PrefixLogger('LiveNote:Scheduler');
 const POLL_INTERVAL_MS = 15_000; // 15 seconds

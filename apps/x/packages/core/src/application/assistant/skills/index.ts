@@ -14,6 +14,7 @@ import browserControlSkill from "./browser-control/skill.js";
 import codeWithAgentsSkill from "./code-with-agents/skill.js";
 import composioIntegrationSkill from "./composio-integration/skill.js";
 import liveNoteSkill from "./live-note/skill.js";
+import backgroundTaskSkill from "./background-task/skill.js";
 import notifyUserSkill from "./notify-user/skill.js";
 
 const CURRENT_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -102,9 +103,15 @@ const definitions: SkillDefinition[] = [
     content: codeWithAgentsSkill,
   },
   {
+    id: "background-task",
+    title: "Background Tasks",
+    summary: "Set up a recurring background task — persistent instructions the agent fires on a schedule and/or on matching events (Gmail, Calendar). Either maintains an `index.md` digest (OUTPUT mode) or performs a recurring side-effect like drafting a reply / posting to Slack / calling an API (ACTION mode). Flagship surface for anything recurring.",
+    content: backgroundTaskSkill,
+  },
+  {
     id: "live-note",
     title: "Live Notes",
-    summary: "Make notes self-updating — a single `live:` objective in the frontmatter that the live-note agent maintains on a schedule, on incoming events, or manually (weather, news, prices, status, dashboards).",
+    summary: "Make a specific markdown note self-updating — a single `live:` objective in the frontmatter that the live-note agent maintains on a schedule or on incoming events. Load only when the user explicitly says 'live note' / 'live-note'; for anything else recurring, prefer the background-task skill.",
     content: liveNoteSkill,
   },
   {

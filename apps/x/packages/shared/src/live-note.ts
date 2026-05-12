@@ -85,27 +85,12 @@ export const LiveNoteSchema = z.object({
 // Knowledge events (live-note event-driven pipeline)
 // ---------------------------------------------------------------------------
 
-export const KnowledgeEventSchema = z.object({
-    id: z.string().describe('Monotonically increasing ID; also the filename in events/pending/'),
-    source: z.string().describe('Producer of the event (e.g. "gmail", "calendar")'),
-    type: z.string().describe('Event type (e.g. "email.synced")'),
-    createdAt: z.string().describe('ISO timestamp when the event was produced'),
-    payload: z.string().describe('Human-readable event body, usually markdown'),
-    targetFilePath: z.string().optional().describe('If set, skip routing and target this note directly (used for re-runs)'),
-    // Enriched on move from pending/ to done/
-    processedAt: z.string().optional(),
-    candidateFilePaths: z.array(z.string()).optional(),
-    runIds: z.array(z.string()).optional(),
-    error: z.string().optional(),
-});
-
-export type KnowledgeEvent = z.infer<typeof KnowledgeEventSchema>;
-
-export const Pass1OutputSchema = z.object({
-    filePaths: z.array(z.string()).describe('Note file paths whose objective and event-match criteria suggest the event might be relevant. The agent does Pass 2 on the event payload before editing.'),
-});
-
-export type Pass1Output = z.infer<typeof Pass1OutputSchema>;
+// Legacy aliases — `KnowledgeEventSchema` / `Pass1OutputSchema` now live in
+// `./events.ts` as `RowboatEventSchema` / `Pass1OutputSchema`. These re-exports
+// keep older import paths working for one release; remove after nothing imports
+// them from here.
+export { RowboatEventSchema as KnowledgeEventSchema, Pass1OutputSchema } from './events.js';
+export type { RowboatEvent as KnowledgeEvent, Pass1Output } from './events.js';
 
 // ---------------------------------------------------------------------------
 // Bus events

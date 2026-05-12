@@ -19,10 +19,13 @@ export async function createRun(opts: z.infer<typeof CreateRunOptions>): Promise
 
     // Resolve model+provider once at creation: opts > agent declaration > defaults.
     // Both fields are plain strings (provider is a name, looked up at runtime).
+    // Use `||` (not `??`) so an empty-string override — what an LLM tool call
+    // sometimes synthesizes for "I'm not setting this" — falls through to the
+    // next link in the chain instead of being treated as a real value.
     const agent = await loadAgent(opts.agentId);
     const defaults = await getDefaultModelAndProvider();
-    const model = opts.model ?? agent.model ?? defaults.model;
-    const provider = opts.provider ?? agent.provider ?? defaults.provider;
+    const model = opts.model || agent.model || defaults.model;
+    const provider = opts.provider || agent.provider || defaults.provider;
     const useCase = opts.useCase ?? "copilot_chat";
 
     const run = await repo.create({

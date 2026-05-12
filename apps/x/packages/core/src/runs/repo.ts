@@ -39,6 +39,10 @@ export type CreateRunRepoOptions = {
     subUseCase?: string;
 };
 
+function runLogPath(runId: string): string {
+    return path.join(WorkDir, 'runs', `${runId}.jsonl`);
+}
+
 export interface IRunsRepo {
     create(options: CreateRunRepoOptions): Promise<z.infer<typeof Run>>;
     fetch(id: string): Promise<z.infer<typeof Run>>;
@@ -68,7 +72,7 @@ export class FSRunsRepo implements IRunsRepo {
         idGenerator: IMonotonicallyIncreasingIdGenerator;
     }) {
         this.idGenerator = idGenerator;
-        // ensure runs directory exists
+        // ensure default runs directory exists
         fsp.mkdir(path.join(WorkDir, 'runs'), { recursive: true });
     }
 
@@ -186,7 +190,7 @@ export class FSRunsRepo implements IRunsRepo {
 
     async appendEvents(runId: string, events: z.infer<typeof RunEvent>[]): Promise<void> {
         await fsp.appendFile(
-            path.join(WorkDir, 'runs', `${runId}.jsonl`),
+            runLogPath(runId),
             events.map(event => JSON.stringify(event)).join("\n") + "\n"
         );
     }
@@ -219,7 +223,7 @@ export class FSRunsRepo implements IRunsRepo {
     }
 
     async fetch(id: string): Promise<z.infer<typeof Run>> {
-        const contents = await fsp.readFile(path.join(WorkDir, 'runs', `${id}.jsonl`), 'utf8');
+        const contents = await fsp.readFile(runLogPath(id), 'utf8');
         // Parse with the lenient schema so legacy start events (no model/provider) load.
         const rawEvents = contents.split('\n')
             .filter(line => line.trim() !== '')
@@ -314,7 +318,6 @@ export class FSRunsRepo implements IRunsRepo {
     }
 
     async delete(id: string): Promise<void> {
-        const filePath = path.join(WorkDir, 'runs', `${id}.jsonl`);
-        await fsp.unlink(filePath);
+        await fsp.unlink(runLogPath(id));
     }
 }

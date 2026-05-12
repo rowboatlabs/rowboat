@@ -7,7 +7,7 @@ import { WorkDir } from '../config/config.js';
 import { GoogleClientFactory } from './google-client-factory.js';
 import { serviceLogger, type ServiceRunContext } from '../services/service_logger.js';
 import { limitEventItems } from './limit_event_items.js';
-import { createEvent } from './live-note/events.js';
+import { createEvent } from '../events/producer.js';
 
 // Configuration
 const SYNC_DIR = path.join(WorkDir, 'gmail_sync');
