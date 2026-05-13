@@ -160,19 +160,17 @@ Required: \`events\` (array). Each event optionally has \`summary\`, \`start\`/\
 
 ## \`email\` — single email or thread digest (JSON)
 
-Use for: surfacing one important thread — latest message body, summary of prior context, optional draft reply.
+Use for: surfacing one important Gmail thread. Prefer storing only a Gmail thread reference plus an optional draft reply; the renderer hydrates sender, subject, date, and latest body from Gmail.
 
 \`\`\`email
 {
-  "subject": "Q3 launch readiness",
-  "from": "sarah@acme.com",
-  "date": "2026-04-19T16:42:00Z",
-  "summary": "Sarah confirms timeline; flagged blocker on infra capacity.",
-  "latest_email": "Hey — quick update on Q3...\\n\\nThanks,\\nSarah"
+  "threadId": "18d5a3b2c1e4f567",
+  "summary": "Needs a reply on the Q3 launch blocker.",
+  "draft_response": "Thanks for flagging. I'll check with infra and get back to you today."
 }
 \`\`\`
 
-Required: \`latest_email\` (string). Optional: \`threadId\`, \`summary\`, \`subject\`, \`from\`, \`to\`, \`date\`, \`past_summary\`, \`draft_response\`, \`response_mode\` ("inline" | "assistant" | "both").
+Required: \`threadId\` or \`threadUrl\`. Optional: \`summary\`, \`draft_response\`, \`response_mode\` ("inline" | "assistant" | "both"). Legacy fields \`subject\`, \`from\`, \`to\`, \`date\`, \`latest_email\`, and \`past_summary\` are supported for older notes, but don't emit them for Gmail threads.
 
 For digests of **many** threads, prefer a \`table\` (Subject | From | Snippet) — \`email\` is for one thread at a time.
 

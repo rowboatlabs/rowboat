@@ -18,6 +18,7 @@ import { RowboatApiConfig } from './rowboat-account.js';
 import { ZListToolkitsResponse } from './composio.js';
 import { BrowserStateSchema } from './browser-control.js';
 import { BillingInfoSchema } from './billing.js';
+import { EmailBlockSchema } from './blocks.js';
 
 // ============================================================================
 // Runtime Validation Schemas (Single Source of Truth)
@@ -122,6 +123,15 @@ const ipcSchemas = {
   'workspace:didChange': {
     req: WorkspaceChangeEvent,
     res: z.null(),
+  },
+  'gmail:getThread': {
+    req: z.object({
+      threadId: z.string().min(1),
+    }),
+    res: z.object({
+      thread: EmailBlockSchema.nullable(),
+      error: z.string().optional(),
+    }),
   },
   'mcp:listTools': {
     req: z.object({

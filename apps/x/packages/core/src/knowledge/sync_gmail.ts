@@ -21,6 +21,18 @@ interface SyncedThread {
     markdown: string;
 }
 
+export interface GmailThreadSnapshot {
+    threadId: string;
+    threadUrl: string;
+    summary?: string;
+    subject?: string;
+    from?: string;
+    to?: string;
+    date?: string;
+    latest_email?: string;
+    past_summary?: string;
+}
+
 function summarizeGmailSync(threads: SyncedThread[]): string {
     const lines: string[] = [
         `# Gmail sync update`,
@@ -122,6 +134,59 @@ function getBody(payload: gmail.Schema$MessagePart): string {
         }
     }
     return body;
+}
+
+function normalizeBody(body: string): string {
+    return body.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function headerValue(headers: gmail.Schema$MessagePartHeader[] | undefined, name: string): string | undefined {
+    return headers?.find(h => h.name?.toLowerCase() === name.toLowerCase())?.value || undefined;
+}
+
+export async function fetchThreadSnapshot(threadId: string): Promise<GmailThreadSnapshot | null> {
+    const auth = await GoogleClientFactory.getClient();
+    if (!auth) {
+        throw new Error('Gmail is not connected.');
+    }
+
+    const gmailClient = google.gmail({ version: 'v1', auth });
+    const res = await gmailClient.users.threads.get({ userId: 'me', id: threadId });
+    const messages = res.data.messages;
+    if (!messages || messages.length === 0) return null;
+
+    const parsed = messages.map((msg) => {
+        const headers = msg.payload?.headers || [];
+        return {
+            from: headerValue(headers, 'From') || 'Unknown',
+            to: headerValue(headers, 'To'),
+            date: headerValue(headers, 'Date'),
+            subject: headerValue(headers, 'Subject') || '(No Subject)',
+            body: msg.payload ? normalizeBody(getBody(msg.payload)) : '',
+        };
+    });
+
+    const latest = parsed[parsed.length - 1]!;
+    const earlier = parsed.slice(0, -1);
+    const earlierSummary = earlier
+        .map((msg) => {
+            const date = msg.date ? ` (${msg.date})` : '';
+            const body = msg.body.replace(/\s+/g, ' ').slice(0, 500).trim();
+            return `${msg.from}${date}: ${body}`;
+        })
+        .filter(Boolean)
+        .join('\n\n');
+
+    return {
+        threadId,
+        threadUrl: `https://mail.google.com/mail/u/0/#all/${threadId}`,
+        subject: latest.subject || parsed[0]?.subject,
+        from: latest.from,
+        to: latest.to,
+        date: latest.date,
+        latest_email: latest.body,
+        past_summary: earlierSummary || undefined,
+    };
 }
 
 async function saveAttachment(gmail: gmail.Gmail, userId: string, msgId: string, part: gmail.Schema$MessagePart, attachmentsDir: string): Promise<string | null> {
