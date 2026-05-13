@@ -74,6 +74,38 @@ function latestMessage(thread: GmailThread): GmailThreadMessage | undefined {
   return thread.messages[thread.messages.length - 1]
 }
 
+const PREFETCH_HOVER_MS = 180
+const PREFETCH_MAX_IMAGES_PER_THREAD = 12
+
+function extractImageUrls(html: string): string[] {
+  const urls: string[] = []
+  const re = /<img\b[^>]*\bsrc=["']([^"']+)["']/gi
+  let match: RegExpExecArray | null
+  while ((match = re.exec(html)) !== null) {
+    const url = match[1]
+    if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
+      urls.push(url)
+    }
+  }
+  return urls
+}
+
+function prefetchThreadImages(thread: GmailThread): void {
+  const seen = new Set<string>()
+  for (const msg of thread.messages) {
+    if (!msg.bodyHtml) continue
+    for (const url of extractImageUrls(msg.bodyHtml)) {
+      if (seen.has(url)) continue
+      seen.add(url)
+      if (seen.size > PREFETCH_MAX_IMAGES_PER_THREAD) return
+      const img = new Image()
+      img.decoding = 'async'
+      img.referrerPolicy = 'no-referrer'
+      img.src = url
+    }
+  }
+}
+
 function escapeHtml(text: string): string {
   return text
     .replace(/&/g, '&amp;')
@@ -336,6 +368,30 @@ export function EmailView() {
     })
   }, [])
 
+  const prefetchedRef = useRef<Set<string>>(new Set())
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const cancelHoverPrefetch = useCallback(() => {
+    if (hoverTimerRef.current) {
+      clearTimeout(hoverTimerRef.current)
+      hoverTimerRef.current = null
+    }
+  }, [])
+
+  const scheduleHoverPrefetch = useCallback((thread: GmailThread) => {
+    cancelHoverPrefetch()
+    if (prefetchedRef.current.has(thread.threadId)) return
+    hoverTimerRef.current = setTimeout(() => {
+      hoverTimerRef.current = null
+      prefetchedRef.current.add(thread.threadId)
+      prefetchThreadImages(thread)
+    }, PREFETCH_HOVER_MS)
+  }, [cancelHoverPrefetch])
+
+  useEffect(() => () => {
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
+  }, [])
+
   const loadThreads = useCallback(async () => {
     setError(null)
     let hasCachedContent = false
@@ -447,6 +503,8 @@ export function EmailView() {
                     type="button"
                     className={cn('gmail-row', isSelected && 'gmail-row-selected', isUnread && 'gmail-row-unread')}
                     onClick={() => toggleThread(thread.threadId)}
+                    onMouseEnter={() => scheduleHoverPrefetch(thread)}
+                    onMouseLeave={cancelHoverPrefetch}
                   >
                     <span className="gmail-row-dot" aria-hidden />
                     <span className="gmail-row-sender">{extractName(latest?.from || thread.from)}</span>
