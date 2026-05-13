@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug } from "lucide-react"
+import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, Sparkles } from "lucide-react"
 
 import {
   Dialog,
@@ -24,8 +24,9 @@ import { useTheme } from "@/contexts/theme-context"
 import { toast } from "sonner"
 import { AccountSettings } from "@/components/settings/account-settings"
 import { ConnectedAccountsSettings } from "@/components/settings/connected-accounts-settings"
+import { SkillsSettings } from "@/components/settings/skills-settings"
 
-type ConfigTab = "account" | "connected-accounts" | "models" | "mcp" | "security" | "appearance" | "tools" | "note-tagging"
+type ConfigTab = "account" | "connected-accounts" | "models" | "mcp" | "security" | "appearance" | "tools" | "note-tagging" | "skills"
 
 interface TabConfig {
   id: ConfigTab
@@ -87,6 +88,12 @@ const tabs: TabConfig[] = [
     icon: Tags,
     path: "config/tags.json",
     description: "Configure tags for notes and emails",
+  },
+  {
+    id: "skills",
+    label: "Skills",
+    icon: Sparkles,
+    description: "View bundled copilot skills",
   },
 ]
 
@@ -1715,7 +1722,7 @@ export function SettingsDialog({ children }: SettingsDialogProps) {
             </div>
 
             {/* Content */}
-            <div className={cn("flex-1 p-4 min-h-0", (activeTab === "models" || activeTab === "tools" || activeTab === "account" || activeTab === "connected-accounts") ? "overflow-y-auto" : activeTab === "note-tagging" ? "overflow-hidden flex flex-col" : "overflow-hidden")}>
+            <div className={cn("flex-1 p-4 min-h-0", (activeTab === "models" || activeTab === "tools" || activeTab === "account" || activeTab === "connected-accounts") ? "overflow-y-auto" : (activeTab === "note-tagging" || activeTab === "skills") ? "overflow-hidden flex flex-col" : "overflow-hidden")}>
               {activeTab === "account" ? (
                 <AccountSettings dialogOpen={open} />
               ) : activeTab === "connected-accounts" ? (
@@ -1728,6 +1735,8 @@ export function SettingsDialog({ children }: SettingsDialogProps) {
                 <NoteTaggingSettings dialogOpen={open} />
               ) : activeTab === "appearance" ? (
                 <AppearanceSettings />
+              ) : activeTab === "skills" ? (
+                <SkillsSettings dialogOpen={open} />
               ) : activeTab === "tools" ? (
                 <ToolsLibrarySettings dialogOpen={open} rowboatConnected={rowboatConnected} />
               ) : loading ? (

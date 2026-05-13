@@ -1,8 +1,26 @@
-import { skillCatalog, buildSkillCatalog } from "./skills/index.js";
 import { getRuntimeContext, getRuntimeContextPrompt } from "./runtime-context.js";
 import { composioAccountsRepo } from "../../composio/repo.js";
 import { isConfigured as isComposioConfigured } from "../../composio/client.js";
 import { CURATED_TOOLKITS } from "@x/shared/dist/composio.js";
+import container from "../../di/container.js";
+import type { ISkillResolver } from "../../skills/resolver.js";
+import type { SkillCatalogEntry } from "@x/shared/dist/skill.js";
+
+function buildSkillCatalogMarkdown(skills: SkillCatalogEntry[]): string {
+    const sections = skills.map((skill) => [
+        `## ${skill.title}`,
+        `- **Skill id:** \`${skill.id}\``,
+        `- **Use it for:** ${skill.summary}`,
+    ].join("\n"));
+
+    return [
+        "# Rowboat Skill Catalog",
+        "",
+        "Use this catalog to see which specialized skills you can load. Each entry lists the skill id plus a short description of when it helps.",
+        "",
+        sections.join("\n\n"),
+    ].join("\n");
+}
 
 const runtimeContextPrompt = getRuntimeContextPrompt(getRuntimeContext());
 
@@ -317,33 +335,22 @@ For browser pages, mention the URL in plain text or use the browser-control tool
 Never output raw file paths in plain text when they could be wrapped in a filepath block — unless the file does not exist yet.`;
 }
 
-/** Keep backward-compatible export for any external consumers */
-export const CopilotInstructions = buildStaticInstructions(true, skillCatalog);
-
-/**
- * Cached Composio instructions. Invalidated by calling invalidateCopilotInstructionsCache().
- */
 let cachedInstructions: string | null = null;
 
-/**
- * Invalidate the cached instructions so the next buildCopilotInstructions() call
- * regenerates the Composio section. Call this after connecting/disconnecting a toolkit.
- */
 export function invalidateCopilotInstructionsCache(): void {
     cachedInstructions = null;
 }
 
-/**
- * Build full copilot instructions with dynamic Composio tools section.
- * Results are cached and reused until invalidated via invalidateCopilotInstructionsCache().
- */
 export async function buildCopilotInstructions(): Promise<string> {
     if (cachedInstructions !== null) return cachedInstructions;
     const composioEnabled = await isComposioConfigured();
-    const catalog = composioEnabled
-        ? skillCatalog
-        : buildSkillCatalog({ excludeIds: ['composio-integration'] });
-    const baseInstructions = buildStaticInstructions(composioEnabled, catalog);
+    const resolver = container.resolve<ISkillResolver>("skillResolver");
+    const allSkills = await resolver.getCatalog();
+    const filtered = composioEnabled
+        ? allSkills
+        : allSkills.filter((s) => s.id !== 'composio-integration');
+    const catalogMarkdown = buildSkillCatalogMarkdown(filtered);
+    const baseInstructions = buildStaticInstructions(composioEnabled, catalogMarkdown);
     const composioPrompt = await getComposioToolsPrompt();
     cachedInstructions = composioPrompt
         ? baseInstructions + '\n' + composioPrompt

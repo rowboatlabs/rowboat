@@ -67,6 +67,7 @@ import {
   listTasks,
   readRunIds as readTaskRunIds,
 } from '@x/core/dist/background-tasks/fileops.js';
+import type { ISkillResolver } from '@x/core/dist/skills/resolver.js';
 import { browserIpcHandlers } from './browser/ipc.js';
 
 /**
@@ -955,6 +956,16 @@ export function setupIpcHandlers() {
     'bg-task:listRunIds': async (_event, args) => {
       const runIds = await readTaskRunIds(args.slug, args.limit);
       return { runIds };
+    },
+    // Skills handlers (read-only)
+    'skills:list': async () => {
+      const resolver = container.resolve<ISkillResolver>('skillResolver');
+      const skills = await resolver.getCatalog();
+      return { skills };
+    },
+    'skills:get': async (_event, args) => {
+      const resolver = container.resolve<ISkillResolver>('skillResolver');
+      return await resolver.resolve(args.id);
     },
     // Billing handler
     'billing:getInfo': async () => {

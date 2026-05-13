@@ -40,7 +40,7 @@ import started from "electron-squirrel-startup";
 import { execSync, exec, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { init as initChromeSync } from "@x/core/dist/knowledge/chrome-extension/server/server.js";
-import { registerBrowserControlService, registerNotificationService } from "@x/core/dist/di/container.js";
+import { registerBrowserControlService, registerNotificationService, registerSkillsDir } from "@x/core/dist/di/container.js";
 import { browserViewManager, BROWSER_PARTITION } from "./browser/view.js";
 import { setupBrowserEventForwarding } from "./browser/ipc.js";
 import { ElectronBrowserControlService } from "./browser/control-service.js";
@@ -56,6 +56,16 @@ const execAsync = promisify(exec);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+function resolveSkillsDir(): string {
+  if (app.isPackaged) {
+    // forge.config.cjs ships apps/skills/ as extraResource → Resources/skills/
+    return path.join(process.resourcesPath, "skills");
+  }
+  // Dev: main runs from apps/x/apps/main/.package/dist/main.cjs,
+  // so the repo's apps/skills lives 5 levels up + over one.
+  return path.resolve(__dirname, "..", "..", "..", "..", "..", "skills");
+}
 
 // run this as early in the main process as possible
 if (started) app.quit();
@@ -313,6 +323,9 @@ app.whenReady().then(async () => {
 
   registerBrowserControlService(new ElectronBrowserControlService());
   registerNotificationService(new ElectronNotificationService());
+  // Skills ship bundled with the app. Register the source directory before any
+  // consumer (resolver, IPC handlers, copilot instructions) resolves.
+  registerSkillsDir(resolveSkillsDir());
 
   setupIpcHandlers();
   setupBrowserEventForwarding();

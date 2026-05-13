@@ -15,6 +15,8 @@ import { IAbortRegistry, InMemoryAbortRegistry } from "../runs/abort-registry.js
 import { FSAgentScheduleRepo, IAgentScheduleRepo } from "../agent-schedule/repo.js";
 import { FSAgentScheduleStateRepo, IAgentScheduleStateRepo } from "../agent-schedule/state-repo.js";
 import { FSSlackConfigRepo, ISlackConfigRepo } from "../slack/repo.js";
+import { FSOfficialSkillsRepo, IOfficialSkillsRepo } from "../skills/official-repo.js";
+import { SkillResolver, ISkillResolver } from "../skills/resolver.js";
 import type { IBrowserControlService } from "../application/browser-control/service.js";
 import type { INotificationService } from "../application/notification/service.js";
 
@@ -41,6 +43,8 @@ container.register({
     agentScheduleRepo: asClass<IAgentScheduleRepo>(FSAgentScheduleRepo).singleton(),
     agentScheduleStateRepo: asClass<IAgentScheduleStateRepo>(FSAgentScheduleStateRepo).singleton(),
     slackConfigRepo: asClass<ISlackConfigRepo>(FSSlackConfigRepo).singleton(),
+    officialSkillsRepo: asClass<IOfficialSkillsRepo>(FSOfficialSkillsRepo).singleton(),
+    skillResolver: asClass<ISkillResolver>(SkillResolver).singleton(),
 });
 
 export default container;
@@ -54,5 +58,11 @@ export function registerBrowserControlService(service: IBrowserControlService): 
 export function registerNotificationService(service: INotificationService): void {
     container.register({
         notificationService: asValue(service),
+    });
+}
+
+export function registerSkillsDir(skillsDir: string): void {
+    container.register({
+        skillsDir: asValue(skillsDir),
     });
 }
