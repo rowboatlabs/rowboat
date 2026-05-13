@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Forward, LoaderIcon, RefreshCw, Reply, Search, Send } from 'lucide-react'
+import { Bold, Forward, Italic, Link as LinkIcon, List, ListOrdered, LoaderIcon, Quote, RefreshCw, Reply, Search, Send, Strikethrough } from 'lucide-react'
+import { useEditor, EditorContent, type Editor } from '@tiptap/react'
+import StarterKit from '@tiptap/starter-kit'
+import Link from '@tiptap/extension-link'
+import Placeholder from '@tiptap/extension-placeholder'
 import type { blocks } from '@x/shared'
 import { cn } from '@/lib/utils'
 import { toast } from '@/lib/toast'
@@ -283,6 +287,105 @@ async function mapWithConcurrency<T, R>(
 
 type ComposeMode = 'reply' | 'forward'
 
+function ComposeToolbarButton({
+  editor,
+  command,
+  isActive,
+  label,
+  children,
+}: {
+  editor: Editor
+  command: () => void
+  isActive: boolean
+  label: string
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      className={cn('gmail-compose-tool', isActive && 'is-active')}
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={() => {
+        command()
+        editor.chain().focus().run()
+      }}
+      aria-label={label}
+      aria-pressed={isActive}
+      title={label}
+    >
+      {children}
+    </button>
+  )
+}
+
+function ComposeToolbar({ editor, onOpenLink }: { editor: Editor; onOpenLink: () => void }) {
+  return (
+    <div className="gmail-compose-toolbar">
+      <ComposeToolbarButton
+        editor={editor}
+        command={() => editor.chain().focus().toggleBold().run()}
+        isActive={editor.isActive('bold')}
+        label="Bold"
+      >
+        <Bold size={14} />
+      </ComposeToolbarButton>
+      <ComposeToolbarButton
+        editor={editor}
+        command={() => editor.chain().focus().toggleItalic().run()}
+        isActive={editor.isActive('italic')}
+        label="Italic"
+      >
+        <Italic size={14} />
+      </ComposeToolbarButton>
+      <ComposeToolbarButton
+        editor={editor}
+        command={() => editor.chain().focus().toggleStrike().run()}
+        isActive={editor.isActive('strike')}
+        label="Strikethrough"
+      >
+        <Strikethrough size={14} />
+      </ComposeToolbarButton>
+      <span className="gmail-compose-tool-sep" />
+      <ComposeToolbarButton
+        editor={editor}
+        command={() => editor.chain().focus().toggleBulletList().run()}
+        isActive={editor.isActive('bulletList')}
+        label="Bulleted list"
+      >
+        <List size={14} />
+      </ComposeToolbarButton>
+      <ComposeToolbarButton
+        editor={editor}
+        command={() => editor.chain().focus().toggleOrderedList().run()}
+        isActive={editor.isActive('orderedList')}
+        label="Numbered list"
+      >
+        <ListOrdered size={14} />
+      </ComposeToolbarButton>
+      <ComposeToolbarButton
+        editor={editor}
+        command={() => editor.chain().focus().toggleBlockquote().run()}
+        isActive={editor.isActive('blockquote')}
+        label="Quote"
+      >
+        <Quote size={14} />
+      </ComposeToolbarButton>
+      <span className="gmail-compose-tool-sep" />
+      <button
+        type="button"
+        className={cn('gmail-compose-tool', editor.isActive('link') && 'is-active')}
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={onOpenLink}
+        aria-label="Link"
+        aria-pressed={editor.isActive('link')}
+        title="Link"
+      >
+        <LinkIcon size={14} />
+      </button>
+    </div>
+  )
+}
+
 function ComposeBox({
   mode,
   thread,
@@ -293,16 +396,64 @@ function ComposeBox({
   onClose: () => void
 }) {
   const latest = latestMessage(thread)
-  const [body, setBody] = useState('')
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
   const to = mode === 'reply' ? extractAddress(latest?.from) : ''
 
+  const editor = useEditor({
+    extensions: [
+      StarterKit,
+      Link.configure({ openOnClick: false, autolink: true }),
+      Placeholder.configure({
+        placeholder: mode === 'reply' ? 'Write your reply…' : 'Write a message…',
+      }),
+    ],
+    editorProps: {
+      attributes: { class: 'gmail-compose-content' },
+    },
+    content: '',
+  })
+
+  const [linkOpen, setLinkOpen] = useState(false)
+  const [linkUrl, setLinkUrl] = useState('')
+  const savedSelectionRef = useRef<{ from: number; to: number } | null>(null)
+  const linkInputRef = useRef<HTMLInputElement>(null)
+
+  const openLink = () => {
+    if (!editor) return
+    const { from, to: selTo } = editor.state.selection
+    savedSelectionRef.current = { from, to: selTo }
+    const existing = editor.getAttributes('link').href as string | undefined
+    setLinkUrl(existing || 'https://')
+    setLinkOpen(true)
+  }
+
   useEffect(() => {
-    const el = textareaRef.current
-    if (!el) return
-    el.style.height = 'auto'
-    el.style.height = `${Math.max(120, el.scrollHeight)}px`
-  }, [body])
+    if (!linkOpen) return
+    const id = window.setTimeout(() => linkInputRef.current?.select(), 0)
+    return () => window.clearTimeout(id)
+  }, [linkOpen])
+
+  const applyLink = () => {
+    if (!editor) {
+      setLinkOpen(false)
+      return
+    }
+    const sel = savedSelectionRef.current
+    setLinkOpen(false)
+    if (!sel) return
+    const trimmed = linkUrl.trim()
+    if (!trimmed || trimmed === 'https://') {
+      editor.chain().focus().setTextSelection(sel).extendMarkRange('link').unsetLink().run()
+      return
+    }
+    const href = /^[a-z]+:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
+    editor.chain().focus().setTextSelection(sel).extendMarkRange('link').setLink({ href }).run()
+  }
+
+  const cancelLink = () => {
+    setLinkOpen(false)
+    const sel = savedSelectionRef.current
+    if (editor && sel) editor.chain().focus().setTextSelection(sel).run()
+  }
 
   return (
     <div className="gmail-compose-card">
@@ -320,12 +471,28 @@ function ComposeBox({
           <input value={`Fwd: ${thread.subject || '(No subject)'}`} readOnly />
         </div>
       )}
-      <textarea
-        ref={textareaRef}
-        value={body}
-        onChange={(event) => setBody(event.target.value)}
-        placeholder={mode === 'reply' ? 'Write your reply...' : 'Write a message...'}
-      />
+      <EditorContent editor={editor} className="gmail-compose-editor" />
+      {linkOpen && (
+        <div className="gmail-compose-link-popover" onMouseDown={(event) => event.preventDefault()}>
+          <input
+            ref={linkInputRef}
+            value={linkUrl}
+            onChange={(event) => setLinkUrl(event.target.value)}
+            placeholder="https://example.com"
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                applyLink()
+              } else if (event.key === 'Escape') {
+                event.preventDefault()
+                cancelLink()
+              }
+            }}
+          />
+          <button type="button" className="gmail-compose-link-popover-apply" onClick={applyLink}>Apply</button>
+          <button type="button" className="gmail-compose-link-popover-cancel" onClick={cancelLink}>Cancel</button>
+        </div>
+      )}
       <div className="gmail-compose-actions">
         <button
           type="button"
@@ -337,6 +504,7 @@ function ComposeBox({
           <Send size={15} />
           Send
         </button>
+        {editor && <ComposeToolbar editor={editor} onOpenLink={openLink} />}
         <button type="button" className="gmail-compose-link" onClick={onClose}>Discard</button>
       </div>
     </div>
