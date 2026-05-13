@@ -90,6 +90,86 @@ function latestMessage(thread: GmailThread): GmailThreadMessage | undefined {
   return thread.messages[thread.messages.length - 1]
 }
 
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function buildEmailDocument(html: string): string {
+  return `<!doctype html>
+<html><head>
+<meta charset="utf-8">
+<base target="_blank">
+<style>
+  html, body { margin: 0; padding: 0; }
+  body {
+    font: 14px/1.6 Arial, sans-serif;
+    color: #202124;
+    overflow-x: auto;
+    overflow-y: hidden;
+    word-wrap: break-word;
+  }
+  img { max-width: 100%; height: auto; }
+  table { max-width: 100%; }
+  a { color: #1a73e8; }
+  blockquote {
+    margin: 0 0 0 6px;
+    padding-left: 12px;
+    border-left: 2px solid #dadce0;
+    color: #5f6368;
+  }
+</style>
+</head><body>${html}</body></html>`
+}
+
+function MessageBody({ message }: { message: GmailThreadMessage }) {
+  const iframeRef = useRef<HTMLIFrameElement>(null)
+  const observerRef = useRef<ResizeObserver | null>(null)
+  const [height, setHeight] = useState(80)
+
+  const srcDoc = useMemo(() => {
+    if (message.bodyHtml && message.bodyHtml.trim()) {
+      return buildEmailDocument(message.bodyHtml)
+    }
+    const text = (message.body || '(No message body)').trim()
+    return buildEmailDocument(`<pre style="white-space: pre-wrap; font: inherit; margin: 0;">${escapeHtml(text)}</pre>`)
+  }, [message.bodyHtml, message.body])
+
+  const handleLoad = useCallback(() => {
+    const iframe = iframeRef.current
+    const doc = iframe?.contentDocument
+    if (!doc?.body) return
+    const measure = () => {
+      const next = Math.max(40, doc.documentElement.scrollHeight)
+      setHeight((current) => (current === next ? current : next))
+    }
+    measure()
+    observerRef.current?.disconnect()
+    if (typeof ResizeObserver !== 'undefined') {
+      observerRef.current = new ResizeObserver(measure)
+      observerRef.current.observe(doc.body)
+    }
+  }, [])
+
+  useEffect(() => () => observerRef.current?.disconnect(), [])
+
+  return (
+    <iframe
+      ref={iframeRef}
+      srcDoc={srcDoc}
+      sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+      title="Email content"
+      className="gmail-message-iframe"
+      style={{ height }}
+      onLoad={handleLoad}
+    />
+  )
+}
+
 async function mapWithConcurrency<T, R>(
   items: T[],
   limit: number,
@@ -207,7 +287,7 @@ function ThreadDetail({
                     <div className="gmail-message-date">{formatFullDate(message.date)}</div>
                   </div>
                   <div className="gmail-message-to">to {message.to || 'me'}</div>
-                  <div className="gmail-message-body">{message.body || '(No message body)'}</div>
+                  <MessageBody message={message} />
                 </div>
               </div>
             )

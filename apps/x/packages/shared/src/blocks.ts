@@ -110,6 +110,7 @@ export const GmailThreadMessageSchema = z.object({
   date: z.string().optional(),
   subject: z.string().optional(),
   body: z.string().optional(),
+  bodyHtml: z.string().optional(),
 });
 
 export type GmailThreadMessage = z.infer<typeof GmailThreadMessageSchema>;
