@@ -793,13 +793,45 @@
   border-top: 1px solid var(--gm-border);
 }
 
+.gmail-compose-actions-primary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.gmail-refine-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  height: 30px;
+  padding: 0 14px;
+  border: 1px solid var(--gm-border-strong);
+  border-radius: 6px;
+  background: var(--gm-bg-pill);
+  color: var(--gm-text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.gmail-refine-button:hover {
+  background: var(--gm-bg-pill-hover);
+  border-color: var(--gm-accent);
+  color: var(--gm-accent);
+}
+
 .gmail-send-button {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  box-sizing: border-box;
   height: 30px;
   padding: 0 14px;
-  border: none;
+  border: 1px solid transparent;
   border-radius: 6px;
   background: var(--gm-accent);
   color: var(--gm-accent-fg);
