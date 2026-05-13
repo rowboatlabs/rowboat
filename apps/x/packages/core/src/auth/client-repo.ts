@@ -3,14 +3,21 @@ import fs from 'fs/promises';
 import path from 'path';
 import { ClientRegistrationResponse } from './types.js';
 
+export const DEFAULT_CALLBACK_PORT = 8080;
+
 export interface IClientRegistrationRepo {
   getClientRegistration(provider: string): Promise<ClientRegistrationResponse | null>;
-  saveClientRegistration(provider: string, registration: ClientRegistrationResponse): Promise<void>;
+  /** Returns the port that was used when DCR-registering this provider, or DEFAULT_CALLBACK_PORT if not stored. */
+  getRegisteredPort(provider: string): Promise<number>;
+  saveClientRegistration(provider: string, registration: ClientRegistrationResponse, port: number): Promise<void>;
   clearClientRegistration(provider: string): Promise<void>;
 }
 
+// _registeredPort is our private field — stripped by Zod when we parse the RFC response fields
+type StoredEntry = Record<string, unknown> & { _registeredPort?: number };
+
 type ClientRegistrationStorage = {
-  [provider: string]: ClientRegistrationResponse;
+  [provider: string]: StoredEntry;
 };
 
 export class FSClientRegistrationRepo implements IClientRegistrationRepo {
@@ -45,14 +52,14 @@ export class FSClientRegistrationRepo implements IClientRegistrationRepo {
 
   async getClientRegistration(provider: string): Promise<ClientRegistrationResponse | null> {
     const config = await this.readConfig();
-    const registration = config[provider];
-    if (!registration) {
+    const entry = config[provider];
+    if (!entry) {
       return null;
     }
 
-    // Validate registration structure
+    // Validate registration structure (Zod strips unknown fields like _registeredPort)
     try {
-      return ClientRegistrationResponse.parse(registration);
+      return ClientRegistrationResponse.parse(entry);
     } catch {
       // Invalid registration, remove it
       await this.clearClientRegistration(provider);
@@ -60,9 +67,14 @@ export class FSClientRegistrationRepo implements IClientRegistrationRepo {
     }
   }
 
-  async saveClientRegistration(provider: string, registration: ClientRegistrationResponse): Promise<void> {
+  async getRegisteredPort(provider: string): Promise<number> {
     const config = await this.readConfig();
-    config[provider] = registration;
+    return config[provider]?._registeredPort ?? DEFAULT_CALLBACK_PORT;
+  }
+
+  async saveClientRegistration(provider: string, registration: ClientRegistrationResponse, port: number): Promise<void> {
+    const config = await this.readConfig();
+    config[provider] = { ...registration, _registeredPort: port };
     await this.writeConfig(config);
   }
 
