@@ -215,6 +215,15 @@
   letter-spacing: 0.08em;
 }
 
+.gmail-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.gmail-section + .gmail-section {
+  margin-top: 28px;
+}
+
 .gmail-row {
   display: grid;
   grid-template-columns: 12px minmax(140px, 0.22fr) minmax(0, 1fr) 60px;
