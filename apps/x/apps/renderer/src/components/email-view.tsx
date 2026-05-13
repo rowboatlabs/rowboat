@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Archive, Forward, LoaderIcon, MoreVertical, RefreshCw, Reply, Search, Send, Star } from 'lucide-react'
+import { Forward, LoaderIcon, RefreshCw, Reply, Search, Send } from 'lucide-react'
 import type { blocks } from '@x/shared'
 import { cn } from '@/lib/utils'
 import { toast } from '@/lib/toast'
@@ -12,9 +12,18 @@ function formatInboxTime(value?: string): string {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   const now = new Date()
+  const diffMs = now.getTime() - date.getTime()
+  const diffMin = Math.round(diffMs / 60000)
+  if (diffMin < 1) return 'now'
+  if (diffMin < 60) return `${diffMin}m`
   const sameDay = date.toDateString() === now.toDateString()
-  if (sameDay) return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-  return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
+  if (sameDay) return `${Math.round(diffMin / 60)}h`
+  const yesterday = new Date(now)
+  yesterday.setDate(now.getDate() - 1)
+  if (date.toDateString() === yesterday.toDateString()) return 'Yest'
+  if (diffMs < 7 * 24 * 60 * 60 * 1000) return date.toLocaleDateString([], { weekday: 'short' })
+  if (date.getFullYear() === now.getFullYear()) return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
+  return date.toLocaleDateString([], { month: 'short', day: 'numeric', year: '2-digit' })
 }
 
 function formatFullDate(value?: string): string {
@@ -233,13 +242,9 @@ function ThreadDetail({
     <div className="gmail-detail gmail-detail-inline">
       <div className="gmail-detail-toolbar">
         <div className="gmail-thread-subject-inline">{thread.subject || '(No subject)'}</div>
-        <div className="gmail-detail-toolbar-actions">
-          <button type="button" className="gmail-icon-button" aria-label="Archive"><Archive size={18} /></button>
-          <button type="button" className="gmail-icon-button" aria-label="More"><MoreVertical size={18} /></button>
-          <button type="button" className="gmail-icon-button" onClick={onClose} aria-label="Close thread">
-            <span>×</span>
-          </button>
-        </div>
+        <button type="button" className="gmail-icon-button" onClick={onClose} aria-label="Close thread">
+          <span>×</span>
+        </button>
       </div>
 
       <div className="gmail-thread-body">
@@ -406,8 +411,7 @@ export function EmailView() {
                     className={cn('gmail-row', isSelected && 'gmail-row-selected', isUnread && 'gmail-row-unread')}
                     onClick={() => setSelectedThreadId(isSelected ? null : thread.threadId)}
                   >
-                    <span className="gmail-row-check" />
-                    <span className="gmail-row-star"><Star size={16} /></span>
+                    <span className="gmail-row-dot" aria-hidden />
                     <span className="gmail-row-sender">{extractName(latest?.from || thread.from)}</span>
                     <span className="gmail-row-content">
                       <strong>{thread.subject || '(No subject)'}</strong>
