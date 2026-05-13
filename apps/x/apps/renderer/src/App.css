@@ -365,13 +365,39 @@
   display: grid;
   grid-template-columns: 28px minmax(0, 1fr);
   gap: 12px;
-  padding: 16px 0;
+  padding: 12px 0;
   border-top: 1px solid var(--gm-border);
 }
 
 .gmail-message:first-child {
   border-top: 0;
   padding-top: 4px;
+}
+
+.gmail-message-header {
+  display: block;
+  width: 100%;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.gmail-message-snippet {
+  margin-top: 2px;
+  color: var(--gm-text-muted);
+  font-size: 12px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.gmail-message:not(.gmail-message-expanded) .gmail-message-header:hover .gmail-message-from strong {
+  color: var(--gm-accent);
 }
 
 .gmail-message-avatar {
@@ -443,6 +469,36 @@
 
 .gmail-message-iframe-dark {
   background: var(--gm-bg-card);
+}
+
+.gmail-quote-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 8px;
+  height: 22px;
+  padding: 0 10px;
+  border: 1px solid var(--gm-border-strong);
+  border-radius: 4px;
+  background: var(--gm-bg-pill);
+  color: var(--gm-text-muted);
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.gmail-quote-toggle:hover {
+  background: var(--gm-bg-pill-hover);
+  color: var(--gm-text-strong);
+  border-color: var(--gm-border-strong);
+}
+
+.gmail-quote-toggle[aria-expanded="true"] {
+  background: var(--gm-bg-row-selected);
+  color: var(--gm-accent);
+  border-color: var(--gm-accent);
 }
 
 .gmail-thread-actions {
