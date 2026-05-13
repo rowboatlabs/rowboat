@@ -364,6 +364,29 @@
   background: transparent;
 }
 
+.gmail-thread-summary {
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--gm-border);
+}
+
+.gmail-thread-summary-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--gm-text-faint);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.gmail-thread-summary-text {
+  display: block;
+  color: var(--gm-text);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
 .gmail-message-stack {
   display: flex;
   flex-direction: column;

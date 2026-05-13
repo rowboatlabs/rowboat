@@ -376,6 +376,12 @@ function ThreadDetail({
       </div>
 
       <div className="gmail-thread-body">
+        {thread.summary && (
+          <div className="gmail-thread-summary">
+            <span className="gmail-thread-summary-label">Summary</span>
+            <span className="gmail-thread-summary-text">{thread.summary}</span>
+          </div>
+        )}
         <div className="gmail-message-stack">
           {thread.messages.map((message, index) => {
             const isExpanded = expandedIndices.has(index)
@@ -589,8 +595,8 @@ export function EmailView() {
           <span className="gmail-row-dot" aria-hidden />
           <span className="gmail-row-sender">{extractName(latest?.from || thread.from)}</span>
           <span className="gmail-row-content">
-            <strong>{thread.subject || '(No subject)'}</strong>
-            <span>{snippet(latest?.body || thread.latest_email)}</span>
+            <strong>{thread.summary || thread.subject || '(No subject)'}</strong>
+            <span>{thread.summary ? thread.subject : snippet(latest?.body || thread.latest_email)}</span>
           </span>
           <span className="gmail-row-date">{formatInboxTime(latest?.date || thread.date)}</span>
         </button>
