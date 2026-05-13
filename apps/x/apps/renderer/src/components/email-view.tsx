@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Archive, Forward, Inbox, LoaderIcon, Mail, MoreVertical, RefreshCw, Reply, Search, Send, Star } from 'lucide-react'
+import { Archive, Forward, LoaderIcon, MoreVertical, RefreshCw, Reply, Search, Send, Star } from 'lucide-react'
 import type { blocks } from '@x/shared'
 import { cn } from '@/lib/utils'
 import { toast } from '@/lib/toast'
@@ -323,13 +323,6 @@ export function EmailView() {
 
   return (
     <div className="gmail-shell">
-      <div className="gmail-left-nav">
-        <button type="button" className="gmail-compose-main">Compose</button>
-        <div className="gmail-nav-item gmail-nav-item-active"><Inbox size={18} /> Inbox</div>
-        <div className="gmail-nav-item"><Star size={18} /> Starred</div>
-        <div className="gmail-nav-item"><Mail size={18} /> Sent</div>
-      </div>
-
       <div className="gmail-main">
         <div className="gmail-topbar">
           <div className="gmail-search">
