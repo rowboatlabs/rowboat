@@ -47,7 +47,7 @@ import { summarizeMeeting } from '@x/core/dist/knowledge/summarize_meeting.js';
 import { getAccessToken } from '@x/core/dist/auth/tokens.js';
 import { getRowboatConfig } from '@x/core/dist/config/rowboat.js';
 import { runLiveNoteAgent } from '@x/core/dist/knowledge/live-note/runner.js';
-import { fetchThreadSnapshot } from '@x/core/dist/knowledge/sync_gmail.js';
+import { fetchThreadSnapshot, listRecentThreadIds, listCachedThreads } from '@x/core/dist/knowledge/sync_gmail.js';
 import { liveNoteBus } from '@x/core/dist/knowledge/live-note/bus.js';
 import { getInstallationId } from '@x/core/dist/analytics/installation.js';
 import { API_URL } from '@x/core/dist/config/env.js';
@@ -485,13 +485,26 @@ export function setupIpcHandlers() {
     },
     'gmail:getThread': async (_event, args) => {
       try {
-        return { thread: await fetchThreadSnapshot(args.threadId) };
+        return { thread: await fetchThreadSnapshot(args.threadId, args.expectedHistoryId) };
       } catch (error) {
         return {
           thread: null,
           error: error instanceof Error ? error.message : String(error),
         };
       }
+    },
+    'gmail:listRecentThreads': async (_event, args) => {
+      try {
+        return { threads: await listRecentThreadIds(args.daysAgo ?? 2) };
+      } catch (error) {
+        return {
+          threads: [],
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+    'gmail:listCachedThreads': async (_event, args) => {
+      return { threads: listCachedThreads(args.daysAgo ?? 2) };
     },
     'mcp:listTools': async (_event, args) => {
       return mcpCore.listTools(args.serverName, args.cursor);

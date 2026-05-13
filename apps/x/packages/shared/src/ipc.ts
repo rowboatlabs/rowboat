@@ -127,10 +127,32 @@ const ipcSchemas = {
   'gmail:getThread': {
     req: z.object({
       threadId: z.string().min(1),
+      expectedHistoryId: z.string().optional(),
     }),
     res: z.object({
       thread: GmailThreadSchema.nullable(),
       error: z.string().optional(),
+    }),
+  },
+  'gmail:listRecentThreads': {
+    req: z.object({
+      daysAgo: z.number().int().positive().optional(),
+    }),
+    res: z.object({
+      threads: z.array(z.object({
+        threadId: z.string(),
+        historyId: z.string(),
+        snippet: z.string().optional(),
+      })),
+      error: z.string().optional(),
+    }),
+  },
+  'gmail:listCachedThreads': {
+    req: z.object({
+      daysAgo: z.number().int().positive().optional(),
+    }),
+    res: z.object({
+      threads: z.array(GmailThreadSchema),
     }),
   },
   'mcp:listTools': {

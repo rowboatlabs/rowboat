@@ -11,10 +11,44 @@ import { createEvent } from '../events/producer.js';
 
 // Configuration
 const SYNC_DIR = path.join(WorkDir, 'gmail_sync');
+const CACHE_DIR = path.join(SYNC_DIR, 'cache');
 const SYNC_INTERVAL_MS = 5 * 60 * 1000; // Check every 5 minutes
 const REQUIRED_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
 const MAX_THREADS_IN_DIGEST = 10;
 const nhm = new NodeHtmlMarkdown();
+
+interface SnapshotCacheEntry {
+    historyId: string;
+    fetchedAt: string;
+    snapshot: GmailThreadSnapshot;
+}
+
+function cachePath(threadId: string): string {
+    return path.join(CACHE_DIR, `${encodeURIComponent(threadId)}.json`);
+}
+
+function readCachedSnapshot(threadId: string): SnapshotCacheEntry | null {
+    try {
+        const raw = fs.readFileSync(cachePath(threadId), 'utf-8');
+        return JSON.parse(raw) as SnapshotCacheEntry;
+    } catch {
+        return null;
+    }
+}
+
+function writeCachedSnapshot(threadId: string, historyId: string, snapshot: GmailThreadSnapshot): void {
+    try {
+        if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
+        const entry: SnapshotCacheEntry = {
+            historyId,
+            fetchedAt: new Date().toISOString(),
+            snapshot,
+        };
+        fs.writeFileSync(cachePath(threadId), JSON.stringify(entry), 'utf-8');
+    } catch (err) {
+        console.warn(`[Gmail cache] write failed for ${threadId}:`, err);
+    }
+}
 
 interface SyncedThread {
     threadId: string;
@@ -208,7 +242,82 @@ function headerValue(headers: gmail.Schema$MessagePartHeader[] | undefined, name
     return headers?.find(h => h.name?.toLowerCase() === name.toLowerCase())?.value || undefined;
 }
 
-export async function fetchThreadSnapshot(threadId: string): Promise<GmailThreadSnapshot | null> {
+export interface RecentThreadInfo {
+    threadId: string;
+    historyId: string;
+    snippet?: string;
+}
+
+export function listCachedThreads(daysAgo: number = 2): GmailThreadSnapshot[] {
+    if (!fs.existsSync(CACHE_DIR)) return [];
+    const cutoffMs = Date.now() - daysAgo * 24 * 60 * 60 * 1000;
+    const out: GmailThreadSnapshot[] = [];
+    for (const name of fs.readdirSync(CACHE_DIR)) {
+        if (!name.endsWith('.json')) continue;
+        const filePath = path.join(CACHE_DIR, name);
+        try {
+            const stat = fs.statSync(filePath);
+            if (stat.mtimeMs < cutoffMs) continue;
+            const entry = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as SnapshotCacheEntry;
+            const latestDate = entry.snapshot.messages[entry.snapshot.messages.length - 1]?.date;
+            const latestMs = latestDate ? Date.parse(latestDate) : stat.mtimeMs;
+            if (Number.isFinite(latestMs) && latestMs < cutoffMs) continue;
+            out.push(entry.snapshot);
+        } catch (err) {
+            console.warn(`[Gmail cache] read failed for ${name}:`, err);
+        }
+    }
+    out.sort((a, b) => {
+        const aDate = Date.parse(a.messages[a.messages.length - 1]?.date || a.date || '');
+        const bDate = Date.parse(b.messages[b.messages.length - 1]?.date || b.date || '');
+        return (Number.isNaN(bDate) ? 0 : bDate) - (Number.isNaN(aDate) ? 0 : aDate);
+    });
+    return out;
+}
+
+export async function listRecentThreadIds(daysAgo: number = 2): Promise<RecentThreadInfo[]> {
+    const auth = await GoogleClientFactory.getClient();
+    if (!auth) {
+        throw new Error('Gmail is not connected.');
+    }
+
+    const gmailClient = google.gmail({ version: 'v1', auth });
+    const since = new Date();
+    since.setDate(since.getDate() - daysAgo);
+    const dateQuery = since.toISOString().split('T')[0].replace(/-/g, '/');
+
+    const results: RecentThreadInfo[] = [];
+    let pageToken: string | undefined;
+    do {
+        const res = await gmailClient.users.threads.list({
+            userId: 'me',
+            q: `after:${dateQuery}`,
+            pageToken,
+        });
+        const threads = res.data.threads || [];
+        for (const thread of threads) {
+            if (thread.id && thread.historyId) {
+                results.push({
+                    threadId: thread.id,
+                    historyId: thread.historyId,
+                    snippet: thread.snippet || undefined,
+                });
+            }
+        }
+        pageToken = res.data.nextPageToken ?? undefined;
+    } while (pageToken);
+
+    return results;
+}
+
+export async function fetchThreadSnapshot(threadId: string, expectedHistoryId?: string): Promise<GmailThreadSnapshot | null> {
+    if (expectedHistoryId) {
+        const cached = readCachedSnapshot(threadId);
+        if (cached && cached.historyId === expectedHistoryId) {
+            return cached.snapshot;
+        }
+    }
+
     const auth = await GoogleClientFactory.getClient();
     if (!auth) {
         throw new Error('Gmail is not connected.');
@@ -256,7 +365,7 @@ export async function fetchThreadSnapshot(threadId: string): Promise<GmailThread
         .filter(Boolean)
         .join('\n\n');
 
-    return {
+    const snapshot: GmailThreadSnapshot = {
         threadId,
         threadUrl: `https://mail.google.com/mail/u/0/#all/${threadId}`,
         subject: latest.subject || parsed[0]?.subject,
@@ -268,6 +377,12 @@ export async function fetchThreadSnapshot(threadId: string): Promise<GmailThread
         unread: parsed.some((m) => m.unread),
         messages: parsed,
     };
+
+    if (res.data.historyId) {
+        writeCachedSnapshot(threadId, res.data.historyId, snapshot);
+    }
+
+    return snapshot;
 }
 
 async function saveAttachment(gmail: gmail.Gmail, userId: string, msgId: string, part: gmail.Schema$MessagePart, attachmentsDir: string): Promise<string | null> {

@@ -7,31 +7,6 @@ import { toast } from '@/lib/toast'
 type GmailThread = blocks.GmailThread
 type GmailThreadMessage = blocks.GmailThreadMessage
 
-type IndexedThread = {
-  threadId: string
-  lastDateMs: number
-  sourcePath: string
-}
-
-const TWO_DAYS_MS = 2 * 24 * 60 * 60 * 1000
-
-function parseThreadId(path: string, markdown: string): string | null {
-  const fromBody = markdown.match(/\*\*Thread ID:\*\*\s*([^\s]+)/)?.[1]?.trim()
-  if (fromBody) return fromBody
-  return path.split('/').pop()?.replace(/\.md$/i, '') || null
-}
-
-function parseLatestDateMs(markdown: string, fallbackMs?: number): number {
-  const matches = Array.from(markdown.matchAll(/^\*\*Date:\*\*\s*(.+)$/gm))
-  for (let i = matches.length - 1; i >= 0; i -= 1) {
-    const raw = matches[i]?.[1]?.trim()
-    if (!raw) continue
-    const ms = Date.parse(raw)
-    if (!Number.isNaN(ms)) return ms
-  }
-  return fallbackMs ?? 0
-}
-
 function formatInboxTime(value?: string): string {
   if (!value) return ''
   const date = new Date(value)
@@ -318,45 +293,37 @@ function ThreadDetail({
 export function EmailView() {
   const [threads, setThreads] = useState<GmailThread[]>([])
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
 
   const loadThreads = useCallback(async () => {
-    setLoading(true)
     setError(null)
+    let hasCachedContent = false
+
     try {
-      const entries = await window.ipc.invoke('workspace:readdir', {
-        path: 'gmail_sync',
-        opts: { includeStats: true },
-      })
-      const cutoff = Date.now() - TWO_DAYS_MS
-      const indexed: IndexedThread[] = []
+      const cached = await window.ipc.invoke('gmail:listCachedThreads', { daysAgo: 2 })
+      if (cached.threads.length > 0) {
+        setThreads(cached.threads)
+        hasCachedContent = true
+      }
+    } catch (err) {
+      console.warn('[Gmail] cache read failed:', err)
+    }
 
-      await Promise.all(entries
-        .filter(entry => entry.kind === 'file' && entry.name.endsWith('.md') && entry.name !== 'sync_state.json')
-        .map(async (entry) => {
-          try {
-            const result = await window.ipc.invoke('workspace:readFile', { path: entry.path, encoding: 'utf8' })
-            const threadId = parseThreadId(entry.path, result.data)
-            if (!threadId) return
-            const lastDateMs = parseLatestDateMs(result.data, entry.stat?.mtimeMs)
-            if (lastDateMs < cutoff) return
-            indexed.push({ threadId, lastDateMs, sourcePath: entry.path })
-          } catch {
-            const threadId = entry.name.replace(/\.md$/i, '')
-            const lastDateMs = entry.stat?.mtimeMs ?? 0
-            if (lastDateMs >= cutoff) indexed.push({ threadId, lastDateMs, sourcePath: entry.path })
-          }
-        }))
+    setLoading(true)
 
-      const recent = indexed
-        .sort((a, b) => b.lastDateMs - a.lastDateMs)
+    try {
+      const list = await window.ipc.invoke('gmail:listRecentThreads', { daysAgo: 2 })
+      if (list.error) throw new Error(list.error)
 
-      const hydrated = await mapWithConcurrency(recent, 6, async (item) => {
-        const result = await window.ipc.invoke('gmail:getThread', { threadId: item.threadId })
+      const hydrated = await mapWithConcurrency(list.threads, 6, async (item) => {
+        const result = await window.ipc.invoke('gmail:getThread', {
+          threadId: item.threadId,
+          expectedHistoryId: item.historyId,
+        })
         if (result.thread) return result.thread
-        console.warn('Failed to hydrate Gmail thread', item.sourcePath, result.error)
+        console.warn('Failed to hydrate Gmail thread', item.threadId, result.error)
         return null
       })
 
@@ -369,11 +336,15 @@ export function EmailView() {
         })
 
       setThreads(nextThreads)
-      setSelectedThreadId(current => current && nextThreads.some(thread => thread.threadId === current) ? current : nextThreads[0]?.threadId ?? null)
+      setSelectedThreadId(current => current && nextThreads.some(thread => thread.threadId === current) ? current : null)
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-      setThreads([])
-      setSelectedThreadId(null)
+      if (hasCachedContent) {
+        console.warn('[Gmail] background refresh failed; keeping cached view:', err)
+      } else {
+        setError(err instanceof Error ? err.message : String(err))
+        setThreads([])
+        setSelectedThreadId(null)
+      }
     } finally {
       setLoading(false)
     }
