@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Bold, Forward, Italic, Link as LinkIcon, List, ListOrdered, LoaderIcon, Quote, RefreshCw, Reply, Search, Send, Strikethrough } from 'lucide-react'
+import { Bold, Forward, Italic, Link as LinkIcon, List, ListOrdered, LoaderIcon, Quote, RefreshCw, Reply, Search, Send, Sparkles, Strikethrough } from 'lucide-react'
 import { useEditor, EditorContent, type Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
@@ -463,6 +463,37 @@ function ComposeBox({
     if (editor && sel) editor.chain().focus().setTextSelection(sel).run()
   }
 
+  const refineWithCopilot = () => {
+    if (!editor) return
+    const currentDraft = editor.getText().trim()
+    const subject = thread.subject || '(No subject)'
+
+    const lines: string[] = []
+    lines.push(`Help me refine this draft email response. **Please ask me how I want to refine it before making any changes** — wait for my answer, then apply the edits.`)
+    lines.push('')
+    lines.push(`**Mode:** ${mode === 'reply' ? 'Reply' : 'Forward'}`)
+    lines.push(`**Subject:** ${subject}`)
+    lines.push('')
+    lines.push(`## Thread (${thread.messages.length} message${thread.messages.length === 1 ? '' : 's'})`)
+    lines.push('')
+    thread.messages.forEach((message, index) => {
+      lines.push(`### Message ${index + 1}`)
+      if (message.from) lines.push(`**From:** ${message.from}`)
+      if (message.to) lines.push(`**To:** ${message.to}`)
+      if (message.date) lines.push(`**Date:** ${message.date}`)
+      lines.push('')
+      lines.push((message.body || '(empty)').trim())
+      lines.push('')
+    })
+
+    lines.push(`## Current draft`)
+    lines.push('')
+    lines.push(currentDraft || '(empty — no draft yet)')
+
+    window.__pendingEmailDraft = { prompt: lines.join('\n') }
+    window.dispatchEvent(new Event('email-block:draft-with-assistant'))
+  }
+
   return (
     <div className="gmail-compose-card">
       <div className="gmail-compose-header">
@@ -502,16 +533,27 @@ function ComposeBox({
         </div>
       )}
       <div className="gmail-compose-actions">
-        <button
-          type="button"
-          className="gmail-send-button"
-          onClick={() => {
-            toast('Sending from this view needs Gmail send scope. Draft UI is ready.', 'info')
-          }}
-        >
-          <Send size={15} />
-          Send
-        </button>
+        <div className="gmail-compose-actions-primary">
+          <button
+            type="button"
+            className="gmail-send-button"
+            onClick={() => {
+              toast('Sending from this view needs Gmail send scope. Draft UI is ready.', 'info')
+            }}
+          >
+            <Send size={15} />
+            Send
+          </button>
+          <button
+            type="button"
+            className="gmail-refine-button"
+            onClick={refineWithCopilot}
+            title="Refine this draft with Copilot"
+          >
+            <Sparkles size={15} />
+            Refine
+          </button>
+        </div>
         {editor && <ComposeToolbar editor={editor} onOpenLink={openLink} />}
         <button type="button" className="gmail-compose-link" onClick={onClose}>Discard</button>
       </div>
