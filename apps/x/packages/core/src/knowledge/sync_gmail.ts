@@ -31,6 +31,7 @@ export interface GmailThreadSnapshot {
     date?: string;
     latest_email?: string;
     past_summary?: string;
+    unread?: boolean;
     messages: Array<{
         id?: string;
         from?: string;
@@ -40,6 +41,7 @@ export interface GmailThreadSnapshot {
         subject?: string;
         body?: string;
         bodyHtml?: string;
+        unread?: boolean;
     }>;
 }
 
@@ -239,6 +241,7 @@ export async function fetchThreadSnapshot(threadId: string): Promise<GmailThread
             subject: headerValue(headers, 'Subject') || '(No Subject)',
             body,
             bodyHtml,
+            unread: msg.labelIds?.includes('UNREAD') ?? false,
         };
     }));
 
@@ -262,6 +265,7 @@ export async function fetchThreadSnapshot(threadId: string): Promise<GmailThread
         date: latest.date,
         latest_email: latest.body,
         past_summary: earlierSummary || undefined,
+        unread: parsed.some((m) => m.unread),
         messages: parsed,
     };
 }

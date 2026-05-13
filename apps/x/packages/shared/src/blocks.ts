@@ -111,6 +111,7 @@ export const GmailThreadMessageSchema = z.object({
   subject: z.string().optional(),
   body: z.string().optional(),
   bodyHtml: z.string().optional(),
+  unread: z.boolean().optional(),
 });
 
 export type GmailThreadMessage = z.infer<typeof GmailThreadMessageSchema>;
@@ -118,6 +119,7 @@ export type GmailThreadMessage = z.infer<typeof GmailThreadMessageSchema>;
 export const GmailThreadSchema = EmailBlockSchema.extend({
   threadId: z.string(),
   threadUrl: z.string().url(),
+  unread: z.boolean().optional(),
   messages: z.array(GmailThreadMessageSchema),
 });
 
