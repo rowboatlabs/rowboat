@@ -110,10 +110,12 @@ function buildEmailDocument(html: string): string {
 </head><body>${html}</body></html>`
 }
 
-function MessageBody({ message }: { message: GmailThreadMessage }) {
+function MessageBody({ message, threadId }: { message: GmailThreadMessage; threadId: string }) {
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const observerRef = useRef<ResizeObserver | null>(null)
-  const [height, setHeight] = useState(80)
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastSavedHeightRef = useRef<number>(message.bodyHeight ?? 0)
+  const [height, setHeight] = useState(message.bodyHeight ?? 80)
 
   const srcDoc = useMemo(() => {
     if (message.bodyHtml && message.bodyHtml.trim()) {
@@ -130,6 +132,17 @@ function MessageBody({ message }: { message: GmailThreadMessage }) {
     const measure = () => {
       const next = Math.max(40, doc.documentElement.scrollHeight)
       setHeight((current) => (current === next ? current : next))
+      if (!message.id) return
+      if (Math.abs(next - lastSavedHeightRef.current) < 4) return
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = setTimeout(() => {
+        lastSavedHeightRef.current = next
+        void window.ipc.invoke('gmail:saveMessageHeight', {
+          threadId,
+          messageId: message.id!,
+          height: next,
+        }).catch(() => {})
+      }, 500)
     }
     measure()
     observerRef.current?.disconnect()
@@ -137,9 +150,12 @@ function MessageBody({ message }: { message: GmailThreadMessage }) {
       observerRef.current = new ResizeObserver(measure)
       observerRef.current.observe(doc.body)
     }
-  }, [])
+  }, [message.id, threadId])
 
-  useEffect(() => () => observerRef.current?.disconnect(), [])
+  useEffect(() => () => {
+    observerRef.current?.disconnect()
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+  }, [])
 
   return (
     <iframe
@@ -232,14 +248,16 @@ function ComposeBox({
 function ThreadDetail({
   thread,
   onClose,
+  hidden,
 }: {
   thread: GmailThread
   onClose: () => void
+  hidden?: boolean
 }) {
   const [composeMode, setComposeMode] = useState<ComposeMode | null>(null)
 
   return (
-    <div className="gmail-detail gmail-detail-inline">
+    <div className={cn('gmail-detail gmail-detail-inline', hidden && 'gmail-detail-hidden')}>
       <div className="gmail-detail-toolbar">
         <div className="gmail-thread-subject-inline">{thread.subject || '(No subject)'}</div>
         <button type="button" className="gmail-icon-button" onClick={onClose} aria-label="Close thread">
@@ -265,7 +283,7 @@ function ThreadDetail({
                     <div className="gmail-message-date">{formatFullDate(message.date)}</div>
                   </div>
                   <div className="gmail-message-to">to {message.to || 'me'}</div>
-                  <MessageBody message={message} />
+                  <MessageBody message={message} threadId={thread.threadId} />
                 </div>
               </div>
             )
@@ -295,12 +313,28 @@ function ThreadDetail({
   )
 }
 
+const MAX_KEPT_OPEN = 5
+
 export function EmailView() {
   const [threads, setThreads] = useState<GmailThread[]>([])
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null)
+  const [openedThreadIds, setOpenedThreadIds] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
+
+  const toggleThread = useCallback((threadId: string) => {
+    setSelectedThreadId((current) => {
+      const next = current === threadId ? null : threadId
+      if (next) {
+        setOpenedThreadIds((prev) => {
+          const without = prev.filter((id) => id !== next)
+          return [...without, next].slice(-MAX_KEPT_OPEN)
+        })
+      }
+      return next
+    })
+  }, [])
 
   const loadThreads = useCallback(async () => {
     setError(null)
@@ -340,8 +374,10 @@ export function EmailView() {
           return (Number.isNaN(bDate) ? 0 : bDate) - (Number.isNaN(aDate) ? 0 : aDate)
         })
 
+      const liveIds = new Set(nextThreads.map((t) => t.threadId))
       setThreads(nextThreads)
-      setSelectedThreadId(current => current && nextThreads.some(thread => thread.threadId === current) ? current : null)
+      setSelectedThreadId(current => current && liveIds.has(current) ? current : null)
+      setOpenedThreadIds((prev) => prev.filter((id) => liveIds.has(id)))
     } catch (err) {
       if (hasCachedContent) {
         console.warn('[Gmail] background refresh failed; keeping cached view:', err)
@@ -404,12 +440,13 @@ export function EmailView() {
               const latest = latestMessage(thread)
               const isSelected = thread.threadId === selectedThreadId
               const isUnread = thread.unread === true
+              const isMounted = openedThreadIds.includes(thread.threadId)
               return (
                 <div key={thread.threadId} className="gmail-row-group">
                   <button
                     type="button"
                     className={cn('gmail-row', isSelected && 'gmail-row-selected', isUnread && 'gmail-row-unread')}
-                    onClick={() => setSelectedThreadId(isSelected ? null : thread.threadId)}
+                    onClick={() => toggleThread(thread.threadId)}
                   >
                     <span className="gmail-row-dot" aria-hidden />
                     <span className="gmail-row-sender">{extractName(latest?.from || thread.from)}</span>
@@ -419,10 +456,11 @@ export function EmailView() {
                     </span>
                     <span className="gmail-row-date">{formatInboxTime(latest?.date || thread.date)}</span>
                   </button>
-                  {isSelected && (
+                  {isMounted && (
                     <ThreadDetail
                       thread={thread}
                       onClose={() => setSelectedThreadId(null)}
+                      hidden={!isSelected}
                     />
                   )}
                 </div>
