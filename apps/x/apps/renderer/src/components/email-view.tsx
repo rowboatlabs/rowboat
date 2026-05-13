@@ -247,29 +247,27 @@ function ComposeBox({
 
 function ThreadDetail({
   thread,
-  onBack,
+  onClose,
 }: {
   thread: GmailThread
-  onBack: () => void
+  onClose: () => void
 }) {
   const [composeMode, setComposeMode] = useState<ComposeMode | null>(null)
 
   return (
-    <div className="gmail-detail">
+    <div className="gmail-detail gmail-detail-inline">
       <div className="gmail-detail-toolbar">
-        <button type="button" className="gmail-icon-button gmail-back-button" onClick={onBack} aria-label="Back to inbox">
-          <span>←</span>
-        </button>
-        <button type="button" className="gmail-icon-button" aria-label="Archive"><Archive size={18} /></button>
-        <button type="button" className="gmail-icon-button" aria-label="More"><MoreVertical size={18} /></button>
+        <div className="gmail-thread-subject-inline">{thread.subject || '(No subject)'}</div>
+        <div className="gmail-detail-toolbar-actions">
+          <button type="button" className="gmail-icon-button" aria-label="Archive"><Archive size={18} /></button>
+          <button type="button" className="gmail-icon-button" aria-label="More"><MoreVertical size={18} /></button>
+          <button type="button" className="gmail-icon-button" onClick={onClose} aria-label="Close thread">
+            <span>×</span>
+          </button>
+        </div>
       </div>
 
-      <div className="gmail-thread-scroll">
-        <div className="gmail-thread-subject-row">
-          <h1>{thread.subject || '(No subject)'}</h1>
-          <span>Inbox</span>
-        </div>
-
+      <div className="gmail-thread-body">
         <div className="gmail-message-stack">
           {thread.messages.map((message, index) => {
             const isLast = index === thread.messages.length - 1
@@ -399,7 +397,7 @@ export function EmailView() {
     })
   }, [query, threads])
 
-  const selectedThread = filteredThreads.find(thread => thread.threadId === selectedThreadId) ?? filteredThreads[0] ?? null
+  const hasThreads = filteredThreads.length > 0
 
   return (
     <div className="gmail-shell">
@@ -420,23 +418,22 @@ export function EmailView() {
 
         {error ? (
           <div className="gmail-empty-state">Could not load mail: {error}</div>
-        ) : selectedThread ? (
-          <div className="gmail-layout">
-            <div className="gmail-list" aria-label="Recent emails">
-              <div className="gmail-list-header">
-                <span>Last 2 days</span>
-                <span>{filteredThreads.length} threads</span>
-              </div>
-              {filteredThreads.map((thread) => {
-                const latest = latestMessage(thread)
-                const isSelected = thread.threadId === selectedThread.threadId
-                const isUnread = thread.unread === true
-                return (
+        ) : hasThreads ? (
+          <div className="gmail-list" aria-label="Recent emails">
+            <div className="gmail-list-header">
+              <span>Last 2 days</span>
+              <span>{filteredThreads.length} threads</span>
+            </div>
+            {filteredThreads.map((thread) => {
+              const latest = latestMessage(thread)
+              const isSelected = thread.threadId === selectedThreadId
+              const isUnread = thread.unread === true
+              return (
+                <div key={thread.threadId} className="gmail-row-group">
                   <button
-                    key={thread.threadId}
                     type="button"
                     className={cn('gmail-row', isSelected && 'gmail-row-selected', isUnread && 'gmail-row-unread')}
-                    onClick={() => setSelectedThreadId(thread.threadId)}
+                    onClick={() => setSelectedThreadId(isSelected ? null : thread.threadId)}
                   >
                     <span className="gmail-row-check" />
                     <span className="gmail-row-star"><Star size={16} /></span>
@@ -447,14 +444,15 @@ export function EmailView() {
                     </span>
                     <span className="gmail-row-date">{formatInboxTime(latest?.date || thread.date)}</span>
                   </button>
-                )
-              })}
-            </div>
-
-            <ThreadDetail
-              thread={selectedThread}
-              onBack={() => setSelectedThreadId(null)}
-            />
+                  {isSelected && (
+                    <ThreadDetail
+                      thread={thread}
+                      onClose={() => setSelectedThreadId(null)}
+                    />
+                  )}
+                </div>
+              )
+            })}
           </div>
         ) : (
           <div className="gmail-empty-state">
