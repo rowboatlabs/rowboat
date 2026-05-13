@@ -166,8 +166,8 @@
   padding: 0 12px;
   border: none;
   border-bottom: 1px solid #f1f3f4;
-  background: #fff;
-  color: #202124;
+  background: #f6f8fc;
+  color: #5f6368;
   text-align: left;
   cursor: pointer;
   font-family: inherit;
@@ -176,6 +176,16 @@
 .gmail-row:hover,
 .gmail-row-selected {
   box-shadow: inset 3px 0 0 #1a73e8;
+  background: #f2f6fc;
+}
+
+.gmail-row-unread {
+  background: #fff;
+  color: #202124;
+}
+
+.gmail-row-unread:hover,
+.gmail-row-unread.gmail-row-selected {
   background: #f2f6fc;
 }
 
@@ -195,6 +205,12 @@
 .gmail-row-content strong,
 .gmail-row-date {
   font-size: 13px;
+  font-weight: 400;
+}
+
+.gmail-row-unread .gmail-row-sender,
+.gmail-row-unread .gmail-row-content strong,
+.gmail-row-unread .gmail-row-date {
   font-weight: 700;
 }
 
@@ -216,6 +232,10 @@
 
 .gmail-row-content strong {
   flex-shrink: 0;
+  color: inherit;
+}
+
+.gmail-row-unread .gmail-row-content strong {
   color: #202124;
 }
 

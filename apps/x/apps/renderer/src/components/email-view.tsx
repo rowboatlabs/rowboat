@@ -430,11 +430,12 @@ export function EmailView() {
               {filteredThreads.map((thread) => {
                 const latest = latestMessage(thread)
                 const isSelected = thread.threadId === selectedThread.threadId
+                const isUnread = thread.unread === true
                 return (
                   <button
                     key={thread.threadId}
                     type="button"
-                    className={cn('gmail-row', isSelected && 'gmail-row-selected')}
+                    className={cn('gmail-row', isSelected && 'gmail-row-selected', isUnread && 'gmail-row-unread')}
                     onClick={() => setSelectedThreadId(thread.threadId)}
                   >
                     <span className="gmail-row-check" />
