@@ -102,6 +102,26 @@ export const EmailBlockSchema = z.object({
 
 export type EmailBlock = z.infer<typeof EmailBlockSchema>;
 
+export const GmailThreadMessageSchema = z.object({
+  id: z.string().optional(),
+  from: z.string().optional(),
+  to: z.string().optional(),
+  cc: z.string().optional(),
+  date: z.string().optional(),
+  subject: z.string().optional(),
+  body: z.string().optional(),
+});
+
+export type GmailThreadMessage = z.infer<typeof GmailThreadMessageSchema>;
+
+export const GmailThreadSchema = EmailBlockSchema.extend({
+  threadId: z.string(),
+  threadUrl: z.string().url(),
+  messages: z.array(GmailThreadMessageSchema),
+});
+
+export type GmailThread = z.infer<typeof GmailThreadSchema>;
+
 export const EmailsBlockSchema = z.object({
   title: z.string().optional(),
   emails: z.array(EmailBlockSchema),

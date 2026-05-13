@@ -26,6 +26,7 @@ import {
   Lightbulb,
   ListChecks,
   LoaderIcon,
+  Mail,
   Settings,
   Square,
   Trash2,
@@ -220,6 +221,8 @@ type SidebarContentPanelProps = {
   onOpenLiveNotes?: () => void
   isBgTasksOpen?: boolean
   onOpenBgTasks?: () => void
+  isEmailOpen?: boolean
+  onOpenEmail?: () => void
 } & React.ComponentProps<typeof Sidebar>
 
 const sectionTabs: { id: ActiveSection; label: string }[] = [
@@ -482,6 +485,8 @@ export function SidebarContentPanel({
   onOpenLiveNotes,
   isBgTasksOpen = false,
   onOpenBgTasks,
+  isEmailOpen = false,
+  onOpenEmail,
   ...props
 }: SidebarContentPanelProps) {
   const { activeSection, setActiveSection } = useSidebarSection()
@@ -499,6 +504,7 @@ export function SidebarContentPanel({
   const isSuggestedTopicsQuickActionSelected = isSuggestedTopicsOpen && !isBrowserOpen
   const isLiveNotesQuickActionSelected = isLiveNotesOpen && !isBrowserOpen
   const isBgTasksQuickActionSelected = isBgTasksOpen && !isBrowserOpen
+  const isEmailQuickActionSelected = isEmailOpen && !isBrowserOpen
 
   const handleRowboatLogin = useCallback(async () => {
     try {
@@ -685,6 +691,21 @@ export function SidebarContentPanel({
             >
               <ListChecks className="size-4" />
               <span>Background tasks</span>
+            </button>
+          )}
+          {onOpenEmail && (
+            <button
+              type="button"
+              onClick={onOpenEmail}
+              className={cn(
+                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
+                isEmailQuickActionSelected
+                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                  : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+              )}
+            >
+              <Mail className="size-4" />
+              <span>Email</span>
             </button>
           )}
           {onOpenLiveNotes && (

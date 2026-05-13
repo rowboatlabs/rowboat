@@ -17,7 +17,7 @@ import { UserMessageContent } from './message.js';
 import { RowboatApiConfig } from './rowboat-account.js';
 import { ZListToolkitsResponse } from './composio.js';
 import { BrowserStateSchema } from './browser-control.js';
-import { EmailBlockSchema } from './blocks.js';
+import { GmailThreadSchema } from './blocks.js';
 
 // ============================================================================
 // Runtime Validation Schemas (Single Source of Truth)
@@ -128,7 +128,7 @@ const ipcSchemas = {
       threadId: z.string().min(1),
     }),
     res: z.object({
-      thread: EmailBlockSchema.nullable(),
+      thread: GmailThreadSchema.nullable(),
       error: z.string().optional(),
     }),
   },

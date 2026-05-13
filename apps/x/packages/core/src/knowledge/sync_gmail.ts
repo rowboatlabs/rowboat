@@ -31,6 +31,15 @@ export interface GmailThreadSnapshot {
     date?: string;
     latest_email?: string;
     past_summary?: string;
+    messages: Array<{
+        id?: string;
+        from?: string;
+        to?: string;
+        cc?: string;
+        date?: string;
+        subject?: string;
+        body?: string;
+    }>;
 }
 
 function summarizeGmailSync(threads: SyncedThread[]): string {
@@ -158,8 +167,10 @@ export async function fetchThreadSnapshot(threadId: string): Promise<GmailThread
     const parsed = messages.map((msg) => {
         const headers = msg.payload?.headers || [];
         return {
+            id: msg.id || undefined,
             from: headerValue(headers, 'From') || 'Unknown',
             to: headerValue(headers, 'To'),
+            cc: headerValue(headers, 'Cc'),
             date: headerValue(headers, 'Date'),
             subject: headerValue(headers, 'Subject') || '(No Subject)',
             body: msg.payload ? normalizeBody(getBody(msg.payload)) : '',
@@ -186,6 +197,7 @@ export async function fetchThreadSnapshot(threadId: string): Promise<GmailThread
         date: latest.date,
         latest_email: latest.body,
         past_summary: earlierSummary || undefined,
+        messages: parsed,
     };
 }
 
