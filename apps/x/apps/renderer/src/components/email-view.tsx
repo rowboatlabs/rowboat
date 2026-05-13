@@ -116,6 +116,17 @@ function escapeHtml(text: string): string {
     .replace(/'/g, '&#39;')
 }
 
+function splitPlainTextQuote(text: string): { visible: string; quoted: string | null } {
+  const re = /(?:^|\n)On\s+.+?\swrote:\s*(?:\n|$)/
+  const match = re.exec(text)
+  if (!match) return { visible: text, quoted: null }
+  const start = match.index === 0 ? 0 : match.index + 1
+  const visible = text.slice(0, start).trimEnd()
+  const quoted = text.slice(start)
+  if (!quoted.trim()) return { visible: text, quoted: null }
+  return { visible, quoted }
+}
+
 function buildEmailDocument(
   html: string,
   opts: { theme: 'light' | 'dark'; plainText: boolean }
@@ -153,6 +164,12 @@ function buildEmailDocument(
     border-left: 2px solid ${quoteBorder};
     color: ${quoteColor};
   }
+  blockquote.gmail_quote,
+  blockquote[type="cite"],
+  .email-quote-block { display: none; }
+  [data-show-quotes="true"] blockquote.gmail_quote,
+  [data-show-quotes="true"] blockquote[type="cite"],
+  [data-show-quotes="true"] .email-quote-block { display: block; }
 </style>
 </head><body>${html}</body></html>`
 }
@@ -164,6 +181,8 @@ function MessageBody({ message, threadId }: { message: GmailThreadMessage; threa
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastSavedHeightRef = useRef<number>(message.bodyHeight ?? 0)
   const [height, setHeight] = useState(message.bodyHeight ?? 80)
+  const [hasQuote, setHasQuote] = useState(false)
+  const [showQuotes, setShowQuotes] = useState(false)
 
   const isPlainText = !(message.bodyHtml && message.bodyHtml.trim())
   const useDarkBody = isPlainText && resolvedTheme === 'dark'
@@ -173,18 +192,21 @@ function MessageBody({ message, threadId }: { message: GmailThreadMessage; threa
       return buildEmailDocument(message.bodyHtml, { theme: resolvedTheme, plainText: false })
     }
     const text = (message.body || '(No message body)').trim()
-    return buildEmailDocument(
-      `<pre style="white-space: pre-wrap; font: inherit; margin: 0;">${escapeHtml(text)}</pre>`,
-      { theme: resolvedTheme, plainText: true },
-    )
+    const { visible, quoted } = splitPlainTextQuote(text)
+    const visibleBlock = `<pre style="white-space: pre-wrap; font: inherit; margin: 0;">${escapeHtml(visible)}</pre>`
+    const quotedBlock = quoted
+      ? `<pre class="email-quote-block" style="white-space: pre-wrap; font: inherit; margin: 0;">${escapeHtml(quoted)}</pre>`
+      : ''
+    return buildEmailDocument(visibleBlock + quotedBlock, { theme: resolvedTheme, plainText: true })
   }, [message.bodyHtml, message.body, resolvedTheme])
 
   const handleLoad = useCallback(() => {
     const iframe = iframeRef.current
     const doc = iframe?.contentDocument
     if (!doc?.body) return
+    setHasQuote(!!doc.querySelector('blockquote.gmail_quote, blockquote[type="cite"], .email-quote-block'))
     const measure = () => {
-      const next = Math.max(40, doc.documentElement.scrollHeight)
+      const next = Math.max(40, doc.body.scrollHeight)
       setHeight((current) => (current === next ? current : next))
       if (!message.id) return
       if (Math.abs(next - lastSavedHeightRef.current) < 4) return
@@ -206,21 +228,43 @@ function MessageBody({ message, threadId }: { message: GmailThreadMessage; threa
     }
   }, [message.id, threadId])
 
+  const toggleQuotes = useCallback(() => {
+    setShowQuotes((prev) => {
+      const next = !prev
+      const doc = iframeRef.current?.contentDocument
+      if (doc) doc.documentElement.dataset.showQuotes = next ? 'true' : ''
+      return next
+    })
+  }, [])
+
   useEffect(() => () => {
     observerRef.current?.disconnect()
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
   }, [])
 
   return (
-    <iframe
-      ref={iframeRef}
-      srcDoc={srcDoc}
-      sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
-      title="Email content"
-      className={cn('gmail-message-iframe', useDarkBody && 'gmail-message-iframe-dark')}
-      style={{ height }}
-      onLoad={handleLoad}
-    />
+    <>
+      <iframe
+        ref={iframeRef}
+        srcDoc={srcDoc}
+        sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+        title="Email content"
+        className={cn('gmail-message-iframe', useDarkBody && 'gmail-message-iframe-dark')}
+        style={{ height }}
+        onLoad={handleLoad}
+      />
+      {hasQuote && (
+        <button
+          type="button"
+          className="gmail-quote-toggle"
+          onClick={toggleQuotes}
+          aria-label={showQuotes ? 'Hide quoted text' : 'Show quoted text'}
+          aria-expanded={showQuotes}
+        >
+          <span>•••</span>
+        </button>
+      )}
+    </>
   )
 }
 
@@ -309,6 +353,18 @@ function ThreadDetail({
   hidden?: boolean
 }) {
   const [composeMode, setComposeMode] = useState<ComposeMode | null>(null)
+  const [expandedIndices, setExpandedIndices] = useState<Set<number>>(
+    () => new Set(thread.messages.length > 0 ? [thread.messages.length - 1] : [])
+  )
+
+  const toggleExpand = useCallback((index: number) => {
+    setExpandedIndices((prev) => {
+      const next = new Set(prev)
+      if (next.has(index)) next.delete(index)
+      else next.add(index)
+      return next
+    })
+  }, [])
 
   return (
     <div className={cn('gmail-detail gmail-detail-inline', hidden && 'gmail-detail-hidden')}>
@@ -322,22 +378,37 @@ function ThreadDetail({
       <div className="gmail-thread-body">
         <div className="gmail-message-stack">
           {thread.messages.map((message, index) => {
-            const isLast = index === thread.messages.length - 1
+            const isExpanded = expandedIndices.has(index)
             return (
-              <div key={message.id || index} className={cn('gmail-message', isLast && 'gmail-message-open')}>
+              <div key={message.id || index} className={cn('gmail-message', isExpanded && 'gmail-message-expanded')}>
                 <div className="gmail-message-avatar" style={{ backgroundColor: avatarColor(message.from) }}>
                   {getInitial(message.from)}
                 </div>
                 <div className="gmail-message-main">
-                  <div className="gmail-message-meta">
-                    <div className="gmail-message-from">
-                      <strong>{extractName(message.from)}</strong>
-                      <span>{extractAddress(message.from)}</span>
+                  <button
+                    type="button"
+                    className="gmail-message-header"
+                    onClick={() => toggleExpand(index)}
+                    aria-expanded={isExpanded}
+                  >
+                    <div className="gmail-message-meta">
+                      <div className="gmail-message-from">
+                        <strong>{extractName(message.from)}</strong>
+                        {isExpanded && <span>{extractAddress(message.from)}</span>}
+                      </div>
+                      <div className="gmail-message-date">
+                        {isExpanded ? formatFullDate(message.date) : formatInboxTime(message.date)}
+                      </div>
                     </div>
-                    <div className="gmail-message-date">{formatFullDate(message.date)}</div>
-                  </div>
-                  <div className="gmail-message-to">to {message.to || 'me'}</div>
-                  <MessageBody message={message} threadId={thread.threadId} />
+                    {isExpanded ? (
+                      <div className="gmail-message-to">to {message.to || 'me'}</div>
+                    ) : (
+                      <div className="gmail-message-snippet">{snippet(message.body)}</div>
+                    )}
+                  </button>
+                  {isExpanded && (
+                    <MessageBody message={message} threadId={thread.threadId} />
+                  )}
                 </div>
               </div>
             )
