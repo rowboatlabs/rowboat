@@ -23,6 +23,7 @@ import { IDataSourcesRepository } from "@/src/application/repositories/data-sour
 import { IDataSourceDocsRepository } from "@/src/application/repositories/data-source-docs.repository.interface";
 import { container } from "@/di/container";
 import { IProjectsRepository } from "@/src/application/repositories/projects.repository.interface";
+import { validateUrlAgainstSSRF } from "@/app/lib/ssrf-protection";
 
 // Provider configuration
 const PROVIDER_API_KEY = process.env.PROVIDER_API_KEY || process.env.OPENAI_API_KEY || '';
@@ -289,6 +290,9 @@ export async function invokeWebhookTool(
     if (!project.webhookUrl) {
         throw new Error('Webhook URL not found');
     }
+
+    // SSRF protection: validate webhook URL does not resolve to private/internal IPs
+    await validateUrlAgainstSSRF(project.webhookUrl);
 
     // prepare request body
     const toolCall = {
