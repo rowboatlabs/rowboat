@@ -441,6 +441,10 @@
   border-radius: 6px;
 }
 
+.gmail-message-iframe-dark {
+  background: var(--gm-bg-card);
+}
+
 .gmail-thread-actions {
   display: flex;
   gap: 8px;

@@ -3,6 +3,7 @@ import { Forward, LoaderIcon, RefreshCw, Reply, Search, Send } from 'lucide-reac
 import type { blocks } from '@x/shared'
 import { cn } from '@/lib/utils'
 import { toast } from '@/lib/toast'
+import { useTheme } from '@/contexts/theme-context'
 
 type GmailThread = blocks.GmailThread
 type GmailThreadMessage = blocks.GmailThreadMessage
@@ -115,47 +116,68 @@ function escapeHtml(text: string): string {
     .replace(/'/g, '&#39;')
 }
 
-function buildEmailDocument(html: string): string {
+function buildEmailDocument(
+  html: string,
+  opts: { theme: 'light' | 'dark'; plainText: boolean }
+): string {
+  const dark = opts.theme === 'dark' && opts.plainText
+  const colorScheme = opts.theme === 'dark' ? 'light dark' : 'light'
+  const bodyBg = dark ? '#131317' : 'transparent'
+  const bodyColor = dark ? '#d4d4d8' : '#202124'
+  const linkColor = dark ? '#a78bfa' : '#1a73e8'
+  const quoteColor = dark ? '#71717a' : '#5f6368'
+  const quoteBorder = dark ? '#2e2e35' : '#dadce0'
+
   return `<!doctype html>
 <html><head>
 <meta charset="utf-8">
+<meta name="color-scheme" content="${colorScheme}">
 <base target="_blank">
 <style>
+  :root { color-scheme: ${colorScheme}; }
   html, body { margin: 0; padding: 0; }
   body {
     font: 14px/1.6 Arial, sans-serif;
-    color: #202124;
+    background: ${bodyBg};
+    color: ${bodyColor};
     overflow-x: auto;
     overflow-y: hidden;
     word-wrap: break-word;
   }
   img { max-width: 100%; height: auto; }
   table { max-width: 100%; }
-  a { color: #1a73e8; }
+  a { color: ${linkColor}; }
   blockquote {
     margin: 0 0 0 6px;
     padding-left: 12px;
-    border-left: 2px solid #dadce0;
-    color: #5f6368;
+    border-left: 2px solid ${quoteBorder};
+    color: ${quoteColor};
   }
 </style>
 </head><body>${html}</body></html>`
 }
 
 function MessageBody({ message, threadId }: { message: GmailThreadMessage; threadId: string }) {
+  const { resolvedTheme } = useTheme()
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const observerRef = useRef<ResizeObserver | null>(null)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastSavedHeightRef = useRef<number>(message.bodyHeight ?? 0)
   const [height, setHeight] = useState(message.bodyHeight ?? 80)
 
+  const isPlainText = !(message.bodyHtml && message.bodyHtml.trim())
+  const useDarkBody = isPlainText && resolvedTheme === 'dark'
+
   const srcDoc = useMemo(() => {
     if (message.bodyHtml && message.bodyHtml.trim()) {
-      return buildEmailDocument(message.bodyHtml)
+      return buildEmailDocument(message.bodyHtml, { theme: resolvedTheme, plainText: false })
     }
     const text = (message.body || '(No message body)').trim()
-    return buildEmailDocument(`<pre style="white-space: pre-wrap; font: inherit; margin: 0;">${escapeHtml(text)}</pre>`)
-  }, [message.bodyHtml, message.body])
+    return buildEmailDocument(
+      `<pre style="white-space: pre-wrap; font: inherit; margin: 0;">${escapeHtml(text)}</pre>`,
+      { theme: resolvedTheme, plainText: true },
+    )
+  }, [message.bodyHtml, message.body, resolvedTheme])
 
   const handleLoad = useCallback(() => {
     const iframe = iframeRef.current
@@ -195,7 +217,7 @@ function MessageBody({ message, threadId }: { message: GmailThreadMessage; threa
       srcDoc={srcDoc}
       sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
       title="Email content"
-      className="gmail-message-iframe"
+      className={cn('gmail-message-iframe', useDarkBody && 'gmail-message-iframe-dark')}
       style={{ height }}
       onLoad={handleLoad}
     />
