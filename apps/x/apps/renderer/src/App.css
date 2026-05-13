@@ -323,6 +323,10 @@
   box-shadow: inset 2px 0 0 var(--gm-accent);
 }
 
+.gmail-detail-hidden {
+  display: none;
+}
+
 .gmail-detail-toolbar {
   display: flex;
   align-items: center;

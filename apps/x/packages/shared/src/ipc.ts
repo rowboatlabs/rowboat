@@ -155,6 +155,14 @@ const ipcSchemas = {
       threads: z.array(GmailThreadSchema),
     }),
   },
+  'gmail:saveMessageHeight': {
+    req: z.object({
+      threadId: z.string().min(1),
+      messageId: z.string().min(1),
+      height: z.number().int().positive(),
+    }),
+    res: z.object({}),
+  },
   'mcp:listTools': {
     req: z.object({
       serverName: z.string(),

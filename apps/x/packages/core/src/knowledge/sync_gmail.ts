@@ -50,6 +50,20 @@ function writeCachedSnapshot(threadId: string, historyId: string, snapshot: Gmai
     }
 }
 
+export function saveMessageBodyHeight(threadId: string, messageId: string, height: number): void {
+    const cached = readCachedSnapshot(threadId);
+    if (!cached) return;
+    const message = cached.snapshot.messages.find((m) => m.id === messageId);
+    if (!message) return;
+    if (message.bodyHeight === height) return;
+    message.bodyHeight = height;
+    try {
+        fs.writeFileSync(cachePath(threadId), JSON.stringify(cached), 'utf-8');
+    } catch (err) {
+        console.warn(`[Gmail cache] height write failed for ${threadId}/${messageId}:`, err);
+    }
+}
+
 interface SyncedThread {
     threadId: string;
     markdown: string;
@@ -76,6 +90,7 @@ export interface GmailThreadSnapshot {
         body?: string;
         bodyHtml?: string;
         unread?: boolean;
+        bodyHeight?: number;
     }>;
 }
 
@@ -311,10 +326,14 @@ export async function listRecentThreadIds(daysAgo: number = 2): Promise<RecentTh
 }
 
 export async function fetchThreadSnapshot(threadId: string, expectedHistoryId?: string): Promise<GmailThreadSnapshot | null> {
-    if (expectedHistoryId) {
-        const cached = readCachedSnapshot(threadId);
-        if (cached && cached.historyId === expectedHistoryId) {
-            return cached.snapshot;
+    const cached = readCachedSnapshot(threadId);
+    if (expectedHistoryId && cached && cached.historyId === expectedHistoryId) {
+        return cached.snapshot;
+    }
+    const heightCarryover = new Map<string, number>();
+    if (cached) {
+        for (const m of cached.snapshot.messages) {
+            if (m.id && typeof m.bodyHeight === 'number') heightCarryover.set(m.id, m.bodyHeight);
         }
     }
 
@@ -351,6 +370,7 @@ export async function fetchThreadSnapshot(threadId: string, expectedHistoryId?: 
             body,
             bodyHtml,
             unread: msg.labelIds?.includes('UNREAD') ?? false,
+            bodyHeight: msg.id ? heightCarryover.get(msg.id) : undefined,
         };
     }));
 
