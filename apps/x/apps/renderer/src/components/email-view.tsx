@@ -558,7 +558,50 @@ export function EmailView() {
     })
   }, [query, threads])
 
+  const { importantThreads, otherThreads } = useMemo(() => {
+    const important: GmailThread[] = []
+    const other: GmailThread[] = []
+    for (const thread of filteredThreads) {
+      if (thread.messages.length > 1) important.push(thread)
+      else other.push(thread)
+    }
+    return { importantThreads: important, otherThreads: other }
+  }, [filteredThreads])
+
   const hasThreads = filteredThreads.length > 0
+
+  const renderRow = (thread: GmailThread) => {
+    const latest = latestMessage(thread)
+    const isSelected = thread.threadId === selectedThreadId
+    const isUnread = thread.unread === true
+    const isMounted = openedThreadIds.includes(thread.threadId)
+    return (
+      <div key={thread.threadId} className="gmail-row-group">
+        <button
+          type="button"
+          className={cn('gmail-row', isSelected && 'gmail-row-selected', isUnread && 'gmail-row-unread')}
+          onClick={() => toggleThread(thread.threadId)}
+          onMouseEnter={() => scheduleHoverPrefetch(thread)}
+          onMouseLeave={cancelHoverPrefetch}
+        >
+          <span className="gmail-row-dot" aria-hidden />
+          <span className="gmail-row-sender">{extractName(latest?.from || thread.from)}</span>
+          <span className="gmail-row-content">
+            <strong>{thread.subject || '(No subject)'}</strong>
+            <span>{snippet(latest?.body || thread.latest_email)}</span>
+          </span>
+          <span className="gmail-row-date">{formatInboxTime(latest?.date || thread.date)}</span>
+        </button>
+        {isMounted && (
+          <ThreadDetail
+            thread={thread}
+            onClose={() => setSelectedThreadId(null)}
+            hidden={!isSelected}
+          />
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className="gmail-shell">
@@ -581,42 +624,24 @@ export function EmailView() {
           <div className="gmail-empty-state">Could not load mail: {error}</div>
         ) : hasThreads ? (
           <div className="gmail-list" aria-label="Recent emails">
-            <div className="gmail-list-header">
-              <span>Last 2 days</span>
-              <span>{filteredThreads.length} threads</span>
-            </div>
-            {filteredThreads.map((thread) => {
-              const latest = latestMessage(thread)
-              const isSelected = thread.threadId === selectedThreadId
-              const isUnread = thread.unread === true
-              const isMounted = openedThreadIds.includes(thread.threadId)
-              return (
-                <div key={thread.threadId} className="gmail-row-group">
-                  <button
-                    type="button"
-                    className={cn('gmail-row', isSelected && 'gmail-row-selected', isUnread && 'gmail-row-unread')}
-                    onClick={() => toggleThread(thread.threadId)}
-                    onMouseEnter={() => scheduleHoverPrefetch(thread)}
-                    onMouseLeave={cancelHoverPrefetch}
-                  >
-                    <span className="gmail-row-dot" aria-hidden />
-                    <span className="gmail-row-sender">{extractName(latest?.from || thread.from)}</span>
-                    <span className="gmail-row-content">
-                      <strong>{thread.subject || '(No subject)'}</strong>
-                      <span>{snippet(latest?.body || thread.latest_email)}</span>
-                    </span>
-                    <span className="gmail-row-date">{formatInboxTime(latest?.date || thread.date)}</span>
-                  </button>
-                  {isMounted && (
-                    <ThreadDetail
-                      thread={thread}
-                      onClose={() => setSelectedThreadId(null)}
-                      hidden={!isSelected}
-                    />
-                  )}
+            {importantThreads.length > 0 && (
+              <section className="gmail-section">
+                <div className="gmail-list-header">
+                  <span>Important</span>
+                  <span>{importantThreads.length} thread{importantThreads.length === 1 ? '' : 's'}</span>
                 </div>
-              )
-            })}
+                {importantThreads.map(renderRow)}
+              </section>
+            )}
+            {otherThreads.length > 0 && (
+              <section className="gmail-section">
+                <div className="gmail-list-header">
+                  <span>Everything else</span>
+                  <span>{otherThreads.length} thread{otherThreads.length === 1 ? '' : 's'}</span>
+                </div>
+                {otherThreads.map(renderRow)}
+              </section>
+            )}
           </div>
         ) : (
           <div className="gmail-empty-state">
