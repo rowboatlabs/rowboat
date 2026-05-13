@@ -39,6 +39,7 @@ export interface GmailThreadSnapshot {
         date?: string;
         subject?: string;
         body?: string;
+        bodyHtml?: string;
     }>;
 }
 
@@ -114,35 +115,87 @@ function decodeBase64(data: string): string {
     return Buffer.from(data, 'base64').toString('utf-8');
 }
 
+function extractBodyParts(payload: gmail.Schema$MessagePart): { text: string; html: string } {
+    const out = { text: '', html: '' };
+    const walk = (part: gmail.Schema$MessagePart): void => {
+        const mime = part.mimeType || '';
+        if (mime === 'text/html' && part.body?.data) {
+            if (!out.html) out.html = decodeBase64(part.body.data);
+            return;
+        }
+        if (mime === 'text/plain' && part.body?.data) {
+            if (!out.text) out.text = decodeBase64(part.body.data);
+            return;
+        }
+        if (part.parts) {
+            for (const sub of part.parts) walk(sub);
+        }
+    };
+    walk(payload);
+    return out;
+}
+
 function getBody(payload: gmail.Schema$MessagePart): string {
-    let body = "";
-    if (payload.parts) {
-        for (const part of payload.parts) {
-            if (part.mimeType === 'text/plain' && part.body && part.body.data) {
-                const text = decodeBase64(part.body.data);
-                // Strip quoted lines
-                const cleanLines = text.split('\n').filter((line: string) => !line.trim().startsWith('>'));
-                body += cleanLines.join('\n');
-            } else if (part.mimeType === 'text/html' && part.body && part.body.data) {
-                const html = decodeBase64(part.body.data);
-                const md = nhm.translate(html);
-                // Simple quote stripping for MD
-                const cleanLines = md.split('\n').filter((line: string) => !line.trim().startsWith('>'));
-                body += cleanLines.join('\n');
-            } else if (part.parts) {
-                body += getBody(part);
-            }
-        }
-    } else if (payload.body && payload.body.data) {
-        const data = decodeBase64(payload.body.data);
-        if (payload.mimeType === 'text/html') {
-            const md = nhm.translate(data);
-            body += md.split('\n').filter((line: string) => !line.trim().startsWith('>')).join('\n');
-        } else {
-            body += data.split('\n').filter((line: string) => !line.trim().startsWith('>')).join('\n');
-        }
+    const { text, html } = extractBodyParts(payload);
+    if (html) {
+        const md = nhm.translate(html);
+        return md.split('\n').filter((line: string) => !line.trim().startsWith('>')).join('\n');
     }
-    return body;
+    if (text) {
+        return text.split('\n').filter((line: string) => !line.trim().startsWith('>')).join('\n');
+    }
+    return '';
+}
+
+async function inlineCidImages(
+    gmailClient: gmail.Gmail,
+    messageId: string,
+    payload: gmail.Schema$MessagePart,
+    html: string,
+): Promise<string> {
+    if (!/src\s*=\s*["']?cid:/i.test(html)) return html;
+
+    const inlineParts: Array<{ contentId: string; mimeType: string; attachmentId: string }> = [];
+    const collect = (part: gmail.Schema$MessagePart): void => {
+        const cidHeader = part.headers?.find(h => h.name?.toLowerCase() === 'content-id')?.value;
+        const attachmentId = part.body?.attachmentId;
+        const mime = part.mimeType || '';
+        if (cidHeader && attachmentId && mime.startsWith('image/')) {
+            inlineParts.push({
+                contentId: cidHeader.replace(/^<|>$/g, '').trim(),
+                mimeType: mime,
+                attachmentId,
+            });
+        }
+        if (part.parts) for (const sub of part.parts) collect(sub);
+    };
+    collect(payload);
+    if (inlineParts.length === 0) return html;
+
+    const dataUrls = new Map<string, string>();
+    await Promise.all(inlineParts.map(async (part) => {
+        try {
+            const res = await gmailClient.users.messages.attachments.get({
+                userId: 'me',
+                messageId,
+                id: part.attachmentId,
+            });
+            const b64 = res.data.data;
+            if (!b64) return;
+            // Gmail returns base64url; data URLs need standard base64
+            const normalized = b64.replace(/-/g, '+').replace(/_/g, '/');
+            dataUrls.set(part.contentId, `data:${part.mimeType};base64,${normalized}`);
+        } catch (err) {
+            console.warn(`[Gmail] inline image fetch failed for ${part.contentId}:`, err);
+        }
+    }));
+
+    let rewritten = html;
+    for (const [cid, url] of dataUrls) {
+        const escaped = cid.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        rewritten = rewritten.replace(new RegExp(`cid:${escaped}`, 'gi'), url);
+    }
+    return rewritten;
 }
 
 function normalizeBody(body: string): string {
@@ -164,8 +217,19 @@ export async function fetchThreadSnapshot(threadId: string): Promise<GmailThread
     const messages = res.data.messages;
     if (!messages || messages.length === 0) return null;
 
-    const parsed = messages.map((msg) => {
+    const parsed = await Promise.all(messages.map(async (msg) => {
         const headers = msg.payload?.headers || [];
+        const parts = msg.payload ? extractBodyParts(msg.payload) : { text: '', html: '' };
+        const body = msg.payload ? normalizeBody(getBody(msg.payload)) : '';
+        let bodyHtml: string | undefined;
+        if (parts.html && msg.payload && msg.id) {
+            try {
+                bodyHtml = await inlineCidImages(gmailClient, msg.id, msg.payload, parts.html);
+            } catch (err) {
+                console.warn(`[Gmail] inline image embed failed for message ${msg.id}:`, err);
+                bodyHtml = parts.html;
+            }
+        }
         return {
             id: msg.id || undefined,
             from: headerValue(headers, 'From') || 'Unknown',
@@ -173,9 +237,10 @@ export async function fetchThreadSnapshot(threadId: string): Promise<GmailThread
             cc: headerValue(headers, 'Cc'),
             date: headerValue(headers, 'Date'),
             subject: headerValue(headers, 'Subject') || '(No Subject)',
-            body: msg.payload ? normalizeBody(getBody(msg.payload)) : '',
+            body,
+            bodyHtml,
         };
-    });
+    }));
 
     const latest = parsed[parsed.length - 1]!;
     const earlier = parsed.slice(0, -1);

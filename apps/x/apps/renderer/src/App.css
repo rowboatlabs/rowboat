@@ -349,6 +349,15 @@
   white-space: pre-wrap;
 }
 
+.gmail-message-iframe {
+  display: block;
+  width: 100%;
+  max-width: 820px;
+  margin-top: 14px;
+  border: 0;
+  background: #fff;
+}
+
 .gmail-thread-actions {
   display: flex;
   gap: 8px;
