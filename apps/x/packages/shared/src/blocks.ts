@@ -88,12 +88,13 @@ export type CalendarBlock = z.infer<typeof CalendarBlockSchema>;
 
 export const EmailBlockSchema = z.object({
   threadId: z.string().optional(),
+  threadUrl: z.string().url().optional(),
   summary: z.string().optional(),
   subject: z.string().optional(),
   from: z.string().optional(),
   to: z.string().optional(),
   date: z.string().optional(),
-  latest_email: z.string(),
+  latest_email: z.string().optional(),
   past_summary: z.string().optional(),
   draft_response: z.string().optional(),
   response_mode: z.enum(['inline', 'assistant', 'both']).optional(),
