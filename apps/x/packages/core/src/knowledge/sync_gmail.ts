@@ -8,6 +8,7 @@ import { GoogleClientFactory } from './google-client-factory.js';
 import { serviceLogger, type ServiceRunContext } from '../services/service_logger.js';
 import { limitEventItems } from './limit_event_items.js';
 import { createEvent } from '../events/producer.js';
+import { classifyThread, getUserEmail } from './classify_thread.js';
 
 // Configuration
 const SYNC_DIR = path.join(WorkDir, 'gmail_sync');
@@ -80,6 +81,7 @@ export interface GmailThreadSnapshot {
     latest_email?: string;
     past_summary?: string;
     unread?: boolean;
+    importance?: 'important' | 'other';
     messages: Array<{
         id?: string;
         from?: string;
@@ -397,6 +399,15 @@ export async function fetchThreadSnapshot(threadId: string, expectedHistoryId?: 
         unread: parsed.some((m) => m.unread),
         messages: parsed,
     };
+
+    try {
+        const userEmail = await getUserEmail(auth);
+        const classification = await classifyThread(snapshot, userEmail);
+        snapshot.importance = classification.importance;
+        if (classification.summary) snapshot.summary = classification.summary;
+    } catch (err) {
+        console.warn(`[Gmail] classify failed for ${threadId}:`, err);
+    }
 
     if (res.data.historyId) {
         writeCachedSnapshot(threadId, res.data.historyId, snapshot);

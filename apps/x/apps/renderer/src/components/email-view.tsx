@@ -562,8 +562,10 @@ export function EmailView() {
     const important: GmailThread[] = []
     const other: GmailThread[] = []
     for (const thread of filteredThreads) {
-      if (thread.messages.length > 1) important.push(thread)
-      else other.push(thread)
+      // Default unclassified threads to Important so we don't hide anything
+      // before the classifier has run on them.
+      if (thread.importance === 'other') other.push(thread)
+      else important.push(thread)
     }
     return { importantThreads: important, otherThreads: other }
   }, [filteredThreads])
