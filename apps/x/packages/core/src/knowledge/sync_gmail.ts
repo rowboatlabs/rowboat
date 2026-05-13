@@ -82,6 +82,7 @@ export interface GmailThreadSnapshot {
     past_summary?: string;
     unread?: boolean;
     importance?: 'important' | 'other';
+    draft_response?: string;
     messages: Array<{
         id?: string;
         from?: string;
@@ -405,6 +406,7 @@ export async function fetchThreadSnapshot(threadId: string, expectedHistoryId?: 
         const classification = await classifyThread(snapshot, userEmail);
         snapshot.importance = classification.importance;
         if (classification.summary) snapshot.summary = classification.summary;
+        if (classification.draftResponse) snapshot.draft_response = classification.draftResponse;
     } catch (err) {
         console.warn(`[Gmail] classify failed for ${threadId}:`, err);
     }
