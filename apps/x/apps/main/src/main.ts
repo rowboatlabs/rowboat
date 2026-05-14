@@ -62,7 +62,7 @@ if (started) app.quit();
 
 // Single-instance lock: route a second launch (e.g. clicking a rowboat:// link)
 // back into the existing process via the 'second-instance' event.
-if (!app.requestSingleInstanceLock()) {
+if (app.isPackaged && !app.requestSingleInstanceLock()) {
   console.error('[Main] Another Rowboat instance is already running; exiting this process.');
   app.quit();
   process.exit(0);
