@@ -123,6 +123,7 @@ export const GmailThreadMessageSchema = z.object({
   unread: z.boolean().optional(),
   bodyHeight: z.number().int().positive().optional(),
   attachments: z.array(GmailAttachmentSchema).optional(),
+  messageIdHeader: z.string().optional(),
 });
 
 export type GmailThreadMessage = z.infer<typeof GmailThreadMessageSchema>;

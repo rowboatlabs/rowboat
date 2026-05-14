@@ -555,39 +555,55 @@ function ComposeBox({
     if (editor && sel) editor.chain().focus().setTextSelection(sel).run()
   }
 
+  const [sending, setSending] = useState(false)
   const sendInGmail = async () => {
-    if (!editor) {
-      window.open(thread.threadUrl, '_blank')
-      return
-    }
+    if (!editor || sending) return
     const html = editor.getHTML()
     const text = editor.getText().trim()
-
-    let copied = false
-    if (text) {
-      try {
-        if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
-          await navigator.clipboard.write([
-            new ClipboardItem({
-              'text/html': new Blob([html], { type: 'text/html' }),
-              'text/plain': new Blob([text], { type: 'text/plain' }),
-            }),
-          ])
-          copied = true
-        } else if (navigator.clipboard?.writeText) {
-          await navigator.clipboard.writeText(text)
-          copied = true
-        }
-      } catch (err) {
-        console.warn('[Gmail] clipboard write failed:', err)
-      }
+    if (!text) {
+      toast('Draft is empty.', 'error')
+      return
     }
 
-    window.open(thread.threadUrl, '_blank')
-    if (copied) {
-      toast('Draft copied — open the reply in Gmail and paste.', 'info')
-    } else if (text) {
-      toast('Could not copy draft. Open Gmail and paste manually.', 'error')
+    const recipient = mode === 'reply' ? extractAddress(latest?.from) : ''
+    if (!recipient) {
+      toast('No recipient found for this thread.', 'error')
+      return
+    }
+
+    const rawSubject = thread.subject || ''
+    const subject = mode === 'reply'
+      ? (/^re:/i.test(rawSubject) ? rawSubject : `Re: ${rawSubject}`.trim())
+      : (/^fwd:/i.test(rawSubject) ? rawSubject : `Fwd: ${rawSubject}`.trim())
+
+    // Build References chain from all known message ids (newest last).
+    const messageIds = thread.messages
+      .map((m) => m.messageIdHeader)
+      .filter((v): v is string => Boolean(v))
+    const references = messageIds.join(' ')
+    const inReplyTo = latest?.messageIdHeader
+
+    setSending(true)
+    try {
+      const result = await window.ipc.invoke('gmail:sendReply', {
+        threadId: thread.threadId,
+        to: recipient,
+        subject,
+        bodyHtml: html,
+        bodyText: text,
+        inReplyTo,
+        references: references || undefined,
+      })
+      if (result.error) {
+        toast(`Send failed: ${result.error}`, 'error')
+        return
+      }
+      toast('Sent.', 'success')
+      onClose()
+    } catch (err) {
+      toast(`Send failed: ${err instanceof Error ? err.message : String(err)}`, 'error')
+    } finally {
+      setSending(false)
     }
   }
 
@@ -666,10 +682,11 @@ function ComposeBox({
             type="button"
             className="gmail-send-button"
             onClick={() => { void sendInGmail() }}
-            title="Copy draft and open this thread in Gmail"
+            disabled={sending}
+            title="Send this reply via Gmail"
           >
-            <Send size={15} />
-            Send
+            {sending ? <LoaderIcon size={15} className="animate-spin" /> : <Send size={15} />}
+            {sending ? 'Sending…' : 'Send'}
           </button>
           <button
             type="button"
