@@ -157,6 +157,21 @@ const ipcSchemas = {
       nextCursor: z.string().nullable(),
     }),
   },
+  'gmail:sendReply': {
+    req: z.object({
+      threadId: z.string().min(1),
+      to: z.string().min(1),
+      subject: z.string(),
+      bodyHtml: z.string(),
+      bodyText: z.string(),
+      inReplyTo: z.string().optional(),
+      references: z.string().optional(),
+    }),
+    res: z.object({
+      messageId: z.string().optional(),
+      error: z.string().optional(),
+    }),
+  },
   'gmail:saveMessageHeight': {
     req: z.object({
       threadId: z.string().min(1),

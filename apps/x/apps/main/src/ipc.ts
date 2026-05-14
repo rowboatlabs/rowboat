@@ -47,7 +47,7 @@ import { summarizeMeeting } from '@x/core/dist/knowledge/summarize_meeting.js';
 import { getAccessToken } from '@x/core/dist/auth/tokens.js';
 import { getRowboatConfig } from '@x/core/dist/config/rowboat.js';
 import { runLiveNoteAgent } from '@x/core/dist/knowledge/live-note/runner.js';
-import { fetchThreadSnapshot, listRecentThreadIds, listInboxPage, saveMessageBodyHeight } from '@x/core/dist/knowledge/sync_gmail.js';
+import { fetchThreadSnapshot, listRecentThreadIds, listInboxPage, saveMessageBodyHeight, sendThreadReply } from '@x/core/dist/knowledge/sync_gmail.js';
 import { liveNoteBus } from '@x/core/dist/knowledge/live-note/bus.js';
 import { getInstallationId } from '@x/core/dist/analytics/installation.js';
 import { API_URL } from '@x/core/dist/config/env.js';
@@ -509,6 +509,9 @@ export function setupIpcHandlers() {
         cursor: args.cursor,
         limit: args.limit,
       });
+    },
+    'gmail:sendReply': async (_event, args) => {
+      return sendThreadReply(args);
     },
     'gmail:saveMessageHeight': async (_event, args) => {
       saveMessageBodyHeight(args.threadId, args.messageId, args.height);
