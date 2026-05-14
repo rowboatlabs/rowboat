@@ -147,12 +147,15 @@ const ipcSchemas = {
       error: z.string().optional(),
     }),
   },
-  'gmail:listCachedThreads': {
+  'gmail:listInboxPage': {
     req: z.object({
-      daysAgo: z.number().int().positive().optional(),
+      section: z.enum(['important', 'other']),
+      cursor: z.string().optional(),
+      limit: z.number().int().min(1).max(100).optional(),
     }),
     res: z.object({
       threads: z.array(GmailThreadSchema),
+      nextCursor: z.string().nullable(),
     }),
   },
   'gmail:saveMessageHeight': {

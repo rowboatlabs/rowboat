@@ -224,6 +224,14 @@
   margin-top: 28px;
 }
 
+.gmail-section-sentinel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  color: var(--gm-text-faint);
+}
+
 .gmail-row {
   display: grid;
   grid-template-columns: 12px minmax(140px, 0.22fr) minmax(0, 1fr) 60px;
