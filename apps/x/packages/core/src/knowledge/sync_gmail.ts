@@ -12,7 +12,19 @@ import { classifyThread, getUserEmail } from './classify_thread.js';
 
 // Configuration
 const SYNC_DIR = path.join(WorkDir, 'gmail_sync');
-const CACHE_DIR = path.join(SYNC_DIR, 'cache');
+const LEGACY_CACHE_DIR = path.join(SYNC_DIR, 'cache');
+const CACHE_DIR = path.join(WorkDir, 'inbox_lists');
+
+(function migrateLegacyCacheDir() {
+    try {
+        if (fs.existsSync(LEGACY_CACHE_DIR) && !fs.existsSync(CACHE_DIR)) {
+            fs.renameSync(LEGACY_CACHE_DIR, CACHE_DIR);
+            console.log(`[Gmail] Migrated cache from ${LEGACY_CACHE_DIR} → ${CACHE_DIR}`);
+        }
+    } catch (err) {
+        console.warn('[Gmail] Cache directory migration failed:', err);
+    }
+})();
 const SYNC_INTERVAL_MS = 5 * 60 * 1000; // Check every 5 minutes
 const REQUIRED_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
 const MAX_THREADS_IN_DIGEST = 10;
@@ -266,31 +278,108 @@ export interface RecentThreadInfo {
     snippet?: string;
 }
 
-export function listCachedThreads(daysAgo: number = 2): GmailThreadSnapshot[] {
-    if (!fs.existsSync(CACHE_DIR)) return [];
-    const cutoffMs = Date.now() - daysAgo * 24 * 60 * 60 * 1000;
-    const out: GmailThreadSnapshot[] = [];
-    for (const name of fs.readdirSync(CACHE_DIR)) {
+export type InboxSection = 'important' | 'other';
+
+export interface InboxPageOptions {
+    section: InboxSection;
+    cursor?: string;
+    limit?: number;
+}
+
+export interface InboxPageResult {
+    threads: GmailThreadSnapshot[];
+    nextCursor: string | null;
+}
+
+interface IndexedEntry {
+    threadId: string;
+    dateMs: number;
+    snapshot: GmailThreadSnapshot;
+}
+
+function snapshotImportance(s: GmailThreadSnapshot): InboxSection {
+    return s.importance === 'other' ? 'other' : 'important';
+}
+
+function snapshotDateMs(s: GmailThreadSnapshot): number {
+    const latest = s.messages[s.messages.length - 1];
+    const raw = latest?.date || s.date;
+    if (!raw) return 0;
+    const ms = Date.parse(raw);
+    return Number.isFinite(ms) ? ms : 0;
+}
+
+function parseCursor(cursor: string | undefined): { dateMs: number; threadId: string } | null {
+    if (!cursor) return null;
+    const idx = cursor.indexOf('|');
+    if (idx < 0) return null;
+    const dateMs = Number(cursor.slice(0, idx));
+    const threadId = cursor.slice(idx + 1);
+    if (!Number.isFinite(dateMs) || !threadId) return null;
+    return { dateMs, threadId };
+}
+
+function encodeCursor(entry: { dateMs: number; threadId: string }): string {
+    return `${entry.dateMs}|${entry.threadId}`;
+}
+
+export function listInboxPage(opts: InboxPageOptions): InboxPageResult {
+    const limit = Math.max(1, Math.min(100, opts.limit ?? 25));
+    const cursor = parseCursor(opts.cursor);
+
+    if (!fs.existsSync(CACHE_DIR)) return { threads: [], nextCursor: null };
+
+    let names: string[];
+    try {
+        names = fs.readdirSync(CACHE_DIR);
+    } catch {
+        return { threads: [], nextCursor: null };
+    }
+
+    const entries: IndexedEntry[] = [];
+    for (const name of names) {
         if (!name.endsWith('.json')) continue;
         const filePath = path.join(CACHE_DIR, name);
         try {
-            const stat = fs.statSync(filePath);
-            if (stat.mtimeMs < cutoffMs) continue;
-            const entry = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as SnapshotCacheEntry;
-            const latestDate = entry.snapshot.messages[entry.snapshot.messages.length - 1]?.date;
-            const latestMs = latestDate ? Date.parse(latestDate) : stat.mtimeMs;
-            if (Number.isFinite(latestMs) && latestMs < cutoffMs) continue;
-            out.push(entry.snapshot);
+            const raw = fs.readFileSync(filePath, 'utf-8');
+            const wrapper = JSON.parse(raw) as SnapshotCacheEntry;
+            const snapshot = wrapper.snapshot;
+            if (!snapshot) continue;
+            if (snapshotImportance(snapshot) !== opts.section) continue;
+            entries.push({
+                threadId: snapshot.threadId,
+                dateMs: snapshotDateMs(snapshot),
+                snapshot,
+            });
         } catch (err) {
-            console.warn(`[Gmail cache] read failed for ${name}:`, err);
+            console.warn(`[Inbox lists] read failed for ${name}:`, err);
         }
     }
-    out.sort((a, b) => {
-        const aDate = Date.parse(a.messages[a.messages.length - 1]?.date || a.date || '');
-        const bDate = Date.parse(b.messages[b.messages.length - 1]?.date || b.date || '');
-        return (Number.isNaN(bDate) ? 0 : bDate) - (Number.isNaN(aDate) ? 0 : aDate);
+
+    // Newest first, threadId asc as tiebreak.
+    entries.sort((a, b) => {
+        if (b.dateMs !== a.dateMs) return b.dateMs - a.dateMs;
+        return a.threadId < b.threadId ? -1 : 1;
     });
-    return out;
+
+    let startIdx = 0;
+    if (cursor) {
+        startIdx = entries.findIndex((e) => {
+            if (e.dateMs < cursor.dateMs) return true;
+            if (e.dateMs === cursor.dateMs && e.threadId > cursor.threadId) return true;
+            return false;
+        });
+        if (startIdx < 0) startIdx = entries.length;
+    }
+
+    const slice = entries.slice(startIdx, startIdx + limit);
+    const hasMore = startIdx + slice.length < entries.length;
+    const last = slice[slice.length - 1];
+
+    return {
+        threads: slice.map((e) => e.snapshot),
+        nextCursor: hasMore && last ? encodeCursor({ dateMs: last.dateMs, threadId: last.threadId }) : null,
+    };
 }
 
 export async function listRecentThreadIds(daysAgo: number = 2): Promise<RecentThreadInfo[]> {

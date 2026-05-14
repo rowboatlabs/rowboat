@@ -663,14 +663,51 @@ function ThreadDetail({
 }
 
 const MAX_KEPT_OPEN = 5
+const PAGE_SIZE = 25
+const SECTIONS = ['important', 'other'] as const
+type InboxSection = (typeof SECTIONS)[number]
+
+interface SectionState {
+  threads: GmailThread[]
+  nextCursor: string | null
+  hasReachedEnd: boolean
+  loadingPage: boolean
+}
+
+const initialSectionState: SectionState = {
+  threads: [],
+  nextCursor: null,
+  hasReachedEnd: false,
+  loadingPage: false,
+}
+
+// Module-level survives unmount/remount within the renderer process — so switching
+// panels and coming back doesn't reload from scratch.
+let persistedImportant: SectionState | null = null
+let persistedOther: SectionState | null = null
+
+function clearLoadingFlag(state: SectionState | null): SectionState {
+  if (!state) return initialSectionState
+  return { ...state, loadingPage: false }
+}
 
 export function EmailView() {
-  const [threads, setThreads] = useState<GmailThread[]>([])
+  const [important, setImportant] = useState<SectionState>(() => clearLoadingFlag(persistedImportant))
+  const [other, setOther] = useState<SectionState>(() => clearLoadingFlag(persistedOther))
+  const hadPersistedDataOnMount = useRef(persistedImportant !== null)
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null)
   const [openedThreadIds, setOpenedThreadIds] = useState<string[]>([])
-  const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(!hadPersistedDataOnMount.current)
   const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
+
+  useEffect(() => { persistedImportant = important }, [important])
+  useEffect(() => { persistedOther = other }, [other])
+
+  const setSection = useCallback((section: InboxSection, updater: (prev: SectionState) => SectionState) => {
+    if (section === 'important') setImportant(updater)
+    else setOther(updater)
+  }, [])
 
   const toggleThread = useCallback((threadId: string) => {
     setSelectedThreadId((current) => {
@@ -709,66 +746,169 @@ export function EmailView() {
     if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
   }, [])
 
-  const loadThreads = useCallback(async () => {
-    setError(null)
-    let hasCachedContent = false
+  // Track the current "load epoch" so concurrent refreshes don't apply stale results.
+  const epochRef = useRef(0)
 
+  const loadNextPage = useCallback(async (section: InboxSection) => {
+    const current = section === 'important' ? important : other
+    if (current.loadingPage || current.hasReachedEnd) return
+
+    const epoch = epochRef.current
+    setSection(section, (prev) => ({ ...prev, loadingPage: true }))
     try {
-      const cached = await window.ipc.invoke('gmail:listCachedThreads', { daysAgo: 2 })
-      if (cached.threads.length > 0) {
-        setThreads(cached.threads)
-        hasCachedContent = true
-      }
+      const result = await window.ipc.invoke('gmail:listInboxPage', {
+        section,
+        cursor: current.nextCursor ?? undefined,
+        limit: PAGE_SIZE,
+      })
+      if (epoch !== epochRef.current) return
+      setSection(section, (prev) => ({
+        threads: [...prev.threads, ...result.threads],
+        nextCursor: result.nextCursor,
+        hasReachedEnd: result.nextCursor === null,
+        loadingPage: false,
+      }))
     } catch (err) {
-      console.warn('[Gmail] cache read failed:', err)
+      if (epoch !== epochRef.current) return
+      console.warn(`[Gmail] page load failed for ${section}:`, err)
+      setSection(section, (prev) => ({ ...prev, loadingPage: false }))
     }
+  }, [important, other, setSection])
 
-    setLoading(true)
-
+  const reloadFirstPage = useCallback(async (section: InboxSection) => {
+    const epoch = ++epochRef.current
+    setSection(section, () => ({ ...initialSectionState, loadingPage: true }))
     try {
-      const list = await window.ipc.invoke('gmail:listRecentThreads', { daysAgo: 2 })
-      if (list.error) throw new Error(list.error)
+      const result = await window.ipc.invoke('gmail:listInboxPage', {
+        section,
+        limit: PAGE_SIZE,
+      })
+      if (epoch !== epochRef.current) return
+      setSection(section, () => ({
+        threads: result.threads,
+        nextCursor: result.nextCursor,
+        hasReachedEnd: result.nextCursor === null,
+        loadingPage: false,
+      }))
+    } catch (err) {
+      if (epoch !== epochRef.current) return
+      console.warn(`[Gmail] initial page load failed for ${section}:`, err)
+      setSection(section, () => ({ ...initialSectionState, loadingPage: false }))
+    }
+  }, [setSection])
 
-      const hydrated = await mapWithConcurrency(list.threads, 6, async (item) => {
+  // Initial load — fetch page 1 of Important only. Everything else stays hidden
+  // until Important is exhausted (see effect below).
+  useEffect(() => {
+    if (hadPersistedDataOnMount.current) return
+    void reloadFirstPage('important')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Once Important is exhausted, kick off page 1 of Everything else.
+  useEffect(() => {
+    if (!important.hasReachedEnd) return
+    if (other.threads.length > 0) return
+    if (other.loadingPage) return
+    void reloadFirstPage('other')
+  }, [important.hasReachedEnd, other.threads.length, other.loadingPage, reloadFirstPage])
+
+  // Live updates: watcher on inbox_lists/ → reload page 1 when files change.
+  // Suppressed while a thread is open (composing/reading) — instead, mark a
+  // pending update and reload once the user closes the thread.
+  const pendingReloadRef = useRef(false)
+  const reloadDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const isSelectedRef = useRef<string | null>(null)
+  isSelectedRef.current = selectedThreadId
+  const isRefreshingRef = useRef(false)
+  isRefreshingRef.current = refreshing
+
+  const triggerLiveReload = useCallback(() => {
+    if (reloadDebounceRef.current) clearTimeout(reloadDebounceRef.current)
+    reloadDebounceRef.current = setTimeout(() => {
+      reloadDebounceRef.current = null
+      // Skip if our own refresh is in flight — its writes triggered the watcher.
+      if (isRefreshingRef.current) return
+      // If a thread is open, defer until it closes.
+      if (isSelectedRef.current !== null) {
+        pendingReloadRef.current = true
+        return
+      }
+      void reloadFirstPage('important')
+      setOther(() => ({ ...initialSectionState }))
+    }, 500)
+  }, [reloadFirstPage])
+
+  useEffect(() => {
+    const cleanup = window.ipc.on('workspace:didChange', (event) => {
+      const matches = (p: string) => p.startsWith('inbox_lists/')
+      switch (event.type) {
+        case 'created':
+        case 'changed':
+        case 'deleted':
+          if (event.path && matches(event.path)) triggerLiveReload()
+          break
+        case 'moved':
+          if ((event.from && matches(event.from)) || (event.to && matches(event.to))) triggerLiveReload()
+          break
+        case 'bulkChanged':
+          if (event.paths?.some(matches)) triggerLiveReload()
+          break
+      }
+    })
+    return () => {
+      cleanup()
+      if (reloadDebounceRef.current) clearTimeout(reloadDebounceRef.current)
+    }
+  }, [triggerLiveReload])
+
+  // When user closes a thread, if updates arrived while they were reading, flush now.
+  useEffect(() => {
+    if (selectedThreadId !== null) return
+    if (!pendingReloadRef.current) return
+    pendingReloadRef.current = false
+    void reloadFirstPage('important')
+    setOther(() => ({ ...initialSectionState }))
+  }, [selectedThreadId, reloadFirstPage])
+
+  // Live refresh: hit the Gmail API to validate the freshest threads, then re-render.
+  const refresh = useCallback(async () => {
+    if (refreshing) return
+    setRefreshing(true)
+    setError(null)
+    try {
+      // TEMP(pagination-testing): widened from daysAgo: 2 to pull more threads into inbox_lists/ for testing. Revert before shipping.
+      const list = await window.ipc.invoke('gmail:listRecentThreads', { daysAgo: 7 })
+      if (list.error) throw new Error(list.error)
+      await mapWithConcurrency(list.threads, 6, async (item) => {
         const result = await window.ipc.invoke('gmail:getThread', {
           threadId: item.threadId,
           expectedHistoryId: item.historyId,
         })
-        if (result.thread) return result.thread
-        console.warn('Failed to hydrate Gmail thread', item.threadId, result.error)
-        return null
+        if (!result.thread) {
+          console.warn('Failed to hydrate Gmail thread', item.threadId, result.error)
+        }
       })
-
-      const nextThreads = hydrated
-        .filter((thread): thread is GmailThread => Boolean(thread))
-        .sort((a, b) => {
-          const aDate = Date.parse(latestMessage(a)?.date || a.date || '')
-          const bDate = Date.parse(latestMessage(b)?.date || b.date || '')
-          return (Number.isNaN(bDate) ? 0 : bDate) - (Number.isNaN(aDate) ? 0 : aDate)
-        })
-
-      const liveIds = new Set(nextThreads.map((t) => t.threadId))
-      setThreads(nextThreads)
-      setSelectedThreadId(current => current && liveIds.has(current) ? current : null)
-      setOpenedThreadIds((prev) => prev.filter((id) => liveIds.has(id)))
+      // Reset Other so the auto-load effect re-triggers once Important hits end.
+      setOther(() => ({ ...initialSectionState }))
+      await reloadFirstPage('important')
     } catch (err) {
-      if (hasCachedContent) {
-        console.warn('[Gmail] background refresh failed; keeping cached view:', err)
-      } else {
-        setError(err instanceof Error ? err.message : String(err))
-        setThreads([])
-        setSelectedThreadId(null)
-      }
+      console.warn('[Gmail] live refresh failed:', err)
+      setError(err instanceof Error ? err.message : String(err))
     } finally {
-      setLoading(false)
+      setRefreshing(false)
     }
+  }, [refreshing, reloadFirstPage])
+
+  // Kick off a live refresh on mount only when there's no persisted data —
+  // otherwise we'd clobber the snapshot the user already had.
+  useEffect(() => {
+    if (hadPersistedDataOnMount.current) return
+    void refresh()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  useEffect(() => {
-    void loadThreads()
-  }, [loadThreads])
-
-  const filteredThreads = useMemo(() => {
+  const filterThreads = useCallback((threads: GmailThread[]) => {
     const normalized = query.trim().toLowerCase()
     if (!normalized) return threads
     return threads.filter((thread) => {
@@ -780,21 +920,13 @@ export function EmailView() {
         latest?.body,
       ].some(value => (value || '').toLowerCase().includes(normalized))
     })
-  }, [query, threads])
+  }, [query])
 
-  const { importantThreads, otherThreads } = useMemo(() => {
-    const important: GmailThread[] = []
-    const other: GmailThread[] = []
-    for (const thread of filteredThreads) {
-      // Default unclassified threads to Important so we don't hide anything
-      // before the classifier has run on them.
-      if (thread.importance === 'other') other.push(thread)
-      else important.push(thread)
-    }
-    return { importantThreads: important, otherThreads: other }
-  }, [filteredThreads])
+  const visibleImportant = useMemo(() => filterThreads(important.threads), [important.threads, filterThreads])
+  const visibleOther = useMemo(() => filterThreads(other.threads), [other.threads, filterThreads])
 
-  const hasThreads = filteredThreads.length > 0
+  const hasAny = important.threads.length > 0 || other.threads.length > 0
+  const initialLoading = !hasAny && refreshing
 
   const renderRow = (thread: GmailThread) => {
     const latest = latestMessage(thread)
@@ -838,43 +970,91 @@ export function EmailView() {
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search mail"
+              placeholder="Search loaded mail"
             />
           </div>
-          <button type="button" className="gmail-icon-button" onClick={() => void loadThreads()} aria-label="Refresh">
-            {loading ? <LoaderIcon size={18} className="animate-spin" /> : <RefreshCw size={18} />}
+          <button type="button" className="gmail-icon-button" onClick={() => void refresh()} aria-label="Refresh">
+            {refreshing ? <LoaderIcon size={18} className="animate-spin" /> : <RefreshCw size={18} />}
           </button>
         </div>
 
-        {error ? (
+        {error && !hasAny ? (
           <div className="gmail-empty-state">Could not load mail: {error}</div>
-        ) : hasThreads ? (
+        ) : hasAny ? (
           <div className="gmail-list" aria-label="Recent emails">
-            {importantThreads.length > 0 && (
+            {important.threads.length > 0 && (
               <section className="gmail-section">
                 <div className="gmail-list-header">
                   <span>Important</span>
-                  <span>{importantThreads.length} thread{importantThreads.length === 1 ? '' : 's'}</span>
+                  <span>
+                    {important.threads.length}{important.hasReachedEnd ? '' : '+'} thread{important.threads.length === 1 ? '' : 's'}
+                  </span>
                 </div>
-                {importantThreads.map(renderRow)}
+                {visibleImportant.map(renderRow)}
+                {!important.hasReachedEnd && (
+                  <SectionSentinel
+                    disabled={important.loadingPage || important.hasReachedEnd}
+                    onIntersect={() => loadNextPage('important')}
+                    loading={important.loadingPage}
+                  />
+                )}
               </section>
             )}
-            {otherThreads.length > 0 && (
+            {important.hasReachedEnd && other.threads.length > 0 && (
               <section className="gmail-section">
                 <div className="gmail-list-header">
                   <span>Everything else</span>
-                  <span>{otherThreads.length} thread{otherThreads.length === 1 ? '' : 's'}</span>
+                  <span>
+                    {other.threads.length}{other.hasReachedEnd ? '' : '+'} thread{other.threads.length === 1 ? '' : 's'}
+                  </span>
                 </div>
-                {otherThreads.map(renderRow)}
+                {visibleOther.map(renderRow)}
+                {!other.hasReachedEnd && (
+                  <SectionSentinel
+                    disabled={other.loadingPage || other.hasReachedEnd}
+                    onIntersect={() => loadNextPage('other')}
+                    loading={other.loadingPage}
+                  />
+                )}
               </section>
             )}
           </div>
         ) : (
           <div className="gmail-empty-state">
-            {loading ? 'Loading recent Gmail threads...' : 'No Gmail threads found from the last 2 days.'}
+            {initialLoading ? 'Loading Gmail threads…' : 'No Gmail threads in your inbox cache yet.'}
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+function SectionSentinel({
+  disabled,
+  onIntersect,
+  loading,
+}: {
+  disabled: boolean
+  onIntersect: () => void
+  loading: boolean
+}) {
+  const sentinelRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (disabled) return
+    const el = sentinelRef.current
+    if (!el) return
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        onIntersect()
+      }
+    }, { rootMargin: '200px' })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [disabled, onIntersect])
+
+  return (
+    <div ref={sentinelRef} className="gmail-section-sentinel" aria-hidden>
+      {loading ? <LoaderIcon size={14} className="animate-spin" /> : null}
     </div>
   )
 }
