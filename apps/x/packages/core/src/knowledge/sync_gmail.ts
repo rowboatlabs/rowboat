@@ -95,6 +95,7 @@ export interface GmailThreadSnapshot {
     unread?: boolean;
     importance?: 'important' | 'other';
     draft_response?: string;
+    gmail_draft?: string;
     messages: Array<{
         id?: string;
         from?: string;
@@ -452,6 +453,7 @@ export async function fetchThreadSnapshot(threadId: string, expectedHistoryId?: 
                 bodyHtml = parts.html;
             }
         }
+        const isDraft = msg.labelIds?.includes('DRAFT') ?? false;
         return {
             id: msg.id || undefined,
             from: headerValue(headers, 'From') || 'Unknown',
@@ -463,11 +465,24 @@ export async function fetchThreadSnapshot(threadId: string, expectedHistoryId?: 
             bodyHtml,
             unread: msg.labelIds?.includes('UNREAD') ?? false,
             bodyHeight: msg.id ? heightCarryover.get(msg.id) : undefined,
+            isDraft,
         };
     }));
 
-    const latest = parsed[parsed.length - 1]!;
-    const earlier = parsed.slice(0, -1);
+    const sentMessages = parsed.filter((m) => !m.isDraft);
+    const draftMessages = parsed.filter((m) => m.isDraft);
+    // Drop the isDraft helper field from outgoing messages — it's internal.
+    const visibleMessages = sentMessages.map(({ isDraft: _isDraft, ...rest }) => rest);
+    const latestDraftBody = draftMessages.length > 0
+        ? draftMessages[draftMessages.length - 1]!.body.trim()
+        : '';
+
+    // A thread with no sent messages (only a draft) shouldn't show up in the inbox —
+    // skip caching it. Once the user actually sends, the thread reappears with a real message.
+    if (visibleMessages.length === 0) return null;
+
+    const latest = visibleMessages[visibleMessages.length - 1]!;
+    const earlier = visibleMessages.slice(0, -1);
     const earlierSummary = earlier
         .map((msg) => {
             const date = msg.date ? ` (${msg.date})` : '';
@@ -480,19 +495,23 @@ export async function fetchThreadSnapshot(threadId: string, expectedHistoryId?: 
     const snapshot: GmailThreadSnapshot = {
         threadId,
         threadUrl: `https://mail.google.com/mail/u/0/#all/${threadId}`,
-        subject: latest.subject || parsed[0]?.subject,
+        subject: latest.subject || visibleMessages[0]?.subject,
         from: latest.from,
         to: latest.to,
         date: latest.date,
         latest_email: latest.body,
         past_summary: earlierSummary || undefined,
-        unread: parsed.some((m) => m.unread),
-        messages: parsed,
+        unread: visibleMessages.some((m) => m.unread),
+        messages: visibleMessages,
+        gmail_draft: latestDraftBody || undefined,
     };
 
     try {
         const userEmail = await getUserEmail(auth);
-        const classification = await classifyThread(snapshot, userEmail);
+        // If the user already has a Gmail-side draft going, skip the AI draft generation —
+        // the renderer will prefer the Gmail draft anyway, and we save an LLM call.
+        const skipDraft = latestDraftBody.length > 0;
+        const classification = await classifyThread(snapshot, userEmail, { skipDraft });
         snapshot.importance = classification.importance;
         if (classification.summary) snapshot.summary = classification.summary;
         if (classification.draftResponse) snapshot.draft_response = classification.draftResponse;

@@ -122,6 +122,7 @@ export const GmailThreadSchema = EmailBlockSchema.extend({
   threadUrl: z.string().url(),
   unread: z.boolean().optional(),
   importance: z.enum(['important', 'other']).optional(),
+  gmail_draft: z.string().optional(),
   messages: z.array(GmailThreadMessageSchema),
 });
 

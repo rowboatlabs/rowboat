@@ -196,9 +196,14 @@ function buildPrompt(
     return lines.join('\n');
 }
 
+export interface ClassifyOptions {
+    skipDraft?: boolean;
+}
+
 export async function classifyThread(
     snapshot: GmailThreadSnapshot,
     userEmail: string | null,
+    options: ClassifyOptions = {},
 ): Promise<Classification> {
     if (userReplied(snapshot, userEmail)) {
         return { importance: 'important' };
@@ -213,9 +218,13 @@ export async function classifyThread(
         const config = await resolveProviderConfig(provider);
         const model = createProvider(config).languageModel(modelId);
 
+        const systemPrompt = options.skipDraft
+            ? `${SYSTEM_PROMPT}\n\n# Skip the draft\n\nThe user already has their own draft in progress for this thread — DO NOT generate a draftResponse. Always omit the draftResponse field.`
+            : SYSTEM_PROMPT;
+
         const result = await generateObject({
             model,
-            system: SYSTEM_PROMPT,
+            system: systemPrompt,
             prompt: buildPrompt(snapshot, userEmail, styleGuide, calendar),
             schema: ClassificationSchema,
         });
@@ -231,7 +240,7 @@ export async function classifyThread(
         const out: Classification = { importance: result.object.importance };
         if (result.object.importance === 'important') {
             if (result.object.summary) out.summary = result.object.summary;
-            if (result.object.draftResponse) out.draftResponse = result.object.draftResponse;
+            if (!options.skipDraft && result.object.draftResponse) out.draftResponse = result.object.draftResponse;
         }
         return out;
     } catch (err) {

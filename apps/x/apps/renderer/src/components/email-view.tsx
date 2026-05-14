@@ -399,12 +399,15 @@ function ComposeBox({
   const to = mode === 'reply' ? extractAddress(latest?.from) : ''
 
   const initialContent = useMemo(() => {
-    if (mode !== 'reply' || !thread.draft_response) return ''
-    return thread.draft_response
+    if (mode !== 'reply') return ''
+    // Gmail-side draft (user's own work) wins over the AI-generated draft.
+    const source = thread.gmail_draft || thread.draft_response
+    if (!source) return ''
+    return source
       .split(/\n{2,}/)
       .map((para) => `<p>${escapeHtml(para).replace(/\n/g, '<br />')}</p>`)
       .join('')
-  }, [mode, thread.draft_response])
+  }, [mode, thread.gmail_draft, thread.draft_response])
 
   const editor = useEditor({
     extensions: [
