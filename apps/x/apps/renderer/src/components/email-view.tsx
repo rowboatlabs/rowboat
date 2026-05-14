@@ -466,6 +466,42 @@ function ComposeBox({
     if (editor && sel) editor.chain().focus().setTextSelection(sel).run()
   }
 
+  const sendInGmail = async () => {
+    if (!editor) {
+      window.open(thread.threadUrl, '_blank')
+      return
+    }
+    const html = editor.getHTML()
+    const text = editor.getText().trim()
+
+    let copied = false
+    if (text) {
+      try {
+        if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
+          await navigator.clipboard.write([
+            new ClipboardItem({
+              'text/html': new Blob([html], { type: 'text/html' }),
+              'text/plain': new Blob([text], { type: 'text/plain' }),
+            }),
+          ])
+          copied = true
+        } else if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(text)
+          copied = true
+        }
+      } catch (err) {
+        console.warn('[Gmail] clipboard write failed:', err)
+      }
+    }
+
+    window.open(thread.threadUrl, '_blank')
+    if (copied) {
+      toast('Draft copied — open the reply in Gmail and paste.', 'info')
+    } else if (text) {
+      toast('Could not copy draft. Open Gmail and paste manually.', 'error')
+    }
+  }
+
   const refineWithCopilot = () => {
     if (!editor) return
     const currentDraft = editor.getText().trim()
@@ -540,9 +576,8 @@ function ComposeBox({
           <button
             type="button"
             className="gmail-send-button"
-            onClick={() => {
-              toast('Sending from this view needs Gmail send scope. Draft UI is ready.', 'info')
-            }}
+            onClick={() => { void sendInGmail() }}
+            title="Copy draft and open this thread in Gmail"
           >
             <Send size={15} />
             Send
