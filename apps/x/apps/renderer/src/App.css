@@ -232,6 +232,10 @@
   color: var(--gm-text-faint);
 }
 
+.gmail-row-shell {
+  position: relative;
+}
+
 .gmail-row {
   display: grid;
   grid-template-columns: 12px minmax(140px, 0.22fr) minmax(0, 1fr) 60px;
@@ -247,6 +251,51 @@
   cursor: pointer;
   font-family: inherit;
   transition: background 120ms ease;
+}
+
+.gmail-row-actions {
+  position: absolute;
+  right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.gmail-row-shell:hover .gmail-row-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.gmail-row-shell:hover .gmail-row-date {
+  visibility: hidden;
+}
+
+.gmail-row-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--gm-text-muted);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.gmail-row-action:hover {
+  background: var(--gm-bg-pill-hover);
+  color: var(--gm-text-strong);
+}
+
+.gmail-row-action-danger:hover {
+  color: #e8453c;
 }
 
 .gmail-row:hover {

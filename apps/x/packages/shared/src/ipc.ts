@@ -163,6 +163,18 @@ const ipcSchemas = {
       error: z.string().optional(),
     }),
   },
+  'gmail:archiveThread': {
+    req: z.object({ threadId: z.string().min(1) }),
+    res: z.object({ ok: z.boolean(), error: z.string().optional() }),
+  },
+  'gmail:trashThread': {
+    req: z.object({ threadId: z.string().min(1) }),
+    res: z.object({ ok: z.boolean(), error: z.string().optional() }),
+  },
+  'gmail:markThreadRead': {
+    req: z.object({ threadId: z.string().min(1) }),
+    res: z.object({ ok: z.boolean(), error: z.string().optional() }),
+  },
   'gmail:saveMessageHeight': {
     req: z.object({
       threadId: z.string().min(1),
