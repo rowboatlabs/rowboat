@@ -872,8 +872,10 @@ export function EmailView() {
   }, [selectedThreadId, reloadFirstPage])
 
   // Live refresh: hit the Gmail API to validate the freshest threads, then re-render.
+  const refreshInFlightRef = useRef(false)
   const refresh = useCallback(async () => {
-    if (refreshing) return
+    if (refreshInFlightRef.current) return
+    refreshInFlightRef.current = true
     setRefreshing(true)
     setError(null)
     try {
@@ -896,9 +898,10 @@ export function EmailView() {
       console.warn('[Gmail] live refresh failed:', err)
       setError(err instanceof Error ? err.message : String(err))
     } finally {
+      refreshInFlightRef.current = false
       setRefreshing(false)
     }
-  }, [refreshing, reloadFirstPage])
+  }, [reloadFirstPage])
 
   // Kick off a live refresh on mount only when there's no persisted data —
   // otherwise we'd clobber the snapshot the user already had.
