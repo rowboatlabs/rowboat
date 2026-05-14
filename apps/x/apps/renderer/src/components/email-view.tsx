@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Bold, Forward, Italic, Link as LinkIcon, List, ListOrdered, LoaderIcon, Quote, RefreshCw, Reply, Search, Send, Sparkles, Strikethrough } from 'lucide-react'
+import { Archive, Bold, CheckCheck, Forward, Italic, Link as LinkIcon, List, ListOrdered, LoaderIcon, Quote, RefreshCw, Reply, Search, Send, Sparkles, Strikethrough, Trash2 } from 'lucide-react'
 import { useEditor, EditorContent, type Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
@@ -764,18 +764,75 @@ export function EmailView() {
     else setOther(updater)
   }, [])
 
-  const toggleThread = useCallback((threadId: string) => {
+  const updateThreadInState = useCallback((threadId: string, updater: (t: GmailThread) => GmailThread) => {
+    const mapSection = (prev: SectionState): SectionState => ({
+      ...prev,
+      threads: prev.threads.map((t) => (t.threadId === threadId ? updater(t) : t)),
+    })
+    setImportant(mapSection)
+    setOther(mapSection)
+  }, [])
+
+  const removeThreadFromState = useCallback((threadId: string) => {
+    const filterSection = (prev: SectionState): SectionState => ({
+      ...prev,
+      threads: prev.threads.filter((t) => t.threadId !== threadId),
+    })
+    setImportant(filterSection)
+    setOther(filterSection)
+    setSelectedThreadId((current) => (current === threadId ? null : current))
+    setOpenedThreadIds((prev) => prev.filter((id) => id !== threadId))
+  }, [])
+
+  const markThreadReadAction = useCallback(async (threadId: string) => {
+    updateThreadInState(threadId, (t) => ({
+      ...t,
+      unread: false,
+      messages: t.messages.map((m) => ({ ...m, unread: false })),
+    }))
+    try {
+      const result = await window.ipc.invoke('gmail:markThreadRead', { threadId })
+      if (!result.ok && result.error) console.warn('[Gmail] mark-read failed:', result.error)
+    } catch (err) {
+      console.warn('[Gmail] mark-read failed:', err)
+    }
+  }, [updateThreadInState])
+
+  const archiveThreadAction = useCallback(async (threadId: string) => {
+    removeThreadFromState(threadId)
+    try {
+      const result = await window.ipc.invoke('gmail:archiveThread', { threadId })
+      if (!result.ok && result.error) toast(`Archive failed: ${result.error}`, 'error')
+    } catch (err) {
+      toast(`Archive failed: ${err instanceof Error ? err.message : String(err)}`, 'error')
+    }
+  }, [removeThreadFromState])
+
+  const trashThreadAction = useCallback(async (threadId: string) => {
+    removeThreadFromState(threadId)
+    try {
+      const result = await window.ipc.invoke('gmail:trashThread', { threadId })
+      if (!result.ok && result.error) toast(`Delete failed: ${result.error}`, 'error')
+    } catch (err) {
+      toast(`Delete failed: ${err instanceof Error ? err.message : String(err)}`, 'error')
+    }
+  }, [removeThreadFromState])
+
+  const toggleThread = useCallback((thread: GmailThread) => {
     setSelectedThreadId((current) => {
-      const next = current === threadId ? null : threadId
+      const next = current === thread.threadId ? null : thread.threadId
       if (next) {
         setOpenedThreadIds((prev) => {
           const without = prev.filter((id) => id !== next)
           return [...without, next].slice(-MAX_KEPT_OPEN)
         })
+        if (thread.unread) {
+          void markThreadReadAction(thread.threadId)
+        }
       }
       return next
     })
-  }, [])
+  }, [markThreadReadAction])
 
   const prefetchedRef = useRef<Set<string>>(new Set())
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -991,23 +1048,61 @@ export function EmailView() {
     const isSelected = thread.threadId === selectedThreadId
     const isUnread = thread.unread === true
     const isMounted = openedThreadIds.includes(thread.threadId)
+    const stop = (e: React.MouseEvent | React.KeyboardEvent) => {
+      e.stopPropagation()
+    }
     return (
       <div key={thread.threadId} className="gmail-row-group">
-        <button
-          type="button"
-          className={cn('gmail-row', isSelected && 'gmail-row-selected', isUnread && 'gmail-row-unread')}
-          onClick={() => toggleThread(thread.threadId)}
+        <div
+          className={cn('gmail-row-shell', isSelected && 'gmail-row-shell-selected')}
           onMouseEnter={() => scheduleHoverPrefetch(thread)}
           onMouseLeave={cancelHoverPrefetch}
         >
-          <span className="gmail-row-dot" aria-hidden />
-          <span className="gmail-row-sender">{extractName(latest?.from || thread.from)}</span>
-          <span className="gmail-row-content">
-            <strong>{thread.summary || thread.subject || '(No subject)'}</strong>
-            <span>{thread.summary ? thread.subject : snippet(latest?.body || thread.latest_email)}</span>
-          </span>
-          <span className="gmail-row-date">{formatInboxTime(latest?.date || thread.date)}</span>
-        </button>
+          <button
+            type="button"
+            className={cn('gmail-row', isSelected && 'gmail-row-selected', isUnread && 'gmail-row-unread')}
+            onClick={() => toggleThread(thread)}
+          >
+            <span className="gmail-row-dot" aria-hidden />
+            <span className="gmail-row-sender">{extractName(latest?.from || thread.from)}</span>
+            <span className="gmail-row-content">
+              <strong>{thread.summary || thread.subject || '(No subject)'}</strong>
+              <span>{thread.summary ? thread.subject : snippet(latest?.body || thread.latest_email)}</span>
+            </span>
+            <span className="gmail-row-date">{formatInboxTime(latest?.date || thread.date)}</span>
+          </button>
+          <div className="gmail-row-actions" onMouseDown={stop} onClick={stop}>
+            {isUnread && (
+              <button
+                type="button"
+                className="gmail-row-action"
+                title="Mark as read"
+                aria-label="Mark as read"
+                onClick={(e) => { stop(e); void markThreadReadAction(thread.threadId) }}
+              >
+                <CheckCheck size={15} />
+              </button>
+            )}
+            <button
+              type="button"
+              className="gmail-row-action"
+              title="Archive"
+              aria-label="Archive"
+              onClick={(e) => { stop(e); void archiveThreadAction(thread.threadId) }}
+            >
+              <Archive size={15} />
+            </button>
+            <button
+              type="button"
+              className="gmail-row-action gmail-row-action-danger"
+              title="Delete"
+              aria-label="Delete"
+              onClick={(e) => { stop(e); void trashThreadAction(thread.threadId) }}
+            >
+              <Trash2 size={15} />
+            </button>
+          </div>
+        </div>
         {isMounted && (
           <ThreadDetail
             thread={thread}

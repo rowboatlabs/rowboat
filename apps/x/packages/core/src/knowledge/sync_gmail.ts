@@ -77,6 +77,76 @@ export function saveMessageBodyHeight(threadId: string, messageId: string, heigh
     }
 }
 
+function deleteCachedSnapshot(threadId: string): void {
+    try {
+        fs.rmSync(cachePath(threadId), { force: true });
+    } catch (err) {
+        console.warn(`[Gmail cache] delete failed for ${threadId}:`, err);
+    }
+}
+
+async function getGmailClientOrThrow() {
+    const auth = await GoogleClientFactory.getClient();
+    if (!auth) throw new Error('Gmail is not connected.');
+    return google.gmail({ version: 'v1', auth });
+}
+
+export interface ThreadActionResult {
+    ok: boolean;
+    error?: string;
+}
+
+export async function archiveThread(threadId: string): Promise<ThreadActionResult> {
+    try {
+        const gmailClient = await getGmailClientOrThrow();
+        await gmailClient.users.threads.modify({
+            userId: 'me',
+            id: threadId,
+            requestBody: { removeLabelIds: ['INBOX'] },
+        });
+        deleteCachedSnapshot(threadId);
+        return { ok: true };
+    } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+}
+
+export async function trashThread(threadId: string): Promise<ThreadActionResult> {
+    try {
+        const gmailClient = await getGmailClientOrThrow();
+        await gmailClient.users.threads.trash({ userId: 'me', id: threadId });
+        deleteCachedSnapshot(threadId);
+        return { ok: true };
+    } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+}
+
+export async function markThreadRead(threadId: string): Promise<ThreadActionResult> {
+    try {
+        const gmailClient = await getGmailClientOrThrow();
+        await gmailClient.users.threads.modify({
+            userId: 'me',
+            id: threadId,
+            requestBody: { removeLabelIds: ['UNREAD'] },
+        });
+        // Update local cache: clear unread on all messages in the thread.
+        const cached = readCachedSnapshot(threadId);
+        if (cached) {
+            for (const m of cached.snapshot.messages) m.unread = false;
+            cached.snapshot.unread = false;
+            try {
+                fs.writeFileSync(cachePath(threadId), JSON.stringify(cached), 'utf-8');
+            } catch (err) {
+                console.warn(`[Gmail cache] markRead write failed for ${threadId}:`, err);
+            }
+        }
+        return { ok: true };
+    } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+}
+
 interface SyncedThread {
     threadId: string;
     markdown: string;
