@@ -391,12 +391,21 @@ app.whenReady().then(async () => {
   initCalendarNotifications();
 
   // start meeting-detect service (mic-in-use detection -> popup asking if user wants notes)
+  //
+  // Popup style — flip this one constant to switch the meeting-detect prompt
+  // between the custom Notion-style top-center toast and the native OS
+  // notification. Doesn't affect the separate calendar 1-min warnings.
+  //   false (default) → custom toast
+  //   true            → native OS notification
+  const USE_NATIVE_NOTIFICATION_FOR_MEETING_DETECT = false;
+
   const meetingDetector = createPlatformDetector();
   if (meetingDetector) {
     const meetingDetectService = new MeetingDetectService({
       detector: meetingDetector,
       notifier: notificationService,
       suppression: new Suppression(),
+      toast: USE_NATIVE_NOTIFICATION_FOR_MEETING_DETECT ? null : undefined,
     });
     meetingDetectService.start().catch((err) => {
       console.error("[MeetingDetect] failed to start:", err);
