@@ -317,11 +317,13 @@ const ipcSchemas = {
   },
   'app:takeMeetingNotes': {
     req: z.object({
-      // Pass the raw calendar event JSON through; renderer adapts to its existing flow.
+      // Calendar event JSON when correlated; null for mic-detect ad-hoc fires.
       event: z.unknown(),
       // When true, the renderer should also open the meeting URL (Zoom/Meet/etc.)
       // in addition to triggering the take-notes flow.
       openMeeting: z.boolean().optional(),
+      // Fallback title for ad-hoc detection (no calendar event matched).
+      title: z.string().nullable().optional(),
     }),
     res: z.null(),
   },
