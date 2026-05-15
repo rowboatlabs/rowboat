@@ -53,7 +53,16 @@ export class MeetingDetectService {
             this.pending.add(work);
             void work.finally(() => this.pending.delete(work));
         });
+        this.detector.on("meeting-cleared", (event) => {
+            // Mic released → drop the session's suppression so the next call
+            // (same Chrome process, new Meet) can fire again.
+            this.suppression.clearSession(event.sessionKey).catch((err) => {
+                console.error("[MeetingDetect] clearSession failed:", err);
+            });
+            console.log(`[MeetingDetect] session cleared: ${event.sessionKey}`);
+        });
         this.detector.start();
+        console.log("[MeetingDetect] service started — polling for meeting apps holding the mic");
     }
 
     stop(): void {
@@ -68,7 +77,11 @@ export class MeetingDetectService {
     }
 
     private async handleActive(event: MeetingActiveEvent): Promise<void> {
-        if (!this.suppression.shouldNotify(event.sessionKey, event.executable)) return;
+        console.log(`[MeetingDetect] active: ${event.executable} (kind=${event.kind})`);
+        if (!this.suppression.shouldNotify(event.sessionKey, event.executable)) {
+            console.log(`[MeetingDetect] suppressed (already notified or muted): ${event.sessionKey}`);
+            return;
+        }
 
         // For browsers we MUST confirm the foreground tab is a meeting page —
         // otherwise we'd popup for YouTube, Spotify web, etc.

@@ -93,6 +93,18 @@ export class Suppression {
         await this.persist();
     }
 
+    /**
+     * Clear the notified mark for a session. Called when the detector observes
+     * the mic being released — without this, on Windows (no pid in sessionKey)
+     * the same browser would never re-fire because every new Meet call reuses
+     * the same exe-keyed session.
+     */
+    async clearSession(sessionKey: string): Promise<void> {
+        if (!this.state.notifiedSessions[sessionKey]) return;
+        delete this.state.notifiedSessions[sessionKey];
+        await this.persist();
+    }
+
     async markDismissed(executable: string, now: Date = new Date()): Promise<void> {
         this.state.recentlyDismissed[dismissKeyFor(executable)] = { dismissedAt: now.toISOString() };
         await this.persist();
