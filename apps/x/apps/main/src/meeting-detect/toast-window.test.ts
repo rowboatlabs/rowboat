@@ -2,31 +2,41 @@ import { describe, it, expect } from "vitest";
 import { buildToastHtml } from "./toast-window.js";
 
 describe("buildToastHtml", () => {
-    it("renders title, message, action label, and a primary link to the rowboat deeplink", () => {
+    it("renders title, subtitle, CTA and a link to the rowboat deeplink", () => {
         const html = buildToastHtml({
-            title: "You're in a meeting",
-            message: "Detected on Google Meet. Click to take notes.",
-            actionLabel: "Take notes",
+            title: "You are in a meeting",
+            subtitle: "Detected on Google Meet",
+            actionLabel: "Start taking notes",
             actionLink: "rowboat://action?type=take-meeting-notes&title=Meeting%20Notes%20-%20Meet",
         });
 
-        expect(html).toContain("You&#39;re in a meeting");
+        expect(html).toContain("You are in a meeting");
         expect(html).toContain("Detected on Google Meet");
-        expect(html).toContain("Take notes");
+        expect(html).toContain("Start taking notes");
         expect(html).toContain("rowboat://action?type=take-meeting-notes");
+    });
+
+    it("includes the rowboat wordmark and accessibility attributes", () => {
+        const html = buildToastHtml({
+            title: "x", subtitle: "y", actionLabel: "Go", actionLink: "rowboat://action",
+        });
+        expect(html).toContain(">rowboat<");
+        expect(html).toContain('role="alert"');
+        expect(html).toContain('aria-live="polite"');
+        expect(html).toContain('aria-label="Dismiss meeting notification"');
     });
 
     it("includes a dismiss link the window will intercept", () => {
         const html = buildToastHtml({
-            title: "x", message: "y", actionLabel: "Go", actionLink: "rowboat://action",
+            title: "x", subtitle: "y", actionLabel: "Go", actionLink: "rowboat://action",
         });
         expect(html).toContain("rowboat-toast://dismiss");
     });
 
-    it("escapes HTML in title/message so a Meet titled `<script>` can't break the toast", () => {
+    it("escapes HTML in title/subtitle so a Meet titled `<script>` can't break the toast", () => {
         const html = buildToastHtml({
             title: "<script>alert(1)</script>",
-            message: "& < > \" '",
+            subtitle: "& < > \" '",
             actionLabel: "ok",
             actionLink: "rowboat://action",
         });
@@ -37,7 +47,7 @@ describe("buildToastHtml", () => {
 
     it("escapes the action link so a malicious title in the URL can't break out of the href quotes", () => {
         const html = buildToastHtml({
-            title: "x", message: "y", actionLabel: "ok",
+            title: "x", subtitle: "y", actionLabel: "ok",
             actionLink: `rowboat://action?title=evil"onerror=alert(1)`,
         });
         expect(html).not.toContain(`"onerror=alert(1)`);

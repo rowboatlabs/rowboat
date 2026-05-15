@@ -34,7 +34,7 @@ describe("buildPopup", () => {
 
     it("falls back to ad-hoc copy when no calendar match", () => {
         const popup = buildPopup("zoom", null, null);
-        expect(popup?.notify.title).toBe("You're in a meeting");
+        expect(popup?.notify.title).toBe("You are in a meeting");
         expect(popup?.notify.link).toContain("title=");
         expect(popup?.notify.link).not.toContain("eventId=");
         // Default ad-hoc title (no precomputed counter) is "Meeting Notes - Zoom".
@@ -156,10 +156,10 @@ describe("MeetingDetectService end-to-end", () => {
     });
 
     it("uses the toast renderer when provided instead of the native notifier", async () => {
-        const calls: Array<{ title: string; message: string; actionLink: string }> = [];
+        const calls: Array<{ title: string; subtitle: string; actionLink: string }> = [];
         const toast = {
-            show(p: { title: string; message: string; actionLabel: string; actionLink: string }) {
-                calls.push({ title: p.title, message: p.message, actionLink: p.actionLink });
+            show(p: { title: string; subtitle: string; actionLabel: string; actionLink: string }) {
+                calls.push({ title: p.title, subtitle: p.subtitle, actionLink: p.actionLink });
             },
         };
         const service = new MeetingDetectService({
@@ -178,7 +178,8 @@ describe("MeetingDetectService end-to-end", () => {
 
         expect(notifier.sent).toHaveLength(0);
         expect(calls).toHaveLength(1);
-        expect(calls[0].title).toBe("You're in a meeting");
+        expect(calls[0].title).toBe("You are in a meeting");
+        expect(calls[0].subtitle).toContain("Zoom");
         expect(calls[0].actionLink).toContain("take-meeting-notes");
     });
 

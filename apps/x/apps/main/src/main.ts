@@ -50,6 +50,7 @@ import {
   MeetingDetectService,
   Suppression,
 } from "./meeting-detect/index.js";
+import { MeetingToastWindow } from "./meeting-detect/toast-window.js";
 import {
   DEEP_LINK_SCHEME,
   dispatchUrl,
@@ -241,6 +242,29 @@ function createWindow() {
 
   setMainWindowForDeepLinks(win);
   win.on("closed", () => setMainWindowForDeepLinks(null));
+
+  // Dev-only: Ctrl+Shift+T fires a fake meeting-detect toast so we can
+  // iterate on the toast UI without joining a real Meet. Scoped to the
+  // main window's input events so it can't collide with browser/OS chords.
+  if (!app.isPackaged) {
+    win.webContents.on("before-input-event", (event, input) => {
+      const isToggle =
+        input.type === "keyDown" &&
+        input.control && input.shift && !input.alt && !input.meta &&
+        input.key.toLowerCase() === "t";
+      if (!isToggle) return;
+      event.preventDefault();
+      new MeetingToastWindow().show({
+        title: "You are in a meeting",
+        subtitle: "Detected on Google Meet",
+        actionLabel: "Start taking notes",
+        actionLink:
+          "rowboat://action?type=take-meeting-notes&title=" +
+          encodeURIComponent("Meeting Notes - Meet"),
+      });
+      console.log("[MeetingDetect] dev toast triggered (Ctrl+Shift+T)");
+    });
+  }
 
   // Show window when content is ready to prevent blank screen
   win.once("ready-to-show", () => {
