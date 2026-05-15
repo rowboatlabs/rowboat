@@ -17,6 +17,7 @@ import { UserMessageContent } from './message.js';
 import { RowboatApiConfig } from './rowboat-account.js';
 import { ZListToolkitsResponse } from './composio.js';
 import { BrowserStateSchema } from './browser-control.js';
+import { ResolvedSkill, SkillCatalogEntry } from './skill.js';
 
 // ============================================================================
 // Runtime Validation Schemas (Single Source of Truth)
@@ -874,6 +875,17 @@ const ipcSchemas = {
   'browser:didUpdateState': {
     req: BrowserStateSchema,
     res: z.null(),
+  },
+  // Skills channels (read-only)
+  'skills:list': {
+    req: z.null(),
+    res: z.object({
+      skills: z.array(SkillCatalogEntry),
+    }),
+  },
+  'skills:get': {
+    req: z.object({ id: z.string() }),
+    res: ResolvedSkill.nullable(),
   },
   // Billing channels
   'billing:getInfo': {

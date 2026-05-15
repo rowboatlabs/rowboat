@@ -14,6 +14,9 @@ module.exports = {
         protocols: [
             { name: 'Rowboat', schemes: ['rowboat'] },
         ],
+        // Bundles <repo>/apps/skills/ into Resources/skills/ in the packaged app.
+        // Read at runtime via process.resourcesPath in main.ts (resolveSkillsDir).
+        extraResource: [path.join(__dirname, '../../../skills')],
         extendInfo: {
             NSAudioCaptureUsageDescription: 'Rowboat needs access to system audio to transcribe meetings from other apps (Zoom, Meet, etc.)',
         },

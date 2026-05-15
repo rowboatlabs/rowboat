@@ -1,10 +1,12 @@
 import z from 'zod';
 import { Agent, ToolAttachment } from '@x/shared/dist/agent.js';
 import { BuiltinTools } from '../application/lib/builtin-tools.js';
-import { KNOWLEDGE_NOTE_STYLE_GUIDE } from '../application/lib/knowledge-note-style.js';
+import container from '../di/container.js';
+import type { ISkillResolver } from '../skills/resolver.js';
 import { WorkDir } from '../config/config.js';
 
-export const BACKGROUND_TASK_AGENT_INSTRUCTIONS = `You are the background-task agent — a self-running agent that fires on a schedule and/or in response to incoming events to act on persistent **instructions** the user wrote.
+function buildInstructions(knowledgeNoteStyle: string): string {
+  return `You are the background-task agent — a self-running agent that fires on a schedule and/or in response to incoming events to act on persistent **instructions** the user wrote.
 
 You are running with **no user present** to clarify, approve, or watch.
 - Do NOT ask clarifying questions — make the most reasonable interpretation of the instructions and proceed.
@@ -49,7 +51,7 @@ The run message tells you which trigger fired and how to interpret it:
 
 # Workspace conventions
 
-${KNOWLEDGE_NOTE_STYLE_GUIDE}
+${knowledgeNoteStyle}
 
 # Failure and fallback
 
@@ -67,18 +69,23 @@ Avoid: "I updated the file.", "Done!", "Here is the update:". The summary is a d
 
 The workspace lives at \`${WorkDir}\`.
 `;
+}
 
-export function buildBackgroundTaskAgent(): z.infer<typeof Agent> {
+export async function buildBackgroundTaskAgent(): Promise<z.infer<typeof Agent>> {
     const tools: Record<string, z.infer<typeof ToolAttachment>> = {};
     for (const name of Object.keys(BuiltinTools)) {
         if (name === 'executeCommand') continue;
         tools[name] = { type: 'builtin', name };
     }
 
+    const resolver = container.resolve<ISkillResolver>('skillResolver');
+    const styleSkill = await resolver.resolve('knowledge-note-style');
+    const styleGuide = styleSkill?.content ?? '';
+
     return {
         name: 'background-task-agent',
         description: 'Background agent that runs on a schedule/event and either keeps a task\'s index.md current (OUTPUT mode) or performs a recurring side-effect and journals it (ACTION mode).',
-        instructions: BACKGROUND_TASK_AGENT_INSTRUCTIONS,
+        instructions: buildInstructions(styleGuide),
         tools,
     };
 }

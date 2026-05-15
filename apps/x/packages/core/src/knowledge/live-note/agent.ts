@@ -1,10 +1,12 @@
 import z from 'zod';
 import { Agent, ToolAttachment } from '@x/shared/dist/agent.js';
 import { BuiltinTools } from '../../application/lib/builtin-tools.js';
-import { KNOWLEDGE_NOTE_STYLE_GUIDE } from '../../application/lib/knowledge-note-style.js';
+import container from '../../di/container.js';
+import type { ISkillResolver } from '../../skills/resolver.js';
 import { WorkDir } from '../../config/config.js';
 
-export const LIVE_NOTE_AGENT_INSTRUCTIONS = `You are the live-note agent — a background agent that keeps a *live note* in the user's personal knowledge base current with its objective.
+function buildInstructions(knowledgeNoteStyle: string): string {
+  return `You are the live-note agent — a background agent that keeps a *live note* in the user's personal knowledge base current with its objective.
 
 Your goal on each run: bring the body of the note in line with the user's persistent **objective** for that note. The user is maintaining a personal knowledge base and will scan this note alongside many others — optimize for **information density and scannability**, not conversational prose.
 
@@ -78,7 +80,7 @@ Unless the objective explicitly specifies a different structure, follow this def
 
 If the objective says something specific about layout (e.g. "show the top 5 stories at the top, with a one-paragraph summary above them"), follow that exactly and ignore the defaults.
 
-${KNOWLEDGE_NOTE_STYLE_GUIDE}
+${knowledgeNoteStyle}
 
 The style guide above is the canonical writing style for everything you emit into the body. The objective may specify a particular shape ("3-column markdown table: Location | Local Time | Offset") — when it does, follow it exactly. When it doesn't, walk the ladder above and pick the tightest shape that fits the data.
 
@@ -307,18 +309,23 @@ State the action and the substance. Good examples:
 
 Avoid: "I updated the note.", "Done!", "Here is the update:". The summary is a data point, not a sign-off.
 `;
+}
 
-export function buildLiveNoteAgent(): z.infer<typeof Agent> {
+export async function buildLiveNoteAgent(): Promise<z.infer<typeof Agent>> {
     const tools: Record<string, z.infer<typeof ToolAttachment>> = {};
     for (const name of Object.keys(BuiltinTools)) {
         if (name === 'executeCommand') continue;
         tools[name] = { type: 'builtin', name };
     }
 
+    const resolver = container.resolve<ISkillResolver>('skillResolver');
+    const styleSkill = await resolver.resolve('knowledge-note-style');
+    const styleGuide = styleSkill?.content ?? '';
+
     return {
         name: 'live-note-agent',
         description: 'Background agent that keeps a live note up to date with its objective',
-        instructions: LIVE_NOTE_AGENT_INSTRUCTIONS,
+        instructions: buildInstructions(styleGuide),
         tools,
     };
 }

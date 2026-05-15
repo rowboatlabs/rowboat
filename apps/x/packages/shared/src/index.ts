@@ -16,4 +16,5 @@ export * as promptBlock from './prompt-block.js';
 export * as frontmatter from './frontmatter.js';
 export * as bases from './bases.js';
 export * as browserControl from './browser-control.js';
+export * as skill from './skill.js';
 export { PrefixLogger };

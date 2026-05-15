@@ -403,11 +403,11 @@ export async function loadAgent(id: string): Promise<z.infer<typeof Agent>> {
     }
 
     if (id === "live-note-agent") {
-        return buildLiveNoteAgent();
+        return await buildLiveNoteAgent();
     }
 
     if (id === "background-task-agent") {
-        return buildBackgroundTaskAgent();
+        return await buildBackgroundTaskAgent();
     }
 
     if (id === 'note_creation') {

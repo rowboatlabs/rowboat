@@ -6,7 +6,7 @@ import { createInterface } from "readline";
 import { execSync } from "child_process";
 import { glob } from "glob";
 import { executeCommand, executeCommandAbortable } from "./command-executor.js";
-import { resolveSkill, availableSkills } from "../assistant/skills/index.js";
+import { ISkillResolver } from "../../skills/resolver.js";
 import { executeTool, listServers, listTools } from "../../mcp/mcp.js";
 import container from "../../di/container.js";
 import { IMcpConfigRepo } from "../..//mcp/repo.js";
@@ -135,24 +135,36 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
     loadSkill: {
         description: "Load a Rowboat skill definition into context by fetching its guidance string",
         inputSchema: z.object({
-            skillName: z.string().describe("Skill identifier or path (e.g., 'workflow-run-ops' or 'src/application/assistant/skills/workflow-run-ops/skill.ts')"),
+            skillName: z.string().describe("Skill identifier (e.g., 'doc-collab', 'web-search')"),
         }),
         execute: async ({ skillName }: { skillName: string }) => {
-            const resolved = resolveSkill(skillName);
+            const resolver = container.resolve<ISkillResolver>("skillResolver");
+            const resolved = await resolver.resolve(skillName);
 
             if (!resolved) {
+                const catalog = await resolver.getCatalog();
+                const available = catalog.map((s) => s.id).join(", ");
                 return {
                     success: false,
-                    message: `Skill '${skillName}' not found. Available skills: ${availableSkills.join(", ")}`,
+                    message: `Skill '${skillName}' not found. Available skills: ${available}`,
                 };
             }
 
             return {
                 success: true,
                 skillName: resolved.id,
-                path: resolved.catalogPath,
                 content: resolved.content,
             };
+        },
+    },
+
+    listSkills: {
+        description: "List all available skills with their id, title, and one-line summary",
+        inputSchema: z.object({}),
+        execute: async () => {
+            const resolver = container.resolve<ISkillResolver>("skillResolver");
+            const catalog = await resolver.getCatalog();
+            return { success: true, skills: catalog };
         },
     },
 
