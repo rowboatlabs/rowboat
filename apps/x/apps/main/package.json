@@ -10,7 +10,8 @@
         "start": "electron .",
         "build": "rm -rf dist && tsc && node bundle.mjs",
         "package": "electron-forge package",
-        "make": "electron-forge make"
+        "make": "electron-forge make",
+        "test": "vitest run"
     },
     "dependencies": {
         "@x/core": "workspace:*",
@@ -37,6 +38,7 @@
         "@types/electron-squirrel-startup": "^1.0.2",
         "@types/node": "^25.0.3",
         "electron": "^39.2.7",
-        "esbuild": "^0.24.2"
+        "esbuild": "^0.24.2",
+        "vitest": "^2.1.9"
     }
 }

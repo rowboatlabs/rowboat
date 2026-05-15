@@ -46,6 +46,11 @@ import { setupBrowserEventForwarding } from "./browser/ipc.js";
 import { ElectronBrowserControlService } from "./browser/control-service.js";
 import { ElectronNotificationService } from "./notification/electron-notification-service.js";
 import {
+  createPlatformDetector,
+  MeetingDetectService,
+  Suppression,
+} from "./meeting-detect/index.js";
+import {
   DEEP_LINK_SCHEME,
   dispatchUrl,
   extractDeepLinkFromArgv,
@@ -312,7 +317,8 @@ app.whenReady().then(async () => {
   });
 
   registerBrowserControlService(new ElectronBrowserControlService());
-  registerNotificationService(new ElectronNotificationService());
+  const notificationService = new ElectronNotificationService();
+  registerNotificationService(notificationService);
 
   setupIpcHandlers();
   setupBrowserEventForwarding();
@@ -383,6 +389,21 @@ app.whenReady().then(async () => {
 
   // start calendar meeting notification service (fires 1-minute warnings)
   initCalendarNotifications();
+
+  // start meeting-detect service (mic-in-use detection -> popup asking if user wants notes)
+  const meetingDetector = createPlatformDetector();
+  if (meetingDetector) {
+    const meetingDetectService = new MeetingDetectService({
+      detector: meetingDetector,
+      notifier: notificationService,
+      suppression: new Suppression(),
+    });
+    meetingDetectService.start().catch((err) => {
+      console.error("[MeetingDetect] failed to start:", err);
+    });
+  } else {
+    console.log("[MeetingDetect] no detector for this platform; skipping");
+  }
 
   // start chrome extension sync server
   initChromeSync();
