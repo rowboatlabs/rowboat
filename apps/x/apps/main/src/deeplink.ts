@@ -63,7 +63,11 @@ export function dispatchDeepLink(url: string): void {
 
 interface MeetingNotesAction {
     type: "take-meeting-notes" | "join-and-take-meeting-notes";
-    eventId: string;
+    // eventId is required for join-and-take-meeting-notes (calendar-time fire)
+    // but optional for take-meeting-notes — mic-detection ad-hoc fires use a
+    // title-only payload when the call isn't on the calendar.
+    eventId?: string;
+    title?: string;
 }
 
 type ParsedAction = MeetingNotesAction;
@@ -76,9 +80,15 @@ function parseAction(url: string): ParsedAction | null {
     if (host !== ACTION_HOST) return null;
     const params = new URLSearchParams(queryIdx >= 0 ? rest.slice(queryIdx + 1) : "");
     const type = params.get("type");
-    if (type === "take-meeting-notes" || type === "join-and-take-meeting-notes") {
-        const eventId = params.get("eventId");
+    const eventId = params.get("eventId") || undefined;
+    const title = params.get("title") || undefined;
+    if (type === "join-and-take-meeting-notes") {
         return eventId ? { type, eventId } : null;
+    }
+    if (type === "take-meeting-notes") {
+        // Need at least one identifier — eventId (calendar) or title (ad-hoc).
+        if (!eventId && !title) return null;
+        return { type, eventId, title };
     }
     return null;
 }
@@ -88,25 +98,31 @@ async function dispatchAction(url: string): Promise<void> {
     if (!parsed) return;
 
     const openMeeting = parsed.type === "join-and-take-meeting-notes";
-    await handleTakeMeetingNotes(parsed.eventId, openMeeting);
+    await handleTakeMeetingNotes(parsed.eventId, parsed.title, openMeeting);
 }
 
-async function handleTakeMeetingNotes(eventId: string, openMeeting: boolean): Promise<void> {
+async function handleTakeMeetingNotes(
+    eventId: string | undefined,
+    title: string | undefined,
+    openMeeting: boolean,
+): Promise<void> {
     const win = mainWindowRef;
     if (!win || win.isDestroyed()) return;
     focusWindow(win);
 
-    const filePath = path.join(WorkDir, "calendar_sync", `${eventId}.json`);
-    let event: unknown;
-    try {
-        const raw = await fs.readFile(filePath, "utf-8");
-        event = JSON.parse(raw);
-    } catch (err) {
-        console.error(`[deeplink] take-meeting-notes: failed to read ${filePath}`, err);
-        return;
+    let event: unknown = null;
+    if (eventId) {
+        const filePath = path.join(WorkDir, "calendar_sync", `${eventId}.json`);
+        try {
+            const raw = await fs.readFile(filePath, "utf-8");
+            event = JSON.parse(raw);
+        } catch (err) {
+            console.error(`[deeplink] take-meeting-notes: failed to read ${filePath}`, err);
+            // Fall through with event=null so the renderer can still open an ad-hoc note.
+        }
     }
 
-    const payload = { event, openMeeting };
+    const payload = { event, openMeeting, title: title ?? null };
 
     if (win.webContents.isLoading()) {
         win.webContents.once("did-finish-load", () => {
