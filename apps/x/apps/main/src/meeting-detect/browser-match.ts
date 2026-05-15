@@ -1,4 +1,4 @@
-import { getForegroundWindow } from "./foreground-window.js";
+import { getWindowSnapshot } from "./foreground-window.js";
 
 export type BrowserMeetingPlatform = "google-meet" | "zoom-web" | "teams-web" | "slack-huddle" | "webex-web";
 
@@ -36,13 +36,16 @@ const RULES: TitleRule[] = [
  * mic-holder as `kind: "browser"`. That keeps active-win calls cheap — we
  * only ask the OS when there's a reason to ask.
  */
-export async function matchBrowserMeeting(): Promise<BrowserMeetingMatch | null> {
-    const win = await getForegroundWindow();
-    if (!win) return null;
-    // We only have a title (no URL from these OS calls), but Chrome / Edge /
-    // Firefox include the tab title in the window title, which contains the
-    // meeting service name for Meet/Zoom-web/Teams-web pages.
-    return matchTitleOrUrl(win.title, undefined);
+export async function matchBrowserMeeting(executable?: string): Promise<BrowserMeetingMatch | null> {
+    const snap = await getWindowSnapshot(executable);
+    if (!snap) return null;
+    // Scan ALL known window titles — on Windows tasklist returns every window,
+    // so even a backgrounded Meet tab still matches while Chrome holds the mic.
+    for (const title of snap.titles) {
+        const m = matchTitleOrUrl(title, undefined);
+        if (m) return m;
+    }
+    return null;
 }
 
 /** Pure matcher — exposed for tests; no OS calls. */

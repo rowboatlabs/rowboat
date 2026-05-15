@@ -4,6 +4,7 @@ import { matchBrowserMeeting, type BrowserMeetingMatch } from "./browser-match.j
 import { correlateNow, type CorrelatedEvent } from "./calendar-correlate.js";
 import { Suppression } from "./suppression.js";
 import type { MeetingAppKind } from "./meeting-apps.js";
+import { buildAdHocTitle, shortPlatformLabel } from "./ad-hoc-title.js";
 
 // Glue layer: turns detector events into popup notifications, gated by browser
 // tab matching, calendar correlation, and the suppression store.
@@ -11,7 +12,7 @@ import type { MeetingAppKind } from "./meeting-apps.js";
 // Tests inject their own detector + notification service + suppression so this
 // runs without touching the OS.
 
-type Matcher = () => Promise<BrowserMeetingMatch | null>;
+type Matcher = (executable?: string) => Promise<BrowserMeetingMatch | null>;
 type Correlator = (now: Date) => Promise<CorrelatedEvent | null>;
 
 export interface MeetingDetectServiceOptions {
@@ -87,12 +88,30 @@ export class MeetingDetectService {
         // otherwise we'd popup for YouTube, Spotify web, etc.
         let browserMatch: BrowserMeetingMatch | null = null;
         if (event.kind === "browser") {
-            browserMatch = await this.matchBrowser();
+            browserMatch = await this.matchBrowser(event.executable);
             if (!browserMatch) return;
         }
 
         const correlated = await this.correlate(new Date()).catch(() => null);
-        const payload = buildPopup(event.kind, browserMatch, correlated);
+
+        // Ad-hoc only: compute "Meeting Notes - <Platform> [#N]" so the note
+        // file lands with a useful title. Skip when we have a real calendar
+        // event — that already provides the right summary.
+        let adHocTitle: string | undefined;
+        if (!correlated) {
+            const short = shortPlatformLabel({
+                browserPlatform: browserMatch?.platform,
+                kind: event.kind,
+            });
+            if (short) {
+                adHocTitle = await buildAdHocTitle({ platformLabel: short }).catch((err) => {
+                    console.error("[MeetingDetect] buildAdHocTitle failed:", err);
+                    return `Meeting Notes - ${short}`;
+                });
+            }
+        }
+
+        const payload = buildPopup(event.kind, browserMatch, correlated, adHocTitle);
         if (!payload) return;
 
         try {
@@ -118,6 +137,7 @@ export function buildPopup(
     kind: MeetingAppKind,
     browserMatch: BrowserMeetingMatch | null,
     correlated: CorrelatedEvent | null,
+    adHocTitle?: string,
 ): BuiltPopup | null {
     const platformLabel = describePlatform(kind, browserMatch);
     if (!platformLabel) return null;
@@ -133,12 +153,15 @@ export function buildPopup(
         };
     }
 
-    // Ad-hoc — no calendar event matched. Still offer notes, with generic copy.
+    // Ad-hoc — no calendar event matched. Use the precomputed counter-aware
+    // title ("Meeting Notes - Zoom" / "... #2") if available; fall back to a
+    // simple platform-suffixed title.
+    const title = adHocTitle ?? `Meeting Notes - ${platformLabel}`;
     return {
         notify: {
             title: "You're in a meeting",
             message: `Detected on ${platformLabel}. Click to take notes with Rowboat.`,
-            link: `rowboat://action?type=take-meeting-notes&title=${encodeURIComponent(`Ad-hoc ${platformLabel} call`)}`,
+            link: `rowboat://action?type=take-meeting-notes&title=${encodeURIComponent(title)}`,
             actionLabel: "Take notes",
         },
     };
