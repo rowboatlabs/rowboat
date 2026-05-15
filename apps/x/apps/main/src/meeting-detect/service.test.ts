@@ -83,6 +83,7 @@ describe("MeetingDetectService end-to-end", () => {
             suppression,
             matchBrowser: async () => null,
             correlate: async () => correlated,
+            toast: null,
         });
         await service.start();
 
@@ -103,6 +104,7 @@ describe("MeetingDetectService end-to-end", () => {
             suppression,
             matchBrowser: async () => null, // browser foreground = not a meeting
             correlate: async () => null,
+            toast: null,
         });
         await service.start();
 
@@ -120,6 +122,7 @@ describe("MeetingDetectService end-to-end", () => {
             suppression,
             matchBrowser: async () => ({ platform: "google-meet", hint: "https://meet.google.com/x" }),
             correlate: async () => null,
+            toast: null,
         });
         await service.start();
 
@@ -139,6 +142,7 @@ describe("MeetingDetectService end-to-end", () => {
             suppression,
             matchBrowser: async () => null,
             correlate: async () => null,
+            toast: null,
         });
         await service.start();
 
@@ -151,6 +155,33 @@ describe("MeetingDetectService end-to-end", () => {
         expect(notifier.sent).toHaveLength(1);
     });
 
+    it("uses the toast renderer when provided instead of the native notifier", async () => {
+        const calls: Array<{ title: string; message: string; actionLink: string }> = [];
+        const toast = {
+            show(p: { title: string; message: string; actionLabel: string; actionLink: string }) {
+                calls.push({ title: p.title, message: p.message, actionLink: p.actionLink });
+            },
+        };
+        const service = new MeetingDetectService({
+            detector,
+            notifier,
+            suppression,
+            matchBrowser: async () => null,
+            correlate: async () => null,
+            toast,
+        });
+        await service.start();
+
+        probe.next = [{ executable: "zoom.us", pid: 100 }];
+        await detector.tick();
+        await service.settle();
+
+        expect(notifier.sent).toHaveLength(0);
+        expect(calls).toHaveLength(1);
+        expect(calls[0].title).toBe("You're in a meeting");
+        expect(calls[0].actionLink).toContain("take-meeting-notes");
+    });
+
     it("respects per-app mute", async () => {
         await suppression.init();
         await suppression.muteApp("Discord");
@@ -161,6 +192,7 @@ describe("MeetingDetectService end-to-end", () => {
             suppression,
             matchBrowser: async () => null,
             correlate: async () => null,
+            toast: null,
         });
         await service.start();
 

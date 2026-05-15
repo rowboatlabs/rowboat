@@ -5,6 +5,7 @@ import { correlateNow, type CorrelatedEvent } from "./calendar-correlate.js";
 import { Suppression } from "./suppression.js";
 import type { MeetingAppKind } from "./meeting-apps.js";
 import { buildAdHocTitle, shortPlatformLabel } from "./ad-hoc-title.js";
+import { MeetingToastWindow, type ToastPayload } from "./toast-window.js";
 
 // Glue layer: turns detector events into popup notifications, gated by browser
 // tab matching, calendar correlation, and the suppression store.
@@ -22,6 +23,10 @@ export interface MeetingDetectServiceOptions {
     // Defaults run the real OS-touching versions; tests override.
     matchBrowser?: Matcher;
     correlate?: Correlator;
+    // Custom popup renderer. When provided (default in production), the toast
+    // is used instead of the native OS notification. Tests pass null to fall
+    // back to the notifier and assert on its calls.
+    toast?: { show(payload: ToastPayload): void } | null;
 }
 
 export class MeetingDetectService {
@@ -30,6 +35,7 @@ export class MeetingDetectService {
     private readonly suppression: Suppression;
     private readonly matchBrowser: Matcher;
     private readonly correlate: Correlator;
+    private readonly toast: { show(payload: ToastPayload): void } | null;
     // Track async work spawned from detector events so tests (and shutdown)
     // can wait for it to settle.
     private pending = new Set<Promise<void>>();
@@ -40,6 +46,9 @@ export class MeetingDetectService {
         this.suppression = opts.suppression;
         this.matchBrowser = opts.matchBrowser ?? matchBrowserMeeting;
         this.correlate = opts.correlate ?? ((now) => correlateNow(now));
+        // `toast` is explicitly nullable so tests can opt out. Undefined →
+        // build the real one. Null → use the native notifier instead.
+        this.toast = opts.toast === undefined ? new MeetingToastWindow() : opts.toast;
     }
 
     async start(): Promise<void> {
@@ -115,11 +124,20 @@ export class MeetingDetectService {
         if (!payload) return;
 
         try {
-            this.notifier.notify(payload.notify);
+            if (this.toast) {
+                this.toast.show({
+                    title: payload.notify.title,
+                    message: payload.notify.message,
+                    actionLabel: payload.notify.actionLabel,
+                    actionLink: payload.notify.link,
+                });
+            } else {
+                this.notifier.notify(payload.notify);
+            }
             await this.suppression.markNotified(event.sessionKey);
             console.log(`[MeetingDetect] popup fired for ${event.executable} (kind=${event.kind}, eventId=${correlated?.eventId ?? "ad-hoc"})`);
         } catch (err) {
-            console.error("[MeetingDetect] notify failed:", err);
+            console.error("[MeetingDetect] popup failed:", err);
         }
     }
 }
