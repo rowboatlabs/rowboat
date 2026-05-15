@@ -126,8 +126,8 @@ export class MeetingDetectService {
         try {
             if (this.toast) {
                 this.toast.show({
-                    title: payload.notify.title,
-                    message: payload.notify.message,
+                    title: payload.toast.title,
+                    subtitle: payload.toast.subtitle,
                     actionLabel: payload.notify.actionLabel,
                     actionLink: payload.notify.link,
                 });
@@ -149,6 +149,13 @@ interface BuiltPopup {
         link: string;
         actionLabel: string;
     };
+    // Toast-specific fields (subtitle is the secondary line; the native
+    // notification API only has one body string, so we collapse title+subtitle
+    // into `message` when falling back to the OS notifier).
+    toast: {
+        title: string;
+        subtitle: string;
+    };
 }
 
 export function buildPopup(
@@ -161,13 +168,16 @@ export function buildPopup(
     if (!platformLabel) return null;
 
     if (correlated) {
+        const toastTitle = correlated.summary;
+        const toastSubtitle = `On ${platformLabel}`;
         return {
             notify: {
                 title: "Take notes for this meeting?",
                 message: `${correlated.summary} — on ${platformLabel}. Click to capture notes with Rowboat.`,
                 link: `rowboat://action?type=take-meeting-notes&eventId=${encodeURIComponent(correlated.eventId)}`,
-                actionLabel: "Take notes",
+                actionLabel: "Start taking notes",
             },
+            toast: { title: toastTitle, subtitle: toastSubtitle },
         };
     }
 
@@ -177,10 +187,14 @@ export function buildPopup(
     const title = adHocTitle ?? `Meeting Notes - ${platformLabel}`;
     return {
         notify: {
-            title: "You're in a meeting",
+            title: "You are in a meeting",
             message: `Detected on ${platformLabel}. Click to take notes with Rowboat.`,
             link: `rowboat://action?type=take-meeting-notes&title=${encodeURIComponent(title)}`,
-            actionLabel: "Take notes",
+            actionLabel: "Start taking notes",
+        },
+        toast: {
+            title: "You are in a meeting",
+            subtitle: `Detected on ${platformLabel}`,
         },
     };
 }

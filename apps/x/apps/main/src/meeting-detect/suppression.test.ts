@@ -26,7 +26,9 @@ describe("Suppression", () => {
     });
 
     it("respects the dismiss cooldown window", async () => {
-        const t0 = new Date("2026-05-15T10:00:00Z");
+        // Anchor at "now" — gc() filters by wall-clock age, so a hard-coded
+        // past date would be dropped on persist and the cooldown wouldn't apply.
+        const t0 = new Date();
         await suppression.markDismissed("/Applications/zoom.us.app/Contents/MacOS/zoom.us", t0);
 
         const within = new Date(t0.getTime() + 10 * 60 * 1000); // 10 min later
