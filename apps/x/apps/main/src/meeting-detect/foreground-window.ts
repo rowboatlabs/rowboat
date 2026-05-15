@@ -3,68 +3,64 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-export interface ForegroundWindow {
-    title: string;
-    // Best-effort process name; we don't always get this from osascript.
-    appName?: string;
+export interface WindowSnapshot {
+    // Window titles we know about. Implementations may return one (foreground)
+    // or many (all titles for a process). browser-match scans the whole list,
+    // so we don't need to identify which is foreground.
+    titles: string[];
 }
 
 /**
- * Read the title of whatever window is in the foreground. Cross-platform,
- * zero native deps — shells out to a built-in OS tool. Returns null if the
- * platform isn't supported or the call fails.
+ * Best-effort look at currently-open window titles for a given executable.
+ * On Windows: `tasklist /v /fi "imagename eq <exe>"` — fast because it skips
+ * every system process. On macOS: AppleScript for the frontmost window.
  *
- * We dropped `active-win` because its prebuilt native binary depends on
- * runtime package.json lookups that don't survive esbuild bundling.
+ * Pass the basename of the exe (e.g. "chrome.exe"). Returns null on failure;
+ * an empty title list means "process is running but no window has a title."
  */
-export async function getForegroundWindow(): Promise<ForegroundWindow | null> {
-    if (process.platform === "win32") return getForegroundWindowWindows();
-    if (process.platform === "darwin") return getForegroundWindowMacOS();
+export async function getWindowSnapshot(executable?: string): Promise<WindowSnapshot | null> {
+    if (process.platform === "win32") return getWindowSnapshotWindows(executable);
+    if (process.platform === "darwin") return getWindowSnapshotMacOS();
     return null;
 }
 
-// Win32 GetForegroundWindow + GetWindowText via inline P/Invoke in PowerShell.
-// Single one-shot call; cheap enough to run on every meeting-active event.
-const WINDOWS_SCRIPT = `
-$src = @'
-using System;
-using System.Runtime.InteropServices;
-using System.Text;
-public class RowboatFW {
-  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
-  [DllImport("user32.dll", CharSet=CharSet.Auto, SetLastError=true)]
-  public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
-  [DllImport("user32.dll", SetLastError=true)]
-  public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
-}
-'@
-Add-Type -TypeDefinition $src -ErrorAction SilentlyContinue
-$hwnd = [RowboatFW]::GetForegroundWindow()
-$sb = New-Object System.Text.StringBuilder 1024
-[RowboatFW]::GetWindowText($hwnd, $sb, $sb.Capacity) | Out-Null
-$pid2 = 0
-[RowboatFW]::GetWindowThreadProcessId($hwnd, [ref]$pid2) | Out-Null
-$proc = $null
-try { $proc = (Get-Process -Id $pid2 -ErrorAction SilentlyContinue).ProcessName } catch {}
-[PSCustomObject]@{ Title = $sb.ToString(); App = $proc } | ConvertTo-Json -Compress
-`.trim();
+async function getWindowSnapshotWindows(executable?: string): Promise<WindowSnapshot | null> {
+    // Reduce to a basename — full paths can't be passed to tasklist's
+    // imagename filter, and the filter wants e.g. "chrome.exe", not the path.
+    const imageName = executable ? executable.replace(/^.*[\\/]/, "") : "";
+    const args = ["/v", "/fo", "csv", "/nh"];
+    if (imageName) args.push("/fi", `imagename eq ${imageName}`);
 
-async function getForegroundWindowWindows(): Promise<ForegroundWindow | null> {
     try {
         const { stdout } = await execFileAsync(
-            "powershell.exe",
-            ["-NoProfile", "-NonInteractive", "-Command", WINDOWS_SCRIPT],
-            { timeout: 5_000, windowsHide: true },
+            "tasklist.exe",
+            args,
+            { timeout: 10_000, windowsHide: true, maxBuffer: 4 * 1024 * 1024 },
         );
-        const trimmed = stdout.trim();
-        if (!trimmed) return null;
-        const parsed = JSON.parse(trimmed) as { Title?: string; App?: string };
-        if (typeof parsed.Title !== "string") return null;
-        return { title: parsed.Title, appName: parsed.App };
+        const titles: string[] = [];
+        for (const line of stdout.split(/\r?\n/)) {
+            if (!line) continue;
+            const fields = parseCsvLine(line);
+            if (fields.length === 0) continue;
+            const title = fields[fields.length - 1];
+            if (!title || title === "N/A") continue;
+            titles.push(title);
+        }
+        return { titles };
     } catch (err) {
-        console.error("[MeetingDetect] foreground-window (windows) failed:", err);
+        console.error("[MeetingDetect] window-snapshot (windows) failed:", err);
         return null;
     }
+}
+
+function parseCsvLine(line: string): string[] {
+    // tasklist /fo csv quotes every field and doesn't embed quotes within fields,
+    // so a simple comma-split between quoted segments works.
+    const out: string[] = [];
+    const re = /"([^"]*)"/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(line)) !== null) out.push(m[1]);
+    return out;
 }
 
 // macOS via osascript — title of the frontmost window of the frontmost app.
@@ -83,15 +79,16 @@ tell application "System Events"
 end tell
 `.trim();
 
-async function getForegroundWindowMacOS(): Promise<ForegroundWindow | null> {
+async function getWindowSnapshotMacOS(): Promise<WindowSnapshot | null> {
     try {
         const { stdout } = await execFileAsync("/usr/bin/osascript", ["-e", MACOS_SCRIPT], {
             timeout: 5_000,
         });
-        const [appName, ...titleParts] = stdout.trim().split("\n");
-        return { title: titleParts.join("\n"), appName };
+        const [, ...titleParts] = stdout.trim().split("\n");
+        const title = titleParts.join("\n");
+        return { titles: title ? [title] : [] };
     } catch (err) {
-        console.error("[MeetingDetect] foreground-window (macOS) failed:", err);
+        console.error("[MeetingDetect] window-snapshot (macOS) failed:", err);
         return null;
     }
 }

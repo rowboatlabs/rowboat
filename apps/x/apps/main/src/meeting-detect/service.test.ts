@@ -37,6 +37,13 @@ describe("buildPopup", () => {
         expect(popup?.notify.title).toBe("You're in a meeting");
         expect(popup?.notify.link).toContain("title=");
         expect(popup?.notify.link).not.toContain("eventId=");
+        // Default ad-hoc title (no precomputed counter) is "Meeting Notes - Zoom".
+        expect(decodeURIComponent(popup!.notify.link.split("title=")[1])).toBe("Meeting Notes - Zoom");
+    });
+
+    it("uses the precomputed ad-hoc title when provided (counter case)", () => {
+        const popup = buildPopup("zoom", null, null, "Meeting Notes - Zoom #2");
+        expect(decodeURIComponent(popup!.notify.link.split("title=")[1])).toBe("Meeting Notes - Zoom #2");
     });
 
     it("uses browser match platform label when kind=browser", () => {
