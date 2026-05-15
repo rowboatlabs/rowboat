@@ -3966,6 +3966,12 @@ function App() {
         document.body.removeChild(textarea)
       })
     },
+    revealInFileManager: (path: string, isDir: boolean) => {
+      const channel = isDir ? 'shell:openPath' : 'shell:showItemInFolder'
+      void window.ipc.invoke(channel, { path }).catch((err) => {
+        console.error('Failed to open in file manager:', err)
+      })
+    },
     onOpenInNewTab: (path: string) => {
       openFileInNewTab(path)
     },
@@ -4769,6 +4775,7 @@ function App() {
                       rename: knowledgeActions.rename,
                       remove: knowledgeActions.remove,
                       copyPath: knowledgeActions.copyPath,
+                      revealInFileManager: knowledgeActions.revealInFileManager,
                     }}
                   />
                 </div>

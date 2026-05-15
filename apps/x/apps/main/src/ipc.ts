@@ -679,6 +679,11 @@ export function setupIpcHandlers() {
       const error = await shell.openPath(filePath);
       return { error: error || undefined };
     },
+    'shell:showItemInFolder': async (_event, args) => {
+      const filePath = resolveShellPath(args.path);
+      shell.showItemInFolder(filePath);
+      return { success: true };
+    },
     'shell:readFileBase64': async (_event, args) => {
       const filePath = resolveShellPath(args.path);
       const stat = await fs.stat(filePath);

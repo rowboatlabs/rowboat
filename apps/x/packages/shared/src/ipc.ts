@@ -489,6 +489,10 @@ const ipcSchemas = {
     req: z.object({ path: z.string() }),
     res: z.object({ error: z.string().optional() }),
   },
+  'shell:showItemInFolder': {
+    req: z.object({ path: z.string() }),
+    res: z.object({ success: z.literal(true) }),
+  },
   'shell:readFileBase64': {
     req: z.object({ path: z.string() }),
     res: z.object({ data: z.string(), mimeType: z.string(), size: z.number() }),

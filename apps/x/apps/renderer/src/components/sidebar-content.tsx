@@ -11,6 +11,7 @@ import {
   ExternalLink,
   FilePlus,
   Folder,
+  FolderOpen,
   FolderPlus,
   Globe,
   AlertTriangle,
@@ -119,7 +120,16 @@ type KnowledgeActions = {
   rename: (path: string, newName: string, isDir: boolean) => Promise<void>
   remove: (path: string) => Promise<void>
   copyPath: (path: string) => void
+  revealInFileManager: (path: string, isDir: boolean) => void
   onOpenInNewTab?: (path: string) => void
+}
+
+function getFileManagerName(): string {
+  if (typeof navigator === 'undefined') return 'File Manager'
+  const platform = navigator.platform.toLowerCase()
+  if (platform.includes('mac')) return 'Finder'
+  if (platform.includes('win')) return 'Explorer'
+  return 'File Manager'
 }
 
 type RunListItem = {
@@ -1177,11 +1187,13 @@ function KnowledgeSection({
     },
   }), [actions, deriveParent])
 
+  const fileManagerName = getFileManagerName()
   const quickActions = [
     { icon: FilePlus, label: "New Note", action: () => wrappedActions.createNote() },
     { icon: FolderPlus, label: "New Folder", action: () => void wrappedActions.createFolder() },
     { icon: Network, label: "Graph View", action: () => actions.openGraph() },
     { icon: Table2, label: "Bases", action: () => actions.openBases() },
+    { icon: FolderOpen, label: `Open in ${fileManagerName}`, action: () => actions.revealInFileManager('knowledge', true) },
   ]
 
   return (
@@ -1388,6 +1400,10 @@ function Tree({
       <ContextMenuItem onClick={handleCopyPath}>
         <Copy className="mr-2 size-4" />
         Copy Path
+      </ContextMenuItem>
+      <ContextMenuItem onClick={() => actions.revealInFileManager(item.path, isDir)}>
+        <FolderOpen className="mr-2 size-4" />
+        Open in {getFileManagerName()}
       </ContextMenuItem>
       <ContextMenuSeparator />
       <ContextMenuItem onClick={() => { setNewName(baseName); isSubmittingRef.current = false; setIsRenaming(true) }}>
