@@ -3296,6 +3296,7 @@ function App() {
     setIsGraphOpen(false)
     setIsBrowserOpen(false)
     setIsSuggestedTopicsOpen(false)
+    setIsMeetingsOpen(false)
     setIsLiveNotesOpen(false)
     setIsBgTasksOpen(false)
     setSelectedBackgroundTask(null)
@@ -3326,6 +3327,7 @@ function App() {
     setIsMeetingsOpen(true)
     setIsLiveNotesOpen(false)
     setIsBgTasksOpen(false)
+    setIsEmailOpen(false)
     setSelectedBackgroundTask(null)
     setExpandedFrom(null)
     setIsRightPaneMaximized(false)
@@ -3396,6 +3398,7 @@ function App() {
         setIsMeetingsOpen(true)
         setIsLiveNotesOpen(false)
         setIsBgTasksOpen(false)
+        setIsEmailOpen(false)
         ensureMeetingsFileTab()
         return
       case 'live-notes':
@@ -3420,6 +3423,7 @@ function App() {
         setIsRightPaneMaximized(false)
         setSelectedBackgroundTask(null)
         setIsSuggestedTopicsOpen(false)
+        setIsMeetingsOpen(false)
         setIsLiveNotesOpen(false)
         setIsBgTasksOpen(false)
         setIsEmailOpen(true)
