@@ -663,7 +663,7 @@ function ContentHeader({
   const isCollapsed = state === "collapsed"
   return (
     <header
-      className="titlebar-drag-region flex h-10 shrink-0 items-stretch border-b border-border bg-sidebar overflow-hidden"
+      className="rowboat-titlebar titlebar-drag-region flex h-10 shrink-0 items-stretch border-b border-border bg-sidebar overflow-hidden"
       style={{
         paddingLeft: isCollapsed ? (collapsedLeftPaddingPx ?? 196) : 12,
         paddingRight: 12,
@@ -4686,7 +4686,7 @@ function App() {
           void navigateToView({ type: 'file', path: BASES_DEFAULT_TAB_PATH })
         }
       }}>
-        <div className="flex h-svh w-full overflow-hidden">
+        <div className="rowboat-shell flex h-svh w-full overflow-hidden">
           {/* Content sidebar with SidebarProvider for collapse functionality */}
           <SidebarProvider
             style={{
@@ -5263,7 +5263,7 @@ function App() {
                   })}
                 </div>
 
-                <div className="sticky bottom-0 z-10 bg-background pb-12 pt-0 shadow-lg">
+                <div className="rowboat-composer-dock sticky bottom-0 z-10 bg-background pb-12 pt-0 shadow-lg">
                   <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-linear-to-t from-background to-transparent" />
                   <div className="mx-auto w-full max-w-4xl px-4">
                     {!hasConversation && (
