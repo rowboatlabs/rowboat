@@ -95,12 +95,12 @@
 
 .light .gmail-shell {
   --gm-bg: #ffffff;
-  --gm-bg-card: #fafafa;
+  --gm-bg-card: #ffffff;
   --gm-bg-input: #f4f4f7;
   --gm-bg-row-hover: #f7f7f9;
   --gm-bg-row-selected: #f5f0ff;
   --gm-bg-row-selected-hover: #ece4ff;
-  --gm-bg-iframe: #fafafa;
+  --gm-bg-iframe: #ffffff;
   --gm-bg-pill: #ffffff;
   --gm-bg-pill-hover: #f4f4f7;
   --gm-text: #27272a;
@@ -505,6 +505,10 @@
   border: 0;
   background: var(--gm-bg-iframe);
   border-radius: 6px;
+}
+
+.gmail-message-iframe-adaptive {
+  background: var(--gm-bg-card);
 }
 
 .gmail-message-plain {

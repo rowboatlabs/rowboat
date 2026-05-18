@@ -131,8 +131,42 @@ function splitPlainTextQuote(text: string): { visible: string; quoted: string | 
   return { visible, quoted }
 }
 
-function buildEmailDocument(html: string, opts: { theme: 'light' | 'dark' }): string {
+// True if the HTML — after stripping quoted/hidden content — defines its
+// own visual layout (real images, tables, explicit backgrounds). Unstyled
+// HTML (Gmail replies, Outlook one-liners wrapped in MsoNormal boilerplate,
+// outreach emails with only a tracking pixel, reply HTML whose only image
+// lives inside the inline-quoted thread) gets an iframe that adapts to the
+// app theme; styled HTML keeps the white "paper" look so newsletters /
+// branded designs render as their senders intended.
+function isStyledHtml(html: string): boolean {
+  const doc = new DOMParser().parseFromString(html, 'text/html')
+  doc.querySelectorAll('.gmail_quote, .gmail_attr, blockquote[type="cite"]').forEach((n) => n.remove())
+  if (doc.querySelector('table')) return true
+  for (const img of Array.from(doc.querySelectorAll('img'))) {
+    const w = parseInt(img.getAttribute('width') || '0', 10)
+    const h = parseInt(img.getAttribute('height') || '0', 10)
+    if (w === 1 && h === 1) continue
+    const style = img.getAttribute('style') || ''
+    if (/display\s*:\s*none/i.test(style)) continue
+    if (/visibility\s*:\s*hidden/i.test(style)) continue
+    return true
+  }
+  const visible = doc.body?.innerHTML || ''
+  if (/bgcolor\s*=/i.test(visible)) return true
+  if (/background-(color|image)\s*:/i.test(visible)) return true
+  return false
+}
+
+function buildEmailDocument(
+  html: string,
+  opts: { theme: 'light' | 'dark'; adaptToTheme: boolean },
+): string {
+  const useDark = opts.theme === 'dark' && opts.adaptToTheme
   const colorScheme = opts.theme === 'dark' ? 'light dark' : 'light'
+  const bodyColor = useDark ? '#d4d4d8' : '#202124'
+  const linkColor = useDark ? '#a78bfa' : '#1a73e8'
+  const quoteBorder = useDark ? '#2e2e35' : '#dadce0'
+  const quoteColor = useDark ? '#71717a' : '#5f6368'
   return `<!doctype html>
 <html><head>
 <meta charset="utf-8">
@@ -144,7 +178,7 @@ function buildEmailDocument(html: string, opts: { theme: 'light' | 'dark' }): st
   body {
     font: 14px/1.6 Arial, sans-serif;
     background: transparent;
-    color: #202124;
+    color: ${bodyColor};
     overflow-x: auto;
     overflow-y: hidden;
     word-wrap: break-word;
@@ -153,12 +187,12 @@ function buildEmailDocument(html: string, opts: { theme: 'light' | 'dark' }): st
   body > *:last-child { margin-bottom: 0; }
   img { max-width: 100%; height: auto; }
   table { max-width: 100%; }
-  a { color: #1a73e8; }
+  a { color: ${linkColor}; }
   blockquote {
     margin: 0 0 0 6px;
     padding-left: 12px;
-    border-left: 2px solid #dadce0;
-    color: #5f6368;
+    border-left: 2px solid ${quoteBorder};
+    color: ${quoteColor};
   }
   .gmail_quote,
   .gmail_attr,
@@ -215,9 +249,10 @@ function HtmlMessageBody({ message, threadId }: { message: GmailThreadMessage; t
   const [hasQuote, setHasQuote] = useState(false)
   const [showQuotes, setShowQuotes] = useState(false)
 
+  const adaptToTheme = useMemo(() => !isStyledHtml(message.bodyHtml!), [message.bodyHtml])
   const srcDoc = useMemo(
-    () => buildEmailDocument(message.bodyHtml!, { theme: resolvedTheme }),
-    [message.bodyHtml, resolvedTheme],
+    () => buildEmailDocument(message.bodyHtml!, { theme: resolvedTheme, adaptToTheme }),
+    [message.bodyHtml, resolvedTheme, adaptToTheme],
   )
 
   const handleLoad = useCallback(() => {
@@ -226,15 +261,12 @@ function HtmlMessageBody({ message, threadId }: { message: GmailThreadMessage; t
     if (!doc?.body) return
     setHasQuote(!!doc.querySelector('.gmail_quote, .gmail_attr, blockquote[type="cite"]'))
     const measure = () => {
-      // Take the max across body + documentElement; body.scrollHeight alone
-      // under-reports when the last element has bottom margin that collapses.
-      const next = Math.max(
-        40,
-        doc.body.scrollHeight,
-        doc.body.offsetHeight,
-        doc.documentElement.scrollHeight,
-        doc.documentElement.offsetHeight,
-      )
+      // Measure off body only. documentElement.scrollHeight stretches to fill
+      // the iframe viewport, so once we size the iframe up (e.g. user expanded
+      // the quote) it never shrinks back when the body collapses. The body's
+      // own padding-bottom + last-child margin reset (see buildEmailDocument)
+      // already prevent under-reporting from collapsed bottom margins.
+      const next = Math.max(40, doc.body.scrollHeight, doc.body.offsetHeight)
       setHeight((current) => (current === next ? current : next))
       if (!message.id) return
       if (Math.abs(next - lastSavedHeightRef.current) < 4) return
@@ -253,7 +285,6 @@ function HtmlMessageBody({ message, threadId }: { message: GmailThreadMessage; t
     if (typeof ResizeObserver !== 'undefined') {
       observerRef.current = new ResizeObserver(measure)
       observerRef.current.observe(doc.body)
-      observerRef.current.observe(doc.documentElement)
     }
   }, [message.id, threadId])
 
@@ -278,7 +309,7 @@ function HtmlMessageBody({ message, threadId }: { message: GmailThreadMessage; t
         srcDoc={srcDoc}
         sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
         title="Email content"
-        className="gmail-message-iframe"
+        className={cn('gmail-message-iframe', adaptToTheme && 'gmail-message-iframe-adaptive')}
         style={{ height }}
         onLoad={handleLoad}
       />
