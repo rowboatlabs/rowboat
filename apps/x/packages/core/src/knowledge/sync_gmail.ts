@@ -324,6 +324,14 @@ function encodeCursor(entry: { dateMs: number; threadId: string }): string {
     return `${entry.dateMs}|${entry.threadId}`;
 }
 
+export function listImportantThreads(opts: { cursor?: string; limit?: number } = {}): InboxPageResult {
+    return listInboxPage({ section: 'important', ...opts });
+}
+
+export function listEverythingElseThreads(opts: { cursor?: string; limit?: number } = {}): InboxPageResult {
+    return listInboxPage({ section: 'other', ...opts });
+}
+
 export function listInboxPage(opts: InboxPageOptions): InboxPageResult {
     const limit = Math.max(1, Math.min(100, opts.limit ?? 25));
     const cursor = parseCursor(opts.cursor);
@@ -418,27 +426,30 @@ export async function listRecentThreadIds(daysAgo: number = 2): Promise<RecentTh
     return results;
 }
 
-export async function fetchThreadSnapshot(threadId: string, expectedHistoryId?: string): Promise<GmailThreadSnapshot | null> {
+/**
+ * Build a GmailThreadSnapshot from an already-fetched threads.get response,
+ * classify it, and write to inbox_lists/. Shared by the renderer-driven
+ * fetchThreadSnapshot and the background sync (processThread).
+ *
+ * Returns null when the thread has no visible (non-draft) messages —
+ * those shouldn't show up in the inbox.
+ */
+async function buildAndCacheSnapshot(
+    threadId: string,
+    threadData: gmail.Schema$Thread,
+    gmailClient: gmail.Gmail,
+    auth: OAuth2Client,
+): Promise<GmailThreadSnapshot | null> {
+    const messages = threadData.messages;
+    if (!messages || messages.length === 0) return null;
+
     const cached = readCachedSnapshot(threadId);
-    if (expectedHistoryId && cached && cached.historyId === expectedHistoryId) {
-        return cached.snapshot;
-    }
     const heightCarryover = new Map<string, number>();
     if (cached) {
         for (const m of cached.snapshot.messages) {
             if (m.id && typeof m.bodyHeight === 'number') heightCarryover.set(m.id, m.bodyHeight);
         }
     }
-
-    const auth = await GoogleClientFactory.getClient();
-    if (!auth) {
-        throw new Error('Gmail is not connected.');
-    }
-
-    const gmailClient = google.gmail({ version: 'v1', auth });
-    const res = await gmailClient.users.threads.get({ userId: 'me', id: threadId });
-    const messages = res.data.messages;
-    if (!messages || messages.length === 0) return null;
 
     const parsed = await Promise.all(messages.map(async (msg) => {
         const headers = msg.payload?.headers || [];
@@ -465,20 +476,18 @@ export async function fetchThreadSnapshot(threadId: string, expectedHistoryId?: 
             bodyHtml,
             unread: msg.labelIds?.includes('UNREAD') ?? false,
             bodyHeight: msg.id ? heightCarryover.get(msg.id) : undefined,
+            messageIdHeader: headerValue(headers, 'Message-ID') || headerValue(headers, 'Message-Id') || undefined,
             isDraft,
         };
     }));
 
     const sentMessages = parsed.filter((m) => !m.isDraft);
     const draftMessages = parsed.filter((m) => m.isDraft);
-    // Drop the isDraft helper field from outgoing messages — it's internal.
     const visibleMessages = sentMessages.map(({ isDraft: _isDraft, ...rest }) => rest);
     const latestDraftBody = draftMessages.length > 0
         ? draftMessages[draftMessages.length - 1]!.body.trim()
         : '';
 
-    // A thread with no sent messages (only a draft) shouldn't show up in the inbox —
-    // skip caching it. Once the user actually sends, the thread reappears with a real message.
     if (visibleMessages.length === 0) return null;
 
     const latest = visibleMessages[visibleMessages.length - 1]!;
@@ -508,8 +517,6 @@ export async function fetchThreadSnapshot(threadId: string, expectedHistoryId?: 
 
     try {
         const userEmail = await getUserEmail(auth);
-        // If the user already has a Gmail-side draft going, skip the AI draft generation —
-        // the renderer will prefer the Gmail draft anyway, and we save an LLM call.
         const skipDraft = latestDraftBody.length > 0;
         const classification = await classifyThread(snapshot, userEmail, { skipDraft });
         snapshot.importance = classification.importance;
@@ -519,11 +526,27 @@ export async function fetchThreadSnapshot(threadId: string, expectedHistoryId?: 
         console.warn(`[Gmail] classify failed for ${threadId}:`, err);
     }
 
-    if (res.data.historyId) {
-        writeCachedSnapshot(threadId, res.data.historyId, snapshot);
+    if (threadData.historyId) {
+        writeCachedSnapshot(threadId, threadData.historyId, snapshot);
     }
 
     return snapshot;
+}
+
+export async function fetchThreadSnapshot(threadId: string, expectedHistoryId?: string): Promise<GmailThreadSnapshot | null> {
+    const cached = readCachedSnapshot(threadId);
+    if (expectedHistoryId && cached && cached.historyId === expectedHistoryId) {
+        return cached.snapshot;
+    }
+
+    const auth = await GoogleClientFactory.getClient();
+    if (!auth) {
+        throw new Error('Gmail is not connected.');
+    }
+
+    const gmailClient = google.gmail({ version: 'v1', auth });
+    const res = await gmailClient.users.threads.get({ userId: 'me', id: threadId });
+    return buildAndCacheSnapshot(threadId, res.data, gmailClient, auth);
 }
 
 async function saveAttachment(gmail: gmail.Gmail, userId: string, msgId: string, part: gmail.Schema$MessagePart, attachmentsDir: string): Promise<string | null> {
@@ -627,11 +650,59 @@ async function processThread(auth: OAuth2Client, threadId: string, syncDir: stri
         fs.writeFileSync(path.join(syncDir, `${threadId}.md`), mdContent);
         console.log(`Synced Thread: ${subject} (${threadId})`);
 
+        // Also build + cache the rich snapshot for the inbox view.
+        // Reuses the threads.get response — no extra API call.
+        try {
+            await buildAndCacheSnapshot(threadId, thread, gmail, auth);
+        } catch (err) {
+            console.warn(`[Gmail] Inbox snapshot build failed for ${threadId}:`, err);
+        }
+
         return { threadId, markdown: mdContent };
 
     } catch (error) {
         console.error(`Error processing thread ${threadId}:`, error);
         return null;
+    }
+}
+
+/**
+ * After a sync cycle, prune inbox_lists/ entries for threadIds that are
+ * no longer in INBOX (archived/trashed elsewhere). Single threads.list call,
+ * keeps the cache in lock-step with Gmail's INBOX label.
+ */
+async function pruneInboxCache(auth: OAuth2Client): Promise<void> {
+    if (!fs.existsSync(CACHE_DIR)) return;
+    try {
+        const gmailClient = google.gmail({ version: 'v1', auth });
+        const inInbox = new Set<string>();
+        let pageToken: string | undefined;
+        do {
+            const res = await gmailClient.users.threads.list({
+                userId: 'me',
+                labelIds: ['INBOX'],
+                maxResults: 500,
+                pageToken,
+            });
+            for (const t of res.data.threads || []) {
+                if (t.id) inInbox.add(t.id);
+            }
+            pageToken = res.data.nextPageToken ?? undefined;
+        } while (pageToken);
+
+        for (const name of fs.readdirSync(CACHE_DIR)) {
+            if (!name.endsWith('.json')) continue;
+            const threadId = decodeURIComponent(name.replace(/\.json$/, ''));
+            if (!inInbox.has(threadId)) {
+                try {
+                    fs.rmSync(path.join(CACHE_DIR, name), { force: true });
+                } catch (err) {
+                    console.warn(`[Gmail] prune failed for ${threadId}:`, err);
+                }
+            }
+        }
+    } catch (err) {
+        console.warn('[Gmail] pruneInboxCache failed:', err);
     }
 }
 
@@ -916,6 +987,10 @@ async function performSync() {
             console.log("History ID found, starting partial sync...");
             await partialSync(auth, state.historyId, SYNC_DIR, ATTACHMENTS_DIR, STATE_FILE, LOOKBACK_DAYS);
         }
+
+        // Keep inbox_lists/ in lock-step with Gmail's INBOX label —
+        // remove cache files for threads that were archived/trashed elsewhere.
+        await pruneInboxCache(auth);
 
         console.log("Sync completed.");
     } catch (error) {

@@ -272,19 +272,6 @@ function MessageBody({ message, threadId }: { message: GmailThreadMessage; threa
   )
 }
 
-async function mapWithConcurrency<T, R>(
-  items: T[],
-  limit: number,
-  mapper: (item: T) => Promise<R>,
-): Promise<R[]> {
-  const results: R[] = []
-  for (let i = 0; i < items.length; i += limit) {
-    const batch = items.slice(i, i + limit)
-    results.push(...await Promise.all(batch.map(mapper)))
-  }
-  return results
-}
-
 type ComposeMode = 'reply' | 'forward'
 
 function ComposeToolbarButton({
@@ -784,22 +771,26 @@ export function EmailView() {
     if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
   }, [])
 
-  // Track the current "load epoch" so concurrent refreshes don't apply stale results.
-  const epochRef = useRef(0)
+  // Per-section load epochs so concurrent reloads of different sections don't
+  // trample each other. (A single shared epoch caused Important's silent
+  // reload to be discarded whenever Other was reloaded in the same tick.)
+  const epochsRef = useRef<Record<InboxSection, number>>({ important: 0, other: 0 })
+
+  const sectionChannel = (section: InboxSection) =>
+    section === 'important' ? 'gmail:getImportant' as const : 'gmail:getEverythingElse' as const
 
   const loadNextPage = useCallback(async (section: InboxSection) => {
     const current = section === 'important' ? important : other
     if (current.loadingPage || current.hasReachedEnd) return
 
-    const epoch = epochRef.current
+    const epoch = epochsRef.current[section]
     setSection(section, (prev) => ({ ...prev, loadingPage: true }))
     try {
-      const result = await window.ipc.invoke('gmail:listInboxPage', {
-        section,
+      const result = await window.ipc.invoke(sectionChannel(section), {
         cursor: current.nextCursor ?? undefined,
         limit: PAGE_SIZE,
       })
-      if (epoch !== epochRef.current) return
+      if (epoch !== epochsRef.current[section]) return
       setSection(section, (prev) => ({
         threads: [...prev.threads, ...result.threads],
         nextCursor: result.nextCursor,
@@ -807,21 +798,24 @@ export function EmailView() {
         loadingPage: false,
       }))
     } catch (err) {
-      if (epoch !== epochRef.current) return
+      if (epoch !== epochsRef.current[section]) return
       console.warn(`[Gmail] page load failed for ${section}:`, err)
       setSection(section, (prev) => ({ ...prev, loadingPage: false }))
     }
   }, [important, other, setSection])
 
-  const reloadFirstPage = useCallback(async (section: InboxSection) => {
-    const epoch = ++epochRef.current
-    setSection(section, () => ({ ...initialSectionState, loadingPage: true }))
+  const reloadFirstPage = useCallback(async (section: InboxSection, options: { silent?: boolean } = {}) => {
+    const epoch = ++epochsRef.current[section]
+    if (options.silent) {
+      setSection(section, (prev) => ({ ...prev, loadingPage: true }))
+    } else {
+      setSection(section, () => ({ ...initialSectionState, loadingPage: true }))
+    }
     try {
-      const result = await window.ipc.invoke('gmail:listInboxPage', {
-        section,
+      const result = await window.ipc.invoke(sectionChannel(section), {
         limit: PAGE_SIZE,
       })
-      if (epoch !== epochRef.current) return
+      if (epoch !== epochsRef.current[section]) return
       setSection(section, () => ({
         threads: result.threads,
         nextCursor: result.nextCursor,
@@ -829,17 +823,27 @@ export function EmailView() {
         loadingPage: false,
       }))
     } catch (err) {
-      if (epoch !== epochRef.current) return
+      if (epoch !== epochsRef.current[section]) return
       console.warn(`[Gmail] initial page load failed for ${section}:`, err)
-      setSection(section, () => ({ ...initialSectionState, loadingPage: false }))
+      setSection(section, (prev) => ({ ...prev, loadingPage: false }))
     }
   }, [setSection])
 
-  // Initial load — fetch page 1 of Important only. Everything else stays hidden
-  // until Important is exhausted (see effect below).
+  // Initial load — fetch page 1 of Important. On first-ever mount we do a
+  // non-silent load (shows loading state). On re-mount with persisted state we
+  // do a silent reconcile against the cache — necessary because the watcher
+  // subscription only runs while mounted, so any cache changes that happened
+  // while the panel was unmounted would otherwise stay invisible.
   useEffect(() => {
-    if (hadPersistedDataOnMount.current) return
-    void reloadFirstPage('important')
+    if (hadPersistedDataOnMount.current) {
+      void reloadFirstPage('important', { silent: true })
+      // Reconcile Other too if it had been loaded before the unmount.
+      if (other.threads.length > 0) {
+        void reloadFirstPage('other', { silent: true })
+      }
+    } else {
+      void reloadFirstPage('important')
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -851,31 +855,56 @@ export function EmailView() {
     void reloadFirstPage('other')
   }, [important.hasReachedEnd, other.threads.length, other.loadingPage, reloadFirstPage])
 
-  // Live updates: watcher on inbox_lists/ → reload page 1 when files change.
-  // Suppressed while a thread is open (composing/reading) — instead, mark a
-  // pending update and reload once the user closes the thread.
+  // Live updates: watcher on inbox_lists/ → silently refresh visible sections
+  // when files change. Throttled to at most one reload per ~3s so a burst of
+  // backend writes (sync processing many threads sequentially) coalesces into
+  // a small number of in-place updates rather than a flicker storm.
+  // Suppressed while a thread is open (composing/reading); deferred until close.
   const pendingReloadRef = useRef(false)
   const reloadDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastReloadAtRef = useRef(0)
   const isSelectedRef = useRef<string | null>(null)
   isSelectedRef.current = selectedThreadId
   const isRefreshingRef = useRef(false)
   isRefreshingRef.current = refreshing
+  const otherHasThreadsRef = useRef(false)
+  otherHasThreadsRef.current = other.threads.length > 0
 
+  const RELOAD_THROTTLE_MS = 3000
+
+  const doReload = useCallback(() => {
+    if (isRefreshingRef.current) return
+    if (isSelectedRef.current !== null) {
+      pendingReloadRef.current = true
+      return
+    }
+    lastReloadAtRef.current = Date.now()
+    void reloadFirstPage('important', { silent: true })
+    // Only refresh Other if it had been loaded — otherwise the chained
+    // effect handles it once Important hits hasReachedEnd.
+    if (otherHasThreadsRef.current) {
+      void reloadFirstPage('other', { silent: true })
+    }
+  }, [reloadFirstPage])
+
+  // Leading-edge throttle:
+  // - First event after a quiet period (≥ THROTTLE) → fire immediately.
+  // - During an active burst → queue a trailing fire at the next throttle
+  //   boundary. Subsequent events while a trailing fire is pending do nothing
+  //   (so a continuous stream of writes can't starve the reload).
   const triggerLiveReload = useCallback(() => {
-    if (reloadDebounceRef.current) clearTimeout(reloadDebounceRef.current)
+    const sinceLast = Date.now() - lastReloadAtRef.current
+    if (sinceLast >= RELOAD_THROTTLE_MS && !reloadDebounceRef.current) {
+      doReload()
+      return
+    }
+    if (reloadDebounceRef.current) return
+    const wait = Math.max(200, RELOAD_THROTTLE_MS - sinceLast)
     reloadDebounceRef.current = setTimeout(() => {
       reloadDebounceRef.current = null
-      // Skip if our own refresh is in flight — its writes triggered the watcher.
-      if (isRefreshingRef.current) return
-      // If a thread is open, defer until it closes.
-      if (isSelectedRef.current !== null) {
-        pendingReloadRef.current = true
-        return
-      }
-      void reloadFirstPage('important')
-      setOther(() => ({ ...initialSectionState }))
-    }, 500)
-  }, [reloadFirstPage])
+      doReload()
+    }, wait)
+  }, [doReload])
 
   useEffect(() => {
     const cleanup = window.ipc.on('workspace:didChange', (event) => {
@@ -905,11 +934,16 @@ export function EmailView() {
     if (selectedThreadId !== null) return
     if (!pendingReloadRef.current) return
     pendingReloadRef.current = false
-    void reloadFirstPage('important')
-    setOther(() => ({ ...initialSectionState }))
+    lastReloadAtRef.current = Date.now()
+    void reloadFirstPage('important', { silent: true })
+    if (otherHasThreadsRef.current) {
+      void reloadFirstPage('other', { silent: true })
+    }
   }, [selectedThreadId, reloadFirstPage])
 
-  // Live refresh: hit the Gmail API to validate the freshest threads, then re-render.
+  // Manual refresh: wake the background sync loop. It updates inbox_lists/,
+  // the watcher fires, and triggerLiveReload picks up the changes. The
+  // spinner is a UX cue — we stop it shortly after the sync poke.
   const refreshInFlightRef = useRef(false)
   const refresh = useCallback(async () => {
     if (refreshInFlightRef.current) return
@@ -917,29 +951,19 @@ export function EmailView() {
     setRefreshing(true)
     setError(null)
     try {
-      // TEMP(pagination-testing): widened from daysAgo: 2 to pull more threads into inbox_lists/ for testing. Revert before shipping.
-      const list = await window.ipc.invoke('gmail:listRecentThreads', { daysAgo: 7 })
-      if (list.error) throw new Error(list.error)
-      await mapWithConcurrency(list.threads, 6, async (item) => {
-        const result = await window.ipc.invoke('gmail:getThread', {
-          threadId: item.threadId,
-          expectedHistoryId: item.historyId,
-        })
-        if (!result.thread) {
-          console.warn('Failed to hydrate Gmail thread', item.threadId, result.error)
-        }
-      })
-      // Reset Other so the auto-load effect re-triggers once Important hits end.
-      setOther(() => ({ ...initialSectionState }))
-      await reloadFirstPage('important')
+      await window.ipc.invoke('gmail:triggerSync', {})
     } catch (err) {
-      console.warn('[Gmail] live refresh failed:', err)
+      console.warn('[Gmail] triggerSync failed:', err)
       setError(err instanceof Error ? err.message : String(err))
     } finally {
-      refreshInFlightRef.current = false
-      setRefreshing(false)
+      // Leave the spinner on briefly so the user sees feedback; the watcher
+      // will refresh the visible state once the sync cycle writes new files.
+      setTimeout(() => {
+        refreshInFlightRef.current = false
+        setRefreshing(false)
+      }, 800)
     }
-  }, [reloadFirstPage])
+  }, [])
 
   // Kick off a live refresh on mount only when there's no persisted data —
   // otherwise we'd clobber the snapshot the user already had.

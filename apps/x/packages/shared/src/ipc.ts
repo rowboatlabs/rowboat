@@ -134,22 +134,8 @@ const ipcSchemas = {
       error: z.string().optional(),
     }),
   },
-  'gmail:listRecentThreads': {
+  'gmail:getImportant': {
     req: z.object({
-      daysAgo: z.number().int().positive().optional(),
-    }),
-    res: z.object({
-      threads: z.array(z.object({
-        threadId: z.string(),
-        historyId: z.string(),
-        snippet: z.string().optional(),
-      })),
-      error: z.string().optional(),
-    }),
-  },
-  'gmail:listInboxPage': {
-    req: z.object({
-      section: z.enum(['important', 'other']),
       cursor: z.string().optional(),
       limit: z.number().int().min(1).max(100).optional(),
     }),
@@ -157,6 +143,20 @@ const ipcSchemas = {
       threads: z.array(GmailThreadSchema),
       nextCursor: z.string().nullable(),
     }),
+  },
+  'gmail:getEverythingElse': {
+    req: z.object({
+      cursor: z.string().optional(),
+      limit: z.number().int().min(1).max(100).optional(),
+    }),
+    res: z.object({
+      threads: z.array(GmailThreadSchema),
+      nextCursor: z.string().nullable(),
+    }),
+  },
+  'gmail:triggerSync': {
+    req: z.object({}),
+    res: z.object({}),
   },
   'gmail:saveMessageHeight': {
     req: z.object({
