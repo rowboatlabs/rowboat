@@ -223,6 +223,16 @@ export const PermissionRequest = ({
                 </DropdownMenu>
               )}
             </div>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={onDeny}
+              disabled={isProcessing}
+              className="flex-1"
+            >
+              <XIcon className="size-4" />
+              Deny
+            </Button>
             {otherAgent && otherDisplay && onSwitchAgent && (
               <Button
                 variant="secondary"
@@ -235,16 +245,6 @@ export const PermissionRequest = ({
                 Use {otherDisplay} instead
               </Button>
             )}
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={onDeny}
-              disabled={isProcessing}
-              className="flex-1"
-            >
-              <XIcon className="size-4" />
-              Deny
-            </Button>
           </div>
         )}
       </div>
