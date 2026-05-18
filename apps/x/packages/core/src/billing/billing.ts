@@ -1,15 +1,6 @@
 import { getAccessToken } from '../auth/tokens.js';
 import { API_URL } from '../config/env.js';
-
-export interface BillingInfo {
-  userEmail: string | null;
-  userId: string | null;
-  subscriptionPlan: string | null;
-  subscriptionStatus: string | null;
-  trialExpiresAt: string | null;
-  sanctionedCredits: number;
-  availableCredits: number;
-}
+import type { BillingInfo, BillingPlan } from '@x/shared/dist/billing.js';
 
 export async function getBillingInfo(): Promise<BillingInfo> {
   const accessToken = await getAccessToken();
@@ -25,7 +16,7 @@ export async function getBillingInfo(): Promise<BillingInfo> {
       email: string;
     };
     billing: {
-      plan: string | null;
+      plan: BillingPlan | null;
       status: string | null;
       trialExpiresAt: string | null;
       usage: {

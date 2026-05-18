@@ -97,7 +97,7 @@ const BILLING_ERROR_PATTERNS = [
   {
     pattern: /not enough credits/i,
     title: 'You\'ve run out of credits',
-    subtitle: 'Upgrade your plan for more credits, or wait for your billing cycle to reset.',
+    subtitle: 'Upgrade your plan for more credits. Free usage resets daily at 00:00 UTC.',
     cta: 'Upgrade plan',
   },
   {

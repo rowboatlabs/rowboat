@@ -17,6 +17,7 @@ import { UserMessageContent } from './message.js';
 import { RowboatApiConfig } from './rowboat-account.js';
 import { ZListToolkitsResponse } from './composio.js';
 import { BrowserStateSchema } from './browser-control.js';
+import { BillingInfoSchema } from './billing.js';
 
 // ============================================================================
 // Runtime Validation Schemas (Single Source of Truth)
@@ -878,15 +879,7 @@ const ipcSchemas = {
   // Billing channels
   'billing:getInfo': {
     req: z.null(),
-    res: z.object({
-      userEmail: z.string().nullable(),
-      userId: z.string().nullable(),
-      subscriptionPlan: z.string().nullable(),
-      subscriptionStatus: z.string().nullable(),
-      trialExpiresAt: z.string().nullable(),
-      sanctionedCredits: z.number(),
-      availableCredits: z.number(),
-    }),
+    res: BillingInfoSchema,
   },
 } as const;
 

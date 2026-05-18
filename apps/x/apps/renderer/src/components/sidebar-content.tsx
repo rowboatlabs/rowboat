@@ -758,7 +758,7 @@ export function SidebarContentPanel({
               onClick={() => appUrl && window.open(`${appUrl}?intent=upgrade`)}
               className="shrink-0 rounded-md bg-sidebar-foreground/10 px-2.5 py-1 text-[11px] font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-foreground/20"
             >
-              {!billing.subscriptionPlan ? 'Subscribe' : billing.subscriptionPlan === 'starter' ? 'Upgrade' : 'Manage'}
+              {!billing.subscriptionPlan || billing.subscriptionPlan === 'free' || billing.subscriptionPlan === 'starter' ? 'Upgrade' : 'Manage'}
             </button>
           </div>
         </div>
