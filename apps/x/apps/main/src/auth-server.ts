@@ -106,31 +106,36 @@ function tryBindPort(
 /**
  * Create a local HTTP server to handle OAuth callback.
  *
- * When `fixedPort` is true, only the given port is tried — used for providers
- * with a pre-registered redirect URI (e.g. Google BYOK) where the port must
- * match exactly what the user registered at the OAuth provider console.
+ * Defaults to fixed-port behaviour: only `port` is tried, and a clear error is
+ * thrown if it cannot be bound. This is the right behaviour for any provider
+ * whose redirect URI is pre-registered (Google BYOK, Composio, etc.) — those
+ * callers must keep using the exact port they've handed to the provider.
  *
- * When `fixedPort` is false (default), tries `port` through `port + PORT_RANGE_SIZE - 1`
- * and binds on the first available one, handling both EADDRINUSE and EACCES
- * (the latter is common on Windows when Hyper-V/WSL2 reserve the port).
+ * Opt into `{ fallback: true }` only when the caller is prepared to use the
+ * port returned in `AuthServerResult` (i.e. the redirect URI is built from the
+ * actual bound port, not hard-coded). With fallback enabled, scans `port`
+ * through `port + PORT_RANGE_SIZE - 1` and binds the first available, handling
+ * both EADDRINUSE and EACCES (the latter is common on Windows when
+ * Hyper-V/WSL2 reserve the port).
  */
 export async function createAuthServer(
   port: number = DEFAULT_PORT,
   onCallback: (callbackUrl: URL) => void | Promise<void>,
-  fixedPort = false,
+  opts: { fallback?: boolean } = {},
 ): Promise<AuthServerResult> {
-  const limit = fixedPort ? port : port + PORT_RANGE_SIZE - 1;
+  const fallback = opts.fallback === true;
+  const limit = fallback ? port + PORT_RANGE_SIZE - 1 : port;
 
   for (let p = port; p <= limit; p++) {
     try {
       return await tryBindPort(p, onCallback);
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
-      if ((code === 'EADDRINUSE' || code === 'EACCES') && p < limit) {
+      if (fallback && (code === 'EADDRINUSE' || code === 'EACCES') && p < limit) {
         console.warn(`[OAuth] Port ${p} unavailable (${code}), trying ${p + 1}…`);
         continue;
       }
-      if (fixedPort) {
+      if (!fallback) {
         const reason = code === 'EACCES' || code === 'EADDRINUSE'
           ? `Port ${port} is unavailable (${code}). This port must be free for sign-in to work — close any app using it and try again.`
           : (err instanceof Error ? err.message : String(err));

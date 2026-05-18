@@ -220,7 +220,8 @@ export async function resolveStartPort(
 
   const registeredPort = await clientRepo.getRegisteredPort(provider);
   try {
-    const probe = await createAuthServer(registeredPort, () => { /* probe */ }, true);
+    // Probe — fixed-port (no fallback) so we know whether the exact registered port is free
+    const probe = await createAuthServer(registeredPort, () => { /* probe */ });
     probe.server.close();
     console.log(`[OAuth] ${provider}: registered port ${registeredPort} still available`);
     return registeredPort;
@@ -386,45 +387,59 @@ export async function connectProvider(provider: string, credentials?: { clientId
           }
         }
       },
-      isStaticClient, // fixedPort=true for static providers (Google BYOK)
+      // Static providers (Google BYOK) keep fixed-port behaviour to match the
+      // pre-registered redirect URI at the provider's console. DCR providers
+      // can fall back since we register the actual bound port below.
+      { fallback: !isStaticClient },
     );
 
-    // --- OAuth config + PKCE (uses actual bound port for redirect URI) ---
-    const redirectUri = buildRedirectUri(boundPort);
-    const config = await getProviderConfiguration(provider, redirectUri, credentials);
+    // Server is bound. Any throw between here and `activeFlow = ...` would
+    // leak the port — `cancelActiveFlow` only closes it once activeFlow is set.
+    try {
+      const redirectUri = buildRedirectUri(boundPort);
+      const config = await getProviderConfiguration(provider, redirectUri, credentials);
 
-    const { verifier: codeVerifier, challenge: codeChallenge } = await oauthClient.generatePKCE();
-    state = oauthClient.generateState();
+      const { verifier: codeVerifier, challenge: codeChallenge } = await oauthClient.generatePKCE();
+      state = oauthClient.generateState();
 
-    const scopes = providerConfig.scopes || [];
-    activeFlows.set(state, { codeVerifier, provider, config });
+      const scopes = providerConfig.scopes || [];
+      activeFlows.set(state, { codeVerifier, provider, config });
 
-    const authUrl = oauthClient.buildAuthorizationUrl(config, {
-      redirect_uri: redirectUri,
-      scope: scopes.join(' '),
-      code_challenge: codeChallenge,
-      state,
-    });
+      const authUrl = oauthClient.buildAuthorizationUrl(config, {
+        redirect_uri: redirectUri,
+        scope: scopes.join(' '),
+        code_challenge: codeChallenge,
+        state,
+      });
 
-    // Set timeout to clean up abandoned flows (2 minutes)
-    const cleanupTimeout = setTimeout(() => {
-      if (activeFlow?.state === state) {
-        console.log(`[OAuth] Cleaning up abandoned OAuth flow for ${provider} (timeout)`);
-        cancelActiveFlow('timed_out');
+      // Set timeout to clean up abandoned flows (2 minutes)
+      const cleanupTimeout = setTimeout(() => {
+        if (activeFlow?.state === state) {
+          console.log(`[OAuth] Cleaning up abandoned OAuth flow for ${provider} (timeout)`);
+          cancelActiveFlow('timed_out');
+        }
+      }, 2 * 60 * 1000);
+
+      activeFlow = {
+        provider,
+        state,
+        server,
+        cleanupTimeout,
+      };
+
+      // Open in system browser (shares cookies/sessions with user's regular browser)
+      shell.openExternal(authUrl.toString());
+
+      return { success: true };
+    } catch (setupError) {
+      // Post-bind setup failed — close the server so the port is released and
+      // a retry isn't blocked by our own zombie listener.
+      server.close();
+      if (state) {
+        activeFlows.delete(state);
       }
-    }, 2 * 60 * 1000);
-
-    activeFlow = {
-      provider,
-      state,
-      server,
-      cleanupTimeout,
-    };
-
-    // Open in system browser (shares cookies/sessions with user's regular browser)
-    shell.openExternal(authUrl.toString());
-
-    return { success: true };
+      throw setupError;
+    }
   } catch (error) {
     console.error('OAuth connection failed:', error);
     return {
