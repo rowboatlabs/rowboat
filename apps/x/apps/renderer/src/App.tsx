@@ -5738,6 +5738,24 @@ function App() {
                                             onApproveSession={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'session')}
                                             onApproveAlways={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'always')}
                                             onDeny={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
+                                            onSwitchAgent={async (newAgent) => {
+                                              const runIdForSwitch = tab.runId
+                                              await handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')
+                                              window.dispatchEvent(new CustomEvent('code-mode-detected', {
+                                                detail: { runId: runIdForSwitch, agent: newAgent },
+                                              }))
+                                              if (runIdForSwitch) {
+                                                try {
+                                                  await window.ipc.invoke('runs:createMessage', {
+                                                    runId: runIdForSwitch,
+                                                    message: `Use ${newAgent === 'claude' ? 'Claude Code' : 'Codex'} instead — rerun the same task with the same prompt, just swap the agent binary to \`${newAgent}\`.`,
+                                                    codeMode: newAgent,
+                                                  })
+                                                } catch (err) {
+                                                  console.error('Failed to send swap-agent follow-up', err)
+                                                }
+                                              }
+                                            }}
                                             isProcessing={isActive && isProcessing}
                                             response={response}
                                           />

@@ -9,7 +9,7 @@ import {
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { AlertTriangleIcon, CheckCircleIcon, CheckIcon, ChevronDownIcon, XCircleIcon, XIcon } from "lucide-react";
+import { AlertTriangleIcon, CheckCircleIcon, CheckIcon, ChevronDownIcon, RefreshCwIcon, Terminal, XCircleIcon, XIcon } from "lucide-react";
 import type { ComponentProps } from "react";
 import { ToolCallPart } from "@x/shared/dist/message.js";
 import { ToolPermissionMetadata } from "@x/shared/dist/runs.js";
@@ -21,6 +21,7 @@ export type PermissionRequestProps = ComponentProps<"div"> & {
   onApproveSession?: () => void;
   onApproveAlways?: () => void;
   onDeny?: () => void;
+  onSwitchAgent?: (newAgent: 'claude' | 'codex') => void;
   isProcessing?: boolean;
   response?: 'approve' | 'deny' | null;
   permission?: z.infer<typeof ToolPermissionMetadata>;
@@ -41,6 +42,7 @@ export const PermissionRequest = ({
   onApproveSession,
   onApproveAlways,
   onDeny,
+  onSwitchAgent,
   isProcessing = false,
   response = null,
   permission,
@@ -53,6 +55,17 @@ export const PermissionRequest = ({
         : JSON.stringify(toolCall.arguments))
     : null;
   const filePermission = permission?.kind === "file" ? permission : null;
+
+  // Detect acpx coding-agent invocations so we can show the agent identity and
+  // offer a one-click swap-and-retry.
+  const acpxAgent: 'claude' | 'codex' | null = (() => {
+    if (!command) return null;
+    const match = command.match(/\bacpx\b[\s\S]*?\b(claude|codex)\b\s+exec\b/);
+    return match ? (match[1] as 'claude' | 'codex') : null;
+  })();
+  const otherAgent: 'claude' | 'codex' | null = acpxAgent === 'claude' ? 'codex' : acpxAgent === 'codex' ? 'claude' : null;
+  const agentDisplay = acpxAgent === 'claude' ? 'Claude Code' : acpxAgent === 'codex' ? 'Codex' : null;
+  const otherDisplay = otherAgent === 'claude' ? 'Claude Code' : otherAgent === 'codex' ? 'Codex' : null;
 
   const isResponded = response !== null;
   const isApproved = response === 'approve';
@@ -89,6 +102,15 @@ export const PermissionRequest = ({
                 </h3>
                 <p className="text-sm text-muted-foreground mt-1">
                   {isResponded ? "Requested:" : "The agent wants to execute:"} <span className="font-mono font-medium">{toolCall.toolName}</span>
+                  {agentDisplay && (
+                    <Badge
+                      variant="secondary"
+                      className="ml-2 align-middle bg-secondary text-foreground"
+                    >
+                      <Terminal className="size-3 mr-1" />
+                      {agentDisplay}
+                    </Badge>
+                  )}
                 </p>
               </div>
               {isResponded && (
@@ -201,6 +223,18 @@ export const PermissionRequest = ({
                 </DropdownMenu>
               )}
             </div>
+            {otherAgent && otherDisplay && onSwitchAgent && (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => onSwitchAgent(otherAgent)}
+                disabled={isProcessing}
+                className="flex-1"
+              >
+                <RefreshCwIcon className="size-4" />
+                Use {otherDisplay} instead
+              </Button>
+            )}
             <Button
               variant="destructive"
               size="sm"
