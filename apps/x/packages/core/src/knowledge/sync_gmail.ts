@@ -107,6 +107,12 @@ export interface GmailThreadSnapshot {
         bodyHtml?: string;
         unread?: boolean;
         bodyHeight?: number;
+        attachments?: Array<{
+            filename: string;
+            mimeType?: string;
+            sizeBytes?: number;
+            savedPath: string;
+        }>;
     }>;
 }
 
@@ -212,6 +218,51 @@ function getBody(payload: gmail.Schema$MessagePart): string {
         return text.split('\n').filter((line: string) => !line.trim().startsWith('>')).join('\n');
     }
     return '';
+}
+
+interface ExtractedAttachment {
+    filename: string;
+    mimeType?: string;
+    sizeBytes?: number;
+    savedPath: string;
+}
+
+/**
+ * Walk a message MIME tree and collect "real" attachments — parts with a
+ * filename + attachmentId, excluding cid-referenced inline images (those
+ * already get baked into bodyHtml as data URLs).
+ *
+ * Returns workspace-relative paths matching the convention used by
+ * saveAttachment / processThread, so the renderer can hand them to
+ * shell.openPath via the existing IPC.
+ */
+function extractAttachments(msgId: string, payload: gmail.Schema$MessagePart): ExtractedAttachment[] {
+    const out: ExtractedAttachment[] = [];
+    const walk = (part: gmail.Schema$MessagePart): void => {
+        const filename = part.filename;
+        const attId = part.body?.attachmentId;
+        if (filename && attId) {
+            // Exclude only true inline images (image/* with a Content-ID, which
+            // get baked into bodyHtml as data URLs by inlineCidImages). Other
+            // parts with Content-ID — PDFs, .log files, .ics, etc. — are real
+            // attachments; Gmail just stamps Content-ID on most parts.
+            const cid = part.headers?.find(h => h.name?.toLowerCase() === 'content-id')?.value;
+            const mime = part.mimeType || '';
+            const isInlineImage = !!cid && mime.startsWith('image/');
+            if (!isInlineImage) {
+                const safeName = `${msgId}_${cleanFilename(filename)}`;
+                out.push({
+                    filename,
+                    mimeType: part.mimeType ?? undefined,
+                    sizeBytes: typeof part.body?.size === 'number' ? part.body.size : undefined,
+                    savedPath: `gmail_sync/attachments/${safeName}`,
+                });
+            }
+        }
+        if (part.parts) for (const sub of part.parts) walk(sub);
+    };
+    walk(payload);
+    return out;
 }
 
 async function inlineCidImages(
@@ -479,6 +530,7 @@ async function buildAndCacheSnapshot(
             }
         }
         const isDraft = msg.labelIds?.includes('DRAFT') ?? false;
+        const attachments = msg.payload && msg.id ? extractAttachments(msg.id, msg.payload) : [];
         return {
             id: msg.id || undefined,
             from: headerValue(headers, 'From') || 'Unknown',
@@ -491,6 +543,7 @@ async function buildAndCacheSnapshot(
             unread: msg.labelIds?.includes('UNREAD') ?? false,
             bodyHeight: msg.id ? heightCarryover.get(msg.id) : undefined,
             messageIdHeader: headerValue(headers, 'Message-ID') || headerValue(headers, 'Message-Id') || undefined,
+            attachments: attachments.length > 0 ? attachments : undefined,
             isDraft,
         };
     }));

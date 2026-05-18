@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Bold, Forward, Italic, Link as LinkIcon, List, ListOrdered, LoaderIcon, Quote, RefreshCw, Reply, Search, Send, Sparkles, Strikethrough } from 'lucide-react'
+import { Bold, Forward, Italic, Link as LinkIcon, List, ListOrdered, LoaderIcon, Paperclip, Quote, RefreshCw, Reply, Search, Send, Sparkles, Strikethrough } from 'lucide-react'
 import { useEditor, EditorContent, type Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
@@ -268,7 +268,52 @@ function MessageBody({ message, threadId }: { message: GmailThreadMessage; threa
           <span>•••</span>
         </button>
       )}
+      {message.attachments && message.attachments.length > 0 && (
+        <MessageAttachments attachments={message.attachments} />
+      )}
     </>
+  )
+}
+
+function formatAttachmentSize(bytes?: number): string {
+  if (!bytes || bytes <= 0) return ''
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+function MessageAttachments({ attachments }: { attachments: NonNullable<GmailThreadMessage['attachments']> }) {
+  const openAttachment = (path: string, filename: string) => {
+    void window.ipc
+      .invoke('shell:openPath', { path })
+      .then((result) => {
+        if (result?.error) toast(`Could not open ${filename}: ${result.error}`, 'error')
+      })
+      .catch((err) => {
+        const message = err instanceof Error ? err.message : String(err)
+        toast(`Could not open ${filename}: ${message}`, 'error')
+      })
+  }
+
+  return (
+    <div className="gmail-message-attachments">
+      {attachments.map((att) => {
+        const size = formatAttachmentSize(att.sizeBytes)
+        return (
+          <button
+            key={att.savedPath}
+            type="button"
+            className="gmail-attachment"
+            onClick={() => openAttachment(att.savedPath, att.filename)}
+            title={`Open ${att.filename}`}
+          >
+            <Paperclip size={13} />
+            <span className="gmail-attachment-name">{att.filename}</span>
+            {size && <span className="gmail-attachment-size">{size}</span>}
+          </button>
+        )
+      })}
+    </div>
   )
 }
 

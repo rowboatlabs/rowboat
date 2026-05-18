@@ -541,6 +541,50 @@
   border-color: var(--gm-accent);
 }
 
+.gmail-message-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+  max-width: 820px;
+}
+
+.gmail-attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 320px;
+  padding: 6px 10px;
+  border: 1px solid var(--gm-border-strong);
+  border-radius: 6px;
+  background: var(--gm-bg-pill);
+  color: var(--gm-text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.gmail-attachment:hover {
+  background: var(--gm-bg-pill-hover);
+  border-color: var(--gm-accent);
+  color: var(--gm-accent);
+}
+
+.gmail-attachment-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-weight: 500;
+}
+
+.gmail-attachment-size {
+  flex-shrink: 0;
+  color: var(--gm-text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
 .gmail-thread-actions {
   display: flex;
   gap: 8px;

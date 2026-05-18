@@ -102,6 +102,15 @@ export const EmailBlockSchema = z.object({
 
 export type EmailBlock = z.infer<typeof EmailBlockSchema>;
 
+export const GmailAttachmentSchema = z.object({
+  filename: z.string(),
+  mimeType: z.string().optional(),
+  sizeBytes: z.number().int().nonnegative().optional(),
+  savedPath: z.string(),
+});
+
+export type GmailAttachment = z.infer<typeof GmailAttachmentSchema>;
+
 export const GmailThreadMessageSchema = z.object({
   id: z.string().optional(),
   from: z.string().optional(),
@@ -113,6 +122,7 @@ export const GmailThreadMessageSchema = z.object({
   bodyHtml: z.string().optional(),
   unread: z.boolean().optional(),
   bodyHeight: z.number().int().positive().optional(),
+  attachments: z.array(GmailAttachmentSchema).optional(),
 });
 
 export type GmailThreadMessage = z.infer<typeof GmailThreadMessageSchema>;
