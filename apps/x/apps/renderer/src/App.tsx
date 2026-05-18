@@ -622,12 +622,14 @@ function parseDeepLink(input: string): ViewState | null {
 /** Sidebar toggle (fixed position, top-left) */
 function FixedSidebarToggle({
   leftInsetPx,
+  onNewChat,
 }: {
   leftInsetPx: number
+  onNewChat?: () => void
 }) {
   const { toggleSidebar } = useSidebar()
   return (
-    <div className="fixed left-0 top-0 z-50 flex h-10 items-center" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+    <div className="fixed left-0 top-0 z-50 flex h-10 items-center gap-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
       <div aria-hidden="true" className="h-10 shrink-0" style={{ width: leftInsetPx }} />
       {/* Sidebar toggle */}
       <button
@@ -639,6 +641,17 @@ function FixedSidebarToggle({
       >
         <PanelLeftIcon className="size-5" />
       </button>
+      {onNewChat && (
+        <button
+          type="button"
+          onClick={onNewChat}
+          className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+          aria-label="New chat"
+          title="New chat"
+        >
+          <SquarePen className="size-5" />
+        </button>
+      )}
     </div>
   )
 }
@@ -5388,6 +5401,7 @@ function App() {
             {/* Rendered last so its no-drag region paints over the sidebar drag region */}
             <FixedSidebarToggle
               leftInsetPx={isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0}
+              onNewChat={handleNewChatTab}
             />
           </SidebarProvider>
         </div>

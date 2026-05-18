@@ -21,7 +21,6 @@ import {
   Pencil,
   Radio,
   SearchIcon,
-  SquarePen,
   Table2,
   Plug,
   Lightbulb,
@@ -591,16 +590,6 @@ export function SidebarContentPanel({
         </div>
         {/* Quick action buttons */}
         <div className="rowboat-quick-actions titlebar-no-drag flex flex-col gap-0.5 px-2 pb-1">
-          {onNewChat && (
-            <button
-              type="button"
-              onClick={onNewChat}
-              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
-            >
-              <SquarePen className="size-4" />
-              <span>New chat</span>
-            </button>
-          )}
           {onOpenSearch && (
             <button
               type="button"
