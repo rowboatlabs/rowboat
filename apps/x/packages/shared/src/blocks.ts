@@ -88,18 +88,55 @@ export type CalendarBlock = z.infer<typeof CalendarBlockSchema>;
 
 export const EmailBlockSchema = z.object({
   threadId: z.string().optional(),
+  threadUrl: z.string().url().optional(),
   summary: z.string().optional(),
   subject: z.string().optional(),
   from: z.string().optional(),
   to: z.string().optional(),
   date: z.string().optional(),
-  latest_email: z.string(),
+  latest_email: z.string().optional(),
   past_summary: z.string().optional(),
   draft_response: z.string().optional(),
   response_mode: z.enum(['inline', 'assistant', 'both']).optional(),
 });
 
 export type EmailBlock = z.infer<typeof EmailBlockSchema>;
+
+export const GmailAttachmentSchema = z.object({
+  filename: z.string(),
+  mimeType: z.string().optional(),
+  sizeBytes: z.number().int().nonnegative().optional(),
+  savedPath: z.string(),
+});
+
+export type GmailAttachment = z.infer<typeof GmailAttachmentSchema>;
+
+export const GmailThreadMessageSchema = z.object({
+  id: z.string().optional(),
+  from: z.string().optional(),
+  to: z.string().optional(),
+  cc: z.string().optional(),
+  date: z.string().optional(),
+  subject: z.string().optional(),
+  body: z.string().optional(),
+  bodyHtml: z.string().optional(),
+  unread: z.boolean().optional(),
+  bodyHeight: z.number().int().positive().optional(),
+  attachments: z.array(GmailAttachmentSchema).optional(),
+});
+
+export type GmailThreadMessage = z.infer<typeof GmailThreadMessageSchema>;
+
+export const GmailThreadSchema = EmailBlockSchema.extend({
+  threadId: z.string(),
+  threadUrl: z.string().url(),
+  unread: z.boolean().optional(),
+  importance: z.enum(['important', 'other']).optional(),
+  gmail_draft: z.string().optional(),
+  messages: z.array(GmailThreadMessageSchema),
+});
+
+export type GmailThread = z.infer<typeof GmailThreadSchema>;
 
 export const EmailsBlockSchema = z.object({
   title: z.string().optional(),
