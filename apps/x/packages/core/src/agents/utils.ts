@@ -32,7 +32,7 @@ export function getErrorDetails(error: unknown): string {
 
 /**
  * Extract the assistant's final text response from a run's log.
- * @param runId 
+ * @param runId
  * @returns The assistant's final text response or null if not found.
  */
 export async function extractAgentResponse(runId: string): Promise<string | null> {

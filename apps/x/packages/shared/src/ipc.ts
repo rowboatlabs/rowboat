@@ -7,10 +7,17 @@ import { AgentScheduleConfig, AgentScheduleEntry } from './agent-schedule.js';
 import { AgentScheduleState } from './agent-schedule-state.js';
 import { ServiceEvent } from './service-events.js';
 import { LiveNoteAgentEvent, LiveNoteSchema } from './live-note.js';
+import {
+    BackgroundTaskAgentEvent,
+    BackgroundTaskSchema,
+    BackgroundTaskSummarySchema,
+    TriggersSchema,
+} from './background-task.js';
 import { UserMessageContent } from './message.js';
 import { RowboatApiConfig } from './rowboat-account.js';
 import { ZListToolkitsResponse } from './composio.js';
 import { BrowserStateSchema } from './browser-control.js';
+import { BillingInfoSchema } from './billing.js';
 
 // ============================================================================
 // Runtime Validation Schemas (Single Source of Truth)
@@ -216,6 +223,10 @@ const ipcSchemas = {
   },
   'live-note-agent:events': {
     req: LiveNoteAgentEvent,
+    res: z.null(),
+  },
+  'bg-task-agent:events': {
+    req: BackgroundTaskAgentEvent,
     res: z.null(),
   },
   'models:list': {
@@ -479,6 +490,10 @@ const ipcSchemas = {
     req: z.object({ path: z.string() }),
     res: z.object({ error: z.string().optional() }),
   },
+  'shell:showItemInFolder': {
+    req: z.object({ path: z.string() }),
+    res: z.object({ success: z.literal(true) }),
+  },
   'shell:readFileBase64': {
     req: z.object({ path: z.string() }),
     res: z.object({ data: z.string(), mimeType: z.string(), size: z.number() }),
@@ -691,6 +706,95 @@ const ipcSchemas = {
       })),
     }),
   },
+  // Background-task channels
+  'bg-task:run': {
+    req: z.object({
+      slug: z.string(),
+      context: z.string().optional(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      runId: z.string().nullable().optional(),
+      summary: z.string().nullable().optional(),
+      error: z.string().optional(),
+    }),
+  },
+  'bg-task:get': {
+    req: z.object({
+      slug: z.string(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      task: BackgroundTaskSchema.nullable().optional(),
+      error: z.string().optional(),
+    }),
+  },
+  'bg-task:patch': {
+    req: z.object({
+      slug: z.string(),
+      partial: BackgroundTaskSchema.partial(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      task: BackgroundTaskSchema.nullable().optional(),
+      error: z.string().optional(),
+    }),
+  },
+  'bg-task:create': {
+    req: z.object({
+      name: z.string(),
+      instructions: z.string(),
+      triggers: TriggersSchema.optional(),
+      model: z.string().optional(),
+      provider: z.string().optional(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      slug: z.string().optional(),
+      error: z.string().optional(),
+    }),
+  },
+  'bg-task:delete': {
+    req: z.object({
+      slug: z.string(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  'bg-task:stop': {
+    req: z.object({
+      slug: z.string(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  'bg-task:list': {
+    req: z.object({
+      offset: z.number().int().nonnegative().optional(),
+      limit: z.number().int().positive().optional(),
+      sort: z.enum(['createdAt:desc', 'createdAt:asc', 'name:asc']).optional(),
+    }),
+    res: z.object({
+      items: z.array(BackgroundTaskSummarySchema),
+      total: z.number().int().nonnegative(),
+    }),
+  },
+  // Returns the runIds recorded in `bg-tasks/<slug>/runs.log` (newest first).
+  // The renderer turns each id into a full Run via the existing `runs:fetch`
+  // channel — bg-task transcripts now live at the global $WorkDir/runs/.
+  'bg-task:listRunIds': {
+    req: z.object({
+      slug: z.string(),
+      limit: z.number().int().positive().optional(),
+    }),
+    res: z.object({
+      runIds: z.array(z.string()),
+    }),
+  },
   // Embedded browser (WebContentsView) channels
   'browser:setBounds': {
     req: z.object({
@@ -775,15 +879,7 @@ const ipcSchemas = {
   // Billing channels
   'billing:getInfo': {
     req: z.null(),
-    res: z.object({
-      userEmail: z.string().nullable(),
-      userId: z.string().nullable(),
-      subscriptionPlan: z.string().nullable(),
-      subscriptionStatus: z.string().nullable(),
-      trialExpiresAt: z.string().nullable(),
-      sanctionedCredits: z.number(),
-      availableCredits: z.number(),
-    }),
+    res: BillingInfoSchema,
   },
 } as const;
 

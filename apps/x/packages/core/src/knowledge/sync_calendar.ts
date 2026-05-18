@@ -7,7 +7,7 @@ import { WorkDir } from '../config/config.js';
 import { GoogleClientFactory } from './google-client-factory.js';
 import { serviceLogger } from '../services/service_logger.js';
 import { limitEventItems } from './limit_event_items.js';
-import { createEvent } from './live-note/events.js';
+import { createEvent } from '../events/producer.js';
 
 const MAX_EVENTS_IN_DIGEST = 50;
 const MAX_DESCRIPTION_CHARS = 500;
@@ -138,7 +138,6 @@ const SYNC_INTERVAL_MS = 5 * 60 * 1000; // Check every 5 minutes
 const LOOKBACK_DAYS = 7;
 const REQUIRED_SCOPES = [
     'https://www.googleapis.com/auth/calendar.events.readonly',
-    'https://www.googleapis.com/auth/drive.readonly'
 ];
 const nhm = new NodeHtmlMarkdown();
 

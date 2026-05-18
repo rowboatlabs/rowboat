@@ -57,6 +57,16 @@ import {
   deleteLiveNote,
   listLiveNotes,
 } from '@x/core/dist/knowledge/live-note/fileops.js';
+import { runBackgroundTask } from '@x/core/dist/background-tasks/runner.js';
+import { backgroundTaskBus } from '@x/core/dist/background-tasks/bus.js';
+import {
+  fetchTask,
+  patchTask,
+  createTask,
+  deleteTask,
+  listTasks,
+  readRunIds as readTaskRunIds,
+} from '@x/core/dist/background-tasks/fileops.js';
 import { browserIpcHandlers } from './browser/ipc.js';
 
 /**
@@ -389,6 +399,19 @@ export function startLiveNoteAgentWatcher(): void {
   });
 }
 
+let backgroundTaskAgentWatcher: (() => void) | null = null;
+export function startBackgroundTaskAgentWatcher(): void {
+  if (backgroundTaskAgentWatcher) return;
+  backgroundTaskAgentWatcher = backgroundTaskBus.subscribe((event) => {
+    const windows = BrowserWindow.getAllWindows();
+    for (const win of windows) {
+      if (!win.isDestroyed() && win.webContents) {
+        win.webContents.send('bg-task-agent:events', event);
+      }
+    }
+  });
+}
+
 export function stopRunsWatcher(): void {
   if (runsWatcher) {
     runsWatcher();
@@ -656,6 +679,11 @@ export function setupIpcHandlers() {
       const error = await shell.openPath(filePath);
       return { error: error || undefined };
     },
+    'shell:showItemInFolder': async (_event, args) => {
+      const filePath = resolveShellPath(args.path);
+      shell.showItemInFolder(filePath);
+      return { success: true };
+    },
     'shell:readFileBase64': async (_event, args) => {
       const filePath = resolveShellPath(args.path);
       const stat = await fs.stat(filePath);
@@ -865,6 +893,73 @@ export function setupIpcHandlers() {
     'live-note:listNotes': async () => {
       const notes = await listLiveNotes();
       return { notes };
+    },
+    // Bg-task handlers
+    'bg-task:run': async (_event, args) => {
+      const result = await runBackgroundTask(args.slug, 'manual', args.context);
+      return {
+        success: !result.error,
+        runId: result.runId,
+        summary: result.summary,
+        error: result.error,
+      };
+    },
+    'bg-task:get': async (_event, args) => {
+      try {
+        const task = await fetchTask(args.slug);
+        return { success: true, task };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'bg-task:patch': async (_event, args) => {
+      try {
+        const task = await patchTask(args.slug, args.partial);
+        return { success: true, task };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'bg-task:create': async (_event, args) => {
+      try {
+        const { slug } = await createTask({
+          name: args.name,
+          instructions: args.instructions,
+          ...(args.triggers ? { triggers: args.triggers } : {}),
+          ...(args.model ? { model: args.model } : {}),
+          ...(args.provider ? { provider: args.provider } : {}),
+        });
+        return { success: true, slug };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'bg-task:delete': async (_event, args) => {
+      try {
+        await deleteTask(args.slug);
+        return { success: true };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'bg-task:stop': async (_event, args) => {
+      try {
+        const task = await fetchTask(args.slug);
+        if (!task?.lastRunId) {
+          return { success: false, error: 'No active run for this task' };
+        }
+        await runsCore.stop(task.lastRunId, false);
+        return { success: true };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'bg-task:list': async (_event, args) => {
+      return listTasks(args);
+    },
+    'bg-task:listRunIds': async (_event, args) => {
+      const runIds = await readTaskRunIds(args.slug, args.limit);
+      return { runIds };
     },
     // Billing handler
     'billing:getInfo': async () => {

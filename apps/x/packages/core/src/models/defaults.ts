@@ -86,3 +86,13 @@ export async function getMeetingNotesModel(): Promise<string> {
     const cfg = await container.resolve<IModelConfigRepo>("modelConfigRepo").getConfig();
     return cfg.meetingNotesModel ?? cfg.model;
 }
+
+/**
+ * Model used by the background-task agent + routing classifier. Currently
+ * mirrors `getLiveNoteAgentModel()` — both surfaces want a fast, reliable
+ * agent model. Split into its own getter so a future per-feature override
+ * doesn't require touching all call sites.
+ */
+export async function getBackgroundTaskAgentModel(): Promise<string> {
+    return getLiveNoteAgentModel();
+}

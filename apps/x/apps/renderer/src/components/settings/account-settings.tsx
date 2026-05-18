@@ -29,6 +29,7 @@ export function AccountSettings({ dialogOpen }: AccountSettingsProps) {
   const [connecting, setConnecting] = useState(false)
   const [appUrl, setAppUrl] = useState<string | null>(null)
   const { billing, isLoading: billingLoading } = useBilling(isRowboatConnected)
+  const hasPaidSubscription = billing?.subscriptionPlan === 'starter' || billing?.subscriptionPlan === 'pro'
 
   const checkConnection = useCallback(async () => {
     try {
@@ -178,9 +179,12 @@ export function AccountSettings({ dialogOpen }: AccountSettingsProps) {
                 {!billing.subscriptionPlan && (
                   <p className="text-xs text-muted-foreground">Subscribe to access AI features</p>
                 )}
+                {billing.subscriptionPlan === 'free' && (
+                  <p className="text-xs text-muted-foreground">Free usage resets daily at 00:00 UTC.</p>
+                )}
               </div>
               <Button variant="outline" size="sm" onClick={() => appUrl && window.open(`${appUrl}?intent=upgrade`)}>
-                {!billing.subscriptionPlan ? 'Subscribe' : 'Change plan'}
+                {!billing.subscriptionPlan ? 'Subscribe' : billing.subscriptionPlan === 'free' ? 'Upgrade' : 'Change plan'}
               </Button>
             </div>
           </div>
@@ -203,15 +207,15 @@ export function AccountSettings({ dialogOpen }: AccountSettingsProps) {
         <Button
           variant="outline"
           size="sm"
-          disabled={!billing?.subscriptionPlan}
+          disabled={!hasPaidSubscription}
           onClick={() => appUrl && window.open(appUrl)}
           className="gap-1.5"
         >
           <ExternalLink className="size-3" />
           Manage in Stripe
         </Button>
-        {!billing?.subscriptionPlan && (
-          <p className="text-[11px] text-muted-foreground">Subscribe to a plan first</p>
+        {!hasPaidSubscription && (
+          <p className="text-[11px] text-muted-foreground">Upgrade to a paid plan first</p>
         )}
       </div>
 

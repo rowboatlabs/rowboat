@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react'
-import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, X, Check, ListFilter, Filter, Search, Save, Copy, Pencil, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, X, Check, ListFilter, Filter, Search, Save, Copy, FolderOpen, Pencil, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { Command, CommandInput, CommandList, CommandItem, CommandEmpty, CommandGroup } from '@/components/ui/command'
@@ -103,7 +103,16 @@ type BasesViewProps = {
     rename: (oldPath: string, newName: string, isDir: boolean) => Promise<void>
     remove: (path: string) => Promise<void>
     copyPath: (path: string) => void
+    revealInFileManager: (path: string, isDir: boolean) => void
   }
+}
+
+function getFileManagerName(): string {
+  if (typeof navigator === 'undefined') return 'File Manager'
+  const platform = navigator.platform.toLowerCase()
+  if (platform.includes('mac')) return 'Finder'
+  if (platform.includes('win')) return 'Explorer'
+  return 'File Manager'
 }
 
 function collectFiles(nodes: TreeNode[]): { path: string; name: string; mtimeMs: number }[] {
@@ -918,6 +927,10 @@ function NoteRow({
         <ContextMenuItem onClick={handleCopyPath}>
           <Copy className="mr-2 size-4" />
           Copy Path
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => actions?.revealInFileManager(note.path, false)}>
+          <FolderOpen className="mr-2 size-4" />
+          Open in {getFileManagerName()}
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem onClick={() => { setNewName(baseName); isSubmittingRef.current = false; setIsRenaming(true) }}>

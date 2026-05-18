@@ -1,14 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-
-interface BillingInfo {
-  userEmail: string | null
-  userId: string | null
-  subscriptionPlan: string | null
-  subscriptionStatus: string | null
-  trialExpiresAt: string | null
-  sanctionedCredits: number
-  availableCredits: number
-}
+import type { BillingInfo } from '@x/shared/dist/billing.js'
 
 export function useBilling(isRowboatConnected: boolean) {
   const [billing, setBilling] = useState<BillingInfo | null>(null)

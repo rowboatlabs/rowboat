@@ -26,6 +26,7 @@ export const StartEvent = BaseRunEvent.extend({
     useCase: z.enum([
         "copilot_chat",
         "live_note_agent",
+        "background_task_agent",
         "meeting_note",
         "knowledge_sync",
     ]).optional(),
@@ -138,6 +139,7 @@ export const AskHumanResponsePayload = AskHumanResponseEvent.pick({
 export const UseCase = z.enum([
     "copilot_chat",
     "live_note_agent",
+    "background_task_agent",
     "meeting_note",
     "knowledge_sync",
 ]);

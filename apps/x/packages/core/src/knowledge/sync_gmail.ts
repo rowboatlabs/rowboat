@@ -7,7 +7,7 @@ import { WorkDir } from '../config/config.js';
 import { GoogleClientFactory } from './google-client-factory.js';
 import { serviceLogger, type ServiceRunContext } from '../services/service_logger.js';
 import { limitEventItems } from './limit_event_items.js';
-import { createEvent } from './live-note/events.js';
+import { createEvent } from '../events/producer.js';
 
 // Configuration
 const SYNC_DIR = path.join(WorkDir, 'gmail_sync');
@@ -164,6 +164,16 @@ async function processThread(auth: OAuth2Client, threadId: string, syncDir: stri
 
         if (!messages || messages.length === 0) return null;
 
+        // Skip threads in SPAM or TRASH (Gmail labels them at the message level).
+        const isExcluded = messages.some(m => {
+            const labels = m.labelIds ?? [];
+            return labels.includes('SPAM') || labels.includes('TRASH');
+        });
+        if (isExcluded) {
+            console.log(`Skipping thread ${threadId} (SPAM/TRASH)`);
+            return null;
+        }
+
         // Subject from first message
         const firstHeader = messages[0].payload?.headers;
         const subject = firstHeader?.find(h => h.name === 'Subject')?.value || '(No Subject)';
@@ -279,7 +289,7 @@ async function fullSync(auth: OAuth2Client, syncDir: string, attachmentsDir: str
         do {
             const res = await gmail.users.threads.list({
                 userId: 'me',
-                q: `after:${dateQuery}`,
+                q: `after:${dateQuery} -in:spam -in:trash`,
                 pageToken
             });
 
@@ -393,6 +403,8 @@ async function partialSync(auth: OAuth2Client, startHistoryId: string, syncDir: 
         for (const record of changes) {
             if (record.messagesAdded) {
                 for (const item of record.messagesAdded) {
+                    const labels = item.message?.labelIds ?? [];
+                    if (labels.includes('SPAM') || labels.includes('TRASH')) continue;
                     if (item.message?.threadId) {
                         threadIds.add(item.message.threadId);
                     }

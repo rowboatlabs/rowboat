@@ -12,6 +12,7 @@ import { AskHumanRequestEvent, RunEvent, ToolPermissionRequestEvent } from "@x/s
 import { BuiltinTools } from "../application/lib/builtin-tools.js";
 import { buildCopilotAgent } from "../application/assistant/agent.js";
 import { buildLiveNoteAgent } from "../knowledge/live-note/agent.js";
+import { buildBackgroundTaskAgent } from "../background-tasks/agent.js";
 import { isBlocked, extractCommandNames } from "../application/lib/command-executor.js";
 import container from "../di/container.js";
 import { IModelConfigRepo } from "../models/repo.js";
@@ -403,6 +404,10 @@ export async function loadAgent(id: string): Promise<z.infer<typeof Agent>> {
 
     if (id === "live-note-agent") {
         return buildLiveNoteAgent();
+    }
+
+    if (id === "background-task-agent") {
+        return buildBackgroundTaskAgent();
     }
 
     if (id === 'note_creation') {

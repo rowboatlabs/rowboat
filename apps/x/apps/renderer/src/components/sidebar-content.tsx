@@ -11,6 +11,7 @@ import {
   ExternalLink,
   FilePlus,
   Folder,
+  FolderOpen,
   FolderPlus,
   Globe,
   AlertTriangle,
@@ -24,6 +25,7 @@ import {
   Table2,
   Plug,
   Lightbulb,
+  ListChecks,
   LoaderIcon,
   Settings,
   Square,
@@ -118,7 +120,16 @@ type KnowledgeActions = {
   rename: (path: string, newName: string, isDir: boolean) => Promise<void>
   remove: (path: string) => Promise<void>
   copyPath: (path: string) => void
+  revealInFileManager: (path: string, isDir: boolean) => void
   onOpenInNewTab?: (path: string) => void
+}
+
+function getFileManagerName(): string {
+  if (typeof navigator === 'undefined') return 'File Manager'
+  const platform = navigator.platform.toLowerCase()
+  if (platform.includes('mac')) return 'Finder'
+  if (platform.includes('win')) return 'Explorer'
+  return 'File Manager'
 }
 
 type RunListItem = {
@@ -217,6 +228,8 @@ type SidebarContentPanelProps = {
   onOpenSuggestedTopics?: () => void
   isLiveNotesOpen?: boolean
   onOpenLiveNotes?: () => void
+  isBgTasksOpen?: boolean
+  onOpenBgTasks?: () => void
 } & React.ComponentProps<typeof Sidebar>
 
 const sectionTabs: { id: ActiveSection; label: string }[] = [
@@ -477,6 +490,8 @@ export function SidebarContentPanel({
   onOpenSuggestedTopics,
   isLiveNotesOpen = false,
   onOpenLiveNotes,
+  isBgTasksOpen = false,
+  onOpenBgTasks,
   ...props
 }: SidebarContentPanelProps) {
   const { activeSection, setActiveSection } = useSidebarSection()
@@ -493,6 +508,7 @@ export function SidebarContentPanel({
   const isBrowserQuickActionSelected = isBrowserOpen && !isSearchOpen && !isMeetingQuickActionSelected
   const isSuggestedTopicsQuickActionSelected = isSuggestedTopicsOpen && !isBrowserOpen
   const isLiveNotesQuickActionSelected = isLiveNotesOpen && !isBrowserOpen
+  const isBgTasksQuickActionSelected = isBgTasksOpen && !isBrowserOpen
 
   const handleRowboatLogin = useCallback(async () => {
     try {
@@ -666,6 +682,21 @@ export function SidebarContentPanel({
               <span>Suggested Topics</span>
             </button>
           )}
+          {onOpenBgTasks && (
+            <button
+              type="button"
+              onClick={onOpenBgTasks}
+              className={cn(
+                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
+                isBgTasksQuickActionSelected
+                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                  : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+              )}
+            >
+              <ListChecks className="size-4" />
+              <span>Background tasks</span>
+            </button>
+          )}
           {onOpenLiveNotes && (
             <button
               type="button"
@@ -727,7 +758,7 @@ export function SidebarContentPanel({
               onClick={() => appUrl && window.open(`${appUrl}?intent=upgrade`)}
               className="shrink-0 rounded-md bg-sidebar-foreground/10 px-2.5 py-1 text-[11px] font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-foreground/20"
             >
-              {!billing.subscriptionPlan ? 'Subscribe' : billing.subscriptionPlan === 'starter' ? 'Upgrade' : 'Manage'}
+              {!billing.subscriptionPlan || billing.subscriptionPlan === 'free' || billing.subscriptionPlan === 'starter' ? 'Upgrade' : 'Manage'}
             </button>
           </div>
         </div>
@@ -1156,11 +1187,13 @@ function KnowledgeSection({
     },
   }), [actions, deriveParent])
 
+  const fileManagerName = getFileManagerName()
   const quickActions = [
     { icon: FilePlus, label: "New Note", action: () => wrappedActions.createNote() },
     { icon: FolderPlus, label: "New Folder", action: () => void wrappedActions.createFolder() },
     { icon: Network, label: "Graph View", action: () => actions.openGraph() },
     { icon: Table2, label: "Bases", action: () => actions.openBases() },
+    { icon: FolderOpen, label: `Open in ${fileManagerName}`, action: () => actions.revealInFileManager('knowledge', true) },
   ]
 
   return (
@@ -1367,6 +1400,10 @@ function Tree({
       <ContextMenuItem onClick={handleCopyPath}>
         <Copy className="mr-2 size-4" />
         Copy Path
+      </ContextMenuItem>
+      <ContextMenuItem onClick={() => actions.revealInFileManager(item.path, isDir)}>
+        <FolderOpen className="mr-2 size-4" />
+        Open in {getFileManagerName()}
       </ContextMenuItem>
       <ContextMenuSeparator />
       <ContextMenuItem onClick={() => { setNewName(baseName); isSubmittingRef.current = false; setIsRenaming(true) }}>

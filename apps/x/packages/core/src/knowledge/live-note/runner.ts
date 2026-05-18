@@ -3,6 +3,7 @@ import { fetchLiveNote, patchLiveNote, readNoteBody } from './fileops.js';
 import { createRun, createMessage } from '../../runs/runs.js';
 import { getLiveNoteAgentModel } from '../../models/defaults.js';
 import { extractAgentResponse, waitForRunCompletion } from '../../agents/utils.js';
+import { buildTriggerBlock } from '../../agents/build-trigger-block.js';
 import { liveNoteBus } from './bus.js';
 import { PrefixLogger } from '@x/shared/dist/prefix-logger.js';
 
@@ -29,50 +30,9 @@ function truncate(s: string | null | undefined, n = SUMMARY_LOG_LIMIT): string {
 // Agent run message
 // ---------------------------------------------------------------------------
 
-function describeWindow(triggers: LiveNote['triggers']): string {
-    const ws = triggers?.windows;
-    if (!ws || ws.length === 0) return 'a configured window';
-    return ws.map(w => `${w.startTime}–${w.endTime}`).join(', ');
-}
+const LIVE_NOTE_EVENT_DECISION_DIRECTIVE = '**Decision:** Determine whether this event genuinely warrants updating the note. If the event is not meaningfully relevant on closer inspection, skip the update — do not call `workspace-edit`. Only edit the file if the event provides new or changed information that the objective implies should be reflected.';
 
-function buildTriggerBlock(
-    live: LiveNote,
-    trigger: LiveNoteTriggerType,
-    context: string | undefined,
-): string {
-    if (trigger === 'event') {
-        const criteria = live.triggers?.eventMatchCriteria ?? '(none — should not happen for event-triggered runs)';
-        return `
-
-**Trigger:** Event match — Pass 1 routing flagged this note as potentially relevant to the event below.
-
-**Event match criteria for this note:**
-${criteria}
-
-**Event payload:**
-${context ?? '(no payload)'}
-
-**Decision:** Determine whether this event genuinely warrants updating the note. If the event is not meaningfully relevant on closer inspection, skip the update — do not call \`workspace-edit\`. Only edit the file if the event provides new or changed information that the objective implies should be reflected.`;
-    }
-
-    if (trigger === 'cron') {
-        const expr = live.triggers?.cronExpr ?? '(unknown)';
-        return `
-
-**Trigger:** Scheduled refresh — the cron expression \`${expr}\` matched. This is a baseline refresh; if your objective specifies different behavior for cron vs window vs event runs, follow the cron branch.${context ? `\n\n**Context:**\n${context}` : ''}`;
-    }
-
-    if (trigger === 'window') {
-        return `
-
-**Trigger:** Scheduled refresh — fired inside the configured window (${describeWindow(live.triggers)}). This is a forgiving baseline refresh that runs once per day per window; reactive updates are handled by event triggers (when configured). If your objective specifies different behavior for cron vs window vs event runs, follow the window branch.${context ? `\n\n**Context:**\n${context}` : ''}`;
-    }
-
-    // manual
-    return `
-
-**Trigger:** Manual run (user-triggered — either the Run button in the Live Note panel or the \`run-live-note-agent\` tool).${context ? `\n\n**Context:**\n${context}` : ''}`;
-}
+const LIVE_NOTE_MANUAL_PAREN = 'user-triggered — either the Run button in the Live Note panel or the `run-live-note-agent` tool';
 
 function buildMessage(
     filePath: string,
@@ -97,7 +57,19 @@ ${live.objective}
 
 Start by calling \`workspace-readFile\` on \`${wsPath}\` to read the current note (frontmatter + body) — the body may be long and you should fetch it yourself rather than rely on a snapshot. Then make small, incremental edits with \`workspace-edit\` to bring the body in line with the objective: edit one region, re-read to verify, then edit the next region. Avoid one-shot rewrites of the whole body. Do not modify the YAML frontmatter at the top of the file — that block is owned by the user and the runtime.`;
 
-    return baseMessage + buildTriggerBlock(live, trigger, context);
+    return baseMessage + buildTriggerBlock({
+        trigger,
+        triggers: live.triggers,
+        // The live-note "event" branch passes the payload as `context`; for
+        // every other trigger that same arg is the manual/scheduled context
+        // appended to the block. Preserve both contracts with a single split.
+        context: trigger === 'event' ? undefined : context,
+        eventPayload: trigger === 'event' ? context : undefined,
+        targetNoun: 'note',
+        instructionsNoun: 'objective',
+        manualParen: LIVE_NOTE_MANUAL_PAREN,
+        eventDecisionDirective: LIVE_NOTE_EVENT_DECISION_DIRECTIVE,
+    });
 }
 
 // ---------------------------------------------------------------------------
