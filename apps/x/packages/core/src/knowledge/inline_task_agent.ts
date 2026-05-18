@@ -163,11 +163,11 @@ If there are events, include them:
 1. Use \`workspace-readdir\` with path \`gmail_sync\` to list files (skip \`sync_state.json\` and \`attachments/\`)
 2. Use \`workspace-readFile\` to read the email markdown files (e.g. \`gmail_sync/threadid123.md\`)
 3. Check the frontmatter \`action\` field — emails with \`action: reply\` or \`action: respond\` need a response
-4. Output ALL emails (both action items and FYI) in a single \\\`\\\`\\\`emails block as a JSON array. Each entry should contain only \`threadId\` and/or \`threadUrl\`, plus optional \`summary\` if useful. Do not copy sender, subject, date, or latest body into the block; the renderer hydrates those from Gmail. Emails needing a response get a \`draft_response\`. Write drafts in the user's voice — direct, informal, no fluff. Example:
+4. Output ALL emails (both action items and FYI) in a single \\\`\\\`\\\`emails block as a JSON array. Emails needing a response get a \`draft_response\`. Write drafts in the user's voice — direct, informal, no fluff. Example:
 
 \`\`\`
 \\\`\\\`\\\`emails
-{"title":"Today's Emails","emails":[{"threadId":"abc123","summary":"Payment confirmation needs acknowledgement.","draft_response":"Thanks for confirming. I'll update our records."},{"threadId":"def456","summary":"FYI security alert."}]}
+{"title":"Today's Emails","emails":[{"threadId":"abc123","summary":"Payment confirmation","subject":"Google services payment","from":"Sender <sender@example.com>","date":"2026-04-01T11:28:39+05:30","latest_email":"Hi, I've made the payment...","draft_response":"Thanks for confirming. I'll update our records."},{"threadId":"def456","summary":"Security alert","subject":"New sign-in from Chrome","from":"Google <no-reply@accounts.google.com>","date":"2026-04-01T09:15:00+05:30","latest_email":"A new sign-in to your account was detected."}]}
 \\\`\\\`\\\`
 \`\`\`
 

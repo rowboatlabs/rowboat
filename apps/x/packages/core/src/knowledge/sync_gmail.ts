@@ -25,7 +25,7 @@ const CACHE_DIR = path.join(WorkDir, 'inbox_lists');
         console.warn('[Gmail] Cache directory migration failed:', err);
     }
 })();
-const SYNC_INTERVAL_MS = 5 * 60 * 1000; // Check every 5 minutes
+const SYNC_INTERVAL_MS = 30 * 1000; // Check every 30 seconds
 const REQUIRED_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
 const MAX_THREADS_IN_DIGEST = 10;
 const nhm = new NodeHtmlMarkdown();
@@ -428,8 +428,8 @@ export async function listRecentThreadIds(daysAgo: number = 2): Promise<RecentTh
 
 /**
  * Build a GmailThreadSnapshot from an already-fetched threads.get response,
- * classify it, and write to inbox_lists/. Shared by the renderer-driven
- * fetchThreadSnapshot and the background sync (processThread).
+ * classify it, and write to inbox_lists/. Called by the background sync
+ * (processThread) — the only path that materializes snapshots.
  *
  * Returns null when the thread has no visible (non-draft) messages —
  * those shouldn't show up in the inbox.
@@ -444,6 +444,20 @@ async function buildAndCacheSnapshot(
     if (!messages || messages.length === 0) return null;
 
     const cached = readCachedSnapshot(threadId);
+    // Short-circuit: if the thread hasn't changed since we last classified it,
+    // skip the rebuild + classifier. Saves the cid-image fetches and one LLM
+    // call per unchanged thread (matters most during fullSync after a
+    // historyId expiry, where the whole window is re-walked).
+    // We require `importance` to be present too — pre-classifier cache files
+    // would otherwise stick around forever uncategorised.
+    if (
+        threadData.historyId &&
+        cached &&
+        cached.historyId === threadData.historyId &&
+        cached.snapshot.importance
+    ) {
+        return cached.snapshot;
+    }
     const heightCarryover = new Map<string, number>();
     if (cached) {
         for (const m of cached.snapshot.messages) {
@@ -531,22 +545,6 @@ async function buildAndCacheSnapshot(
     }
 
     return snapshot;
-}
-
-export async function fetchThreadSnapshot(threadId: string, expectedHistoryId?: string): Promise<GmailThreadSnapshot | null> {
-    const cached = readCachedSnapshot(threadId);
-    if (expectedHistoryId && cached && cached.historyId === expectedHistoryId) {
-        return cached.snapshot;
-    }
-
-    const auth = await GoogleClientFactory.getClient();
-    if (!auth) {
-        throw new Error('Gmail is not connected.');
-    }
-
-    const gmailClient = google.gmail({ version: 'v1', auth });
-    const res = await gmailClient.users.threads.get({ userId: 'me', id: threadId });
-    return buildAndCacheSnapshot(threadId, res.data, gmailClient, auth);
 }
 
 async function saveAttachment(gmail: gmail.Gmail, userId: string, msgId: string, part: gmail.Schema$MessagePart, attachmentsDir: string): Promise<string | null> {

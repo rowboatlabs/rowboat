@@ -324,8 +324,7 @@ live:
     Maintain a digest of email threads worth attention today, as a single \`emails\` block.
 
     Without an event payload (cron / window / manual runs): scan \`gmail_sync/\` and emit the
-    full digest from scratch. In each email entry, store only \`threadId\` or \`threadUrl\`,
-    optional \`summary\`, and optional \`draft_response\`; the block hydrates Gmail metadata.
+    full digest from scratch.
 
     With an event payload (event run): integrate the new thread into the existing digest —
     add it if new, update its entry if the threadId is already shown — and don't re-list

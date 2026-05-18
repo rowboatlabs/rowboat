@@ -47,7 +47,7 @@ import { summarizeMeeting } from '@x/core/dist/knowledge/summarize_meeting.js';
 import { getAccessToken } from '@x/core/dist/auth/tokens.js';
 import { getRowboatConfig } from '@x/core/dist/config/rowboat.js';
 import { runLiveNoteAgent } from '@x/core/dist/knowledge/live-note/runner.js';
-import { fetchThreadSnapshot, listImportantThreads, listEverythingElseThreads, saveMessageBodyHeight, triggerSync as triggerGmailSync } from '@x/core/dist/knowledge/sync_gmail.js';
+import { listImportantThreads, listEverythingElseThreads, saveMessageBodyHeight, triggerSync as triggerGmailSync } from '@x/core/dist/knowledge/sync_gmail.js';
 import { liveNoteBus } from '@x/core/dist/knowledge/live-note/bus.js';
 import { getInstallationId } from '@x/core/dist/analytics/installation.js';
 import { API_URL } from '@x/core/dist/config/env.js';
@@ -482,16 +482,6 @@ export function setupIpcHandlers() {
     },
     'workspace:remove': async (_event, args) => {
       return workspace.remove(args.path, args.opts);
-    },
-    'gmail:getThread': async (_event, args) => {
-      try {
-        return { thread: await fetchThreadSnapshot(args.threadId, args.expectedHistoryId) };
-      } catch (error) {
-        return {
-          thread: null,
-          error: error instanceof Error ? error.message : String(error),
-        };
-      }
     },
     'gmail:getImportant': async (_event, args) => {
       return listImportantThreads({ cursor: args.cursor, limit: args.limit });

@@ -14,7 +14,7 @@ const DAILY_NOTE_PATH = path.join(KNOWLEDGE_DIR, 'Today.md');
 // on-disk `templateVersion` against this constant — if older or missing, the
 // existing file is renamed to Today.md.bkp.<ISO-stamp> and replaced with the
 // new template. v2 is the live-note rewrite (single objective, no `track:`).
-const CANONICAL_DAILY_NOTE_VERSION = 3;
+const CANONICAL_DAILY_NOTE_VERSION = 2;
 
 const TODAY_LIVE_NOTE: z.infer<typeof LiveNoteSchema> = {
     objective:
@@ -24,7 +24,7 @@ const TODAY_LIVE_NOTE: z.infer<typeof LiveNoteSchema> = {
 
 2. **Calendar** — today's meetings as a single \`calendar\` block titled "Today's Meetings". Read \`calendar_sync/\` via \`workspace-readdir\` → \`workspace-readFile\` each \`.json\`. Filter to today; after 10am drop meetings that have already ended. Always emit the block (use \`events: []\` when empty). Set \`showJoinButton: true\` if any event has a \`conferenceLink\`.
 
-3. **Emails** — a digest of email threads worth attention today, as a **single** fenced \`emails\` block (plural — never individual \`email\` blocks per thread). Body shape: \`{"title":"Today's Emails","emails":[...]}\`. Each entry should contain only \`threadId\` and/or \`threadUrl\`, plus optional \`summary\` if useful for why it matters. Do **not** copy \`subject\`, \`from\`, \`date\`, or \`latest_email\` from Gmail into the block — the email block hydrates the latest thread from Gmail directly. For threads needing a reply, add \`draft_response\` written in the user's voice — direct, informal, no fluff. For FYI threads, omit \`draft_response\`. Skip marketing, auto-notifications, and closed threads. Without an event payload, scan \`gmail_sync/\` (skip \`sync_state.json\` and \`attachments/\`), prioritising threads where frontmatter \`action = "reply"\` or \`"respond"\`, and use the filename/Thread ID to set \`threadId\`. With an event payload, integrate qualifying new threads into the existing digest (add a new entry for a new threadId; update the existing entry if shown). Don't re-list threads the user has already seen unless their state changed. If nothing qualifies: "No new emails."
+3. **Emails** — a digest of email threads worth attention today, as a **single** fenced \`emails\` block (plural — never individual \`email\` blocks per thread). Body shape: \`{"title":"Today's Emails","emails":[...]}\`. Each entry: \`threadId\`, \`subject\`, \`from\`, \`date\`, \`summary\`, \`latest_email\`. For threads needing a reply, add \`draft_response\` written in the user's voice — direct, informal, no fluff. For FYI threads, omit \`draft_response\`. Skip marketing, auto-notifications, and closed threads. Without an event payload, scan \`gmail_sync/\` (skip \`sync_state.json\` and \`attachments/\`), prioritising threads where frontmatter \`action = "reply"\` or \`"respond"\`. With an event payload, integrate qualifying new threads into the existing digest (add a new entry for a new threadId; update the existing entry if shown). Don't re-list threads the user has already seen unless their state changed. If nothing qualifies: "No new emails."
 
 4. **What you missed** — a short markdown summary of yesterday's meetings + emails that matter this morning. Pull decisions / action items from \`knowledge/Meetings/<source>/<yesterday>/\` (\`workspace-readdir\` recursive on \`knowledge/Meetings\`, filter folders matching yesterday's date, read each file). Skim \`gmail_sync/\` for unresolved threads. Skip recurring/routine events. If nothing notable: "Quiet day yesterday — nothing to flag."
 

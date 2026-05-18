@@ -54,137 +54,6 @@ function avatarColor(from: string): string {
   return GMAIL_AVATAR_COLORS[hash % GMAIL_AVATAR_COLORS.length]
 }
 
-function extractThreadId(config: Pick<blocks.EmailBlock, 'threadId' | 'threadUrl'>): string | null {
-  if (config.threadId) return config.threadId
-  if (!config.threadUrl) return null
-  const url = config.threadUrl.trim()
-  const hashId = url.match(/#(?:all|inbox|sent|important|starred|search\/[^/]+)\/([^/?#]+)/)
-  if (hashId?.[1]) return decodeURIComponent(hashId[1])
-  const queryId = url.match(/[?&](?:th|threadId)=([^&]+)/)
-  if (queryId?.[1]) return decodeURIComponent(queryId[1])
-  const tailId = url.match(/\/([a-f0-9]{12,})\/?$/i)
-  return tailId?.[1] || null
-}
-
-function parseSyncedGmailThread(markdown: string, threadId: string): blocks.EmailBlock | null {
-  const subject = markdown.match(/^#\s+(.+)$/m)?.[1]?.trim()
-  const chunks = markdown
-    .split(/\n---\n/g)
-    .map(chunk => chunk.trim())
-    .filter(chunk => /^### From:/m.test(chunk))
-
-  const messages = chunks.map((chunk) => {
-    const from = chunk.match(/^### From:\s*(.+)$/m)?.[1]?.trim()
-    const date = chunk.match(/^\*\*Date:\*\*\s*(.+)$/m)?.[1]?.trim()
-    const body = chunk
-      .replace(/^### From:\s*.+$/m, '')
-      .replace(/^\*\*Date:\*\*\s*.+$/m, '')
-      .replace(/\n\*\*Attachments:\*\*[\s\S]*$/m, '')
-      .trim()
-    return { from, date, body }
-  }).filter(message => message.from || message.body)
-
-  const latest = messages[messages.length - 1]
-  if (!latest) return null
-
-  const earlier = messages.slice(0, -1)
-  const pastSummary = earlier
-    .map((message) => {
-      const date = message.date ? ` (${message.date})` : ''
-      const body = message.body.replace(/\s+/g, ' ').slice(0, 500).trim()
-      return `${message.from || 'Unknown'}${date}: ${body}`
-    })
-    .filter(Boolean)
-    .join('\n\n')
-
-  return {
-    threadId,
-    threadUrl: `https://mail.google.com/mail/u/0/#all/${threadId}`,
-    subject,
-    from: latest.from,
-    date: latest.date,
-    latest_email: latest.body,
-    past_summary: pastSummary || undefined,
-  }
-}
-
-function mergeHydratedEmail(base: blocks.EmailBlock, hydrated: blocks.EmailBlock | null): blocks.EmailBlock {
-  if (!hydrated) return base
-  return {
-    ...hydrated,
-    ...base,
-    threadId: base.threadId || hydrated.threadId,
-    threadUrl: base.threadUrl || hydrated.threadUrl,
-    subject: hydrated.subject || base.subject,
-    from: hydrated.from || base.from,
-    to: hydrated.to || base.to,
-    date: hydrated.date || base.date,
-    latest_email: hydrated.latest_email || base.latest_email,
-    past_summary: hydrated.past_summary || base.past_summary,
-    summary: base.summary || hydrated.summary,
-  }
-}
-
-function useHydratedEmail(config: blocks.EmailBlock): { email: blocks.EmailBlock; loading: boolean; error: string | null } {
-  const [email, setEmail] = useState(config)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const threadId = extractThreadId(config)
-  const configKey = JSON.stringify(config)
-
-  useEffect(() => {
-    let cancelled = false
-    const baseConfig = blocks.EmailBlockSchema.parse(JSON.parse(configKey))
-
-    async function load() {
-      setEmail(baseConfig)
-      setError(null)
-      if (!threadId) {
-        setLoading(false)
-        return
-      }
-
-      setLoading(true)
-      let hydrated: blocks.EmailBlock | null = null
-      let loadError: string | null = null
-
-      try {
-        const result = await window.ipc.invoke('gmail:getThread', { threadId })
-        if (result.thread) {
-          hydrated = result.thread
-        } else if (result.error) {
-          loadError = result.error
-        }
-      } catch (err) {
-        loadError = err instanceof Error ? err.message : String(err)
-      }
-
-      if (!hydrated) {
-        try {
-          const result = await window.ipc.invoke('workspace:readFile', {
-            path: `gmail_sync/${threadId}.md`,
-            encoding: 'utf8',
-          })
-          hydrated = parseSyncedGmailThread(result.data, threadId)
-        } catch (err) {
-          loadError ||= err instanceof Error ? err.message : String(err)
-        }
-      }
-
-      if (!cancelled) {
-        setEmail(mergeHydratedEmail(baseConfig, hydrated))
-        setError(hydrated ? null : loadError)
-        setLoading(false)
-      }
-    }
-
-    void load()
-    return () => { cancelled = true }
-  }, [configKey, threadId])
-
-  return { email, loading, error }
-}
-
 declare global {
   interface Window {
     __pendingEmailDraft?: { prompt: string }
@@ -219,9 +88,8 @@ function EmailExpandedBody({
     let prompt = draftBody
       ? `Help me refine this draft response to an email`
       : `Help me draft a response to this email`
-    const threadId = extractThreadId(config)
-    if (threadId) {
-      prompt += `. Read the full thread at gmail_sync/${threadId}.md for context`
+    if (config.threadId) {
+      prompt += `. Read the full thread at gmail_sync/${config.threadId}.md for context`
     }
     prompt += `.\n\n**From:** ${config.from || 'Unknown'}\n**Subject:** ${config.subject || 'No subject'}\n`
     if (draftBody) prompt += `\n**Current draft:**\n${draftBody}\n`
@@ -245,8 +113,9 @@ function EmailExpandedBody({
     })
   }, [draftBody])
 
-  const threadId = extractThreadId(config)
-  const gmailUrl = config.threadUrl || (threadId ? `https://mail.google.com/mail/u/0/#all/${threadId}` : null)
+  const gmailUrl = config.threadId
+    ? `https://mail.google.com/mail/u/0/#all/${config.threadId}`
+    : null
 
   const initial = config.from ? getInitial(config.from) : '?'
   const color = config.from ? avatarColor(config.from) : '#5f6368'
@@ -269,7 +138,7 @@ function EmailExpandedBody({
         </div>
       </div>
 
-      <div className="email-gmail-exp-body">{config.latest_email || 'Loading latest message...'}</div>
+      <div className="email-gmail-exp-body">{config.latest_email}</div>
 
       {config.past_summary && (
         <div className="email-gmail-exp-history">
@@ -355,69 +224,6 @@ function EmailExpandedBody({
 
 // --- Multi-email inbox block (language-emails) ---
 
-function EmailInboxRow({
-  email,
-  expanded,
-  onToggle,
-  resolvedTheme,
-}: {
-  email: blocks.EmailBlock
-  expanded: boolean
-  onToggle: () => void
-  resolvedTheme: string
-}) {
-  const { email: hydratedEmail, loading, error } = useHydratedEmail(email)
-  const senderName = hydratedEmail.from ? extractName(hydratedEmail.from) : 'Unknown'
-  const initial = hydratedEmail.from ? getInitial(hydratedEmail.from) : '?'
-  const color = hydratedEmail.from ? avatarColor(hydratedEmail.from) : '#5f6368'
-  const snippet = hydratedEmail.summary
-    || (hydratedEmail.latest_email ? hydratedEmail.latest_email.slice(0, 100).replace(/\s+/g, ' ').trim() : '')
-    || (loading ? 'Loading latest Gmail thread...' : error || '')
-
-  return (
-    <div className={`email-inbox-row${expanded ? ' email-inbox-row-expanded' : ''}`}>
-      {/* Collapsed row */}
-      <div
-        className="email-inbox-row-header"
-        onClick={(e) => { e.stopPropagation(); onToggle() }}
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        <div className="email-inbox-avatar" style={{ backgroundColor: color }}>{initial}</div>
-
-        <div className="email-inbox-content">
-          <div className="email-inbox-top-row">
-            <span className="email-inbox-sender">{senderName}</span>
-            {hydratedEmail.date && <span className="email-inbox-date">{formatEmailDate(hydratedEmail.date)}</span>}
-          </div>
-          <div className="email-inbox-bottom-row">
-            {hydratedEmail.subject && <span className="email-inbox-subject">{hydratedEmail.subject}</span>}
-            {snippet && (
-              <span className="email-inbox-snippet">
-                {hydratedEmail.subject ? ` — ${snippet}` : snippet}
-              </span>
-            )}
-          </div>
-        </div>
-
-        <ChevronDown
-          size={14}
-          className={`email-inbox-chevron${expanded ? ' email-inbox-chevron-open' : ''}`}
-        />
-      </div>
-
-      {/* Expanded content */}
-      {expanded && (
-        <div className="email-inbox-expanded-wrap">
-          <EmailExpandedBody
-            config={hydratedEmail}
-            resolvedTheme={resolvedTheme}
-          />
-        </div>
-      )}
-    </div>
-  )
-}
-
 function EmailsBlockView({ node, deleteNode }: {
   node: { attrs: Record<string, unknown> }
   deleteNode: () => void
@@ -452,14 +258,53 @@ function EmailsBlockView({ node, deleteNode }: {
         <div className="email-inbox-list">
           {config.emails.map((email, i) => {
             const isExpanded = expandedIndex === i
+            const senderName = email.from ? extractName(email.from) : 'Unknown'
+            const initial = email.from ? getInitial(email.from) : '?'
+            const color = email.from ? avatarColor(email.from) : '#5f6368'
+            const snippet = email.summary
+              || (email.latest_email ? email.latest_email.slice(0, 100).replace(/\s+/g, ' ').trim() : '')
+
             return (
-              <EmailInboxRow
-                key={email.threadId || email.threadUrl || i}
-                email={email}
-                expanded={isExpanded}
-                onToggle={() => setExpandedIndex(isExpanded ? null : i)}
-                resolvedTheme={resolvedTheme}
-              />
+              <div key={i} className={`email-inbox-row${isExpanded ? ' email-inbox-row-expanded' : ''}`}>
+                {/* Collapsed row */}
+                <div
+                  className="email-inbox-row-header"
+                  onClick={(e) => { e.stopPropagation(); setExpandedIndex(isExpanded ? null : i) }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  <div className="email-inbox-avatar" style={{ backgroundColor: color }}>{initial}</div>
+
+                  <div className="email-inbox-content">
+                    <div className="email-inbox-top-row">
+                      <span className="email-inbox-sender">{senderName}</span>
+                      {email.date && <span className="email-inbox-date">{formatEmailDate(email.date)}</span>}
+                    </div>
+                    <div className="email-inbox-bottom-row">
+                      {email.subject && <span className="email-inbox-subject">{email.subject}</span>}
+                      {snippet && (
+                        <span className="email-inbox-snippet">
+                          {email.subject ? ` — ${snippet}` : snippet}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <ChevronDown
+                    size={14}
+                    className={`email-inbox-chevron${isExpanded ? ' email-inbox-chevron-open' : ''}`}
+                  />
+                </div>
+
+                {/* Expanded content */}
+                {isExpanded && (
+                  <div className="email-inbox-expanded-wrap">
+                    <EmailExpandedBody
+                      config={email}
+                      resolvedTheme={resolvedTheme}
+                    />
+                  </div>
+                )}
+              </div>
             )
           })}
         </div>
@@ -542,13 +387,11 @@ function EmailBlockView({ node, deleteNode, updateAttributes }: {
     )
   }
 
-  const { email, loading, error } = useHydratedEmail(config)
-  const senderName = email.from ? extractName(email.from) : 'Unknown'
-  const initial = email.from ? getInitial(email.from) : '?'
-  const color = email.from ? avatarColor(email.from) : '#5f6368'
-  const snippet = email.summary
-    || (email.latest_email ? email.latest_email.slice(0, 120).replace(/\s+/g, ' ').trim() : '')
-    || (loading ? 'Loading latest Gmail thread...' : error || '')
+  const senderName = config.from ? extractName(config.from) : 'Unknown'
+  const initial = config.from ? getInitial(config.from) : '?'
+  const color = config.from ? avatarColor(config.from) : '#5f6368'
+  const snippet = config.summary
+    || (config.latest_email ? config.latest_email.slice(0, 120).replace(/\s+/g, ' ').trim() : '')
 
   return (
     <NodeViewWrapper className="email-block-wrapper" data-type="email-block">
@@ -564,11 +407,11 @@ function EmailBlockView({ node, deleteNode, updateAttributes }: {
           <div className="email-gmail-content">
             <div className="email-gmail-top-row">
               <span className="email-gmail-sender">{senderName}</span>
-              {email.date && <span className="email-gmail-date">{formatEmailDate(email.date)}</span>}
+              {config.date && <span className="email-gmail-date">{formatEmailDate(config.date)}</span>}
             </div>
             <div className="email-gmail-bottom-row">
-              {email.subject && <span className="email-gmail-subject">{email.subject}</span>}
-              {snippet && <span className="email-gmail-snippet">{email.subject ? ` — ${snippet}` : snippet}</span>}
+              {config.subject && <span className="email-gmail-subject">{config.subject}</span>}
+              {snippet && <span className="email-gmail-snippet">{config.subject ? ` — ${snippet}` : snippet}</span>}
             </div>
           </div>
           <ChevronDown size={15} className={`email-gmail-chevron${expanded ? ' email-gmail-chevron-open' : ''}`} />
@@ -576,7 +419,7 @@ function EmailBlockView({ node, deleteNode, updateAttributes }: {
 
         {expanded && (
           <EmailExpandedBody
-            config={email}
+            config={config}
             resolvedTheme={resolvedTheme}
           />
         )}

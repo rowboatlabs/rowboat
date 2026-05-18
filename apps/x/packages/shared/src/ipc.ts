@@ -124,16 +124,6 @@ const ipcSchemas = {
     req: WorkspaceChangeEvent,
     res: z.null(),
   },
-  'gmail:getThread': {
-    req: z.object({
-      threadId: z.string().min(1),
-      expectedHistoryId: z.string().optional(),
-    }),
-    res: z.object({
-      thread: GmailThreadSchema.nullable(),
-      error: z.string().optional(),
-    }),
-  },
   'gmail:getImportant': {
     req: z.object({
       cursor: z.string().optional(),
