@@ -3808,6 +3808,18 @@ function App() {
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [])
 
+  // Keyboard shortcut: Cmd+N / Ctrl+N opens a new chat tab.
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'n') {
+        e.preventDefault()
+        handleNewChatTab()
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [handleNewChatTab])
+
   // Route undo/redo to the active markdown tab only (prevents cross-tab browser undo behavior).
   useEffect(() => {
     const handleHistoryKeyDown = (e: KeyboardEvent) => {
