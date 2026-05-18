@@ -100,7 +100,7 @@
   --gm-bg-row-hover: #f7f7f9;
   --gm-bg-row-selected: #f5f0ff;
   --gm-bg-row-selected-hover: #ece4ff;
-  --gm-bg-iframe: #ffffff;
+  --gm-bg-iframe: #fafafa;
   --gm-bg-pill: #ffffff;
   --gm-bg-pill-hover: #f4f4f7;
   --gm-text: #27272a;
@@ -507,8 +507,25 @@
   border-radius: 6px;
 }
 
-.gmail-message-iframe-dark {
-  background: var(--gm-bg-card);
+.gmail-message-plain {
+  max-width: 820px;
+  margin-top: 12px;
+  padding: 10px 14px;
+  background: var(--gm-bg-iframe);
+  border-radius: 6px;
+  color: var(--gm-text);
+}
+
+.gmail-message-pre {
+  margin: 0;
+  font: 14px/1.6 Arial, sans-serif;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.gmail-message-pre-quoted {
+  margin-top: 12px;
+  color: var(--gm-text-muted);
 }
 
 .gmail-quote-toggle {

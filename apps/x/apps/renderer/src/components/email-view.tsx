@@ -131,18 +131,8 @@ function splitPlainTextQuote(text: string): { visible: string; quoted: string | 
   return { visible, quoted }
 }
 
-function buildEmailDocument(
-  html: string,
-  opts: { theme: 'light' | 'dark'; plainText: boolean }
-): string {
-  const dark = opts.theme === 'dark' && opts.plainText
+function buildEmailDocument(html: string, opts: { theme: 'light' | 'dark' }): string {
   const colorScheme = opts.theme === 'dark' ? 'light dark' : 'light'
-  const bodyBg = dark ? '#131317' : 'transparent'
-  const bodyColor = dark ? '#d4d4d8' : '#202124'
-  const linkColor = dark ? '#a78bfa' : '#1a73e8'
-  const quoteColor = dark ? '#71717a' : '#5f6368'
-  const quoteBorder = dark ? '#2e2e35' : '#dadce0'
-
   return `<!doctype html>
 <html><head>
 <meta charset="utf-8">
@@ -153,32 +143,69 @@ function buildEmailDocument(
   html, body { margin: 0; padding: 0; }
   body {
     font: 14px/1.6 Arial, sans-serif;
-    background: ${bodyBg};
-    color: ${bodyColor};
+    background: transparent;
+    color: #202124;
     overflow-x: auto;
     overflow-y: hidden;
     word-wrap: break-word;
+    padding-bottom: 4px;
   }
+  body > *:last-child { margin-bottom: 0; }
   img { max-width: 100%; height: auto; }
   table { max-width: 100%; }
-  a { color: ${linkColor}; }
+  a { color: #1a73e8; }
   blockquote {
     margin: 0 0 0 6px;
     padding-left: 12px;
-    border-left: 2px solid ${quoteBorder};
-    color: ${quoteColor};
+    border-left: 2px solid #dadce0;
+    color: #5f6368;
   }
-  blockquote.gmail_quote,
-  blockquote[type="cite"],
-  .email-quote-block { display: none; }
-  [data-show-quotes="true"] blockquote.gmail_quote,
-  [data-show-quotes="true"] blockquote[type="cite"],
-  [data-show-quotes="true"] .email-quote-block { display: block; }
+  .gmail_quote,
+  .gmail_attr,
+  blockquote[type="cite"] { display: none; }
+  [data-show-quotes="true"] .gmail_quote,
+  [data-show-quotes="true"] .gmail_attr,
+  [data-show-quotes="true"] blockquote[type="cite"] { display: block; }
 </style>
 </head><body>${html}</body></html>`
 }
 
 function MessageBody({ message, threadId }: { message: GmailThreadMessage; threadId: string }) {
+  const isPlainText = !(message.bodyHtml && message.bodyHtml.trim())
+  return isPlainText
+    ? <PlainTextBody message={message} />
+    : <HtmlMessageBody message={message} threadId={threadId} />
+}
+
+function PlainTextBody({ message }: { message: GmailThreadMessage }) {
+  const text = (message.body || '(No message body)').trim()
+  const { visible, quoted } = splitPlainTextQuote(text)
+  const [showQuote, setShowQuote] = useState(false)
+  return (
+    <>
+      <div className="gmail-message-plain">
+        <pre className="gmail-message-pre">{visible}</pre>
+        {quoted && showQuote && <pre className="gmail-message-pre gmail-message-pre-quoted">{quoted}</pre>}
+      </div>
+      {quoted && (
+        <button
+          type="button"
+          className="gmail-quote-toggle"
+          onClick={() => setShowQuote((v) => !v)}
+          aria-label={showQuote ? 'Hide quoted text' : 'Show quoted text'}
+          aria-expanded={showQuote}
+        >
+          <span>•••</span>
+        </button>
+      )}
+      {message.attachments && message.attachments.length > 0 && (
+        <MessageAttachments attachments={message.attachments} />
+      )}
+    </>
+  )
+}
+
+function HtmlMessageBody({ message, threadId }: { message: GmailThreadMessage; threadId: string }) {
   const { resolvedTheme } = useTheme()
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const observerRef = useRef<ResizeObserver | null>(null)
@@ -188,29 +215,26 @@ function MessageBody({ message, threadId }: { message: GmailThreadMessage; threa
   const [hasQuote, setHasQuote] = useState(false)
   const [showQuotes, setShowQuotes] = useState(false)
 
-  const isPlainText = !(message.bodyHtml && message.bodyHtml.trim())
-  const useDarkBody = isPlainText && resolvedTheme === 'dark'
-
-  const srcDoc = useMemo(() => {
-    if (message.bodyHtml && message.bodyHtml.trim()) {
-      return buildEmailDocument(message.bodyHtml, { theme: resolvedTheme, plainText: false })
-    }
-    const text = (message.body || '(No message body)').trim()
-    const { visible, quoted } = splitPlainTextQuote(text)
-    const visibleBlock = `<pre style="white-space: pre-wrap; font: inherit; margin: 0;">${escapeHtml(visible)}</pre>`
-    const quotedBlock = quoted
-      ? `<pre class="email-quote-block" style="white-space: pre-wrap; font: inherit; margin: 0;">${escapeHtml(quoted)}</pre>`
-      : ''
-    return buildEmailDocument(visibleBlock + quotedBlock, { theme: resolvedTheme, plainText: true })
-  }, [message.bodyHtml, message.body, resolvedTheme])
+  const srcDoc = useMemo(
+    () => buildEmailDocument(message.bodyHtml!, { theme: resolvedTheme }),
+    [message.bodyHtml, resolvedTheme],
+  )
 
   const handleLoad = useCallback(() => {
     const iframe = iframeRef.current
     const doc = iframe?.contentDocument
     if (!doc?.body) return
-    setHasQuote(!!doc.querySelector('blockquote.gmail_quote, blockquote[type="cite"], .email-quote-block'))
+    setHasQuote(!!doc.querySelector('.gmail_quote, .gmail_attr, blockquote[type="cite"]'))
     const measure = () => {
-      const next = Math.max(40, doc.body.scrollHeight)
+      // Take the max across body + documentElement; body.scrollHeight alone
+      // under-reports when the last element has bottom margin that collapses.
+      const next = Math.max(
+        40,
+        doc.body.scrollHeight,
+        doc.body.offsetHeight,
+        doc.documentElement.scrollHeight,
+        doc.documentElement.offsetHeight,
+      )
       setHeight((current) => (current === next ? current : next))
       if (!message.id) return
       if (Math.abs(next - lastSavedHeightRef.current) < 4) return
@@ -229,6 +253,7 @@ function MessageBody({ message, threadId }: { message: GmailThreadMessage; threa
     if (typeof ResizeObserver !== 'undefined') {
       observerRef.current = new ResizeObserver(measure)
       observerRef.current.observe(doc.body)
+      observerRef.current.observe(doc.documentElement)
     }
   }, [message.id, threadId])
 
@@ -253,7 +278,7 @@ function MessageBody({ message, threadId }: { message: GmailThreadMessage; threa
         srcDoc={srcDoc}
         sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
         title="Email content"
-        className={cn('gmail-message-iframe', useDarkBody && 'gmail-message-iframe-dark')}
+        className="gmail-message-iframe"
         style={{ height }}
         onLoad={handleLoad}
       />
