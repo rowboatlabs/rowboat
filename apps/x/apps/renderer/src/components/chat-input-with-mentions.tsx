@@ -434,7 +434,7 @@ function ChatInputInner({
   }, [addFiles, isActive])
 
   return (
-    <div className="rounded-lg border border-border bg-background shadow-none">
+    <div className="rowboat-chat-input rounded-lg border border-border bg-background shadow-none">
       {attachments.length > 0 && (
         <div className="flex flex-wrap gap-2 px-4 pb-1 pt-3">
           {attachments.map((attachment) => {

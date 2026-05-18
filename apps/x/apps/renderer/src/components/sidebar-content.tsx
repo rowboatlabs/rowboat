@@ -566,13 +566,13 @@ export function SidebarContentPanel({
   }, [])
 
   return (
-    <Sidebar className="border-r-0" {...props}>
+    <Sidebar className="rowboat-sidebar border-r-0" {...props}>
       <SidebarHeader className="titlebar-drag-region">
         {/* Top spacer to clear the traffic lights + fixed toggle row */}
         <div className="h-8" />
         {/* Tab switcher - centered below the traffic lights row */}
         <div className="flex items-center px-2 py-1.5">
-          <div className="titlebar-no-drag flex w-full rounded-lg bg-sidebar-accent/50 p-0.5">
+          <div className="rowboat-section-switcher titlebar-no-drag flex w-full rounded-lg bg-sidebar-accent/50 p-0.5">
             {sectionTabs.map((tab) => (
               <button
                 key={tab.id}
@@ -590,7 +590,7 @@ export function SidebarContentPanel({
           </div>
         </div>
         {/* Quick action buttons */}
-        <div className="titlebar-no-drag flex flex-col gap-0.5 px-2 pb-1">
+        <div className="rowboat-quick-actions titlebar-no-drag flex flex-col gap-0.5 px-2 pb-1">
           {onNewChat && (
             <button
               type="button"
