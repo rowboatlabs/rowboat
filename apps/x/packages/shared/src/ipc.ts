@@ -228,6 +228,7 @@ const ipcSchemas = {
       voiceInput: z.boolean().optional(),
       voiceOutput: z.enum(['summary', 'full']).optional(),
       searchEnabled: z.boolean().optional(),
+      codeMode: z.enum(['claude', 'codex']).optional(),
       middlePaneContext: z.discriminatedUnion('kind', [
         z.object({
           kind: z.literal('note'),

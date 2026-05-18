@@ -9,6 +9,7 @@ import { useState, useRef, useEffect } from "react";
 
 export type AskHumanRequestProps = ComponentProps<"div"> & {
   query: string;
+  options?: string[];
   onResponse: (response: string) => void;
   isProcessing?: boolean;
 };
@@ -16,17 +17,21 @@ export type AskHumanRequestProps = ComponentProps<"div"> & {
 export const AskHumanRequest = ({
   className,
   query,
+  options,
   onResponse,
   isProcessing = false,
   ...props
 }: AskHumanRequestProps) => {
   const [response, setResponse] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const hasOptions = Array.isArray(options) && options.length > 0;
 
   useEffect(() => {
-    // Auto-focus the textarea when component mounts
-    textareaRef.current?.focus();
-  }, []);
+    // Auto-focus the textarea when in free-text mode; nothing to focus for buttons.
+    if (!hasOptions) {
+      textareaRef.current?.focus();
+    }
+  }, [hasOptions]);
 
   const handleSubmit = () => {
     const trimmed = response.trim();
@@ -34,6 +39,11 @@ export const AskHumanRequest = ({
       onResponse(trimmed);
       setResponse("");
     }
+  };
+
+  const handleOptionClick = (option: string) => {
+    if (isProcessing) return;
+    onResponse(option);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -65,30 +75,47 @@ export const AskHumanRequest = ({
                 {query}
               </p>
             </div>
-            <div className="space-y-2">
-              <Textarea
-                ref={textareaRef}
-                value={response}
-                onChange={(e) => setResponse(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Type your response..."
-                disabled={isProcessing}
-                rows={3}
-                className="resize-none"
-              />
-              <div className="flex justify-end">
-                <Button
-                  variant="default"
-                  size="sm"
-                  onClick={handleSubmit}
-                  disabled={!canSubmit}
-                  className="gap-2"
-                >
-                  <ArrowUpIcon className="size-4" />
-                  Send Response
-                </Button>
+            {hasOptions ? (
+              <div className="flex flex-wrap gap-2">
+                {options!.map((option) => (
+                  <Button
+                    key={option}
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleOptionClick(option)}
+                    disabled={isProcessing}
+                    className="bg-background"
+                  >
+                    {option}
+                  </Button>
+                ))}
               </div>
-            </div>
+            ) : (
+              <div className="space-y-2">
+                <Textarea
+                  ref={textareaRef}
+                  value={response}
+                  onChange={(e) => setResponse(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Type your response..."
+                  disabled={isProcessing}
+                  rows={3}
+                  className="resize-none"
+                />
+                <div className="flex justify-end">
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={handleSubmit}
+                    disabled={!canSubmit}
+                    className="gap-2"
+                  >
+                    <ArrowUpIcon className="size-4" />
+                    Send Response
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

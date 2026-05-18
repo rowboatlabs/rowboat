@@ -954,7 +954,7 @@ function App() {
     voice.start()
   }, [voice])
 
-  const handlePromptSubmitRef = useRef<((message: PromptInputMessage, mentions?: FileMention[], stagedAttachments?: StagedAttachment[], searchEnabled?: boolean) => Promise<void>) | null>(null)
+  const handlePromptSubmitRef = useRef<((message: PromptInputMessage, mentions?: FileMention[], stagedAttachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex') => Promise<void>) | null>(null)
   const pendingVoiceInputRef = useRef(false)
 
   // Palette: per-tab editor handles for capturing cursor context on Cmd+K, and pending payload
@@ -2136,6 +2136,19 @@ function App() {
               status: 'running',
               timestamp: Date.now(),
             }])
+            // Detect acpx-driven coding-agent runs so the composer can retroactively
+            // flip code mode on with the right agent (when the user reached the skill
+            // via plain prompt rather than the explicit toggle).
+            if (llmEvent.toolName === 'executeCommand') {
+              const input = llmEvent.input as { command?: unknown } | undefined
+              const cmd = typeof input?.command === 'string' ? input.command : ''
+              const match = cmd.match(/\bacpx\b[\s\S]*?\b(claude|codex)\b/)
+              if (match) {
+                window.dispatchEvent(new CustomEvent('code-mode-detected', {
+                  detail: { runId: event.runId, agent: match[1] as 'claude' | 'codex' },
+                }))
+              }
+            }
           } else if (llmEvent.type === 'finish-step') {
             const nextUsage = normalizeUsage(llmEvent.usage)
             if (nextUsage) {
@@ -2428,6 +2441,7 @@ function App() {
     mentions?: FileMention[],
     stagedAttachments: StagedAttachment[] = [],
     searchEnabled?: boolean,
+    codeMode?: 'claude' | 'codex',
   ) => {
     if (isProcessing) return
 
@@ -2535,6 +2549,7 @@ function App() {
           voiceInput: pendingVoiceInputRef.current || undefined,
           voiceOutput: ttsEnabledRef.current ? ttsModeRef.current : undefined,
           searchEnabled: searchEnabled || undefined,
+          codeMode: codeMode || undefined,
           middlePaneContext,
         })
         analytics.chatMessageSent({
@@ -2550,6 +2565,7 @@ function App() {
           voiceInput: pendingVoiceInputRef.current || undefined,
           voiceOutput: ttsEnabledRef.current ? ttsModeRef.current : undefined,
           searchEnabled: searchEnabled || undefined,
+          codeMode: codeMode || undefined,
           middlePaneContext,
         })
         analytics.chatMessageSent({
@@ -5736,6 +5752,7 @@ function App() {
                                   <AskHumanRequest
                                     key={request.toolCallId}
                                     query={request.query}
+                                    options={request.options}
                                     onResponse={(response) => handleAskHumanResponse(request.toolCallId, request.subflow, response)}
                                     isProcessing={isActive && isProcessing}
                                   />

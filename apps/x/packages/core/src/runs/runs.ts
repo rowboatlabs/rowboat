@@ -39,9 +39,9 @@ export async function createRun(opts: z.infer<typeof CreateRunOptions>): Promise
     return run;
 }
 
-export async function createMessage(runId: string, message: UserMessageContentType, voiceInput?: boolean, voiceOutput?: VoiceOutputMode, searchEnabled?: boolean, middlePaneContext?: MiddlePaneContext): Promise<string> {
+export async function createMessage(runId: string, message: UserMessageContentType, voiceInput?: boolean, voiceOutput?: VoiceOutputMode, searchEnabled?: boolean, middlePaneContext?: MiddlePaneContext, codeMode?: 'claude' | 'codex'): Promise<string> {
     const queue = container.resolve<IMessageQueue>('messageQueue');
-    const id = await queue.enqueue(runId, message, voiceInput, voiceOutput, searchEnabled, middlePaneContext);
+    const id = await queue.enqueue(runId, message, voiceInput, voiceOutput, searchEnabled, middlePaneContext, codeMode);
     const runtime = container.resolve<IAgentRuntime>('agentRuntime');
     runtime.trigger(runId);
     return id;
