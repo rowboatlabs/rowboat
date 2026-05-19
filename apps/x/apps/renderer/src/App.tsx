@@ -5118,7 +5118,6 @@ function App() {
               onToggleBrowser={handleToggleBrowser}
               isSuggestedTopicsOpen={isSuggestedTopicsOpen}
               onOpenSuggestedTopics={() => void navigateToView({ type: 'suggested-topics' })}
-              isMeetingsOpen={isMeetingsOpen}
               onOpenMeetings={openMeetingsView}
               onOpenBgTasks={() => { setBgTaskInitialSlug(null); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
               isEmailOpen={isEmailOpen}

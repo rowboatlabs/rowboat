@@ -16,6 +16,7 @@ import {
   HelpCircle,
   Mic,
   Plug,
+  Video,
   Lightbulb,
   LoaderIcon,
   Mail,
@@ -79,6 +80,7 @@ import { HelpPopover } from "@/components/help-popover"
 import { SettingsDialog } from "@/components/settings-dialog"
 import { toast } from "@/lib/toast"
 import { formatRelativeTime as formatRunTime } from "@/lib/relative-time"
+import { extractConferenceLink } from "@/lib/calendar-event"
 import { useBilling } from "@/hooks/useBilling"
 import { ServiceEvent } from "@x/shared/src/service-events.js"
 import z from "zod"
@@ -193,7 +195,6 @@ type SidebarContentPanelProps = {
   onToggleBrowser?: () => void
   isSuggestedTopicsOpen?: boolean
   onOpenSuggestedTopics?: () => void
-  isMeetingsOpen?: boolean
   onOpenMeetings?: () => void
   onOpenBgTasks?: () => void
   isEmailOpen?: boolean
@@ -441,7 +442,6 @@ export function SidebarContentPanel({
   onToggleBrowser,
   isSuggestedTopicsOpen = false,
   onOpenSuggestedTopics,
-  isMeetingsOpen = false,
   onOpenMeetings,
   onOpenBgTasks,
   isEmailOpen = false,
@@ -459,7 +459,6 @@ export function SidebarContentPanel({
   const { billing } = useBilling(isRowboatConnected)
   const isBrowserQuickActionSelected = isBrowserOpen && !isSearchOpen
   const isSuggestedTopicsQuickActionSelected = isSuggestedTopicsOpen && !isBrowserOpen
-  const isMeetingsQuickActionSelected = isMeetingsOpen && !isBrowserOpen
   const isEmailQuickActionSelected = isEmailOpen && !isBrowserOpen
 
   const handleRowboatLogin = useCallback(async () => {
@@ -540,24 +539,10 @@ export function SidebarContentPanel({
               <span>Email</span>
             </button>
           )}
-          {onOpenMeetings && (
-            <button
-              type="button"
-              onClick={onOpenMeetings}
-              className={cn(
-                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
-                isMeetingsQuickActionSelected
-                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                  : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-              )}
-            >
-              <Mic className="size-4" />
-              <span>Meetings</span>
-            </button>
-          )}
         </div>
       </SidebarHeader>
       <SidebarContent>
+        <MeetingsSidebarSection onOpenMeetingsView={onOpenMeetings} />
         <TasksSidebarSection
           tasks={bgTaskSummaries}
           onOpenTask={onOpenBgTask}
@@ -1099,6 +1084,253 @@ export function WorkspaceSection({
   )
 }
 
+
+type UpcomingMeeting = {
+  id: string
+  summary: string
+  start: Date
+  isAllDay: boolean
+  location: string | null
+  htmlLink: string | null
+  conferenceLink: string | null
+  source: string
+  rawStart: { dateTime?: string; date?: string } | undefined
+  rawEnd: { dateTime?: string; date?: string } | undefined
+}
+
+type RawCalendarEvent = {
+  id?: string
+  summary?: string
+  start?: { dateTime?: string; date?: string }
+  end?: { dateTime?: string; date?: string }
+  location?: string
+  htmlLink?: string
+  status?: string
+  attendees?: Array<{ self?: boolean; responseStatus?: string }>
+}
+
+function parseAllDayDate(s: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s)
+  if (!m) return null
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+}
+
+function normalizeUpcomingMeeting(raw: RawCalendarEvent, sourcePath: string): UpcomingMeeting | null {
+  if (raw.status === 'cancelled') return null
+  const declined = raw.attendees?.find((a) => a.self)?.responseStatus === 'declined'
+  if (declined) return null
+  const allDayStart = raw.start?.date
+  const timedStart = raw.start?.dateTime
+  const isAllDay = !timedStart && Boolean(allDayStart)
+  let start: Date | null = null
+  let end: Date | null = null
+  if (timedStart) {
+    start = new Date(timedStart)
+    end = raw.end?.dateTime ? new Date(raw.end.dateTime) : null
+  } else if (allDayStart) {
+    start = parseAllDayDate(allDayStart)
+    end = raw.end?.date ? parseAllDayDate(raw.end.date) : null
+  }
+  if (!start || Number.isNaN(start.getTime())) return null
+  const now = new Date()
+  const effectiveEnd = end ?? (isAllDay ? new Date(start.getTime() + 24 * 60 * 60 * 1000) : start)
+  if (effectiveEnd <= now) return null
+  const conferenceLink = extractConferenceLink(raw as unknown as Record<string, unknown>) ?? null
+  return {
+    id: raw.id ?? sourcePath,
+    summary: raw.summary?.trim() || '(No title)',
+    start,
+    isAllDay,
+    location: raw.location?.trim() || null,
+    htmlLink: raw.htmlLink ?? null,
+    conferenceLink,
+    source: sourcePath,
+    rawStart: raw.start,
+    rawEnd: raw.end,
+  }
+}
+
+function triggerMeetingCapture(event: UpcomingMeeting, openConference: boolean) {
+  window.__pendingCalendarEvent = {
+    summary: event.summary,
+    start: event.rawStart,
+    end: event.rawEnd,
+    location: event.location ?? undefined,
+    htmlLink: event.htmlLink ?? undefined,
+    conferenceLink: event.conferenceLink ?? undefined,
+    source: event.source,
+  }
+  if (openConference && event.conferenceLink) {
+    window.open(event.conferenceLink, '_blank')
+  }
+  window.dispatchEvent(new Event('calendar-block:join-meeting'))
+}
+
+function isSameLocalDay(a: Date, b: Date): boolean {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
+}
+
+function formatMeetingTime(event: UpcomingMeeting): string {
+  if (event.isAllDay) return 'All day'
+  const now = new Date()
+  const tomorrow = new Date(now)
+  tomorrow.setDate(tomorrow.getDate() + 1)
+  const time = event.start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  if (isSameLocalDay(event.start, now)) return time
+  if (isSameLocalDay(event.start, tomorrow)) return `Tmrw ${time}`
+  return event.start.toLocaleDateString([], { month: 'numeric', day: 'numeric' })
+}
+
+function MeetingsSidebarSection({
+  onOpenMeetingsView,
+}: {
+  onOpenMeetingsView?: () => void
+}) {
+  const [meetings, setMeetings] = useState<UpcomingMeeting[]>([])
+
+  const load = useCallback(async () => {
+    try {
+      const exists = await window.ipc.invoke('workspace:exists', { path: 'calendar_sync' })
+      if (!exists.exists) {
+        setMeetings([])
+        return
+      }
+      const entries = await window.ipc.invoke('workspace:readdir', {
+        path: 'calendar_sync',
+        opts: { recursive: false, includeHidden: false, includeStats: false },
+      })
+      const jsonEntries = entries.filter((e) => e.kind === 'file' && e.name.endsWith('.json'))
+      const settled = await Promise.allSettled(
+        jsonEntries.map(async (entry): Promise<UpcomingMeeting | null> => {
+          const result = await window.ipc.invoke('workspace:readFile', {
+            path: entry.path,
+            encoding: 'utf8',
+          })
+          const raw = JSON.parse(result.data) as RawCalendarEvent
+          return normalizeUpcomingMeeting(raw, entry.path)
+        }),
+      )
+      const collected: UpcomingMeeting[] = []
+      for (const r of settled) {
+        if (r.status === 'fulfilled' && r.value) collected.push(r.value)
+      }
+      collected.sort((a, b) => {
+        if (a.isAllDay !== b.isAllDay) return a.isAllDay ? -1 : 1
+        return a.start.getTime() - b.start.getTime()
+      })
+      setMeetings(collected.slice(0, 3))
+    } catch (err) {
+      console.error('Failed to load upcoming meetings:', err)
+    }
+  }, [])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  useEffect(() => {
+    let timeout: ReturnType<typeof setTimeout> | null = null
+    const scheduleReload = () => {
+      if (timeout) clearTimeout(timeout)
+      timeout = setTimeout(() => { timeout = null; void load() }, 250)
+    }
+    const matches = (p: string | undefined) =>
+      typeof p === 'string' && (p === 'calendar_sync' || p.startsWith('calendar_sync/'))
+    const cleanup = window.ipc.on('workspace:didChange', (event) => {
+      switch (event.type) {
+        case 'created':
+        case 'changed':
+        case 'deleted':
+          if (matches(event.path)) scheduleReload()
+          break
+        case 'moved':
+          if (matches(event.from) || matches(event.to)) scheduleReload()
+          break
+        case 'bulkChanged':
+          if (!event.paths || event.paths.some(matches)) scheduleReload()
+          break
+      }
+    })
+    const tick = setInterval(() => void load(), 60 * 60 * 1000)
+    return () => {
+      if (timeout) clearTimeout(timeout)
+      clearInterval(tick)
+      cleanup()
+    }
+  }, [load])
+
+  return (
+    <SidebarGroup className="flex flex-col">
+      <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
+        Meetings
+      </div>
+      <SidebarGroupContent>
+        <SidebarMenu>
+          {meetings.map((m) => {
+            const hasConference = Boolean(m.conferenceLink)
+            return (
+              <SidebarMenuItem key={m.id}>
+                <SidebarMenuButton onClick={onOpenMeetingsView} className="gap-2">
+                  <Mic className="size-4 shrink-0" />
+                  <span className="min-w-0 flex-1 truncate text-sm">{m.summary}</span>
+                  <span className="shrink-0 text-[10px] text-muted-foreground group-hover/menu-item:hidden">
+                    {formatMeetingTime(m)}
+                  </span>
+                </SidebarMenuButton>
+                <div className="absolute top-1.5 right-1 flex items-center gap-0.5 opacity-0 transition-opacity group-focus-within/menu-item:opacity-100 group-hover/menu-item:opacity-100">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label="Take notes"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          triggerMeetingCapture(m, false)
+                        }}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        className="flex aspect-square w-5 items-center justify-center rounded-md text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                      >
+                        <Mic className="size-4" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">Take notes</TooltipContent>
+                  </Tooltip>
+                  {hasConference && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          aria-label="Join & take notes"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            triggerMeetingCapture(m, true)
+                          }}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          className="flex aspect-square w-5 items-center justify-center rounded-md text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                        >
+                          <Video className="size-4" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">Join & take notes</TooltipContent>
+                    </Tooltip>
+                  )}
+                </div>
+              </SidebarMenuItem>
+            )
+          })}
+          {onOpenMeetingsView && (
+            <SidebarMenuItem>
+              <SidebarMenuButton onClick={onOpenMeetingsView}>
+                <ArrowUpRight className="size-4 shrink-0 text-muted-foreground" />
+                <span className="text-muted-foreground">View all</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          )}
+        </SidebarMenu>
+      </SidebarGroupContent>
+    </SidebarGroup>
+  )
+}
 
 function TasksSidebarSection({
   tasks,
