@@ -1402,6 +1402,13 @@ function App() {
         loadBackgroundTasks()
       }
 
+      // Reload bg-task summaries if anything under bg-tasks/ changed
+      if (
+        eventPaths.some((p) => p === 'bg-tasks' || p.startsWith('bg-tasks/'))
+      ) {
+        loadBgTaskSummaries()
+      }
+
       // Invalidate cached content for files changed outside the active editor.
       // This prevents stale backlinks after rename-rewrite passes touch many files.
       for (const path of eventPaths) {
@@ -1746,6 +1753,37 @@ function App() {
   useEffect(() => {
     loadRuns()
   }, [loadRuns])
+
+  const [bgTaskSummaries, setBgTaskSummaries] = useState<Array<{
+    slug: string
+    name: string
+    active: boolean
+    createdAt: string
+    lastAttemptAt?: string
+    lastRunAt?: string
+  }>>([])
+  const [bgTaskInitialSlug, setBgTaskInitialSlug] = useState<string | null>(null)
+  const [bgTaskSlugVersion, setBgTaskSlugVersion] = useState(0)
+
+  const loadBgTaskSummaries = useCallback(async () => {
+    try {
+      const result = await window.ipc.invoke('bg-task:list', { limit: 200 })
+      setBgTaskSummaries(result.items.map((it) => ({
+        slug: it.slug,
+        name: it.name,
+        active: it.active,
+        createdAt: it.createdAt,
+        lastAttemptAt: it.lastAttemptAt,
+        lastRunAt: it.lastRunAt,
+      })))
+    } catch (err) {
+      console.error('Failed to load bg-task summaries:', err)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadBgTaskSummaries()
+  }, [loadBgTaskSummaries])
 
   // Load background tasks
   const loadBackgroundTasks = useCallback(async () => {
@@ -5069,8 +5107,12 @@ function App() {
                   void navigateToView({ type: 'chat-history' })
                 },
               }}
-              backgroundTasks={backgroundTasks}
-              selectedBackgroundTask={selectedBackgroundTask}
+              bgTaskSummaries={bgTaskSummaries}
+              onOpenBgTask={(slug) => {
+                setBgTaskInitialSlug(slug)
+                setBgTaskSlugVersion((v) => v + 1)
+                openBgTasksView()
+              }}
               isSearchOpen={isSearchOpen}
               isBrowserOpen={isBrowserOpen}
               onToggleBrowser={handleToggleBrowser}
@@ -5078,8 +5120,7 @@ function App() {
               onOpenSuggestedTopics={() => void navigateToView({ type: 'suggested-topics' })}
               isMeetingsOpen={isMeetingsOpen}
               onOpenMeetings={openMeetingsView}
-              isBgTasksOpen={isBgTasksOpen}
-              onOpenBgTasks={openBgTasksView}
+              onOpenBgTasks={() => { setBgTaskInitialSlug(null); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
               isEmailOpen={isEmailOpen}
               onOpenEmail={openEmailView}
             />
@@ -5246,6 +5287,8 @@ function App() {
               ) : isBgTasksOpen ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                   <BgTasksView
+                    initialSlug={bgTaskInitialSlug}
+                    slugVersion={bgTaskSlugVersion}
                     onCreateWithCopilot={(description) => {
                       submitFromPalette(buildBgTaskSetupPrompt(description), null)
                     }}

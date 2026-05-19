@@ -17,7 +17,6 @@ import {
   Mic,
   Plug,
   Lightbulb,
-  ListChecks,
   LoaderIcon,
   Mail,
   Settings,
@@ -124,21 +123,13 @@ type RunListItem = {
   agentId: string
 }
 
-type BackgroundTaskItem = {
+type TaskSummary = {
+  slug: string
   name: string
-  description?: string
-  schedule: {
-    type: "cron" | "window" | "once"
-    expression?: string
-    cron?: string
-    startTime?: string
-    endTime?: string
-    runAt?: string
-  }
-  enabled: boolean
-  status?: "scheduled" | "running" | "finished" | "failed" | "triggered"
-  nextRunAt?: string | null
-  lastRunAt?: string | null
+  active: boolean
+  createdAt: string
+  lastAttemptAt?: string
+  lastRunAt?: string
 }
 
 type ServiceEventType = z.infer<typeof ServiceEvent>
@@ -195,8 +186,8 @@ type SidebarContentPanelProps = {
   currentRunId?: string | null
   processingRunIds?: Set<string>
   tasksActions?: TasksActions
-  backgroundTasks?: BackgroundTaskItem[]
-  selectedBackgroundTask?: string | null
+  bgTaskSummaries?: TaskSummary[]
+  onOpenBgTask?: (slug: string) => void
   isSearchOpen?: boolean
   isBrowserOpen?: boolean
   onToggleBrowser?: () => void
@@ -204,7 +195,6 @@ type SidebarContentPanelProps = {
   onOpenSuggestedTopics?: () => void
   isMeetingsOpen?: boolean
   onOpenMeetings?: () => void
-  isBgTasksOpen?: boolean
   onOpenBgTasks?: () => void
   isEmailOpen?: boolean
   onOpenEmail?: () => void
@@ -444,8 +434,8 @@ export function SidebarContentPanel({
   currentRunId,
   processingRunIds,
   tasksActions,
-  backgroundTasks = [],
-  selectedBackgroundTask,
+  bgTaskSummaries = [],
+  onOpenBgTask,
   isSearchOpen = false,
   isBrowserOpen = false,
   onToggleBrowser,
@@ -453,7 +443,6 @@ export function SidebarContentPanel({
   onOpenSuggestedTopics,
   isMeetingsOpen = false,
   onOpenMeetings,
-  isBgTasksOpen = false,
   onOpenBgTasks,
   isEmailOpen = false,
   onOpenEmail,
@@ -471,7 +460,6 @@ export function SidebarContentPanel({
   const isBrowserQuickActionSelected = isBrowserOpen && !isSearchOpen
   const isSuggestedTopicsQuickActionSelected = isSuggestedTopicsOpen && !isBrowserOpen
   const isMeetingsQuickActionSelected = isMeetingsOpen && !isBrowserOpen
-  const isBgTasksQuickActionSelected = isBgTasksOpen && !isBrowserOpen
   const isEmailQuickActionSelected = isEmailOpen && !isBrowserOpen
 
   const handleRowboatLogin = useCallback(async () => {
@@ -567,24 +555,14 @@ export function SidebarContentPanel({
               <span>Meetings</span>
             </button>
           )}
-          {onOpenBgTasks && (
-            <button
-              type="button"
-              onClick={onOpenBgTasks}
-              className={cn(
-                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
-                isBgTasksQuickActionSelected
-                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                  : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-              )}
-            >
-              <ListChecks className="size-4" />
-              <span>Agents</span>
-            </button>
-          )}
         </div>
       </SidebarHeader>
       <SidebarContent>
+        <TasksSidebarSection
+          tasks={bgTaskSummaries}
+          onOpenTask={onOpenBgTask}
+          onOpenTasksView={onOpenBgTasks}
+        />
         <KnowledgeSection
           tree={tree}
           selectedPath={selectedPath}
@@ -597,8 +575,6 @@ export function SidebarContentPanel({
           currentRunId={currentRunId}
           processingRunIds={processingRunIds}
           actions={tasksActions}
-          backgroundTasks={backgroundTasks}
-          selectedBackgroundTask={selectedBackgroundTask}
         />
       </SidebarContent>
       {/* Billing / upgrade CTA or Log in CTA */}
@@ -1124,25 +1100,60 @@ export function WorkspaceSection({
 }
 
 
-// Get status indicator color
-function getStatusColor(status?: string, enabled?: boolean): string {
-  // Disabled agents always show gray
-  if (enabled === false) {
-    return "bg-gray-400"
-  }
-  switch (status) {
-    case "running":
-      return "bg-blue-500"
-    case "finished":
-      return "bg-green-500"
-    case "failed":
-      return "bg-red-500"
-    case "triggered":
-      return "bg-gray-400"
-    case "scheduled":
-    default:
-      return "bg-yellow-500"
-  }
+function TasksSidebarSection({
+  tasks,
+  onOpenTask,
+  onOpenTasksView,
+}: {
+  tasks: TaskSummary[]
+  onOpenTask?: (slug: string) => void
+  onOpenTasksView?: () => void
+}) {
+  const recentTasks = React.useMemo<TaskSummary[]>(() => {
+    const toTime = (s?: string | null): number => {
+      if (!s) return 0
+      const t = new Date(s).getTime()
+      return Number.isNaN(t) ? 0 : t
+    }
+    const activity = (t: TaskSummary): number =>
+      Math.max(toTime(t.lastRunAt), toTime(t.lastAttemptAt), toTime(t.createdAt))
+    return [...tasks]
+      .sort((a, b) => activity(b) - activity(a))
+      .slice(0, 3)
+  }, [tasks])
+
+  return (
+    <SidebarGroup className="flex flex-col">
+      <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
+        Tasks
+      </div>
+      <SidebarGroupContent>
+        <SidebarMenu>
+          {recentTasks.map((task) => (
+            <SidebarMenuItem key={task.slug}>
+              <SidebarMenuButton
+                onClick={() => onOpenTask?.(task.slug)}
+                className="gap-2"
+              >
+                <Bot className="size-4 shrink-0" />
+                <span className={`truncate text-sm ${!task.active ? "text-muted-foreground" : ""}`}>
+                  {task.name}
+                </span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          ))}
+          {onOpenTasksView && (
+            <SidebarMenuItem>
+              <SidebarMenuButton onClick={onOpenTasksView}>
+                <ArrowUpRight className="size-4 shrink-0 text-muted-foreground" />
+                <span className="text-muted-foreground">View all</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          )}
+        </SidebarMenu>
+      </SidebarGroupContent>
+    </SidebarGroup>
+  )
 }
 
 // Tasks Section
@@ -1151,51 +1162,18 @@ function TasksSection({
   currentRunId,
   processingRunIds,
   actions,
-  backgroundTasks = [],
-  selectedBackgroundTask,
 }: {
   runs: RunListItem[]
   currentRunId?: string | null
   processingRunIds?: Set<string>
   actions?: TasksActions
-  backgroundTasks?: BackgroundTaskItem[]
-  selectedBackgroundTask?: string | null
 }) {
   const [pendingDeleteRunId, setPendingDeleteRunId] = useState<string | null>(null)
 
   return (
     <SidebarGroup className="flex flex-col">
       <SidebarGroupContent>
-        {/* Background Tasks Section */}
-        {backgroundTasks.length > 0 && (
-          <>
-            <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
-              Background Tasks
-            </div>
-            <SidebarMenu>
-              {backgroundTasks.map((task) => (
-                <SidebarMenuItem key={task.name}>
-                  <SidebarMenuButton
-                    isActive={selectedBackgroundTask === task.name}
-                    onClick={() => actions?.onSelectBackgroundTask?.(task.name)}
-                    className="gap-2"
-                  >
-                    <div className="relative">
-                      <Bot className="size-4 shrink-0" />
-                      <span
-                        className={`absolute -bottom-0.5 -right-0.5 size-2 rounded-full ${getStatusColor(task.status, task.enabled)} ${task.status === "running" && task.enabled ? "animate-pulse" : ""}`}
-                      />
-                    </div>
-                    <span className={`truncate text-sm ${!task.enabled ? "text-muted-foreground" : ""}`}>
-                      {task.name}
-                    </span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </>
-        )}
-        <div className="px-3 py-1.5 mt-4 text-xs font-medium text-muted-foreground">
+        <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
           Chat history
         </div>
         <SidebarMenu>
