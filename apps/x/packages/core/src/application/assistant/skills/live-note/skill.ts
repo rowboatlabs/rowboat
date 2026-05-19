@@ -314,7 +314,7 @@ The agent always receives a \`**Trigger:**\` line in its run message telling it 
 - \`Scheduled refresh — fired inside the configured window\` — forgiving once-per-day baseline refresh.
 - \`Event match — Pass 1 routing flagged this note\` — comes with the event payload and a Pass 2 decision directive.
 
-**When to branch in the objective:** there's a meaningful difference between the work to do on a *baseline* refresh (cron/window — pull a full snapshot from local data) and a *reactive* update (event — integrate one new signal). The flagship case is the **Today.md emails section**: on a window run it scans \`gmail_sync/\` for everything worth attention; on an event run with an incoming email payload it integrates that one thread into the existing digest without re-listing previously-seen threads. Same objective, two branches.
+**When to branch in the objective:** there's a meaningful difference between the work to do on a *baseline* refresh (cron/window — pull a full snapshot from local data) and a *reactive* update (event — integrate one new signal). For example, an email digest can scan \`gmail_sync/\` for everything worth attention on a window run, then integrate one incoming thread on an event run without re-listing previously-seen threads. Same objective, two branches.
 
 How to write it — use plain conditional language inside the objective:
 

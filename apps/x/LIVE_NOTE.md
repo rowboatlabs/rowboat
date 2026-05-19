@@ -175,7 +175,7 @@ Internal trigger enum (`LiveNoteTriggerType`) is `'manual' | 'cron' | 'window' |
 
 `buildMessage` always emits a `**Trigger:**` paragraph in the agent's run message — one paragraph per kind. `manual` and the two timed variants (`cron`, `window`) include any optional `context` as a `**Context:**` block. `event` includes the eventMatchCriteria + payload + Pass 2 decision directive (no `**Context:**`; the payload *is* the context).
 
-This lets the user-authored objective branch on trigger kind when warranted (the canonical example is the Today.md emails section: cron/window scans `gmail_sync/` from scratch, event integrates the new thread). The skill teaches the pattern under "Per-trigger guidance (advanced)".
+This lets the user-authored objective branch on trigger kind when warranted (for example, an email digest can scan `gmail_sync/` from scratch on cron/window runs, while event runs integrate just the new thread). The skill teaches the pattern under "Per-trigger guidance (advanced)".
 
 ### Run flow (`runLiveNoteAgent`)
 
@@ -254,17 +254,15 @@ The contract (defined in the run-agent system prompt — `packages/core/src/know
 
 ---
 
-## Daily-Note Template & Migrations
+## Default Note Policy
 
-`Today.md` is the canonical demo of what a live note can do. It ships with one objective covering an Overview / Calendar / Emails / What you missed / Priorities layout — driven by three windows and an event-match criterion for in-day signals.
+Rowboat no longer creates a default `Today.md` live dashboard for new users. Live notes are user-created notes with an explicit `live:` frontmatter block.
 
-**Versioning** — `packages/core/src/knowledge/ensure_daily_note.ts` carries a `CANONICAL_DAILY_NOTE_VERSION` constant and a `templateVersion` scalar in the frontmatter. On app start, `ensureDailyNote()`:
+**Deprecated Today.md migration** — `packages/core/src/knowledge/deprecate_today_note.ts` runs once per workspace on app start:
 
-- File missing → fresh write at canonical version.
-- File at-or-above canonical → no-op.
-- File below canonical → rename existing to `Today.md.bkp.<ISO-stamp>` (which doesn't end in `.md`, so the scheduler/event router skip it), then write the canonical template body-from-scratch (live notes regenerate their own body).
-
-The bump from v1 (the old `track:` array model) to v2 (the live-note rewrite) is handled by this same path. Pre-v2 notes get backed up and replaced.
+- File missing → mark processed and do nothing.
+- File present → set `live.active: false` if a `live:` block exists, prepend a user-facing deprecation notice once, and preserve the note body.
+- Future launches → no-op via `config/today-note-deprecation.json`, so a user who re-enables the note is not paused again.
 
 ---
 
@@ -393,7 +391,7 @@ Conventions:
 | Run orchestrator (`runLiveNoteAgent`, `buildMessage`) | `packages/core/src/knowledge/live-note/runner.ts` |
 | Live-note agent definition (`LIVE_NOTE_AGENT_INSTRUCTIONS`, `buildLiveNoteAgent`) | `packages/core/src/knowledge/live-note/agent.ts` |
 | Live-note bus (pub-sub for lifecycle events) | `packages/core/src/knowledge/live-note/bus.ts` |
-| Daily-note template + version migration | `packages/core/src/knowledge/ensure_daily_note.ts` |
+| Deprecated Today.md one-time migration | `packages/core/src/knowledge/deprecate_today_note.ts` |
 | Gmail event producer | `packages/core/src/knowledge/sync_gmail.ts` |
 | Calendar event producer + digest | `packages/core/src/knowledge/sync_calendar.ts` |
 | Copilot skill | `packages/core/src/application/assistant/skills/live-note/skill.ts` |

@@ -42,8 +42,8 @@ function isSamePath(a: string, b: string | undefined): boolean {
  * - Ticks every minute so callers using `formatRelativeTime` get a fresh label
  *   without the underlying data changing.
  *
- * `notePath` may be either knowledge-relative (`Today.md`) or workspace-rooted
- * (`knowledge/Today.md`); the hook normalises internally.
+ * `notePath` may be either knowledge-relative (`Digest.md`) or workspace-rooted
+ * (`knowledge/Digest.md`); the hook normalises internally.
  */
 export function useLiveNoteForPath(notePath: string | null | undefined): UseLiveNoteForPathResult {
   const knowledgeRelPath = stripKnowledgePrefix(notePath ?? null)

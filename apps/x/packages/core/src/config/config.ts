@@ -49,9 +49,10 @@ function ensureDefaultConfigs() {
 ensureDirs();
 ensureDefaultConfigs();
 
-// Ensure default knowledge files exist
-import('../knowledge/ensure_daily_note.js').then(m => m.ensureDailyNote()).catch(err => {
-    console.error('[DailyNote] Failed to ensure daily note:', err);
+// One-time deprecation for the old Today.md live dashboard. New installs no
+// longer get a generated Today.md; existing files are paused in place.
+import('../knowledge/deprecate_today_note.js').then(m => m.deprecateTodayNote()).catch(err => {
+    console.error('[TodayNoteDeprecation] Failed to deprecate Today.md:', err);
 });
 
 // Initialize version history repo (async, fire-and-forget on startup)
