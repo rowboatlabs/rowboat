@@ -196,6 +196,9 @@ type SidebarContentPanelProps = {
   isSuggestedTopicsOpen?: boolean
   onOpenSuggestedTopics?: () => void
   onOpenMeetings?: () => void
+  meetingRecordingState?: 'idle' | 'connecting' | 'recording' | 'stopping'
+  recordingMeetingSource?: string | null
+  onToggleMeetingRecording?: () => void
   onOpenBgTasks?: () => void
   isEmailOpen?: boolean
   onOpenEmail?: () => void
@@ -443,6 +446,9 @@ export function SidebarContentPanel({
   isSuggestedTopicsOpen = false,
   onOpenSuggestedTopics,
   onOpenMeetings,
+  meetingRecordingState,
+  recordingMeetingSource,
+  onToggleMeetingRecording,
   onOpenBgTasks,
   isEmailOpen = false,
   onOpenEmail,
@@ -542,7 +548,12 @@ export function SidebarContentPanel({
         </div>
       </SidebarHeader>
       <SidebarContent>
-        <MeetingsSidebarSection onOpenMeetingsView={onOpenMeetings} />
+        <MeetingsSidebarSection
+          onOpenMeetingsView={onOpenMeetings}
+          recordingState={meetingRecordingState ?? 'idle'}
+          recordingSource={recordingMeetingSource ?? null}
+          onToggleRecording={onToggleMeetingRecording}
+        />
         <TasksSidebarSection
           tasks={bgTaskSummaries}
           onOpenTask={onOpenBgTask}
@@ -1183,8 +1194,14 @@ function formatMeetingTime(event: UpcomingMeeting): string {
 
 function MeetingsSidebarSection({
   onOpenMeetingsView,
+  recordingState,
+  recordingSource,
+  onToggleRecording,
 }: {
   onOpenMeetingsView?: () => void
+  recordingState: 'idle' | 'connecting' | 'recording' | 'stopping'
+  recordingSource: string | null
+  onToggleRecording?: () => void
 }) {
   const [meetings, setMeetings] = useState<UpcomingMeeting[]>([])
 
@@ -1268,53 +1285,86 @@ function MeetingsSidebarSection({
         <SidebarMenu>
           {meetings.map((m) => {
             const hasConference = Boolean(m.conferenceLink)
+            const isThisRecording = recordingSource === m.source && (recordingState === 'recording' || recordingState === 'connecting' || recordingState === 'stopping')
+            const isBusy = isThisRecording && (recordingState === 'connecting' || recordingState === 'stopping')
             return (
               <SidebarMenuItem key={m.id}>
                 <SidebarMenuButton onClick={onOpenMeetingsView} className="gap-2">
                   <Mic className="size-4 shrink-0" />
                   <span className="min-w-0 flex-1 truncate text-sm">{m.summary}</span>
-                  <span className="shrink-0 text-[10px] text-muted-foreground group-hover/menu-item:hidden">
-                    {formatMeetingTime(m)}
+                  <span
+                    className={`shrink-0 text-[10px] text-muted-foreground ${isThisRecording ? '' : 'group-hover/menu-item:hidden'}`}
+                  >
+                    {isThisRecording ? null : formatMeetingTime(m)}
                   </span>
                 </SidebarMenuButton>
-                <div className="absolute top-1.5 right-1 flex items-center gap-0.5 opacity-0 transition-opacity group-focus-within/menu-item:opacity-100 group-hover/menu-item:opacity-100">
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        aria-label="Take notes"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          triggerMeetingCapture(m, false)
-                        }}
-                        onMouseDown={(e) => e.stopPropagation()}
-                        className="flex aspect-square w-5 items-center justify-center rounded-md text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                      >
-                        <Mic className="size-4" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">Take notes</TooltipContent>
-                  </Tooltip>
-                  {hasConference && (
+                {isThisRecording ? (
+                  <div className="absolute top-1.5 right-1 flex items-center gap-1.5">
+                    <span className="relative flex size-2">
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
+                      <span className="relative inline-flex size-2 rounded-full bg-red-500" />
+                    </span>
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <button
                           type="button"
-                          aria-label="Join & take notes"
+                          aria-label="Stop recording"
+                          disabled={isBusy}
                           onClick={(e) => {
                             e.stopPropagation()
-                            triggerMeetingCapture(m, true)
+                            onToggleRecording?.()
+                          }}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          className="flex aspect-square w-5 items-center justify-center rounded-md text-destructive hover:bg-destructive/10 disabled:opacity-50"
+                        >
+                          {isBusy ? <LoaderIcon className="size-4 animate-spin" /> : <Square className="size-3.5 fill-current" />}
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">
+                        {recordingState === 'connecting' ? 'Starting…' : recordingState === 'stopping' ? 'Stopping…' : 'Stop recording'}
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+                ) : (
+                  <div className="absolute top-1.5 right-1 flex items-center gap-0.5 opacity-0 transition-opacity group-focus-within/menu-item:opacity-100 group-hover/menu-item:opacity-100">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          aria-label="Take notes"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            triggerMeetingCapture(m, false)
                           }}
                           onMouseDown={(e) => e.stopPropagation()}
                           className="flex aspect-square w-5 items-center justify-center rounded-md text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
                         >
-                          <Video className="size-4" />
+                          <Mic className="size-4" />
                         </button>
                       </TooltipTrigger>
-                      <TooltipContent side="bottom">Join & take notes</TooltipContent>
+                      <TooltipContent side="bottom">Take notes</TooltipContent>
                     </Tooltip>
-                  )}
-                </div>
+                    {hasConference && (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            aria-label="Join & take notes"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              triggerMeetingCapture(m, true)
+                            }}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            className="flex aspect-square w-5 items-center justify-center rounded-md text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                          >
+                            <Video className="size-4" />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom">Join & take notes</TooltipContent>
+                      </Tooltip>
+                    )}
+                  </div>
+                )}
               </SidebarMenuItem>
             )
           })}

@@ -4567,12 +4567,14 @@ function App() {
   const pendingCalendarEventRef = useRef<CalendarEventMeta | undefined>(undefined)
   const [meetingSummarizing, setMeetingSummarizing] = useState(false)
   const [showMeetingPermissions, setShowMeetingPermissions] = useState(false)
+  const [recordingMeetingSource, setRecordingMeetingSource] = useState<string | null>(null)
 
   const [checkingPermission, setCheckingPermission] = useState(false)
 
   const startMeetingNow = useCallback(async () => {
     const calEvent = pendingCalendarEventRef.current
     pendingCalendarEventRef.current = undefined
+    setRecordingMeetingSource(calEvent?.source ?? null)
     const notePath = await meetingTranscription.start(calEvent)
     if (notePath) {
       meetingNotePathRef.current = notePath
@@ -4600,6 +4602,7 @@ function App() {
   const handleToggleMeeting = useCallback(async () => {
     if (meetingTranscription.state === 'recording') {
       await meetingTranscription.stop()
+      setRecordingMeetingSource(null)
 
       // Read the final transcript and generate meeting notes via LLM
       const notePath = meetingNotePathRef.current
@@ -5119,6 +5122,9 @@ function App() {
               isSuggestedTopicsOpen={isSuggestedTopicsOpen}
               onOpenSuggestedTopics={() => void navigateToView({ type: 'suggested-topics' })}
               onOpenMeetings={openMeetingsView}
+              meetingRecordingState={meetingTranscription.state}
+              recordingMeetingSource={recordingMeetingSource}
+              onToggleMeetingRecording={() => { void handleToggleMeeting() }}
               onOpenBgTasks={() => { setBgTaskInitialSlug(null); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
               isEmailOpen={isEmailOpen}
               onOpenEmail={openEmailView}
