@@ -10,13 +10,11 @@ import {
   FileText,
   FilePlus,
   Folder,
-  FolderOpen,
   FolderPlus,
   Globe,
   AlertTriangle,
   HelpCircle,
   Mic,
-  LayoutGrid,
   Plug,
   Lightbulb,
   ListChecks,
@@ -76,7 +74,6 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
-import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import { ConnectorsPopover } from "@/components/connectors-popover"
 import { HelpPopover } from "@/components/help-popover"
@@ -118,14 +115,6 @@ function displayNoteName(node: TreeNode): string {
     return node.name.slice(0, -3)
   }
   return node.name
-}
-
-function getFileManagerName(): string {
-  if (typeof navigator === 'undefined') return 'File Manager'
-  const platform = navigator.platform.toLowerCase()
-  if (platform.includes('mac')) return 'Finder'
-  if (platform.includes('win')) return 'Explorer'
-  return 'File Manager'
 }
 
 type RunListItem = {
@@ -1097,12 +1086,13 @@ export function WorkspaceSection({
   tree: TreeNode[]
   actions: KnowledgeActions
 }) {
-  const workspaceFolders = React.useMemo<TreeNode[]>(() => {
+  const recentWorkspaces = React.useMemo<TreeNode[]>(() => {
     const root = tree.find((item) => item.path === 'knowledge/Workspace')
     const children = root?.children ?? []
     return [...children]
       .filter((c) => c.kind === 'dir')
-      .sort((a, b) => a.name.localeCompare(b.name))
+      .sort((a, b) => (b.stat?.mtimeMs ?? 0) - (a.stat?.mtimeMs ?? 0))
+      .slice(0, 3)
   }, [tree])
 
   return (
@@ -1110,163 +1100,25 @@ export function WorkspaceSection({
       <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
         Workspace
       </div>
-      <WorkspacesPanel
-        workspaces={workspaceFolders}
-        onOpen={(path) => actions.openWorkspaceAt(path)}
-        onOpenRoot={() => actions.openWorkspaceAt()}
-        onCreate={actions.createWorkspace}
-        onRevealInFileManager={() => actions.revealInFileManager('knowledge/Workspace', true)}
-      />
-    </SidebarGroup>
-  )
-}
-
-function WorkspacesPanel({
-  workspaces,
-  onOpen,
-  onOpenRoot,
-  onCreate,
-  onRevealInFileManager,
-}: {
-  workspaces: TreeNode[]
-  onOpen: (path: string) => void
-  onOpenRoot: () => void
-  onCreate: (name: string) => Promise<string>
-  onRevealInFileManager: () => void
-}) {
-  const fileManagerName = getFileManagerName()
-  const [addOpen, setAddOpen] = useState(false)
-  const [newName, setNewName] = useState('')
-  const [creating, setCreating] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const resetDialog = useCallback(() => {
-    setNewName('')
-    setError(null)
-    setCreating(false)
-  }, [])
-
-  const handleCreate = useCallback(async () => {
-    setCreating(true)
-    setError(null)
-    try {
-      const newPath = await onCreate(newName)
-      setAddOpen(false)
-      resetDialog()
-      onOpen(newPath)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create workspace')
-      setCreating(false)
-    }
-  }, [newName, onCreate, onOpen, resetDialog])
-
-  return (
-    <>
-      <div className="flex items-center justify-center gap-1 py-1 sticky top-0 z-10 bg-sidebar border-b border-sidebar-border">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              onClick={() => setAddOpen(true)}
-              className="text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded p-1.5 transition-colors"
-            >
-              <FolderPlus className="size-4" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">Add workspace</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              onClick={onOpenRoot}
-              className="text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded p-1.5 transition-colors"
-            >
-              <LayoutGrid className="size-4" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">Workspace view</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              onClick={onRevealInFileManager}
-              className="text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded p-1.5 transition-colors"
-            >
-              <FolderOpen className="size-4" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">Open in {fileManagerName}</TooltipContent>
-        </Tooltip>
-      </div>
       <SidebarGroupContent>
         <SidebarMenu>
-          {workspaces.length === 0 ? (
-            <div className="px-3 py-2 text-xs text-sidebar-foreground/60">
-              No workspaces yet.
-            </div>
-          ) : (
-            workspaces.map((ws) => (
-              <SidebarMenuItem key={ws.path}>
-                <SidebarMenuButton onClick={() => onOpen(ws.path)}>
-                  <Folder className="size-4 shrink-0" />
-                  <span className="truncate">{ws.name}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            ))
-          )}
+          {recentWorkspaces.map((ws) => (
+            <SidebarMenuItem key={ws.path}>
+              <SidebarMenuButton onClick={() => actions.openWorkspaceAt(ws.path)}>
+                <Folder className="size-4 shrink-0" />
+                <span className="truncate">{ws.name}</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          ))}
+          <SidebarMenuItem>
+            <SidebarMenuButton onClick={() => actions.openWorkspaceAt()}>
+              <ArrowUpRight className="size-4 shrink-0 text-muted-foreground" />
+              <span className="text-muted-foreground">View all</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
         </SidebarMenu>
       </SidebarGroupContent>
-      <Dialog
-        open={addOpen}
-        onOpenChange={(open) => {
-          setAddOpen(open)
-          if (!open) resetDialog()
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>New workspace</DialogTitle>
-            <DialogDescription>
-              Workspaces are top-level folders inside knowledge/Workspace.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-2">
-            <label htmlFor="sidebar-workspace-name" className="text-sm font-medium">Name</label>
-            <Input
-              id="sidebar-workspace-name"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              placeholder="e.g. Alpha"
-              autoFocus
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !creating) {
-                  e.preventDefault()
-                  void handleCreate()
-                }
-              }}
-            />
-            {error && <p className="text-xs text-destructive">{error}</p>}
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setAddOpen(false)
-                resetDialog()
-              }}
-              disabled={creating}
-            >
-              Cancel
-            </Button>
-            <Button onClick={() => void handleCreate()} disabled={creating || !newName.trim()}>
-              {creating ? 'Creating…' : 'Create'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
+    </SidebarGroup>
   )
 }
 
