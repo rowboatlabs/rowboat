@@ -183,6 +183,7 @@ type TasksActions = {
   onDeleteRun: (runId: string) => void
   onOpenInNewTab?: (runId: string) => void
   onSelectBackgroundTask?: (taskName: string) => void
+  onOpenChatHistoryView?: () => void
 }
 
 type SidebarContentPanelProps = {
@@ -1194,62 +1195,66 @@ function TasksSection({
             </SidebarMenu>
           </>
         )}
-        {runs.length > 0 && (
-          <>
-            <div className="px-3 py-1.5 mt-4 text-xs font-medium text-muted-foreground">
-              Chat history
-            </div>
-            <SidebarMenu>
-              {runs.map((run) => (
-                <ContextMenu key={run.id}>
-                  <ContextMenuTrigger asChild>
-                    <SidebarMenuItem className="group/chat-item">
-                      <SidebarMenuButton
-                        isActive={currentRunId === run.id}
-                        onClick={(e) => {
-                          if (e.metaKey && actions?.onOpenInNewTab) {
-                            actions.onOpenInNewTab(run.id)
-                          } else {
-                            actions?.onSelectRun(run.id)
-                          }
-                        }}
-                      >
-                        <div className="flex w-full items-center gap-2 min-w-0">
-                          <span className="min-w-0 flex-1 truncate text-sm">{run.title || '(Untitled chat)'}</span>
-                          {run.createdAt ? (
-                            <span className="shrink-0 text-[10px] text-muted-foreground">
-                              {formatRunTime(run.createdAt)}
-                            </span>
-                          ) : null}
-                        </div>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  </ContextMenuTrigger>
-                  <ContextMenuContent className="w-48">
-                    {actions?.onOpenInNewTab && (
-                      <ContextMenuItem onClick={() => actions.onOpenInNewTab!(run.id)}>
-                        <ExternalLink className="mr-2 size-4" />
-                        Open in new tab
-                      </ContextMenuItem>
-                    )}
-                    {!processingRunIds?.has(run.id) && (
-                      <>
-                        {actions?.onOpenInNewTab && <ContextMenuSeparator />}
-                        <ContextMenuItem
-                          variant="destructive"
-                          onClick={() => setPendingDeleteRunId(run.id)}
-                        >
-                          <Trash2 className="mr-2 size-4" />
-                          Delete
-                        </ContextMenuItem>
-                      </>
-                    )}
-                  </ContextMenuContent>
-                </ContextMenu>
-              ))}
-            </SidebarMenu>
-          </>
-        )}
+        <div className="px-3 py-1.5 mt-4 text-xs font-medium text-muted-foreground">
+          Chat history
+        </div>
+        <SidebarMenu>
+          {runs.slice(0, 3).map((run) => (
+            <ContextMenu key={run.id}>
+              <ContextMenuTrigger asChild>
+                <SidebarMenuItem className="group/chat-item">
+                  <SidebarMenuButton
+                    isActive={currentRunId === run.id}
+                    onClick={(e) => {
+                      if (e.metaKey && actions?.onOpenInNewTab) {
+                        actions.onOpenInNewTab(run.id)
+                      } else {
+                        actions?.onSelectRun(run.id)
+                      }
+                    }}
+                  >
+                    <div className="flex w-full items-center gap-2 min-w-0">
+                      <span className="min-w-0 flex-1 truncate text-sm">{run.title || '(Untitled chat)'}</span>
+                      {run.createdAt ? (
+                        <span className="shrink-0 text-[10px] text-muted-foreground">
+                          {formatRunTime(run.createdAt)}
+                        </span>
+                      ) : null}
+                    </div>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </ContextMenuTrigger>
+              <ContextMenuContent className="w-48">
+                {actions?.onOpenInNewTab && (
+                  <ContextMenuItem onClick={() => actions.onOpenInNewTab!(run.id)}>
+                    <ExternalLink className="mr-2 size-4" />
+                    Open in new tab
+                  </ContextMenuItem>
+                )}
+                {!processingRunIds?.has(run.id) && (
+                  <>
+                    {actions?.onOpenInNewTab && <ContextMenuSeparator />}
+                    <ContextMenuItem
+                      variant="destructive"
+                      onClick={() => setPendingDeleteRunId(run.id)}
+                    >
+                      <Trash2 className="mr-2 size-4" />
+                      Delete
+                    </ContextMenuItem>
+                  </>
+                )}
+              </ContextMenuContent>
+            </ContextMenu>
+          ))}
+          {actions?.onOpenChatHistoryView && (
+            <SidebarMenuItem>
+              <SidebarMenuButton onClick={() => actions.onOpenChatHistoryView?.()}>
+                <ArrowUpRight className="size-4 shrink-0 text-muted-foreground" />
+                <span className="text-muted-foreground">View all</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          )}
+        </SidebarMenu>
       </SidebarGroupContent>
 
       {/* Delete confirmation dialog */}
