@@ -19,8 +19,7 @@ import {
   Mic,
   Network,
   Pencil,
-  Radio,
-  SearchIcon,
+  LayoutGrid,
   Table2,
   Plug,
   Lightbulb,
@@ -91,7 +90,6 @@ import {
 } from "@/components/ui/context-menu"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
-import { type ActiveSection, useSidebarSection } from "@/contexts/sidebar-context"
 import { ConnectorsPopover } from "@/components/connectors-popover"
 import { HelpPopover } from "@/components/help-popover"
 import { SettingsDialog } from "@/components/settings-dialog"
@@ -114,6 +112,8 @@ type KnowledgeActions = {
   createFolder: (parentPath?: string) => Promise<string>
   openGraph: () => void
   openBases: () => void
+  openWorkspaceAt: (path?: string) => void
+  createWorkspace: (name: string) => Promise<string>
   expandAll: () => void
   collapseAll: () => void
   rename: (path: string, newName: string, isDir: boolean) => Promise<void>
@@ -213,8 +213,6 @@ type SidebarContentPanelProps = {
   tasksActions?: TasksActions
   backgroundTasks?: BackgroundTaskItem[]
   selectedBackgroundTask?: string | null
-  onNewChat?: () => void
-  onOpenSearch?: () => void
   isSearchOpen?: boolean
   isBrowserOpen?: boolean
   onToggleBrowser?: () => void
@@ -222,18 +220,11 @@ type SidebarContentPanelProps = {
   onOpenSuggestedTopics?: () => void
   isMeetingsOpen?: boolean
   onOpenMeetings?: () => void
-  isLiveNotesOpen?: boolean
-  onOpenLiveNotes?: () => void
   isBgTasksOpen?: boolean
   onOpenBgTasks?: () => void
   isEmailOpen?: boolean
   onOpenEmail?: () => void
 } & React.ComponentProps<typeof Sidebar>
-
-const sectionTabs: { id: ActiveSection; label: string }[] = [
-  { id: "tasks", label: "Chat" },
-  { id: "knowledge", label: "Knowledge" },
-]
 
 function formatEventTime(ts: string): string {
   const date = new Date(ts)
@@ -474,8 +465,6 @@ export function SidebarContentPanel({
   tasksActions,
   backgroundTasks = [],
   selectedBackgroundTask,
-  onNewChat,
-  onOpenSearch,
   isSearchOpen = false,
   isBrowserOpen = false,
   onToggleBrowser,
@@ -483,15 +472,12 @@ export function SidebarContentPanel({
   onOpenSuggestedTopics,
   isMeetingsOpen = false,
   onOpenMeetings,
-  isLiveNotesOpen = false,
-  onOpenLiveNotes,
   isBgTasksOpen = false,
   onOpenBgTasks,
   isEmailOpen = false,
   onOpenEmail,
   ...props
 }: SidebarContentPanelProps) {
-  const { activeSection, setActiveSection } = useSidebarSection()
   const [hasOauthError, setHasOauthError] = useState(false)
   const [showOauthAlert, setShowOauthAlert] = useState(true)
   const [connectorsOpen, setConnectorsOpen] = useState(false)
@@ -504,7 +490,6 @@ export function SidebarContentPanel({
   const isBrowserQuickActionSelected = isBrowserOpen && !isSearchOpen
   const isSuggestedTopicsQuickActionSelected = isSuggestedTopicsOpen && !isBrowserOpen
   const isMeetingsQuickActionSelected = isMeetingsOpen && !isBrowserOpen
-  const isLiveNotesQuickActionSelected = isLiveNotesOpen && !isBrowserOpen
   const isBgTasksQuickActionSelected = isBgTasksOpen && !isBrowserOpen
   const isEmailQuickActionSelected = isEmailOpen && !isBrowserOpen
 
@@ -569,87 +554,8 @@ export function SidebarContentPanel({
       <SidebarHeader className="titlebar-drag-region">
         {/* Top spacer to clear the traffic lights + fixed toggle row */}
         <div className="h-8" />
-        {/* Tab switcher - centered below the traffic lights row */}
-        <div className="flex items-center px-2 py-1.5">
-          <div className="rowboat-section-switcher titlebar-no-drag flex w-full rounded-lg bg-sidebar-accent/50 p-0.5">
-            {sectionTabs.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveSection(tab.id)}
-                className={cn(
-                  "flex-1 rounded-md px-3 py-1 text-sm font-medium transition-colors",
-                  activeSection === tab.id
-                    ? "bg-sidebar-accent text-sidebar-accent-foreground shadow-sm"
-                    : "text-sidebar-foreground/70 hover:text-sidebar-foreground"
-                )}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-        </div>
         {/* Quick action buttons */}
         <div className="rowboat-quick-actions titlebar-no-drag flex flex-col gap-0.5 px-2 pb-1">
-          {onOpenSearch && (
-            <button
-              type="button"
-              onClick={onOpenSearch}
-              className={cn(
-                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
-                isSearchOpen
-                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                  : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-              )}
-            >
-              <SearchIcon className="size-4" />
-              <span>Search</span>
-            </button>
-          )}
-          {onToggleBrowser && (
-            <button
-              type="button"
-              onClick={onToggleBrowser}
-              className={cn(
-                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
-                isBrowserQuickActionSelected
-                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                  : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-              )}
-            >
-              <Globe className="size-4" />
-              <span>Run browser task</span>
-            </button>
-          )}
-          {onOpenSuggestedTopics && (
-            <button
-              type="button"
-              onClick={onOpenSuggestedTopics}
-              className={cn(
-                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
-                isSuggestedTopicsQuickActionSelected
-                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                  : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-              )}
-            >
-              <Lightbulb className="size-4" />
-              <span>Suggested Topics</span>
-            </button>
-          )}
-          {onOpenBgTasks && (
-            <button
-              type="button"
-              onClick={onOpenBgTasks}
-              className={cn(
-                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
-                isBgTasksQuickActionSelected
-                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                  : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-              )}
-            >
-              <ListChecks className="size-4" />
-              <span>Background tasks</span>
-            </button>
-          )}
           {onOpenEmail && (
             <button
               type="button"
@@ -680,45 +586,41 @@ export function SidebarContentPanel({
               <span>Meetings</span>
             </button>
           )}
-          {onOpenLiveNotes && (
+          {onOpenBgTasks && (
             <button
               type="button"
-              onClick={onOpenLiveNotes}
+              onClick={onOpenBgTasks}
               className={cn(
                 "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
-                isLiveNotesQuickActionSelected
+                isBgTasksQuickActionSelected
                   ? "bg-sidebar-accent text-sidebar-accent-foreground"
                   : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
               )}
             >
-              <Radio className="size-4" />
-              <span>Live notes</span>
+              <ListChecks className="size-4" />
+              <span>Agents</span>
             </button>
           )}
         </div>
       </SidebarHeader>
       <SidebarContent>
-        {activeSection === "knowledge" && (
-          <KnowledgeSection
-            tree={tree}
-            selectedPath={selectedPath}
-            expandedPaths={expandedPaths}
-            onSelectFile={onSelectFile}
-            onToggleFolder={onToggleFolder}
-            actions={knowledgeActions}
-            onVoiceNoteCreated={onVoiceNoteCreated}
-          />
-        )}
-        {activeSection === "tasks" && (
-          <TasksSection
-            runs={runs}
-            currentRunId={currentRunId}
-            processingRunIds={processingRunIds}
-            actions={tasksActions}
-            backgroundTasks={backgroundTasks}
-            selectedBackgroundTask={selectedBackgroundTask}
-          />
-        )}
+        <KnowledgeSection
+          tree={tree}
+          selectedPath={selectedPath}
+          expandedPaths={expandedPaths}
+          onSelectFile={onSelectFile}
+          onToggleFolder={onToggleFolder}
+          actions={knowledgeActions}
+          onVoiceNoteCreated={onVoiceNoteCreated}
+        />
+        <TasksSection
+          runs={runs}
+          currentRunId={currentRunId}
+          processingRunIds={processingRunIds}
+          actions={tasksActions}
+          backgroundTasks={backgroundTasks}
+          selectedBackgroundTask={selectedBackgroundTask}
+        />
       </SidebarContent>
       {/* Billing / upgrade CTA or Log in CTA */}
       {isRowboatConnected && billing ? (
@@ -756,6 +658,43 @@ export function SidebarContentPanel({
           >
             {loggingIn ? 'Signing in…' : 'Sign in to Rowboat'}
           </button>
+        </div>
+      )}
+      {/* Secondary quick actions (above bottom divider) */}
+      {(onToggleBrowser || onOpenSuggestedTopics) && (
+        <div className="px-2 pb-1">
+          <div className="flex flex-col gap-0.5">
+            {onToggleBrowser && (
+              <button
+                type="button"
+                onClick={onToggleBrowser}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs transition-colors",
+                  isBrowserQuickActionSelected
+                    ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                    : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                )}
+              >
+                <Globe className="size-4" />
+                <span>Run browser task</span>
+              </button>
+            )}
+            {onOpenSuggestedTopics && (
+              <button
+                type="button"
+                onClick={onOpenSuggestedTopics}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs transition-colors",
+                  isSuggestedTopicsQuickActionSelected
+                    ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                    : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                )}
+              >
+                <Lightbulb className="size-4" />
+                <span>Suggested Topics</span>
+              </button>
+            )}
+          </div>
         </div>
       )}
       {/* Bottom actions */}
@@ -1109,10 +1048,18 @@ function KnowledgeSection({
   const treeContainerRef = React.useRef<HTMLDivElement | null>(null)
   const [selectedFolderPath, setSelectedFolderPath] = useState<string | null>(null)
   const [renameTarget, setRenameTarget] = useState<string | null>(null)
+  const [knowledgeTab, setKnowledgeTab] = useState<'notes' | 'workspaces'>('notes')
   const visibleTree = React.useMemo(
-    () => tree.filter((item) => item.path !== 'knowledge/Meetings'),
+    () => tree.filter((item) => item.path !== 'knowledge/Meetings' && item.path !== 'knowledge/Workspace'),
     [tree],
   )
+  const workspaceFolders = React.useMemo<TreeNode[]>(() => {
+    const root = tree.find((item) => item.path === 'knowledge/Workspace')
+    const children = root?.children ?? []
+    return [...children]
+      .filter((c) => c.kind === 'dir')
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }, [tree])
 
   useEffect(() => {
     if (!selectedPath) return
@@ -1184,75 +1131,267 @@ function KnowledgeSection({
   ]
 
   return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>
-        <SidebarGroup className="flex-1 flex flex-col overflow-hidden">
-          <div className="flex items-center justify-center gap-1 py-1 sticky top-0 z-10 bg-sidebar border-b border-sidebar-border">
-            {quickActions.map((action) => (
-              <Tooltip key={action.label}>
-                <TooltipTrigger asChild>
-                  <button
-                    onClick={action.action}
-                    className="text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded p-1.5 transition-colors"
-                  >
-                    <action.icon className="size-4" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">{action.label}</TooltipContent>
-              </Tooltip>
-            ))}
-            <VoiceNoteButton onNoteCreated={onVoiceNoteCreated} />
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  onClick={isExpanded ? actions.collapseAll : actions.expandAll}
-                  className="text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded p-1.5 transition-colors"
-                >
-                  {isExpanded ? (
-                    <ChevronsDownUp className="size-4" />
-                  ) : (
-                    <ChevronsUpDown className="size-4" />
-                  )}
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">
-                {isExpanded ? "Collapse All" : "Expand All"}
-              </TooltipContent>
-            </Tooltip>
-          </div>
-          <SidebarGroupContent className="flex-1 overflow-y-auto">
-            <div ref={treeContainerRef}>
-              <SidebarMenu>
-                {visibleTree.map((item, index) => (
-                  <Tree
-                    key={index}
-                    item={item}
-                    selectedPath={selectedPath}
-                    expandedPaths={expandedPaths}
-                    onSelect={handleSelect}
-                    onToggleFolder={onToggleFolder}
-                    actions={wrappedActions}
-                    selectedFolderPath={selectedFolderPath}
-                    renameTarget={renameTarget}
-                    onRenameTargetConsumed={() => setRenameTarget(null)}
-                  />
+    <SidebarGroup className="flex flex-col">
+      <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
+        Knowledge
+      </div>
+      <div className="px-2 pb-1">
+        <div className="flex w-full rounded-md bg-sidebar-accent/40 p-0.5">
+          <button
+            type="button"
+            onClick={() => setKnowledgeTab('notes')}
+            className={cn(
+              "flex-1 rounded px-2 py-1 text-xs font-medium transition-colors",
+              knowledgeTab === 'notes'
+                ? "bg-sidebar-accent text-sidebar-accent-foreground shadow-sm"
+                : "text-sidebar-foreground/70 hover:text-sidebar-foreground"
+            )}
+          >
+            Notes
+          </button>
+          <button
+            type="button"
+            onClick={() => setKnowledgeTab('workspaces')}
+            className={cn(
+              "flex-1 rounded px-2 py-1 text-xs font-medium transition-colors",
+              knowledgeTab === 'workspaces'
+                ? "bg-sidebar-accent text-sidebar-accent-foreground shadow-sm"
+                : "text-sidebar-foreground/70 hover:text-sidebar-foreground"
+            )}
+          >
+            Workspaces
+          </button>
+        </div>
+      </div>
+      {knowledgeTab === 'notes' ? (
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <div className="flex flex-col">
+              <div className="flex items-center justify-center gap-1 py-1 sticky top-0 z-10 bg-sidebar border-b border-sidebar-border">
+                {quickActions.map((action) => (
+                  <Tooltip key={action.label}>
+                    <TooltipTrigger asChild>
+                      <button
+                        onClick={action.action}
+                        className="text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded p-1.5 transition-colors"
+                      >
+                        <action.icon className="size-4" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">{action.label}</TooltipContent>
+                  </Tooltip>
                 ))}
-              </SidebarMenu>
+                <VoiceNoteButton onNoteCreated={onVoiceNoteCreated} />
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={isExpanded ? actions.collapseAll : actions.expandAll}
+                      className="text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded p-1.5 transition-colors"
+                    >
+                      {isExpanded ? (
+                        <ChevronsDownUp className="size-4" />
+                      ) : (
+                        <ChevronsUpDown className="size-4" />
+                      )}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    {isExpanded ? "Collapse All" : "Expand All"}
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+              <SidebarGroupContent>
+                <div ref={treeContainerRef}>
+                  <SidebarMenu>
+                    {visibleTree.map((item, index) => (
+                      <Tree
+                        key={index}
+                        item={item}
+                        selectedPath={selectedPath}
+                        expandedPaths={expandedPaths}
+                        onSelect={handleSelect}
+                        onToggleFolder={onToggleFolder}
+                        actions={wrappedActions}
+                        selectedFolderPath={selectedFolderPath}
+                        renameTarget={renameTarget}
+                        onRenameTargetConsumed={() => setRenameTarget(null)}
+                      />
+                    ))}
+                  </SidebarMenu>
+                </div>
+              </SidebarGroupContent>
             </div>
-          </SidebarGroupContent>
-        </SidebarGroup>
-      </ContextMenuTrigger>
-      <ContextMenuContent className="w-48">
-        <ContextMenuItem onClick={() => wrappedActions.createNote()}>
-          <FilePlus className="mr-2 size-4" />
-          New Note
-        </ContextMenuItem>
-        <ContextMenuItem onClick={() => void wrappedActions.createFolder()}>
-          <FolderPlus className="mr-2 size-4" />
-          New Folder
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
+          </ContextMenuTrigger>
+          <ContextMenuContent className="w-48">
+            <ContextMenuItem onClick={() => wrappedActions.createNote()}>
+              <FilePlus className="mr-2 size-4" />
+              New Note
+            </ContextMenuItem>
+            <ContextMenuItem onClick={() => void wrappedActions.createFolder()}>
+              <FolderPlus className="mr-2 size-4" />
+              New Folder
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
+      ) : (
+        <WorkspacesPanel
+          workspaces={workspaceFolders}
+          onOpen={(path) => actions.openWorkspaceAt(path)}
+          onOpenRoot={() => actions.openWorkspaceAt()}
+          onCreate={actions.createWorkspace}
+          onRevealInFileManager={() => actions.revealInFileManager('knowledge/Workspace', true)}
+        />
+      )}
+    </SidebarGroup>
+  )
+}
+
+function WorkspacesPanel({
+  workspaces,
+  onOpen,
+  onOpenRoot,
+  onCreate,
+  onRevealInFileManager,
+}: {
+  workspaces: TreeNode[]
+  onOpen: (path: string) => void
+  onOpenRoot: () => void
+  onCreate: (name: string) => Promise<string>
+  onRevealInFileManager: () => void
+}) {
+  const fileManagerName = getFileManagerName()
+  const [addOpen, setAddOpen] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [creating, setCreating] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const resetDialog = useCallback(() => {
+    setNewName('')
+    setError(null)
+    setCreating(false)
+  }, [])
+
+  const handleCreate = useCallback(async () => {
+    setCreating(true)
+    setError(null)
+    try {
+      const newPath = await onCreate(newName)
+      setAddOpen(false)
+      resetDialog()
+      onOpen(newPath)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create workspace')
+      setCreating(false)
+    }
+  }, [newName, onCreate, onOpen, resetDialog])
+
+  return (
+    <>
+      <div className="flex items-center justify-center gap-1 py-1 sticky top-0 z-10 bg-sidebar border-b border-sidebar-border">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={() => setAddOpen(true)}
+              className="text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded p-1.5 transition-colors"
+            >
+              <FolderPlus className="size-4" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">Add workspace</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={onOpenRoot}
+              className="text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded p-1.5 transition-colors"
+            >
+              <LayoutGrid className="size-4" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">Workspace view</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={onRevealInFileManager}
+              className="text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded p-1.5 transition-colors"
+            >
+              <FolderOpen className="size-4" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">Open in {fileManagerName}</TooltipContent>
+        </Tooltip>
+      </div>
+      <SidebarGroupContent>
+        <SidebarMenu>
+          {workspaces.length === 0 ? (
+            <div className="px-3 py-2 text-xs text-sidebar-foreground/60">
+              No workspaces yet.
+            </div>
+          ) : (
+            workspaces.map((ws) => (
+              <SidebarMenuItem key={ws.path}>
+                <SidebarMenuButton onClick={() => onOpen(ws.path)}>
+                  <Folder className="size-4 shrink-0" />
+                  <span className="truncate">{ws.name}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            ))
+          )}
+        </SidebarMenu>
+      </SidebarGroupContent>
+      <Dialog
+        open={addOpen}
+        onOpenChange={(open) => {
+          setAddOpen(open)
+          if (!open) resetDialog()
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>New workspace</DialogTitle>
+            <DialogDescription>
+              Workspaces are top-level folders inside knowledge/Workspace.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-2">
+            <label htmlFor="sidebar-workspace-name" className="text-sm font-medium">Name</label>
+            <Input
+              id="sidebar-workspace-name"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="e.g. Alpha"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !creating) {
+                  e.preventDefault()
+                  void handleCreate()
+                }
+              }}
+            />
+            {error && <p className="text-xs text-destructive">{error}</p>}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setAddOpen(false)
+                resetDialog()
+              }}
+              disabled={creating}
+            >
+              Cancel
+            </Button>
+            <Button onClick={() => void handleCreate()} disabled={creating || !newName.trim()}>
+              {creating ? 'Creating…' : 'Create'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
 
@@ -1608,8 +1747,8 @@ function TasksSection({
   const [pendingDeleteRunId, setPendingDeleteRunId] = useState<string | null>(null)
 
   return (
-    <SidebarGroup className="flex-1 flex flex-col overflow-hidden">
-      <SidebarGroupContent className="flex-1 overflow-y-auto">
+    <SidebarGroup className="flex flex-col">
+      <SidebarGroupContent>
         {/* Background Tasks Section */}
         {backgroundTasks.length > 0 && (
           <>
