@@ -775,6 +775,8 @@ function App() {
   const [workspaceInitialPath, setWorkspaceInitialPath] = useState<string | null>(null)
   const [isKnowledgeViewOpen, setIsKnowledgeViewOpen] = useState(false)
   const [isChatHistoryOpen, setIsChatHistoryOpen] = useState(false)
+  const [emailInitialThreadId, setEmailInitialThreadId] = useState<string | null>(null)
+  const [emailThreadIdVersion, setEmailThreadIdVersion] = useState(0)
   const [expandedFrom, setExpandedFrom] = useState<{
     path: string | null
     graph: boolean
@@ -5126,8 +5128,11 @@ function App() {
               recordingMeetingSource={recordingMeetingSource}
               onToggleMeetingRecording={() => { void handleToggleMeeting() }}
               onOpenBgTasks={() => { setBgTaskInitialSlug(null); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
-              isEmailOpen={isEmailOpen}
-              onOpenEmail={openEmailView}
+              onOpenEmail={(threadId) => {
+                setEmailInitialThreadId(threadId ?? null)
+                setEmailThreadIdVersion((v) => v + 1)
+                openEmailView()
+              }}
             />
             <SidebarInset
               className={cn(
@@ -5304,7 +5309,7 @@ function App() {
                 </div>
               ) : isEmailOpen ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-                  <EmailView />
+                  <EmailView initialThreadId={emailInitialThreadId} threadIdVersion={emailThreadIdVersion} />
                 </div>
               ) : isWorkspaceOpen ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">

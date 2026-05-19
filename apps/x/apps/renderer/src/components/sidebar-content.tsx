@@ -200,8 +200,7 @@ type SidebarContentPanelProps = {
   recordingMeetingSource?: string | null
   onToggleMeetingRecording?: () => void
   onOpenBgTasks?: () => void
-  isEmailOpen?: boolean
-  onOpenEmail?: () => void
+  onOpenEmail?: (threadId?: string) => void
 } & React.ComponentProps<typeof Sidebar>
 
 function formatEventTime(ts: string): string {
@@ -450,7 +449,6 @@ export function SidebarContentPanel({
   recordingMeetingSource,
   onToggleMeetingRecording,
   onOpenBgTasks,
-  isEmailOpen = false,
   onOpenEmail,
   ...props
 }: SidebarContentPanelProps) {
@@ -465,7 +463,6 @@ export function SidebarContentPanel({
   const { billing } = useBilling(isRowboatConnected)
   const isBrowserQuickActionSelected = isBrowserOpen && !isSearchOpen
   const isSuggestedTopicsQuickActionSelected = isSuggestedTopicsOpen && !isBrowserOpen
-  const isEmailQuickActionSelected = isEmailOpen && !isBrowserOpen
 
   const handleRowboatLogin = useCallback(async () => {
     try {
@@ -528,26 +525,9 @@ export function SidebarContentPanel({
       <SidebarHeader className="titlebar-drag-region">
         {/* Top spacer to clear the traffic lights + fixed toggle row */}
         <div className="h-8" />
-        {/* Quick action buttons */}
-        <div className="rowboat-quick-actions titlebar-no-drag flex flex-col gap-0.5 px-2 pb-1">
-          {onOpenEmail && (
-            <button
-              type="button"
-              onClick={onOpenEmail}
-              className={cn(
-                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
-                isEmailQuickActionSelected
-                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                  : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-              )}
-            >
-              <Mail className="size-4" />
-              <span>Email</span>
-            </button>
-          )}
-        </div>
       </SidebarHeader>
       <SidebarContent>
+        <EmailSidebarSection onOpenEmailView={onOpenEmail} />
         <MeetingsSidebarSection
           onOpenMeetingsView={onOpenMeetings}
           recordingState={meetingRecordingState ?? 'idle'}
@@ -1190,6 +1170,133 @@ function formatMeetingTime(event: UpcomingMeeting): string {
   if (isSameLocalDay(event.start, now)) return time
   if (isSameLocalDay(event.start, tomorrow)) return `Tmrw ${time}`
   return event.start.toLocaleDateString([], { month: 'numeric', day: 'numeric' })
+}
+
+type SidebarEmailThread = {
+  threadId: string
+  subject: string
+  from: string
+  date: string
+}
+
+function formatEmailFrom(from: string): string {
+  const match = /^\s*"?([^"<]+?)"?\s*<.+>\s*$/.exec(from)
+  if (match) return match[1].trim()
+  return from
+}
+
+function formatEmailTime(value: string): string {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  const now = new Date()
+  const diffMs = now.getTime() - date.getTime()
+  const diffMin = Math.round(diffMs / 60000)
+  if (diffMin < 1) return 'now'
+  if (diffMin < 60) return `${diffMin}m`
+  const sameDay = date.toDateString() === now.toDateString()
+  if (sameDay) return `${Math.round(diffMin / 60)}h`
+  const yesterday = new Date(now)
+  yesterday.setDate(now.getDate() - 1)
+  if (date.toDateString() === yesterday.toDateString()) return 'Yest'
+  if (diffMs < 7 * 24 * 60 * 60 * 1000) return date.toLocaleDateString([], { weekday: 'short' })
+  if (date.getFullYear() === now.getFullYear()) return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
+  return date.toLocaleDateString([], { month: 'short', day: 'numeric', year: '2-digit' })
+}
+
+function EmailSidebarSection({
+  onOpenEmailView,
+}: {
+  onOpenEmailView?: (threadId?: string) => void
+}) {
+  const [threads, setThreads] = useState<SidebarEmailThread[]>([])
+
+  const load = useCallback(async () => {
+    try {
+      const result = await window.ipc.invoke('gmail:getImportant', { limit: 25 })
+      const unread = result.threads
+        .filter((t) => t.unread === true)
+        .slice(0, 3)
+        .map<SidebarEmailThread>((t) => ({
+          threadId: t.threadId,
+          subject: t.subject ?? '(No subject)',
+          from: t.from ?? '',
+          date: t.date ?? '',
+        }))
+      setThreads(unread)
+    } catch (err) {
+      console.error('Failed to load important emails:', err)
+    }
+  }, [])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  useEffect(() => {
+    let timeout: ReturnType<typeof setTimeout> | null = null
+    const scheduleReload = () => {
+      if (timeout) clearTimeout(timeout)
+      timeout = setTimeout(() => { timeout = null; void load() }, 500)
+    }
+    const matches = (p: string | undefined) =>
+      typeof p === 'string' && (p === 'gmail_sync' || p.startsWith('gmail_sync/'))
+    const cleanup = window.ipc.on('workspace:didChange', (event) => {
+      switch (event.type) {
+        case 'created':
+        case 'changed':
+        case 'deleted':
+          if (matches(event.path)) scheduleReload()
+          break
+        case 'moved':
+          if (matches(event.from) || matches(event.to)) scheduleReload()
+          break
+        case 'bulkChanged':
+          if (!event.paths || event.paths.some(matches)) scheduleReload()
+          break
+      }
+    })
+    return () => {
+      if (timeout) clearTimeout(timeout)
+      cleanup()
+    }
+  }, [load])
+
+  return (
+    <SidebarGroup className="flex flex-col">
+      <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
+        Email
+      </div>
+      <SidebarGroupContent>
+        <SidebarMenu>
+          {threads.map((t) => (
+            <SidebarMenuItem key={t.threadId}>
+              <SidebarMenuButton onClick={() => onOpenEmailView?.(t.threadId)} className="gap-2">
+                <Mail className="size-4 shrink-0" />
+                <span className="min-w-0 flex-1 truncate text-sm">
+                  {formatEmailFrom(t.from)}
+                  <span className="text-muted-foreground"> · {t.subject}</span>
+                </span>
+                {t.date && (
+                  <span className="shrink-0 text-[10px] text-muted-foreground">
+                    {formatEmailTime(t.date)}
+                  </span>
+                )}
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          ))}
+          {onOpenEmailView && (
+            <SidebarMenuItem>
+              <SidebarMenuButton onClick={() => onOpenEmailView()}>
+                <ArrowUpRight className="size-4 shrink-0 text-muted-foreground" />
+                <span className="text-muted-foreground">View all</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          )}
+        </SidebarMenu>
+      </SidebarGroupContent>
+    </SidebarGroup>
+  )
 }
 
 function MeetingsSidebarSection({
