@@ -2020,3 +2020,33 @@
 .dark .tiptap-editor .ProseMirror p.is-editor-empty:first-child::before {
   color: rgba(255, 255, 255, 0.3);
 }
+
+/* Read-only renderer used by surfaces that need rich blocks without editor chrome. */
+.rich-markdown-viewer {
+  display: block;
+  overflow: visible;
+  min-height: auto;
+}
+
+.rich-markdown-viewer .ProseMirror {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+}
+
+.rich-markdown-viewer .ProseMirror:focus {
+  outline: none;
+}
+
+.rich-markdown-viewer .ProseMirror .task-block-delete,
+.rich-markdown-viewer .ProseMirror .image-block-delete,
+.rich-markdown-viewer .ProseMirror .embed-block-delete,
+.rich-markdown-viewer .ProseMirror .iframe-block-delete,
+.rich-markdown-viewer .ProseMirror .chart-block-delete,
+.rich-markdown-viewer .ProseMirror .table-block-delete,
+.rich-markdown-viewer .ProseMirror .calendar-block-delete,
+.rich-markdown-viewer .ProseMirror .email-block-delete,
+.rich-markdown-viewer .ProseMirror .email-draft-block-delete,
+.rich-markdown-viewer .ProseMirror .mermaid-block-delete {
+  display: none;
+}

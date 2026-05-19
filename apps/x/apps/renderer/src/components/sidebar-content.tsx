@@ -27,6 +27,7 @@ import {
   Lightbulb,
   ListChecks,
   LoaderIcon,
+  Mail,
   Settings,
   Square,
   Trash2,
@@ -99,7 +100,6 @@ import { toast } from "@/lib/toast"
 import { formatRelativeTime as formatRunTime } from "@/lib/relative-time"
 import { useBilling } from "@/hooks/useBilling"
 import { ServiceEvent } from "@x/shared/src/service-events.js"
-import type { MeetingTranscriptionState } from "@/hooks/useMeetingTranscription"
 import z from "zod"
 
 interface TreeNode {
@@ -216,20 +216,19 @@ type SidebarContentPanelProps = {
   selectedBackgroundTask?: string | null
   onNewChat?: () => void
   onOpenSearch?: () => void
-  meetingState?: MeetingTranscriptionState
-  meetingSummarizing?: boolean
-  meetingAvailable?: boolean
-  onToggleMeeting?: () => void
   isSearchOpen?: boolean
-  isMeetingActionActive?: boolean
   isBrowserOpen?: boolean
   onToggleBrowser?: () => void
   isSuggestedTopicsOpen?: boolean
   onOpenSuggestedTopics?: () => void
+  isMeetingsOpen?: boolean
+  onOpenMeetings?: () => void
   isLiveNotesOpen?: boolean
   onOpenLiveNotes?: () => void
   isBgTasksOpen?: boolean
   onOpenBgTasks?: () => void
+  isEmailOpen?: boolean
+  onOpenEmail?: () => void
 } & React.ComponentProps<typeof Sidebar>
 
 const sectionTabs: { id: ActiveSection; label: string }[] = [
@@ -478,20 +477,19 @@ export function SidebarContentPanel({
   selectedBackgroundTask,
   onNewChat,
   onOpenSearch,
-  meetingState = 'idle',
-  meetingSummarizing = false,
-  meetingAvailable = false,
-  onToggleMeeting,
   isSearchOpen = false,
-  isMeetingActionActive = false,
   isBrowserOpen = false,
   onToggleBrowser,
   isSuggestedTopicsOpen = false,
   onOpenSuggestedTopics,
+  isMeetingsOpen = false,
+  onOpenMeetings,
   isLiveNotesOpen = false,
   onOpenLiveNotes,
   isBgTasksOpen = false,
   onOpenBgTasks,
+  isEmailOpen = false,
+  onOpenEmail,
   ...props
 }: SidebarContentPanelProps) {
   const { activeSection, setActiveSection } = useSidebarSection()
@@ -504,11 +502,12 @@ export function SidebarContentPanel({
   const [loggingIn, setLoggingIn] = useState(false)
   const [appUrl, setAppUrl] = useState<string | null>(null)
   const { billing } = useBilling(isRowboatConnected)
-  const isMeetingQuickActionSelected = isMeetingActionActive
-  const isBrowserQuickActionSelected = isBrowserOpen && !isSearchOpen && !isMeetingQuickActionSelected
+  const isBrowserQuickActionSelected = isBrowserOpen && !isSearchOpen
   const isSuggestedTopicsQuickActionSelected = isSuggestedTopicsOpen && !isBrowserOpen
+  const isMeetingsQuickActionSelected = isMeetingsOpen && !isBrowserOpen
   const isLiveNotesQuickActionSelected = isLiveNotesOpen && !isBrowserOpen
   const isBgTasksQuickActionSelected = isBgTasksOpen && !isBrowserOpen
+  const isEmailQuickActionSelected = isEmailOpen && !isBrowserOpen
 
   const handleRowboatLogin = useCallback(async () => {
     try {
@@ -567,13 +566,13 @@ export function SidebarContentPanel({
   }, [])
 
   return (
-    <Sidebar className="border-r-0" {...props}>
+    <Sidebar className="rowboat-sidebar border-r-0" {...props}>
       <SidebarHeader className="titlebar-drag-region">
         {/* Top spacer to clear the traffic lights + fixed toggle row */}
         <div className="h-8" />
         {/* Tab switcher - centered below the traffic lights row */}
         <div className="flex items-center px-2 py-1.5">
-          <div className="titlebar-no-drag flex w-full rounded-lg bg-sidebar-accent/50 p-0.5">
+          <div className="rowboat-section-switcher titlebar-no-drag flex w-full rounded-lg bg-sidebar-accent/50 p-0.5">
             {sectionTabs.map((tab) => (
               <button
                 key={tab.id}
@@ -591,7 +590,7 @@ export function SidebarContentPanel({
           </div>
         </div>
         {/* Quick action buttons */}
-        <div className="titlebar-no-drag flex flex-col gap-0.5 px-2 pb-1">
+        <div className="rowboat-quick-actions titlebar-no-drag flex flex-col gap-0.5 px-2 pb-1">
           {onNewChat && (
             <button
               type="button"
@@ -615,41 +614,6 @@ export function SidebarContentPanel({
             >
               <SearchIcon className="size-4" />
               <span>Search</span>
-            </button>
-          )}
-          {meetingAvailable && onToggleMeeting && (
-            <button
-              type="button"
-              onClick={onToggleMeeting}
-              disabled={meetingState === 'connecting' || meetingState === 'stopping' || meetingSummarizing}
-              className={cn(
-                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors disabled:pointer-events-none",
-                isMeetingQuickActionSelected
-                  ? "bg-sidebar-accent"
-                  : "hover:bg-sidebar-accent",
-                meetingState === 'recording'
-                  ? "text-red-500"
-                  : isMeetingQuickActionSelected
-                    ? "text-sidebar-accent-foreground"
-                    : "text-sidebar-foreground/80 hover:text-sidebar-accent-foreground"
-              )}
-            >
-              {meetingSummarizing || meetingState === 'connecting' ? (
-                <LoaderIcon className="size-4 animate-spin" />
-              ) : meetingState === 'recording' ? (
-                <Square className="size-4 animate-pulse" />
-              ) : (
-                <Radio className="size-4" />
-              )}
-              <span>
-                {meetingSummarizing
-                  ? 'Generating notes…'
-                  : meetingState === 'connecting'
-                    ? 'Starting…'
-                    : meetingState === 'recording'
-                      ? 'Stop recording'
-                      : 'Take meeting notes'}
-              </span>
             </button>
           )}
           {onToggleBrowser && (
@@ -695,6 +659,36 @@ export function SidebarContentPanel({
             >
               <ListChecks className="size-4" />
               <span>Background tasks</span>
+            </button>
+          )}
+          {onOpenEmail && (
+            <button
+              type="button"
+              onClick={onOpenEmail}
+              className={cn(
+                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
+                isEmailQuickActionSelected
+                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                  : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+              )}
+            >
+              <Mail className="size-4" />
+              <span>Email</span>
+            </button>
+          )}
+          {onOpenMeetings && (
+            <button
+              type="button"
+              onClick={onOpenMeetings}
+              className={cn(
+                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
+                isMeetingsQuickActionSelected
+                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                  : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+              )}
+            >
+              <Mic className="size-4" />
+              <span>Meetings</span>
             </button>
           )}
           {onOpenLiveNotes && (
@@ -1126,6 +1120,10 @@ function KnowledgeSection({
   const treeContainerRef = React.useRef<HTMLDivElement | null>(null)
   const [selectedFolderPath, setSelectedFolderPath] = useState<string | null>(null)
   const [renameTarget, setRenameTarget] = useState<string | null>(null)
+  const visibleTree = React.useMemo(
+    () => tree.filter((item) => item.path !== 'knowledge/Meetings'),
+    [tree],
+  )
 
   useEffect(() => {
     if (!selectedPath) return
@@ -1154,7 +1152,7 @@ function KnowledgeSection({
       cancelled = true
       if (rafId !== null) cancelAnimationFrame(rafId)
     }
-  }, [selectedPath, expandedPaths, tree])
+  }, [selectedPath, expandedPaths, visibleTree])
 
   // Folder clicks highlight the folder; file clicks clear folder highlight
   const handleSelect = React.useCallback((path: string, kind: "file" | "dir") => {
@@ -1236,7 +1234,7 @@ function KnowledgeSection({
           <SidebarGroupContent className="flex-1 overflow-y-auto">
             <div ref={treeContainerRef}>
               <SidebarMenu>
-                {tree.map((item, index) => (
+                {visibleTree.map((item, index) => (
                   <Tree
                     key={index}
                     item={item}

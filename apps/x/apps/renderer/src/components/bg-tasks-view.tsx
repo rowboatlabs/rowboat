@@ -18,6 +18,7 @@ import { toast } from '@/lib/toast'
 import type { ConversationItem } from '@/lib/chat-conversation'
 import { runLogToConversation } from '@/lib/run-to-conversation'
 import { CompactConversation } from '@/components/compact-conversation'
+import { RichMarkdownViewer } from '@/components/rich-markdown-viewer'
 
 // ---------------------------------------------------------------------------
 // Trigger helpers (inlined; extract to shared <TriggersEditor> as a follow-up)
@@ -560,9 +561,7 @@ function OutputPane({ slug, taskName, refreshKey }: { slug: string; taskName: st
                     ) : viewSource ? (
                         <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[13px] leading-relaxed">{body}</pre>
                     ) : (
-                        <Streamdown className="prose dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
-                            {body}
-                        </Streamdown>
+                        <RichMarkdownViewer content={body} />
                     )}
                 </div>
             </div>

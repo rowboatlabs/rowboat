@@ -47,6 +47,7 @@ import { summarizeMeeting } from '@x/core/dist/knowledge/summarize_meeting.js';
 import { getAccessToken } from '@x/core/dist/auth/tokens.js';
 import { getRowboatConfig } from '@x/core/dist/config/rowboat.js';
 import { runLiveNoteAgent } from '@x/core/dist/knowledge/live-note/runner.js';
+import { listImportantThreads, listEverythingElseThreads, saveMessageBodyHeight, triggerSync as triggerGmailSync } from '@x/core/dist/knowledge/sync_gmail.js';
 import { liveNoteBus } from '@x/core/dist/knowledge/live-note/bus.js';
 import { getInstallationId } from '@x/core/dist/analytics/installation.js';
 import { API_URL } from '@x/core/dist/config/env.js';
@@ -481,6 +482,20 @@ export function setupIpcHandlers() {
     },
     'workspace:remove': async (_event, args) => {
       return workspace.remove(args.path, args.opts);
+    },
+    'gmail:getImportant': async (_event, args) => {
+      return listImportantThreads({ cursor: args.cursor, limit: args.limit });
+    },
+    'gmail:getEverythingElse': async (_event, args) => {
+      return listEverythingElseThreads({ cursor: args.cursor, limit: args.limit });
+    },
+    'gmail:triggerSync': async () => {
+      triggerGmailSync();
+      return {};
+    },
+    'gmail:saveMessageHeight': async (_event, args) => {
+      saveMessageBodyHeight(args.threadId, args.messageId, args.height);
+      return {};
     },
     'mcp:listTools': async (_event, args) => {
       return mcpCore.listTools(args.serverName, args.cursor);

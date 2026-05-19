@@ -18,6 +18,7 @@ import { RowboatApiConfig } from './rowboat-account.js';
 import { ZListToolkitsResponse } from './composio.js';
 import { BrowserStateSchema } from './browser-control.js';
 import { BillingInfoSchema } from './billing.js';
+import { EmailBlockSchema, GmailThreadSchema } from './blocks.js';
 
 // ============================================================================
 // Runtime Validation Schemas (Single Source of Truth)
@@ -122,6 +123,38 @@ const ipcSchemas = {
   'workspace:didChange': {
     req: WorkspaceChangeEvent,
     res: z.null(),
+  },
+  'gmail:getImportant': {
+    req: z.object({
+      cursor: z.string().optional(),
+      limit: z.number().int().min(1).max(100).optional(),
+    }),
+    res: z.object({
+      threads: z.array(GmailThreadSchema),
+      nextCursor: z.string().nullable(),
+    }),
+  },
+  'gmail:getEverythingElse': {
+    req: z.object({
+      cursor: z.string().optional(),
+      limit: z.number().int().min(1).max(100).optional(),
+    }),
+    res: z.object({
+      threads: z.array(GmailThreadSchema),
+      nextCursor: z.string().nullable(),
+    }),
+  },
+  'gmail:triggerSync': {
+    req: z.object({}),
+    res: z.object({}),
+  },
+  'gmail:saveMessageHeight': {
+    req: z.object({
+      threadId: z.string().min(1),
+      messageId: z.string().min(1),
+      height: z.number().int().positive(),
+    }),
+    res: z.object({}),
   },
   'mcp:listTools': {
     req: z.object({
