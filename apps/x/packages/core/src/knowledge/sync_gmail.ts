@@ -1031,8 +1031,18 @@ async function performSync() {
         console.log("Authorization successful. Starting sync...");
 
         const state = loadState(STATE_FILE);
+        // Backfill case: users who upgraded from a pre-inbox-view build have a
+        // stored historyId but no inbox_lists/ cache, so partialSync would only
+        // touch *new* threads and the inbox UI would stay empty. Force a one-
+        // shot fullSync to populate snapshots for the lookback window. After
+        // this runs once, the cache directory is populated and we fall back to
+        // partial-sync on subsequent calls.
+        const cacheMissing = !fs.existsSync(CACHE_DIR) || fs.readdirSync(CACHE_DIR).length === 0;
         if (!state.historyId) {
             console.log("No history ID found, starting full sync...");
+            await fullSync(auth, SYNC_DIR, ATTACHMENTS_DIR, STATE_FILE, LOOKBACK_DAYS);
+        } else if (cacheMissing) {
+            console.log("History ID present but inbox cache empty — running full sync to backfill snapshots...");
             await fullSync(auth, SYNC_DIR, ATTACHMENTS_DIR, STATE_FILE, LOOKBACK_DAYS);
         } else {
             console.log("History ID found, starting partial sync...");
