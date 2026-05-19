@@ -629,15 +629,20 @@ function ChatInputInner({
       </div>
       <div className="flex items-center gap-2 px-4 pb-3">
         <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              aria-label="Add"
-            >
-              <Plus className="h-4 w-4" />
-            </button>
-          </DropdownMenuTrigger>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  aria-label="Add"
+                >
+                  <Plus className="h-4 w-4" />
+                </button>
+              </DropdownMenuTrigger>
+            </TooltipTrigger>
+            <TooltipContent side="top">Add files or set work directory</TooltipContent>
+          </Tooltip>
           <DropdownMenuContent align="start" className="min-w-56">
             <DropdownMenuItem onSelect={() => fileInputRef.current?.click()}>
               <ImagePlus className="size-4" />
@@ -677,24 +682,34 @@ function ChatInputInner({
         )}
         {searchAvailable && (
           searchEnabled ? (
-            <button
-              type="button"
-              onClick={() => setSearchEnabled(false)}
-              className="flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-2.5 text-blue-600 transition-colors hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-400 dark:hover:bg-blue-900"
-            >
-              <Globe className="h-3.5 w-3.5" />
-              <span className="text-xs font-medium">Search</span>
-              <X className="h-3 w-3" />
-            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => setSearchEnabled(false)}
+                  className="flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-2.5 text-blue-600 transition-colors hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-400 dark:hover:bg-blue-900"
+                >
+                  <Globe className="h-3.5 w-3.5" />
+                  <span className="text-xs font-medium">Search</span>
+                  <X className="h-3 w-3" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top">Web search on — click to disable</TooltipContent>
+            </Tooltip>
           ) : (
-            <button
-              type="button"
-              onClick={() => setSearchEnabled(true)}
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              aria-label="Search"
-            >
-              <Globe className="h-4 w-4" />
-            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => setSearchEnabled(true)}
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  aria-label="Search"
+                >
+                  <Globe className="h-4 w-4" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top">Enable web search</TooltipContent>
+            </Tooltip>
           )
         )}
         {codeModeEnabled ? (
