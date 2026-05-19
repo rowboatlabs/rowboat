@@ -1,33 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { AlertCircleIcon, ExternalLinkIcon, FileTextIcon, Loader2Icon } from 'lucide-react'
 
 const MAX_SIZE_BYTES = 5 * 1024 * 1024
-const CACHE_MAX_ENTRIES = 20
-
-type CacheEntry = { html: string; mtimeMs: number; size: number }
-const htmlCache = new Map<string, CacheEntry>()
-
-function getCached(path: string, mtimeMs: number, size: number): string | null {
-  const entry = htmlCache.get(path)
-  if (!entry || entry.mtimeMs !== mtimeMs || entry.size !== size) return null
-  // Refresh LRU position
-  htmlCache.delete(path)
-  htmlCache.set(path, entry)
-  return entry.html
-}
-
-function setCached(path: string, html: string, mtimeMs: number, size: number) {
-  htmlCache.set(path, { html, mtimeMs, size })
-  while (htmlCache.size > CACHE_MAX_ENTRIES) {
-    const oldest = htmlCache.keys().next().value
-    if (oldest === undefined) break
-    htmlCache.delete(oldest)
-  }
-}
 
 type ViewerState =
   | { kind: 'loading' }
-  | { kind: 'loaded'; html: string }
+  | { kind: 'loaded' }
   | { kind: 'empty' }
   | { kind: 'tooLarge'; sizeMB: number }
   | { kind: 'error'; message: string }
@@ -36,9 +14,15 @@ interface HtmlFileViewerProps {
   path: string
 }
 
+function toAppWorkspaceUrl(path: string): string {
+  const segments = path.split('/').filter(Boolean).map((seg) => encodeURIComponent(seg))
+  return `app://workspace/${segments.join('/')}`
+}
+
 export function HtmlFileViewer({ path }: HtmlFileViewerProps) {
   const [state, setState] = useState<ViewerState>({ kind: 'loading' })
   const [iframeLoaded, setIframeLoaded] = useState(false)
+  const iframeSrc = useMemo(() => toAppWorkspaceUrl(path), [path])
 
   useEffect(() => {
     let cancelled = false
@@ -57,19 +41,11 @@ export function HtmlFileViewer({ path }: HtmlFileViewerProps) {
           setState({ kind: 'tooLarge', sizeMB: stat.size / (1024 * 1024) })
           return
         }
-        const cachedHtml = getCached(path, stat.mtimeMs, stat.size)
-        if (cachedHtml !== null) {
-          setState(cachedHtml.trim() === '' ? { kind: 'empty' } : { kind: 'loaded', html: cachedHtml })
-          return
-        }
-        const result = await window.ipc.invoke('workspace:readFile', { path })
-        if (cancelled) return
-        setCached(path, result.data, stat.mtimeMs, stat.size)
-        if (!result.data || result.data.trim() === '') {
+        if (stat.size === 0) {
           setState({ kind: 'empty' })
           return
         }
-        setState({ kind: 'loaded', html: result.data })
+        setState({ kind: 'loaded' })
       } catch (err) {
         if (cancelled) return
         const message = err instanceof Error ? err.message : String(err)
@@ -124,20 +100,16 @@ export function HtmlFileViewer({ path }: HtmlFileViewerProps) {
     )
   }
 
-  // We use `srcDoc` here (not `src=app://workspace/<path>`) so the iframe
-  // gets a null origin with no base URL. Trade-off: relative assets inside
-  // the file — `<link href="./style.css">`, `<img src="./pic.png">`,
-  // `<script src="./foo.js">` — will silently 404. Self-contained HTML
-  // works fine; HTML that ships next to sibling assets will look broken.
-  // TODO: switch to `src=app://workspace/<path>` if we want relative-asset
-  // support; that path also resolves through the existing path-traversal
-  // guard in resolveWorkspacePath.
+  // Serve via the `app://workspace/<rel-path>` protocol so the iframe has a
+  // proper base URL — relative `<link>`, `<img>`, `<script>` references next
+  // to the file resolve correctly (the path-traversal guard in
+  // resolveWorkspacePath already gates the protocol handler).
   return (
     <div className="relative h-full w-full">
       {state.kind === 'loaded' && (
         <iframe
           key={path}
-          srcDoc={state.html}
+          src={iframeSrc}
           sandbox="allow-scripts"
           className="h-full w-full border-0 bg-white"
           title="HTML preview"
