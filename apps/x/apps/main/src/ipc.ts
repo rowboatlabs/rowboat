@@ -30,6 +30,9 @@ import { listGatewayModels } from '@x/core/dist/models/gateway.js';
 import type { IModelConfigRepo } from '@x/core/dist/models/repo.js';
 import type { IOAuthRepo } from '@x/core/dist/auth/repo.js';
 import { IGranolaConfigRepo } from '@x/core/dist/knowledge/granola/repo.js';
+import { ICodeModeConfigRepo } from '@x/core/dist/code-mode/repo.js';
+import { checkCodeModeAgentStatus } from '@x/core/dist/code-mode/status.js';
+import { invalidateCopilotInstructionsCache } from '@x/core/dist/application/assistant/instructions.js';
 import { triggerSync as triggerGranolaSync } from '@x/core/dist/knowledge/granola/sync.js';
 import { ISlackConfigRepo } from '@x/core/dist/slack/repo.js';
 import { isOnboardingComplete, markOnboardingComplete } from '@x/core/dist/config/note_creation_config.js';
@@ -599,6 +602,20 @@ export function setupIpcHandlers() {
       const repo = container.resolve<IGranolaConfigRepo>('granolaConfigRepo');
       const config = await repo.getConfig();
       return { enabled: config.enabled };
+    },
+    'codeMode:getConfig': async () => {
+      const repo = container.resolve<ICodeModeConfigRepo>('codeModeConfigRepo');
+      const config = await repo.getConfig();
+      return { enabled: config.enabled };
+    },
+    'codeMode:setConfig': async (_event, args) => {
+      const repo = container.resolve<ICodeModeConfigRepo>('codeModeConfigRepo');
+      await repo.setConfig({ enabled: args.enabled });
+      invalidateCopilotInstructionsCache();
+      return { success: true };
+    },
+    'codeMode:checkAgentStatus': async () => {
+      return await checkCodeModeAgentStatus();
     },
     'granola:setConfig': async (_event, args) => {
       const repo = container.resolve<IGranolaConfigRepo>('granolaConfigRepo');

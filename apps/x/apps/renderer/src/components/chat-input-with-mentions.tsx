@@ -177,6 +177,7 @@ function ChatInputInner({
   const [workDir, setWorkDir] = useState<string | null>(null)
   const [codingAgent, setCodingAgent] = useState<'claude' | 'codex'>('claude')
   const [codeModeEnabled, setCodeModeEnabled] = useState(false)
+  const [codeModeFeatureEnabled, setCodeModeFeatureEnabled] = useState(false)
 
   // When a run exists, freeze the dropdown to the run's resolved model+provider.
   useEffect(() => {
@@ -258,6 +259,25 @@ function ChatInputInner({
     window.addEventListener('models-config-changed', handler)
     return () => window.removeEventListener('models-config-changed', handler)
   }, [loadModelConfig])
+
+  // Load the global code-mode feature flag (from settings) and stay in sync.
+  useEffect(() => {
+    const load = () => {
+      window.ipc.invoke('codeMode:getConfig', null)
+        .then((r) => setCodeModeFeatureEnabled(r.enabled))
+        .catch(() => setCodeModeFeatureEnabled(false))
+    }
+    load()
+    window.addEventListener('code-mode-config-changed', load)
+    return () => window.removeEventListener('code-mode-config-changed', load)
+  }, [])
+
+  // If the feature is turned off in settings, also turn off any per-conversation chip.
+  useEffect(() => {
+    if (!codeModeFeatureEnabled && codeModeEnabled) {
+      setCodeModeEnabled(false)
+    }
+  }, [codeModeFeatureEnabled, codeModeEnabled])
 
   // Listen for coding-agent runs that were triggered without the explicit code-mode
   // toggle. App.tsx dispatches this when it sees an acpx executeCommand fire. We
@@ -712,7 +732,7 @@ function ChatInputInner({
             </Tooltip>
           )
         )}
-        {codeModeEnabled ? (
+        {codeModeFeatureEnabled && (codeModeEnabled ? (
           <div className="flex h-7 shrink-0 items-center rounded-full bg-secondary text-xs font-medium text-foreground">
             <Tooltip>
               <TooltipTrigger asChild>
@@ -757,7 +777,7 @@ function ChatInputInner({
             </TooltipTrigger>
             <TooltipContent side="top">Use a coding agent (Claude Code or Codex)</TooltipContent>
           </Tooltip>
-        )}
+        ))}
         <div className="flex-1" />
         {lockedModel ? (
           <span

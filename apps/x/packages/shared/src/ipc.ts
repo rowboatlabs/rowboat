@@ -416,6 +416,27 @@ const ipcSchemas = {
       enabled: z.boolean(),
     }),
   },
+  'codeMode:getConfig': {
+    req: z.null(),
+    res: z.object({
+      enabled: z.boolean(),
+    }),
+  },
+  'codeMode:setConfig': {
+    req: z.object({
+      enabled: z.boolean(),
+    }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  'codeMode:checkAgentStatus': {
+    req: z.null(),
+    res: z.object({
+      claude: z.object({ installed: z.boolean(), signedIn: z.boolean() }),
+      codex: z.object({ installed: z.boolean(), signedIn: z.boolean() }),
+    }),
+  },
   'granola:setConfig': {
     req: z.object({
       enabled: z.boolean(),

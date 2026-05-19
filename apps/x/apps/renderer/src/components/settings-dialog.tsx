@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Bug } from "lucide-react"
+import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Bug, Terminal, AlertTriangle, RefreshCw } from "lucide-react"
 
 import {
   Dialog,
@@ -26,7 +26,7 @@ import { toast } from "sonner"
 import { AccountSettings } from "@/components/settings/account-settings"
 import { ConnectedAccountsSettings } from "@/components/settings/connected-accounts-settings"
 
-type ConfigTab = "account" | "connections" | "models" | "mcp" | "security" | "appearance" | "note-tagging" | "help"
+type ConfigTab = "account" | "connections" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "note-tagging" | "help"
 
 interface TabConfig {
   id: ConfigTab
@@ -69,6 +69,12 @@ const tabs: TabConfig[] = [
     icon: Shield,
     path: "config/security.json",
     description: "Configure allowed shell commands",
+  },
+  {
+    id: "code-mode",
+    label: "Code Mode",
+    icon: Terminal,
+    description: "Delegate coding tasks to Claude Code or Codex",
   },
   {
     id: "appearance",
@@ -1648,6 +1654,189 @@ function NoteTaggingSettings({ dialogOpen }: { dialogOpen: boolean }) {
   )
 }
 
+// --- Code Mode Settings ---
+
+type AgentStatus = { installed: boolean; signedIn: boolean }
+type CodeModeAgentStatus = { claude: AgentStatus; codex: AgentStatus }
+
+function AgentStatusRow({
+  name,
+  installLink,
+  status,
+}: {
+  name: string
+  installLink: string
+  status: AgentStatus | null
+}) {
+  const ready = status?.installed && status?.signedIn
+  return (
+    <div className="rounded-md border px-3 py-2.5 flex items-center gap-3">
+      <Terminal className="size-4 text-muted-foreground shrink-0" />
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-medium">{name}</div>
+        <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-3">
+          <span className={cn("inline-flex items-center gap-1", status?.installed ? "text-green-600" : "text-muted-foreground")}>
+            {status?.installed ? <CheckCircle2 className="size-3" /> : <X className="size-3" />}
+            Installed
+          </span>
+          <span className={cn("inline-flex items-center gap-1", status?.signedIn ? "text-green-600" : "text-muted-foreground")}>
+            {status?.signedIn ? <CheckCircle2 className="size-3" /> : <X className="size-3" />}
+            Signed in
+          </span>
+        </div>
+      </div>
+      {ready ? (
+        <span className="rounded-full bg-green-500/10 px-2 py-0.5 text-[10px] font-medium leading-none text-green-600">
+          Ready
+        </span>
+      ) : (
+        <a
+          href={installLink}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-xs text-primary hover:underline shrink-0"
+        >
+          Install &amp; sign in
+        </a>
+      )}
+    </div>
+  )
+}
+
+function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
+  const [enabled, setEnabled] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [status, setStatus] = useState<CodeModeAgentStatus | null>(null)
+  const [statusLoading, setStatusLoading] = useState(false)
+
+  const loadStatus = useCallback(async () => {
+    setStatusLoading(true)
+    try {
+      const result = await window.ipc.invoke("codeMode:checkAgentStatus", null)
+      setStatus(result)
+    } catch {
+      setStatus(null)
+    } finally {
+      setStatusLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!dialogOpen) return
+    let cancelled = false
+    async function load() {
+      setLoading(true)
+      try {
+        const result = await window.ipc.invoke("codeMode:getConfig", null)
+        if (!cancelled) setEnabled(result.enabled)
+      } catch {
+        if (!cancelled) setEnabled(false)
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    load()
+    loadStatus()
+    return () => { cancelled = true }
+  }, [dialogOpen, loadStatus])
+
+  const handleToggle = useCallback(async (next: boolean) => {
+    setSaving(true)
+    setEnabled(next)
+    try {
+      await window.ipc.invoke("codeMode:setConfig", { enabled: next })
+      window.dispatchEvent(new Event("code-mode-config-changed"))
+      toast.success(next ? "Code mode enabled" : "Code mode disabled")
+    } catch {
+      setEnabled(!next)
+      toast.error("Failed to update code mode")
+    } finally {
+      setSaving(false)
+    }
+  }, [])
+
+  const anyReady = status?.claude.installed && status?.claude.signedIn
+    || status?.codex.installed && status?.codex.signedIn
+
+  if (loading) {
+    return (
+      <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
+        <Loader2 className="size-4 animate-spin mr-2" />
+        Loading...
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="space-y-2 text-sm text-muted-foreground leading-relaxed">
+        <p>
+          <strong className="text-foreground">Code mode</strong> lets the assistant delegate coding tasks
+          to <strong className="text-foreground">Claude Code</strong> or <strong className="text-foreground">Codex</strong> running
+          on your machine. Pick the agent inline from the composer; the assistant calls it via
+          <code className="mx-1 rounded bg-muted px-1 py-0.5 text-[11px]">acpx</code>
+          and streams results back into chat.
+        </p>
+        <p>
+          Requires an active <strong className="text-foreground">Claude Code</strong> subscription or
+          a <strong className="text-foreground">ChatGPT/Codex</strong> subscription. You can have one or both.
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Agent status</span>
+          <button
+            onClick={() => { void loadStatus() }}
+            disabled={statusLoading}
+            className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            {statusLoading ? <Loader2 className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}
+            Re-check
+          </button>
+        </div>
+        <div className="space-y-2">
+          <AgentStatusRow
+            name="Claude Code"
+            installLink="https://claude.ai/code"
+            status={status?.claude ?? null}
+          />
+          <AgentStatusRow
+            name="Codex"
+            installLink="https://developers.openai.com/codex/cli"
+            status={status?.codex ?? null}
+          />
+        </div>
+      </div>
+
+      <div className="rounded-md border px-3 py-3 flex items-start gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-medium">Enable code mode</div>
+          <div className="text-xs text-muted-foreground mt-0.5">
+            Shows the code mode chip in the composer and lets the assistant delegate to your installed agents.
+          </div>
+        </div>
+        <Switch
+          checked={enabled}
+          onCheckedChange={handleToggle}
+          disabled={saving}
+        />
+      </div>
+
+      {enabled && status && !anyReady && (
+        <div className="rounded-md border border-amber-500/40 bg-amber-50/60 dark:bg-amber-950/20 px-3 py-2.5 flex items-start gap-2 text-xs">
+          <AlertTriangle className="size-4 text-amber-600 dark:text-amber-500 shrink-0 mt-0.5" />
+          <div className="text-amber-900 dark:text-amber-200">
+            Neither Claude Code nor Codex is ready. Install at least one and sign in with a subscription
+            account, then click Re-check.
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // --- Main Settings Dialog ---
 
 export function SettingsDialog({ children, defaultTab = "account", open: controlledOpen, onOpenChange }: SettingsDialogProps) {
@@ -1695,7 +1884,7 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
   }
 
   const loadConfig = useCallback(async (tab: ConfigTab) => {
-    if (tab === "appearance" || tab === "models" || tab === "note-tagging" || tab === "account" || tab === "connections" || tab === "help") return
+    if (tab === "appearance" || tab === "models" || tab === "note-tagging" || tab === "account" || tab === "connections" || tab === "help" || tab === "code-mode") return
     const tabConfig = tabs.find((t) => t.id === tab)!
     if (!tabConfig.path) return
     setLoading(true)
@@ -1803,7 +1992,7 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
             </div>
 
             {/* Content */}
-            <div className={cn("flex-1 p-4 min-h-0", (activeTab === "models" || activeTab === "connections" || activeTab === "account") ? "overflow-y-auto" : activeTab === "note-tagging" ? "overflow-hidden flex flex-col" : "overflow-hidden")}>
+            <div className={cn("flex-1 p-4 min-h-0", (activeTab === "models" || activeTab === "connections" || activeTab === "account" || activeTab === "code-mode") ? "overflow-y-auto" : activeTab === "note-tagging" ? "overflow-hidden flex flex-col" : "overflow-hidden")}>
               {activeTab === "account" ? (
                 <AccountSettings dialogOpen={open} />
               ) : activeTab === "connections" ? (
@@ -1828,6 +2017,8 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
                 <AppearanceSettings />
               ) : activeTab === "help" ? (
                 <HelpSettings />
+              ) : activeTab === "code-mode" ? (
+                <CodeModeSettings dialogOpen={open} />
               ) : loading ? (
                 <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
                   Loading...
