@@ -1662,13 +1662,16 @@ type CodeModeAgentStatus = { claude: AgentStatus; codex: AgentStatus }
 function AgentStatusRow({
   name,
   installLink,
+  signInCommand,
   status,
 }: {
   name: string
   installLink: string
+  signInCommand: string
   status: AgentStatus | null
 }) {
   const ready = status?.installed && status?.signedIn
+  const needsSignInOnly = status?.installed && !status?.signedIn
   return (
     <div className="rounded-md border px-3 py-2.5 flex items-center gap-3">
       <Terminal className="size-4 text-muted-foreground shrink-0" />
@@ -1688,6 +1691,10 @@ function AgentStatusRow({
       {ready ? (
         <span className="rounded-full bg-green-500/10 px-2 py-0.5 text-[10px] font-medium leading-none text-green-600">
           Ready
+        </span>
+      ) : needsSignInOnly ? (
+        <span className="text-xs text-muted-foreground shrink-0">
+          Run <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">{signInCommand}</code>
         </span>
       ) : (
         <a
@@ -1800,11 +1807,13 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
           <AgentStatusRow
             name="Claude Code"
             installLink="https://claude.ai/code"
+            signInCommand="claude login"
             status={status?.claude ?? null}
           />
           <AgentStatusRow
             name="Codex"
             installLink="https://developers.openai.com/codex/cli"
+            signInCommand="codex login"
             status={status?.codex ?? null}
           />
         </div>
