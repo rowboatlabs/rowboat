@@ -1,6 +1,7 @@
 import { shell } from 'electron';
 import type { Server } from 'http';
 import { createAuthServer } from './auth-server.js';
+import { DEFAULT_CALLBACK_PORT } from '@x/core/dist/auth/client-repo.js';
 import * as oauthClient from '@x/core/dist/auth/oauth-client.js';
 import type { Configuration } from '@x/core/dist/auth/oauth-client.js';
 import { getProviderConfig, getAvailableProviders } from '@x/core/dist/auth/providers.js';
@@ -17,7 +18,9 @@ import { isSignedIn } from '@x/core/dist/account/account.js';
 import { getWebappUrl } from '@x/core/dist/config/remote-config.js';
 import { claimTokensViaBackend } from '@x/core/dist/auth/google-backend-oauth.js';
 
-const REDIRECT_URI = 'http://localhost:8080/oauth/callback';
+function buildRedirectUri(port: number): string {
+  return `http://localhost:${port}/oauth/callback`;
+}
 
 /** Top-level openid-client messages that often wrap a more specific cause. */
 const OPAQUE_OAUTH_TOP_MESSAGES = new Set(['invalid response encountered']);
@@ -114,9 +117,15 @@ function getClientRegistrationRepo(): IClientRegistrationRepo {
 }
 
 /**
- * Get or create OAuth configuration for a provider
+ * Get or create OAuth configuration for a provider.
+ * `redirectUri` is required for DCR providers — it is the actual callback URI
+ * (including port) that was just bound, so the registration and auth URL stay in sync.
  */
-async function getProviderConfiguration(provider: string, credentialsOverride?: { clientId: string; clientSecret: string }): Promise<Configuration> {
+async function getProviderConfiguration(
+  provider: string,
+  redirectUri: string = buildRedirectUri(DEFAULT_CALLBACK_PORT),
+  credentialsOverride?: { clientId: string; clientSecret: string },
+): Promise<Configuration> {
   const config = await getProviderConfig(provider);
   const resolveClientCredentials = async (): Promise<{ clientId: string; clientSecret?: string }> => {
     if (config.client.mode === 'static' && config.client.clientId) {
@@ -148,7 +157,7 @@ async function getProviderConfiguration(provider: string, credentialsOverride?: 
       console.log(`[OAuth] ${provider}: Discovery from issuer with DCR`);
       const clientRepo = getClientRegistrationRepo();
       const existingRegistration = await clientRepo.getClientRegistration(provider);
-      
+
       if (existingRegistration) {
         console.log(`[OAuth] ${provider}: Using existing DCR registration`);
         return await oauthClient.discoverConfiguration(
@@ -157,18 +166,21 @@ async function getProviderConfiguration(provider: string, credentialsOverride?: 
         );
       }
 
-      // Register new client
+      // Register new client with the actual redirect URI (port already bound)
       const scopes = config.scopes || [];
       const { config: oauthConfig, registration } = await oauthClient.registerClient(
         config.discovery.issuer,
-        [REDIRECT_URI],
+        [redirectUri],
         scopes
       );
-      
-      // Save registration for future use
-      await clientRepo.saveClientRegistration(provider, registration);
-      console.log(`[OAuth] ${provider}: DCR registration saved`);
-      
+
+      // Parse port from redirectUri (e.g. "http://localhost:8081/...") and save
+      const boundPort = new URL(redirectUri).port
+        ? parseInt(new URL(redirectUri).port, 10)
+        : DEFAULT_CALLBACK_PORT;
+      await clientRepo.saveClientRegistration(provider, registration, boundPort);
+      console.log(`[OAuth] ${provider}: DCR registration saved (port ${boundPort})`);
+
       return oauthConfig;
     }
   } else {
@@ -176,7 +188,7 @@ async function getProviderConfiguration(provider: string, credentialsOverride?: 
     if (config.client.mode !== 'static') {
       throw new Error('DCR requires discovery mode "issuer", not "static"');
     }
-    
+
     console.log(`[OAuth] ${provider}: Using static endpoints (no discovery)`);
     const { clientId, clientSecret } = await resolveClientCredentials();
     return oauthClient.createStaticConfiguration(
@@ -186,6 +198,37 @@ async function getProviderConfiguration(provider: string, credentialsOverride?: 
       config.discovery.revocationEndpoint,
       clientSecret
     );
+  }
+}
+
+/**
+ * Determine which port to start the OAuth callback server on for a DCR provider.
+ *
+ * If the provider has an existing registration, probes the port it was registered
+ * on. If that port is still available, returns it so the existing client_id keeps
+ * working. If it is blocked, clears the stale registration (forcing re-registration
+ * on the next available port) and returns DEFAULT_CALLBACK_PORT as the scan base.
+ *
+ * Exported for unit testing.
+ */
+export async function resolveStartPort(
+  provider: string,
+  clientRepo: IClientRegistrationRepo,
+): Promise<number> {
+  const existingReg = await clientRepo.getClientRegistration(provider);
+  if (!existingReg) return DEFAULT_CALLBACK_PORT;
+
+  const registeredPort = await clientRepo.getRegisteredPort(provider);
+  try {
+    // Probe — fixed-port (no fallback) so we know whether the exact registered port is free
+    const probe = await createAuthServer(registeredPort, () => { /* probe */ });
+    probe.server.close();
+    console.log(`[OAuth] ${provider}: registered port ${registeredPort} still available`);
+    return registeredPort;
+  } catch {
+    console.log(`[OAuth] ${provider}: registered port ${registeredPort} blocked, clearing DCR registration`);
+    await clientRepo.clearClientRegistration(provider);
+    return DEFAULT_CALLBACK_PORT;
   }
 }
 
@@ -225,154 +268,178 @@ export async function connectProvider(provider: string, credentials?: { clientId
       }
     }
 
-    // Get or create OAuth configuration
-    const config = await getProviderConfiguration(provider, credentials);
+    // For static-client providers (Google BYOK) the redirect URI is pre-registered
+    // at the OAuth provider console on a fixed port — we must not scan.
+    // For DCR providers, resolveStartPort handles the re-registration trap.
+    const isStaticClient = providerConfig.client.mode === 'static';
+    const startPort = isStaticClient
+      ? DEFAULT_CALLBACK_PORT
+      : await resolveStartPort(provider, getClientRegistrationRepo());
 
-    // Generate PKCE codes
-    const { verifier: codeVerifier, challenge: codeChallenge } = await oauthClient.generatePKCE();
-    const state = oauthClient.generateState();
-
-    // Get scopes from config
-    const scopes = providerConfig.scopes || [];
-
-    // Store flow state
-    activeFlows.set(state, { codeVerifier, provider, config });
-
-    // Build authorization URL
-    const authUrl = oauthClient.buildAuthorizationUrl(config, {
-      redirect_uri: REDIRECT_URI,
-      scope: scopes.join(' '),
-      code_challenge: codeChallenge,
-      state,
-    });
-
-    // Create callback server
+    // --- Callback server ---
+    // Declare `state` before the closure so the callback can close over its binding.
+    // The variable is assigned below, before shell.openExternal, so it is always
+    // set by the time any browser request arrives.
+    let state = '';
     let callbackHandled = false;
-    const { server } = await createAuthServer(8080, async (callbackUrl) => {
-      // Guard against duplicate callbacks (browser may send multiple requests)
-      if (callbackHandled) return;
-      callbackHandled = true;
-      const receivedState = callbackUrl.searchParams.get('state');
-      if (receivedState == null || receivedState === '') {
-        throw new Error(
-          'OAuth callback missing state parameter. Complete sign-in in the browser or check the redirect URI.'
-        );
-      }
-      if (receivedState !== state) {
-        throw new Error('Invalid state parameter - possible CSRF attack');
-      }
 
-      const flow = activeFlows.get(state);
-      if (!flow || flow.provider !== provider) {
-        throw new Error('Invalid OAuth flow state');
-      }
-
-      try {
-        // Use full callback URL (includes iss, scope, etc.) so openid-client validation succeeds
-        console.log(`[OAuth] Exchanging authorization code for tokens (${provider})...`);
-        const tokens = await oauthClient.exchangeCodeForTokens(
-          flow.config,
-          callbackUrl,
-          flow.codeVerifier,
-          state
-        );
-
-        // Save tokens and credentials. For Google, BYOK is the only path
-        // that reaches this token exchange (rowboat path returns above
-        // before any local server runs); stamp mode: 'byok' so a future
-        // refresh / reconnect can't get confused with a rowboat entry.
-        console.log(`[OAuth] Token exchange successful for ${provider}`);
-        await oauthRepo.upsert(provider, {
-          tokens,
-          ...(credentials ? { clientId: credentials.clientId, clientSecret: credentials.clientSecret } : {}),
-          ...(provider === 'google' ? { mode: 'byok' as const } : {}),
-          error: null,
-        });
-
-        // Trigger immediate sync for relevant providers
-        if (provider === 'google') {
-          triggerGmailSync();
-          triggerCalendarSync();
-        } else if (provider === 'fireflies-ai') {
-          triggerFirefliesSync();
+    const { server, port: boundPort } = await createAuthServer(
+      startPort,
+      async (callbackUrl) => {
+        // Guard against duplicate callbacks (browser may send multiple requests)
+        if (callbackHandled) return;
+        callbackHandled = true;
+        const receivedState = callbackUrl.searchParams.get('state');
+        if (receivedState == null || receivedState === '') {
+          throw new Error(
+            'OAuth callback missing state parameter. Complete sign-in in the browser or check the redirect URI.'
+          );
+        }
+        if (receivedState !== state) {
+          throw new Error('Invalid state parameter - possible CSRF attack');
         }
 
-        // For Rowboat sign-in, ensure user + Stripe customer exist before
-        // notifying the renderer. Without this, parallel API calls from
-        // multiple renderer hooks race to create the user, causing duplicates.
-        let signedInUserId: string | undefined;
-        if (provider === 'rowboat') {
-          try {
-            const billing = await getBillingInfo();
-            if (billing.userId) {
-              signedInUserId = billing.userId;
-              analyticsIdentify(billing.userId, {
-                ...(billing.userEmail ? { email: billing.userEmail } : {}),
-                plan: billing.subscriptionPlan,
-                status: billing.subscriptionStatus,
-              });
-              analyticsCapture('user_signed_in', {
-                plan: billing.subscriptionPlan,
-                status: billing.subscriptionStatus,
-              });
+        const flow = activeFlows.get(state);
+        if (!flow || flow.provider !== provider) {
+          throw new Error('Invalid OAuth flow state');
+        }
+
+        try {
+          // Use full callback URL (includes iss, scope, etc.) so openid-client validation succeeds
+          console.log(`[OAuth] Exchanging authorization code for tokens (${provider})...`);
+          const tokens = await oauthClient.exchangeCodeForTokens(
+            flow.config,
+            callbackUrl,
+            flow.codeVerifier,
+            state
+          );
+
+          // Save tokens and credentials. For Google, BYOK is the only path
+          // that reaches this token exchange (rowboat path returns above
+          // before any local server runs); stamp mode: 'byok' so a future
+          // refresh / reconnect can't get confused with a rowboat entry.
+          console.log(`[OAuth] Token exchange successful for ${provider}`);
+          await oauthRepo.upsert(provider, {
+            tokens,
+            ...(credentials ? { clientId: credentials.clientId, clientSecret: credentials.clientSecret } : {}),
+            ...(provider === 'google' ? { mode: 'byok' as const } : {}),
+            error: null,
+          });
+
+          // Trigger immediate sync for relevant providers
+          if (provider === 'google') {
+            triggerGmailSync();
+            triggerCalendarSync();
+          } else if (provider === 'fireflies-ai') {
+            triggerFirefliesSync();
+          }
+
+          // For Rowboat sign-in, ensure user + Stripe customer exist before
+          // notifying the renderer. Without this, parallel API calls from
+          // multiple renderer hooks race to create the user, causing duplicates.
+          let signedInUserId: string | undefined;
+          if (provider === 'rowboat') {
+            try {
+              const billing = await getBillingInfo();
+              if (billing.userId) {
+                signedInUserId = billing.userId;
+                analyticsIdentify(billing.userId, {
+                  ...(billing.userEmail ? { email: billing.userEmail } : {}),
+                  plan: billing.subscriptionPlan,
+                  status: billing.subscriptionStatus,
+                });
+                analyticsCapture('user_signed_in', {
+                  plan: billing.subscriptionPlan,
+                  status: billing.subscriptionStatus,
+                });
+              }
+            } catch (meError) {
+              console.error('[OAuth] Failed to initialize user via /v1/me:', meError);
             }
-          } catch (meError) {
-            console.error('[OAuth] Failed to initialize user via /v1/me:', meError);
           }
-        }
 
-        // Emit success event to renderer
-        emitOAuthEvent({
-          provider,
-          success: true,
-          ...(signedInUserId ? { userId: signedInUserId } : {}),
-        });
-      } catch (error) {
-        console.error('OAuth token exchange failed:', error);
-        // Log cause chain for debugging (e.g. OAUTH_INVALID_RESPONSE -> OperationProcessingError)
-        let cause: unknown = error;
-        while (cause != null && typeof cause === 'object' && 'cause' in cause) {
-          cause = (cause as { cause?: unknown }).cause;
-          if (cause != null) {
-            console.error('[OAuth] Caused by:', cause);
+          // Emit success event to renderer
+          emitOAuthEvent({
+            provider,
+            success: true,
+            ...(signedInUserId ? { userId: signedInUserId } : {}),
+          });
+        } catch (error) {
+          console.error('OAuth token exchange failed:', error);
+          // Log cause chain for debugging (e.g. OAUTH_INVALID_RESPONSE -> OperationProcessingError)
+          let cause: unknown = error;
+          while (cause != null && typeof cause === 'object' && 'cause' in cause) {
+            cause = (cause as { cause?: unknown }).cause;
+            if (cause != null) {
+              console.error('[OAuth] Caused by:', cause);
+            }
+          }
+          const errorMessage = getOAuthErrorMessage(error);
+          emitOAuthEvent({ provider, success: false, error: errorMessage });
+          throw error;
+        } finally {
+          // Clean up
+          activeFlows.delete(state);
+          if (activeFlow && activeFlow.state === state) {
+            clearTimeout(activeFlow.cleanupTimeout);
+            activeFlow.server.close();
+            activeFlow = null;
           }
         }
-        const errorMessage = getOAuthErrorMessage(error);
-        emitOAuthEvent({ provider, success: false, error: errorMessage });
-        throw error;
-      } finally {
-        // Clean up
+      },
+      // Static providers (Google BYOK) keep fixed-port behaviour to match the
+      // pre-registered redirect URI at the provider's console. DCR providers
+      // can fall back since we register the actual bound port below.
+      { fallback: !isStaticClient },
+    );
+
+    // Server is bound. Any throw between here and `activeFlow = ...` would
+    // leak the port — `cancelActiveFlow` only closes it once activeFlow is set.
+    try {
+      const redirectUri = buildRedirectUri(boundPort);
+      const config = await getProviderConfiguration(provider, redirectUri, credentials);
+
+      const { verifier: codeVerifier, challenge: codeChallenge } = await oauthClient.generatePKCE();
+      state = oauthClient.generateState();
+
+      const scopes = providerConfig.scopes || [];
+      activeFlows.set(state, { codeVerifier, provider, config });
+
+      const authUrl = oauthClient.buildAuthorizationUrl(config, {
+        redirect_uri: redirectUri,
+        scope: scopes.join(' '),
+        code_challenge: codeChallenge,
+        state,
+      });
+
+      // Set timeout to clean up abandoned flows (2 minutes)
+      const cleanupTimeout = setTimeout(() => {
+        if (activeFlow?.state === state) {
+          console.log(`[OAuth] Cleaning up abandoned OAuth flow for ${provider} (timeout)`);
+          cancelActiveFlow('timed_out');
+        }
+      }, 2 * 60 * 1000);
+
+      activeFlow = {
+        provider,
+        state,
+        server,
+        cleanupTimeout,
+      };
+
+      // Open in system browser (shares cookies/sessions with user's regular browser)
+      shell.openExternal(authUrl.toString());
+
+      return { success: true };
+    } catch (setupError) {
+      // Post-bind setup failed — close the server so the port is released and
+      // a retry isn't blocked by our own zombie listener.
+      server.close();
+      if (state) {
         activeFlows.delete(state);
-        if (activeFlow && activeFlow.state === state) {
-          clearTimeout(activeFlow.cleanupTimeout);
-          activeFlow.server.close();
-          activeFlow = null;
-        }
       }
-    });
-
-    // Set timeout to clean up abandoned flows (2 minutes)
-    // This prevents memory leaks if user never completes the OAuth flow
-    const cleanupTimeout = setTimeout(() => {
-      if (activeFlow?.state === state) {
-        console.log(`[OAuth] Cleaning up abandoned OAuth flow for ${provider} (timeout)`);
-        cancelActiveFlow('timed_out');
-      }
-    }, 2 * 60 * 1000); // 2 minutes
-
-    // Store complete flow state for cleanup
-    activeFlow = {
-      provider,
-      state,
-      server,
-      cleanupTimeout,
-    };
-
-    // Open in system browser (shares cookies/sessions with user's regular browser)
-    shell.openExternal(authUrl.toString());
-
-    // Wait for callback (server will handle it)
-    return { success: true };
+      throw setupError;
+    }
   } catch (error) {
     console.error('OAuth connection failed:', error);
     return {
