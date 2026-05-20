@@ -46,6 +46,12 @@ import { setupBrowserEventForwarding } from "./browser/ipc.js";
 import { ElectronBrowserControlService } from "./browser/control-service.js";
 import { ElectronNotificationService } from "./notification/electron-notification-service.js";
 import {
+  createPlatformDetector,
+  MeetingDetectService,
+  Suppression,
+} from "./meeting-detect/index.js";
+import { MeetingToastWindow } from "./meeting-detect/toast-window.js";
+import {
   DEEP_LINK_SCHEME,
   dispatchUrl,
   extractDeepLinkFromArgv,
@@ -237,6 +243,29 @@ function createWindow() {
   setMainWindowForDeepLinks(win);
   win.on("closed", () => setMainWindowForDeepLinks(null));
 
+  // Dev-only: Ctrl+Shift+T fires a fake meeting-detect toast so we can
+  // iterate on the toast UI without joining a real Meet. Scoped to the
+  // main window's input events so it can't collide with browser/OS chords.
+  if (!app.isPackaged) {
+    win.webContents.on("before-input-event", (event, input) => {
+      const isToggle =
+        input.type === "keyDown" &&
+        input.control && input.shift && !input.alt && !input.meta &&
+        input.key.toLowerCase() === "t";
+      if (!isToggle) return;
+      event.preventDefault();
+      new MeetingToastWindow().show({
+        title: "You are in a meeting",
+        subtitle: "Detected on Google Meet",
+        actionLabel: "Start taking notes",
+        actionLink:
+          "rowboat://action?type=take-meeting-notes&title=" +
+          encodeURIComponent("Meeting Notes - Meet"),
+      });
+      console.log("[MeetingDetect] dev toast triggered (Ctrl+Shift+T)");
+    });
+  }
+
   // Show window when content is ready to prevent blank screen
   win.once("ready-to-show", () => {
     win.maximize();
@@ -312,7 +341,8 @@ app.whenReady().then(async () => {
   });
 
   registerBrowserControlService(new ElectronBrowserControlService());
-  registerNotificationService(new ElectronNotificationService());
+  const notificationService = new ElectronNotificationService();
+  registerNotificationService(notificationService);
 
   setupIpcHandlers();
   setupBrowserEventForwarding();
@@ -383,6 +413,30 @@ app.whenReady().then(async () => {
 
   // start calendar meeting notification service (fires 1-minute warnings)
   initCalendarNotifications();
+
+  // start meeting-detect service (mic-in-use detection -> popup asking if user wants notes)
+  //
+  // Popup style — flip this one constant to switch the meeting-detect prompt
+  // between the custom Notion-style top-center toast and the native OS
+  // notification. Doesn't affect the separate calendar 1-min warnings.
+  //   false (default) → custom toast
+  //   true            → native OS notification
+  const USE_NATIVE_NOTIFICATION_FOR_MEETING_DETECT = false;
+
+  const meetingDetector = createPlatformDetector();
+  if (meetingDetector) {
+    const meetingDetectService = new MeetingDetectService({
+      detector: meetingDetector,
+      notifier: notificationService,
+      suppression: new Suppression(),
+      toast: USE_NATIVE_NOTIFICATION_FOR_MEETING_DETECT ? null : undefined,
+    });
+    meetingDetectService.start().catch((err) => {
+      console.error("[MeetingDetect] failed to start:", err);
+    });
+  } else {
+    console.log("[MeetingDetect] no detector for this platform; skipping");
+  }
 
   // start chrome extension sync server
   initChromeSync();

@@ -3541,36 +3541,53 @@ function App() {
     return window.ipc.on('app:openUrl', ({ url }) => handle(url))
   }, [])
 
-  // Triggered by main when the user clicks a calendar-meeting notification.
-  // Reuses the same flow as the in-app "Join meeting & take notes" button.
+  // Triggered by main when the user clicks a meeting-notes notification —
+  // either the calendar-time notification (event populated) or the mic-detect
+  // ad-hoc notification (event=null, title=string). Both routes feed the same
+  // calendar-block flow which kicks off startMeetingNow().
   // When `openMeeting` is true, also opens the meeting URL in the system browser.
   useEffect(() => {
-    return window.ipc.on('app:takeMeetingNotes', ({ event, openMeeting }) => {
-      const e = event as {
-        summary?: string
-        start?: { dateTime?: string; date?: string; timeZone?: string }
-        end?: { dateTime?: string; date?: string; timeZone?: string }
-        location?: string
-        htmlLink?: string
-        hangoutLink?: string
-        conferenceData?: { entryPoints?: Array<{ entryPointType?: string; uri?: string }> }
+    return window.ipc.on('app:takeMeetingNotes', ({ event, openMeeting, title }) => {
+      const payload = event as
+        | {
+            summary?: string
+            start?: { dateTime?: string; date?: string; timeZone?: string }
+            end?: { dateTime?: string; date?: string; timeZone?: string }
+            location?: string
+            htmlLink?: string
+            hangoutLink?: string
+            conferenceData?: { entryPoints?: Array<{ entryPointType?: string; uri?: string }> }
+          }
+        | null
+        | undefined
+
+      if (payload && typeof payload === 'object') {
+        const conferenceLink = extractConferenceLink(payload as Record<string, unknown>)
+        if (openMeeting && conferenceLink) {
+          window.open(conferenceLink, '_blank')
+        } else if (openMeeting) {
+          console.warn('[take-meeting-notes] openMeeting requested but event has no conference link', payload)
+        }
+        window.__pendingCalendarEvent = {
+          summary: payload.summary,
+          start: payload.start,
+          end: payload.end,
+          location: payload.location,
+          htmlLink: payload.htmlLink,
+          conferenceLink,
+          source: 'calendar-sync',
+        }
+      } else if (typeof title === 'string' && title.length > 0) {
+        // Ad-hoc detection — no calendar event matched. Build a minimal
+        // pending event from the title so the meeting flow can still start.
+        window.__pendingCalendarEvent = {
+          summary: title,
+          source: 'meeting-detect',
+        }
+      } else {
+        return
       }
-      if (!e || typeof e !== 'object') return
-      const conferenceLink = extractConferenceLink(e as Record<string, unknown>)
-      if (openMeeting && conferenceLink) {
-        window.open(conferenceLink, '_blank')
-      } else if (openMeeting) {
-        console.warn('[take-meeting-notes] openMeeting requested but event has no conference link', e)
-      }
-      window.__pendingCalendarEvent = {
-        summary: e.summary,
-        start: e.start,
-        end: e.end,
-        location: e.location,
-        htmlLink: e.htmlLink,
-        conferenceLink,
-        source: 'calendar-sync',
-      }
+
       window.dispatchEvent(new Event('calendar-block:join-meeting'))
     })
   }, [])
