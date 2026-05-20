@@ -12,6 +12,7 @@ import {
     resolveProviderConfig,
 } from '../models/defaults.js';
 import { captureLlmUsage } from '../analytics/usage.js';
+import { withUseCase } from '../analytics/use_case.js';
 import type { GmailThreadSnapshot } from './sync_gmail.js';
 
 const STYLE_GUIDE_PATH = path.join(WorkDir, 'knowledge', 'Agent Notes', 'style', 'email.md');
@@ -222,12 +223,12 @@ export async function classifyThread(
             ? `${SYSTEM_PROMPT}\n\n# Skip the draft\n\nThe user already has their own draft in progress for this thread — DO NOT generate a draftResponse. Always omit the draftResponse field.`
             : SYSTEM_PROMPT;
 
-        const result = await generateObject({
+        const result = await withUseCase({ useCase: 'knowledge_sync', subUseCase: 'email_classifier' }, () => generateObject({
             model,
             system: systemPrompt,
             prompt: buildPrompt(snapshot, userEmail, styleGuide, calendar),
             schema: ClassificationSchema,
-        });
+        }));
 
         captureLlmUsage({
             useCase: 'knowledge_sync',

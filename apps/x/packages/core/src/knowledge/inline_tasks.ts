@@ -11,6 +11,7 @@ import { createProvider } from '../models/models.js';
 import { inlineTask } from '@x/shared';
 import { extractAgentResponse, waitForRunCompletion } from '../agents/utils.js';
 import { captureLlmUsage } from '../analytics/usage.js';
+import { withUseCase } from '../analytics/use_case.js';
 
 const SYNC_INTERVAL_MS = 15 * 1000; // 15 seconds
 const INLINE_TASK_AGENT = 'inline_task_agent';
@@ -664,11 +665,11 @@ Default end time (local): ${localEnd}
 Respond with ONLY valid JSON: either a schedule object or null. No other text.`;
 
     try {
-        const result = await generateText({
+        const result = await withUseCase({ useCase: 'knowledge_sync', subUseCase: 'inline_task_classify' }, () => generateText({
             model,
             system: systemPrompt,
             prompt: instruction,
-        });
+        }));
 
         captureLlmUsage({
             useCase: 'knowledge_sync',

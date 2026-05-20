@@ -50,7 +50,7 @@ import { generateText } from "ai";
 import { createProvider } from "../../models/models.js";
 import { getDefaultModelAndProvider, resolveProviderConfig } from "../../models/defaults.js";
 import { captureLlmUsage } from "../../analytics/usage.js";
-import { getCurrentUseCase } from "../../analytics/use_case.js";
+import { getCurrentUseCase, withUseCase } from "../../analytics/use_case.js";
 import { isSignedIn } from "../../account/account.js";
 import { getAccessToken } from "../../auth/tokens.js";
 import { API_URL } from "../../config/env.js";
@@ -818,7 +818,12 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
 
                 const userPrompt = prompt || 'Convert this file to well-structured markdown.';
 
-                const response = await generateText({
+                const ctx = getCurrentUseCase();
+                const response = await withUseCase({
+                    useCase: ctx?.useCase ?? 'copilot_chat',
+                    subUseCase: 'file_parse',
+                    ...(ctx?.agentName ? { agentName: ctx.agentName } : {}),
+                }, () => generateText({
                     model,
                     messages: [
                         {
@@ -829,9 +834,8 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                             ],
                         },
                     ],
-                });
+                }));
 
-                const ctx = getCurrentUseCase();
                 captureLlmUsage({
                     useCase: ctx?.useCase ?? 'copilot_chat',
                     subUseCase: 'file_parse',
