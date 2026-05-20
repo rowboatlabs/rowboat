@@ -4,7 +4,13 @@ import { getSecurityAllowList, SECURITY_CONFIG_PATH } from '../../config/securit
 import { getExecutionShell } from '../assistant/runtime-context.js';
 
 const execPromise = promisify(exec);
-const COMMAND_SPLIT_REGEX = /(?:\|\||&&|;|\||\n)/;
+// Order matters: longer separators (`||`, `&&`) must precede their single-char
+// prefixes (`|`, `&`) so the leftmost-longest match consumes the right token.
+// `&` (background), backtick / `$(` (command substitution), and `(` `)`
+// (subshell) are also command separators — without them, `echo hi & rm /x`,
+// `echo \`rm /x\``, and `echo $(rm /x)` slip past isBlocked() with only
+// `echo` in the allowlist.
+const COMMAND_SPLIT_REGEX = /(?:\|\||&&|&|;|\||\n|`|\$\(|\(|\))/;
 const ENV_ASSIGNMENT_REGEX = /^[A-Za-z_][A-Za-z0-9_]*=.*/;
 const WRAPPER_COMMANDS = new Set(['sudo', 'env', 'time', 'command']);
 const EXECUTION_SHELL = getExecutionShell();
