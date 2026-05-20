@@ -5,6 +5,7 @@ import { createProvider } from '../models/models.js';
 import { getDefaultModelAndProvider, getMeetingNotesModel, resolveProviderConfig } from '../models/defaults.js';
 import { WorkDir } from '../config/config.js';
 import { captureLlmUsage } from '../analytics/usage.js';
+import { withUseCase } from '../analytics/use_case.js';
 
 const CALENDAR_SYNC_DIR = path.join(WorkDir, 'calendar_sync');
 
@@ -152,11 +153,11 @@ export async function summarizeMeeting(transcript: string, meetingStartTime?: st
 
     const prompt = `Meeting recording started at: ${meetingStartTime || 'unknown'}\n\n${transcript}${calendarContext}`;
 
-    const result = await generateText({
+    const result = await withUseCase({ useCase: 'meeting_note' }, () => generateText({
         model,
         system: SYSTEM_PROMPT,
         prompt,
-    });
+    }));
 
     captureLlmUsage({
         useCase: 'meeting_note',

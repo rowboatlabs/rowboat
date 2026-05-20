@@ -28,7 +28,7 @@ import { IAbortRegistry } from "../runs/abort-registry.js";
 import { PrefixLogger } from "@x/shared";
 import { parse } from "yaml";
 import { captureLlmUsage } from "../analytics/usage.js";
-import { enterUseCase, type UseCase } from "../analytics/use_case.js";
+import { enterUseCase, withUseCase, type UseCase } from "../analytics/use_case.js";
 import { getRaw as getNoteCreationRaw } from "../knowledge/note_creation.js";
 import { getRaw as getLabelingAgentRaw } from "../knowledge/labeling_agent.js";
 import { getRaw as getNoteTaggingAgentRaw } from "../knowledge/note_tagging_agent.js";
@@ -1292,14 +1292,28 @@ async function* streamLlm(
 ): AsyncGenerator<z.infer<typeof LlmStepStreamEvent>, void, unknown> {
     const converted = convertFromMessages(messages);
     console.log(`! SENDING payload to model: `, JSON.stringify(converted))
-    const { fullStream } = streamText({
-        model,
-        messages: converted,
-        system: instructions,
-        tools,
-        stopWhen: stepCountIs(1),
-        abortSignal: signal,
-    });
+    const streamResult = analytics
+        ? withUseCase({
+            useCase: analytics.useCase,
+            ...(analytics.subUseCase ? { subUseCase: analytics.subUseCase } : {}),
+            ...(analytics.agentName ? { agentName: analytics.agentName } : {}),
+        }, () => streamText({
+            model,
+            messages: converted,
+            system: instructions,
+            tools,
+            stopWhen: stepCountIs(1),
+            abortSignal: signal,
+        }))
+        : streamText({
+            model,
+            messages: converted,
+            system: instructions,
+            tools,
+            stopWhen: stepCountIs(1),
+            abortSignal: signal,
+        });
+    const { fullStream } = streamResult;
     for await (const event of fullStream) {
         // Check abort on every chunk for responsiveness
         signal?.throwIfAborted();
