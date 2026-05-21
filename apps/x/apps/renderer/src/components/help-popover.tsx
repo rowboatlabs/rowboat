@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState } from "react"
-import { MessageCircle } from "lucide-react"
+import { Bug, MessageCircle } from "lucide-react"
 
 import {
   Popover,
@@ -26,6 +26,10 @@ export function HelpPopover({ children, tooltip }: HelpPopoverProps) {
 
   const handleDiscordClick = () => {
     window.open("https://discord.com/invite/wajrgmJQ6b", "_blank")
+  }
+
+  const handleReportBugClick = () => {
+    window.open("https://github.com/rowboatlabs/rowboat/issues/new", "_blank")
   }
 
   return (
@@ -59,6 +63,21 @@ export function HelpPopover({ children, tooltip }: HelpPopoverProps) {
           </p>
         </div>
         <div className="p-2">
+          <Button
+            variant="ghost"
+            className="w-full justify-start gap-3 h-auto py-3"
+            onClick={handleReportBugClick}
+          >
+            <div className="flex size-8 items-center justify-center rounded-md bg-destructive/10">
+              <Bug className="size-4 text-destructive" />
+            </div>
+            <div className="flex flex-col items-start">
+              <span className="text-sm font-medium">Report a bug</span>
+              <span className="text-xs text-muted-foreground">
+                Send feedback to the Rowboat team
+              </span>
+            </div>
+          </Button>
           <Button
             variant="ghost"
             className="w-full justify-start gap-3 h-auto py-3"

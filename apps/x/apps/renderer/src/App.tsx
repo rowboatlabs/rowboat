@@ -63,7 +63,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Toaster } from "@/components/ui/sonner"
-import { stripKnowledgePrefix, toKnowledgePath, wikiLabel } from '@/lib/wiki-links'
+import { ensureMarkdownExtension, normalizeWikiPath, splitWikiFragment, stripKnowledgePrefix, toKnowledgePath, wikiLabel } from '@/lib/wiki-links'
 import { splitFrontmatter, joinFrontmatter } from '@/lib/frontmatter'
 import { extractConferenceLink } from '@/lib/calendar-event'
 import { OnboardingModal } from '@/components/onboarding'
@@ -4355,8 +4355,30 @@ function App() {
     return () => window.removeEventListener('email-block:draft-with-assistant', handler)
   }, [])
 
+  const resolveWikiFilePath = useCallback((wikiPath: string) => {
+    const normalized = normalizeWikiPath(wikiPath)
+    const { path: basePath } = splitWikiFragment(normalized)
+    if (!basePath) return null
+
+    const targetPath = ensureMarkdownExtension(basePath)
+    const targetKey = targetPath.toLowerCase()
+    const exactMatch = knowledgeFiles.find((filePath) => normalizeWikiPath(filePath).toLowerCase() === targetKey)
+    if (exactMatch) return toKnowledgePath(exactMatch)
+
+    if (!basePath.includes('/')) {
+      const targetBaseName = targetPath.split('/').pop()?.toLowerCase()
+      const basenameMatches = knowledgeFiles.filter((filePath) => {
+        const normalizedFile = normalizeWikiPath(filePath)
+        return normalizedFile.split('/').pop()?.toLowerCase() === targetBaseName
+      })
+      if (basenameMatches.length === 1) return toKnowledgePath(basenameMatches[0])
+    }
+
+    return toKnowledgePath(basePath)
+  }, [knowledgeFiles])
+
   const ensureWikiFile = useCallback(async (wikiPath: string) => {
-    const resolvedPath = toKnowledgePath(wikiPath)
+    const resolvedPath = resolveWikiFilePath(wikiPath)
     if (!resolvedPath) return null
     try {
       const exists = await window.ipc.invoke('workspace:exists', { path: resolvedPath })
@@ -4373,9 +4395,11 @@ function App() {
       console.error('Failed to ensure wiki link target:', err)
       return null
     }
-  }, [])
+  }, [resolveWikiFilePath])
 
   const openWikiLink = useCallback(async (wikiPath: string) => {
+    const { path: basePath } = splitWikiFragment(normalizeWikiPath(wikiPath))
+    if (!basePath) return
     const resolvedPath = await ensureWikiFile(wikiPath)
     if (resolvedPath) {
       navigateToFile(resolvedPath)
