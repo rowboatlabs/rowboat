@@ -63,6 +63,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Toaster } from "@/components/ui/sonner"
+import { BillingErrorDialog } from "@/components/billing-error-dialog"
+import { matchBillingError, type BillingErrorMatch } from "@/lib/billing-error"
 import { stripKnowledgePrefix, toKnowledgePath, wikiLabel } from '@/lib/wiki-links'
 import { splitFrontmatter, joinFrontmatter } from '@/lib/frontmatter'
 import { extractConferenceLink } from '@/lib/calendar-event'
@@ -793,7 +795,25 @@ function App() {
   // Chat state
   const [, setMessage] = useState<string>('')
   const [conversation, setConversation] = useState<ConversationItem[]>([])
+  const [billingErrorMatch, setBillingErrorMatch] = useState<BillingErrorMatch | null>(null)
+  const [billingErrorOpen, setBillingErrorOpen] = useState(false)
+  const lastHandledBillingErrorIdRef = useRef<string | null>(null)
   const [currentAssistantMessage, setCurrentAssistantMessage] = useState<string>('')
+
+  useEffect(() => {
+    for (let i = conversation.length - 1; i >= 0; i--) {
+      const item = conversation[i]
+      if (!isErrorMessage(item)) continue
+      if (item.id === lastHandledBillingErrorIdRef.current) return
+      const match = matchBillingError(item.message)
+      if (match) {
+        lastHandledBillingErrorIdRef.current = item.id
+        setBillingErrorMatch(match)
+        setBillingErrorOpen(true)
+      }
+      return
+    }
+  }, [conversation])
   const [, setModelUsage] = useState<LanguageModelUsage | null>(null)
   const [runId, setRunId] = useState<string | null>(null)
   const runIdRef = useRef<string | null>(null)
@@ -2271,7 +2291,9 @@ function App() {
           message: event.error,
           timestamp: Date.now(),
         }])
-        toast.error(event.error.split('\n')[0] || 'Model error')
+        if (!matchBillingError(event.error)) {
+          toast.error(event.error.split('\n')[0] || 'Model error')
+        }
         console.error('Run error:', event.error)
         break
     }
@@ -4629,6 +4651,9 @@ function App() {
     }
 
     if (isErrorMessage(item)) {
+      if (matchBillingError(item.message)) {
+        return null
+      }
       return (
         <Message key={item.id} from="assistant" data-message-id={item.id}>
           <MessageContent className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-destructive">
@@ -5399,6 +5424,11 @@ function App() {
         />
       </SidebarSectionProvider>
       <Toaster />
+      <BillingErrorDialog
+        open={billingErrorOpen}
+        match={billingErrorMatch}
+        onOpenChange={setBillingErrorOpen}
+      />
       <OnboardingModal
         open={showOnboarding}
         onComplete={handleOnboardingComplete}
