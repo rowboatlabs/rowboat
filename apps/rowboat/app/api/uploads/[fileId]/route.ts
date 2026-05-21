@@ -9,6 +9,15 @@ const UPLOADS_DIR = process.env.RAG_UPLOADS_DIR || '/uploads';
 
 const dataSourceDocsRepository = container.resolve<IDataSourceDocsRepository>('dataSourceDocsRepository');
 
+function getSafeFilePath(uploadsDir: string, fileId: string): string | null {
+    const resolvedBase = path.resolve(uploadsDir);
+    const resolvedPath = path.resolve(uploadsDir, fileId);
+    if (!resolvedPath.startsWith(resolvedBase + path.sep) && resolvedPath !== resolvedBase) {
+        return null;
+    }
+    return resolvedPath;
+}
+
 // PUT endpoint to handle file uploads
 export async function PUT(request: NextRequest, props: { params: Promise<{ fileId: string }> }) {
     const params = await props.params;
@@ -17,7 +26,10 @@ export async function PUT(request: NextRequest, props: { params: Promise<{ fileI
         return NextResponse.json({ error: 'Missing file ID' }, { status: 400 });
     }
 
-    const filePath = path.join(UPLOADS_DIR, fileId);
+    const filePath = getSafeFilePath(UPLOADS_DIR, fileId);
+    if (!filePath) {
+        return NextResponse.json({ error: 'Invalid file ID' }, { status: 400 });
+    }
 
     try {
         const data = await request.arrayBuffer();
@@ -55,7 +67,11 @@ export async function GET(request: NextRequest, props: { params: Promise<{ fileI
 
     try {
         // strip uploads dir from path
-        const filePath = path.join(UPLOADS_DIR, doc.data.path.split('/api/uploads/')[1]);
+        const rawFileId = doc.data.path.split('/api/uploads/')[1];
+        const filePath = getSafeFilePath(UPLOADS_DIR, rawFileId);
+        if (!filePath) {
+            return NextResponse.json({ error: 'Invalid file path' }, { status: 400 });
+        }
 
         // Check if file exists
         await fs.access(filePath);
