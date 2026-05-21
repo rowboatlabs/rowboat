@@ -499,7 +499,7 @@ function ComposeBox({
 
   const editor = useEditor({
     extensions: [
-      StarterKit,
+      StarterKit.configure({ link: false }),
       Link.configure({ openOnClick: false, autolink: true }),
       Placeholder.configure({
         placeholder: mode === 'reply' ? 'Write your reply…' : 'Write a message…',

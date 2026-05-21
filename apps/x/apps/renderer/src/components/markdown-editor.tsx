@@ -564,11 +564,16 @@ const scrollToHeading = (view: EditorView, rawTarget: string) => {
 
   const selectionPos = Math.min(foundPos + 1, view.state.doc.content.size)
   view.dispatch(
-    view.state.tr
-      .setSelection(TextSelection.near(view.state.doc.resolve(selectionPos)))
-      .scrollIntoView()
+    view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(selectionPos)))
   )
   view.focus()
+
+  const domAtPos = view.domAtPos(foundPos + 1)
+  const node = domAtPos.node
+  const headingEl = node.nodeType === Node.ELEMENT_NODE
+    ? (node as HTMLElement)
+    : node.parentElement
+  headingEl?.scrollIntoView({ block: 'start', behavior: 'smooth' })
   return true
 }
 
@@ -727,6 +732,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
         heading: {
           levels: [1, 2, 3],
         },
+        link: false,
       }),
       Link.configure({
         openOnClick: false,
