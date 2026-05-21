@@ -52,6 +52,7 @@ import {
   parseAttachedFiles,
   toToolState,
 } from '@/lib/chat-conversation'
+import { matchBillingError } from '@/lib/billing-error'
 
 const streamdownComponents = { pre: MarkdownPreOverride }
 
@@ -86,31 +87,6 @@ function AutoScrollPre({ className, children }: { className?: string; children: 
 }
 
 /* ─── Billing error helpers ─── */
-
-const BILLING_ERROR_PATTERNS = [
-  {
-    pattern: /upgrade required/i,
-    title: 'A subscription is required',
-    subtitle: 'Get started with a plan to access AI features in Rowboat.',
-    cta: 'Subscribe',
-  },
-  {
-    pattern: /not enough credits/i,
-    title: 'You\'ve run out of credits',
-    subtitle: 'Upgrade your plan for more credits. Free usage resets daily at 00:00 UTC.',
-    cta: 'Upgrade plan',
-  },
-  {
-    pattern: /subscription not active/i,
-    title: 'Your subscription is inactive',
-    subtitle: 'Reactivate your subscription to continue using AI features.',
-    cta: 'Reactivate',
-  },
-] as const
-
-function matchBillingError(message: string) {
-  return BILLING_ERROR_PATTERNS.find(({ pattern }) => pattern.test(message)) ?? null
-}
 
 interface BillingRowboatAccount {
   config?: {
