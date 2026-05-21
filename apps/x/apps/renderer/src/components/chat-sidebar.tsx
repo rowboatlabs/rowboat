@@ -86,35 +86,6 @@ function AutoScrollPre({ className, children }: { className?: string; children: 
   )
 }
 
-/* ─── Billing error helpers ─── */
-
-interface BillingRowboatAccount {
-  config?: {
-    appUrl?: string | null
-  } | null
-}
-
-function BillingErrorCTA({ label }: { label: string }) {
-  const [appUrl, setAppUrl] = useState<string | null>(null)
-
-  useEffect(() => {
-    window.ipc.invoke('account:getRowboat', null)
-      .then((account: BillingRowboatAccount) => setAppUrl(account.config?.appUrl ?? null))
-      .catch(() => {})
-  }, [])
-
-  if (!appUrl) return null
-
-  return (
-    <button
-      onClick={() => window.open(`${appUrl}?intent=upgrade`)}
-      className="mt-1 rounded-md bg-amber-500/20 px-3 py-1.5 text-xs font-medium text-amber-100 transition-colors hover:bg-amber-500/30"
-    >
-      {label}
-    </button>
-  )
-}
-
 const MIN_WIDTH = 360
 const MAX_WIDTH = 1600
 const MIN_MAIN_PANE_WIDTH = 420
@@ -467,19 +438,8 @@ export function ChatSidebar({
     }
 
     if (isErrorMessage(item)) {
-      const billingError = matchBillingError(item.message)
-      if (billingError) {
-        return (
-          <Message key={item.id} from="assistant" data-message-id={item.id}>
-            <MessageContent className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3">
-              <div className="space-y-2">
-                <p className="text-sm font-medium text-amber-200">{billingError.title}</p>
-                <p className="text-xs text-amber-300/80">{billingError.subtitle}</p>
-                <BillingErrorCTA label={billingError.cta} />
-              </div>
-            </MessageContent>
-          </Message>
-        )
+      if (matchBillingError(item.message)) {
+        return null
       }
       return (
         <Message key={item.id} from="assistant" data-message-id={item.id}>

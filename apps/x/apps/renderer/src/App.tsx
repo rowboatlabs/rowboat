@@ -2291,7 +2291,9 @@ function App() {
           message: event.error,
           timestamp: Date.now(),
         }])
-        toast.error(event.error.split('\n')[0] || 'Model error')
+        if (!matchBillingError(event.error)) {
+          toast.error(event.error.split('\n')[0] || 'Model error')
+        }
         console.error('Run error:', event.error)
         break
     }
@@ -4649,6 +4651,9 @@ function App() {
     }
 
     if (isErrorMessage(item)) {
+      if (matchBillingError(item.message)) {
+        return null
+      }
       return (
         <Message key={item.id} from="assistant" data-message-id={item.id}>
           <MessageContent className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-destructive">
