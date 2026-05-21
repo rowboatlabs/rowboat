@@ -2,7 +2,8 @@ import { createServer, Server } from 'http';
 import { URL } from 'url';
 
 const OAUTH_CALLBACK_PATH = '/oauth/callback';
-const DEFAULT_PORT = 8080;
+export const DEFAULT_PORT = 8080;
+export const PORT_RANGE_SIZE = 10;
 
 /** Escape HTML special characters to prevent XSS */
 function escapeHtml(str: string): string {
@@ -19,13 +20,8 @@ export interface AuthServerResult {
   port: number;
 }
 
-/**
- * Create a local HTTP server to handle OAuth callback
- * Listens on http://localhost:8080/oauth/callback
- * Passes the full callback URL (including iss, scope, etc.) so openid-client validation succeeds.
- */
-export function createAuthServer(
-  port: number = DEFAULT_PORT,
+function tryBindPort(
+  port: number,
   onCallback: (callbackUrl: URL) => void | Promise<void>
 ): Promise<AuthServerResult> {
   return new Promise((resolve, reject) => {
@@ -37,7 +33,7 @@ export function createAuthServer(
       }
 
       const url = new URL(req.url, `http://localhost:${port}`);
-      
+
       if (url.pathname === OAUTH_CALLBACK_PATH) {
         const error = url.searchParams.get('error');
 
@@ -96,12 +92,62 @@ export function createAuthServer(
     });
 
     server.on('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'EADDRINUSE') {
-        reject(new Error(`Port ${port} is already in use`));
+      server.close();
+      if (err.code === 'EADDRINUSE' || err.code === 'EACCES') {
+        // Signal caller to try next port
+        reject(Object.assign(new Error(err.code), { code: err.code }));
       } else {
         reject(err);
       }
     });
   });
+}
+
+/**
+ * Create a local HTTP server to handle OAuth callback.
+ *
+ * Defaults to fixed-port behaviour: only `port` is tried, and a clear error is
+ * thrown if it cannot be bound. This is the right behaviour for any provider
+ * whose redirect URI is pre-registered (Google BYOK, Composio, etc.) — those
+ * callers must keep using the exact port they've handed to the provider.
+ *
+ * Opt into `{ fallback: true }` only when the caller is prepared to use the
+ * port returned in `AuthServerResult` (i.e. the redirect URI is built from the
+ * actual bound port, not hard-coded). With fallback enabled, scans `port`
+ * through `port + PORT_RANGE_SIZE - 1` and binds the first available, handling
+ * both EADDRINUSE and EACCES (the latter is common on Windows when
+ * Hyper-V/WSL2 reserve the port).
+ */
+export async function createAuthServer(
+  port: number = DEFAULT_PORT,
+  onCallback: (callbackUrl: URL) => void | Promise<void>,
+  opts: { fallback?: boolean } = {},
+): Promise<AuthServerResult> {
+  const fallback = opts.fallback === true;
+  const limit = fallback ? port + PORT_RANGE_SIZE - 1 : port;
+
+  for (let p = port; p <= limit; p++) {
+    try {
+      return await tryBindPort(p, onCallback);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (fallback && (code === 'EADDRINUSE' || code === 'EACCES') && p < limit) {
+        console.warn(`[OAuth] Port ${p} unavailable (${code}), trying ${p + 1}…`);
+        continue;
+      }
+      if (!fallback) {
+        const reason = code === 'EACCES' || code === 'EADDRINUSE'
+          ? `Port ${port} is unavailable (${code}). This port must be free for sign-in to work — close any app using it and try again.`
+          : (err instanceof Error ? err.message : String(err));
+        throw new Error(reason);
+      }
+      throw new Error(
+        `No available port found in range ${port}–${limit}. Free a port in that range and try again.`
+      );
+    }
+  }
+
+  // Unreachable — loop always returns or throws — but satisfies TypeScript
+  throw new Error(`No available port found in range ${port}–${limit}.`);
 }
 
