@@ -396,6 +396,16 @@ export async function connectProvider(provider: string, credentials?: { clientId
     // Server is bound. Any throw between here and `activeFlow = ...` would
     // leak the port — `cancelActiveFlow` only closes it once activeFlow is set.
     try {
+      // TOCTOU guard: resolveStartPort probed the registered port and found it
+      // free, but the port could have been grabbed between probe and real bind,
+      // causing fallback to a different port. The cached client_id is registered
+      // for the old port — clear it so getProviderConfiguration re-registers
+      // with the actual bound port.
+      if (!isStaticClient && boundPort !== startPort) {
+        console.log(`[OAuth] ${provider}: bound port ${boundPort} differs from start port ${startPort}, clearing stale DCR registration`);
+        await getClientRegistrationRepo().clearClientRegistration(provider);
+      }
+
       const redirectUri = buildRedirectUri(boundPort);
       const config = await getProviderConfiguration(provider, redirectUri, credentials);
 
