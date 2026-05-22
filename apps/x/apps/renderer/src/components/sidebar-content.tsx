@@ -4,25 +4,17 @@ import * as React from "react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
   Bot,
+  ArrowUpRight,
   ChevronRight,
-  ChevronsDownUp,
-  ChevronsUpDown,
-  Copy,
   ExternalLink,
+  FileText,
   FilePlus,
   Folder,
-  FolderOpen,
   FolderPlus,
   Globe,
   AlertTriangle,
   HelpCircle,
   Mic,
-  Network,
-  Pencil,
-  Radio,
-  SearchIcon,
-  SquarePen,
-  Table2,
   Plug,
   Lightbulb,
   ListChecks,
@@ -32,12 +24,6 @@ import {
   Square,
   Trash2,
 } from "lucide-react"
-
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible"
 import {
   Dialog,
   DialogContent,
@@ -66,10 +52,8 @@ import {
   SidebarGroupContent,
   SidebarHeader,
   SidebarMenu,
-  SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarMenuSub,
   SidebarRail,
   useSidebar,
 } from "@/components/ui/sidebar"
@@ -90,9 +74,7 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
-import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
-import { type ActiveSection, useSidebarSection } from "@/contexts/sidebar-context"
 import { ConnectorsPopover } from "@/components/connectors-popover"
 import { HelpPopover } from "@/components/help-popover"
 import { SettingsDialog } from "@/components/settings-dialog"
@@ -108,6 +90,7 @@ interface TreeNode {
   kind: "file" | "dir"
   children?: TreeNode[]
   loaded?: boolean
+  stat?: { size: number; mtimeMs: number }
 }
 
 type KnowledgeActions = {
@@ -115,6 +98,9 @@ type KnowledgeActions = {
   createFolder: (parentPath?: string) => Promise<string>
   openGraph: () => void
   openBases: () => void
+  openKnowledgeView: () => void
+  openWorkspaceAt: (path?: string) => void
+  createWorkspace: (name: string) => Promise<string>
   expandAll: () => void
   collapseAll: () => void
   rename: (path: string, newName: string, isDir: boolean) => Promise<void>
@@ -124,12 +110,11 @@ type KnowledgeActions = {
   onOpenInNewTab?: (path: string) => void
 }
 
-function getFileManagerName(): string {
-  if (typeof navigator === 'undefined') return 'File Manager'
-  const platform = navigator.platform.toLowerCase()
-  if (platform.includes('mac')) return 'Finder'
-  if (platform.includes('win')) return 'Explorer'
-  return 'File Manager'
+function displayNoteName(node: TreeNode): string {
+  if (node.kind === 'file' && node.name.toLowerCase().endsWith('.md')) {
+    return node.name.slice(0, -3)
+  }
+  return node.name
 }
 
 type RunListItem = {
@@ -203,19 +188,14 @@ type TasksActions = {
 type SidebarContentPanelProps = {
   tree: TreeNode[]
   selectedPath: string | null
-  expandedPaths: Set<string>
   onSelectFile: (path: string, kind: "file" | "dir") => void
-  onToggleFolder?: (path: string) => void
   knowledgeActions: KnowledgeActions
-  onVoiceNoteCreated?: (path: string) => void
   runs?: RunListItem[]
   currentRunId?: string | null
   processingRunIds?: Set<string>
   tasksActions?: TasksActions
   backgroundTasks?: BackgroundTaskItem[]
   selectedBackgroundTask?: string | null
-  onNewChat?: () => void
-  onOpenSearch?: () => void
   isSearchOpen?: boolean
   isBrowserOpen?: boolean
   onToggleBrowser?: () => void
@@ -223,18 +203,11 @@ type SidebarContentPanelProps = {
   onOpenSuggestedTopics?: () => void
   isMeetingsOpen?: boolean
   onOpenMeetings?: () => void
-  isLiveNotesOpen?: boolean
-  onOpenLiveNotes?: () => void
   isBgTasksOpen?: boolean
   onOpenBgTasks?: () => void
   isEmailOpen?: boolean
   onOpenEmail?: () => void
 } & React.ComponentProps<typeof Sidebar>
-
-const sectionTabs: { id: ActiveSection; label: string }[] = [
-  { id: "tasks", label: "Chat" },
-  { id: "knowledge", label: "Knowledge" },
-]
 
 function formatEventTime(ts: string): string {
   const date = new Date(ts)
@@ -464,19 +437,14 @@ function SyncStatusBar() {
 export function SidebarContentPanel({
   tree,
   selectedPath,
-  expandedPaths,
   onSelectFile,
-  onToggleFolder,
   knowledgeActions,
-  onVoiceNoteCreated,
   runs = [],
   currentRunId,
   processingRunIds,
   tasksActions,
   backgroundTasks = [],
   selectedBackgroundTask,
-  onNewChat,
-  onOpenSearch,
   isSearchOpen = false,
   isBrowserOpen = false,
   onToggleBrowser,
@@ -484,15 +452,12 @@ export function SidebarContentPanel({
   onOpenSuggestedTopics,
   isMeetingsOpen = false,
   onOpenMeetings,
-  isLiveNotesOpen = false,
-  onOpenLiveNotes,
   isBgTasksOpen = false,
   onOpenBgTasks,
   isEmailOpen = false,
   onOpenEmail,
   ...props
 }: SidebarContentPanelProps) {
-  const { activeSection, setActiveSection } = useSidebarSection()
   const [hasOauthError, setHasOauthError] = useState(false)
   const [showOauthAlert, setShowOauthAlert] = useState(true)
   const [connectorsOpen, setConnectorsOpen] = useState(false)
@@ -505,7 +470,6 @@ export function SidebarContentPanel({
   const isBrowserQuickActionSelected = isBrowserOpen && !isSearchOpen
   const isSuggestedTopicsQuickActionSelected = isSuggestedTopicsOpen && !isBrowserOpen
   const isMeetingsQuickActionSelected = isMeetingsOpen && !isBrowserOpen
-  const isLiveNotesQuickActionSelected = isLiveNotesOpen && !isBrowserOpen
   const isBgTasksQuickActionSelected = isBgTasksOpen && !isBrowserOpen
   const isEmailQuickActionSelected = isEmailOpen && !isBrowserOpen
 
@@ -570,97 +534,8 @@ export function SidebarContentPanel({
       <SidebarHeader className="titlebar-drag-region">
         {/* Top spacer to clear the traffic lights + fixed toggle row */}
         <div className="h-8" />
-        {/* Tab switcher - centered below the traffic lights row */}
-        <div className="flex items-center px-2 py-1.5">
-          <div className="rowboat-section-switcher titlebar-no-drag flex w-full rounded-lg bg-sidebar-accent/50 p-0.5">
-            {sectionTabs.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveSection(tab.id)}
-                className={cn(
-                  "flex-1 rounded-md px-3 py-1 text-sm font-medium transition-colors",
-                  activeSection === tab.id
-                    ? "bg-sidebar-accent text-sidebar-accent-foreground shadow-sm"
-                    : "text-sidebar-foreground/70 hover:text-sidebar-foreground"
-                )}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-        </div>
         {/* Quick action buttons */}
         <div className="rowboat-quick-actions titlebar-no-drag flex flex-col gap-0.5 px-2 pb-1">
-          {onNewChat && (
-            <button
-              type="button"
-              onClick={onNewChat}
-              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
-            >
-              <SquarePen className="size-4" />
-              <span>New chat</span>
-            </button>
-          )}
-          {onOpenSearch && (
-            <button
-              type="button"
-              onClick={onOpenSearch}
-              className={cn(
-                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
-                isSearchOpen
-                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                  : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-              )}
-            >
-              <SearchIcon className="size-4" />
-              <span>Search</span>
-            </button>
-          )}
-          {onToggleBrowser && (
-            <button
-              type="button"
-              onClick={onToggleBrowser}
-              className={cn(
-                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
-                isBrowserQuickActionSelected
-                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                  : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-              )}
-            >
-              <Globe className="size-4" />
-              <span>Run browser task</span>
-            </button>
-          )}
-          {onOpenSuggestedTopics && (
-            <button
-              type="button"
-              onClick={onOpenSuggestedTopics}
-              className={cn(
-                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
-                isSuggestedTopicsQuickActionSelected
-                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                  : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-              )}
-            >
-              <Lightbulb className="size-4" />
-              <span>Suggested Topics</span>
-            </button>
-          )}
-          {onOpenBgTasks && (
-            <button
-              type="button"
-              onClick={onOpenBgTasks}
-              className={cn(
-                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
-                isBgTasksQuickActionSelected
-                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                  : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-              )}
-            >
-              <ListChecks className="size-4" />
-              <span>Background tasks</span>
-            </button>
-          )}
           {onOpenEmail && (
             <button
               type="button"
@@ -691,45 +566,39 @@ export function SidebarContentPanel({
               <span>Meetings</span>
             </button>
           )}
-          {onOpenLiveNotes && (
+          {onOpenBgTasks && (
             <button
               type="button"
-              onClick={onOpenLiveNotes}
+              onClick={onOpenBgTasks}
               className={cn(
                 "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
-                isLiveNotesQuickActionSelected
+                isBgTasksQuickActionSelected
                   ? "bg-sidebar-accent text-sidebar-accent-foreground"
                   : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
               )}
             >
-              <Radio className="size-4" />
-              <span>Live notes</span>
+              <ListChecks className="size-4" />
+              <span>Agents</span>
             </button>
           )}
         </div>
       </SidebarHeader>
       <SidebarContent>
-        {activeSection === "knowledge" && (
-          <KnowledgeSection
-            tree={tree}
-            selectedPath={selectedPath}
-            expandedPaths={expandedPaths}
-            onSelectFile={onSelectFile}
-            onToggleFolder={onToggleFolder}
-            actions={knowledgeActions}
-            onVoiceNoteCreated={onVoiceNoteCreated}
-          />
-        )}
-        {activeSection === "tasks" && (
-          <TasksSection
-            runs={runs}
-            currentRunId={currentRunId}
-            processingRunIds={processingRunIds}
-            actions={tasksActions}
-            backgroundTasks={backgroundTasks}
-            selectedBackgroundTask={selectedBackgroundTask}
-          />
-        )}
+        <KnowledgeSection
+          tree={tree}
+          selectedPath={selectedPath}
+          onSelectFile={onSelectFile}
+          actions={knowledgeActions}
+        />
+        <WorkspaceSection tree={tree} actions={knowledgeActions} />
+        <TasksSection
+          runs={runs}
+          currentRunId={currentRunId}
+          processingRunIds={processingRunIds}
+          actions={tasksActions}
+          backgroundTasks={backgroundTasks}
+          selectedBackgroundTask={selectedBackgroundTask}
+        />
       </SidebarContent>
       {/* Billing / upgrade CTA or Log in CTA */}
       {isRowboatConnected && billing ? (
@@ -767,6 +636,43 @@ export function SidebarContentPanel({
           >
             {loggingIn ? 'Signing in…' : 'Sign in to Rowboat'}
           </button>
+        </div>
+      )}
+      {/* Secondary quick actions (above bottom divider) */}
+      {(onToggleBrowser || onOpenSuggestedTopics) && (
+        <div className="px-2 pb-1">
+          <div className="flex flex-col gap-0.5">
+            {onToggleBrowser && (
+              <button
+                type="button"
+                onClick={onToggleBrowser}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs transition-colors",
+                  isBrowserQuickActionSelected
+                    ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                    : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                )}
+              >
+                <Globe className="size-4" />
+                <span>Run browser task</span>
+              </button>
+            )}
+            {onOpenSuggestedTopics && (
+              <button
+                type="button"
+                onClick={onOpenSuggestedTopics}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs transition-colors",
+                  isSuggestedTopicsQuickActionSelected
+                    ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                    : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                )}
+              >
+                <Lightbulb className="size-4" />
+                <span>Suggested Topics</span>
+              </button>
+            )}
+          </div>
         </div>
       )}
       {/* Bottom actions */}
@@ -886,7 +792,7 @@ async function transcribeWithDeepgram(audioBlob: Blob): Promise<string | null> {
 }
 
 // Voice Note Recording Button
-function VoiceNoteButton({ onNoteCreated }: { onNoteCreated?: (path: string) => void }) {
+export function VoiceNoteButton({ onNoteCreated }: { onNoteCreated?: (path: string) => void }) {
   const [isRecording, setIsRecording] = React.useState(false)
   const [hasDeepgramKey, setHasDeepgramKey] = React.useState(false)
   const mediaRecorderRef = React.useRef<MediaRecorder | null>(null)
@@ -1102,163 +1008,69 @@ path: ${currentRelativePath}
 function KnowledgeSection({
   tree,
   selectedPath,
-  expandedPaths,
   onSelectFile,
-  onToggleFolder,
   actions,
-  onVoiceNoteCreated,
 }: {
   tree: TreeNode[]
   selectedPath: string | null
-  expandedPaths: Set<string>
   onSelectFile: (path: string, kind: "file" | "dir") => void
-  onToggleFolder?: (path: string) => void
   actions: KnowledgeActions
-  onVoiceNoteCreated?: (path: string) => void
 }) {
-  const isExpanded = expandedPaths.size > 0
-  const treeContainerRef = React.useRef<HTMLDivElement | null>(null)
-  const [selectedFolderPath, setSelectedFolderPath] = useState<string | null>(null)
-  const [renameTarget, setRenameTarget] = useState<string | null>(null)
   const visibleTree = React.useMemo(
-    () => tree.filter((item) => item.path !== 'knowledge/Meetings'),
+    () => tree.filter((item) => item.path !== 'knowledge/Meetings' && item.path !== 'knowledge/Workspace'),
     [tree],
   )
-
-  useEffect(() => {
-    if (!selectedPath) return
-
-    let cancelled = false
-    let rafId: number | null = null
-    let attempts = 0
-    const maxAttempts = 20
-
-    const revealActiveFile = () => {
-      if (cancelled) return
-      const container = treeContainerRef.current
-      if (!container) return
-      const activeRow = container.querySelector<HTMLElement>('[data-knowledge-active="true"]')
-      if (activeRow) {
-        activeRow.scrollIntoView({ block: "nearest", inline: "nearest" })
-        return
+  const recentNotes = React.useMemo<TreeNode[]>(() => {
+    const out: TreeNode[] = []
+    const walk = (nodes: TreeNode[]) => {
+      for (const n of nodes) {
+        if (n.kind === 'file') out.push(n)
+        else if (n.children?.length) walk(n.children)
       }
-      if (attempts >= maxAttempts) return
-      attempts += 1
-      rafId = requestAnimationFrame(revealActiveFile)
     }
-
-    rafId = requestAnimationFrame(revealActiveFile)
-    return () => {
-      cancelled = true
-      if (rafId !== null) cancelAnimationFrame(rafId)
-    }
-  }, [selectedPath, expandedPaths, visibleTree])
-
-  // Folder clicks highlight the folder; file clicks clear folder highlight
-  const handleSelect = React.useCallback((path: string, kind: "file" | "dir") => {
-    if (kind === 'dir') {
-      setSelectedFolderPath(path)
-    } else {
-      setSelectedFolderPath(null)
-    }
-    onSelectFile(path, kind)
-  }, [onSelectFile])
-
-  // Resolve the parent path for new items: explicit folder > open file's parent > root
-  const deriveParent = React.useCallback((): string => {
-    if (selectedFolderPath) return selectedFolderPath
-    if (selectedPath) {
-      const parts = selectedPath.split('/')
-      if (parts.length > 1) return parts.slice(0, -1).join('/')
-    }
-    return 'knowledge'
-  }, [selectedFolderPath, selectedPath])
-
-  // Wrap actions to inject context-aware parent and capture rename target
-  const wrappedActions = React.useMemo<KnowledgeActions>(() => ({
-    ...actions,
-    createNote: (parentPath?: string) => actions.createNote(parentPath ?? deriveParent()),
-    createFolder: async (parentPath?: string): Promise<string> => {
-      const newPath = await actions.createFolder(parentPath ?? deriveParent())
-      setRenameTarget(newPath)
-      return newPath
-    },
-  }), [actions, deriveParent])
-
-  const fileManagerName = getFileManagerName()
-  const quickActions = [
-    { icon: FilePlus, label: "New Note", action: () => wrappedActions.createNote() },
-    { icon: FolderPlus, label: "New Folder", action: () => void wrappedActions.createFolder() },
-    { icon: Network, label: "Graph View", action: () => actions.openGraph() },
-    { icon: Table2, label: "Bases", action: () => actions.openBases() },
-    { icon: FolderOpen, label: `Open in ${fileManagerName}`, action: () => actions.revealInFileManager('knowledge', true) },
-  ]
+    walk(visibleTree)
+    return out
+      .filter((n) => n.stat?.mtimeMs !== undefined)
+      .sort((a, b) => (b.stat?.mtimeMs ?? 0) - (a.stat?.mtimeMs ?? 0))
+      .slice(0, 3)
+  }, [visibleTree])
 
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <SidebarGroup className="flex-1 flex flex-col overflow-hidden">
-          <div className="flex items-center justify-center gap-1 py-1 sticky top-0 z-10 bg-sidebar border-b border-sidebar-border">
-            {quickActions.map((action) => (
-              <Tooltip key={action.label}>
-                <TooltipTrigger asChild>
-                  <button
-                    onClick={action.action}
-                    className="text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded p-1.5 transition-colors"
-                  >
-                    <action.icon className="size-4" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">{action.label}</TooltipContent>
-              </Tooltip>
-            ))}
-            <VoiceNoteButton onNoteCreated={onVoiceNoteCreated} />
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  onClick={isExpanded ? actions.collapseAll : actions.expandAll}
-                  className="text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded p-1.5 transition-colors"
-                >
-                  {isExpanded ? (
-                    <ChevronsDownUp className="size-4" />
-                  ) : (
-                    <ChevronsUpDown className="size-4" />
-                  )}
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">
-                {isExpanded ? "Collapse All" : "Expand All"}
-              </TooltipContent>
-            </Tooltip>
+        <SidebarGroup className="flex flex-col">
+          <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
+            Knowledge
           </div>
-          <SidebarGroupContent className="flex-1 overflow-y-auto">
-            <div ref={treeContainerRef}>
-              <SidebarMenu>
-                {visibleTree.map((item, index) => (
-                  <Tree
-                    key={index}
-                    item={item}
-                    selectedPath={selectedPath}
-                    expandedPaths={expandedPaths}
-                    onSelect={handleSelect}
-                    onToggleFolder={onToggleFolder}
-                    actions={wrappedActions}
-                    selectedFolderPath={selectedFolderPath}
-                    renameTarget={renameTarget}
-                    onRenameTargetConsumed={() => setRenameTarget(null)}
-                  />
-                ))}
-              </SidebarMenu>
-            </div>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {recentNotes.map((note) => (
+                <SidebarMenuItem key={note.path}>
+                  <SidebarMenuButton
+                    isActive={selectedPath === note.path}
+                    onClick={() => onSelectFile(note.path, 'file')}
+                  >
+                    <FileText className="size-4 shrink-0" />
+                    <span className="truncate">{displayNoteName(note)}</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+              <SidebarMenuItem>
+                <SidebarMenuButton onClick={() => actions.openKnowledgeView()}>
+                  <ArrowUpRight className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="text-muted-foreground">View all</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-48">
-        <ContextMenuItem onClick={() => wrappedActions.createNote()}>
+        <ContextMenuItem onClick={() => actions.createNote()}>
           <FilePlus className="mr-2 size-4" />
           New Note
         </ContextMenuItem>
-        <ContextMenuItem onClick={() => void wrappedActions.createFolder()}>
+        <ContextMenuItem onClick={() => void actions.createFolder()}>
           <FolderPlus className="mr-2 size-4" />
           New Folder
         </ContextMenuItem>
@@ -1267,317 +1079,49 @@ function KnowledgeSection({
   )
 }
 
-function countFiles(node: TreeNode): number {
-  if (node.kind === 'file') return 1
-  return (node.children ?? []).reduce((sum, child) => sum + countFiles(child), 0)
-}
-
-/** Display name overrides for top-level knowledge folders */
-const FOLDER_DISPLAY_NAMES: Record<string, string> = {}
-
-// Tree component for file browser
-function Tree({
-  item,
-  selectedPath,
-  expandedPaths,
-  onSelect,
-  onToggleFolder,
+export function WorkspaceSection({
+  tree,
   actions,
-  selectedFolderPath,
-  renameTarget,
-  onRenameTargetConsumed,
 }: {
-  item: TreeNode
-  selectedPath: string | null
-  expandedPaths: Set<string>
-  onSelect: (path: string, kind: "file" | "dir") => void
-  onToggleFolder?: (path: string) => void
+  tree: TreeNode[]
   actions: KnowledgeActions
-  selectedFolderPath?: string | null
-  renameTarget?: string | null
-  onRenameTargetConsumed?: () => void
 }) {
-  const isDir = item.kind === 'dir'
-  const isExpanded = expandedPaths.has(item.path)
-  const isSelected = selectedPath === item.path
-  const isFolderSelected = isDir && selectedFolderPath === item.path
-  const [isRenaming, setIsRenaming] = useState(false)
-  const isSubmittingRef = React.useRef(false)
-  const displayName = (isDir && FOLDER_DISPLAY_NAMES[item.name]) || item.name
-
-  // For files, strip .md extension for editing
-  const baseName = !isDir && item.name.endsWith('.md')
-    ? item.name.slice(0, -3)
-    : item.name
-  const [newName, setNewName] = useState(baseName)
-
-  // Auto-enter rename mode when this node is the rename target
-  React.useEffect(() => {
-    if (renameTarget === item.path) {
-      setNewName(baseName)
-      isSubmittingRef.current = false
-      setIsRenaming(true)
-      onRenameTargetConsumed?.()
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [renameTarget, item.path])
-
-  // Sync newName when baseName changes (e.g., after external rename)
-  React.useEffect(() => {
-    setNewName(baseName)
-  }, [baseName])
-
-  const handleRename = async () => {
-    // Prevent double submission
-    if (isSubmittingRef.current) return
-    isSubmittingRef.current = true
-
-    const trimmedName = newName.trim()
-    if (trimmedName && trimmedName !== baseName) {
-      try {
-        await actions.rename(item.path, trimmedName, isDir)
-        toast('Renamed successfully', 'success')
-      } catch {
-        toast('Failed to rename', 'error')
-      }
-    }
-    setIsRenaming(false)
-    // Reset after a small delay to prevent blur from re-triggering
-    setTimeout(() => {
-      isSubmittingRef.current = false
-    }, 100)
-  }
-
-  const handleDelete = async () => {
-    try {
-      await actions.remove(item.path)
-      toast('Moved to trash', 'success')
-    } catch {
-      toast('Failed to delete', 'error')
-    }
-  }
-
-  const handleCopyPath = () => {
-    actions.copyPath(item.path)
-    toast('Path copied', 'success')
-  }
-
-  const cancelRename = () => {
-    isSubmittingRef.current = true // Prevent blur from triggering rename
-    setIsRenaming(false)
-    setNewName(baseName) // Reset to original name
-    setTimeout(() => {
-      isSubmittingRef.current = false
-    }, 100)
-  }
-
-  const contextMenuContent = (
-    <ContextMenuContent className="w-48">
-      {isDir && (
-        <>
-          <ContextMenuItem onClick={() => actions.createNote(item.path)}>
-            <FilePlus className="mr-2 size-4" />
-            New Note
-          </ContextMenuItem>
-          <ContextMenuItem onClick={() => actions.createFolder(item.path)}>
-            <FolderPlus className="mr-2 size-4" />
-            New Folder
-          </ContextMenuItem>
-          <ContextMenuSeparator />
-        </>
-      )}
-      {!isDir && actions.onOpenInNewTab && (
-        <>
-          <ContextMenuItem onClick={() => actions.onOpenInNewTab!(item.path)}>
-            <ExternalLink className="mr-2 size-4" />
-            Open in new tab
-          </ContextMenuItem>
-          <ContextMenuSeparator />
-        </>
-      )}
-      <ContextMenuItem onClick={handleCopyPath}>
-        <Copy className="mr-2 size-4" />
-        Copy Path
-      </ContextMenuItem>
-      <ContextMenuItem onClick={() => actions.revealInFileManager(item.path, isDir)}>
-        <FolderOpen className="mr-2 size-4" />
-        Open in {getFileManagerName()}
-      </ContextMenuItem>
-      <ContextMenuSeparator />
-      <ContextMenuItem onClick={() => { setNewName(baseName); isSubmittingRef.current = false; setIsRenaming(true) }}>
-        <Pencil className="mr-2 size-4" />
-        Rename
-      </ContextMenuItem>
-      <ContextMenuItem variant="destructive" onClick={handleDelete}>
-        <Trash2 className="mr-2 size-4" />
-        Delete
-      </ContextMenuItem>
-    </ContextMenuContent>
-  )
-
-  // Inline rename input
-  if (isRenaming) {
-    return (
-      <SidebarMenuItem>
-        <div className="flex items-center px-2 py-1">
-          <Input
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            onKeyDown={async (e) => {
-              e.stopPropagation()
-              if (e.key === 'Enter') {
-                e.preventDefault()
-                await handleRename()
-              } else if (e.key === 'Escape') {
-                e.preventDefault()
-                cancelRename()
-              }
-            }}
-            onBlur={() => {
-              // Only trigger rename if not already submitting
-              if (!isSubmittingRef.current) {
-                handleRename()
-              }
-            }}
-            className="h-6 text-sm flex-1"
-            autoFocus
-          />
-        </div>
-      </SidebarMenuItem>
-    )
-  }
-
-  // Top-level knowledge folders open bases view — render as flat items
-  const parts = item.path.split('/')
-  const isBasesFolder = isDir && parts.length === 2 && parts[0] === 'knowledge'
-
-  if (isBasesFolder) {
-    return (
-      <ContextMenu>
-        <ContextMenuTrigger asChild>
-          <SidebarMenuItem className="group/file-item">
-            <SidebarMenuButton isActive={isFolderSelected} onClick={() => onSelect(item.path, item.kind)}>
-              <Folder className="size-4 shrink-0" />
-              <div className="flex w-full items-center gap-1 min-w-0">
-                <span className="min-w-0 flex-1 truncate">{displayName}</span>
-                <span className="text-xs text-sidebar-foreground/50 tabular-nums shrink-0">{countFiles(item)}</span>
-              </div>
-            </SidebarMenuButton>
-            {onToggleFolder && (item.children?.length ?? 0) > 0 && (
-              <SidebarMenuAction
-                showOnHover
-                aria-label={isExpanded ? "Collapse folder" : "Expand folder"}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onToggleFolder(item.path)
-                }}
-              >
-                <ChevronRight
-                  className={cn(
-                    "transition-transform",
-                    isExpanded && "rotate-90",
-                  )}
-                />
-              </SidebarMenuAction>
-            )}
-            {isExpanded && (
-              <SidebarMenuSub>
-                {(item.children ?? []).map((subItem, index) => (
-                  <Tree
-                    key={index}
-                    item={subItem}
-                    selectedPath={selectedPath}
-                    expandedPaths={expandedPaths}
-                    onSelect={onSelect}
-                    onToggleFolder={onToggleFolder}
-                    actions={actions}
-                    selectedFolderPath={selectedFolderPath}
-                    renameTarget={renameTarget}
-                    onRenameTargetConsumed={onRenameTargetConsumed}
-                  />
-                ))}
-              </SidebarMenuSub>
-            )}
-          </SidebarMenuItem>
-        </ContextMenuTrigger>
-        {contextMenuContent}
-      </ContextMenu>
-    )
-  }
-
-  if (!isDir) {
-    return (
-      <ContextMenu>
-        <ContextMenuTrigger asChild>
-          <SidebarMenuItem
-            className="group/file-item"
-            data-knowledge-file-path={item.path}
-            data-knowledge-active={isSelected ? "true" : "false"}
-          >
-            <SidebarMenuButton
-              isActive={isSelected}
-              onClick={(e) => {
-                if (e.metaKey && actions.onOpenInNewTab) {
-                  actions.onOpenInNewTab(item.path)
-                } else {
-                  onSelect(item.path, item.kind)
-                }
-              }}
-            >
-              <div className="flex w-full items-center gap-1 min-w-0">
-                <span className="min-w-0 flex-1 truncate">{item.name}</span>
-              </div>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </ContextMenuTrigger>
-        {contextMenuContent}
-      </ContextMenu>
-    )
-  }
+  const recentWorkspaces = React.useMemo<TreeNode[]>(() => {
+    const root = tree.find((item) => item.path === 'knowledge/Workspace')
+    const children = root?.children ?? []
+    return [...children]
+      .filter((c) => c.kind === 'dir')
+      .sort((a, b) => (b.stat?.mtimeMs ?? 0) - (a.stat?.mtimeMs ?? 0))
+      .slice(0, 3)
+  }, [tree])
 
   return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>
-        <SidebarMenuItem>
-          <Collapsible
-            open={isExpanded}
-            onOpenChange={() => onSelect(item.path, item.kind)}
-            className="group/collapsible [&[data-state=open]>button>svg:first-child]:rotate-90"
-          >
-            <CollapsibleTrigger asChild>
-              <SidebarMenuButton isActive={isFolderSelected}>
-                <ChevronRight className="transition-transform size-4" />
-                <div className="flex w-full items-center gap-1 min-w-0">
-                  <span className="min-w-0 flex-1 truncate">{displayName}</span>
-                  <span className="text-xs text-sidebar-foreground/50 tabular-nums shrink-0">{countFiles(item)}</span>
-                </div>
+    <SidebarGroup className="flex flex-col">
+      <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
+        Workspace
+      </div>
+      <SidebarGroupContent>
+        <SidebarMenu>
+          {recentWorkspaces.map((ws) => (
+            <SidebarMenuItem key={ws.path}>
+              <SidebarMenuButton onClick={() => actions.openWorkspaceAt(ws.path)}>
+                <Folder className="size-4 shrink-0" />
+                <span className="truncate">{ws.name}</span>
               </SidebarMenuButton>
-            </CollapsibleTrigger>
-            <CollapsibleContent>
-              <SidebarMenuSub>
-                {(item.children ?? []).map((subItem, index) => (
-                  <Tree
-                    key={index}
-                    item={subItem}
-                    selectedPath={selectedPath}
-                    expandedPaths={expandedPaths}
-                    onSelect={onSelect}
-                    onToggleFolder={onToggleFolder}
-                    actions={actions}
-                    selectedFolderPath={selectedFolderPath}
-                    renameTarget={renameTarget}
-                    onRenameTargetConsumed={onRenameTargetConsumed}
-                  />
-                ))}
-              </SidebarMenuSub>
-            </CollapsibleContent>
-          </Collapsible>
-        </SidebarMenuItem>
-      </ContextMenuTrigger>
-      {contextMenuContent}
-    </ContextMenu>
+            </SidebarMenuItem>
+          ))}
+          <SidebarMenuItem>
+            <SidebarMenuButton onClick={() => actions.openWorkspaceAt()}>
+              <ArrowUpRight className="size-4 shrink-0 text-muted-foreground" />
+              <span className="text-muted-foreground">View all</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarGroupContent>
+    </SidebarGroup>
   )
 }
+
 
 // Get status indicator color
 function getStatusColor(status?: string, enabled?: boolean): string {
@@ -1619,8 +1163,8 @@ function TasksSection({
   const [pendingDeleteRunId, setPendingDeleteRunId] = useState<string | null>(null)
 
   return (
-    <SidebarGroup className="flex-1 flex flex-col overflow-hidden">
-      <SidebarGroupContent className="flex-1 overflow-y-auto">
+    <SidebarGroup className="flex flex-col">
+      <SidebarGroupContent>
         {/* Background Tasks Section */}
         {backgroundTasks.length > 0 && (
           <>
