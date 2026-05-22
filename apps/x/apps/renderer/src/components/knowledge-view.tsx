@@ -119,7 +119,9 @@ export function KnowledgeView({
 
   const rows = useMemo<FlatRow[]>(() => {
     const out: FlatRow[] = []
-    flatten(tree, expanded, 0, out)
+    // Meetings and Workspace have dedicated destinations, so hide them here.
+    const visible = tree.filter((n) => n.path !== 'knowledge/Meetings' && n.path !== 'knowledge/Workspace')
+    flatten(visible, expanded, 0, out)
     return out
   }, [tree, expanded])
 
@@ -154,7 +156,12 @@ export function KnowledgeView({
           </button>
           <button
             type="button"
-            onClick={() => void actions.createFolder()}
+            onClick={async () => {
+              try {
+                const path = await actions.createFolder()
+                setRenameTarget(path)
+              } catch { /* ignore */ }
+            }}
             className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-accent"
           >
             <FolderPlus className="size-4" />
@@ -359,7 +366,7 @@ function KnowledgeRow({
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
-      <ContextMenuContent className="w-48">
+      <ContextMenuContent className="w-48" onCloseAutoFocus={(e) => e.preventDefault()}>
         {isDir && (
           <>
             <ContextMenuItem onClick={() => actions.createNote(node.path)}>

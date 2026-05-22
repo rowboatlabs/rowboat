@@ -1,4 +1,4 @@
-import { ArrowUpRight, Bot, Mail, MessageSquare, NotebookPen, Sparkles } from 'lucide-react'
+import { ArrowUpRight, Bot, Mail, MessageSquare, Sparkles, Telescope } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
 import { formatRelativeTime } from '@/lib/relative-time'
@@ -21,8 +21,8 @@ interface ChatEmptyStateProps {
 
 const SUGGESTED_ACTIONS: { icon: typeof Mail; title: string; sub: string; prompt: string }[] = [
   { icon: Mail, title: 'Draft a reply', sub: 'to an email', prompt: "Let's draft a reply to [name]'s email" },
-  { icon: Bot, title: 'Set up a background agent', sub: 'that summarizes my inbox', prompt: 'Set up a background agent that summarizes my inbox each morning' },
-  { icon: NotebookPen, title: 'Take notes', sub: 'while I work', prompt: 'Take notes while I work' },
+  { icon: Bot, title: 'Set up a background agent', sub: 'that automates tasks', prompt: 'Set up a background agent that automates [task]' },
+  { icon: Telescope, title: 'Research a topic', sub: 'create a local wiki for me', prompt: 'Research [topic] and create a local wiki for me' },
 ]
 
 /**

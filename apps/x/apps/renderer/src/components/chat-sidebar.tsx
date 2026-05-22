@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Maximize2, Minimize2 } from 'lucide-react'
+import { ArrowRight, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -178,6 +178,7 @@ interface ChatSidebarProps {
   onSelectRun?: (runId: string) => void
   onOpenChatHistory?: () => void
   onOpenFullScreen?: () => void
+  onCloseChat?: () => void
   conversation: ConversationItem[]
   currentAssistantMessage: string
   chatTabStates?: Record<string, ChatTabViewState>
@@ -233,6 +234,7 @@ export function ChatSidebar({
   onSelectRun,
   onOpenChatHistory,
   onOpenFullScreen,
+  onCloseChat,
   conversation,
   currentAssistantMessage,
   chatTabStates = {},
@@ -573,23 +575,40 @@ export function ChatSidebar({
               onSelectRun={onSelectRun}
               onOpenChatHistory={onOpenChatHistory}
             />
-            {onOpenFullScreen && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={onOpenFullScreen}
-                    className="titlebar-no-drag my-1 mr-2 h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
-                    aria-label={isMaximized ? 'Restore two-pane view' : 'Maximize chat view'}
-                  >
-                    {isMaximized ? <Minimize2 className="size-5" /> : <Maximize2 className="size-5" />}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">
-                  {isMaximized ? 'Restore two-pane view' : 'Maximize chat view'}
-                </TooltipContent>
-              </Tooltip>
+            {isMaximized ? (
+              onOpenFullScreen && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={onOpenFullScreen}
+                      className="titlebar-no-drag my-1 mr-2 h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+                      aria-label="Dock chat to side pane"
+                    >
+                      <ArrowRight className="size-5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">Dock to side pane</TooltipContent>
+                </Tooltip>
+              )
+            ) : (
+              onCloseChat && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={onCloseChat}
+                      className="titlebar-no-drag my-1 mr-2 h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+                      aria-label="Close chat"
+                    >
+                      <X className="size-5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">Close chat</TooltipContent>
+                </Tooltip>
+              )
             )}
           </header>
 

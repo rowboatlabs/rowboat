@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Bold, Forward, Italic, Link as LinkIcon, List, ListOrdered, LoaderIcon, Paperclip, Quote, RefreshCw, Reply, Search, Send, Sparkles, Strikethrough } from 'lucide-react'
+import { Bold, Forward, Italic, Link as LinkIcon, List, ListOrdered, LoaderIcon, Mail, Paperclip, Quote, RefreshCw, Reply, Search, Send, Sparkles, Strikethrough } from 'lucide-react'
 import { useEditor, EditorContent, type Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
@@ -8,6 +8,7 @@ import type { blocks } from '@x/shared'
 import { cn } from '@/lib/utils'
 import { toast } from '@/lib/toast'
 import { useTheme } from '@/contexts/theme-context'
+import { SettingsDialog } from '@/components/settings-dialog'
 
 type GmailThread = blocks.GmailThread
 type GmailThreadMessage = blocks.GmailThreadMessage
@@ -842,6 +843,24 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
   const [refreshing, setRefreshing] = useState(!hadPersistedDataOnMount.current)
   const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
+  // Gmail connection status — null while checking, false shows the connect prompt.
+  const [emailConnected, setEmailConnected] = useState<boolean | null>(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    const check = async () => {
+      try {
+        const result = await window.ipc.invoke('composio:get-connection-status', { toolkitSlug: 'gmail' })
+        if (!cancelled) setEmailConnected(result.isConnected)
+      } catch {
+        if (!cancelled) setEmailConnected(false)
+      }
+    }
+    void check()
+    const cleanup = window.ipc.on('oauth:didConnect', () => { void check() })
+    return () => { cancelled = true; cleanup() }
+  }, [])
 
   useEffect(() => { persistedImportant = important }, [important])
   useEffect(() => { persistedOther = other }, [other])
@@ -1201,12 +1220,26 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
               </section>
             )}
           </div>
+        ) : emailConnected === false ? (
+          <div className="gmail-empty-state flex flex-col items-center gap-3 py-16 text-center">
+            <Mail size={28} className="opacity-50" />
+            <p>Connect your email to see your inbox here.</p>
+            <button
+              type="button"
+              onClick={() => setSettingsOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3.5 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-accent"
+            >
+              <Mail size={15} />
+              Connect your email
+            </button>
+          </div>
         ) : (
           <div className="gmail-empty-state">
             {initialLoading ? 'Loading Gmail threads…' : 'No Gmail threads in your inbox cache yet.'}
           </div>
         )}
       </div>
+      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} defaultTab="connections" />
     </div>
   )
 }
