@@ -5,10 +5,12 @@ import { RunEvent, ListRunsResponse } from '@x/shared/src/runs.js';
 import type { LanguageModelUsage, ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
-import { CheckIcon, LoaderIcon, PanelLeftIcon, Maximize2, Minimize2, ChevronLeftIcon, ChevronRightIcon, SquarePen, HistoryIcon } from 'lucide-react';
+import { CheckIcon, LoaderIcon, PanelLeftIcon, Maximize2, Minimize2, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MarkdownEditor, type MarkdownEditorHandle } from './components/markdown-editor';
 import { ChatSidebar } from './components/chat-sidebar';
+import { ChatHeader } from './components/chat-header';
+import { ChatEmptyState } from './components/chat-empty-state';
 import { ChatInputWithMentions, type StagedAttachment } from './components/chat-input-with-mentions';
 import { ChatMessageAttachments } from '@/components/chat-message-attachments'
 import { GraphView, type GraphEdge, type GraphNode } from '@/components/graph-view';
@@ -28,12 +30,12 @@ import { EmailView } from '@/components/email-view';
 import { WorkspaceView } from '@/components/workspace-view';
 import { KnowledgeView } from '@/components/knowledge-view';
 import { ChatHistoryView } from '@/components/chat-history-view';
+import { HomeView } from '@/components/home-view';
 import { MeetingsView } from '@/components/meetings-view';
 import { SidebarSectionProvider } from '@/contexts/sidebar-context';
 import {
   Conversation,
   ConversationContent,
-  ConversationEmptyState,
   ConversationScrollButton,
 } from '@/components/ai-elements/conversation';
 import {
@@ -55,7 +57,6 @@ import { ComposioConnectCard } from '@/components/ai-elements/composio-connect-c
 import { PermissionRequest } from '@/components/ai-elements/permission-request';
 import { TerminalOutput } from '@/components/terminal-output';
 import { AskHumanRequest } from '@/components/ai-elements/ask-human-request';
-import { Suggestions } from '@/components/ai-elements/suggestions';
 import { ToolPermissionRequestEvent, AskHumanRequestEvent } from '@x/shared/src/runs.js';
 import {
   SidebarInset,
@@ -189,6 +190,7 @@ const WORKSPACE_TAB_PATH = '__rowboat_workspace__'
 const WORKSPACE_ROOT = 'knowledge/Workspace'
 const KNOWLEDGE_VIEW_TAB_PATH = '__rowboat_knowledge_view__'
 const CHAT_HISTORY_TAB_PATH = '__rowboat_chat_history__'
+const HOME_TAB_PATH = '__rowboat_home__'
 const BASES_DEFAULT_TAB_PATH = '__rowboat_bases_default__'
 
 const clampNumber = (value: number, min: number, max: number) =>
@@ -325,6 +327,7 @@ const isEmailTabPath = (path: string) => path === EMAIL_TAB_PATH
 const isWorkspaceTabPath = (path: string) => path === WORKSPACE_TAB_PATH
 const isKnowledgeViewTabPath = (path: string) => path === KNOWLEDGE_VIEW_TAB_PATH
 const isChatHistoryTabPath = (path: string) => path === CHAT_HISTORY_TAB_PATH
+const isHomeTabPath = (path: string) => path === HOME_TAB_PATH
 const isBaseFilePath = (path: string) => path.endsWith('.base') || path === BASES_DEFAULT_TAB_PATH
 
 const getSuggestedTopicTargetFolder = (category?: string) => {
@@ -578,6 +581,7 @@ type ViewState =
   | { type: 'workspace'; path?: string }
   | { type: 'knowledge-view' }
   | { type: 'chat-history' }
+  | { type: 'home' }
 
 function viewStatesEqual(a: ViewState, b: ViewState): boolean {
   if (a.type !== b.type) return false
@@ -636,6 +640,8 @@ function parseDeepLink(input: string): ViewState | null {
       return { type: 'knowledge-view' }
     case 'chat-history':
       return { type: 'chat-history' }
+    case 'home':
+      return { type: 'home' }
     default:
       return null
   }
@@ -749,6 +755,7 @@ function App() {
   const [workspaceInitialPath, setWorkspaceInitialPath] = useState<string | null>(null)
   const [isKnowledgeViewOpen, setIsKnowledgeViewOpen] = useState(false)
   const [isChatHistoryOpen, setIsChatHistoryOpen] = useState(false)
+  const [isHomeOpen, setIsHomeOpen] = useState(false)
   const [emailInitialThreadId, setEmailInitialThreadId] = useState<string | null>(null)
   const [emailThreadIdVersion, setEmailThreadIdVersion] = useState(0)
   const [expandedFrom, setExpandedFrom] = useState<{
@@ -989,13 +996,13 @@ function App() {
 
   // Chat tab state
   const [chatTabs, setChatTabs] = useState<ChatTab[]>([{ id: 'default-chat-tab', runId: null }])
+  const chatTabsRef = useRef(chatTabs)
+  chatTabsRef.current = chatTabs
   const [activeChatTabId, setActiveChatTabId] = useState('default-chat-tab')
   const [chatViewStateByTab, setChatViewStateByTab] = useState<Record<string, ChatTabViewState>>({
     'default-chat-tab': createEmptyChatTabViewState(),
   })
   const chatViewStateByTabRef = useRef(chatViewStateByTab)
-  const chatTabIdCounterRef = useRef(0)
-  const newChatTabId = () => `chat-tab-${++chatTabIdCounterRef.current}`
   const chatDraftsRef = useRef(new Map<string, string>())
   const selectedModelByTabRef = useRef(new Map<string, { provider: string; model: string }>())
   const chatScrollTopByTabRef = useRef(new Map<string, number>())
@@ -1090,6 +1097,7 @@ function App() {
     if (isWorkspaceTabPath(tab.path)) return 'Workspace'
     if (isKnowledgeViewTabPath(tab.path)) return 'Notes'
     if (isChatHistoryTabPath(tab.path)) return 'Chat history'
+    if (isHomeTabPath(tab.path)) return 'Home'
     if (tab.path === BASES_DEFAULT_TAB_PATH) return 'Bases'
     if (tab.path.endsWith('.base')) return tab.path.split('/').pop()?.replace(/\.base$/i, '') || 'Base'
     return tab.path.split('/').pop()?.replace(/\.md$/i, '') || tab.path
@@ -1737,6 +1745,7 @@ function App() {
     createdAt: string
     lastAttemptAt?: string
     lastRunAt?: string
+    lastRunError?: string
   }>>([])
   const [bgTaskInitialSlug, setBgTaskInitialSlug] = useState<string | null>(null)
   const [bgTaskSlugVersion, setBgTaskSlugVersion] = useState(0)
@@ -1751,6 +1760,7 @@ function App() {
         createdAt: it.createdAt,
         lastAttemptAt: it.lastAttemptAt,
         lastRunAt: it.lastRunAt,
+        lastRunError: it.lastRunError,
       })))
     } catch (err) {
       console.error('Failed to load bg-task summaries:', err)
@@ -2677,25 +2687,6 @@ function App() {
     return true
   }, [])
 
-  const openChatInNewTab = useCallback((targetRunId: string) => {
-    cancelRecordingIfActive()
-    const existingTab = chatTabs.find(t => t.runId === targetRunId)
-    if (existingTab) {
-      // Cancel stale in-flight loads from previously focused tabs.
-      loadRunRequestIdRef.current += 1
-      setActiveChatTabId(existingTab.id)
-      const restored = restoreChatTabState(existingTab.id, existingTab.runId)
-      if (processingRunIdsRef.current.has(targetRunId) || !restored) {
-        loadRun(targetRunId)
-      }
-      return
-    }
-    const id = newChatTabId()
-    setChatTabs(prev => [...prev, { id, runId: targetRunId }])
-    setActiveChatTabId(id)
-    loadRun(targetRunId)
-  }, [chatTabs, loadRun, restoreChatTabState, cancelRecordingIfActive])
-
   const switchChatTab = useCallback((tabId: string) => {
     const tab = chatTabs.find(t => t.id === tabId)
     if (!tab) return
@@ -2840,7 +2831,7 @@ function App() {
       setActiveFileTabId(existingTab.id)
       setIsGraphOpen(false)
       setIsSuggestedTopicsOpen(false)
-      setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false)
+      setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false)
       setSelectedPath(path)
       return
     }
@@ -2849,7 +2840,7 @@ function App() {
     setActiveFileTabId(id)
     setIsGraphOpen(false)
     setIsSuggestedTopicsOpen(false)
-    setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false)
+    setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false)
     setSelectedPath(path)
   }, [fileTabs, dismissBrowserOverlay])
 
@@ -2868,14 +2859,14 @@ function App() {
       setSelectedPath(null)
       setIsGraphOpen(true)
       setIsSuggestedTopicsOpen(false)
-      setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false)
+      setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false)
       return
     }
     if (isSuggestedTopicsTabPath(tab.path)) {
       setSelectedPath(null)
       setIsGraphOpen(false)
       setIsSuggestedTopicsOpen(true)
-      setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false)
+      setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false)
       return
     }
     if (isLiveNotesTabPath(tab.path)) {
@@ -2888,6 +2879,7 @@ function App() {
       setIsWorkspaceOpen(false)
       setIsKnowledgeViewOpen(false)
       setIsChatHistoryOpen(false)
+      setIsHomeOpen(false)
       setIsLiveNotesOpen(true)
       return
     }
@@ -2901,6 +2893,7 @@ function App() {
       setIsWorkspaceOpen(false)
       setIsKnowledgeViewOpen(false)
       setIsChatHistoryOpen(false)
+      setIsHomeOpen(false)
       setIsBgTasksOpen(true)
       return
     }
@@ -2915,6 +2908,7 @@ function App() {
       setIsWorkspaceOpen(false)
       setIsKnowledgeViewOpen(false)
       setIsChatHistoryOpen(false)
+      setIsHomeOpen(false)
       return
     }
     if (isEmailTabPath(tab.path)) {
@@ -2927,6 +2921,7 @@ function App() {
       setIsWorkspaceOpen(false)
       setIsKnowledgeViewOpen(false)
       setIsChatHistoryOpen(false)
+      setIsHomeOpen(false)
       setIsEmailOpen(true)
       return
     }
@@ -2940,6 +2935,7 @@ function App() {
       setIsEmailOpen(false)
       setIsKnowledgeViewOpen(false)
       setIsChatHistoryOpen(false)
+      setIsHomeOpen(false)
       setIsWorkspaceOpen(true)
       return
     }
@@ -2953,6 +2949,7 @@ function App() {
       setIsEmailOpen(false)
       setIsWorkspaceOpen(false)
       setIsChatHistoryOpen(false)
+      setIsHomeOpen(false)
       setIsKnowledgeViewOpen(true)
       return
     }
@@ -2966,18 +2963,26 @@ function App() {
       setIsEmailOpen(false)
       setIsWorkspaceOpen(false)
       setIsKnowledgeViewOpen(false)
-      setIsChatHistoryOpen(true)
+      setIsChatHistoryOpen(true); setIsHomeOpen(false)
+      return
+    }
+    if (isHomeTabPath(tab.path)) {
+      setSelectedPath(null)
+      setIsGraphOpen(false)
+      setIsSuggestedTopicsOpen(false)
+      setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false)
+      setIsHomeOpen(true)
       return
     }
     setIsGraphOpen(false)
     setIsSuggestedTopicsOpen(false)
-    setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false)
+    setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false)
     setSelectedPath(tab.path)
   }, [fileTabs, isRightPaneMaximized, dismissBrowserOverlay])
 
   const closeFileTab = useCallback((tabId: string) => {
     const closingTab = fileTabs.find(t => t.id === tabId)
-    if (closingTab && !isGraphTabPath(closingTab.path) && !isSuggestedTopicsTabPath(closingTab.path) && !isLiveNotesTabPath(closingTab.path) && !isBgTasksTabPath(closingTab.path) && !isEmailTabPath(closingTab.path) && !isWorkspaceTabPath(closingTab.path) && !isKnowledgeViewTabPath(closingTab.path) && !isChatHistoryTabPath(closingTab.path) && !isBaseFilePath(closingTab.path)) {
+    if (closingTab && !isGraphTabPath(closingTab.path) && !isSuggestedTopicsTabPath(closingTab.path) && !isLiveNotesTabPath(closingTab.path) && !isBgTasksTabPath(closingTab.path) && !isEmailTabPath(closingTab.path) && !isWorkspaceTabPath(closingTab.path) && !isKnowledgeViewTabPath(closingTab.path) && !isChatHistoryTabPath(closingTab.path) && !isHomeTabPath(closingTab.path) && !isBaseFilePath(closingTab.path)) {
       removeEditorCacheForPath(closingTab.path)
       initialContentByPathRef.current.delete(closingTab.path)
       untitledRenameReadyPathsRef.current.delete(closingTab.path)
@@ -3000,7 +3005,7 @@ function App() {
         setSelectedPath(null)
         setIsGraphOpen(false)
         setIsSuggestedTopicsOpen(false)
-        setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false)
+        setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false)
           return []
       }
       const idx = prev.findIndex(t => t.id === tabId)
@@ -3014,12 +3019,12 @@ function App() {
           setSelectedPath(null)
           setIsGraphOpen(true)
           setIsSuggestedTopicsOpen(false)
-          setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false)
+          setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false)
         } else if (isSuggestedTopicsTabPath(newActiveTab.path)) {
           setSelectedPath(null)
           setIsGraphOpen(false)
           setIsSuggestedTopicsOpen(true)
-          setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false)
+          setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false)
         } else if (isMeetingsTabPath(newActiveTab.path)) {
           setSelectedPath(null)
           setIsGraphOpen(false)
@@ -3031,6 +3036,7 @@ function App() {
           setIsWorkspaceOpen(false)
           setIsKnowledgeViewOpen(false)
           setIsChatHistoryOpen(false)
+      setIsHomeOpen(false)
         } else if (isLiveNotesTabPath(newActiveTab.path)) {
           setSelectedPath(null)
           setIsGraphOpen(false)
@@ -3041,6 +3047,7 @@ function App() {
           setIsWorkspaceOpen(false)
           setIsKnowledgeViewOpen(false)
           setIsChatHistoryOpen(false)
+      setIsHomeOpen(false)
           setIsLiveNotesOpen(true)
         } else if (isBgTasksTabPath(newActiveTab.path)) {
           setSelectedPath(null)
@@ -3053,6 +3060,7 @@ function App() {
           setIsWorkspaceOpen(false)
           setIsKnowledgeViewOpen(false)
           setIsChatHistoryOpen(false)
+      setIsHomeOpen(false)
         } else if (isEmailTabPath(newActiveTab.path)) {
           setSelectedPath(null)
           setIsGraphOpen(false)
@@ -3063,6 +3071,7 @@ function App() {
           setIsWorkspaceOpen(false)
           setIsKnowledgeViewOpen(false)
           setIsChatHistoryOpen(false)
+      setIsHomeOpen(false)
           setIsEmailOpen(true)
         } else if (isWorkspaceTabPath(newActiveTab.path)) {
           setSelectedPath(null)
@@ -3074,6 +3083,7 @@ function App() {
           setIsEmailOpen(false)
           setIsKnowledgeViewOpen(false)
           setIsChatHistoryOpen(false)
+      setIsHomeOpen(false)
           setIsWorkspaceOpen(true)
         } else if (isKnowledgeViewTabPath(newActiveTab.path)) {
           setSelectedPath(null)
@@ -3085,6 +3095,7 @@ function App() {
           setIsEmailOpen(false)
           setIsWorkspaceOpen(false)
           setIsChatHistoryOpen(false)
+      setIsHomeOpen(false)
           setIsKnowledgeViewOpen(true)
         } else if (isChatHistoryTabPath(newActiveTab.path)) {
           setSelectedPath(null)
@@ -3096,11 +3107,17 @@ function App() {
           setIsEmailOpen(false)
           setIsWorkspaceOpen(false)
           setIsKnowledgeViewOpen(false)
-          setIsChatHistoryOpen(true)
-        } else {
+          setIsChatHistoryOpen(true); setIsHomeOpen(false)
+        } else if (isHomeTabPath(newActiveTab.path)) {
+          setSelectedPath(null)
           setIsGraphOpen(false)
           setIsSuggestedTopicsOpen(false)
           setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false)
+          setIsHomeOpen(true)
+        } else {
+          setIsGraphOpen(false)
+          setIsSuggestedTopicsOpen(false)
+          setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false)
               setSelectedPath(newActiveTab.path)
         }
       }
@@ -3116,22 +3133,13 @@ function App() {
   }, [activeFileTabId, fileTabs, removeEditorCacheForPath])
 
   const handleNewChatTab = useCallback(() => {
-    // If there's already an empty "New chat" tab, switch to it
-    const emptyTab = chatTabs.find(t => !t.runId)
-    if (emptyTab) {
-      if (emptyTab.id !== activeChatTabId) {
-        setActiveChatTabId(emptyTab.id)
-      }
-    } else {
-      // Create a new tab
-      const id = newChatTabId()
-      setChatTabs(prev => [...prev, { id, runId: null }])
-        setActiveChatTabId(id)
-    }
+    // Single-chat model: reset the one conversation in place instead of
+    // opening a new tab.
+    setChatTabs([{ id: activeChatTabIdRef.current, runId: null }])
     dismissBrowserOverlay()
     handleNewChat()
     // Left-pane "new chat" should always open full chat view.
-    if (selectedPath || isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen) {
+    if (selectedPath || isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen || isHomeOpen) {
       setExpandedFrom({
         path: selectedPath,
         graph: isGraphOpen,
@@ -3148,23 +3156,14 @@ function App() {
     setSelectedPath(null)
     setIsGraphOpen(false)
     setIsSuggestedTopicsOpen(false)
-    setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false)
-  }, [chatTabs, activeChatTabId, dismissBrowserOverlay, handleNewChat, selectedPath, isGraphOpen, isSuggestedTopicsOpen, isMeetingsOpen, isLiveNotesOpen, isBgTasksOpen, isEmailOpen, isWorkspaceOpen, isKnowledgeViewOpen, isChatHistoryOpen])
+    setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false)
+  }, [dismissBrowserOverlay, handleNewChat, selectedPath, isGraphOpen, isSuggestedTopicsOpen, isMeetingsOpen, isLiveNotesOpen, isBgTasksOpen, isEmailOpen, isWorkspaceOpen, isKnowledgeViewOpen, isChatHistoryOpen, isHomeOpen])
 
-  // Sidebar variant: create/switch chat tab without leaving file/graph context.
+  // Sidebar variant: reset the chat in place without leaving file/graph context.
   const handleNewChatTabInSidebar = useCallback(() => {
-    const emptyTab = chatTabs.find(t => !t.runId)
-    if (emptyTab) {
-      if (emptyTab.id !== activeChatTabId) {
-        setActiveChatTabId(emptyTab.id)
-      }
-    } else {
-      const id = newChatTabId()
-      setChatTabs(prev => [...prev, { id, runId: null }])
-      setActiveChatTabId(id)
-    }
+    setChatTabs([{ id: activeChatTabIdRef.current, runId: null }])
     handleNewChat()
-  }, [chatTabs, activeChatTabId, handleNewChat])
+  }, [handleNewChat])
 
   // Palette → sidebar submission. Opens the sidebar (if closed), forces a fresh chat tab,
   // queues the message; the pending-submit effect (below) flushes it once state has settled
@@ -3281,7 +3280,7 @@ function App() {
 
   const handleOpenFullScreenChat = useCallback(() => {
     // Remember where we came from so the close button can return
-    if (selectedPath || isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen) {
+    if (selectedPath || isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen || isHomeOpen) {
       setExpandedFrom({
         path: selectedPath,
         graph: isGraphOpen,
@@ -3297,7 +3296,7 @@ function App() {
     setSelectedPath(null)
     setIsGraphOpen(false)
     setIsSuggestedTopicsOpen(false)
-    setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false)
+    setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false)
   }, [selectedPath, isGraphOpen, isSuggestedTopicsOpen, isMeetingsOpen, isLiveNotesOpen, isBgTasksOpen, isEmailOpen, isWorkspaceOpen, isKnowledgeViewOpen, isChatHistoryOpen, dismissBrowserOverlay])
 
   const handleCloseFullScreenChat = useCallback(() => {
@@ -3305,11 +3304,11 @@ function App() {
       if (expandedFrom.graph) {
         setIsGraphOpen(true)
         setIsSuggestedTopicsOpen(false)
-        setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false)
+        setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false)
       } else if (expandedFrom.suggestedTopics) {
         setIsGraphOpen(false)
         setIsSuggestedTopicsOpen(true)
-        setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false)
+        setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false)
       } else if (expandedFrom.meetings) {
         setIsGraphOpen(false)
         setIsSuggestedTopicsOpen(false)
@@ -3341,7 +3340,7 @@ function App() {
       } else if (expandedFrom.path) {
         setIsGraphOpen(false)
         setIsSuggestedTopicsOpen(false)
-        setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false)
+        setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false)
         setSelectedPath(expandedFrom.path)
       }
       setExpandedFrom(null)
@@ -3358,10 +3357,11 @@ function App() {
     if (isWorkspaceOpen) return { type: 'workspace', path: workspaceInitialPath ?? undefined }
     if (isKnowledgeViewOpen) return { type: 'knowledge-view' }
     if (isChatHistoryOpen) return { type: 'chat-history' }
+    if (isHomeOpen) return { type: 'home' }
     if (selectedPath) return { type: 'file', path: selectedPath }
     if (isGraphOpen) return { type: 'graph' }
     return { type: 'chat', runId }
-  }, [selectedBackgroundTask, isEmailOpen, isMeetingsOpen, isLiveNotesOpen, isBgTasksOpen, isSuggestedTopicsOpen, selectedPath, isGraphOpen, isWorkspaceOpen, isKnowledgeViewOpen, isChatHistoryOpen, workspaceInitialPath, runId])
+  }, [selectedBackgroundTask, isEmailOpen, isMeetingsOpen, isLiveNotesOpen, isBgTasksOpen, isSuggestedTopicsOpen, selectedPath, isGraphOpen, isWorkspaceOpen, isKnowledgeViewOpen, isChatHistoryOpen, isHomeOpen, workspaceInitialPath, runId])
 
   const appendUnique = useCallback((stack: ViewState[], entry: ViewState) => {
     const last = stack[stack.length - 1]
@@ -3495,7 +3495,18 @@ function App() {
     setActiveFileTabId(id)
   }, [fileTabs])
 
-  const openEmailView = useCallback(() => {
+  const ensureHomeFileTab = useCallback(() => {
+    const existing = fileTabs.find((tab) => isHomeTabPath(tab.path))
+    if (existing) {
+      setActiveFileTabId(existing.id)
+      return
+    }
+    const id = newFileTabId()
+    setFileTabs((prev) => [...prev, { id, path: HOME_TAB_PATH }])
+    setActiveFileTabId(id)
+  }, [fileTabs])
+
+  const openEmailView = useCallback((threadId?: string) => {
     setSelectedPath(null)
     setIsGraphOpen(false)
     setIsBrowserOpen(false)
@@ -3505,10 +3516,16 @@ function App() {
     setIsBgTasksOpen(false)
     setIsWorkspaceOpen(false)
     setIsKnowledgeViewOpen(false)
+    setIsChatHistoryOpen(false)
+    setIsHomeOpen(false)
     setSelectedBackgroundTask(null)
     setExpandedFrom(null)
     setIsRightPaneMaximized(false)
     setIsEmailOpen(true)
+    if (threadId) {
+      setEmailInitialThreadId(threadId)
+      setEmailThreadIdVersion((v) => v + 1)
+    }
     ensureEmailFileTab()
   }, [ensureEmailFileTab])
 
@@ -3517,7 +3534,7 @@ function App() {
     setIsGraphOpen(false)
     setIsBrowserOpen(false)
     setIsSuggestedTopicsOpen(false)
-    setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false)
+    setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false)
     setSelectedBackgroundTask(null)
     setExpandedFrom(null)
     setIsRightPaneMaximized(false)
@@ -3536,6 +3553,8 @@ function App() {
     setIsEmailOpen(false)
     setIsWorkspaceOpen(false)
     setIsKnowledgeViewOpen(false)
+    setIsChatHistoryOpen(false)
+    setIsHomeOpen(false)
     setSelectedBackgroundTask(null)
     setExpandedFrom(null)
     setIsRightPaneMaximized(false)
@@ -3551,7 +3570,7 @@ function App() {
         // visible in the middle pane.
         setIsBrowserOpen(false)
         setIsSuggestedTopicsOpen(false)
-        setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false)
+        setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false)
         setExpandedFrom(null)
         // Preserve split vs knowledge-max mode when navigating knowledge files.
         // Only exit chat-only maximize, because that would hide the selected file.
@@ -3566,7 +3585,7 @@ function App() {
         setSelectedPath(null)
         setIsBrowserOpen(false)
         setIsSuggestedTopicsOpen(false)
-        setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false)
+        setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false)
         setExpandedFrom(null)
         setIsGraphOpen(true)
         ensureGraphFileTab()
@@ -3579,7 +3598,7 @@ function App() {
         setIsGraphOpen(false)
         setIsBrowserOpen(false)
         setIsSuggestedTopicsOpen(false)
-        setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false)
+        setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false)
         setExpandedFrom(null)
         setIsRightPaneMaximized(false)
         setSelectedBackgroundTask(view.name)
@@ -3592,7 +3611,7 @@ function App() {
         setIsRightPaneMaximized(false)
         setSelectedBackgroundTask(null)
         setIsSuggestedTopicsOpen(true)
-        setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false)
+        setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false)
         ensureSuggestedTopicsFileTab()
         return
       case 'meetings':
@@ -3610,6 +3629,7 @@ function App() {
         setIsWorkspaceOpen(false)
         setIsKnowledgeViewOpen(false)
         setIsChatHistoryOpen(false)
+      setIsHomeOpen(false)
         ensureMeetingsFileTab()
         return
       case 'live-notes':
@@ -3626,6 +3646,7 @@ function App() {
         setIsWorkspaceOpen(false)
         setIsKnowledgeViewOpen(false)
         setIsChatHistoryOpen(false)
+      setIsHomeOpen(false)
         setIsLiveNotesOpen(true)
         ensureLiveNotesFileTab()
         return
@@ -3644,6 +3665,7 @@ function App() {
         setIsWorkspaceOpen(false)
         setIsKnowledgeViewOpen(false)
         setIsChatHistoryOpen(false)
+      setIsHomeOpen(false)
         ensureEmailFileTab()
         return
       case 'workspace':
@@ -3661,6 +3683,7 @@ function App() {
         setIsWorkspaceOpen(true)
         setIsKnowledgeViewOpen(false)
         setIsChatHistoryOpen(false)
+      setIsHomeOpen(false)
         setWorkspaceInitialPath(view.path ?? null)
         ensureWorkspaceFileTab()
         return
@@ -3679,6 +3702,7 @@ function App() {
         setIsWorkspaceOpen(false)
         setIsKnowledgeViewOpen(true)
         setIsChatHistoryOpen(false)
+      setIsHomeOpen(false)
         ensureKnowledgeViewFileTab()
         return
       case 'chat-history':
@@ -3695,8 +3719,26 @@ function App() {
         setIsEmailOpen(false)
         setIsWorkspaceOpen(false)
         setIsKnowledgeViewOpen(false)
-        setIsChatHistoryOpen(true)
+        setIsChatHistoryOpen(true); setIsHomeOpen(false)
         ensureChatHistoryFileTab()
+        return
+      case 'home':
+        setSelectedPath(null)
+        setIsGraphOpen(false)
+        setIsBrowserOpen(false)
+        setExpandedFrom(null)
+        setIsRightPaneMaximized(false)
+        setSelectedBackgroundTask(null)
+        setIsSuggestedTopicsOpen(false)
+        setIsMeetingsOpen(false)
+        setIsLiveNotesOpen(false)
+        setIsBgTasksOpen(false)
+        setIsEmailOpen(false)
+        setIsWorkspaceOpen(false)
+        setIsKnowledgeViewOpen(false)
+        setIsChatHistoryOpen(false)
+        setIsHomeOpen(true)
+        ensureHomeFileTab()
         return
       case 'chat':
         setSelectedPath(null)
@@ -3706,15 +3748,27 @@ function App() {
         setIsRightPaneMaximized(false)
         setSelectedBackgroundTask(null)
         setIsSuggestedTopicsOpen(false)
-        setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false)
+        setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false)
         if (view.runId) {
-          await loadRun(view.runId)
+          const targetRunId = view.runId
+          // Bind the loaded run to a chat tab so its title (derived from
+          // tab.runId) updates. Reuse an existing tab for this run if one is
+          // open, otherwise rebind the active tab.
+          const existingTab = chatTabsRef.current.find((tab) => tab.runId === targetRunId)
+          if (existingTab) {
+            setActiveChatTabId(existingTab.id)
+          } else {
+            setChatTabs((prev) => prev.map((tab) => (
+              tab.id === activeChatTabIdRef.current ? { ...tab, runId: targetRunId } : tab
+            )))
+          }
+          await loadRun(targetRunId)
         } else {
           handleNewChat()
         }
         return
     }
-  }, [ensureEmailFileTab, ensureMeetingsFileTab, ensureLiveNotesFileTab, ensureFileTabForPath, ensureGraphFileTab, ensureSuggestedTopicsFileTab, ensureWorkspaceFileTab, ensureKnowledgeViewFileTab, ensureChatHistoryFileTab, handleNewChat, isRightPaneMaximized, loadRun])
+  }, [ensureEmailFileTab, ensureMeetingsFileTab, ensureLiveNotesFileTab, ensureFileTabForPath, ensureGraphFileTab, ensureSuggestedTopicsFileTab, ensureWorkspaceFileTab, ensureKnowledgeViewFileTab, ensureChatHistoryFileTab, ensureHomeFileTab, handleNewChat, isRightPaneMaximized, loadRun])
 
   const navigateToView = useCallback(async (nextView: ViewState) => {
     const current = currentViewState
@@ -4036,7 +4090,7 @@ function App() {
   }, [])
 
   // Keyboard shortcut: Ctrl+L to toggle main chat view
-  const isFullScreenChat = !selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isMeetingsOpen && !isLiveNotesOpen && !isBgTasksOpen && !isEmailOpen && !isWorkspaceOpen && !isKnowledgeViewOpen && !isChatHistoryOpen && !selectedBackgroundTask && !isBrowserOpen
+  const isFullScreenChat = !selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isMeetingsOpen && !isLiveNotesOpen && !isBgTasksOpen && !isEmailOpen && !isWorkspaceOpen && !isKnowledgeViewOpen && !isChatHistoryOpen && !isHomeOpen && !selectedBackgroundTask && !isBrowserOpen
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'l') {
@@ -4121,11 +4175,11 @@ function App() {
     const handleTabKeyDown = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey
       if (!mod) return
-      const rightPaneAvailable = Boolean((selectedPath || isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen) && isChatSidebarOpen)
+      const rightPaneAvailable = Boolean((selectedPath || isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen || isHomeOpen) && isChatSidebarOpen)
       const targetPane: ShortcutPane = rightPaneAvailable
         ? (isRightPaneMaximized ? 'right' : activeShortcutPane)
         : 'left'
-      const inFileView = targetPane === 'left' && Boolean(selectedPath || isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen)
+      const inFileView = targetPane === 'left' && Boolean(selectedPath || isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen || isHomeOpen)
       const selectedKnowledgePath = isGraphOpen
         ? GRAPH_TAB_PATH
         : isSuggestedTopicsOpen
@@ -4144,6 +4198,8 @@ function App() {
             ? KNOWLEDGE_VIEW_TAB_PATH
           : isChatHistoryOpen
             ? CHAT_HISTORY_TAB_PATH
+          : isHomeOpen
+            ? HOME_TAB_PATH
           : selectedPath
       const targetFileTabId = activeFileTabId ?? (
         selectedKnowledgePath
@@ -4981,11 +5037,10 @@ function App() {
     if (tabId === activeChatTabId) return activeChatTabState
     return chatViewStateByTab[tabId] ?? emptyChatTabState
   }, [activeChatTabId, activeChatTabState, chatViewStateByTab, emptyChatTabState])
-  const hasConversation = activeChatTabState.conversation.length > 0 || activeChatTabState.currentAssistantMessage
   const selectedTask = selectedBackgroundTask
     ? backgroundTasks.find(t => t.name === selectedBackgroundTask)
     : null
-  const isRightPaneContext = Boolean(selectedPath || isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen || isBrowserOpen)
+  const isRightPaneContext = Boolean(selectedPath || isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen || isHomeOpen || isBrowserOpen)
   const isRightPaneOnlyMode = isRightPaneContext && isChatSidebarOpen && isRightPaneMaximized
   const shouldCollapseLeftPane = isRightPaneOnlyMode
   const openMarkdownTabs = React.useMemo(() => {
@@ -5002,7 +5057,7 @@ function App() {
   return (
     <TooltipProvider delayDuration={0}>
       <SidebarSectionProvider defaultSection="tasks" onSectionChange={(section) => {
-        if (section === 'knowledge' && !selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isMeetingsOpen && !isLiveNotesOpen && !isBgTasksOpen && !isEmailOpen && !isWorkspaceOpen && !isKnowledgeViewOpen && !isChatHistoryOpen) {
+        if (section === 'knowledge' && !selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isMeetingsOpen && !isLiveNotesOpen && !isBgTasksOpen && !isEmailOpen && !isWorkspaceOpen && !isKnowledgeViewOpen && !isChatHistoryOpen && !isHomeOpen) {
           void navigateToView({ type: 'file', path: BASES_DEFAULT_TAB_PATH })
         }
       }}>
@@ -5015,97 +5070,31 @@ function App() {
           >
             <SidebarContentPanel
               tree={tree}
-              selectedPath={selectedPath}
               onSelectFile={toggleExpand}
               knowledgeActions={knowledgeActions}
-              runs={runs}
-              currentRunId={runId}
-              processingRunIds={processingRunIds}
-              tasksActions={{
-                onNewChat: handleNewChatTab,
-                onSelectRun: (runIdToLoad) => {
-                  cancelRecordingIfActive()
-                  if (selectedPath || isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen || isBrowserOpen) {
-                    setIsChatSidebarOpen(true)
-                  }
-
-                  // If already open in a chat tab, switch to it
-                  const existingTab = chatTabs.find(t => t.runId === runIdToLoad)
-                  if (existingTab) {
-                    switchChatTab(existingTab.id)
-                    return
-                  }
-                  // In two-pane mode (file/graph/browser), keep the middle pane and just swap chat context in the right sidebar.
-                  if (selectedPath || isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen || isBrowserOpen) {
-                    setChatTabs(prev => prev.map(t => t.id === activeChatTabId ? { ...t, runId: runIdToLoad } : t))
-                    loadRun(runIdToLoad)
-                    return
-                  }
-
-                  // Outside two-pane mode, navigate to chat.
-                  setChatTabs(prev => prev.map(t => t.id === activeChatTabId ? { ...t, runId: runIdToLoad } : t))
-                  void navigateToView({ type: 'chat', runId: runIdToLoad })
-                },
-                onOpenInNewTab: (targetRunId) => {
-                  openChatInNewTab(targetRunId)
-                },
-                onDeleteRun: async (runIdToDelete) => {
-                  try {
-                    await window.ipc.invoke('runs:delete', { runId: runIdToDelete })
-                    // Close any chat tab showing the deleted run
-                    const tabForRun = chatTabs.find(t => t.runId === runIdToDelete)
-                    if (tabForRun) {
-                      if (chatTabs.length > 1) {
-                        closeChatTab(tabForRun.id)
-                      } else {
-                        // Only one tab, reset it to new chat
-                        setChatTabs([{ id: tabForRun.id, runId: null }])
-                        if (selectedPath || isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen || isBrowserOpen) {
-                          handleNewChat()
-                        } else {
-                          void navigateToView({ type: 'chat', runId: null })
-                        }
-                      }
-                    } else if (runId === runIdToDelete) {
-                      if (selectedPath || isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen || isBrowserOpen) {
-                        setChatTabs(prev => prev.map(t => t.id === activeChatTabId ? { ...t, runId: null } : t))
-                        handleNewChat()
-                      } else {
-                        void navigateToView({ type: 'chat', runId: null })
-                      }
-                    }
-                    await loadRuns()
-                  } catch (err) {
-                    console.error('Failed to delete run:', err)
-                  }
-                },
-                onSelectBackgroundTask: (taskName) => {
-                  void navigateToView({ type: 'task', name: taskName })
-                },
-                onOpenChatHistoryView: () => {
-                  void navigateToView({ type: 'chat-history' })
-                },
-              }}
               bgTaskSummaries={bgTaskSummaries}
-              onOpenBgTask={(slug) => {
-                setBgTaskInitialSlug(slug)
-                setBgTaskSlugVersion((v) => v + 1)
-                openBgTasksView()
-              }}
+              activeNav={
+                isHomeOpen ? 'home'
+                : isEmailOpen ? 'email'
+                : isMeetingsOpen ? 'meetings'
+                : (isKnowledgeViewOpen || isGraphOpen || (selectedPath != null && selectedPath.startsWith('knowledge/'))) ? 'knowledge'
+                : isBgTasksOpen ? 'agents'
+                : isWorkspaceOpen ? 'workspaces'
+                : null
+              }
               onOpenMeetings={openMeetingsView}
+              onOpenBgTasks={() => { setBgTaskInitialSlug(null); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
+              onOpenAgent={(slug) => { setBgTaskInitialSlug(slug); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
+              recentRuns={runs}
+              onOpenRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
+              onOpenEmail={(threadId) => openEmailView(threadId)}
+              onOpenHome={() => void navigateToView({ type: 'home' })}
+              onNewChat={handleNewChatTab}
+              onToggleBrowser={handleToggleBrowser}
+              onVoiceNoteCreated={handleVoiceNoteCreated}
               meetingRecordingState={meetingTranscription.state}
               recordingMeetingSource={recordingMeetingSource}
               onToggleMeetingRecording={() => { void handleToggleMeeting() }}
-              onOpenBgTasks={() => { setBgTaskInitialSlug(null); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
-              onOpenEmail={(threadId) => {
-                setEmailInitialThreadId(threadId ?? null)
-                setEmailThreadIdVersion((v) => v + 1)
-                openEmailView()
-              }}
-              onOpenHome={navigateToFullScreenChat}
-              onNewChat={handleNewChatTab}
-              onOpenSearch={() => setIsSearchOpen(true)}
-              onToggleBrowser={handleToggleBrowser}
             />
             <SidebarInset
               className={cn(
@@ -5125,7 +5114,7 @@ function App() {
                 canNavigateForward={canNavigateForward}
                 collapsedLeftPaddingPx={collapsedLeftPaddingPx}
               >
-                {(selectedPath || isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen) && fileTabs.length >= 1 ? (
+                {(selectedPath || isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen || isHomeOpen) && fileTabs.length >= 1 ? (
                   <TabBar
                     tabs={fileTabs}
                     activeTabId={activeFileTabId ?? ''}
@@ -5133,7 +5122,19 @@ function App() {
                     getTabId={(t) => t.id}
                     onSwitchTab={switchFileTab}
                     onCloseTab={closeFileTab}
-                    allowSingleTabClose={fileTabs.length === 1 && (isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen || (selectedPath != null && isBaseFilePath(selectedPath)))}
+                    allowSingleTabClose={fileTabs.length === 1 && (isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen || isHomeOpen || (selectedPath != null && isBaseFilePath(selectedPath)))}
+                  />
+                ) : isFullScreenChat ? (
+                  <ChatHeader
+                    activeTitle={(() => {
+                      const activeTab = chatTabs.find((t) => t.id === activeChatTabId)
+                      return activeTab ? getChatTabTitle(activeTab) : 'New chat'
+                    })()}
+                    onNewChatTab={handleNewChatTab}
+                    recentRuns={runs}
+                    activeRunId={runId}
+                    onSelectRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
+                    onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
                   />
                 ) : (
                   <TabBar
@@ -5186,19 +5187,19 @@ function App() {
                     <TooltipContent side="bottom">Version history</TooltipContent>
                   </Tooltip>
                 )}
-                {!selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isMeetingsOpen && !isLiveNotesOpen && !isBgTasksOpen && !isEmailOpen && !isWorkspaceOpen && !isKnowledgeViewOpen && !isChatHistoryOpen && !selectedTask && !isBrowserOpen && (
+                {!isFullScreenChat && !selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isMeetingsOpen && !isLiveNotesOpen && !isBgTasksOpen && !isEmailOpen && !isWorkspaceOpen && !isKnowledgeViewOpen && !isChatHistoryOpen && !selectedTask && !isBrowserOpen && (
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
                         type="button"
                         onClick={handleNewChatTab}
                         className="titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors self-center shrink-0"
-                        aria-label="New chat tab"
+                        aria-label="New chat"
                       >
-                        <SquarePen className="size-5" />
+                        <Plus className="size-5" />
                       </button>
                     </TooltipTrigger>
-                    <TooltipContent side="bottom">New chat tab</TooltipContent>
+                    <TooltipContent side="bottom">New chat</TooltipContent>
                   </Tooltip>
                 )}
                 {!selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isMeetingsOpen && !isLiveNotesOpen && !isBgTasksOpen && !isEmailOpen && !isWorkspaceOpen && !isKnowledgeViewOpen && !isChatHistoryOpen && !isBrowserOpen && expandedFrom && (
@@ -5216,7 +5217,7 @@ function App() {
                     <TooltipContent side="bottom">Restore two-pane view</TooltipContent>
                   </Tooltip>
                 )}
-                {(selectedPath || isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen) && (
+                {(selectedPath || isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen || isHomeOpen) && (
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
@@ -5240,6 +5241,24 @@ function App() {
                   onClose={handleCloseBrowser}
                   forceHidden={isSearchOpen || showMeetingPermissions}
                 />
+              ) : isHomeOpen ? (
+                <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+                  <HomeView
+                    tree={tree}
+                    runs={runs}
+                    bgTaskSummaries={bgTaskSummaries}
+                    onOpenEmail={() => openEmailView()}
+                    onOpenMeetings={openMeetingsView}
+                    onOpenAgents={() => { setBgTaskInitialSlug(null); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
+                    onOpenAgent={(slug) => { setBgTaskInitialSlug(slug); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
+                    onOpenNote={(path) => navigateToFile(path)}
+                    onOpenRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
+                    onTakeMeetingNotes={() => { void handleToggleMeeting() }}
+                    onVoiceNoteCreated={handleVoiceNoteCreated}
+                    onRunBrowserTask={handleToggleBrowser}
+                    onStartResearch={() => submitFromPalette('Do deep, extreme research on a topic and build me a local website that summarizes the findings. Ask me what topic to research.', null)}
+                  />
+                </div>
               ) : isSuggestedTopicsOpen ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                   <SuggestedTopicsView
@@ -5325,7 +5344,6 @@ function App() {
                     currentRunId={runId}
                     processingRunIds={processingRunIds}
                     onSelectRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
-                    onOpenInNewTab={(rid) => openChatInNewTab(rid)}
                     onDeleteRun={async (rid) => {
                       try {
                         await window.ipc.invoke('runs:delete', { runId: rid })
@@ -5530,7 +5548,24 @@ function App() {
               <FileCardProvider onOpenKnowledgeFile={(path) => { navigateToFile(path) }}>
               <div className="flex min-h-0 flex-1 flex-col">
                 <div className="relative min-h-0 flex-1">
-                  {chatTabs.map((tab) => {
+                  {(activeChatTabState.conversation.length === 0 && !activeChatTabState.currentAssistantMessage) ? (
+                    <HomeView
+                      tree={tree}
+                      runs={runs}
+                      bgTaskSummaries={bgTaskSummaries}
+                      onOpenEmail={() => openEmailView()}
+                      onOpenMeetings={openMeetingsView}
+                      onOpenAgents={() => { setBgTaskInitialSlug(null); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
+                      onOpenAgent={(slug) => { setBgTaskInitialSlug(slug); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
+                      onOpenNote={(path) => navigateToFile(path)}
+                      onOpenRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
+                      onTakeMeetingNotes={() => { void handleToggleMeeting() }}
+                      onVoiceNoteCreated={handleVoiceNoteCreated}
+                      onRunBrowserTask={handleToggleBrowser}
+                      onStartResearch={() => submitFromPalette('Do deep, extreme research on a topic and build me a local website that summarizes the findings. Ask me what topic to research.', null)}
+                    />
+                  ) : (
+                  chatTabs.map((tab) => {
                     const isActive = tab.id === activeChatTabId
                     const tabState = getChatTabStateForRender(tab.id)
                     const tabHasConversation = tabState.conversation.length > 0 || tabState.currentAssistantMessage
@@ -5556,11 +5591,13 @@ function App() {
                         >
                           <ConversationContent className={tabConversationContentClassName}>
                             {!tabHasConversation ? (
-                              <ConversationEmptyState className="h-auto">
-                                <div className="text-2xl font-semibold tracking-tight text-foreground/80 sm:text-3xl md:text-4xl">
-                                  What are we working on?
-                                </div>
-                              </ConversationEmptyState>
+                              <ChatEmptyState
+                                wide
+                                recentRuns={runs}
+                                onSelectRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
+                                onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
+                                onPickPrompt={setPresetMessage}
+                              />
                             ) : (
                               <>
                                 {groupConversationItems(
@@ -5632,15 +5669,13 @@ function App() {
                         </Conversation>
                       </div>
                     )
-                  })}
+                  })
+                  )}
                 </div>
 
                 <div className="rowboat-composer-dock sticky bottom-0 z-10 bg-background pb-12 pt-0 shadow-lg">
                   <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-linear-to-t from-background to-transparent" />
                   <div className="mx-auto w-full max-w-4xl px-4">
-                    {!hasConversation && (
-                      <Suggestions onSelect={setPresetMessage} className="mb-3 justify-center" />
-                    )}
                     {chatTabs.map((tab) => {
                       const isActive = tab.id === activeChatTabId
                       const tabState = getChatTabStateForRender(tab.id)
@@ -5704,10 +5739,18 @@ function App() {
                 chatTabs={chatTabs}
                 activeChatTabId={activeChatTabId}
                 getChatTabTitle={getChatTabTitle}
-                isChatTabProcessing={isChatTabProcessing}
-                onSwitchChatTab={switchChatTab}
-                onCloseChatTab={closeChatTab}
                 onNewChatTab={handleNewChatTabInSidebar}
+                recentRuns={runs}
+                onSelectRun={(rid) => {
+                  const existingTab = chatTabs.find((t) => t.runId === rid)
+                  if (existingTab) {
+                    switchChatTab(existingTab.id)
+                    return
+                  }
+                  setChatTabs((prev) => prev.map((t) => (t.id === activeChatTabId ? { ...t, runId: rid } : t)))
+                  loadRun(rid)
+                }}
+                onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
                 onOpenFullScreen={toggleRightPaneMaximize}
                 conversation={conversation}
                 currentAssistantMessage={currentAssistantMessage}
