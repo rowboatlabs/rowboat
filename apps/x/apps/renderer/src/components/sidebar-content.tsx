@@ -13,7 +13,6 @@ import {
   FolderPlus,
   Globe,
   AlertTriangle,
-  HelpCircle,
   Home,
   Mic,
   SearchIcon,
@@ -79,8 +78,6 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
 import { cn } from "@/lib/utils"
-import { ConnectorsPopover } from "@/components/connectors-popover"
-import { HelpPopover } from "@/components/help-popover"
 import { SettingsDialog } from "@/components/settings-dialog"
 import { toast } from "@/lib/toast"
 import { formatRelativeTime as formatRunTime } from "@/lib/relative-time"
@@ -456,8 +453,8 @@ export function SidebarContentPanel({
 }: SidebarContentPanelProps) {
   const [hasOauthError, setHasOauthError] = useState(false)
   const [showOauthAlert, setShowOauthAlert] = useState(true)
-  const [connectorsOpen, setConnectorsOpen] = useState(false)
-  const [openConnectorsAfterClose, setOpenConnectorsAfterClose] = useState(false)
+  const [connectionsSettingsOpen, setConnectionsSettingsOpen] = useState(false)
+  const [openConnectionsAfterClose, setOpenConnectionsAfterClose] = useState(false)
   const connectorsButtonRef = useRef<HTMLButtonElement | null>(null)
   const [isRowboatConnected, setIsRowboatConnected] = useState(false)
   const [loggingIn, setLoggingIn] = useState(false)
@@ -575,11 +572,11 @@ export function SidebarContentPanel({
       <SidebarContent>
         <EmailSidebarSection
           onOpenEmailView={onOpenEmail}
-          onOpenConnectors={() => setConnectorsOpen(true)}
+          onOpenConnectors={() => setConnectionsSettingsOpen(true)}
         />
         <MeetingsSidebarSection
           onOpenMeetingsView={onOpenMeetings}
-          onOpenConnectors={() => setConnectorsOpen(true)}
+          onOpenConnectors={() => setConnectionsSettingsOpen(true)}
           recordingState={meetingRecordingState ?? 'idle'}
           recordingSource={recordingMeetingSource ?? null}
           onToggleRecording={onToggleMeetingRecording}
@@ -645,15 +642,14 @@ export function SidebarContentPanel({
       <div className="border-t border-sidebar-border px-2 py-2">
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-2">
-            <ConnectorsPopover open={connectorsOpen} onOpenChange={setConnectorsOpen} mode="unconnected">
-              <button
-                ref={connectorsButtonRef}
-                className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
-              >
-                <Plug className="size-4" />
-                <span>Connect Accounts</span>
-              </button>
-            </ConnectorsPopover>
+            <button
+              ref={connectorsButtonRef}
+              onClick={() => setConnectionsSettingsOpen(true)}
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+            >
+              <Plug className="size-4" />
+              <span>Connect Accounts</span>
+            </button>
             {hasOauthError && (
               <AlertDialog
                 open={showOauthAlert}
@@ -671,9 +667,9 @@ export function SidebarContentPanel({
                 <AlertDialogContent
                   onCloseAutoFocus={(event) => {
                     event.preventDefault()
-                    if (openConnectorsAfterClose) {
-                      setOpenConnectorsAfterClose(false)
-                      setConnectorsOpen(true)
+                    if (openConnectionsAfterClose) {
+                      setOpenConnectionsAfterClose(false)
+                      setConnectionsSettingsOpen(true)
                     }
                     connectorsButtonRef.current?.focus()
                   }}
@@ -696,7 +692,7 @@ export function SidebarContentPanel({
                     </AlertDialogCancel>
                     <AlertDialogAction
                       onClick={() => {
-                        setOpenConnectorsAfterClose(true)
+                        setOpenConnectionsAfterClose(true)
                         setShowOauthAlert(false)
                       }}
                     >
@@ -713,14 +709,13 @@ export function SidebarContentPanel({
               <span>Settings</span>
             </button>
           </SettingsDialog>
-          <HelpPopover>
-            <button className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors">
-              <HelpCircle className="size-4" />
-              <span>Help</span>
-            </button>
-          </HelpPopover>
         </div>
       </div>
+      <SettingsDialog
+        defaultTab="connections"
+        open={connectionsSettingsOpen}
+        onOpenChange={setConnectionsSettingsOpen}
+      />
       <SyncStatusBar />
       <SidebarRail />
     </Sidebar>
@@ -1005,7 +1000,7 @@ function KnowledgeSection({
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <SidebarGroup className="flex flex-col">
-          <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
+          <div className="px-3 pt-1.5 pb-0.5 text-xs font-medium text-muted-foreground">
             Notes
           </div>
           <SidebarGroupContent>
@@ -1078,7 +1073,7 @@ export function WorkspaceSection({
 
   return (
     <SidebarGroup className="flex flex-col">
-      <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
+      <div className="px-3 pt-1.5 pb-0.5 text-xs font-medium text-muted-foreground">
         Workspace
       </div>
       <SidebarGroupContent>
@@ -1319,7 +1314,7 @@ function EmailSidebarSection({
 
   return (
     <SidebarGroup className="flex flex-col">
-      <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
+      <div className="px-3 pt-1.5 pb-0.5 text-xs font-medium text-muted-foreground">
         Email
       </div>
       <SidebarGroupContent>
@@ -1469,7 +1464,7 @@ function MeetingsSidebarSection({
 
   return (
     <SidebarGroup className="flex flex-col">
-      <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
+      <div className="px-3 pt-1.5 pb-0.5 text-xs font-medium text-muted-foreground">
         Meetings
       </div>
       <SidebarGroupContent>
@@ -1608,7 +1603,7 @@ function TasksSidebarSection({
 
   return (
     <SidebarGroup className="flex flex-col">
-      <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
+      <div className="px-3 pt-1.5 pb-0.5 text-xs font-medium text-muted-foreground">
         Tasks
       </div>
       <SidebarGroupContent>
@@ -1666,7 +1661,7 @@ function TasksSection({
   return (
     <SidebarGroup className="flex flex-col">
       <SidebarGroupContent>
-        <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
+        <div className="px-3 pt-1.5 pb-0.5 text-xs font-medium text-muted-foreground">
           Chat history
         </div>
         <SidebarMenu>
