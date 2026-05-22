@@ -77,7 +77,6 @@ const providerConfigs: ProviderConfig = {
     scopes: [
       'https://www.googleapis.com/auth/gmail.modify',
       'https://www.googleapis.com/auth/calendar.events.readonly',
-      'https://www.googleapis.com/auth/drive.readonly',
     ],
   },
   'fireflies-ai': {
@@ -119,4 +118,3 @@ export async function getProviderConfig(providerName: string): Promise<ProviderC
 export function getAvailableProviders(): string[] {
   return Object.keys(providerConfigs);
 }
-
