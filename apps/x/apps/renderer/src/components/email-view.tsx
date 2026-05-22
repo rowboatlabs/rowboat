@@ -817,12 +817,28 @@ function clearLoadingFlag(state: SectionState | null): SectionState {
   return { ...state, loadingPage: false }
 }
 
-export function EmailView() {
+export type EmailViewProps = {
+  /** If provided, the view opens with this thread already expanded. */
+  initialThreadId?: string | null
+  /** Bump to re-focus on the same threadId after navigating away inside the view. */
+  threadIdVersion?: number
+}
+
+export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps = {}) {
   const [important, setImportant] = useState<SectionState>(() => clearLoadingFlag(persistedImportant))
   const [other, setOther] = useState<SectionState>(() => clearLoadingFlag(persistedOther))
   const hadPersistedDataOnMount = useRef(persistedImportant !== null)
-  const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null)
-  const [openedThreadIds, setOpenedThreadIds] = useState<string[]>([])
+  const [selectedThreadId, setSelectedThreadId] = useState<string | null>(initialThreadId ?? null)
+  const [openedThreadIds, setOpenedThreadIds] = useState<string[]>(initialThreadId ? [initialThreadId] : [])
+  useEffect(() => {
+    setSelectedThreadId(initialThreadId ?? null)
+    if (initialThreadId) {
+      setOpenedThreadIds((prev) => {
+        const without = prev.filter((id) => id !== initialThreadId)
+        return [...without, initialThreadId].slice(-MAX_KEPT_OPEN)
+      })
+    }
+  }, [initialThreadId, threadIdVersion])
   const [refreshing, setRefreshing] = useState(!hadPersistedDataOnMount.current)
   const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState('')

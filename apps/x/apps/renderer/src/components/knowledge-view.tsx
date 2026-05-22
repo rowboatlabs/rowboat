@@ -142,7 +142,7 @@ export function KnowledgeView({
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <div className="shrink-0 flex items-center justify-between gap-3 border-b border-border px-8 py-6">
-        <h1 className="text-2xl font-bold tracking-tight">Knowledge</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Notes</h1>
         <div className="flex items-center gap-2">
           <button
             type="button"

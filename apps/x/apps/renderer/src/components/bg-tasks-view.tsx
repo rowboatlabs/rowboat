@@ -1418,6 +1418,18 @@ export interface BgTasksViewProps {
      * "Edit with Copilot" button in the detail-view sidebar footer.
      */
     onEditWithCopilot?: (slug: string) => void
+    /**
+     * If provided, the view opens with this task already selected. Updates to
+     * this prop sync into internal state so the sidebar can swap which task is
+     * focused without remounting the view.
+     */
+    initialSlug?: string | null
+    /**
+     * Bump this counter to force a re-focus on `initialSlug` even when the
+     * slug value itself didn't change (e.g. user clicks the same task in the
+     * sidebar twice after navigating away inside the view).
+     */
+    slugVersion?: number
 }
 
 function formatLastRanLabel(iso: string | null | undefined): string {
@@ -1425,9 +1437,12 @@ function formatLastRanLabel(iso: string | null | undefined): string {
     return formatRelativeTime(iso) || 'Never'
 }
 
-export function BgTasksView({ onCreateWithCopilot, onEditWithCopilot }: BgTasksViewProps = {}) {
+export function BgTasksView({ onCreateWithCopilot, onEditWithCopilot, initialSlug, slugVersion }: BgTasksViewProps = {}) {
     const [items, setItems] = useState<BackgroundTaskSummary[]>([])
-    const [selectedSlug, setSelectedSlug] = useState<string | null>(null)
+    const [selectedSlug, setSelectedSlug] = useState<string | null>(initialSlug ?? null)
+    useEffect(() => {
+      setSelectedSlug(initialSlug ?? null)
+    }, [initialSlug, slugVersion])
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
     const [showNewDialog, setShowNewDialog] = useState(false)
