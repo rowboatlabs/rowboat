@@ -1,7 +1,33 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ChevronRight, File as FileIcon, Folder as FolderIcon, Home, Plus } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  ChevronRight,
+  Copy,
+  File as FileIcon,
+  FilePlus,
+  Folder as FolderIcon,
+  FolderOpen,
+  FolderPlus,
+  Home,
+  Pencil,
+  Plus,
+  Trash2,
+  UploadCloud,
+} from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import {
   Dialog,
   DialogContent,
@@ -11,6 +37,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 
 const WORKSPACE_ROOT = 'knowledge/Workspace'
@@ -22,11 +49,26 @@ interface TreeNode {
   children?: TreeNode[]
 }
 
+type WorkspaceActions = {
+  remove: (path: string) => Promise<void>
+  copyPath: (path: string) => void
+  revealInFileManager: (path: string, isDir: boolean) => void
+}
+
 type WorkspaceViewProps = {
   tree: TreeNode[]
   initialPath?: string | null
+  actions: WorkspaceActions
   onOpenNote: (path: string) => void
   onCreateWorkspace: (name: string) => Promise<void>
+}
+
+function getFileManagerName(): string {
+  if (typeof navigator === 'undefined') return 'File Manager'
+  const platform = navigator.platform.toLowerCase()
+  if (platform.includes('mac')) return 'Finder'
+  if (platform.includes('win')) return 'Explorer'
+  return 'File Manager'
 }
 
 function findNode(nodes: TreeNode[] | undefined, path: string): TreeNode | null {
@@ -46,18 +88,51 @@ function countChildren(node: TreeNode | null): number {
   return node.children.length
 }
 
-export function WorkspaceView({ tree, initialPath, onOpenNote, onCreateWorkspace }: WorkspaceViewProps) {
+async function uniqueChildPath(parent: string, name: string): Promise<string> {
+  const dot = name.lastIndexOf('.')
+  const base = dot > 0 ? name.slice(0, dot) : name
+  const ext = dot > 0 ? name.slice(dot) : ''
+  let candidate = `${parent}/${name}`
+  let i = 1
+  while ((await window.ipc.invoke('workspace:exists', { path: candidate })).exists) {
+    candidate = `${parent}/${base} (${i})${ext}`
+    i += 1
+  }
+  return candidate
+}
+
+function readFileAsBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = reader.result as string
+      resolve(result.split(',')[1] ?? '')
+    }
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
+
+export function WorkspaceView({ tree, initialPath, actions, onOpenNote, onCreateWorkspace }: WorkspaceViewProps) {
   const [currentPath, setCurrentPath] = useState<string>(initialPath || WORKSPACE_ROOT)
   const [addOpen, setAddOpen] = useState(false)
   const [newName, setNewName] = useState('')
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [renameTarget, setRenameTarget] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState('')
+  const [isDraggingOver, setIsDraggingOver] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const dragDepthRef = useRef(0)
+  const filesInputRef = useRef<HTMLInputElement | null>(null)
+  const folderInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
     if (initialPath) setCurrentPath(initialPath)
   }, [initialPath])
 
   const isRoot = currentPath === WORKSPACE_ROOT
+  const fileManagerName = getFileManagerName()
 
   const currentNode = useMemo(() => findNode(tree, currentPath), [tree, currentPath])
 
@@ -83,14 +158,108 @@ export function WorkspaceView({ tree, initialPath, onOpenNote, onCreateWorkspace
 
   const handleItemClick = useCallback(
     (item: TreeNode) => {
+      if (renameTarget) return
       if (item.kind === 'dir') {
         setCurrentPath(item.path)
       } else {
         onOpenNote(item.path)
       }
     },
-    [onOpenNote],
+    [onOpenNote, renameTarget],
   )
+
+  const beginRename = useCallback((item: TreeNode) => {
+    setRenameTarget(item.path)
+    setRenameValue(item.name)
+  }, [])
+
+  const commitRename = useCallback(async () => {
+    if (!renameTarget) return
+    const node = items.find((i) => i.path === renameTarget)
+    const trimmed = renameValue.trim()
+    setRenameTarget(null)
+    if (!node || !trimmed || trimmed === node.name || trimmed.includes('/')) return
+    const parent = renameTarget.slice(0, renameTarget.lastIndexOf('/'))
+    try {
+      await window.ipc.invoke('workspace:rename', { from: renameTarget, to: `${parent}/${trimmed}` })
+      toast('Renamed', 'success')
+    } catch {
+      toast('Failed to rename', 'error')
+    }
+  }, [renameTarget, renameValue, items])
+
+  const handleDelete = useCallback(async (item: TreeNode) => {
+    try {
+      await actions.remove(item.path)
+      toast('Moved to trash', 'success')
+    } catch {
+      toast('Failed to delete', 'error')
+    }
+  }, [actions])
+
+  const uploadFiles = useCallback(async (files: FileList | File[], preserveStructure = false) => {
+    const list = Array.from(files)
+    if (list.length === 0) return
+    setUploading(true)
+    try {
+      for (const file of list) {
+        const data = await readFileAsBase64(file)
+        const rel = (file as File & { webkitRelativePath?: string }).webkitRelativePath
+        const target = preserveStructure && rel
+          ? `${currentPath}/${rel}`
+          : await uniqueChildPath(currentPath, file.name)
+        await window.ipc.invoke('workspace:writeFile', {
+          path: target,
+          data,
+          opts: { encoding: 'base64', mkdirp: true },
+        })
+      }
+      toast(list.length === 1 ? 'Added' : `${list.length} items added`, 'success')
+    } catch (err) {
+      console.error('Failed to add files:', err)
+      toast('Failed to add', 'error')
+    } finally {
+      setUploading(false)
+    }
+  }, [currentPath])
+
+  // Drag-and-drop (only inside a workspace folder, not at the root grid).
+  // stopPropagation keeps the drop from also reaching the copilot's
+  // document-level drop listener when it lands on the workspace area.
+  const dropEnabled = !isRoot
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    if (!dropEnabled) return
+    if (!Array.from(e.dataTransfer.types).includes('Files')) return
+    e.preventDefault()
+    e.stopPropagation()
+    dragDepthRef.current += 1
+    setIsDraggingOver(true)
+  }, [dropEnabled])
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    if (!dropEnabled) return
+    if (!Array.from(e.dataTransfer.types).includes('Files')) return
+    e.preventDefault()
+    e.stopPropagation()
+    e.dataTransfer.dropEffect = 'copy'
+  }, [dropEnabled])
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    if (!dropEnabled) return
+    e.preventDefault()
+    e.stopPropagation()
+    dragDepthRef.current -= 1
+    if (dragDepthRef.current <= 0) {
+      dragDepthRef.current = 0
+      setIsDraggingOver(false)
+    }
+  }, [dropEnabled])
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    if (!dropEnabled) return
+    e.preventDefault()
+    e.stopPropagation()
+    dragDepthRef.current = 0
+    setIsDraggingOver(false)
+    if (e.dataTransfer.files?.length) void uploadFiles(e.dataTransfer.files)
+  }, [dropEnabled, uploadFiles])
 
   const resetAddDialog = useCallback(() => {
     setNewName('')
@@ -157,22 +326,70 @@ export function WorkspaceView({ tree, initialPath, onOpenNote, onCreateWorkspace
             )
           })}
         </div>
-        {isRoot && (
+        {isRoot ? (
           <Button size="sm" onClick={() => setAddOpen(true)}>
             <Plus className="size-4" />
             Add workspace
           </Button>
+        ) : (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="sm">
+                <Plus className="size-4" />
+                Add
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => filesInputRef.current?.click()}>
+                <FilePlus className="mr-2 size-4" />
+                Add files…
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => folderInputRef.current?.click()}>
+                <FolderPlus className="mr-2 size-4" />
+                Add folder…
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
       </div>
+      <input
+        ref={filesInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          if (e.target.files?.length) void uploadFiles(e.target.files, false)
+          e.target.value = ''
+        }}
+      />
+      <input
+        ref={folderInputRef}
+        type="file"
+        // @ts-expect-error non-standard but supported in Chromium/Electron
+        webkitdirectory=""
+        directory=""
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          if (e.target.files?.length) void uploadFiles(e.target.files, true)
+          e.target.value = ''
+        }}
+      />
 
-      <div className="flex-1 overflow-y-auto px-6 py-6">
+      <div
+        className="relative flex-1 overflow-y-auto px-6 py-6"
+        onDragEnter={handleDragEnter}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
         {items.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-muted-foreground">
             <FolderIcon className="size-10 opacity-50" />
             <div className="text-sm">
               {isRoot
                 ? 'No workspaces yet. Create one to get started.'
-                : 'This folder is empty.'}
+                : 'This folder is empty. Drag files in or use New note / New folder.'}
             </div>
             {isRoot && (
               <Button size="sm" variant="outline" onClick={() => setAddOpen(true)}>
@@ -186,17 +403,33 @@ export function WorkspaceView({ tree, initialPath, onOpenNote, onCreateWorkspace
             {items.map((item) => {
               const childCount = item.kind === 'dir' ? countChildren(item) : 0
               const Icon = item.kind === 'dir' ? FolderIcon : FileIcon
-              return (
+              const isRenaming = renameTarget === item.path
+              const card = (
                 <button
-                  key={item.path}
                   type="button"
                   onClick={() => handleItemClick(item)}
-                  className="group flex flex-col items-start gap-2 rounded-lg border border-border bg-card p-4 text-left transition-colors hover:border-foreground/20 hover:bg-accent"
+                  className="group flex w-full flex-col items-start gap-2 rounded-lg border border-border bg-card p-4 text-left transition-colors hover:border-foreground/20 hover:bg-accent"
                 >
                   <Icon className="size-6 text-muted-foreground group-hover:text-foreground" />
                   <div className="min-w-0 w-full">
-                    <div className="truncate text-sm font-medium">{item.name}</div>
-                    {item.kind === 'dir' && (
+                    {isRenaming ? (
+                      <Input
+                        autoFocus
+                        value={renameValue}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => setRenameValue(e.target.value)}
+                        onBlur={() => void commitRename()}
+                        onKeyDown={(e) => {
+                          e.stopPropagation()
+                          if (e.key === 'Enter') { e.preventDefault(); void commitRename() }
+                          else if (e.key === 'Escape') { e.preventDefault(); setRenameTarget(null) }
+                        }}
+                        className="h-6 text-sm"
+                      />
+                    ) : (
+                      <div className="truncate text-sm font-medium">{item.name}</div>
+                    )}
+                    {item.kind === 'dir' && !isRenaming && (
                       <div className="text-xs text-muted-foreground">
                         {childCount} {childCount === 1 ? 'item' : 'items'}
                       </div>
@@ -204,7 +437,43 @@ export function WorkspaceView({ tree, initialPath, onOpenNote, onCreateWorkspace
                   </div>
                 </button>
               )
+              return (
+                <ContextMenu key={item.path}>
+                  <ContextMenuTrigger asChild>{card}</ContextMenuTrigger>
+                  <ContextMenuContent className="w-48">
+                    <ContextMenuItem onClick={() => beginRename(item)}>
+                      <Pencil className="mr-2 size-4" />
+                      Rename
+                    </ContextMenuItem>
+                    <ContextMenuItem onClick={() => { actions.copyPath(item.path); toast('Path copied', 'success') }}>
+                      <Copy className="mr-2 size-4" />
+                      Copy Path
+                    </ContextMenuItem>
+                    <ContextMenuItem onClick={() => actions.revealInFileManager(item.path, item.kind === 'dir')}>
+                      <FolderOpen className="mr-2 size-4" />
+                      Show in {fileManagerName}
+                    </ContextMenuItem>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem variant="destructive" onClick={() => void handleDelete(item)}>
+                      <Trash2 className="mr-2 size-4" />
+                      Delete
+                    </ContextMenuItem>
+                  </ContextMenuContent>
+                </ContextMenu>
+              )
             })}
+          </div>
+        )}
+
+        {dropEnabled && isDraggingOver && (
+          <div className="pointer-events-none absolute inset-3 z-10 flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-primary/60 bg-primary/5 text-primary">
+            <UploadCloud className="size-8" />
+            <span className="text-sm font-medium">Drop files to add to this folder</span>
+          </div>
+        )}
+        {uploading && (
+          <div className="pointer-events-none absolute bottom-4 right-4 z-10 rounded-md bg-foreground/80 px-3 py-1.5 text-xs text-background">
+            Adding files…
           </div>
         )}
       </div>

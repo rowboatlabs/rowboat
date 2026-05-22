@@ -5289,6 +5289,11 @@ function App() {
                   <WorkspaceView
                     tree={tree}
                     initialPath={workspaceInitialPath}
+                    actions={{
+                      remove: knowledgeActions.remove,
+                      copyPath: knowledgeActions.copyPath,
+                      revealInFileManager: knowledgeActions.revealInFileManager,
+                    }}
                     onOpenNote={(path) => navigateToFile(path)}
                     onCreateWorkspace={async (name) => { await knowledgeActions.createWorkspace(name) }}
                   />
