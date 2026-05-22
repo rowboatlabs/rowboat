@@ -29,6 +29,7 @@ type HomeViewProps = {
   onVoiceNoteCreated?: (path: string) => void
   onRunBrowserTask?: () => void
   onStartResearch?: () => void
+  onOpenChat?: () => void
 }
 
 type CalEvent = {
@@ -139,6 +140,22 @@ function noteLabel(node: TreeNode): string {
   return node.name
 }
 
+function triggerMeetingCapture(event: CalEvent, openConference: boolean) {
+  window.__pendingCalendarEvent = {
+    summary: event.summary,
+    start: event.rawStart,
+    end: event.rawEnd,
+    location: event.location ?? undefined,
+    htmlLink: event.htmlLink ?? undefined,
+    conferenceLink: event.conferenceLink ?? undefined,
+    source: event.source,
+  }
+  if (openConference && event.conferenceLink) {
+    window.open(event.conferenceLink, '_blank')
+  }
+  window.dispatchEvent(new Event('calendar-block:join-meeting'))
+}
+
 const CARD = 'rounded-xl border border-border bg-card p-4'
 
 export function HomeView({
@@ -155,6 +172,7 @@ export function HomeView({
   onVoiceNoteCreated,
   onRunBrowserTask,
   onStartResearch,
+  onOpenChat,
 }: HomeViewProps) {
   const [events, setEvents] = useState<CalEvent[]>([])
   const [emails, setEmails] = useState<EmailThread[]>([])
@@ -338,6 +356,7 @@ export function HomeView({
                 <span className="text-sm font-medium">Background agents</span>
                 <span className="flex-1" />
                 <span className="text-xs text-muted-foreground">{activeAgents.length} active</span>
+                <button type="button" onClick={onOpenAgents} className="text-xs text-primary hover:underline">Open →</button>
               </div>
               {recentAgent ? (
                 <button
@@ -374,12 +393,32 @@ export function HomeView({
             {todaysEvents.length === 0 ? (
               <div className="py-1 text-[13px] italic text-muted-foreground">No more events today.</div>
             ) : todaysEvents.map((e, i) => (
-              <div key={e.id} className={`flex items-center gap-3.5 py-2 text-[13px] ${i ? 'border-t border-border' : ''}`}>
+              <div key={e.id} className={`group flex items-center gap-3.5 py-2 text-[13px] ${i ? 'border-t border-border' : ''}`}>
                 <span className="w-[90px] shrink-0 font-mono text-[11.5px] text-muted-foreground">
                   {e.isAllDay ? 'All day' : `${timeOfDay(e.start)}${e.end ? ` – ${timeOfDay(e.end)}` : ''}`}
                 </span>
                 <span className={`size-2 shrink-0 rounded-full ${i === 0 ? 'bg-emerald-500' : 'bg-border'}`} />
-                <span className="flex-1 truncate font-medium">{e.summary}</span>
+                <span className="min-w-0 flex-1 truncate font-medium">{e.summary}</span>
+                <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                  <button
+                    type="button"
+                    onClick={() => triggerMeetingCapture(e, false)}
+                    className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11.5px] text-foreground transition-colors hover:bg-accent"
+                  >
+                    <Mic className="size-3" />
+                    Take notes
+                  </button>
+                  {e.conferenceLink && (
+                    <button
+                      type="button"
+                      onClick={() => triggerMeetingCapture(e, true)}
+                      className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11.5px] text-foreground transition-colors hover:bg-accent"
+                    >
+                      <Video className="size-3" />
+                      Join &amp; take notes
+                    </button>
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -406,29 +445,26 @@ export function HomeView({
             </div>
           )}
 
-          {/* Discovery carousel */}
-          <DiscoveryCarousel
-            tips={[
-              {
-                icon: Mic,
-                title: 'Try a voice note',
-                desc: 'capture a thought out loud; the agent transcribes it and files it into Knowledge.',
-                action: <VoiceNoteButton onNoteCreated={onVoiceNoteCreated} />,
-              },
-              {
-                icon: Globe,
-                title: 'Run a browser task',
-                desc: 'let the agent drive a real browser to look things up and get things done.',
-                onAction: onRunBrowserTask,
-              },
-              {
-                icon: Telescope,
-                title: 'Do extreme research',
-                desc: 'Rowboat digs deep and builds you a local website with the findings.',
-                onAction: onStartResearch,
-              },
-            ]}
-          />
+          {/* Open chat CTA */}
+          {onOpenChat && (
+            <button
+              type="button"
+              onClick={onOpenChat}
+              className="flex items-center gap-3.5 rounded-xl border border-border bg-card p-4 text-left transition-colors hover:bg-accent"
+            >
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground">
+                <MessageSquare className="size-[15px]" />
+              </div>
+              <div className="min-w-0 flex-1 text-[13.5px] leading-snug">
+                <span className="font-medium">Ask anything</span>
+                <span className="text-muted-foreground"> — create presentations, do research, collaborate on docs.</span>
+              </div>
+              <span className="flex shrink-0 items-center gap-1 text-[12.5px] font-medium text-primary">
+                New chat
+                <ArrowRight className="size-3.5" />
+              </span>
+            </button>
+          )}
 
         </div>
       </div>

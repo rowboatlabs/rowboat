@@ -5,7 +5,7 @@ import { RunEvent, ListRunsResponse } from '@x/shared/src/runs.js';
 import type { LanguageModelUsage, ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
-import { CheckIcon, LoaderIcon, PanelLeftIcon, Maximize2, Minimize2, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon } from 'lucide-react';
+import { CheckIcon, LoaderIcon, PanelLeftIcon, ArrowRight, MessageSquare, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MarkdownEditor, type MarkdownEditorHandle } from './components/markdown-editor';
 import { ChatSidebar } from './components/chat-sidebar';
@@ -757,7 +757,8 @@ function App() {
   const [workspaceInitialPath, setWorkspaceInitialPath] = useState<string | null>(null)
   const [isKnowledgeViewOpen, setIsKnowledgeViewOpen] = useState(false)
   const [isChatHistoryOpen, setIsChatHistoryOpen] = useState(false)
-  const [isHomeOpen, setIsHomeOpen] = useState(false)
+  // Default landing view: Home in the middle with the chat docked on the right.
+  const [isHomeOpen, setIsHomeOpen] = useState(true)
   const [emailInitialThreadId, setEmailInitialThreadId] = useState<string | null>(null)
   const [emailThreadIdVersion, setEmailThreadIdVersion] = useState(0)
   const [expandedFrom, setExpandedFrom] = useState<{
@@ -1098,8 +1099,8 @@ function App() {
   }, [processingRunIds])
 
   // File tab state
-  const [fileTabs, setFileTabs] = useState<FileTab[]>([])
-  const [activeFileTabId, setActiveFileTabId] = useState<string | null>(null)
+  const [fileTabs, setFileTabs] = useState<FileTab[]>([{ id: 'home-tab', path: HOME_TAB_PATH }])
+  const [activeFileTabId, setActiveFileTabId] = useState<string | null>('home-tab')
   const activeFileTabIdRef = useRef(activeFileTabId)
   activeFileTabIdRef.current = activeFileTabId
   const [editorSessionByTabId, setEditorSessionByTabId] = useState<Record<string, number>>({})
@@ -3272,9 +3273,10 @@ function App() {
     return () => window.removeEventListener('rowboat:open-copilot-prompt', handler as EventListener)
   }, [submitFromPalette])
 
-  const toggleKnowledgePane = useCallback(() => {
+  // Reveal the chat in the right side pane (from the middle-panel chat icon).
+  const openChatSidePane = useCallback(() => {
     setIsRightPaneMaximized(false)
-    setIsChatSidebarOpen(prev => !prev)
+    setIsChatSidebarOpen(true)
   }, [])
 
   // Browser is an overlay on the middle pane: opening it forces the chat
@@ -3809,6 +3811,18 @@ function App() {
     setHistory(nextHistory)
     await applyViewState(nextView)
   }, [appendUnique, applyViewState, cancelRecordingIfActive, currentViewState, setHistory, isBrowserOpen, dismissBrowserOverlay])
+
+  // Move the maximized/full-screen chat into the right side pane: restore the
+  // view we expanded from (or fall back to Home) and dock the chat on the right.
+  const pushChatToSidePane = useCallback(() => {
+    setIsRightPaneMaximized(false)
+    setIsChatSidebarOpen(true)
+    if (expandedFrom) {
+      handleCloseFullScreenChat()
+    } else {
+      void navigateToView({ type: 'home' })
+    }
+  }, [expandedFrom, handleCloseFullScreenChat, navigateToView])
 
   const navigateBack = useCallback(async () => {
     const { back, forward } = historyRef.current
@@ -4412,14 +4426,23 @@ function App() {
       }
     },
     createFolder: async (parentPath: string = 'knowledge'): Promise<string> => {
-      const newPath = `${parentPath}/new-folder-${Date.now()}`
       try {
+        let index = 1
+        let name = 'New folder'
+        let fullPath = `${parentPath}/${name}`
+        while (index < 1000) {
+          const exists = await window.ipc.invoke('workspace:exists', { path: fullPath })
+          if (!exists.exists) break
+          index += 1
+          name = `New folder ${index}`
+          fullPath = `${parentPath}/${name}`
+        }
         await window.ipc.invoke('workspace:mkdir', {
-          path: newPath,
+          path: fullPath,
           recursive: true
         })
         setExpandedPaths(prev => new Set([...prev, parentPath]))
-        return newPath
+        return fullPath
       } catch (err) {
         console.error('Failed to create folder:', err)
         throw err
@@ -5227,38 +5250,38 @@ function App() {
                     <TooltipContent side="bottom">New chat</TooltipContent>
                   </Tooltip>
                 )}
-                {!selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isMeetingsOpen && !isLiveNotesOpen && !isBgTasksOpen && !isEmailOpen && !isWorkspaceOpen && !isKnowledgeViewOpen && !isChatHistoryOpen && !isBrowserOpen && expandedFrom && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        onClick={handleCloseFullScreenChat}
-                        className="titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors self-center shrink-0"
-                        aria-label="Restore two-pane view"
-                      >
-                        <Minimize2 className="size-5" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">Restore two-pane view</TooltipContent>
-                  </Tooltip>
-                )}
-                {(selectedPath || isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen || isHomeOpen) && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        onClick={toggleKnowledgePane}
-                        className="titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors -mr-1 self-center shrink-0"
-                        aria-label={isChatSidebarOpen ? "Maximize knowledge view" : "Restore two-pane view"}
-                      >
-                        {isChatSidebarOpen ? <Maximize2 className="size-5" /> : <Minimize2 className="size-5" />}
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">
-                      {isChatSidebarOpen ? "Maximize knowledge view" : "Restore two-pane view"}
-                    </TooltipContent>
-                  </Tooltip>
-                )}
+                {/* Trailing layout control. Always mounted (just toggled invisible
+                    when inactive) so its -webkit-app-region:no-drag rect is stable —
+                    a freshly-mounted no-drag button inside the drag-region header
+                    otherwise has its first click swallowed by the window drag. */}
+                {(() => {
+                  const viewOpen = selectedPath || isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen || isHomeOpen
+                  const action = isFullScreenChat
+                    ? { onClick: pushChatToSidePane, icon: <ArrowRight className="size-5" />, label: 'Dock chat to side pane' }
+                    : (viewOpen && !isChatSidebarOpen)
+                      ? { onClick: openChatSidePane, icon: <MessageSquare className="size-5" />, label: 'Open chat' }
+                      : null
+                  return (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          onClick={action ? action.onClick : undefined}
+                          disabled={!action}
+                          aria-hidden={!action}
+                          aria-label={action?.label}
+                          className={cn(
+                            'titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors -mr-1 self-center shrink-0',
+                            action ? 'hover:bg-accent hover:text-foreground' : 'invisible pointer-events-none',
+                          )}
+                        >
+                          {action?.icon}
+                        </button>
+                      </TooltipTrigger>
+                      {action && <TooltipContent side="bottom">{action.label}</TooltipContent>}
+                    </Tooltip>
+                  )
+                })()}
               </ContentHeader>
 
               {isBrowserOpen ? (
@@ -5282,6 +5305,7 @@ function App() {
                     onVoiceNoteCreated={handleVoiceNoteCreated}
                     onRunBrowserTask={handleToggleBrowser}
                     onStartResearch={() => submitFromPalette('Do deep, extreme research on a topic and build me a local website that summarizes the findings. Ask me what topic to research.', null)}
+                    onOpenChat={handleNewChatTab}
                   />
                 </div>
               ) : isSuggestedTopicsOpen ? (
@@ -5573,24 +5597,7 @@ function App() {
               <FileCardProvider onOpenKnowledgeFile={(path) => { navigateToFile(path) }}>
               <div className="flex min-h-0 flex-1 flex-col">
                 <div className="relative min-h-0 flex-1">
-                  {(activeChatTabState.conversation.length === 0 && !activeChatTabState.currentAssistantMessage) ? (
-                    <HomeView
-                      tree={tree}
-                      runs={runs}
-                      bgTaskSummaries={bgTaskSummaries}
-                      onOpenEmail={() => openEmailView()}
-                      onOpenMeetings={openMeetingsView}
-                      onOpenAgents={() => { setBgTaskInitialSlug(null); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
-                      onOpenAgent={(slug) => { setBgTaskInitialSlug(slug); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
-                      onOpenNote={(path) => navigateToFile(path)}
-                      onOpenRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
-                      onTakeMeetingNotes={() => { void handleToggleMeeting() }}
-                      onVoiceNoteCreated={handleVoiceNoteCreated}
-                      onRunBrowserTask={handleToggleBrowser}
-                      onStartResearch={() => submitFromPalette('Do deep, extreme research on a topic and build me a local website that summarizes the findings. Ask me what topic to research.', null)}
-                    />
-                  ) : (
-                  chatTabs.map((tab) => {
+                  {chatTabs.map((tab) => {
                     const isActive = tab.id === activeChatTabId
                     const tabState = getChatTabStateForRender(tab.id)
                     const tabHasConversation = tabState.conversation.length > 0 || tabState.currentAssistantMessage
@@ -5694,8 +5701,7 @@ function App() {
                         </Conversation>
                       </div>
                     )
-                  })
-                  )}
+                  })}
                 </div>
 
                 <div className="rowboat-composer-dock sticky bottom-0 z-10 bg-background pb-12 pt-0 shadow-lg">
@@ -5777,6 +5783,7 @@ function App() {
                 }}
                 onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
                 onOpenFullScreen={toggleRightPaneMaximize}
+                onCloseChat={() => { setIsRightPaneMaximized(false); setIsChatSidebarOpen(false) }}
                 conversation={conversation}
                 currentAssistantMessage={currentAssistantMessage}
                 chatTabStates={chatViewStateByTab}
