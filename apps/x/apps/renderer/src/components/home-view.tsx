@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowRight, Bot, Calendar, Clock, FileText, Globe, Mail, MessageSquare, Mic, Plus, Telescope, Video } from 'lucide-react'
-
-import { VoiceNoteButton } from '@/components/sidebar-content'
+import { ArrowRight, Bot, Calendar, Clock, FileText, Mail, MessageSquare, Mic, Plus, Video } from 'lucide-react'
 import { extractConferenceLink } from '@/lib/calendar-event'
 
 interface TreeNode {
@@ -26,9 +24,6 @@ type HomeViewProps = {
   onOpenNote: (path: string) => void
   onOpenRun: (runId: string) => void
   onTakeMeetingNotes: () => void
-  onVoiceNoteCreated?: (path: string) => void
-  onRunBrowserTask?: () => void
-  onStartResearch?: () => void
   onOpenChat?: () => void
 }
 
@@ -169,9 +164,6 @@ export function HomeView({
   onOpenNote,
   onOpenRun,
   onTakeMeetingNotes,
-  onVoiceNoteCreated,
-  onRunBrowserTask,
-  onStartResearch,
   onOpenChat,
 }: HomeViewProps) {
   const [events, setEvents] = useState<CalEvent[]>([])
@@ -467,67 +459,6 @@ export function HomeView({
           )}
 
         </div>
-      </div>
-    </div>
-  )
-}
-
-type DiscoveryTip = {
-  icon: typeof Mic
-  title: string
-  desc: string
-  /** Provide one of: an action node (e.g. VoiceNoteButton) or an onAction handler. */
-  action?: React.ReactNode
-  onAction?: () => void
-}
-
-function DiscoveryCarousel({ tips }: { tips: DiscoveryTip[] }) {
-  const [index, setIndex] = useState(0)
-  const [paused, setPaused] = useState(false)
-
-  useEffect(() => {
-    if (paused || tips.length <= 1) return
-    const id = setInterval(() => setIndex((i) => (i + 1) % tips.length), 7000)
-    return () => clearInterval(id)
-  }, [paused, tips.length])
-
-  const safeIndex = index % tips.length
-  const tip = tips[safeIndex]
-  const Icon = tip.icon
-
-  return (
-    <div
-      className={`${CARD} flex items-center gap-3.5 border-dashed bg-transparent`}
-      onMouseEnter={() => setPaused(true)}
-      onMouseLeave={() => setPaused(false)}
-    >
-      <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border bg-card">
-        <Icon className="size-[15px]" />
-      </div>
-      <div className="flex-1 text-[13.5px] leading-snug">
-        <span className="font-medium">{tip.title}</span>
-        <span className="text-muted-foreground"> — {tip.desc}</span>
-      </div>
-      {tip.action ?? (
-        <button
-          type="button"
-          onClick={() => tip.onAction?.()}
-          aria-label={tip.title}
-          className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        >
-          <ArrowRight className="size-[15px]" />
-        </button>
-      )}
-      <div className="ml-1 flex shrink-0 items-center gap-1">
-        {tips.map((_, i) => (
-          <button
-            key={i}
-            type="button"
-            onClick={() => setIndex(i)}
-            aria-label={`Show tip ${i + 1}`}
-            className={`size-1.5 rounded-full transition-colors ${i === safeIndex ? 'bg-foreground' : 'bg-border hover:bg-muted-foreground/40'}`}
-          />
-        ))}
       </div>
     </div>
   )

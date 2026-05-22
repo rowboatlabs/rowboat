@@ -59,6 +59,7 @@ import { cn } from "@/lib/utils"
 import { SettingsDialog } from "@/components/settings-dialog"
 import { extractConferenceLink } from "@/lib/calendar-event"
 import { useBilling } from "@/hooks/useBilling"
+import { toast } from "@/lib/toast"
 import { ServiceEvent } from "@x/shared/src/service-events.js"
 import z from "zod"
 
@@ -472,7 +473,7 @@ export function SidebarContentPanel({
     const loadNext = async () => {
       try {
         const exists = await window.ipc.invoke('workspace:exists', { path: 'calendar_sync' })
-        if (!exists.exists) { if (!cancelled) setNextMeetingLabel(null); return }
+        if (!exists.exists) { if (!cancelled) setMeetings([]); return }
         const entries = await window.ipc.invoke('workspace:readdir', {
           path: 'calendar_sync',
           opts: { recursive: false, includeHidden: false, includeStats: false },
@@ -998,7 +999,7 @@ export function SidebarContentPanel({
                   <AlertDialogFooter>
                     <AlertDialogCancel
                       onClick={() => {
-                        setOpenConnectorsAfterClose(false)
+                        setOpenConnectionsAfterClose(false)
                         setShowOauthAlert(false)
                       }}
                     >
@@ -1410,4 +1411,3 @@ function formatEmailFrom(from: string): string {
   if (match) return match[1].trim()
   return from
 }
-

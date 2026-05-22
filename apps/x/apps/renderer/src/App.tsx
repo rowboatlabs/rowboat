@@ -5302,9 +5302,6 @@ function App() {
                     onOpenNote={(path) => navigateToFile(path)}
                     onOpenRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
                     onTakeMeetingNotes={() => { void handleToggleMeeting() }}
-                    onVoiceNoteCreated={handleVoiceNoteCreated}
-                    onRunBrowserTask={handleToggleBrowser}
-                    onStartResearch={() => submitFromPalette('Do deep, extreme research on a topic and build me a local website that summarizes the findings. Ask me what topic to research.', null)}
                     onOpenChat={handleNewChatTab}
                   />
                 </div>
