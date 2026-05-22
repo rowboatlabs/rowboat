@@ -14,12 +14,16 @@ import {
   Globe,
   AlertTriangle,
   HelpCircle,
+  Home,
   Mic,
+  SearchIcon,
+  SquarePen,
   Plug,
-  Lightbulb,
-  ListChecks,
+  Plus,
+  Video,
   LoaderIcon,
   Mail,
+  MessageSquare,
   Settings,
   Square,
   Trash2,
@@ -80,6 +84,7 @@ import { HelpPopover } from "@/components/help-popover"
 import { SettingsDialog } from "@/components/settings-dialog"
 import { toast } from "@/lib/toast"
 import { formatRelativeTime as formatRunTime } from "@/lib/relative-time"
+import { extractConferenceLink } from "@/lib/calendar-event"
 import { useBilling } from "@/hooks/useBilling"
 import { ServiceEvent } from "@x/shared/src/service-events.js"
 import z from "zod"
@@ -124,21 +129,13 @@ type RunListItem = {
   agentId: string
 }
 
-type BackgroundTaskItem = {
+type TaskSummary = {
+  slug: string
   name: string
-  description?: string
-  schedule: {
-    type: "cron" | "window" | "once"
-    expression?: string
-    cron?: string
-    startTime?: string
-    endTime?: string
-    runAt?: string
-  }
-  enabled: boolean
-  status?: "scheduled" | "running" | "finished" | "failed" | "triggered"
-  nextRunAt?: string | null
-  lastRunAt?: string | null
+  active: boolean
+  createdAt: string
+  lastAttemptAt?: string
+  lastRunAt?: string
 }
 
 type ServiceEventType = z.infer<typeof ServiceEvent>
@@ -183,6 +180,7 @@ type TasksActions = {
   onDeleteRun: (runId: string) => void
   onOpenInNewTab?: (runId: string) => void
   onSelectBackgroundTask?: (taskName: string) => void
+  onOpenChatHistoryView?: () => void
 }
 
 type SidebarContentPanelProps = {
@@ -194,19 +192,18 @@ type SidebarContentPanelProps = {
   currentRunId?: string | null
   processingRunIds?: Set<string>
   tasksActions?: TasksActions
-  backgroundTasks?: BackgroundTaskItem[]
-  selectedBackgroundTask?: string | null
-  isSearchOpen?: boolean
-  isBrowserOpen?: boolean
-  onToggleBrowser?: () => void
-  isSuggestedTopicsOpen?: boolean
-  onOpenSuggestedTopics?: () => void
-  isMeetingsOpen?: boolean
+  bgTaskSummaries?: TaskSummary[]
+  onOpenBgTask?: (slug: string) => void
   onOpenMeetings?: () => void
-  isBgTasksOpen?: boolean
+  meetingRecordingState?: 'idle' | 'connecting' | 'recording' | 'stopping'
+  recordingMeetingSource?: string | null
+  onToggleMeetingRecording?: () => void
   onOpenBgTasks?: () => void
-  isEmailOpen?: boolean
-  onOpenEmail?: () => void
+  onOpenEmail?: (threadId?: string) => void
+  onOpenHome?: () => void
+  onNewChat?: () => void
+  onOpenSearch?: () => void
+  onToggleBrowser?: () => void
 } & React.ComponentProps<typeof Sidebar>
 
 function formatEventTime(ts: string): string {
@@ -443,19 +440,18 @@ export function SidebarContentPanel({
   currentRunId,
   processingRunIds,
   tasksActions,
-  backgroundTasks = [],
-  selectedBackgroundTask,
-  isSearchOpen = false,
-  isBrowserOpen = false,
-  onToggleBrowser,
-  isSuggestedTopicsOpen = false,
-  onOpenSuggestedTopics,
-  isMeetingsOpen = false,
+  bgTaskSummaries = [],
+  onOpenBgTask,
   onOpenMeetings,
-  isBgTasksOpen = false,
+  meetingRecordingState,
+  recordingMeetingSource,
+  onToggleMeetingRecording,
   onOpenBgTasks,
-  isEmailOpen = false,
   onOpenEmail,
+  onOpenHome,
+  onNewChat,
+  onOpenSearch,
+  onToggleBrowser,
   ...props
 }: SidebarContentPanelProps) {
   const [hasOauthError, setHasOauthError] = useState(false)
@@ -467,11 +463,6 @@ export function SidebarContentPanel({
   const [loggingIn, setLoggingIn] = useState(false)
   const [appUrl, setAppUrl] = useState<string | null>(null)
   const { billing } = useBilling(isRowboatConnected)
-  const isBrowserQuickActionSelected = isBrowserOpen && !isSearchOpen
-  const isSuggestedTopicsQuickActionSelected = isSuggestedTopicsOpen && !isBrowserOpen
-  const isMeetingsQuickActionSelected = isMeetingsOpen && !isBrowserOpen
-  const isBgTasksQuickActionSelected = isBgTasksOpen && !isBrowserOpen
-  const isEmailQuickActionSelected = isEmailOpen && !isBrowserOpen
 
   const handleRowboatLogin = useCallback(async () => {
     try {
@@ -534,56 +525,70 @@ export function SidebarContentPanel({
       <SidebarHeader className="titlebar-drag-region">
         {/* Top spacer to clear the traffic lights + fixed toggle row */}
         <div className="h-8" />
-        {/* Quick action buttons */}
-        <div className="rowboat-quick-actions titlebar-no-drag flex flex-col gap-0.5 px-2 pb-1">
-          {onOpenEmail && (
+        <div className="titlebar-no-drag flex items-center gap-1 px-2 pb-1">
+          {onOpenHome && (
             <button
               type="button"
-              onClick={onOpenEmail}
-              className={cn(
-                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
-                isEmailQuickActionSelected
-                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                  : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-              )}
+              onClick={onOpenHome}
+              className="flex size-8 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+              aria-label="Home"
+              title="Home"
             >
-              <Mail className="size-4" />
-              <span>Email</span>
+              <Home className="size-4" />
             </button>
           )}
-          {onOpenMeetings && (
+          {onNewChat && (
             <button
               type="button"
-              onClick={onOpenMeetings}
-              className={cn(
-                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
-                isMeetingsQuickActionSelected
-                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                  : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-              )}
+              onClick={onNewChat}
+              className="flex size-8 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+              aria-label="New chat"
+              title="New chat"
             >
-              <Mic className="size-4" />
-              <span>Meetings</span>
+              <SquarePen className="size-4" />
             </button>
           )}
-          {onOpenBgTasks && (
+          {onToggleBrowser && (
             <button
               type="button"
-              onClick={onOpenBgTasks}
-              className={cn(
-                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
-                isBgTasksQuickActionSelected
-                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                  : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-              )}
+              onClick={onToggleBrowser}
+              className="flex size-8 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+              aria-label="Run browser task"
+              title="Run browser task"
             >
-              <ListChecks className="size-4" />
-              <span>Agents</span>
+              <Globe className="size-4" />
+            </button>
+          )}
+          {onOpenSearch && (
+            <button
+              type="button"
+              onClick={onOpenSearch}
+              className="flex size-8 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+              aria-label="Search"
+              title="Search"
+            >
+              <SearchIcon className="size-4" />
             </button>
           )}
         </div>
       </SidebarHeader>
       <SidebarContent>
+        <EmailSidebarSection
+          onOpenEmailView={onOpenEmail}
+          onOpenConnectors={() => setConnectorsOpen(true)}
+        />
+        <MeetingsSidebarSection
+          onOpenMeetingsView={onOpenMeetings}
+          onOpenConnectors={() => setConnectorsOpen(true)}
+          recordingState={meetingRecordingState ?? 'idle'}
+          recordingSource={recordingMeetingSource ?? null}
+          onToggleRecording={onToggleMeetingRecording}
+        />
+        <TasksSidebarSection
+          tasks={bgTaskSummaries}
+          onOpenTask={onOpenBgTask}
+          onOpenTasksView={onOpenBgTasks}
+        />
         <KnowledgeSection
           tree={tree}
           selectedPath={selectedPath}
@@ -596,8 +601,6 @@ export function SidebarContentPanel({
           currentRunId={currentRunId}
           processingRunIds={processingRunIds}
           actions={tasksActions}
-          backgroundTasks={backgroundTasks}
-          selectedBackgroundTask={selectedBackgroundTask}
         />
       </SidebarContent>
       {/* Billing / upgrade CTA or Log in CTA */}
@@ -636,43 +639,6 @@ export function SidebarContentPanel({
           >
             {loggingIn ? 'Signing in…' : 'Sign in to Rowboat'}
           </button>
-        </div>
-      )}
-      {/* Secondary quick actions (above bottom divider) */}
-      {(onToggleBrowser || onOpenSuggestedTopics) && (
-        <div className="px-2 pb-1">
-          <div className="flex flex-col gap-0.5">
-            {onToggleBrowser && (
-              <button
-                type="button"
-                onClick={onToggleBrowser}
-                className={cn(
-                  "flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs transition-colors",
-                  isBrowserQuickActionSelected
-                    ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                    : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                )}
-              >
-                <Globe className="size-4" />
-                <span>Run browser task</span>
-              </button>
-            )}
-            {onOpenSuggestedTopics && (
-              <button
-                type="button"
-                onClick={onOpenSuggestedTopics}
-                className={cn(
-                  "flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs transition-colors",
-                  isSuggestedTopicsQuickActionSelected
-                    ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                    : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                )}
-              >
-                <Lightbulb className="size-4" />
-                <span>Suggested Topics</span>
-              </button>
-            )}
-          </div>
         </div>
       )}
       {/* Bottom actions */}
@@ -1040,7 +1006,7 @@ function KnowledgeSection({
       <ContextMenuTrigger asChild>
         <SidebarGroup className="flex flex-col">
           <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
-            Knowledge
+            Notes
           </div>
           <SidebarGroupContent>
             <SidebarMenu>
@@ -1056,9 +1022,24 @@ function KnowledgeSection({
                 </SidebarMenuItem>
               ))}
               <SidebarMenuItem>
-                <SidebarMenuButton onClick={() => actions.openKnowledgeView()}>
-                  <ArrowUpRight className="size-4 shrink-0 text-muted-foreground" />
-                  <span className="text-muted-foreground">View all</span>
+                <SidebarMenuButton
+                  onClick={() =>
+                    recentNotes.length === 0
+                      ? actions.createNote()
+                      : actions.openKnowledgeView()
+                  }
+                >
+                  {recentNotes.length === 0 ? (
+                    <>
+                      <Plus className="size-4 shrink-0 text-muted-foreground" />
+                      <span className="text-muted-foreground">New note</span>
+                    </>
+                  ) : (
+                    <>
+                      <ArrowUpRight className="size-4 shrink-0 text-muted-foreground" />
+                      <span className="text-muted-foreground">View all</span>
+                    </>
+                  )}
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>
@@ -1112,8 +1093,17 @@ export function WorkspaceSection({
           ))}
           <SidebarMenuItem>
             <SidebarMenuButton onClick={() => actions.openWorkspaceAt()}>
-              <ArrowUpRight className="size-4 shrink-0 text-muted-foreground" />
-              <span className="text-muted-foreground">View all</span>
+              {recentWorkspaces.length === 0 ? (
+                <>
+                  <Plus className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="text-muted-foreground">New workspace</span>
+                </>
+              ) : (
+                <>
+                  <ArrowUpRight className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="text-muted-foreground">View all</span>
+                </>
+              )}
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
@@ -1123,25 +1113,540 @@ export function WorkspaceSection({
 }
 
 
-// Get status indicator color
-function getStatusColor(status?: string, enabled?: boolean): string {
-  // Disabled agents always show gray
-  if (enabled === false) {
-    return "bg-gray-400"
+type UpcomingMeeting = {
+  id: string
+  summary: string
+  start: Date
+  isAllDay: boolean
+  location: string | null
+  htmlLink: string | null
+  conferenceLink: string | null
+  source: string
+  rawStart: { dateTime?: string; date?: string } | undefined
+  rawEnd: { dateTime?: string; date?: string } | undefined
+}
+
+type RawCalendarEvent = {
+  id?: string
+  summary?: string
+  start?: { dateTime?: string; date?: string }
+  end?: { dateTime?: string; date?: string }
+  location?: string
+  htmlLink?: string
+  status?: string
+  attendees?: Array<{ self?: boolean; responseStatus?: string }>
+}
+
+function parseAllDayDate(s: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s)
+  if (!m) return null
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+}
+
+function normalizeUpcomingMeeting(raw: RawCalendarEvent, sourcePath: string): UpcomingMeeting | null {
+  if (raw.status === 'cancelled') return null
+  const declined = raw.attendees?.find((a) => a.self)?.responseStatus === 'declined'
+  if (declined) return null
+  const allDayStart = raw.start?.date
+  const timedStart = raw.start?.dateTime
+  const isAllDay = !timedStart && Boolean(allDayStart)
+  let start: Date | null = null
+  let end: Date | null = null
+  if (timedStart) {
+    start = new Date(timedStart)
+    end = raw.end?.dateTime ? new Date(raw.end.dateTime) : null
+  } else if (allDayStart) {
+    start = parseAllDayDate(allDayStart)
+    end = raw.end?.date ? parseAllDayDate(raw.end.date) : null
   }
-  switch (status) {
-    case "running":
-      return "bg-blue-500"
-    case "finished":
-      return "bg-green-500"
-    case "failed":
-      return "bg-red-500"
-    case "triggered":
-      return "bg-gray-400"
-    case "scheduled":
-    default:
-      return "bg-yellow-500"
+  if (!start || Number.isNaN(start.getTime())) return null
+  const now = new Date()
+  const effectiveEnd = end ?? (isAllDay ? new Date(start.getTime() + 24 * 60 * 60 * 1000) : start)
+  if (effectiveEnd <= now) return null
+  const conferenceLink = extractConferenceLink(raw as unknown as Record<string, unknown>) ?? null
+  return {
+    id: raw.id ?? sourcePath,
+    summary: raw.summary?.trim() || '(No title)',
+    start,
+    isAllDay,
+    location: raw.location?.trim() || null,
+    htmlLink: raw.htmlLink ?? null,
+    conferenceLink,
+    source: sourcePath,
+    rawStart: raw.start,
+    rawEnd: raw.end,
   }
+}
+
+function triggerMeetingCapture(event: UpcomingMeeting, openConference: boolean) {
+  window.__pendingCalendarEvent = {
+    summary: event.summary,
+    start: event.rawStart,
+    end: event.rawEnd,
+    location: event.location ?? undefined,
+    htmlLink: event.htmlLink ?? undefined,
+    conferenceLink: event.conferenceLink ?? undefined,
+    source: event.source,
+  }
+  if (openConference && event.conferenceLink) {
+    window.open(event.conferenceLink, '_blank')
+  }
+  window.dispatchEvent(new Event('calendar-block:join-meeting'))
+}
+
+function isSameLocalDay(a: Date, b: Date): boolean {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
+}
+
+function formatMeetingTime(event: UpcomingMeeting): string {
+  if (event.isAllDay) return 'All day'
+  const now = new Date()
+  const tomorrow = new Date(now)
+  tomorrow.setDate(tomorrow.getDate() + 1)
+  const time = event.start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  if (isSameLocalDay(event.start, now)) return time
+  if (isSameLocalDay(event.start, tomorrow)) return `Tmrw ${time}`
+  return event.start.toLocaleDateString([], { month: 'numeric', day: 'numeric' })
+}
+
+type SidebarEmailThread = {
+  threadId: string
+  subject: string
+  from: string
+  date: string
+}
+
+function formatEmailFrom(from: string): string {
+  const match = /^\s*"?([^"<]+?)"?\s*<.+>\s*$/.exec(from)
+  if (match) return match[1].trim()
+  return from
+}
+
+function formatEmailTime(value: string): string {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  const now = new Date()
+  const diffMs = now.getTime() - date.getTime()
+  const diffMin = Math.round(diffMs / 60000)
+  if (diffMin < 1) return 'now'
+  if (diffMin < 60) return `${diffMin}m`
+  const sameDay = date.toDateString() === now.toDateString()
+  if (sameDay) return `${Math.round(diffMin / 60)}h`
+  const yesterday = new Date(now)
+  yesterday.setDate(now.getDate() - 1)
+  if (date.toDateString() === yesterday.toDateString()) return 'Yest'
+  if (diffMs < 7 * 24 * 60 * 60 * 1000) return date.toLocaleDateString([], { weekday: 'short' })
+  if (date.getFullYear() === now.getFullYear()) return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
+  return date.toLocaleDateString([], { month: 'short', day: 'numeric', year: '2-digit' })
+}
+
+function EmailSidebarSection({
+  onOpenEmailView,
+  onOpenConnectors,
+}: {
+  onOpenEmailView?: (threadId?: string) => void
+  onOpenConnectors?: () => void
+}) {
+  const [threads, setThreads] = useState<SidebarEmailThread[]>([])
+  const [connected, setConnected] = useState<boolean | null>(null)
+
+  const refreshConnected = useCallback(async () => {
+    try {
+      const result = await window.ipc.invoke('composio:get-connection-status', { toolkitSlug: 'gmail' })
+      setConnected(result.isConnected)
+    } catch {
+      setConnected(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void refreshConnected()
+    const cleanup = window.ipc.on('oauth:didConnect', () => { void refreshConnected() })
+    return cleanup
+  }, [refreshConnected])
+
+  const load = useCallback(async () => {
+    try {
+      const result = await window.ipc.invoke('gmail:getImportant', { limit: 25 })
+      const unread = result.threads
+        .filter((t) => t.unread === true)
+        .slice(0, 3)
+        .map<SidebarEmailThread>((t) => ({
+          threadId: t.threadId,
+          subject: t.subject ?? '(No subject)',
+          from: t.from ?? '',
+          date: t.date ?? '',
+        }))
+      setThreads(unread)
+    } catch (err) {
+      console.error('Failed to load important emails:', err)
+    }
+  }, [])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  useEffect(() => {
+    let timeout: ReturnType<typeof setTimeout> | null = null
+    const scheduleReload = () => {
+      if (timeout) clearTimeout(timeout)
+      timeout = setTimeout(() => { timeout = null; void load() }, 500)
+    }
+    const matches = (p: string | undefined) =>
+      typeof p === 'string' && (p === 'gmail_sync' || p.startsWith('gmail_sync/'))
+    const cleanup = window.ipc.on('workspace:didChange', (event) => {
+      switch (event.type) {
+        case 'created':
+        case 'changed':
+        case 'deleted':
+          if (matches(event.path)) scheduleReload()
+          break
+        case 'moved':
+          if (matches(event.from) || matches(event.to)) scheduleReload()
+          break
+        case 'bulkChanged':
+          if (!event.paths || event.paths.some(matches)) scheduleReload()
+          break
+      }
+    })
+    return () => {
+      if (timeout) clearTimeout(timeout)
+      cleanup()
+    }
+  }, [load])
+
+  return (
+    <SidebarGroup className="flex flex-col">
+      <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
+        Email
+      </div>
+      <SidebarGroupContent>
+        <SidebarMenu>
+          {threads.map((t) => (
+            <SidebarMenuItem key={t.threadId}>
+              <SidebarMenuButton onClick={() => onOpenEmailView?.(t.threadId)} className="gap-2">
+                <Mail className="size-4 shrink-0" />
+                <span className="min-w-0 flex-1 truncate text-sm">
+                  {formatEmailFrom(t.from)}
+                  <span className="text-muted-foreground"> · {t.subject}</span>
+                </span>
+                {t.date && (
+                  <span className="shrink-0 text-[10px] text-muted-foreground">
+                    {formatEmailTime(t.date)}
+                  </span>
+                )}
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          ))}
+          {connected === false && threads.length === 0 ? (
+            onOpenConnectors && (
+              <SidebarMenuItem>
+                <SidebarMenuButton onClick={onOpenConnectors}>
+                  <Plug className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="text-muted-foreground">Connect Email</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            )
+          ) : (
+            onOpenEmailView && (
+              <SidebarMenuItem>
+                <SidebarMenuButton onClick={() => onOpenEmailView()}>
+                  <ArrowUpRight className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="text-muted-foreground">View all</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            )
+          )}
+        </SidebarMenu>
+      </SidebarGroupContent>
+    </SidebarGroup>
+  )
+}
+
+function MeetingsSidebarSection({
+  onOpenMeetingsView,
+  onOpenConnectors,
+  recordingState,
+  recordingSource,
+  onToggleRecording,
+}: {
+  onOpenMeetingsView?: () => void
+  onOpenConnectors?: () => void
+  recordingState: 'idle' | 'connecting' | 'recording' | 'stopping'
+  recordingSource: string | null
+  onToggleRecording?: () => void
+}) {
+  const [meetings, setMeetings] = useState<UpcomingMeeting[]>([])
+  const [calendarConnected, setCalendarConnected] = useState<boolean | null>(null)
+
+  const refreshCalendarConnected = useCallback(async () => {
+    try {
+      const result = await window.ipc.invoke('composio:get-connection-status', { toolkitSlug: 'googlecalendar' })
+      setCalendarConnected(result.isConnected)
+    } catch {
+      setCalendarConnected(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void refreshCalendarConnected()
+    const cleanup = window.ipc.on('oauth:didConnect', () => { void refreshCalendarConnected() })
+    return cleanup
+  }, [refreshCalendarConnected])
+
+  const load = useCallback(async () => {
+    try {
+      const exists = await window.ipc.invoke('workspace:exists', { path: 'calendar_sync' })
+      if (!exists.exists) {
+        setMeetings([])
+        return
+      }
+      const entries = await window.ipc.invoke('workspace:readdir', {
+        path: 'calendar_sync',
+        opts: { recursive: false, includeHidden: false, includeStats: false },
+      })
+      const jsonEntries = entries.filter((e) => e.kind === 'file' && e.name.endsWith('.json'))
+      const settled = await Promise.allSettled(
+        jsonEntries.map(async (entry): Promise<UpcomingMeeting | null> => {
+          const result = await window.ipc.invoke('workspace:readFile', {
+            path: entry.path,
+            encoding: 'utf8',
+          })
+          const raw = JSON.parse(result.data) as RawCalendarEvent
+          return normalizeUpcomingMeeting(raw, entry.path)
+        }),
+      )
+      const collected: UpcomingMeeting[] = []
+      for (const r of settled) {
+        if (r.status === 'fulfilled' && r.value) collected.push(r.value)
+      }
+      collected.sort((a, b) => {
+        if (a.isAllDay !== b.isAllDay) return a.isAllDay ? -1 : 1
+        return a.start.getTime() - b.start.getTime()
+      })
+      setMeetings(collected.slice(0, 3))
+    } catch (err) {
+      console.error('Failed to load upcoming meetings:', err)
+    }
+  }, [])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  useEffect(() => {
+    let timeout: ReturnType<typeof setTimeout> | null = null
+    const scheduleReload = () => {
+      if (timeout) clearTimeout(timeout)
+      timeout = setTimeout(() => { timeout = null; void load() }, 250)
+    }
+    const matches = (p: string | undefined) =>
+      typeof p === 'string' && (p === 'calendar_sync' || p.startsWith('calendar_sync/'))
+    const cleanup = window.ipc.on('workspace:didChange', (event) => {
+      switch (event.type) {
+        case 'created':
+        case 'changed':
+        case 'deleted':
+          if (matches(event.path)) scheduleReload()
+          break
+        case 'moved':
+          if (matches(event.from) || matches(event.to)) scheduleReload()
+          break
+        case 'bulkChanged':
+          if (!event.paths || event.paths.some(matches)) scheduleReload()
+          break
+      }
+    })
+    const tick = setInterval(() => void load(), 60 * 60 * 1000)
+    return () => {
+      if (timeout) clearTimeout(timeout)
+      clearInterval(tick)
+      cleanup()
+    }
+  }, [load])
+
+  return (
+    <SidebarGroup className="flex flex-col">
+      <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
+        Meetings
+      </div>
+      <SidebarGroupContent>
+        <SidebarMenu>
+          {meetings.map((m) => {
+            const hasConference = Boolean(m.conferenceLink)
+            const isThisRecording = recordingSource === m.source && (recordingState === 'recording' || recordingState === 'connecting' || recordingState === 'stopping')
+            const isBusy = isThisRecording && (recordingState === 'connecting' || recordingState === 'stopping')
+            return (
+              <SidebarMenuItem key={m.id}>
+                <SidebarMenuButton onClick={onOpenMeetingsView} className="gap-2">
+                  <Mic className="size-4 shrink-0" />
+                  <span className="min-w-0 flex-1 truncate text-sm">{m.summary}</span>
+                  <span
+                    className={`shrink-0 text-[10px] text-muted-foreground ${isThisRecording ? '' : 'group-hover/menu-item:hidden'}`}
+                  >
+                    {isThisRecording ? null : formatMeetingTime(m)}
+                  </span>
+                </SidebarMenuButton>
+                {isThisRecording ? (
+                  <div className="absolute top-1.5 right-1 flex items-center gap-1.5">
+                    <span className="relative flex size-2">
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
+                      <span className="relative inline-flex size-2 rounded-full bg-red-500" />
+                    </span>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          aria-label="Stop recording"
+                          disabled={isBusy}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            onToggleRecording?.()
+                          }}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          className="flex aspect-square w-5 items-center justify-center rounded-md text-destructive hover:bg-destructive/10 disabled:opacity-50"
+                        >
+                          {isBusy ? <LoaderIcon className="size-4 animate-spin" /> : <Square className="size-3.5 fill-current" />}
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">
+                        {recordingState === 'connecting' ? 'Starting…' : recordingState === 'stopping' ? 'Stopping…' : 'Stop recording'}
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+                ) : (
+                  <div className="absolute top-1.5 right-1 flex items-center gap-0.5 opacity-0 transition-opacity group-focus-within/menu-item:opacity-100 group-hover/menu-item:opacity-100">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          aria-label="Take notes"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            triggerMeetingCapture(m, false)
+                          }}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          className="flex aspect-square w-5 items-center justify-center rounded-md text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                        >
+                          <Mic className="size-4" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">Take notes</TooltipContent>
+                    </Tooltip>
+                    {hasConference && (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            aria-label="Join & take notes"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              triggerMeetingCapture(m, true)
+                            }}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            className="flex aspect-square w-5 items-center justify-center rounded-md text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                          >
+                            <Video className="size-4" />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom">Join & take notes</TooltipContent>
+                      </Tooltip>
+                    )}
+                  </div>
+                )}
+              </SidebarMenuItem>
+            )
+          })}
+          {calendarConnected === false && meetings.length === 0 ? (
+            onOpenConnectors && (
+              <SidebarMenuItem>
+                <SidebarMenuButton onClick={onOpenConnectors}>
+                  <Plug className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="text-muted-foreground">Connect Calendar</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            )
+          ) : (
+            onOpenMeetingsView && (
+              <SidebarMenuItem>
+                <SidebarMenuButton onClick={onOpenMeetingsView}>
+                  <ArrowUpRight className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="text-muted-foreground">View all</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            )
+          )}
+        </SidebarMenu>
+      </SidebarGroupContent>
+    </SidebarGroup>
+  )
+}
+
+function TasksSidebarSection({
+  tasks,
+  onOpenTask,
+  onOpenTasksView,
+}: {
+  tasks: TaskSummary[]
+  onOpenTask?: (slug: string) => void
+  onOpenTasksView?: () => void
+}) {
+  const recentTasks = React.useMemo<TaskSummary[]>(() => {
+    const toTime = (s?: string | null): number => {
+      if (!s) return 0
+      const t = new Date(s).getTime()
+      return Number.isNaN(t) ? 0 : t
+    }
+    const activity = (t: TaskSummary): number =>
+      Math.max(toTime(t.lastRunAt), toTime(t.lastAttemptAt), toTime(t.createdAt))
+    return [...tasks]
+      .sort((a, b) => activity(b) - activity(a))
+      .slice(0, 3)
+  }, [tasks])
+
+  return (
+    <SidebarGroup className="flex flex-col">
+      <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
+        Tasks
+      </div>
+      <SidebarGroupContent>
+        <SidebarMenu>
+          {recentTasks.map((task) => (
+            <SidebarMenuItem key={task.slug}>
+              <SidebarMenuButton
+                onClick={() => onOpenTask?.(task.slug)}
+                className="gap-2"
+              >
+                <Bot className="size-4 shrink-0" />
+                <span className={`truncate text-sm ${!task.active ? "text-muted-foreground" : ""}`}>
+                  {task.name}
+                </span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          ))}
+          {onOpenTasksView && (
+            <SidebarMenuItem>
+              <SidebarMenuButton onClick={onOpenTasksView}>
+                {recentTasks.length === 0 ? (
+                  <>
+                    <Plus className="size-4 shrink-0 text-muted-foreground" />
+                    <span className="text-muted-foreground">New Task</span>
+                  </>
+                ) : (
+                  <>
+                    <ArrowUpRight className="size-4 shrink-0 text-muted-foreground" />
+                    <span className="text-muted-foreground">View all</span>
+                  </>
+                )}
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          )}
+        </SidebarMenu>
+      </SidebarGroupContent>
+    </SidebarGroup>
+  )
 }
 
 // Tasks Section
@@ -1150,106 +1655,78 @@ function TasksSection({
   currentRunId,
   processingRunIds,
   actions,
-  backgroundTasks = [],
-  selectedBackgroundTask,
 }: {
   runs: RunListItem[]
   currentRunId?: string | null
   processingRunIds?: Set<string>
   actions?: TasksActions
-  backgroundTasks?: BackgroundTaskItem[]
-  selectedBackgroundTask?: string | null
 }) {
   const [pendingDeleteRunId, setPendingDeleteRunId] = useState<string | null>(null)
 
   return (
     <SidebarGroup className="flex flex-col">
       <SidebarGroupContent>
-        {/* Background Tasks Section */}
-        {backgroundTasks.length > 0 && (
-          <>
-            <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
-              Background Tasks
-            </div>
-            <SidebarMenu>
-              {backgroundTasks.map((task) => (
-                <SidebarMenuItem key={task.name}>
+        <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
+          Chat history
+        </div>
+        <SidebarMenu>
+          {runs.slice(0, 3).map((run) => (
+            <ContextMenu key={run.id}>
+              <ContextMenuTrigger asChild>
+                <SidebarMenuItem className="group/chat-item">
                   <SidebarMenuButton
-                    isActive={selectedBackgroundTask === task.name}
-                    onClick={() => actions?.onSelectBackgroundTask?.(task.name)}
-                    className="gap-2"
+                    isActive={currentRunId === run.id}
+                    onClick={(e) => {
+                      if (e.metaKey && actions?.onOpenInNewTab) {
+                        actions.onOpenInNewTab(run.id)
+                      } else {
+                        actions?.onSelectRun(run.id)
+                      }
+                    }}
                   >
-                    <div className="relative">
-                      <Bot className="size-4 shrink-0" />
-                      <span
-                        className={`absolute -bottom-0.5 -right-0.5 size-2 rounded-full ${getStatusColor(task.status, task.enabled)} ${task.status === "running" && task.enabled ? "animate-pulse" : ""}`}
-                      />
+                    <div className="flex w-full items-center gap-2 min-w-0">
+                      <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
+                      <span className="min-w-0 flex-1 truncate text-sm">{run.title || '(Untitled chat)'}</span>
+                      {run.createdAt ? (
+                        <span className="shrink-0 text-[10px] text-muted-foreground">
+                          {formatRunTime(run.createdAt)}
+                        </span>
+                      ) : null}
                     </div>
-                    <span className={`truncate text-sm ${!task.enabled ? "text-muted-foreground" : ""}`}>
-                      {task.name}
-                    </span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </>
-        )}
-        {runs.length > 0 && (
-          <>
-            <div className="px-3 py-1.5 mt-4 text-xs font-medium text-muted-foreground">
-              Chat history
-            </div>
-            <SidebarMenu>
-              {runs.map((run) => (
-                <ContextMenu key={run.id}>
-                  <ContextMenuTrigger asChild>
-                    <SidebarMenuItem className="group/chat-item">
-                      <SidebarMenuButton
-                        isActive={currentRunId === run.id}
-                        onClick={(e) => {
-                          if (e.metaKey && actions?.onOpenInNewTab) {
-                            actions.onOpenInNewTab(run.id)
-                          } else {
-                            actions?.onSelectRun(run.id)
-                          }
-                        }}
-                      >
-                        <div className="flex w-full items-center gap-2 min-w-0">
-                          <span className="min-w-0 flex-1 truncate text-sm">{run.title || '(Untitled chat)'}</span>
-                          {run.createdAt ? (
-                            <span className="shrink-0 text-[10px] text-muted-foreground">
-                              {formatRunTime(run.createdAt)}
-                            </span>
-                          ) : null}
-                        </div>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  </ContextMenuTrigger>
-                  <ContextMenuContent className="w-48">
-                    {actions?.onOpenInNewTab && (
-                      <ContextMenuItem onClick={() => actions.onOpenInNewTab!(run.id)}>
-                        <ExternalLink className="mr-2 size-4" />
-                        Open in new tab
-                      </ContextMenuItem>
-                    )}
-                    {!processingRunIds?.has(run.id) && (
-                      <>
-                        {actions?.onOpenInNewTab && <ContextMenuSeparator />}
-                        <ContextMenuItem
-                          variant="destructive"
-                          onClick={() => setPendingDeleteRunId(run.id)}
-                        >
-                          <Trash2 className="mr-2 size-4" />
-                          Delete
-                        </ContextMenuItem>
-                      </>
-                    )}
-                  </ContextMenuContent>
-                </ContextMenu>
-              ))}
-            </SidebarMenu>
-          </>
-        )}
+              </ContextMenuTrigger>
+              <ContextMenuContent className="w-48">
+                {actions?.onOpenInNewTab && (
+                  <ContextMenuItem onClick={() => actions.onOpenInNewTab!(run.id)}>
+                    <ExternalLink className="mr-2 size-4" />
+                    Open in new tab
+                  </ContextMenuItem>
+                )}
+                {!processingRunIds?.has(run.id) && (
+                  <>
+                    {actions?.onOpenInNewTab && <ContextMenuSeparator />}
+                    <ContextMenuItem
+                      variant="destructive"
+                      onClick={() => setPendingDeleteRunId(run.id)}
+                    >
+                      <Trash2 className="mr-2 size-4" />
+                      Delete
+                    </ContextMenuItem>
+                  </>
+                )}
+              </ContextMenuContent>
+            </ContextMenu>
+          ))}
+          {runs.length > 0 && actions?.onOpenChatHistoryView && (
+            <SidebarMenuItem>
+              <SidebarMenuButton onClick={() => actions.onOpenChatHistoryView?.()}>
+                <ArrowUpRight className="size-4 shrink-0 text-muted-foreground" />
+                <span className="text-muted-foreground">View all</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          )}
+        </SidebarMenu>
       </SidebarGroupContent>
 
       {/* Delete confirmation dialog */}
