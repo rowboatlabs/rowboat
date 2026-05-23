@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Archive, Bold, CheckCheck, Forward, Italic, Link as LinkIcon, List, ListOrdered, LoaderIcon, Mail, Paperclip, Quote, RefreshCw, Reply, Search, Send, Sparkles, Strikethrough, Trash2 } from 'lucide-react'
+import { Archive, Bold, CheckCheck, Forward, Italic, Link as LinkIcon, List, ListOrdered, LoaderIcon, Mail, Paperclip, Quote, RefreshCw, Reply, ReplyAll, Search, Send, Sparkles, Strikethrough, Trash2 } from 'lucide-react'
 import { useEditor, EditorContent, type Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
@@ -78,6 +78,88 @@ function avatarColor(from?: string): string {
 
 function latestMessage(thread: GmailThread): GmailThreadMessage | undefined {
   return thread.messages[thread.messages.length - 1]
+}
+
+// Split a raw header recipient string (e.g. `"Jo Bloggs" <jo@x.com>, b@y.com`) into
+// individual address tokens, respecting commas inside quotes/angle brackets.
+function splitAddresses(raw?: string): string[] {
+  if (!raw) return []
+  const tokens: string[] = []
+  let buf = ''
+  let inQuote = false
+  let depth = 0
+  for (const ch of raw) {
+    if (ch === '"') inQuote = !inQuote
+    else if (ch === '<') depth += 1
+    else if (ch === '>') depth = Math.max(0, depth - 1)
+    if ((ch === ',' || ch === ';' || ch === '\n') && !inQuote && depth === 0) {
+      const token = buf.trim()
+      if (token) tokens.push(token)
+      buf = ''
+      continue
+    }
+    buf += ch
+  }
+  const last = buf.trim()
+  if (last) tokens.push(last)
+  return tokens
+}
+
+// Display label for a recipient chip: the display name if present, else the bare address.
+function recipientLabel(token: string): string {
+  const named = token.match(/^\s*"?([^"<]+?)"?\s*<[^>]+>\s*$/)
+  if (named?.[1]?.trim()) return named[1].trim()
+  return extractAddress(token)
+}
+
+// Dedupe tokens by lowercased email address, dropping any whose address is in `exclude`.
+function dedupeRecipients(tokens: string[], exclude: Set<string>): string[] {
+  const seen = new Set<string>(exclude)
+  const out: string[] = []
+  for (const token of tokens) {
+    const addr = extractAddress(token).toLowerCase()
+    if (!addr || seen.has(addr)) continue
+    seen.add(addr)
+    out.push(token)
+  }
+  return out
+}
+
+// Compute the To / Cc recipients for a reply, reply-all, or forward, excluding "me".
+function buildRecipients(
+  mode: ComposeMode,
+  thread: GmailThread,
+  selfEmail: string,
+): { to: string[]; cc: string[] } {
+  if (mode === 'forward') return { to: [], cc: [] }
+
+  const latest = latestMessage(thread)
+  const self = selfEmail.toLowerCase()
+  const fromAddr = latest?.from ? extractAddress(latest.from).toLowerCase() : ''
+  const iAmSender = Boolean(self) && fromAddr === self
+
+  // If my own message is the latest, reply to whoever I sent it to; otherwise reply to the sender.
+  const rawTo = iAmSender ? splitAddresses(latest?.to) : (latest?.from ? [latest.from] : [])
+  const ccPool = iAmSender
+    ? splitAddresses(latest?.cc)
+    : [...splitAddresses(latest?.to), ...splitAddresses(latest?.cc)]
+
+  const selfSet = new Set<string>(self ? [self] : [])
+  const to = dedupeRecipients(rawTo, selfSet)
+
+  if (mode === 'reply') return { to, cc: [] }
+
+  const ccExclude = new Set<string>(selfSet)
+  for (const token of to) ccExclude.add(extractAddress(token).toLowerCase())
+  const cc = dedupeRecipients(ccPool, ccExclude)
+  return { to, cc }
+}
+
+// Subject line for a reply ("Re: …") or forward ("Fwd: …"), avoiding double prefixes.
+function composeSubject(mode: ComposeMode, rawSubject?: string): string {
+  const raw = (rawSubject || '').trim()
+  if (mode === 'forward') return /^fwd:/i.test(raw) ? raw : `Fwd: ${raw}`.trim()
+  return /^re:/i.test(raw) ? raw : `Re: ${raw}`.trim()
 }
 
 const PREFETCH_HOVER_MS = 180
@@ -374,7 +456,7 @@ function MessageAttachments({ attachments }: { attachments: NonNullable<GmailThr
   )
 }
 
-type ComposeMode = 'reply' | 'forward'
+type ComposeMode = 'reply' | 'replyAll' | 'forward'
 
 function ComposeToolbarButton({
   editor,
@@ -475,20 +557,110 @@ function ComposeToolbar({ editor, onOpenLink }: { editor: Editor; onOpenLink: ()
   )
 }
 
+function RecipientField({
+  label,
+  value,
+  onChange,
+  autoFocus,
+  trailing,
+}: {
+  label: string
+  value: string[]
+  onChange: (next: string[]) => void
+  autoFocus?: boolean
+  trailing?: React.ReactNode
+}) {
+  const [draft, setDraft] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (autoFocus) inputRef.current?.focus()
+  }, [autoFocus])
+
+  const commit = (raw: string) => {
+    const additions = splitAddresses(raw)
+    if (additions.length === 0) return
+    onChange(dedupeRecipients([...value, ...additions], new Set()))
+    setDraft('')
+  }
+
+  const onKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter' || event.key === ',' || event.key === ';' || (event.key === 'Tab' && draft.trim())) {
+      if (draft.trim()) {
+        event.preventDefault()
+        commit(draft)
+      }
+    } else if (event.key === 'Backspace' && !draft && value.length > 0) {
+      onChange(value.slice(0, -1))
+    }
+  }
+
+  return (
+    <div className="gmail-recipient-row">
+      <span className="gmail-recipient-label">{label}</span>
+      <div className="gmail-recipient-field">
+        {value.map((token, index) => (
+          <span key={`${token}-${index}`} className="gmail-recipient-chip" title={extractAddress(token)}>
+            <span className="gmail-recipient-chip-label">{recipientLabel(token)}</span>
+            <button
+              type="button"
+              className="gmail-recipient-chip-remove"
+              aria-label={`Remove ${extractAddress(token)}`}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => onChange(value.filter((_, idx) => idx !== index))}
+            >
+              ×
+            </button>
+          </span>
+        ))}
+        <input
+          ref={inputRef}
+          className="gmail-recipient-input"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={onKeyDown}
+          onBlur={() => { if (draft.trim()) commit(draft) }}
+          onPaste={(event) => {
+            const text = event.clipboardData.getData('text')
+            if (text && /[,;\n]/.test(text)) {
+              event.preventDefault()
+              commit(text)
+            }
+          }}
+        />
+      </div>
+      {trailing && <div className="gmail-recipient-trailing">{trailing}</div>}
+    </div>
+  )
+}
+
 function ComposeBox({
   mode,
   thread,
+  selfEmail,
   onClose,
 }: {
   mode: ComposeMode
   thread: GmailThread
+  selfEmail: string
   onClose: () => void
 }) {
   const latest = latestMessage(thread)
-  const to = mode === 'reply' ? extractAddress(latest?.from) : ''
+  const initialRecipients = useMemo(
+    () => buildRecipients(mode, thread, selfEmail),
+    [mode, thread, selfEmail],
+  )
+
+  const [toList, setToList] = useState<string[]>(initialRecipients.to)
+  const [ccList, setCcList] = useState<string[]>(initialRecipients.cc)
+  const [bccList, setBccList] = useState<string[]>([])
+  const [showCc, setShowCc] = useState<boolean>(initialRecipients.cc.length > 0)
+  const [showBcc, setShowBcc] = useState<boolean>(false)
+  const [subject, setSubject] = useState<string>(() => composeSubject(mode, thread.subject))
+  const modeLabel = mode === 'forward' ? 'Forward' : mode === 'replyAll' ? 'Reply all' : 'Reply'
 
   const initialContent = useMemo(() => {
-    if (mode !== 'reply') return ''
+    if (mode === 'forward') return ''
     // Gmail-side draft (user's own work) wins over the AI-generated draft.
     const source = thread.gmail_draft || thread.draft_response
     if (!source) return ''
@@ -503,7 +675,7 @@ function ComposeBox({
       StarterKit,
       Link.configure({ openOnClick: false, autolink: true }),
       Placeholder.configure({
-        placeholder: mode === 'reply' ? 'Write your reply…' : 'Write a message…',
+        placeholder: mode === 'forward' ? 'Write a message…' : 'Write your reply…',
       }),
     ],
     editorProps: {
@@ -565,16 +737,10 @@ function ComposeBox({
       return
     }
 
-    const recipient = mode === 'reply' ? extractAddress(latest?.from) : ''
-    if (!recipient) {
-      toast('No recipient found for this thread.', 'error')
+    if (toList.length === 0) {
+      toast('Add at least one recipient.', 'error')
       return
     }
-
-    const rawSubject = thread.subject || ''
-    const subject = mode === 'reply'
-      ? (/^re:/i.test(rawSubject) ? rawSubject : `Re: ${rawSubject}`.trim())
-      : (/^fwd:/i.test(rawSubject) ? rawSubject : `Fwd: ${rawSubject}`.trim())
 
     // Build References chain from all known message ids (newest last).
     const messageIds = thread.messages
@@ -587,8 +753,10 @@ function ComposeBox({
     try {
       const result = await window.ipc.invoke('gmail:sendReply', {
         threadId: thread.threadId,
-        to: recipient,
-        subject,
+        to: toList.join(', '),
+        cc: ccList.length ? ccList.join(', ') : undefined,
+        bcc: bccList.length ? bccList.join(', ') : undefined,
+        subject: subject.trim() || composeSubject(mode, thread.subject),
         bodyHtml: html,
         bodyText: text,
         inReplyTo,
@@ -610,13 +778,13 @@ function ComposeBox({
   const refineWithCopilot = () => {
     if (!editor) return
     const currentDraft = editor.getText().trim()
-    const subject = thread.subject || '(No subject)'
+    const threadSubject = thread.subject || '(No subject)'
 
     const lines: string[] = []
     lines.push(`Help me refine this draft email response. **Please ask me how I want to refine it before making any changes** — wait for my answer, then apply the edits.`)
     lines.push('')
-    lines.push(`**Mode:** ${mode === 'reply' ? 'Reply' : 'Forward'}`)
-    lines.push(`**Subject:** ${subject}`)
+    lines.push(`**Mode:** ${modeLabel}`)
+    lines.push(`**Subject:** ${threadSubject}`)
     lines.push('')
     lines.push(`## Thread (${thread.messages.length} message${thread.messages.length === 1 ? '' : 's'})`)
     lines.push('')
@@ -641,17 +809,32 @@ function ComposeBox({
   return (
     <div className="gmail-compose-card">
       <div className="gmail-compose-header">
-        <span>{mode === 'reply' ? 'Reply' : 'Forward'}</span>
-        <button type="button" onClick={onClose} aria-label="Close compose">x</button>
+        <span>{modeLabel}</span>
+        <button type="button" onClick={onClose} aria-label="Close compose">×</button>
       </div>
-      <div className="gmail-compose-line">
-        <span>{mode === 'reply' ? 'To' : 'Recipients'}</span>
-        <input value={to} placeholder="Recipients" readOnly={mode === 'reply'} />
-      </div>
+      <RecipientField
+        label="To"
+        value={toList}
+        onChange={setToList}
+        autoFocus={mode === 'forward'}
+        trailing={
+          <div className="gmail-recipient-toggles">
+            {!showCc && <button type="button" onClick={() => setShowCc(true)}>Cc</button>}
+            {!showBcc && <button type="button" onClick={() => setShowBcc(true)}>Bcc</button>}
+          </div>
+        }
+      />
+      {showCc && <RecipientField label="Cc" value={ccList} onChange={setCcList} />}
+      {showBcc && <RecipientField label="Bcc" value={bccList} onChange={setBccList} />}
       {mode === 'forward' && (
         <div className="gmail-compose-line">
-          <span>Subject</span>
-          <input value={`Fwd: ${thread.subject || '(No subject)'}`} readOnly />
+          <span className="gmail-compose-label">Subject</span>
+          <input
+            className="gmail-compose-subject-input"
+            value={subject}
+            onChange={(event) => setSubject(event.target.value)}
+            placeholder="Subject"
+          />
         </div>
       )}
       <EditorContent editor={editor} className="gmail-compose-editor" />
@@ -715,9 +898,24 @@ function ThreadDetail({
   hidden?: boolean
 }) {
   const [composeMode, setComposeMode] = useState<ComposeMode | null>(null)
+  const [selfEmail, setSelfEmail] = useState<string>('')
   const [expandedIndices, setExpandedIndices] = useState<Set<number>>(
     () => new Set(thread.messages.length > 0 ? [thread.messages.length - 1] : [])
   )
+
+  // The connected Gmail address, so reply-all can exclude "me".
+  useEffect(() => {
+    let cancelled = false
+    window.ipc.invoke('gmail:getAccountEmail', {})
+      .then((res) => { if (!cancelled && res?.email) setSelfEmail(res.email) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+
+  const canReplyAll = useMemo(() => {
+    const { to, cc } = buildRecipients('replyAll', thread, selfEmail)
+    return cc.length > 0 || to.length > 1
+  }, [thread, selfEmail])
 
   const toggleExpand = useCallback((index: number) => {
     setExpandedIndices((prev) => {
@@ -788,6 +986,12 @@ function ThreadDetail({
             <Reply size={16} />
             Reply
           </button>
+          {canReplyAll && (
+            <button type="button" onClick={() => setComposeMode('replyAll')}>
+              <ReplyAll size={16} />
+              Reply all
+            </button>
+          )}
           <button type="button" onClick={() => setComposeMode('forward')}>
             <Forward size={16} />
             Forward
@@ -796,8 +1000,10 @@ function ThreadDetail({
 
         {composeMode && (
           <ComposeBox
+            key={composeMode}
             mode={composeMode}
             thread={thread}
+            selfEmail={selfEmail}
             onClose={() => setComposeMode(null)}
           />
         )}

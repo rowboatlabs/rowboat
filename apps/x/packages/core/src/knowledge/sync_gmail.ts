@@ -1234,6 +1234,8 @@ async function performSync() {
 export interface SendReplyOptions {
     threadId: string;
     to: string;
+    cc?: string;
+    bcc?: string;
     subject: string;
     bodyHtml: string;
     bodyText: string;
@@ -1244,6 +1246,13 @@ export interface SendReplyOptions {
 export interface SendReplyResult {
     messageId?: string;
     error?: string;
+}
+
+/** The connected Gmail address (cached). Used by the composer to exclude "me" from reply-all. */
+export async function getAccountEmail(): Promise<string | null> {
+    const auth = await GoogleClientFactory.getClient();
+    if (!auth) return null;
+    return getUserEmail(auth);
 }
 
 function encodeRfc2047(text: string): string {
@@ -1265,6 +1274,8 @@ export async function sendThreadReply(opts: SendReplyOptions): Promise<SendReply
     const headers: string[] = [];
     headers.push(`From: ${userEmail}`);
     headers.push(`To: ${opts.to}`);
+    if (opts.cc?.trim()) headers.push(`Cc: ${opts.cc.trim()}`);
+    if (opts.bcc?.trim()) headers.push(`Bcc: ${opts.bcc.trim()}`);
     headers.push(`Subject: ${encodeRfc2047(opts.subject)}`);
     if (opts.inReplyTo) headers.push(`In-Reply-To: ${opts.inReplyTo}`);
     if (opts.references) headers.push(`References: ${opts.references}`);

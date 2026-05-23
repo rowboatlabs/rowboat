@@ -152,6 +152,8 @@ const ipcSchemas = {
     req: z.object({
       threadId: z.string().min(1),
       to: z.string().min(1),
+      cc: z.string().optional(),
+      bcc: z.string().optional(),
       subject: z.string(),
       bodyHtml: z.string(),
       bodyText: z.string(),
@@ -161,6 +163,12 @@ const ipcSchemas = {
     res: z.object({
       messageId: z.string().optional(),
       error: z.string().optional(),
+    }),
+  },
+  'gmail:getAccountEmail': {
+    req: z.object({}),
+    res: z.object({
+      email: z.string().nullable(),
     }),
   },
   'gmail:archiveThread': {
