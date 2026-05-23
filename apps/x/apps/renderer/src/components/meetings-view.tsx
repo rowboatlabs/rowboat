@@ -190,7 +190,7 @@ function UpcomingEvents() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [refreshTick, setRefreshTick] = useState(0)
-  // Calendar connection status — null while checking, false shows the connect prompt.
+  // Calendar sync uses the native Google OAuth connection.
   const [calendarConnected, setCalendarConnected] = useState<boolean | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
 
@@ -198,15 +198,18 @@ function UpcomingEvents() {
     let cancelled = false
     const check = async () => {
       try {
-        const result = await window.ipc.invoke('composio:get-connection-status', { toolkitSlug: 'googlecalendar' })
-        if (!cancelled) setCalendarConnected(result.isConnected)
+        const oauthState = await window.ipc.invoke('oauth:getState', null)
+        if (!cancelled) setCalendarConnected(oauthState.config?.google?.connected ?? false)
       } catch {
         if (!cancelled) setCalendarConnected(false)
       }
     }
     void check()
-    const cleanup = window.ipc.on('oauth:didConnect', () => { void check() })
-    return () => { cancelled = true; cleanup() }
+    const cleanupOAuthConnect = window.ipc.on('oauth:didConnect', () => { void check() })
+    return () => {
+      cancelled = true
+      cleanupOAuthConnect()
+    }
   }, [])
 
   const loadEvents = useCallback(async () => {

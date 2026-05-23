@@ -843,7 +843,7 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
   const [refreshing, setRefreshing] = useState(!hadPersistedDataOnMount.current)
   const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
-  // Gmail connection status — null while checking, false shows the connect prompt.
+  // Gmail sync uses the native Google OAuth connection.
   const [emailConnected, setEmailConnected] = useState<boolean | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
 
@@ -851,15 +851,18 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
     let cancelled = false
     const check = async () => {
       try {
-        const result = await window.ipc.invoke('composio:get-connection-status', { toolkitSlug: 'gmail' })
-        if (!cancelled) setEmailConnected(result.isConnected)
+        const oauthState = await window.ipc.invoke('oauth:getState', null)
+        if (!cancelled) setEmailConnected(oauthState.config?.google?.connected ?? false)
       } catch {
         if (!cancelled) setEmailConnected(false)
       }
     }
     void check()
-    const cleanup = window.ipc.on('oauth:didConnect', () => { void check() })
-    return () => { cancelled = true; cleanup() }
+    const cleanupOAuthConnect = window.ipc.on('oauth:didConnect', () => { void check() })
+    return () => {
+      cancelled = true
+      cleanupOAuthConnect()
+    }
   }, [])
 
   useEffect(() => { persistedImportant = important }, [important])
