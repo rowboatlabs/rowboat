@@ -150,7 +150,7 @@ const ipcSchemas = {
   },
   'gmail:sendReply': {
     req: z.object({
-      threadId: z.string().min(1),
+      threadId: z.string().min(1).optional(),
       to: z.string().min(1),
       cc: z.string().optional(),
       bcc: z.string().optional(),
@@ -163,6 +163,15 @@ const ipcSchemas = {
     res: z.object({
       messageId: z.string().optional(),
       error: z.string().optional(),
+    }),
+  },
+  'gmail:getConnectionStatus': {
+    req: z.object({}),
+    res: z.object({
+      connected: z.boolean(),
+      hasRequiredScope: z.boolean(),
+      missingScopes: z.array(z.string()),
+      email: z.string().nullable(),
     }),
   },
   'gmail:getAccountEmail': {

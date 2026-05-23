@@ -12,6 +12,12 @@ import { SettingsDialog } from '@/components/settings-dialog'
 
 type GmailThread = blocks.GmailThread
 type GmailThreadMessage = blocks.GmailThreadMessage
+type GmailConnectionStatus = {
+  connected: boolean
+  hasRequiredScope: boolean
+  missingScopes: string[]
+  email: string | null
+}
 
 function formatInboxTime(value?: string): string {
   if (!value) return ''
@@ -160,6 +166,27 @@ function composeSubject(mode: ComposeMode, rawSubject?: string): string {
   const raw = (rawSubject || '').trim()
   if (mode === 'forward') return /^fwd:/i.test(raw) ? raw : `Fwd: ${raw}`.trim()
   return /^re:/i.test(raw) ? raw : `Re: ${raw}`.trim()
+}
+
+function buildForwardedContent(thread: GmailThread): string {
+  const message = latestMessage(thread)
+  if (!message) return ''
+  const rows = [
+    '---------- Forwarded message ---------',
+    message.from ? `From: ${message.from}` : null,
+    message.date ? `Date: ${formatFullDate(message.date)}` : null,
+    message.subject || thread.subject ? `Subject: ${message.subject || thread.subject}` : null,
+    message.to ? `To: ${message.to}` : null,
+    message.cc ? `Cc: ${message.cc}` : null,
+  ].filter((line): line is string => Boolean(line))
+  const body = (message.body || snippet(message.bodyHtml)).trim()
+  return [
+    '<p></p>',
+    '<blockquote>',
+    ...rows.map((line) => `<p>${escapeHtml(line)}</p>`),
+    body ? `<p>${escapeHtml(body).replace(/\n/g, '<br />')}</p>` : '',
+    '</blockquote>',
+  ].join('')
 }
 
 const PREFETCH_HOVER_MS = 180
@@ -660,7 +687,7 @@ function ComposeBox({
   const modeLabel = mode === 'forward' ? 'Forward' : mode === 'replyAll' ? 'Reply all' : 'Reply'
 
   const initialContent = useMemo(() => {
-    if (mode === 'forward') return ''
+    if (mode === 'forward') return buildForwardedContent(thread)
     // Gmail-side draft (user's own work) wins over the AI-generated draft.
     const source = thread.gmail_draft || thread.draft_response
     if (!source) return ''
@@ -668,7 +695,7 @@ function ComposeBox({
       .split(/\n{2,}/)
       .map((para) => `<p>${escapeHtml(para).replace(/\n/g, '<br />')}</p>`)
       .join('')
-  }, [mode, thread.gmail_draft, thread.draft_response])
+  }, [mode, thread])
 
   const editor = useEditor({
     extensions: [
@@ -748,19 +775,20 @@ function ComposeBox({
       .filter((v): v is string => Boolean(v))
     const references = messageIds.join(' ')
     const inReplyTo = latest?.messageIdHeader
+    const isForward = mode === 'forward'
 
     setSending(true)
     try {
       const result = await window.ipc.invoke('gmail:sendReply', {
-        threadId: thread.threadId,
+        threadId: isForward ? undefined : thread.threadId,
         to: toList.join(', '),
         cc: ccList.length ? ccList.join(', ') : undefined,
         bcc: bccList.length ? bccList.join(', ') : undefined,
         subject: subject.trim() || composeSubject(mode, thread.subject),
         bodyHtml: html,
         bodyText: text,
-        inReplyTo,
-        references: references || undefined,
+        inReplyTo: isForward ? undefined : inReplyTo,
+        references: isForward ? undefined : references || undefined,
       })
       if (result.error) {
         toast(`Send failed: ${result.error}`, 'error')
@@ -1067,17 +1095,24 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
   const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   // Gmail sync uses the native Google OAuth connection.
-  const [emailConnected, setEmailConnected] = useState<boolean | null>(null)
+  const [emailConnection, setEmailConnection] = useState<GmailConnectionStatus | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
 
   useEffect(() => {
     let cancelled = false
     const check = async () => {
       try {
-        const oauthState = await window.ipc.invoke('oauth:getState', null)
-        if (!cancelled) setEmailConnected(oauthState.config?.google?.connected ?? false)
+        const status = await window.ipc.invoke('gmail:getConnectionStatus', {})
+        if (!cancelled) setEmailConnection(status)
       } catch {
-        if (!cancelled) setEmailConnected(false)
+        if (!cancelled) {
+          setEmailConnection({
+            connected: false,
+            hasRequiredScope: false,
+            missingScopes: [],
+            email: null,
+          })
+        }
       }
     }
     void check()
@@ -1131,20 +1166,26 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
   }, [updateThreadInState])
 
   const archiveThreadAction = useCallback(async (threadId: string) => {
-    removeThreadFromState(threadId)
     try {
       const result = await window.ipc.invoke('gmail:archiveThread', { threadId })
-      if (!result.ok && result.error) toast(`Archive failed: ${result.error}`, 'error')
+      if (result.ok) {
+        removeThreadFromState(threadId)
+      } else if (result.error) {
+        toast(`Archive failed: ${result.error}`, 'error')
+      }
     } catch (err) {
       toast(`Archive failed: ${err instanceof Error ? err.message : String(err)}`, 'error')
     }
   }, [removeThreadFromState])
 
   const trashThreadAction = useCallback(async (threadId: string) => {
-    removeThreadFromState(threadId)
     try {
       const result = await window.ipc.invoke('gmail:trashThread', { threadId })
-      if (!result.ok && result.error) toast(`Delete failed: ${result.error}`, 'error')
+      if (result.ok) {
+        removeThreadFromState(threadId)
+      } else if (result.error) {
+        toast(`Delete failed: ${result.error}`, 'error')
+      }
     } catch (err) {
       toast(`Delete failed: ${err instanceof Error ? err.message : String(err)}`, 'error')
     }
@@ -1411,6 +1452,8 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
 
   const hasAny = important.threads.length > 0 || other.threads.length > 0
   const initialLoading = !hasAny && refreshing
+  const needsEmailConnect = emailConnection?.connected === false
+  const needsEmailReconnect = emailConnection?.connected === true && !emailConnection.hasRequiredScope
 
   const renderRow = (thread: GmailThread) => {
     const latest = latestMessage(thread)
@@ -1541,17 +1584,21 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
               </section>
             )}
           </div>
-        ) : emailConnected === false ? (
+        ) : needsEmailConnect || needsEmailReconnect ? (
           <div className="gmail-empty-state flex flex-col items-center gap-3 py-16 text-center">
             <Mail size={28} className="opacity-50" />
-            <p>Connect your email to see your inbox here.</p>
+            <p>
+              {needsEmailReconnect
+                ? 'Reconnect your email to enable Gmail sync and actions.'
+                : 'Connect your email to see your inbox here.'}
+            </p>
             <button
               type="button"
               onClick={() => setSettingsOpen(true)}
               className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3.5 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-accent"
             >
               <Mail size={15} />
-              Connect your email
+              {needsEmailReconnect ? 'Reconnect your email' : 'Connect your email'}
             </button>
           </div>
         ) : (

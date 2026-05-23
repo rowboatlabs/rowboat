@@ -188,18 +188,41 @@ export class GoogleClientFactory {
      * Check if credentials are available and have required scopes
      */
     static async hasValidCredentials(requiredScopes: string | string[]): Promise<boolean> {
+        const status = await this.getCredentialStatus(requiredScopes);
+        return status.hasRequiredScopes;
+    }
+
+    static async getCredentialStatus(requiredScopes: string | string[]): Promise<{
+        connected: boolean;
+        hasRequiredScopes: boolean;
+        missingScopes: string[];
+    }> {
         const oauthRepo = container.resolve<IOAuthRepo>('oauthRepo');
         const { tokens } = await oauthRepo.read(this.PROVIDER_NAME);
         if (!tokens) {
-            return false;
+            const scopesArray = Array.isArray(requiredScopes) ? requiredScopes : [requiredScopes];
+            return {
+                connected: false,
+                hasRequiredScopes: false,
+                missingScopes: scopesArray,
+            };
         }
 
-        // Check if required scope(s) are present
         const scopesArray = Array.isArray(requiredScopes) ? requiredScopes : [requiredScopes];
+        const granted = new Set(tokens.scopes ?? []);
+        const missingScopes = scopesArray.filter(scope => !granted.has(scope));
         if (!tokens.scopes || tokens.scopes.length === 0) {
-            return false;
+            return {
+                connected: true,
+                hasRequiredScopes: false,
+                missingScopes,
+            };
         }
-        return scopesArray.every(scope => tokens.scopes!.includes(scope));
+        return {
+            connected: true,
+            hasRequiredScopes: missingScopes.length === 0,
+            missingScopes,
+        };
     }
 
     /**

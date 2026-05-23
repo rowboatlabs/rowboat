@@ -1232,7 +1232,7 @@ async function performSync() {
 // --- Send Reply ---
 
 export interface SendReplyOptions {
-    threadId: string;
+    threadId?: string;
     to: string;
     cc?: string;
     bcc?: string;
@@ -1248,6 +1248,13 @@ export interface SendReplyResult {
     error?: string;
 }
 
+export interface GmailConnectionStatus {
+    connected: boolean;
+    hasRequiredScope: boolean;
+    missingScopes: string[];
+    email: string | null;
+}
+
 /** The connected Gmail address (cached). Used by the composer to exclude "me" from reply-all. */
 export async function getAccountEmail(): Promise<string | null> {
     const auth = await GoogleClientFactory.getClient();
@@ -1255,74 +1262,118 @@ export async function getAccountEmail(): Promise<string | null> {
     return getUserEmail(auth);
 }
 
+export async function getConnectionStatus(): Promise<GmailConnectionStatus> {
+    const status = await GoogleClientFactory.getCredentialStatus(REQUIRED_SCOPE);
+    let email: string | null = null;
+    if (status.connected) {
+        try {
+            email = await getAccountEmail();
+        } catch {
+            email = null;
+        }
+    }
+    return {
+        connected: status.connected,
+        hasRequiredScope: status.hasRequiredScopes,
+        missingScopes: status.missingScopes,
+        email,
+    };
+}
+
+function requireSafeHeaderValue(name: string, value: string): string {
+    if (/[\r\n]/.test(value)) {
+        throw new Error(`${name} cannot contain line breaks.`);
+    }
+    return value.trim();
+}
+
 function encodeRfc2047(text: string): string {
+    requireSafeHeaderValue('Subject', text);
     // Only encode if non-ASCII chars present.
     // eslint-disable-next-line no-control-regex
     if (/^[\x00-\x7F]*$/.test(text)) return text;
     return `=?UTF-8?B?${Buffer.from(text).toString('base64')}?=`;
 }
 
-export async function sendThreadReply(opts: SendReplyOptions): Promise<SendReplyResult> {
-    const auth = await GoogleClientFactory.getClient();
-    if (!auth) return { error: 'Gmail is not connected.' };
-
-    const gmailClient = google.gmail({ version: 'v1', auth });
-    const userEmail = await getUserEmail(auth);
-    if (!userEmail) return { error: 'Could not determine your Gmail address.' };
-
-    const boundary = `b_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-    const headers: string[] = [];
-    headers.push(`From: ${userEmail}`);
-    headers.push(`To: ${opts.to}`);
-    if (opts.cc?.trim()) headers.push(`Cc: ${opts.cc.trim()}`);
-    if (opts.bcc?.trim()) headers.push(`Bcc: ${opts.bcc.trim()}`);
-    headers.push(`Subject: ${encodeRfc2047(opts.subject)}`);
-    if (opts.inReplyTo) headers.push(`In-Reply-To: ${opts.inReplyTo}`);
-    if (opts.references) headers.push(`References: ${opts.references}`);
-    headers.push('MIME-Version: 1.0');
-    headers.push(`Content-Type: multipart/alternative; boundary="${boundary}"`);
-
-    const parts: string[] = [];
-    parts.push(`--${boundary}`);
-    parts.push('Content-Type: text/plain; charset="UTF-8"');
-    parts.push('Content-Transfer-Encoding: 7bit');
-    parts.push('');
-    parts.push(opts.bodyText);
-    parts.push('');
-    parts.push(`--${boundary}`);
-    parts.push('Content-Type: text/html; charset="UTF-8"');
-    parts.push('Content-Transfer-Encoding: 7bit');
-    parts.push('');
-    parts.push(opts.bodyHtml);
-    parts.push('');
-    parts.push(`--${boundary}--`);
-
-    const message = `${headers.join('\r\n')}\r\n\r\n${parts.join('\r\n')}`;
-    const raw = Buffer.from(message)
+function encodeMimeBase64(text: string): string {
+    return Buffer.from(text, 'utf8')
         .toString('base64')
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_')
-        .replace(/=+$/, '');
+        .match(/.{1,76}/g)
+        ?.join('\r\n') ?? '';
+}
 
+export async function sendThreadReply(opts: SendReplyOptions): Promise<SendReplyResult> {
     try {
+        const auth = await GoogleClientFactory.getClient();
+        if (!auth) return { error: 'Gmail is not connected.' };
+
+        const gmailClient = google.gmail({ version: 'v1', auth });
+        const userEmail = await getUserEmail(auth);
+        if (!userEmail) return { error: 'Could not determine your Gmail address.' };
+
+        const safeTo = requireSafeHeaderValue('To', opts.to);
+        const safeCc = opts.cc?.trim() ? requireSafeHeaderValue('Cc', opts.cc) : undefined;
+        const safeBcc = opts.bcc?.trim() ? requireSafeHeaderValue('Bcc', opts.bcc) : undefined;
+        const safeInReplyTo = opts.inReplyTo ? requireSafeHeaderValue('In-Reply-To', opts.inReplyTo) : undefined;
+        const safeReferences = opts.references ? requireSafeHeaderValue('References', opts.references) : undefined;
+
+        const boundary = `b_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+        const headers: string[] = [];
+        headers.push(`From: ${requireSafeHeaderValue('From', userEmail)}`);
+        headers.push(`To: ${safeTo}`);
+        if (safeCc) headers.push(`Cc: ${safeCc}`);
+        if (safeBcc) headers.push(`Bcc: ${safeBcc}`);
+        headers.push(`Subject: ${encodeRfc2047(opts.subject)}`);
+        if (safeInReplyTo) headers.push(`In-Reply-To: ${safeInReplyTo}`);
+        if (safeReferences) headers.push(`References: ${safeReferences}`);
+        headers.push('MIME-Version: 1.0');
+        headers.push(`Content-Type: multipart/alternative; boundary="${boundary}"`);
+
+        const parts: string[] = [];
+        parts.push(`--${boundary}`);
+        parts.push('Content-Type: text/plain; charset="UTF-8"');
+        parts.push('Content-Transfer-Encoding: base64');
+        parts.push('');
+        parts.push(encodeMimeBase64(opts.bodyText));
+        parts.push('');
+        parts.push(`--${boundary}`);
+        parts.push('Content-Type: text/html; charset="UTF-8"');
+        parts.push('Content-Transfer-Encoding: base64');
+        parts.push('');
+        parts.push(encodeMimeBase64(opts.bodyHtml));
+        parts.push('');
+        parts.push(`--${boundary}--`);
+
+        const message = `${headers.join('\r\n')}\r\n\r\n${parts.join('\r\n')}`;
+        const raw = Buffer.from(message, 'utf8')
+            .toString('base64')
+            .replace(/\+/g, '-')
+            .replace(/\//g, '_')
+            .replace(/=+$/, '');
+
+        const requestBody: gmail.Schema$Message = { raw };
+        if (opts.threadId) requestBody.threadId = opts.threadId;
+
         const res = await gmailClient.users.messages.send({
             userId: 'me',
-            requestBody: { raw, threadId: opts.threadId },
+            requestBody,
         });
 
-        // Clean up any Gmail-side drafts in this thread.
-        try {
-            const drafts = await gmailClient.users.drafts.list({ userId: 'me' });
-            const matching = (drafts.data.drafts || []).filter(
-                (d) => d.message?.threadId === opts.threadId && d.id
-            );
-            await Promise.all(
-                matching.map((d) =>
-                    gmailClient.users.drafts.delete({ userId: 'me', id: d.id! })
-                )
-            );
-        } catch (cleanupErr) {
-            console.warn('[Gmail] Draft cleanup after send failed:', cleanupErr);
+        if (opts.threadId) {
+            // Clean up any Gmail-side drafts in this thread.
+            try {
+                const drafts = await gmailClient.users.drafts.list({ userId: 'me' });
+                const matching = (drafts.data.drafts || []).filter(
+                    (d) => d.message?.threadId === opts.threadId && d.id
+                );
+                await Promise.all(
+                    matching.map((d) =>
+                        gmailClient.users.drafts.delete({ userId: 'me', id: d.id! })
+                    )
+                );
+            } catch (cleanupErr) {
+                console.warn('[Gmail] Draft cleanup after send failed:', cleanupErr);
+            }
         }
 
         // Wake the sync loop so the cache picks up the new message.
