@@ -608,7 +608,6 @@ export function ChatSidebar({
                                     const response = tabState.permissionResponses.get(item.id) || null
                                     return (
                                       <React.Fragment key={item.id}>
-                                        {rendered}
                                         <PermissionRequest
                                           toolCall={permRequest.toolCall}
                                           onApprove={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
@@ -618,6 +617,7 @@ export function ChatSidebar({
                                           isProcessing={isActive && isProcessing}
                                           response={response}
                                         />
+                                        {rendered}
                                       </React.Fragment>
                                     )
                                   }

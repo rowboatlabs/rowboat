@@ -2263,7 +2263,7 @@ function App() {
             return next
           })
 
-          if (event.toolCallId && event.toolName !== 'executeCommand') {
+          if (event.toolCallId) {
             setToolOpenForTab(activeChatTabIdRef.current, event.toolCallId, false)
           }
 
@@ -5730,7 +5730,6 @@ function App() {
                                       const response = tabState.permissionResponses.get(item.id) || null
                                       return (
                                         <React.Fragment key={item.id}>
-                                          {rendered}
                                           <PermissionRequest
                                             toolCall={permRequest.toolCall}
                                             permission={permRequest.permission}
@@ -5759,6 +5758,7 @@ function App() {
                                             isProcessing={isActive && isProcessing}
                                             response={response}
                                           />
+                                          {rendered}
                                         </React.Fragment>
                                       )
                                     }
