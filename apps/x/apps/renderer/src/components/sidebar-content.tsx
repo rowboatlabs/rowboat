@@ -96,6 +96,11 @@ function displayNoteName(node: TreeNode): string {
   return node.name
 }
 
+function formatBillingPlanName(plan: string | null | undefined) {
+  if (!plan) return 'No plan'
+  return `${plan.charAt(0).toUpperCase()}${plan.slice(1)} plan`
+}
+
 function formatAgo(ms: number): string {
   const diffMs = Math.max(0, Date.now() - ms)
   const min = Math.floor(diffMs / 60000)
@@ -921,7 +926,7 @@ export function SidebarContentPanel({
           <div className="flex items-center justify-between rounded-lg border border-sidebar-border bg-sidebar-accent/20 px-3 py-2">
             <div className="min-w-0">
               <span className="text-xs font-medium capitalize text-sidebar-foreground">
-                {billing.subscriptionPlan ? `${billing.subscriptionPlan} plan` : 'No plan'}
+                {formatBillingPlanName(billing.subscriptionPlan)}
               </span>
               {billing.subscriptionStatus === 'trialing' && billing.trialExpiresAt && (() => {
                 const days = Math.max(0, Math.ceil((new Date(billing.trialExpiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
