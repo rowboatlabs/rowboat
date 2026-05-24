@@ -590,6 +590,20 @@ const isSameNotePath = (linkPath: string, notePath?: string) => {
 const isExternalHref = (href: string) =>
   /^(https?:|mailto:|tel:)/i.test(href)
 
+const collapseRelativeSegments = (relPath: string) => {
+  const parts = relPath.split('/').filter((part) => part !== '' && part !== '.')
+  const stack: string[] = []
+  for (const part of parts) {
+    if (part === '..') {
+      if (stack.length === 0) return null
+      stack.pop()
+    } else {
+      stack.push(part)
+    }
+  }
+  return stack.join('/')
+}
+
 const resolveWorkspaceLinkPath = (href: string, notePath?: string) => {
   const withoutHash = href.split('#')[0]
   const withoutQuery = withoutHash.split('?')[0]
@@ -605,10 +619,10 @@ const resolveWorkspaceLinkPath = (href: string, notePath?: string) => {
   }
 
   if (/^[a-zA-Z]:[\\/]/.test(decoded) || decoded.startsWith('/')) return decoded
-  if (decoded.startsWith('knowledge/') || !notePath) return decoded.replace(/^\.\//, '')
+  if (decoded.startsWith('knowledge/') || !notePath) return collapseRelativeSegments(decoded.replace(/^\.\//, ''))
 
   const noteDir = notePath.split('/').slice(0, -1).join('/')
-  return `${noteDir}/${decoded.replace(/^\.\//, '')}`
+  return collapseRelativeSegments(`${noteDir}/${decoded.replace(/^\.\//, '')}`)
 }
 
 export interface MarkdownEditorHandle {
