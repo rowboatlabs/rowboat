@@ -78,9 +78,62 @@ function decodeJwtPayload(token: string): Record<string, unknown> | null {
     }
 }
 
-// Validates Claude Code auth: ~/.claude/.credentials.json (or ~/.config fallback).
-// Considered signed in if any of: valid API key, unexpired access token, or
-// presence of a refresh token (which can mint a new access token transparently).
+// Given the raw credentials JSON (from a file or the macOS Keychain), decide
+// whether it represents a usable signed-in state: a valid API key, an unexpired
+// access token, or a refresh token (which can mint a new access token).
+function isClaudeCredentialSignedIn(raw: string): boolean {
+    try {
+        const parsed = JSON.parse(raw) as Record<string, unknown>;
+
+        const oauth = parsed.claudeAiOauth as Record<string, unknown> | undefined;
+        if (oauth) {
+            const access = typeof oauth.accessToken === 'string' ? oauth.accessToken : '';
+            const refresh = typeof oauth.refreshToken === 'string' ? oauth.refreshToken : '';
+            if (refresh.length > 0) return true;
+            if (access.length > 0) {
+                if (typeof oauth.expiresAt === 'number' && oauth.expiresAt > 0 && oauth.expiresAt < Date.now()) {
+                    return false;
+                }
+                return true;
+            }
+        }
+
+        if (typeof parsed.apiKey === 'string' && parsed.apiKey.length > 10) return true;
+        if (typeof parsed.accessToken === 'string' && parsed.accessToken.length > 10) return true;
+    } catch {
+        // malformed JSON
+    }
+    return false;
+}
+
+// Reads Claude Code's credentials from the macOS login Keychain, where the
+// CLI stores them on macOS (service "Claude Code-credentials"). On Linux/Windows
+// it uses the ~/.claude/.credentials.json file instead, so this is a no-op there.
+//
+// Caveats:
+//  - The first read by this app (a different binary than the `claude` CLI that
+//    created the item) triggers a one-time macOS authorization dialog; the user
+//    must "Always Allow". Headless/SSH sessions can't show it and will fail.
+//  - If CLAUDE_CONFIG_DIR is set, Claude appends a SHA-256 suffix to the service
+//    name, which this lookup won't match — such setups usually keep the file too.
+async function readClaudeKeychainCredential(): Promise<string | null> {
+    if (process.platform !== 'darwin') return null;
+    try {
+        const { stdout } = await execAsync(
+            `security find-generic-password -s "Claude Code-credentials" -w`,
+            { timeout: 5000 },
+        );
+        const out = stdout.trim();
+        return out.length > 0 ? out : null;
+    } catch {
+        // not present in keychain
+        return null;
+    }
+}
+
+// Validates Claude Code auth. On macOS the credentials live in the login
+// Keychain; on Linux/Windows in ~/.claude/.credentials.json (or ~/.config
+// fallback). We check both so detection works across platforms.
 async function checkClaudeSignedIn(): Promise<boolean> {
     const home = os.homedir();
     const candidates = [
@@ -90,27 +143,16 @@ async function checkClaudeSignedIn(): Promise<boolean> {
     for (const full of candidates) {
         try {
             const raw = await fs.readFile(full, 'utf-8');
-            const parsed = JSON.parse(raw) as Record<string, unknown>;
-
-            const oauth = parsed.claudeAiOauth as Record<string, unknown> | undefined;
-            if (oauth) {
-                const access = typeof oauth.accessToken === 'string' ? oauth.accessToken : '';
-                const refresh = typeof oauth.refreshToken === 'string' ? oauth.refreshToken : '';
-                if (refresh.length > 0) return true;
-                if (access.length > 0) {
-                    if (typeof oauth.expiresAt === 'number' && oauth.expiresAt > 0 && oauth.expiresAt < Date.now()) {
-                        return false;
-                    }
-                    return true;
-                }
-            }
-
-            if (typeof parsed.apiKey === 'string' && parsed.apiKey.length > 10) return true;
-            if (typeof parsed.accessToken === 'string' && parsed.accessToken.length > 10) return true;
+            if (isClaudeCredentialSignedIn(raw)) return true;
         } catch {
             // try next candidate
         }
     }
+
+    // macOS: credentials are stored in the Keychain rather than on disk.
+    const keychainRaw = await readClaudeKeychainCredential();
+    if (keychainRaw && isClaudeCredentialSignedIn(keychainRaw)) return true;
+
     return false;
 }
 
