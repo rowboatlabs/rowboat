@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Bold, Forward, Italic, Link as LinkIcon, List, ListOrdered, LoaderIcon, Paperclip, Quote, RefreshCw, Reply, Search, Send, Sparkles, Strikethrough } from 'lucide-react'
+import { Bold, Forward, Italic, Link as LinkIcon, List, ListOrdered, LoaderIcon, Mail, Paperclip, Quote, RefreshCw, Reply, Search, Send, Sparkles, Strikethrough } from 'lucide-react'
 import { useEditor, EditorContent, type Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
@@ -8,6 +8,7 @@ import type { blocks } from '@x/shared'
 import { cn } from '@/lib/utils'
 import { toast } from '@/lib/toast'
 import { useTheme } from '@/contexts/theme-context'
+import { SettingsDialog } from '@/components/settings-dialog'
 
 type GmailThread = blocks.GmailThread
 type GmailThreadMessage = blocks.GmailThreadMessage
@@ -817,15 +818,52 @@ function clearLoadingFlag(state: SectionState | null): SectionState {
   return { ...state, loadingPage: false }
 }
 
-export function EmailView() {
+export type EmailViewProps = {
+  /** If provided, the view opens with this thread already expanded. */
+  initialThreadId?: string | null
+  /** Bump to re-focus on the same threadId after navigating away inside the view. */
+  threadIdVersion?: number
+}
+
+export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps = {}) {
   const [important, setImportant] = useState<SectionState>(() => clearLoadingFlag(persistedImportant))
   const [other, setOther] = useState<SectionState>(() => clearLoadingFlag(persistedOther))
   const hadPersistedDataOnMount = useRef(persistedImportant !== null)
-  const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null)
-  const [openedThreadIds, setOpenedThreadIds] = useState<string[]>([])
+  const [selectedThreadId, setSelectedThreadId] = useState<string | null>(initialThreadId ?? null)
+  const [openedThreadIds, setOpenedThreadIds] = useState<string[]>(initialThreadId ? [initialThreadId] : [])
+  useEffect(() => {
+    setSelectedThreadId(initialThreadId ?? null)
+    if (initialThreadId) {
+      setOpenedThreadIds((prev) => {
+        const without = prev.filter((id) => id !== initialThreadId)
+        return [...without, initialThreadId].slice(-MAX_KEPT_OPEN)
+      })
+    }
+  }, [initialThreadId, threadIdVersion])
   const [refreshing, setRefreshing] = useState(!hadPersistedDataOnMount.current)
   const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
+  // Gmail sync uses the native Google OAuth connection.
+  const [emailConnected, setEmailConnected] = useState<boolean | null>(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    const check = async () => {
+      try {
+        const oauthState = await window.ipc.invoke('oauth:getState', null)
+        if (!cancelled) setEmailConnected(oauthState.config?.google?.connected ?? false)
+      } catch {
+        if (!cancelled) setEmailConnected(false)
+      }
+    }
+    void check()
+    const cleanupOAuthConnect = window.ipc.on('oauth:didConnect', () => { void check() })
+    return () => {
+      cancelled = true
+      cleanupOAuthConnect()
+    }
+  }, [])
 
   useEffect(() => { persistedImportant = important }, [important])
   useEffect(() => { persistedOther = other }, [other])
@@ -1185,12 +1223,26 @@ export function EmailView() {
               </section>
             )}
           </div>
+        ) : emailConnected === false ? (
+          <div className="gmail-empty-state flex flex-col items-center gap-3 py-16 text-center">
+            <Mail size={28} className="opacity-50" />
+            <p>Connect your email to see your inbox here.</p>
+            <button
+              type="button"
+              onClick={() => setSettingsOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3.5 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-accent"
+            >
+              <Mail size={15} />
+              Connect your email
+            </button>
+          </div>
         ) : (
           <div className="gmail-empty-state">
             {initialLoading ? 'Loading Gmail threads…' : 'No Gmail threads in your inbox cache yet.'}
           </div>
         )}
       </div>
+      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} defaultTab="connections" />
     </div>
   )
 }

@@ -1,13 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Maximize2, Minimize2, SquarePen } from 'lucide-react'
+import { ArrowRight, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { ChatHeader } from '@/components/chat-header'
+import { ChatEmptyState } from '@/components/chat-empty-state'
 import {
   Conversation,
   ConversationContent,
-  ConversationEmptyState,
   ConversationScrollButton,
 } from '@/components/ai-elements/conversation'
 import {
@@ -22,13 +23,12 @@ import { ComposioConnectCard } from '@/components/ai-elements/composio-connect-c
 import { PermissionRequest } from '@/components/ai-elements/permission-request'
 import { TerminalOutput } from '@/components/terminal-output'
 import { AskHumanRequest } from '@/components/ai-elements/ask-human-request'
-import { Suggestions } from '@/components/ai-elements/suggestions'
 import { type PromptInputMessage, type FileMention } from '@/components/ai-elements/prompt-input'
 import { FileCardProvider } from '@/contexts/file-card-context'
 import { MarkdownPreOverride } from '@/components/ai-elements/markdown-code-override'
 import { defaultRemarkPlugins } from 'streamdown'
 import remarkBreaks from 'remark-breaks'
-import { TabBar, type ChatTab } from '@/components/tab-bar'
+import { type ChatTab } from '@/components/tab-bar'
 import { ChatInputWithMentions, type StagedAttachment, type SelectedModel } from '@/components/chat-input-with-mentions'
 import { ChatMessageAttachments } from '@/components/chat-message-attachments'
 import { useSidebar } from '@/components/ui/sidebar'
@@ -52,6 +52,7 @@ import {
   parseAttachedFiles,
   toToolState,
 } from '@/lib/chat-conversation'
+import { matchBillingError } from '@/lib/billing-error'
 
 const streamdownComponents = { pre: MarkdownPreOverride }
 
@@ -82,60 +83,6 @@ function AutoScrollPre({ className, children }: { className?: string; children: 
     <pre ref={ref} onScroll={handleScroll} className={className}>
       {children}
     </pre>
-  )
-}
-
-/* ─── Billing error helpers ─── */
-
-const BILLING_ERROR_PATTERNS = [
-  {
-    pattern: /upgrade required/i,
-    title: 'A subscription is required',
-    subtitle: 'Get started with a plan to access AI features in Rowboat.',
-    cta: 'Subscribe',
-  },
-  {
-    pattern: /not enough credits/i,
-    title: 'You\'ve run out of credits',
-    subtitle: 'Upgrade your plan for more credits. Free usage resets daily at 00:00 UTC.',
-    cta: 'Upgrade plan',
-  },
-  {
-    pattern: /subscription not active/i,
-    title: 'Your subscription is inactive',
-    subtitle: 'Reactivate your subscription to continue using AI features.',
-    cta: 'Reactivate',
-  },
-] as const
-
-function matchBillingError(message: string) {
-  return BILLING_ERROR_PATTERNS.find(({ pattern }) => pattern.test(message)) ?? null
-}
-
-interface BillingRowboatAccount {
-  config?: {
-    appUrl?: string | null
-  } | null
-}
-
-function BillingErrorCTA({ label }: { label: string }) {
-  const [appUrl, setAppUrl] = useState<string | null>(null)
-
-  useEffect(() => {
-    window.ipc.invoke('account:getRowboat', null)
-      .then((account: BillingRowboatAccount) => setAppUrl(account.config?.appUrl ?? null))
-      .catch(() => {})
-  }, [])
-
-  if (!appUrl) return null
-
-  return (
-    <button
-      onClick={() => window.open(`${appUrl}?intent=upgrade`)}
-      className="mt-1 rounded-md bg-amber-500/20 px-3 py-1.5 text-xs font-medium text-amber-100 transition-colors hover:bg-amber-500/30"
-    >
-      {label}
-    </button>
   )
 }
 
@@ -173,11 +120,12 @@ interface ChatSidebarProps {
   chatTabs: ChatTab[]
   activeChatTabId: string
   getChatTabTitle: (tab: ChatTab) => string
-  isChatTabProcessing: (tab: ChatTab) => boolean
-  onSwitchChatTab: (tabId: string) => void
-  onCloseChatTab: (tabId: string) => void
   onNewChatTab: () => void
+  recentRuns?: { id: string; title?: string; createdAt: string }[]
+  onSelectRun?: (runId: string) => void
+  onOpenChatHistory?: () => void
   onOpenFullScreen?: () => void
+  onCloseChat?: () => void
   conversation: ConversationItem[]
   currentAssistantMessage: string
   chatTabStates?: Record<string, ChatTabViewState>
@@ -228,11 +176,12 @@ export function ChatSidebar({
   chatTabs,
   activeChatTabId,
   getChatTabTitle,
-  isChatTabProcessing,
-  onSwitchChatTab,
-  onCloseChatTab,
   onNewChatTab,
+  recentRuns = [],
+  onSelectRun,
+  onOpenChatHistory,
   onOpenFullScreen,
+  onCloseChat,
   conversation,
   currentAssistantMessage,
   chatTabStates = {},
@@ -380,7 +329,6 @@ export function ChatSidebar({
     if (tabId === activeChatTabId) return activeTabState
     return chatTabStates[tabId] ?? emptyTabState
   }, [activeChatTabId, activeTabState, chatTabStates, emptyTabState])
-  const hasConversation = activeTabState.conversation.length > 0 || Boolean(activeTabState.currentAssistantMessage)
 
   const renderConversationItem = (item: ConversationItem, tabId: string) => {
     if (isChatMessage(item)) {
@@ -491,19 +439,8 @@ export function ChatSidebar({
     }
 
     if (isErrorMessage(item)) {
-      const billingError = matchBillingError(item.message)
-      if (billingError) {
-        return (
-          <Message key={item.id} from="assistant" data-message-id={item.id}>
-            <MessageContent className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3">
-              <div className="space-y-2">
-                <p className="text-sm font-medium text-amber-200">{billingError.title}</p>
-                <p className="text-xs text-amber-300/80">{billingError.subtitle}</p>
-                <BillingErrorCTA label={billingError.cta} />
-              </div>
-            </MessageContent>
-          </Message>
-        )
+      if (matchBillingError(item.message)) {
+        return null
       }
       return (
         <Message key={item.id} from="assistant" data-message-id={item.id}>
@@ -563,45 +500,51 @@ export function ChatSidebar({
               transition: isMaximized ? 'padding-left 200ms linear' : undefined,
             }}
           >
-            <TabBar
-              tabs={chatTabs}
-              activeTabId={activeChatTabId}
-              getTabTitle={getChatTabTitle}
-              getTabId={(tab) => tab.id}
-              isProcessing={isChatTabProcessing}
-              onSwitchTab={onSwitchChatTab}
-              onCloseTab={onCloseChatTab}
+            <ChatHeader
+              activeTitle={(() => {
+                const activeTab = chatTabs.find((tab) => tab.id === activeChatTabId)
+                return activeTab ? getChatTabTitle(activeTab) : 'New chat'
+              })()}
+              onNewChatTab={onNewChatTab}
+              recentRuns={recentRuns}
+              activeRunId={runId}
+              onSelectRun={onSelectRun}
+              onOpenChatHistory={onOpenChatHistory}
             />
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={onNewChatTab}
-                  className="titlebar-no-drag my-1 h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
-                >
-                  <SquarePen className="size-5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">New chat tab</TooltipContent>
-            </Tooltip>
-            {onOpenFullScreen && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={onOpenFullScreen}
-                    className="titlebar-no-drag my-1 mr-2 h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
-                    aria-label={isMaximized ? 'Restore two-pane view' : 'Maximize chat view'}
-                  >
-                    {isMaximized ? <Minimize2 className="size-5" /> : <Maximize2 className="size-5" />}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">
-                  {isMaximized ? 'Restore two-pane view' : 'Maximize chat view'}
-                </TooltipContent>
-              </Tooltip>
+            {isMaximized ? (
+              onOpenFullScreen && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={onOpenFullScreen}
+                      className="titlebar-no-drag my-1 mr-2 h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+                      aria-label="Dock chat to side pane"
+                    >
+                      <ArrowRight className="size-5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">Dock to side pane</TooltipContent>
+                </Tooltip>
+              )
+            ) : (
+              onCloseChat && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={onCloseChat}
+                      className="titlebar-no-drag my-1 mr-2 h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+                      aria-label="Close chat"
+                    >
+                      <X className="size-5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">Close chat</TooltipContent>
+                </Tooltip>
+              )
             )}
           </header>
 
@@ -629,11 +572,19 @@ export function ChatSidebar({
                           anchorRequestKey={viewportAnchors[tab.id]?.requestKey}
                           className="relative flex-1"
                       >
-                        <ConversationContent className={tabHasConversation ? 'mx-auto w-full max-w-4xl px-3 pb-28' : 'mx-auto w-full max-w-4xl min-h-full items-center justify-center px-3 pb-0'}>
+                        <ConversationContent className={cn(
+                          'mx-auto w-full max-w-4xl px-3',
+                          tabHasConversation ? 'pb-28' : 'pb-0',
+                          !tabHasConversation && isMaximized && 'min-h-full items-center justify-center',
+                        )}>
                           {!tabHasConversation ? (
-                            <ConversationEmptyState className="h-auto">
-                              <div className="text-sm text-muted-foreground">Ask anything...</div>
-                            </ConversationEmptyState>
+                            <ChatEmptyState
+                              wide={isMaximized}
+                              recentRuns={recentRuns}
+                              onSelectRun={onSelectRun}
+                              onOpenChatHistory={onOpenChatHistory}
+                              onPickPrompt={setLocalPresetMessage}
+                            />
                           ) : (
                             <>
                               {groupConversationItems(
@@ -711,9 +662,6 @@ export function ChatSidebar({
               <div className="sticky bottom-0 z-10 bg-background pb-12 pt-0 shadow-lg">
                 <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-linear-to-t from-background to-transparent" />
                 <div className="mx-auto w-full max-w-4xl px-3">
-                  {!hasConversation && (
-                    <Suggestions onSelect={setLocalPresetMessage} className="mb-3 justify-center" />
-                  )}
                   {chatTabs.map((tab) => {
                     const isActive = tab.id === activeChatTabId
                     const tabState = getTabState(tab.id)

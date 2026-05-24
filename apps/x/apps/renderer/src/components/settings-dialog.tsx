@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug } from "lucide-react"
+import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Bug } from "lucide-react"
 
 import {
   Dialog,
@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Separator } from "@/components/ui/separator"
 import {
   Select,
   SelectContent,
@@ -25,7 +26,7 @@ import { toast } from "sonner"
 import { AccountSettings } from "@/components/settings/account-settings"
 import { ConnectedAccountsSettings } from "@/components/settings/connected-accounts-settings"
 
-type ConfigTab = "account" | "connected-accounts" | "models" | "mcp" | "security" | "appearance" | "tools" | "note-tagging"
+type ConfigTab = "account" | "connections" | "models" | "mcp" | "security" | "appearance" | "note-tagging" | "help"
 
 interface TabConfig {
   id: ConfigTab
@@ -43,10 +44,10 @@ const tabs: TabConfig[] = [
     description: "Manage your Rowboat account",
   },
   {
-    id: "connected-accounts",
-    label: "Connected Accounts",
+    id: "connections",
+    label: "Connections",
     icon: Plug,
-    description: "Manage connected services",
+    description: "Manage accounts and tools",
   },
   {
     id: "models",
@@ -76,22 +77,99 @@ const tabs: TabConfig[] = [
     description: "Customize the look and feel",
   },
   {
-    id: "tools",
-    label: "Tools Library",
-    icon: Wrench,
-    description: "Browse and enable toolkits",
-  },
-  {
     id: "note-tagging",
     label: "Note Tagging",
     icon: Tags,
     path: "config/tags.json",
     description: "Configure tags for notes and emails",
   },
+  {
+    id: "help",
+    label: "Help",
+    icon: HelpCircle,
+    description: "Get help and support",
+  },
 ]
 
 interface SettingsDialogProps {
-  children: React.ReactNode
+  /** Optional trigger element. Omit when controlling `open` externally. */
+  children?: React.ReactNode
+  /** Tab to open on when the dialog is shown. Defaults to "account". */
+  defaultTab?: ConfigTab
+  /** Controlled open state. When provided, the dialog is fully controlled. */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+}
+
+// --- Help & Support tab ---
+
+function HelpSettings() {
+  return (
+    <div className="space-y-4">
+      <div>
+        <h4 className="text-sm font-medium">Help &amp; Support</h4>
+        <p className="text-xs text-muted-foreground mt-0.5">Get help from our community</p>
+      </div>
+      <Button
+        variant="outline"
+        className="w-full justify-start gap-3 h-auto py-3"
+        onClick={() => window.open("https://github.com/rowboatlabs/rowboat/issues/new", "_blank")}
+      >
+        <div className="flex size-8 items-center justify-center rounded-md bg-destructive/10">
+          <Bug className="size-4 text-destructive" />
+        </div>
+        <div className="flex flex-col items-start">
+          <span className="text-sm font-medium">Report a bug</span>
+          <span className="text-xs text-muted-foreground">Send feedback to the Rowboat team</span>
+        </div>
+      </Button>
+      <Button
+        variant="outline"
+        className="w-full justify-start gap-3 h-auto py-3"
+        onClick={() => window.open("https://discord.com/invite/wajrgmJQ6b", "_blank")}
+      >
+        <div className="flex size-8 items-center justify-center rounded-md bg-[#5865F2]">
+          <MessageCircle className="size-4 text-white" />
+        </div>
+        <div className="flex flex-col items-start">
+          <span className="text-sm font-medium">Join our Discord</span>
+          <span className="text-xs text-muted-foreground">Chat with the community</span>
+        </div>
+      </Button>
+      <Button
+        variant="outline"
+        className="w-full justify-start gap-3 h-auto py-3"
+        onClick={() => window.open("mailto:contact@rowboatlabs.com", "_blank")}
+      >
+        <div className="flex size-8 items-center justify-center rounded-md bg-muted">
+          <Mail className="size-4" />
+        </div>
+        <div className="flex flex-col items-start">
+          <span className="text-sm font-medium">Contact us</span>
+          <span className="text-xs text-muted-foreground">contact@rowboatlabs.com</span>
+        </div>
+      </Button>
+      <div className="flex gap-3 text-xs text-muted-foreground">
+        <a
+          href="https://www.rowboatlabs.com/terms-of-service"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="hover:text-foreground transition-colors"
+        >
+          Terms of Service
+        </a>
+        <span>·</span>
+        <a
+          href="https://www.rowboatlabs.com/privacy-policy"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="hover:text-foreground transition-colors"
+        >
+          Privacy Policy
+        </a>
+      </div>
+    </div>
+  )
 }
 
 // --- Theme option for Appearance tab ---
@@ -1572,15 +1650,25 @@ function NoteTaggingSettings({ dialogOpen }: { dialogOpen: boolean }) {
 
 // --- Main Settings Dialog ---
 
-export function SettingsDialog({ children }: SettingsDialogProps) {
-  const [open, setOpen] = useState(false)
-  const [activeTab, setActiveTab] = useState<ConfigTab>("account")
+export function SettingsDialog({ children, defaultTab = "account", open: controlledOpen, onOpenChange }: SettingsDialogProps) {
+  const [internalOpen, setInternalOpen] = useState(false)
+  const open = controlledOpen ?? internalOpen
+  const setOpen = useCallback((next: boolean) => {
+    if (onOpenChange) onOpenChange(next)
+    else setInternalOpen(next)
+  }, [onOpenChange])
+  const [activeTab, setActiveTab] = useState<ConfigTab>(defaultTab)
   const [content, setContent] = useState("")
   const [originalContent, setOriginalContent] = useState("")
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [rowboatConnected, setRowboatConnected] = useState(false)
+
+  // Reset to the requested default tab each time the dialog is opened
+  useEffect(() => {
+    if (open) setActiveTab(defaultTab)
+  }, [open, defaultTab])
 
   // Check if user is signed in to Rowboat
   useEffect(() => {
@@ -1607,7 +1695,7 @@ export function SettingsDialog({ children }: SettingsDialogProps) {
   }
 
   const loadConfig = useCallback(async (tab: ConfigTab) => {
-    if (tab === "appearance" || tab === "models" || tab === "note-tagging" || tab === "account" || tab === "connected-accounts") return
+    if (tab === "appearance" || tab === "models" || tab === "note-tagging" || tab === "account" || tab === "connections" || tab === "help") return
     const tabConfig = tabs.find((t) => t.id === tab)!
     if (!tabConfig.path) return
     setLoading(true)
@@ -1673,7 +1761,7 @@ export function SettingsDialog({ children }: SettingsDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>{children}</DialogTrigger>
+      {children && <DialogTrigger asChild>{children}</DialogTrigger>}
       <DialogContent
         className="max-w-[900px]! w-[900px] h-[600px] p-0 gap-0 overflow-hidden"
       >
@@ -1715,11 +1803,21 @@ export function SettingsDialog({ children }: SettingsDialogProps) {
             </div>
 
             {/* Content */}
-            <div className={cn("flex-1 p-4 min-h-0", (activeTab === "models" || activeTab === "tools" || activeTab === "account" || activeTab === "connected-accounts") ? "overflow-y-auto" : activeTab === "note-tagging" ? "overflow-hidden flex flex-col" : "overflow-hidden")}>
+            <div className={cn("flex-1 p-4 min-h-0", (activeTab === "models" || activeTab === "connections" || activeTab === "account") ? "overflow-y-auto" : activeTab === "note-tagging" ? "overflow-hidden flex flex-col" : "overflow-hidden")}>
               {activeTab === "account" ? (
                 <AccountSettings dialogOpen={open} />
-              ) : activeTab === "connected-accounts" ? (
-                <ConnectedAccountsSettings dialogOpen={open} />
+              ) : activeTab === "connections" ? (
+                <div className="space-y-6">
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-semibold">Primary accounts</h4>
+                    <ConnectedAccountsSettings dialogOpen={open} />
+                  </div>
+                  <Separator />
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-semibold">Library</h4>
+                    <ToolsLibrarySettings dialogOpen={open} rowboatConnected={rowboatConnected} />
+                  </div>
+                </div>
               ) : activeTab === "models" ? (
                 rowboatConnected
                   ? <RowboatModelSettings dialogOpen={open} />
@@ -1728,8 +1826,8 @@ export function SettingsDialog({ children }: SettingsDialogProps) {
                 <NoteTaggingSettings dialogOpen={open} />
               ) : activeTab === "appearance" ? (
                 <AppearanceSettings />
-              ) : activeTab === "tools" ? (
-                <ToolsLibrarySettings dialogOpen={open} rowboatConnected={rowboatConnected} />
+              ) : activeTab === "help" ? (
+                <HelpSettings />
               ) : loading ? (
                 <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
                   Loading...

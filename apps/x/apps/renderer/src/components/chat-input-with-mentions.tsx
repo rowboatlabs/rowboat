@@ -274,9 +274,21 @@ function ChatInputInner({
 
   const handleSetWorkDir = useCallback(async () => {
     try {
+      let defaultPath: string | undefined = workDir ?? undefined
+      try {
+        const { root } = await window.ipc.invoke('workspace:getRoot', null)
+        const workspaceRel = 'knowledge/Workspace'
+        const exists = await window.ipc.invoke('workspace:exists', { path: workspaceRel })
+        if (!exists.exists) {
+          await window.ipc.invoke('workspace:mkdir', { path: workspaceRel, recursive: true })
+        }
+        defaultPath = `${root.replace(/\/$/, '')}/${workspaceRel}`
+      } catch (err) {
+        console.error('Failed to resolve Workspace path; falling back to current workDir', err)
+      }
       const { path: chosen } = await window.ipc.invoke('dialog:openDirectory', {
         title: 'Choose work directory',
-        defaultPath: workDir ?? undefined,
+        defaultPath,
       })
       if (!chosen) return
       await window.ipc.invoke('workspace:writeFile', {

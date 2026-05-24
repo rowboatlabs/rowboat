@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Calendar, ChevronDown, Loader2, Mic, Square, Video } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+import { SettingsDialog } from '@/components/settings-dialog'
 import { formatRelativeTime } from '@/lib/relative-time'
 import { extractConferenceLink } from '@/lib/calendar-event'
 import { cn } from '@/lib/utils'
@@ -189,6 +190,27 @@ function UpcomingEvents() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [refreshTick, setRefreshTick] = useState(0)
+  // Calendar sync uses the native Google OAuth connection.
+  const [calendarConnected, setCalendarConnected] = useState<boolean | null>(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    const check = async () => {
+      try {
+        const oauthState = await window.ipc.invoke('oauth:getState', null)
+        if (!cancelled) setCalendarConnected(oauthState.config?.google?.connected ?? false)
+      } catch {
+        if (!cancelled) setCalendarConnected(false)
+      }
+    }
+    void check()
+    const cleanupOAuthConnect = window.ipc.on('oauth:didConnect', () => { void check() })
+    return () => {
+      cancelled = true
+      cleanupOAuthConnect()
+    }
+  }, [])
 
   const loadEvents = useCallback(async () => {
     setLoading(true)
@@ -313,7 +335,20 @@ function UpcomingEvents() {
           )}
         </div>
 
-        {loading && events.length === 0 ? (
+        {calendarConnected === false && events.length === 0 ? (
+          <div className="flex flex-col items-center gap-3 py-12 text-center">
+            <Calendar className="size-7 text-muted-foreground opacity-50" />
+            <p className="text-sm text-muted-foreground">Connect your calendar to see upcoming meetings here.</p>
+            <button
+              type="button"
+              onClick={() => setSettingsOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3.5 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-accent"
+            >
+              <Calendar className="size-4" />
+              Connect your calendar
+            </button>
+          </div>
+        ) : loading && events.length === 0 ? (
           <div className="flex items-center justify-center py-6">
             <Loader2 className="size-4 animate-spin text-muted-foreground" />
           </div>
@@ -335,6 +370,7 @@ function UpcomingEvents() {
           </div>
         )}
       </div>
+      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} defaultTab="connections" />
     </section>
   )
 }
@@ -348,7 +384,7 @@ function UpcomingDayRow({ day, isToday, isLast }: { day: DayGroup; isToday: bool
     <div
       className="grid"
       style={{
-        gridTemplateColumns: '96px 1fr',
+        gridTemplateColumns: '96px minmax(0, 1fr)',
         borderBottom: isLast ? undefined : '1px dashed var(--gm-border-strong)',
       }}
     >
@@ -376,7 +412,7 @@ function UpcomingDayRow({ day, isToday, isLast }: { day: DayGroup; isToday: bool
           <span style={{ fontSize: 12, color: 'var(--gm-text-faint)' }}>{weekday}</span>
         </span>
       </div>
-      <div className="flex flex-col py-3 pr-3">
+      <div className="flex min-w-0 flex-col py-3 pr-3">
         {day.events.length === 0 ? (
           <div
             className="flex w-full items-center gap-3 px-3 py-2 text-sm"

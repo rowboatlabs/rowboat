@@ -17,9 +17,42 @@ import {
 import { Separator } from "@/components/ui/separator"
 import { useBilling } from "@/hooks/useBilling"
 import { toast } from "sonner"
+import type { BillingUsageBucket } from "@x/shared/dist/billing.js"
 
 interface AccountSettingsProps {
   dialogOpen: boolean
+}
+
+function formatPlanName(plan: string | null | undefined) {
+  if (!plan) return 'No Plan'
+  return `${plan.charAt(0).toUpperCase()}${plan.slice(1)} Plan`
+}
+
+function CreditUsageBar({ label, bucket, helper }: {
+  label: string
+  bucket: BillingUsageBucket
+  helper?: string
+}) {
+  const pct = bucket.sanctionedCredits > 0
+    ? Math.min(100, Math.max(0, Math.round((bucket.usedCredits / bucket.sanctionedCredits) * 100)))
+    : 0
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-medium text-muted-foreground">{label}</p>
+          {helper ? <p className="text-[11px] text-muted-foreground">{helper}</p> : null}
+        </div>
+        <p className="shrink-0 text-xs font-medium tabular-nums">
+          {pct}%
+        </p>
+      </div>
+      <div className="h-2 overflow-hidden rounded-full bg-muted">
+        <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  )
 }
 
 export function AccountSettings({ dialogOpen }: AccountSettingsProps) {
@@ -164,7 +197,7 @@ export function AccountSettings({ dialogOpen }: AccountSettingsProps) {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium capitalize">
-                  {billing.subscriptionPlan ? `${billing.subscriptionPlan} Plan` : 'No Plan'}
+                  {formatPlanName(billing.subscriptionPlan)}
                 </p>
                 {billing.subscriptionStatus === 'trialing' && billing.trialExpiresAt ? (() => {
                   const days = Math.max(0, Math.ceil((new Date(billing.trialExpiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
@@ -179,13 +212,18 @@ export function AccountSettings({ dialogOpen }: AccountSettingsProps) {
                 {!billing.subscriptionPlan && (
                   <p className="text-xs text-muted-foreground">Subscribe to access AI features</p>
                 )}
-                {billing.subscriptionPlan === 'free' && (
-                  <p className="text-xs text-muted-foreground">Free usage resets daily at 00:00 UTC.</p>
-                )}
               </div>
               <Button variant="outline" size="sm" onClick={() => appUrl && window.open(`${appUrl}?intent=upgrade`)}>
                 {!billing.subscriptionPlan ? 'Subscribe' : billing.subscriptionPlan === 'free' ? 'Upgrade' : 'Change plan'}
               </Button>
+            </div>
+            <div className="space-y-3 border-t pt-3">
+              <CreditUsageBar label="Plan usage" bucket={billing.monthly} />
+              <CreditUsageBar
+                label="Daily use"
+                bucket={billing.daily}
+                helper="Daily usage resets at 00:00 UTC"
+              />
             </div>
           </div>
         ) : (
