@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle } from "lucide-react"
+import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Bug } from "lucide-react"
 
 import {
   Dialog,
@@ -110,6 +110,19 @@ function HelpSettings() {
         <h4 className="text-sm font-medium">Help &amp; Support</h4>
         <p className="text-xs text-muted-foreground mt-0.5">Get help from our community</p>
       </div>
+      <Button
+        variant="outline"
+        className="w-full justify-start gap-3 h-auto py-3"
+        onClick={() => window.open("https://github.com/rowboatlabs/rowboat/issues/new", "_blank")}
+      >
+        <div className="flex size-8 items-center justify-center rounded-md bg-destructive/10">
+          <Bug className="size-4 text-destructive" />
+        </div>
+        <div className="flex flex-col items-start">
+          <span className="text-sm font-medium">Report a bug</span>
+          <span className="text-xs text-muted-foreground">Send feedback to the Rowboat team</span>
+        </div>
+      </Button>
       <Button
         variant="outline"
         className="w-full justify-start gap-3 h-auto py-3"
