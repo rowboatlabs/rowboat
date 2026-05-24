@@ -218,11 +218,11 @@ export function AccountSettings({ dialogOpen }: AccountSettingsProps) {
               </Button>
             </div>
             <div className="space-y-3 border-t pt-3">
-              <CreditUsageBar label="Monthly credits" bucket={billing.monthly} />
+              <CreditUsageBar label="Plan usage" bucket={billing.monthly} />
               <CreditUsageBar
-                label="Daily credits"
+                label="Daily use"
                 bucket={billing.daily}
-                helper="Resets daily at 00:00 UTC"
+                helper="Daily usage resets at 00:00 UTC"
               />
             </div>
           </div>
