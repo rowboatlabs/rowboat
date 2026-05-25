@@ -536,6 +536,7 @@
 
 .gmail-message-from span,
 .gmail-message-to,
+.gmail-message-cc,
 .gmail-message-date {
   color: var(--gm-text-muted);
   font-size: 12px;

@@ -998,7 +998,10 @@ function ThreadDetail({
                       </div>
                     </div>
                     {isExpanded ? (
-                      <div className="gmail-message-to">to {message.to || 'me'}</div>
+                      <>
+                        <div className="gmail-message-to">to {message.to || 'me'}</div>
+                        {message.cc && <div className="gmail-message-cc">cc {message.cc}</div>}
+                      </>
                     ) : (
                       <div className="gmail-message-snippet">{snippet(message.body)}</div>
                     )}

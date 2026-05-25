@@ -31,9 +31,16 @@ const MAX_THREADS_IN_DIGEST = 10;
 const RECENT_BACKFILL_INTERVAL_MS = 15 * 60 * 1000;
 const nhm = new NodeHtmlMarkdown();
 
+// Bump whenever snapshot-building logic changes in a way that should invalidate
+// previously cached snapshots (e.g. attachment / recipient parsing fixes). The
+// short-circuit in buildAndCacheSnapshot only reuses a cache whose version matches,
+// so stale entries are transparently rebuilt on the next sync.
+const SNAPSHOT_PARSER_VERSION = 2;
+
 interface SnapshotCacheEntry {
     historyId: string;
     fetchedAt: string;
+    parserVersion?: number;
     snapshot: GmailThreadSnapshot;
 }
 
@@ -56,6 +63,7 @@ function writeCachedSnapshot(threadId: string, historyId: string, snapshot: Gmai
         const entry: SnapshotCacheEntry = {
             historyId,
             fetchedAt: new Date().toISOString(),
+            parserVersion: SNAPSHOT_PARSER_VERSION,
             snapshot,
         };
         fs.writeFileSync(cachePath(threadId), JSON.stringify(entry), 'utf-8');
@@ -308,19 +316,24 @@ interface ExtractedAttachment {
  * saveAttachment / processThread, so the renderer can hand them to
  * shell.openPath via the existing IPC.
  */
-function extractAttachments(msgId: string, payload: gmail.Schema$MessagePart): ExtractedAttachment[] {
+function extractAttachments(msgId: string, payload: gmail.Schema$MessagePart, html?: string): ExtractedAttachment[] {
     const out: ExtractedAttachment[] = [];
     const walk = (part: gmail.Schema$MessagePart): void => {
         const filename = part.filename;
         const attId = part.body?.attachmentId;
         if (filename && attId) {
-            // Exclude only true inline images (image/* with a Content-ID, which
-            // get baked into bodyHtml as data URLs by inlineCidImages). Other
-            // parts with Content-ID — PDFs, .log files, .ics, etc. — are real
-            // attachments; Gmail just stamps Content-ID on most parts.
-            const cid = part.headers?.find(h => h.name?.toLowerCase() === 'content-id')?.value;
+            // Exclude only images that are genuinely inline — i.e. their Content-ID
+            // is actually referenced via `cid:` in the HTML body, so inlineCidImages
+            // already baked them in as data URLs. Gmail stamps a Content-ID on most
+            // parts (including real, separately-attached images like screenshots or
+            // scanned docs), so a Content-ID alone must NOT exclude an attachment;
+            // otherwise attached images silently disappear from the thread view.
+            const cidRaw = part.headers?.find(h => h.name?.toLowerCase() === 'content-id')?.value;
+            const cid = cidRaw?.replace(/^<|>$/g, '').trim();
             const mime = part.mimeType || '';
-            const isInlineImage = !!cid && mime.startsWith('image/');
+            const referencedInHtml = !!cid && !!html
+                && new RegExp(`cid:${cid.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'i').test(html);
+            const isInlineImage = mime.startsWith('image/') && referencedInHtml;
             if (!isInlineImage) {
                 const safeName = `${msgId}_${cleanFilename(filename)}`;
                 out.push({
@@ -577,6 +590,7 @@ async function buildAndCacheSnapshot(
         threadData.historyId &&
         cached &&
         cached.historyId === threadData.historyId &&
+        cached.parserVersion === SNAPSHOT_PARSER_VERSION &&
         cached.snapshot.importance
     ) {
         return cached.snapshot;
@@ -602,7 +616,7 @@ async function buildAndCacheSnapshot(
             }
         }
         const isDraft = msg.labelIds?.includes('DRAFT') ?? false;
-        const attachments = msg.payload && msg.id ? extractAttachments(msg.id, msg.payload) : [];
+        const attachments = msg.payload && msg.id ? extractAttachments(msg.id, msg.payload, parts.html) : [];
         return {
             id: msg.id || undefined,
             from: headerValue(headers, 'From') || 'Unknown',
