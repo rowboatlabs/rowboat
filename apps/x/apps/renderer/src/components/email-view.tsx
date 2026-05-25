@@ -152,6 +152,9 @@ function buildRecipients(
 
   const selfSet = new Set<string>(self ? [self] : [])
   const to = dedupeRecipients(rawTo, selfSet)
+  if (iAmSender && to.length === 0 && self && rawTo.some((token) => extractAddress(token).toLowerCase() === self)) {
+    to.push(self)
+  }
 
   if (mode === 'reply') return { to, cc: [] }
 
