@@ -46,33 +46,61 @@ This is non-negotiable. The user gets clickable buttons. Free-text "which agent?
 2. The path from a "# User Work Directory" block in your context.
 3. Ask once in plain text: "Which folder should I work in?"
 
-**Confirm briefly** with the user (one short line):
+**State your intent in one line, then execute immediately — do NOT wait for a "yes".** The \`executeCommand\` call surfaces a permission card that is itself the user's confirmation, so an extra in-chat "reply yes to proceed" is redundant friction. Say something like:
 
-> I'll use [Claude Code / Codex] to [task description] in \`[folder]\`. Permission requests from the coding agent will be auto-approved. Reply "yes" to proceed.
+> Using [Claude Code / Codex] to [task description] in \`[folder]\`.
 
-**Execute** with the chosen agent. Call \`executeCommand\` with this exact shape:
+…and then immediately make the \`executeCommand\` call in the same turn.
 
-\`\`\`
-npx acpx@latest --approve-all --cwd <folder> <agent> exec "<prompt>"
-\`\`\`
+**Execute** with the chosen agent using a **persistent named session** so follow-up coding requests in this chat resume the same agent and keep context.
 
-Where \`<agent>\` is \`claude\` or \`codex\`, picked by (in priority order):
+Pick \`<agent>\` (\`claude\` or \`codex\`) by, in priority order:
 - An explicit in-chat override from the user this turn ("use codex", "switch to claude") — honor it.
 - The agent chosen in Step 1 / the "# Code Mode (Active)" block.
 
-Concrete examples:
+Pick \`<session-name>\` — **stable for this whole chat**:
+- If the "# Code Mode (Active)" block gives a session name (e.g. \`rowboat-<runId>\`), use that exact name.
+- Otherwise pick one short, kebab-case name and **reuse it for every coding call this turn and in follow-ups** — never a new name each time.
+
+**\`-s\` resumes an existing session; it does NOT create one.** So create the session once at the start, then prompt:
+
+**1. First coding action in this chat — create the session:**
 
 \`\`\`
-npx acpx@latest --approve-all --cwd ~/projects/myapp claude exec "fix the off-by-one bug in foo.ts"
-npx acpx@latest --approve-all --cwd "G:/4th sem/CN" codex exec "create a C program that divides two numbers with divide-by-zero handling"
+npx acpx@latest --approve-all --cwd <folder> <agent> sessions new --name <session-name>
+\`\`\`
+
+**2. Then run the prompt:**
+
+\`\`\`
+npx acpx@latest --approve-all --cwd <folder> <agent> -s <session-name> "<prompt>"
+\`\`\`
+
+**3. Every follow-up coding request in this chat — reuse the same session (do NOT create again):**
+
+\`\`\`
+npx acpx@latest --approve-all --cwd <folder> <agent> -s <session-name> "<prompt>"
+\`\`\`
+
+Do NOT use \`exec\` — it is one-shot and forgets everything.
+
+Concrete example:
+
+\`\`\`
+# First coding message in the chat — create, then prompt:
+npx acpx@latest --approve-all --cwd "G:\\Blogging\\myblog" claude sessions new --name diskspace-check
+npx acpx@latest --approve-all --cwd "G:\\Blogging\\myblog" claude -s diskspace-check "Check the system disk space and report total, used, and free space."
+
+# Follow-up in the same chat — reuse the session, no create:
+npx acpx@latest --approve-all --cwd "G:\\Blogging\\myblog" claude -s diskspace-check "Summarize what we did and the final findings."
 \`\`\`
 
 ### Critical: flag order
 
-\`--approve-all\` and \`--cwd\` are GLOBAL flags and MUST appear BEFORE the agent name:
+\`--approve-all\` and \`--cwd\` are GLOBAL flags and MUST appear BEFORE the agent name. \`sessions new --name <name>\` and \`-s <session-name>\` come AFTER the agent name:
 
-- ✓ Correct: \`npx acpx@latest --approve-all --cwd <folder> <agent> exec "<prompt>"\`
-- ✗ Wrong:  \`npx acpx@latest <agent> --approve-all exec "..."\` (will fail)
+- ✓ Correct: \`npx acpx@latest --approve-all --cwd <folder> <agent> -s <session-name> "<prompt>"\`
+- ✗ Wrong:  \`npx acpx@latest <agent> --approve-all -s <name> "..."\` (will fail)
 
 ### Writing good prompts for the agent
 
@@ -86,8 +114,11 @@ npx acpx@latest --approve-all --cwd "G:/4th sem/CN" codex exec "create a C progr
 
 After the command finishes:
 - Pass through the coding agent's summary as-is. Do not rewrite.
-- Refer to file paths as plain text. Do NOT use \`\`\`file:path\`\`\` reference blocks.
-- Only add your own explanation if the command failed (non-zero exit). If exit code is 5, permissions were denied (shouldn't happen with \`--approve-all\` — flag this).
+- Refer to file paths as plain text. Do NOT use \`\`\`file:path\`\`\` reference blocks. (This overrides the global "always wrap paths in filepath blocks" rule — for code-mode output, plain text.)
+- Only add your own explanation if the command failed (non-zero exit):
+  - Exit code 5 — permissions were denied (shouldn't happen with \`--approve-all\`; flag it).
+  - Exit code 4 / "No acpx session found" — the \`-s <session-name>\` session doesn't exist yet. Create it once with \`npx acpx@latest --cwd <folder> <agent> sessions new --name <session-name>\`, then retry the prompt. (\`-s\` only resumes; it never creates.)
+  - "command not found" / agent not installed, or an auth/sign-in error — the agent isn't set up. Tell the user to install or sign in to the agent via **Settings → Code Mode**, where Rowboat shows the install and sign-in status.
 
 ---
 
