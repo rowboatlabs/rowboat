@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Calendar, ChevronDown, Clock, ExternalLink, Loader2, MapPin, Mic, Square, UserRound, UsersRound, Video, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -548,8 +549,8 @@ function UpcomingDayCard({ day, isToday }: { day: DayGroup; isToday: boolean }) 
   const count = day.events.length
 
   return (
-    <div className="overflow-hidden rounded-xl border bg-muted">
-      <div className="flex items-center justify-between gap-3 border-b px-5 py-3.5">
+    <div className="overflow-hidden rounded-xl border bg-card">
+      <div className="flex items-center justify-between gap-3 border-b bg-muted px-5 py-3.5">
         <div className="flex min-w-0 items-baseline gap-2">
           <span className="text-[22px] font-bold leading-none text-foreground">{dayNum}</span>
           <span className="truncate text-[13px] text-muted-foreground">
@@ -604,7 +605,7 @@ function UpcomingEventItem({ event, isLast }: { event: UpcomingEvent; isLast: bo
           className={cn(
             'group flex w-full cursor-pointer items-center gap-4 px-5 py-3 text-left transition-colors',
             !isLast && 'border-b',
-            isNow ? 'bg-background' : 'hover:bg-background',
+            isNow ? 'bg-muted' : 'hover:bg-muted/50',
           )}
         >
           <span className="shrink-0 text-[13px] tabular-nums text-muted-foreground" style={{ width: 118 }}>
@@ -786,22 +787,39 @@ function SplitJoinButton({ onJoinAndNotes, onNotesOnly }: {
   onNotesOnly: () => void
 }) {
   const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  // Fixed-position coords for the portaled menu so it isn't clipped by the
+  // calendar card's `overflow-hidden`.
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null)
+
+  const updatePos = useCallback(() => {
+    const rect = containerRef.current?.getBoundingClientRect()
+    if (!rect) return
+    setMenuPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right })
+  }, [])
 
   useEffect(() => {
     if (!open) return
+    updatePos()
     const handler = (e: MouseEvent) => {
       const target = e.target
-      if (ref.current && target instanceof globalThis.Node && !ref.current.contains(target)) {
-        setOpen(false)
-      }
+      if (!(target instanceof globalThis.Node)) return
+      if (containerRef.current?.contains(target) || menuRef.current?.contains(target)) return
+      setOpen(false)
     }
     document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [open])
+    window.addEventListener('resize', updatePos)
+    window.addEventListener('scroll', updatePos, true)
+    return () => {
+      document.removeEventListener('mousedown', handler)
+      window.removeEventListener('resize', updatePos)
+      window.removeEventListener('scroll', updatePos, true)
+    }
+  }, [open, updatePos])
 
   return (
-    <div ref={ref} className="relative inline-flex items-stretch">
+    <div ref={containerRef} className="relative inline-flex items-stretch">
       <button
         type="button"
         onMouseDown={(e) => e.stopPropagation()}
@@ -820,19 +838,26 @@ function SplitJoinButton({ onJoinAndNotes, onNotesOnly }: {
       >
         <ChevronDown className="size-3" />
       </button>
-      {open && (
-        <div className="absolute right-0 top-[calc(100%+4px)] z-50 min-w-36 overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-lg">
-          <button
-            type="button"
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={(e) => { e.stopPropagation(); setOpen(false); onNotesOnly() }}
-            className="flex w-full items-center gap-1.5 whitespace-nowrap px-2.5 py-1.5 text-xs transition-colors hover:bg-accent"
-          >
-            <Mic className="size-3" />
-            Take notes only
-          </button>
-        </div>
-      )}
+      {open && menuPos
+        ? createPortal(
+            <div
+              ref={menuRef}
+              style={{ position: 'fixed', top: menuPos.top, right: menuPos.right, zIndex: 60 }}
+              className="min-w-36 overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-lg"
+            >
+              <button
+                type="button"
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => { e.stopPropagation(); setOpen(false); onNotesOnly() }}
+                className="flex w-full items-center gap-1.5 whitespace-nowrap px-2.5 py-1.5 text-xs transition-colors hover:bg-accent"
+              >
+                <Mic className="size-3" />
+                Take notes only
+              </button>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   )
 }
