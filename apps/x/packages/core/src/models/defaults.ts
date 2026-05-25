@@ -6,8 +6,8 @@ import container from "../di/container.js";
 
 const SIGNED_IN_DEFAULT_MODEL = "gpt-5.4";
 const SIGNED_IN_DEFAULT_PROVIDER = "rowboat";
-const SIGNED_IN_KG_MODEL = "google/gemini-3.1-flash-lite-preview";
-const SIGNED_IN_LIVE_NOTE_AGENT_MODEL = "google/gemini-3.1-flash-lite-preview";
+const SIGNED_IN_KG_MODEL = "google/gemini-3.1-flash-lite";
+const SIGNED_IN_LIVE_NOTE_AGENT_MODEL = "google/gemini-3.1-flash-lite";
 
 /**
  * The single source of truth for "what model+provider should we use when
