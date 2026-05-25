@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Calendar, ChevronDown, Loader2, Mic, Square, Video } from 'lucide-react'
+import { Calendar, ChevronDown, Clock, ExternalLink, Loader2, MapPin, Mic, Square, UserRound, UsersRound, Video, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { SettingsDialog } from '@/components/settings-dialog'
 import { formatRelativeTime } from '@/lib/relative-time'
 import { extractConferenceLink } from '@/lib/calendar-event'
@@ -40,13 +41,31 @@ type RawCalendarEvent = {
   start?: { dateTime?: string; date?: string }
   end?: { dateTime?: string; date?: string }
   location?: string
+  description?: string
   htmlLink?: string
   status?: string
-  attendees?: Array<{ email?: string; self?: boolean; responseStatus?: string }>
+  creator?: CalendarPerson
+  organizer?: CalendarPerson
+  attendees?: CalendarAttendee[]
   conferenceData?: { entryPoints?: Array<{ entryPointType?: string; uri?: string }> }
   hangoutLink?: string
   conferenceLink?: string
 }
+
+type CalendarPerson = {
+  email?: string
+  displayName?: string
+  self?: boolean
+}
+
+type CalendarAttendee = CalendarPerson & {
+  responseStatus?: string
+  optional?: boolean
+}
+
+type DescriptionPart =
+  | { type: 'text'; text: string }
+  | { type: 'link'; text: string; href: string }
 
 type UpcomingEvent = {
   id: string
@@ -55,8 +74,12 @@ type UpcomingEvent = {
   end: Date | null
   isAllDay: boolean
   location: string | null
+  description: string | null
   htmlLink: string | null
   conferenceLink: string | null
+  creator: CalendarPerson | null
+  organizer: CalendarPerson | null
+  attendees: CalendarAttendee[]
   source: string // workspace path to the calendar_sync JSON
   rawStart: { dateTime?: string; date?: string } | undefined
   rawEnd: { dateTime?: string; date?: string } | undefined
@@ -125,8 +148,12 @@ function normalizeEvent(raw: RawCalendarEvent, sourcePath: string): UpcomingEven
     end,
     isAllDay,
     location: raw.location?.trim() || null,
+    description: raw.description?.trim() || null,
     htmlLink: raw.htmlLink ?? null,
     conferenceLink,
+    creator: raw.creator ?? null,
+    organizer: raw.organizer ?? null,
+    attendees: raw.attendees ?? [],
     source: sourcePath,
     rawStart: raw.start,
     rawEnd: raw.end,
@@ -183,6 +210,115 @@ function formatEventTimeRange(event: UpcomingEvent): string {
   }
   const end = event.end.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
   return `${start} – ${end}`
+}
+
+function formatEventDetailTime(event: UpcomingEvent): string {
+  if (!event.isAllDay) {
+    const date = event.start.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })
+    return `${date}, ${formatEventTimeRange(event)}`
+  }
+
+  const start = event.start.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })
+  if (!event.end) return `${start}, all day`
+
+  const exclusiveEnd = addDays(event.end, -1)
+  if (localDateKey(exclusiveEnd) === localDateKey(event.start)) return `${start}, all day`
+
+  const end = exclusiveEnd.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })
+  return `${start} – ${end}, all day`
+}
+
+function personLabel(person: CalendarPerson | null | undefined): string | null {
+  if (!person) return null
+  return person.displayName?.trim() || person.email?.trim() || null
+}
+
+function attendeeLabel(attendee: CalendarAttendee): string | null {
+  const label = personLabel(attendee)
+  if (!label) return null
+  if (attendee.self) return `${label} (you)`
+  return label
+}
+
+function normalizeDescriptionParts(parts: DescriptionPart[]): DescriptionPart[] {
+  const normalized: DescriptionPart[] = []
+  for (const part of parts) {
+    const text = part.text.replace(/\n{3,}/g, '\n\n')
+    if (!text) continue
+    const previous = normalized[normalized.length - 1]
+    if (previous?.type === 'text' && part.type === 'text') {
+      previous.text += text
+    } else if (part.type === 'link') {
+      normalized.push({ ...part, text })
+    } else {
+      normalized.push({ type: 'text', text })
+    }
+  }
+  return normalized
+}
+
+function isSafeDescriptionHref(value: string): boolean {
+  try {
+    const url = new URL(value, window.location.href)
+    return url.protocol === 'http:' || url.protocol === 'https:' || url.protocol === 'mailto:'
+  } catch {
+    return false
+  }
+}
+
+function linkifyText(value: string): DescriptionPart[] {
+  const parts: DescriptionPart[] = []
+  const urlRe = /\bhttps?:\/\/[^\s<>"')\]]+|\bwww\.[^\s<>"')\]]+/gi
+  let lastIndex = 0
+  for (const match of value.matchAll(urlRe)) {
+    const raw = match[0]
+    const index = match.index ?? 0
+    if (index > lastIndex) parts.push({ type: 'text', text: value.slice(lastIndex, index) })
+    const href = raw.startsWith('www.') ? `https://${raw}` : raw
+    parts.push({ type: 'link', text: raw, href })
+    lastIndex = index + raw.length
+  }
+  if (lastIndex < value.length) parts.push({ type: 'text', text: value.slice(lastIndex) })
+  return parts
+}
+
+function parseDescriptionParts(value: string): DescriptionPart[] {
+  const withLineBreaks = value.replace(/<\s*br\s*\/?>/gi, '\n').replace(/<\/\s*(p|div|li|tr|h[1-6])\s*>/gi, '\n')
+  if (typeof DOMParser === 'undefined') {
+    return normalizeDescriptionParts(linkifyText(withLineBreaks.replace(/<[^>]*>/g, '').trim()))
+  }
+  const doc = new DOMParser().parseFromString(withLineBreaks, 'text/html')
+  const parts: DescriptionPart[] = []
+
+  const visit = (node: Node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      parts.push(...linkifyText(node.textContent ?? ''))
+      return
+    }
+    if (!(node instanceof HTMLElement)) return
+    if (node.tagName === 'A') {
+      const href = node.getAttribute('href') ?? ''
+      const text = node.textContent?.trim() || href
+      if (href && isSafeDescriptionHref(href)) {
+        parts.push({ type: 'link', text, href })
+        return
+      }
+    }
+    if (node.tagName === 'BR') {
+      parts.push({ type: 'text', text: '\n' })
+      return
+    }
+    node.childNodes.forEach(visit)
+    if (/^(P|DIV|LI|TR|H[1-6])$/.test(node.tagName)) {
+      parts.push({ type: 'text', text: '\n' })
+    }
+  }
+
+  doc.body.childNodes.forEach(visit)
+  return normalizeDescriptionParts(parts).map((part, index, all) => {
+    if (index === 0 || index === all.length - 1) return { ...part, text: part.text.trim() }
+    return part
+  }).filter((part) => part.text.length > 0)
 }
 
 function UpcomingEvents() {
@@ -430,74 +566,202 @@ function UpcomingDayRow({ day, isToday, isLast }: { day: DayGroup; isToday: bool
 }
 
 function UpcomingEventItem({ event }: { event: UpcomingEvent }) {
-  const handleOpen = useCallback(() => {
-    if (event.htmlLink) window.open(event.htmlLink, '_blank')
-  }, [event.htmlLink])
+  const [open, setOpen] = useState(false)
 
   const titleAndLocation = event.location ? `${event.summary} · ${event.location}` : event.summary
 
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      onClick={handleOpen}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault()
-          handleOpen()
-        }
-      }}
-      title={titleAndLocation}
-      className={cn(
-        'upcoming-event-row group flex w-full items-center gap-3 px-3 py-2 text-left cursor-pointer',
-      )}
-      style={{ color: 'var(--gm-text)', minHeight: 40 }}
-    >
-      <span
-        aria-hidden
-        className="self-stretch rounded-full"
-        style={{ width: 3, background: 'var(--gm-accent)', opacity: 0.55 }}
-      />
-      <span className="min-w-0 flex-1">
-        <span
-          className="block truncate"
-          style={{ fontSize: 14, fontWeight: 500, color: 'var(--gm-text-strong)' }}
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <div
+          role="button"
+          tabIndex={0}
+          title={titleAndLocation}
+          className={cn(
+            'upcoming-event-row group flex w-full items-center gap-3 px-3 py-2 text-left cursor-pointer',
+          )}
+          style={{ color: 'var(--gm-text)', minHeight: 40 }}
         >
-          {event.summary}
-        </span>
-        <span
-          className="mt-0.5 block truncate"
-          style={{ fontSize: 12, color: 'var(--gm-text-muted)' }}
-        >
-          {formatEventTimeRange(event)}
-          {event.location ? <span style={{ color: 'var(--gm-text-faint)' }}> · {event.location}</span> : null}
-        </span>
-      </span>
-      <div className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-        {event.conferenceLink ? (
-          <SplitJoinButton
-            onJoinAndNotes={() => triggerMeetingCapture(event, true)}
-            onNotesOnly={() => triggerMeetingCapture(event, false)}
+          <span
+            aria-hidden
+            className="self-stretch rounded-full"
+            style={{ width: 3, background: 'var(--gm-accent)', opacity: 0.55 }}
           />
-        ) : (
+          <span className="min-w-0 flex-1">
+            <span
+              className="block truncate"
+              style={{ fontSize: 14, fontWeight: 500, color: 'var(--gm-text-strong)' }}
+            >
+              {event.summary}
+            </span>
+            <span
+              className="mt-0.5 block truncate"
+              style={{ fontSize: 12, color: 'var(--gm-text-muted)' }}
+            >
+              {formatEventTimeRange(event)}
+              {event.location ? <span style={{ color: 'var(--gm-text-faint)' }}> · {event.location}</span> : null}
+            </span>
+          </span>
+          <div className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+            {event.conferenceLink ? (
+              <SplitJoinButton
+                onJoinAndNotes={() => triggerMeetingCapture(event, true)}
+                onNotesOnly={() => triggerMeetingCapture(event, false)}
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); triggerMeetingCapture(event, false) }}
+                onMouseDown={(e) => e.stopPropagation()}
+                className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs transition-colors"
+                style={{
+                  background: 'var(--gm-bg-pill)',
+                  color: 'var(--gm-text)',
+                  border: '1px solid var(--gm-border)',
+                }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--gm-bg-pill-hover)' }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--gm-bg-pill)' }}
+              >
+                <Mic className="size-3" />
+                Take notes
+              </button>
+            )}
+          </div>
+        </div>
+      </PopoverTrigger>
+      <EventDetailsPopover event={event} onClose={() => setOpen(false)} />
+    </Popover>
+  )
+}
+
+function EventDetailsPopover({ event, onClose }: { event: UpcomingEvent; onClose: () => void }) {
+  const organizer = personLabel(event.organizer) ?? personLabel(event.creator)
+  const attendees = event.attendees.map(attendeeLabel).filter((label): label is string => Boolean(label))
+  const descriptionParts = event.description ? parseDescriptionParts(event.description) : []
+  const handleMeetingCapture = (openConference: boolean) => {
+    onClose()
+    triggerMeetingCapture(event, openConference)
+  }
+
+  return (
+    <PopoverContent
+      align="start"
+      side="bottom"
+      sideOffset={6}
+      className="w-[min(380px,calc(100vw-32px))] rounded-lg p-0 shadow-xl"
+      style={{
+        backgroundColor: 'var(--popover, #fff)',
+        borderColor: 'var(--border, #e4e4e7)',
+        color: 'var(--popover-foreground, #09090b)',
+      }}
+    >
+      <div className="flex items-center justify-end gap-1 border-b px-3 py-2" style={{ borderColor: 'var(--border, #e4e4e7)' }}>
+        {event.htmlLink ? (
           <button
             type="button"
-            onClick={(e) => { e.stopPropagation(); triggerMeetingCapture(event, false) }}
-            onMouseDown={(e) => e.stopPropagation()}
-            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs transition-colors"
-            style={{
-              background: 'var(--gm-bg-pill)',
-              color: 'var(--gm-text)',
-              border: '1px solid var(--gm-border)',
-            }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--gm-bg-pill-hover)' }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--gm-bg-pill)' }}
+            onClick={() => window.open(event.htmlLink!, '_blank')}
+            className="inline-flex size-8 items-center justify-center rounded-md transition-colors"
+            style={{ color: 'var(--muted-foreground, #71717a)' }}
+            aria-label="Open in Google Calendar"
+            title="Open in Google Calendar"
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--muted, #f4f4f5)' }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
           >
-            <Mic className="size-3" />
-            Take notes
+            <ExternalLink className="size-4" />
           </button>
-        )}
+        ) : null}
+        <button
+          type="button"
+          onClick={onClose}
+          className="inline-flex size-8 items-center justify-center rounded-md transition-colors"
+          style={{ color: 'var(--muted-foreground, #71717a)' }}
+          aria-label="Close event details"
+          title="Close"
+          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--muted, #f4f4f5)' }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
+        >
+          <X className="size-4" />
+        </button>
       </div>
+      <div className="space-y-4 px-5 py-4">
+        <div className="flex gap-3">
+          <span
+            aria-hidden
+            className="mt-1.5 h-3 w-3 shrink-0 rounded-sm"
+            style={{ background: 'var(--primary, #18181b)' }}
+          />
+          <div className="min-w-0">
+            <h4 className="break-words text-[20px] font-normal leading-6" style={{ color: 'var(--foreground, #09090b)' }}>
+              {event.summary}
+            </h4>
+          </div>
+        </div>
+
+        <EventDetailRow icon={<Clock className="size-4" />} value={formatEventDetailTime(event)} />
+        {event.location ? <EventDetailRow icon={<MapPin className="size-4" />} value={event.location} /> : null}
+        {organizer ? <EventDetailRow icon={<UserRound className="size-4" />} value={`Organizer: ${organizer}`} /> : null}
+        {attendees.length > 0 ? (
+          <EventDetailRow
+            icon={<UsersRound className="size-4" />}
+            value={attendees.slice(0, 8).join(', ') + (attendees.length > 8 ? `, +${attendees.length - 8} more` : '')}
+          />
+        ) : null}
+
+        {event.conferenceLink ? (
+          <div className="flex gap-3">
+            <Video className="mt-1 size-4 shrink-0" style={{ color: 'var(--muted-foreground, #71717a)' }} />
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" size="sm" onClick={() => handleMeetingCapture(true)}>
+                Join & take notes
+              </Button>
+              <Button type="button" size="sm" variant="outline" onClick={() => handleMeetingCapture(false)}>
+                Take notes only
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex gap-3">
+            <Mic className="mt-1 size-4 shrink-0" style={{ color: 'var(--muted-foreground, #71717a)' }} />
+            <Button type="button" size="sm" variant="outline" onClick={() => handleMeetingCapture(false)}>
+              Take notes
+            </Button>
+          </div>
+        )}
+
+        {descriptionParts.length > 0 ? (
+          <div className="flex gap-3">
+            <span className="mt-1 size-4 shrink-0" />
+            <div className="max-h-40 overflow-auto whitespace-pre-wrap break-words text-sm leading-5" style={{ color: 'var(--foreground, #27272a)' }}>
+              {descriptionParts.map((part, index) => {
+                if (part.type === 'text') return <span key={index}>{part.text}</span>
+                return (
+                  <a
+                    key={index}
+                    href={part.href}
+                    onClick={(e) => {
+                      e.preventDefault()
+                      window.open(part.href, '_blank')
+                    }}
+                    className="underline underline-offset-2"
+                    style={{ color: 'var(--primary, #18181b)' }}
+                  >
+                    {part.text}
+                  </a>
+                )
+              })}
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </PopoverContent>
+  )
+}
+
+function EventDetailRow({ icon, value }: { icon: React.ReactNode; value: string }) {
+  return (
+    <div className="flex gap-3 text-sm leading-5">
+      <span className="mt-0.5 shrink-0" style={{ color: 'var(--muted-foreground, #71717a)' }}>{icon}</span>
+      <span className="min-w-0 break-words" style={{ color: 'var(--foreground, #27272a)' }}>{value}</span>
     </div>
   )
 }
