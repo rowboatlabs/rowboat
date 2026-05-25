@@ -62,13 +62,15 @@ Pick \`<session-name>\` — **stable for this whole chat**:
 - If the "# Code Mode (Active)" block gives a session name (e.g. \`rowboat-<runId>\`), use that exact name.
 - Otherwise pick one short, kebab-case name and **reuse it for every coding call this turn and in follow-ups** — never a new name each time.
 
-**\`-s\` resumes an existing session; it does NOT create one.** So create the session once at the start, then prompt:
+**\`-s\` resumes an existing session; it does NOT create one.** So ensure the session exists once at the start, then prompt:
 
-**1. First coding action in this chat — create the session:**
+**1. First coding action in this chat — ensure the session exists:**
 
 \`\`\`
-npx acpx@latest --approve-all --cwd <folder> <agent> sessions new --name <session-name>
+npx acpx@latest --approve-all --cwd <folder> <agent> sessions ensure --name <session-name>
 \`\`\`
+
+(\`ensure\` creates the session if missing and reuses it if it already exists — so reopening this chat later just resumes the same session instead of erroring.)
 
 **2. Then run the prompt:**
 
@@ -82,13 +84,15 @@ npx acpx@latest --approve-all --cwd <folder> <agent> -s <session-name> "<prompt>
 npx acpx@latest --approve-all --cwd <folder> <agent> -s <session-name> "<prompt>"
 \`\`\`
 
+**Run steps 1 and 2 as separate, sequential \`executeCommand\` calls.** Issue the \`sessions ensure\` call FIRST, wait for it to finish, and only THEN issue the prompt call. Do NOT fire both in the same turn / batch — each must surface and complete its own permission + command block before the next begins.
+
 Do NOT use \`exec\` — it is one-shot and forgets everything.
 
 Concrete example:
 
 \`\`\`
-# First coding message in the chat — create, then prompt:
-npx acpx@latest --approve-all --cwd "G:\\Blogging\\myblog" claude sessions new --name diskspace-check
+# First coding message in the chat — ensure the session, then prompt:
+npx acpx@latest --approve-all --cwd "G:\\Blogging\\myblog" claude sessions ensure --name diskspace-check
 npx acpx@latest --approve-all --cwd "G:\\Blogging\\myblog" claude -s diskspace-check "Check the system disk space and report total, used, and free space."
 
 # Follow-up in the same chat — reuse the session, no create:
@@ -97,7 +101,7 @@ npx acpx@latest --approve-all --cwd "G:\\Blogging\\myblog" claude -s diskspace-c
 
 ### Critical: flag order
 
-\`--approve-all\` and \`--cwd\` are GLOBAL flags and MUST appear BEFORE the agent name. \`sessions new --name <name>\` and \`-s <session-name>\` come AFTER the agent name:
+\`--approve-all\` and \`--cwd\` are GLOBAL flags and MUST appear BEFORE the agent name. \`sessions ensure --name <name>\` and \`-s <session-name>\` come AFTER the agent name:
 
 - ✓ Correct: \`npx acpx@latest --approve-all --cwd <folder> <agent> -s <session-name> "<prompt>"\`
 - ✗ Wrong:  \`npx acpx@latest <agent> --approve-all -s <name> "..."\` (will fail)
@@ -117,7 +121,7 @@ After the command finishes:
 - Refer to file paths as plain text. Do NOT use \`\`\`file:path\`\`\` reference blocks. (This overrides the global "always wrap paths in filepath blocks" rule — for code-mode output, plain text.)
 - Only add your own explanation if the command failed (non-zero exit):
   - Exit code 5 — permissions were denied (shouldn't happen with \`--approve-all\`; flag it).
-  - Exit code 4 / "No acpx session found" — the \`-s <session-name>\` session doesn't exist yet. Create it once with \`npx acpx@latest --cwd <folder> <agent> sessions new --name <session-name>\`, then retry the prompt. (\`-s\` only resumes; it never creates.)
+  - Exit code 4 / "No acpx session found" — the \`-s <session-name>\` session doesn't exist yet. Create it once with \`npx acpx@latest --approve-all --cwd <folder> <agent> sessions ensure --name <session-name>\`, then retry the prompt. (\`-s\` only resumes; it never creates.)
   - "command not found" / agent not installed, or an auth/sign-in error — the agent isn't set up. Tell the user to install or sign in to the agent via **Settings → Code Mode**, where Rowboat shows the install and sign-in status.
 
 ---

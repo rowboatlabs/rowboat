@@ -1331,13 +1331,15 @@ The user has turned on **code mode** and the composer chip is set to **${agentDi
 1. By toggling the chip in the composer (preferred).
 2. By asking you directly in chat ("use codex", "switch to claude", "do this with ${otherDisplay}", etc.). When the user explicitly asks to use a different agent in the current message, honor that — use \`${otherAgent}\` instead of \`${codeMode}\` for this turn, and briefly mention they can also toggle it via the chip for stickiness.
 
-**Persistent session for this chat — session name: \`${sessionName}\`.** This chat uses one named agent session so the agent keeps context across your requests. The session must be created once before it can be used (\`-s\` only resumes; it does not create).
+**Persistent session for this chat — session name: \`${sessionName}\`.** This chat uses one named agent session so the agent keeps context across your requests. The session must exist before it can be prompted (\`-s\` only resumes; it does not create).
 
-**1. First coding action in this chat — create the session:**
+**1. First coding action in this chat — ensure the session exists:**
 
 \`\`\`
-npx acpx@latest --approve-all --cwd <workdir> <agent> sessions new --name ${sessionName}
+npx acpx@latest --approve-all --cwd <workdir> <agent> sessions ensure --name ${sessionName}
 \`\`\`
+
+(\`ensure\` creates the session if missing and reuses it if it already exists — safe to call when reopening this chat later.)
 
 **2. Then run the prompt:**
 
@@ -1350,6 +1352,8 @@ npx acpx@latest --approve-all --cwd <workdir> <agent> -s ${sessionName} "<prompt
 \`\`\`
 npx acpx@latest --approve-all --cwd <workdir> <agent> -s ${sessionName} "<prompt>"
 \`\`\`
+
+Run these as **separate, sequential** \`executeCommand\` calls — issue the \`sessions ensure\` call first and WAIT for it to finish, then issue the prompt call. Do NOT fire both in the same turn / batch.
 
 Where \`<agent>\` is either \`claude\` or \`codex\` — pick based on (in priority order): an explicit in-chat override → the chip setting (\`${codeMode}\`). Use \`${sessionName}\` exactly — do NOT invent a different name, and do NOT use \`exec\` (it is one-shot and forgets).
 
