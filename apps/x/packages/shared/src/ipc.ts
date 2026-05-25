@@ -148,6 +148,50 @@ const ipcSchemas = {
     req: z.object({}),
     res: z.object({}),
   },
+  'gmail:sendReply': {
+    req: z.object({
+      threadId: z.string().min(1).optional(),
+      to: z.string().min(1),
+      cc: z.string().optional(),
+      bcc: z.string().optional(),
+      subject: z.string(),
+      bodyHtml: z.string(),
+      bodyText: z.string(),
+      inReplyTo: z.string().optional(),
+      references: z.string().optional(),
+    }),
+    res: z.object({
+      messageId: z.string().optional(),
+      error: z.string().optional(),
+    }),
+  },
+  'gmail:getConnectionStatus': {
+    req: z.object({}),
+    res: z.object({
+      connected: z.boolean(),
+      hasRequiredScope: z.boolean(),
+      missingScopes: z.array(z.string()),
+      email: z.string().nullable(),
+    }),
+  },
+  'gmail:getAccountEmail': {
+    req: z.object({}),
+    res: z.object({
+      email: z.string().nullable(),
+    }),
+  },
+  'gmail:archiveThread': {
+    req: z.object({ threadId: z.string().min(1) }),
+    res: z.object({ ok: z.boolean(), error: z.string().optional() }),
+  },
+  'gmail:trashThread': {
+    req: z.object({ threadId: z.string().min(1) }),
+    res: z.object({ ok: z.boolean(), error: z.string().optional() }),
+  },
+  'gmail:markThreadRead': {
+    req: z.object({ threadId: z.string().min(1) }),
+    res: z.object({ ok: z.boolean(), error: z.string().optional() }),
+  },
   'gmail:saveMessageHeight': {
     req: z.object({
       threadId: z.string().min(1),
