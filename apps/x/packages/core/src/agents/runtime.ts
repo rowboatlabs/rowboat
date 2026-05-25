@@ -1344,13 +1344,13 @@ npx acpx@latest --approve-all --cwd <workdir> <agent> sessions ensure --name ${s
 **2. Then run the prompt:**
 
 \`\`\`
-npx acpx@latest --approve-all --cwd <workdir> <agent> -s ${sessionName} "<prompt>"
+npx acpx@latest --approve-all --timeout 600 --cwd <workdir> <agent> -s ${sessionName} "<prompt>"
 \`\`\`
 
 **3. Every follow-up coding request in this chat — reuse the same session (do NOT create again):**
 
 \`\`\`
-npx acpx@latest --approve-all --cwd <workdir> <agent> -s ${sessionName} "<prompt>"
+npx acpx@latest --approve-all --timeout 600 --cwd <workdir> <agent> -s ${sessionName} "<prompt>"
 \`\`\`
 
 Run these as **separate, sequential** \`executeCommand\` calls — issue the \`sessions ensure\` call first and WAIT for it to finish, then issue the prompt call. Do NOT fire both in the same turn / batch.
