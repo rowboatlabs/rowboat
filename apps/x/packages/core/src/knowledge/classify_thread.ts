@@ -109,7 +109,7 @@ export interface Classification {
 const ClassificationSchema = z.object({
     importance: z.enum(['important', 'other']).describe('important = real correspondence, action-required, or content worth referencing later. other = newsletters, marketing, automated notifications, transactional receipts, cold outreach.'),
     summary: z.string().optional().describe('One or two sentences capturing what the thread is about and any implied action. Required when importance is important. Omit when other.'),
-    draftResponse: z.string().optional().describe('A complete draft reply the user can send as-is or edit. Plain text. Required when importance is important AND the thread implies a response is wanted. Omit when other, or when no response is appropriate (e.g. an FYI from a colleague that does not need a reply).'),
+    draftResponse: z.string().optional().describe('A complete draft reply the user can send as-is or edit. Plain text with real line breaks (\\n): greeting on its own line, a blank line between paragraphs, and the sign-off on its own line(s) — e.g. "Hi Tyrone,\\n\\nThanks for the follow-up.\\n\\nBest,\\nJohn". Required when importance is important AND the thread implies a response is wanted. Omit when other, or when no response is appropriate (e.g. an FYI from a colleague that does not need a reply).'),
 });
 
 const SYSTEM_PROMPT = `You classify a Gmail thread for a personal inbox view and, when appropriate, draft a reply on behalf of the user.
@@ -128,7 +128,18 @@ When the thread is important, write a 1-2 sentence summary that captures the gis
 
 When the thread is important AND a reply is reasonably expected from the user, write a complete draft reply they could send as-is.
 
-Apply the user's email-style guide (when provided below) — match their tone, sign-off, length, and phrasing patterns. If no style guide is provided, default to a brief, warm, professional voice.
+Format it like a real email, not one run-on block. Use actual line breaks: put the greeting on its own line, separate distinct paragraphs with a blank line, and put the sign-off and the name on their own lines. The example below illustrates only the line-break structure — not the wording, tone, greeting, or sign-off to use:
+
+Hi Tyrone,
+
+Thanks for the follow-up — sorry I missed your earlier note.
+
+Could you resend it with a bit more context so I can get back to you properly?
+
+Best,
+John
+
+When an email-style guide is provided below, it takes precedence: follow it for greeting, tone, sign-off, length, and phrasing patterns (while keeping the line-break structure shown above). If no style guide is provided, default to a brief, warm, professional voice.
 
 For scheduling-related threads (where the sender proposes meeting times, asks for the user's availability, or follows up on a meeting request), look at the user's upcoming calendar (provided below) and either:
 - Propose 2-3 specific time windows from genuinely free slots, or
@@ -144,10 +155,12 @@ Omit the draft when:
 
 Be decisive — pick exactly one importance label. Do not hedge.`;
 
-function userReplied(snapshot: GmailThreadSnapshot, userEmail: string | null): boolean {
+function userSentLatest(snapshot: GmailThreadSnapshot, userEmail: string | null): boolean {
     if (!userEmail) return false;
+    const latest = snapshot.messages[snapshot.messages.length - 1];
+    if (!latest) return false;
     const needle = userEmail.toLowerCase();
-    return snapshot.messages.some(m => (m.from || '').toLowerCase().includes(needle));
+    return (latest.from || '').toLowerCase().includes(needle);
 }
 
 function buildPrompt(
@@ -206,7 +219,7 @@ export async function classifyThread(
     userEmail: string | null,
     options: ClassifyOptions = {},
 ): Promise<Classification> {
-    if (userReplied(snapshot, userEmail)) {
+    if (userSentLatest(snapshot, userEmail)) {
         return { importance: 'important' };
     }
 
