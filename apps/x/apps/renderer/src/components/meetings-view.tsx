@@ -212,6 +212,42 @@ function formatEventTimeRange(event: UpcomingEvent): string {
   return `${start} – ${end}`
 }
 
+// Compact range for the upcoming list: drops the leading meridiem when both
+// ends share it ("9:00 – 11:00 AM" instead of "9:00 AM – 11:00 AM").
+function formatEventTimeRangeCompact(event: UpcomingEvent): string {
+  if (event.isAllDay) return 'All day'
+  const startStr = event.start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  if (!event.end) return startStr
+  const sameDay = localDateKey(event.start) === localDateKey(event.end)
+  if (!sameDay) return formatEventTimeRange(event)
+  const endStr = event.end.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  const meridiemRe = /\s*[AP]M$/i
+  const startMer = startStr.match(meridiemRe)?.[0]?.trim().toUpperCase()
+  const endMer = endStr.match(meridiemRe)?.[0]?.trim().toUpperCase()
+  if (startMer && endMer && startMer === endMer) {
+    return `${startStr.replace(meridiemRe, '')} – ${endStr}`
+  }
+  return `${startStr} – ${endStr}`
+}
+
+// Whether a timed event is happening right now.
+function isEventNow(event: UpcomingEvent): boolean {
+  if (event.isAllDay) return false
+  const now = Date.now()
+  const start = event.start.getTime()
+  const end = event.end ? event.end.getTime() : start + 30 * 60 * 1000
+  return start <= now && now < end
+}
+
+// Human label for the conferencing provider behind an event's join link.
+function meetingPlatformLabel(link: string | null): string | null {
+  if (!link) return null
+  if (/zoom\.us|zoomgov\.com/i.test(link)) return 'Zoom'
+  if (/teams\.(?:microsoft|live)\.com/i.test(link)) return 'Teams'
+  if (/meet\.google\.com/i.test(link)) return 'Meet'
+  return 'Video call'
+}
+
 function formatEventDetailTime(event: UpcomingEvent): string {
   if (!event.isAllDay) {
     const date = event.start.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })
@@ -431,8 +467,9 @@ function UpcomingEvents() {
           break
       }
     })
-    // Refresh on the hour so day labels and "ended" filtering stay current.
-    const tick = setInterval(() => setRefreshTick((t) => t + 1), 60 * 60 * 1000)
+    // Refresh every minute so the "now" highlight, day labels, and "ended"
+    // filtering stay current without waiting on a calendar sync.
+    const tick = setInterval(() => setRefreshTick((t) => t + 1), 60 * 1000)
     return () => {
       cleanup()
       clearInterval(tick)
@@ -462,10 +499,7 @@ function UpcomingEvents() {
             Coming up
           </h3>
           {loading && events.length === 0 ? null : (
-            <span
-              className="text-[11px] uppercase tracking-wider"
-              style={{ color: 'var(--gm-text-faint)' }}
-            >
+            <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
               {totalVisible} {totalVisible === 1 ? 'event' : 'events'}
             </span>
           )}
@@ -491,16 +525,12 @@ function UpcomingEvents() {
         ) : error ? (
           <div className="py-4 text-sm text-muted-foreground">{error}</div>
         ) : (
-          <div
-            className="overflow-hidden rounded-xl border"
-            style={{ borderColor: 'var(--gm-border)', background: 'var(--gm-bg)' }}
-          >
-            {visibleDays.map((day, idx) => (
-              <UpcomingDayRow
+          <div className="flex flex-col gap-3">
+            {visibleDays.map((day) => (
+              <UpcomingDayCard
                 key={day.dateKey}
                 day={day}
                 isToday={day.dateKey === todayKey}
-                isLast={idx === visibleDays.length - 1}
               />
             ))}
           </div>
@@ -511,63 +541,57 @@ function UpcomingEvents() {
   )
 }
 
-function UpcomingDayRow({ day, isToday, isLast }: { day: DayGroup; isToday: boolean; isLast: boolean }) {
+function UpcomingDayCard({ day, isToday }: { day: DayGroup; isToday: boolean }) {
   const dayNum = day.date.getDate()
   const month = day.date.toLocaleDateString([], { month: 'short' })
   const weekday = day.date.toLocaleDateString([], { weekday: 'short' })
+  const count = day.events.length
 
   return (
-    <div
-      className="grid"
-      style={{
-        gridTemplateColumns: '96px minmax(0, 1fr)',
-        borderBottom: isLast ? undefined : '1px dashed var(--gm-border-strong)',
-      }}
-    >
-      <div className="flex items-start gap-2 px-4 py-4">
-        <span
-          className="leading-none"
-          style={{ fontSize: 30, fontWeight: 400, color: 'var(--gm-text-strong)' }}
-        >
-          {dayNum}
-        </span>
-        <span className="flex flex-col leading-tight">
-          <span
-            className="flex items-center gap-1"
-            style={{ fontSize: 12, fontWeight: 600, color: 'var(--gm-text)' }}
-          >
-            {month}
-            {isToday ? (
-              <span
-                aria-hidden
-                className="inline-block rounded-full"
-                style={{ width: 5, height: 5, background: 'var(--gm-accent)' }}
-              />
-            ) : null}
+    <div className="overflow-hidden rounded-xl border bg-muted">
+      <div className="flex items-center justify-between gap-3 border-b px-5 py-3.5">
+        <div className="flex min-w-0 items-baseline gap-2">
+          <span className="text-[22px] font-bold leading-none text-foreground">{dayNum}</span>
+          <span className="truncate text-[13px] text-muted-foreground">
+            {month} · {weekday}
           </span>
-          <span style={{ fontSize: 12, color: 'var(--gm-text-faint)' }}>{weekday}</span>
+          {isToday ? (
+            <span className="shrink-0 rounded-md bg-foreground px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-background">
+              Today
+            </span>
+          ) : null}
+        </div>
+        <span className="shrink-0 text-xs text-muted-foreground">
+          {count} {count === 1 ? 'event' : 'events'}
         </span>
       </div>
-      <div className="flex min-w-0 flex-col py-3 pr-3">
-        {day.events.length === 0 ? (
-          <div
-            className="flex w-full items-center gap-3 px-3 py-2 text-sm"
-            style={{ color: 'var(--gm-text-faint)', minHeight: 40 }}
-          >
-            <span aria-hidden className="self-stretch shrink-0" style={{ width: 3 }} />
-            <span>{isToday ? 'No events today' : 'No events'}</span>
-          </div>
-        ) : (
-          day.events.map((ev) => <UpcomingEventItem key={ev.id} event={ev} />)
-        )}
-      </div>
+
+      {count === 0 ? (
+        <div className="px-5 py-4 text-sm text-muted-foreground">
+          {isToday ? 'No events today' : 'No events'}
+        </div>
+      ) : (
+        day.events.map((ev, idx) => (
+          <UpcomingEventItem key={ev.id} event={ev} isLast={idx === count - 1} />
+        ))
+      )}
     </div>
   )
 }
 
-function UpcomingEventItem({ event }: { event: UpcomingEvent }) {
-  const [open, setOpen] = useState(false)
+function NowBadge() {
+  return (
+    <span className="shrink-0 rounded bg-green-600 px-1.5 py-px text-[10px] font-bold uppercase leading-[1.5] tracking-wide text-white">
+      Now
+    </span>
+  )
+}
 
+function UpcomingEventItem({ event, isLast }: { event: UpcomingEvent; isLast: boolean }) {
+  const [open, setOpen] = useState(false)
+  const isNow = isEventNow(event)
+  const platform = meetingPlatformLabel(event.conferenceLink)
+  const subtitle = platform ?? event.location
   const titleAndLocation = event.location ? `${event.summary} · ${event.location}` : event.summary
 
   return (
@@ -578,31 +602,29 @@ function UpcomingEventItem({ event }: { event: UpcomingEvent }) {
           tabIndex={0}
           title={titleAndLocation}
           className={cn(
-            'upcoming-event-row group flex w-full items-center gap-3 px-3 py-2 text-left cursor-pointer',
+            'group flex w-full cursor-pointer items-center gap-4 px-5 py-3 text-left transition-colors',
+            !isLast && 'border-b',
+            isNow ? 'bg-background' : 'hover:bg-background',
           )}
-          style={{ color: 'var(--gm-text)', minHeight: 40 }}
         >
-          <span
-            aria-hidden
-            className="self-stretch rounded-full"
-            style={{ width: 3, background: 'var(--gm-accent)', opacity: 0.55 }}
-          />
-          <span className="min-w-0 flex-1">
-            <span
-              className="block truncate"
-              style={{ fontSize: 14, fontWeight: 500, color: 'var(--gm-text-strong)' }}
-            >
-              {event.summary}
-            </span>
-            <span
-              className="mt-0.5 block truncate"
-              style={{ fontSize: 12, color: 'var(--gm-text-muted)' }}
-            >
-              {formatEventTimeRange(event)}
-              {event.location ? <span style={{ color: 'var(--gm-text-faint)' }}> · {event.location}</span> : null}
-            </span>
+          <span className="shrink-0 text-[13px] tabular-nums text-muted-foreground" style={{ width: 118 }}>
+            {formatEventTimeRangeCompact(event)}
           </span>
-          <div className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span className="flex items-center gap-2">
+              <span className="truncate text-sm font-semibold text-foreground">
+                {event.summary}
+              </span>
+              {isNow ? <NowBadge /> : null}
+            </span>
+            {subtitle ? (
+              <span className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                {platform ? <Video className="size-3.5 shrink-0" /> : <MapPin className="size-3.5 shrink-0" />}
+                <span className="truncate">{subtitle}</span>
+              </span>
+            ) : null}
+          </span>
+          <div className="shrink-0">
             {event.conferenceLink ? (
               <SplitJoinButton
                 onJoinAndNotes={() => triggerMeetingCapture(event, true)}
@@ -613,16 +635,9 @@ function UpcomingEventItem({ event }: { event: UpcomingEvent }) {
                 type="button"
                 onClick={(e) => { e.stopPropagation(); triggerMeetingCapture(event, false) }}
                 onMouseDown={(e) => e.stopPropagation()}
-                className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs transition-colors"
-                style={{
-                  background: 'var(--gm-bg-pill)',
-                  color: 'var(--gm-text)',
-                  border: '1px solid var(--gm-border)',
-                }}
-                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--gm-bg-pill-hover)' }}
-                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--gm-bg-pill)' }}
+                className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
               >
-                <Mic className="size-3" />
+                <Mic className="size-3.5" />
                 Take notes
               </button>
             )}
@@ -786,26 +801,14 @@ function SplitJoinButton({ onJoinAndNotes, onNotesOnly }: {
   }, [open])
 
   return (
-    <div
-      ref={ref}
-      style={{ position: 'relative', display: 'inline-flex', alignItems: 'stretch' }}
-    >
+    <div ref={ref} className="relative inline-flex items-stretch">
       <button
         type="button"
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => { e.stopPropagation(); onJoinAndNotes() }}
-        className="inline-flex items-center gap-1 px-2 py-1 text-xs transition-colors"
-        style={{
-          background: 'var(--gm-bg-pill)',
-          color: 'var(--gm-text)',
-          border: '1px solid var(--gm-border)',
-          borderTopLeftRadius: 6,
-          borderBottomLeftRadius: 6,
-        }}
-        onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--gm-bg-pill-hover)' }}
-        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--gm-bg-pill)' }}
+        className="inline-flex items-center gap-1.5 rounded-l-md border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
       >
-        <Video className="size-3" />
+        <Video className="size-3.5" />
         Join & take notes
       </button>
       <button
@@ -813,43 +816,17 @@ function SplitJoinButton({ onJoinAndNotes, onNotesOnly }: {
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => { e.stopPropagation(); setOpen((v) => !v) }}
         aria-label="More meeting options"
-        className="inline-flex items-center justify-center px-1.5 py-1 transition-colors"
-        style={{
-          background: 'var(--gm-bg-pill)',
-          color: 'var(--gm-text)',
-          border: '1px solid var(--gm-border)',
-          borderLeft: 'none',
-          borderTopRightRadius: 6,
-          borderBottomRightRadius: 6,
-        }}
-        onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--gm-bg-pill-hover)' }}
-        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--gm-bg-pill)' }}
+        className="inline-flex items-center justify-center rounded-r-md border border-l-0 bg-background px-1.5 py-1.5 text-foreground transition-colors hover:bg-accent"
       >
         <ChevronDown className="size-3" />
       </button>
       {open && (
-        <div
-          style={{
-            position: 'absolute',
-            top: 'calc(100% + 4px)',
-            right: 0,
-            zIndex: 50,
-            background: 'var(--gm-bg-card)',
-            border: '1px solid var(--gm-border)',
-            borderRadius: 6,
-            boxShadow: '0 4px 12px rgba(0,0,0,0.12)',
-            minWidth: 144,
-            overflow: 'hidden',
-          }}
-        >
+        <div className="absolute right-0 top-[calc(100%+4px)] z-50 min-w-36 overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-lg">
           <button
             type="button"
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => { e.stopPropagation(); setOpen(false); onNotesOnly() }}
-            className="flex w-full items-center gap-1 px-2 py-1.5 text-xs"
-            style={{ background: 'transparent', color: 'var(--gm-text)', whiteSpace: 'nowrap', border: 'none' }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--gm-bg-row-hover)' }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
+            className="flex w-full items-center gap-1.5 whitespace-nowrap px-2.5 py-1.5 text-xs transition-colors hover:bg-accent"
           >
             <Mic className="size-3" />
             Take notes only

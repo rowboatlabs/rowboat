@@ -303,15 +303,6 @@
   box-shadow: none;
 }
 
-.upcoming-event-row {
-  background-color: transparent;
-  transition: background-color 120ms ease;
-}
-
-.upcoming-event-row:hover {
-  background-color: var(--gm-bg-pill-hover);
-}
-
 .gmail-row-selected {
   background: var(--gm-bg-row-selected);
   box-shadow: inset 2px 0 0 var(--gm-accent);
