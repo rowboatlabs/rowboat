@@ -5,7 +5,7 @@ import { RunEvent, ListRunsResponse } from '@x/shared/src/runs.js';
 import type { LanguageModelUsage, ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
-import { CheckIcon, LoaderIcon, PanelLeftIcon, ArrowRight, MessageSquare, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon } from 'lucide-react';
+import { CheckIcon, LoaderIcon, PanelLeftIcon, ArrowRight, MessageSquare, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MarkdownEditor, type MarkdownEditorHandle } from './components/markdown-editor';
 import { ChatSidebar } from './components/chat-sidebar';
@@ -779,6 +779,14 @@ function App() {
   const [graphError, setGraphError] = useState<string | null>(null)
   const [isChatSidebarOpen, setIsChatSidebarOpen] = useState(true)
   const [isRightPaneMaximized, setIsRightPaneMaximized] = useState(false)
+  // Middle-pane collapse animation. Animating its max-width from 100% is janky:
+  // 100% is relative to the parent (far wider than the pane's real width), so the
+  // transition spends its first frames non-binding (nothing moves) then snaps shut.
+  // Instead we snapshot the pane's real px width before it collapses and drive the
+  // transition from that value.
+  const [insetCollapseFromPx, setInsetCollapseFromPx] = useState<number | null>(null)
+  const [insetMaxWidth, setInsetMaxWidth] = useState<string>('100%')
+  const [insetAnimateMaxWidth, setInsetAnimateMaxWidth] = useState(true)
   // Live-note panel: bound to a single note path. Mounted as a sibling of the
   // markdown editor so it shares the layout (no overlap with chat) and
   // auto-closes when the active note changes.
@@ -3299,7 +3307,15 @@ function App() {
 
   const toggleRightPaneMaximize = useCallback(() => {
     setIsChatSidebarOpen(true)
-    setIsRightPaneMaximized(prev => !prev)
+    setIsRightPaneMaximized(prev => {
+      if (!prev) {
+        // About to collapse the middle pane: capture its real width now, while it's
+        // still laid out, so the collapse can animate from a binding px value.
+        const px = document.querySelector('[data-slot="sidebar-inset"]')?.getBoundingClientRect().width
+        setInsetCollapseFromPx(px && px > 0 ? px : null)
+      }
+      return !prev
+    })
   }, [])
 
   const handleOpenFullScreenChat = useCallback(() => {
@@ -5115,6 +5131,27 @@ function App() {
   const isRightPaneContext = Boolean(selectedPath || isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen || isHomeOpen || isBrowserOpen)
   const isRightPaneOnlyMode = isRightPaneContext && isChatSidebarOpen && isRightPaneMaximized
   const shouldCollapseLeftPane = isRightPaneOnlyMode
+  // Collapsing: pin max-width to the snapshot px (no transition) for one frame so it's
+  // binding immediately (no flex jump), then animate to 0. Expanding goes back to 100%
+  // — its non-binding range lands at the end of the range, where it isn't visible.
+  useLayoutEffect(() => {
+    if (!shouldCollapseLeftPane) {
+      setInsetAnimateMaxWidth(true)
+      setInsetMaxWidth('100%')
+      return
+    }
+    if (insetCollapseFromPx == null) {
+      setInsetMaxWidth('0px')
+      return
+    }
+    setInsetAnimateMaxWidth(false)
+    setInsetMaxWidth(`${insetCollapseFromPx}px`)
+    const id = requestAnimationFrame(() => {
+      setInsetAnimateMaxWidth(true)
+      setInsetMaxWidth('0px')
+    })
+    return () => cancelAnimationFrame(id)
+  }, [shouldCollapseLeftPane, insetCollapseFromPx])
   const openMarkdownTabs = React.useMemo(() => {
     const markdownTabs = fileTabs.filter(tab => tab.path.endsWith('.md'))
     if (selectedPath?.endsWith('.md')) {
@@ -5170,10 +5207,11 @@ function App() {
             />
             <SidebarInset
               className={cn(
-                "overflow-hidden! min-h-0 min-w-0 transition-[max-width] duration-200 ease-linear",
+                "overflow-hidden! min-h-0 min-w-0",
+                insetAnimateMaxWidth && "transition-[max-width] duration-200 ease-linear",
                 shouldCollapseLeftPane && "pointer-events-none select-none"
               )}
-              style={shouldCollapseLeftPane ? { maxWidth: 0 } : { maxWidth: '100%' }}
+              style={{ maxWidth: insetMaxWidth }}
               aria-hidden={shouldCollapseLeftPane}
               onMouseDownCapture={() => setActiveShortcutPane('left')}
               onFocusCapture={() => setActiveShortcutPane('left')}
@@ -5284,7 +5322,9 @@ function App() {
                     ? { onClick: pushChatToSidePane, icon: <ArrowRight className="size-5" />, label: 'Dock chat to side pane' }
                     : (viewOpen && !isChatSidebarOpen)
                       ? { onClick: openChatSidePane, icon: <MessageSquare className="size-5" />, label: 'Open chat' }
-                      : null
+                      : (viewOpen && isChatSidebarOpen && !isRightPaneMaximized)
+                        ? { onClick: toggleRightPaneMaximize, icon: <X className="size-5" />, label: 'Expand chat' }
+                        : null
                   return (
                     <Tooltip>
                       <TooltipTrigger asChild>
