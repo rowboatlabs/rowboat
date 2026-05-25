@@ -43,7 +43,7 @@ export function ChatEmptyState({
           <Sparkles className="size-[17px]" />
         </div>
         <div>
-          <div className="text-base font-semibold tracking-tight">How can I help?</div>
+          <div className="text-base font-semibold tracking-tight">What are we working on?</div>
           <div className="text-xs text-muted-foreground">Ask anything, or pick up where you left off.</div>
         </div>
       </div>
