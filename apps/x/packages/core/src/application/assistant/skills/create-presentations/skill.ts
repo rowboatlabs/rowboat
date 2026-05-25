@@ -78,19 +78,19 @@ Map each point to a slide layout from the Available Layout Types below. For a ty
 
 ## Workflow
 
-1. Use workspace-readFile to check knowledge/ for relevant context about the company, product, team, etc.
+1. Use file-readText to check knowledge/ for relevant context about the company, product, team, etc.
 2. Ensure Playwright is installed: \`npm install playwright && npx playwright install chromium\`
-3. Use workspace-getRoot to get the workspace root path.
+3. Use file-getRoot to get the workspace root path.
 4. Plan the narrative arc and slide outline (see Content Planning above).
-5. Use workspace-writeFile to create the HTML file at tmp/presentation.html (workspace-relative) with slides (1280x720px each).
+5. Use file-writeText to create the HTML file at tmp/presentation.html (workspace-relative) with slides (1280x720px each).
 6. **Perform the Post-Generation Validation (see below). Fix any issues before proceeding.**
-7. Use workspace-writeFile to create the conversion script at tmp/convert.js (workspace-relative) — see Playwright Export section.
+7. Use file-writeText to create the conversion script at tmp/convert.js (workspace-relative) — see Playwright Export section.
 8. Run it: \`node <WORKSPACE_ROOT>/tmp/convert.js\`
 9. Tell the user: "Your presentation is ready at ~/Desktop/presentation.pdf" and note the theme used.
 
 **Critical**: Never show HTML code to the user. Never ask the user to run commands, install packages, or make technical decisions. The entire pipeline from content to PDF must be invisible to the user.
 
-Use workspace-writeFile and workspace-readFile for ALL file operations. Do NOT use executeCommand to write or read files.
+Use file-writeText and file-readText for ALL file operations. Do NOT use executeCommand to write or read files.
 
 ## Post-Generation Validation (REQUIRED)
 
@@ -142,14 +142,14 @@ html { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !
 ## Playwright Export
 
 \`\`\`javascript
-// save as tmp/convert.js via workspace-writeFile
+// save as tmp/convert.js via file-writeText
 const { chromium } = require('playwright');
 const path = require('path');
 
 (async () => {
   const browser = await chromium.launch();
   const page = await browser.newPage();
-  // Replace <WORKSPACE_ROOT> with the actual absolute path from workspace-getRoot
+  // Replace <WORKSPACE_ROOT> with the actual absolute path from file-getRoot
   await page.goto('file://<WORKSPACE_ROOT>/tmp/presentation.html', { waitUntil: 'networkidle' });
   await page.pdf({
     path: path.join(process.env.HOME, 'Desktop', 'presentation.pdf'),
@@ -162,7 +162,7 @@ const path = require('path');
 })();
 \`\`\`
 
-Replace \`<WORKSPACE_ROOT>\` with the actual absolute path returned by workspace-getRoot.
+Replace \`<WORKSPACE_ROOT>\` with the actual absolute path returned by file-getRoot.
 
 ## Available Layout Types (35 Templates)
 

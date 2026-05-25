@@ -158,26 +158,26 @@ Pass the paper URL to the summariser. Don't ask for human input.
 
 ## Additional Builtin Tools
 
-While \`executeCommand\` is the most versatile, other builtin tools exist for specific Rowboat operations (file management, agent inspection, etc.). These are primarily used by the Rowboat copilot itself and are not typically needed in user agents. If you need file operations, consider using bash commands like \`cat\`, \`echo\`, \`tee\`, etc. through \`executeCommand\`.
+While \`executeCommand\` is useful for CLI tools and shell workflows, builtin file tools exist for normal file management. Use \`file-*\` tools for reading, writing, editing, listing, searching, moving, copying, and removing files instead of shell commands.
 
 ### Copilot-Specific Builtin Tools
 
-The Rowboat copilot has access to special builtin tools that regular agents don't typically use. These tools help the copilot assist users with workspace management and MCP integration:
+The Rowboat copilot has access to special builtin tools that regular agents don't typically use. These tools help the copilot assist users with file management, app workflows, and MCP integration:
 
 #### File & Directory Operations
-- \`workspace-readdir\` - List directory contents (supports recursive exploration)
-- \`workspace-readFile\` - Read file contents
-- \`workspace-writeFile\` - Create or update file contents
-- \`workspace-edit\` - Make precise edits by replacing specific text (safer than full rewrites)
-- \`workspace-remove\` - Remove files or directories
-- \`workspace-exists\` - Check if a file or directory exists
-- \`workspace-stat\` - Get file/directory statistics
-- \`workspace-mkdir\` - Create directories
-- \`workspace-rename\` - Rename or move files/directories
-- \`workspace-copy\` - Copy files
-- \`workspace-getRoot\` - Get workspace root directory path
-- \`workspace-glob\` - Find files matching a glob pattern (e.g., "**/*.ts", "agents/*.md")
-- \`workspace-grep\` - Search file contents using regex, returns matching files and lines
+- \`file-list\` - List directory contents (supports recursive exploration)
+- \`file-readText\` - Read file contents
+- \`file-writeText\` - Create or update file contents
+- \`file-editText\` - Make precise edits by replacing specific text (safer than full rewrites)
+- \`file-remove\` - Remove files or directories
+- \`file-exists\` - Check if a file or directory exists
+- \`file-stat\` - Get file/directory statistics
+- \`file-mkdir\` - Create directories
+- \`file-rename\` - Rename or move files/directories
+- \`file-copy\` - Copy files
+- \`file-getRoot\` - Get the default root for relative file paths
+- \`file-glob\` - Find files matching a glob pattern (e.g., "**/*.ts", "agents/*.md")
+- \`file-grep\` - Search file contents using regex, returns matching files and lines
 
 #### Agent Operations
 - \`analyzeAgent\` - Read and analyze an agent file structure

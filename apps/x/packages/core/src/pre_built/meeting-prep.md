@@ -1,20 +1,20 @@
 ---
 tools:
-  workspace-readFile:
+  file-readText:
     type: builtin
-    name: workspace-readFile
-  workspace-writeFile:
+    name: file-readText
+  file-writeText:
     type: builtin
-    name: workspace-writeFile
-  workspace-readdir:
+    name: file-writeText
+  file-list:
     type: builtin
-    name: workspace-readdir
-  workspace-mkdir:
+    name: file-list
+  file-mkdir:
     type: builtin
-    name: workspace-mkdir
-  workspace-exists:
+    name: file-mkdir
+  file-exists:
     type: builtin
-    name: workspace-exists
+    name: file-exists
   executeCommand:
     type: builtin
     name: executeCommand
@@ -40,8 +40,8 @@ All state is stored in `pre-built/meeting-prep/`:
 
 On first run, check if state exists. If not, create it:
 
-1. Use `workspace-exists` to check if `pre-built/meeting-prep/state.json` exists
-2. If not, use `workspace-mkdir` to create `pre-built/meeting-prep/` and `pre-built/meeting-prep/briefs/`
+1. Use `file-exists` to check if `pre-built/meeting-prep/state.json` exists
+2. If not, use `file-mkdir` to create `pre-built/meeting-prep/` and `pre-built/meeting-prep/briefs/`
 3. Initialize `state.json` with empty `prepared` array and current timestamp
 
 ## Processing Flow
@@ -54,7 +54,7 @@ Read `pre-built/meeting-prep/state.json` to get:
 
 ### Step 2: Scan for Upcoming Meetings
 
-List calendar events in `calendar_sync/` folder using `workspace-readdir`.
+List calendar events in `calendar_sync/` folder using `file-list`.
 
 For each event file:
 1. Read the JSON content

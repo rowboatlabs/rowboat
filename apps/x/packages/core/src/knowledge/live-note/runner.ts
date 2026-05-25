@@ -30,7 +30,7 @@ function truncate(s: string | null | undefined, n = SUMMARY_LOG_LIMIT): string {
 // Agent run message
 // ---------------------------------------------------------------------------
 
-const LIVE_NOTE_EVENT_DECISION_DIRECTIVE = '**Decision:** Determine whether this event genuinely warrants updating the note. If the event is not meaningfully relevant on closer inspection, skip the update — do not call `workspace-edit`. Only edit the file if the event provides new or changed information that the objective implies should be reflected.';
+const LIVE_NOTE_EVENT_DECISION_DIRECTIVE = '**Decision:** Determine whether this event genuinely warrants updating the note. If the event is not meaningfully relevant on closer inspection, skip the update — do not call `file-editText`. Only edit the file if the event provides new or changed information that the objective implies should be reflected.';
 
 const LIVE_NOTE_MANUAL_PAREN = 'user-triggered — either the Run button in the Live Note panel or the `run-live-note-agent` tool';
 
@@ -44,8 +44,8 @@ function buildMessage(
     const localNow = now.toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'long' });
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-    // Workspace-relative path the agent's tools (workspace-readFile,
-    // workspace-edit) expect. Internal storage is knowledge/-relative.
+    // Workspace-relative path the agent's tools (file-readText,
+    // file-editText) expect. Internal storage is knowledge/-relative.
     const wsPath = `knowledge/${filePath}`;
 
     const baseMessage = `Update the live note at \`${wsPath}\`.
@@ -55,7 +55,7 @@ function buildMessage(
 **Objective:**
 ${live.objective}
 
-Start by calling \`workspace-readFile\` on \`${wsPath}\` to read the current note (frontmatter + body) — the body may be long and you should fetch it yourself rather than rely on a snapshot. Then make small, incremental edits with \`workspace-edit\` to bring the body in line with the objective: edit one region, re-read to verify, then edit the next region. Avoid one-shot rewrites of the whole body. Do not modify the YAML frontmatter at the top of the file — that block is owned by the user and the runtime.`;
+Start by calling \`file-readText\` on \`${wsPath}\` to read the current note (frontmatter + body) — the body may be long and you should fetch it yourself rather than rely on a snapshot. Then make small, incremental edits with \`file-editText\` to bring the body in line with the objective: edit one region, re-read to verify, then edit the next region. Avoid one-shot rewrites of the whole body. Do not modify the YAML frontmatter at the top of the file — that block is owned by the user and the runtime.`;
 
     return baseMessage + buildTriggerBlock({
         trigger,

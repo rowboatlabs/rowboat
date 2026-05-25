@@ -8,12 +8,14 @@ import { LanguageModel, stepCountIs, streamText, tool, Tool, ToolSet } from "ai"
 import { z } from "zod";
 import { LlmStepStreamEvent } from "@x/shared/dist/llm-step-events.js";
 import { execTool } from "../application/lib/exec-tool.js";
-import { AskHumanRequestEvent, RunEvent, ToolPermissionRequestEvent } from "@x/shared/dist/runs.js";
+import { AskHumanRequestEvent, RunEvent, ToolPermissionMetadata, ToolPermissionRequestEvent } from "@x/shared/dist/runs.js";
 import { BuiltinTools } from "../application/lib/builtin-tools.js";
 import { buildCopilotAgent } from "../application/assistant/agent.js";
 import { buildLiveNoteAgent } from "../knowledge/live-note/agent.js";
 import { buildBackgroundTaskAgent } from "../background-tasks/agent.js";
 import { isBlocked, extractCommandNames } from "../application/lib/command-executor.js";
+import { getFileAccessAllowList, type FileAccessGrant, type FileAccessOperation } from "../config/security.js";
+import { resolveFilePathForPermission } from "../filesystem/files.js";
 import container from "../di/container.js";
 import { IModelConfigRepo } from "../models/repo.js";
 import { createProvider } from "../models/models.js";
@@ -37,6 +39,131 @@ import { getRaw as getAgentNotesAgentRaw } from "../knowledge/agent_notes_agent.
 
 const AGENT_NOTES_DIR = path.join(WorkDir, 'knowledge', 'Agent Notes');
 const WORKDIR_CONFIG_FILE = path.join(WorkDir, 'config', 'workdir.json');
+
+type ToolPermissionMetadataValue = z.infer<typeof ToolPermissionMetadata>;
+
+function isPathInside(parent: string, child: string): boolean {
+    const relative = path.relative(parent, child);
+    return relative === '' || (!!relative && !relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+function fileGrantCoversPath(grant: FileAccessGrant, operation: FileAccessOperation, resolvedPath: string): boolean {
+    return grant.operation === operation && isPathInside(path.resolve(grant.pathPrefix), path.resolve(resolvedPath));
+}
+
+function commonPathPrefix(paths: string[]): string {
+    if (!paths.length) return path.resolve(WorkDir);
+    const split = paths.map(p => path.resolve(p).split(path.sep).filter(Boolean));
+    const first = split[0];
+    const common: string[] = [];
+    for (let i = 0; i < first.length; i++) {
+        if (split.every(parts => parts[i] === first[i])) {
+            common.push(first[i]);
+        } else {
+            break;
+        }
+    }
+    const prefix = `${path.sep}${common.join(path.sep)}`;
+    return prefix === path.sep ? prefix : path.resolve(prefix);
+}
+
+function grantPrefixForTool(toolName: string, resolvedPaths: string[]): string {
+    if (toolName === 'file-list' || toolName === 'file-glob' || toolName === 'file-grep' || toolName === 'file-mkdir') {
+        return commonPathPrefix(resolvedPaths);
+    }
+    const parentPaths = resolvedPaths.map(p => path.dirname(p));
+    return commonPathPrefix(parentPaths);
+}
+
+function filePermissionTargets(toolName: string, args: Record<string, unknown>): { operation: FileAccessOperation; paths: string[] } | null {
+    const pathArg = typeof args.path === 'string' ? args.path : undefined;
+    switch (toolName) {
+        case 'file-readText':
+        case 'parseFile':
+        case 'LLMParse':
+        case 'file-exists':
+        case 'file-stat':
+            return pathArg ? { operation: 'read', paths: [pathArg] } : null;
+        case 'file-list':
+            return pathArg ? { operation: 'list', paths: [pathArg || '.'] } : null;
+        case 'file-glob':
+            return { operation: 'search', paths: [typeof args.cwd === 'string' && args.cwd ? args.cwd : '.'] };
+        case 'file-grep':
+            return { operation: 'search', paths: [typeof args.searchPath === 'string' && args.searchPath ? args.searchPath : '.'] };
+        case 'file-writeText':
+        case 'file-editText':
+        case 'file-mkdir':
+            return pathArg ? { operation: 'write', paths: [pathArg] } : null;
+        case 'file-copy':
+        case 'file-rename': {
+            const from = typeof args.from === 'string' ? args.from : undefined;
+            const to = typeof args.to === 'string' ? args.to : undefined;
+            return from && to ? { operation: 'write', paths: [from, to] } : null;
+        }
+        case 'file-remove':
+            return pathArg ? { operation: 'delete', paths: [pathArg] } : null;
+        default:
+            return null;
+    }
+}
+
+async function getToolPermissionMetadata(
+    toolCall: z.infer<typeof ToolCallPart>,
+    underlyingTool: z.infer<typeof ToolAttachment>,
+    sessionAllowedCommands: Set<string>,
+    sessionAllowedFileAccess: FileAccessGrant[],
+): Promise<ToolPermissionMetadataValue | null> {
+    if (underlyingTool.type !== 'builtin') {
+        return null;
+    }
+
+    if (underlyingTool.name === 'executeCommand') {
+        const args = toolCall.arguments;
+        if (!args || typeof args !== 'object' || !('command' in args)) {
+            return null;
+        }
+        const command = String((args as { command: unknown }).command);
+        if (!isBlocked(command, sessionAllowedCommands)) {
+            return null;
+        }
+        return {
+            kind: 'command',
+            commandNames: extractCommandNames(command),
+        };
+    }
+
+    const args = toolCall.arguments && typeof toolCall.arguments === 'object'
+        ? toolCall.arguments as Record<string, unknown>
+        : {};
+    const targets = filePermissionTargets(underlyingTool.name, args);
+    if (!targets) {
+        return null;
+    }
+
+    const resolvedTargets = await Promise.all(targets.paths.map(p => resolveFilePathForPermission(p)));
+    const outsideWorkspacePaths = resolvedTargets
+        .filter(target => !target.isInsideWorkspace)
+        .map(target => target.canonicalPath);
+    if (!outsideWorkspacePaths.length) {
+        return null;
+    }
+
+    const persistentGrants = getFileAccessAllowList();
+    const allGrants = [...persistentGrants, ...sessionAllowedFileAccess];
+    const uncovered = outsideWorkspacePaths.filter(resolvedPath =>
+        !allGrants.some(grant => fileGrantCoversPath(grant, targets.operation, resolvedPath))
+    );
+    if (!uncovered.length) {
+        return null;
+    }
+
+    return {
+        kind: 'file',
+        operation: targets.operation,
+        paths: uncovered,
+        pathPrefix: grantPrefixForTool(underlyingTool.name, uncovered),
+    };
+}
 
 function loadUserWorkDir(): string | null {
     try {
@@ -95,7 +222,7 @@ function loadAgentNotesContext(): string | null {
     } catch { /* ignore */ }
 
     if (otherFiles.length > 0) {
-        sections.push(`## More Specific Preferences\nFor more specific preferences, you can read these files using workspace-readFile. Only read them when relevant to the current task.\n\n${otherFiles.map(f => `- knowledge/Agent Notes/${f}`).join('\n')}`);
+        sections.push(`## More Specific Preferences\nFor more specific preferences, you can read these files using file-readText. Only read them when relevant to the current task.\n\n${otherFiles.map(f => `- knowledge/Agent Notes/${f}`).join('\n')}`);
     }
 
     if (sections.length === 0) return null;
@@ -683,6 +810,7 @@ export class AgentState {
     allowedToolCallIds: Record<string, true> = {};
     deniedToolCallIds: Record<string, true> = {};
     sessionAllowedCommands: Set<string> = new Set();
+    sessionAllowedFileAccess: FileAccessGrant[] = [];
 
     getPendingPermissions(): z.infer<typeof ToolPermissionRequestEvent>[] {
         const response: z.infer<typeof ToolPermissionRequestEvent>[] = [];
@@ -828,6 +956,15 @@ export class AgentState {
                 switch (event.response) {
                     case "approve":
                         this.allowedToolCallIds[event.toolCallId] = true;
+                        {
+                            const permissionRequest = this.pendingToolPermissionRequests[event.toolCallId];
+                            if (event.scope === "session" && permissionRequest?.permission?.kind === "file") {
+                                this.sessionAllowedFileAccess.push({
+                                    operation: permissionRequest.permission.operation,
+                                    pathPrefix: permissionRequest.permission.pathPrefix,
+                                });
+                            }
+                        }
                         // For session scope, extract command names and add to session allowlist
                         if (event.scope === "session") {
                             const toolCall = this.toolCallIdMap[event.toolCallId];
@@ -1135,10 +1272,10 @@ Treat this as the **default location** for file operations whenever the user ref
 - "save this", "export it", "write that to a file" — write the output into the work directory unless the user names another location.
 - "open the file I was just working on", "the doc from earlier" — assume the work directory first.
 
-Use absolute paths rooted at this directory. On macOS/Linux call \`executeCommand\` with POSIX commands (\`ls\`, \`cat\`, \`cp\`, etc.) operating on \`${userWorkDir}\`. On Windows use the equivalent cmd syntax. For reading file contents use \`parseFile\` or \`LLMParse\` with the absolute path; you do NOT need to copy the file into the workspace first.
+Use absolute paths rooted at this directory with the \`file-*\` tools. For example, list with \`file-list({ path: "${userWorkDir}" })\`, read text with \`file-readText\`, and write text with \`file-writeText\`. For PDFs, Office docs, images, scanned docs, and other non-text files, use \`parseFile\` or \`LLMParse\` with the absolute path; you do NOT need to copy the file into the workspace first.
 
 **Exceptions — these ALWAYS take precedence over the work directory default:**
-1. **Knowledge base questions.** If the user asks about anything in the knowledge graph (notes, people, organizations, projects, topics) or paths starting with \`knowledge/\`, use the workspace tools against \`knowledge/\` as documented above. Do NOT redirect those into the work directory.
+1. **Knowledge base questions.** If the user asks about anything in the knowledge graph (notes, people, organizations, projects, topics) or paths starting with \`knowledge/\`, use file tools against \`knowledge/\` as documented above. Do NOT redirect those into the work directory.
 2. **Explicit paths.** If the user names a different directory or gives an absolute/relative path (e.g. "in ~/Downloads", "from /tmp/foo", "the Desktop"), honor that path exactly and ignore the work-directory default for that request.
 3. **Workspace-specific operations.** Anything that obviously belongs in the Rowboat workspace (config files, MCP servers, agent schedules, etc.) stays in the workspace, not the work directory.
 
@@ -1236,17 +1373,21 @@ Do not announce the work directory unless it's relevant. Just use it.`;
                             subflow: [],
                         });
                     }
-                    if (underlyingTool.type === "builtin" && underlyingTool.name === "executeCommand") {
-                        // if command is blocked, then seek permission
-                        if (isBlocked(part.arguments.command, state.sessionAllowedCommands)) {
-                            loopLogger.log('emitting tool-permission-request, toolCallId:', part.toolCallId);
-                            yield* processEvent({
-                                runId,
-                                type: "tool-permission-request",
-                                toolCall: part,
-                                subflow: [],
-                            });
-                        }
+                    const permission = await getToolPermissionMetadata(
+                        part,
+                        underlyingTool,
+                        state.sessionAllowedCommands,
+                        state.sessionAllowedFileAccess,
+                    );
+                    if (permission) {
+                        loopLogger.log('emitting tool-permission-request, toolCallId:', part.toolCallId);
+                        yield* processEvent({
+                            runId,
+                            type: "tool-permission-request",
+                            toolCall: part,
+                            permission,
+                            subflow: [],
+                        });
                     }
                     if (underlyingTool.type === "agent" && underlyingTool.name) {
                         loopLogger.log('emitting spawn-subflow, toolCallId:', part.toolCallId);

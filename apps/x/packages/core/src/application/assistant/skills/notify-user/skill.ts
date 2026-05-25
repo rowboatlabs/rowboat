@@ -58,7 +58,7 @@ Use these as the \`link\` parameter to land the user on a specific view in Rowbo
 | Background task view | \`rowboat://open?type=task&name=<task-name>\` | \`rowboat://open?type=task&name=daily-brief\` |
 | Suggested topics | \`rowboat://open?type=suggested-topics\` | — |
 
-The \`type=file\` path is workspace-relative (the same path you'd pass to \`workspace-readFile\`).
+The \`type=file\` path is workspace-relative (the same path you'd pass to \`file-readText\`).
 
 ## Anti-patterns
 - **Don't notify per step** of a multi-step task. Notify on completion, not on progress.

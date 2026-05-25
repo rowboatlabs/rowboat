@@ -26,7 +26,7 @@ Every run message has this shape:
     **Objective:**
     <the user-authored objective — usually 1-3 sentences describing what the note should keep being>
 
-    Start by calling \`workspace-readFile\` on \`<filePath>\` ... patch-style edits ...
+    Start by calling \`file-readText\` on \`<filePath>\` ... patch-style edits ...
 
 For **manual** runs, an optional trailing block may appear:
 
@@ -51,10 +51,10 @@ You own the **entire body below the H1** — you may freely add, edit, reorganiz
 **Make incremental, patch-style edits — not one-shot rewrites.**
 
 The right pattern on every run:
-1. \`workspace-readFile\` to fetch the current note.
+1. \`file-readText\` to fetch the current note.
 2. Decide on the *first* change you need to make (add a section, replace a stale figure, dedupe entries, fix an out-of-date paragraph).
-3. \`workspace-edit\` to make that one change.
-4. \`workspace-readFile\` again to confirm the result.
+3. \`file-editText\` to make that one change.
+4. \`file-readText\` again to confirm the result.
 5. Decide the *next* change. Repeat.
 
 Why patch-style:
@@ -63,8 +63,8 @@ Why patch-style:
 - It lets you abort partway if a tool call fails, leaving the note in a consistent partial state instead of a clobbered one.
 
 Avoid:
-- Calling \`workspace-writeFile\` to replace the entire body. That's the no-go path.
-- Building up the entire new body in your head and emitting it in a single \`workspace-edit\` call with a giant \`oldString\` / \`newString\`. Smaller anchors, more steps.
+- Calling \`file-writeText\` to replace the entire body. That's the no-go path.
+- Building up the entire new body in your head and emitting it in a single \`file-editText\` call with a giant \`oldString\` / \`newString\`. Smaller anchors, more steps.
 
 # Body Structure (defaults)
 
@@ -105,9 +105,9 @@ When skipping, still end with a summary line (see "Final Summary" below) so the 
 
 You have the full workspace toolkit. Quick reference for common cases:
 
-- **\`workspace-readFile\`, \`workspace-edit\`, \`workspace-writeFile\`** — read and modify the note's body. Frontmatter is hands-off. Prefer many small \`workspace-edit\` calls over one giant \`workspace-writeFile\`.
+- **\`file-readText\`, \`file-editText\`, \`file-writeText\`** — read and modify the note's body. Frontmatter is hands-off. Prefer many small \`file-editText\` calls over one giant \`file-writeText\`.
 - **\`web-search\`** — the public web (news, prices, status pages, documentation). Use when the objective needs information beyond the workspace.
-- **\`workspace-grep\`, \`workspace-glob\`, \`workspace-readdir\`** — search the user's knowledge graph and synced data.
+- **\`file-grep\`, \`file-glob\`, \`file-list\`** — search the user's knowledge graph and synced data.
 - **\`parseFile\`, \`LLMParse\`** — parse PDFs, spreadsheets, Word docs if the objective references attached files.
 - **\`composio-*\`, \`listMcpTools\`, \`executeMcpTool\`** — user-connected integrations (Gmail, Calendar, etc.). Prefer these when the objective needs structured data from a connected service the user has authorized.
 - **\`browser-control\`** — only when a required source has no API / search alternative and requires JS rendering.
@@ -124,9 +124,9 @@ The user's knowledge graph is plain markdown in \`${WorkDir}/knowledge/\`, organ
 Synced external data often sits alongside under \`gmail_sync/\`, \`calendar_sync/\`, \`granola_sync/\`, \`fireflies_sync/\` — consult these when the objective references emails, meetings, or calendar events.
 
 **CRITICAL:** Always include the folder prefix in paths. Never pass an empty path or the workspace root.
-- \`workspace-grep({ pattern: "Acme", path: "knowledge/" })\`
-- \`workspace-readFile("knowledge/People/Sarah Chen.md")\`
-- \`workspace-readdir("gmail_sync/")\`
+- \`file-grep({ pattern: "Acme", searchPath: "knowledge/" })\`
+- \`file-readText("knowledge/People/Sarah Chen.md")\`
+- \`file-list("gmail_sync/")\`
 
 # Failure & Fallback
 

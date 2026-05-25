@@ -83,9 +83,23 @@ export const AskHumanResponseEvent = BaseRunEvent.extend({
     response: z.string(),
 });
 
+export const ToolPermissionMetadata = z.discriminatedUnion("kind", [
+    z.object({
+        kind: z.literal("command"),
+        commandNames: z.array(z.string()),
+    }),
+    z.object({
+        kind: z.literal("file"),
+        operation: z.enum(["read", "list", "search", "write", "delete"]),
+        paths: z.array(z.string()),
+        pathPrefix: z.string(),
+    }),
+]);
+
 export const ToolPermissionRequestEvent = BaseRunEvent.extend({
     type: z.literal("tool-permission-request"),
     toolCall: ToolCallPart,
+    permission: ToolPermissionMetadata.optional(),
 });
 
 export const ToolPermissionResponseEvent = BaseRunEvent.extend({

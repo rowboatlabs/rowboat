@@ -98,7 +98,7 @@ This brief refreshes every 15 minutes, so it should always reflect the **current
 
 ## Technical Instructions
 
-**IMPORTANT:** All workspace tools (workspace-readdir, workspace-readFile, workspace-grep, etc.) take paths **relative to the workspace root**. Use paths like \`calendar_sync/\`, \`gmail_sync/\`, \`knowledge/\` — NOT absolute paths.
+**IMPORTANT:** File tools accept relative paths that resolve against the Rowboat workspace root. For workspace data, use paths like \`calendar_sync/\`, \`gmail_sync/\`, \`knowledge/\` — NOT absolute paths.
 
 **IMPORTANT:** Check the current date. If the date has changed since the content was last generated, clear everything and start fresh for the new day.
 
@@ -136,8 +136,8 @@ This is the most time-sensitive section — it orients the user on what's coming
 6. **IMPORTANT:** Do NOT say "nothing in the next X hours" if there IS an event within that window. Always compute the actual time difference between now and the next event's start time before writing this section.
 
 ### Calendar
-1. Use \`workspace-readdir\` with path \`calendar_sync\` to list files
-2. Use \`workspace-readFile\` to read each \`.json\` event file (e.g. \`calendar_sync/eventid123.json\`)
+1. Use \`file-list\` with path \`calendar_sync\` to list files
+2. Use \`file-readText\` to read each \`.json\` event file (e.g. \`calendar_sync/eventid123.json\`)
 3. Filter for events happening **today** (compare the event's start dateTime or date to the current date)
 4. **After morning:** Only include events that **haven't ended yet**. Don't show meetings that already happened — the user was there. If it's afternoon and all meetings are done, show an empty calendar block.
 5. **Always** output a \\\`\\\`\\\`calendar block — even if there are no events today. If no events, output an empty events array:
@@ -160,8 +160,8 @@ If there are events, include them:
 7. If there are no remaining events, don't add filler text — the empty calendar block speaks for itself.
 
 ### Emails
-1. Use \`workspace-readdir\` with path \`gmail_sync\` to list files (skip \`sync_state.json\` and \`attachments/\`)
-2. Use \`workspace-readFile\` to read the email markdown files (e.g. \`gmail_sync/threadid123.md\`)
+1. Use \`file-list\` with path \`gmail_sync\` to list files (skip \`sync_state.json\` and \`attachments/\`)
+2. Use \`file-readText\` to read the email markdown files (e.g. \`gmail_sync/threadid123.md\`)
 3. Check the frontmatter \`action\` field — emails with \`action: reply\` or \`action: respond\` need a response
 4. Output ALL emails (both action items and FYI) in a single \\\`\\\`\\\`emails block as a JSON array. Emails needing a response get a \`draft_response\`. Write drafts in the user's voice — direct, informal, no fluff. Example:
 
@@ -180,7 +180,7 @@ If there are events, include them:
 This section is about things the user might not be aware of from yesterday. Think of it as: "Here's what happened while you were away."
 
 - **Skip recurring/routine events entirely.** The user knows they have standup every day. Don't mention it unless something unusual happened during it.
-- **Read yesterday's meeting notes** from \`knowledge/Meetings/\`. The directory structure is nested: \`knowledge/Meetings/<source>/<YYYY-MM-DD>/meeting-<timestamp>.md\` (e.g. \`knowledge/Meetings/rowboat/2026-03-30/meeting-2026-03-30T13-49-27.md\`). Use \`workspace-readdir\` with \`recursive: true\` on \`knowledge/Meetings\` to find all files, then filter for files in a folder matching yesterday's date. Read the matching files with \`workspace-readFile\`. Summarize key outcomes: decisions made, action items assigned, blockers raised, anything that changes priorities.
+- **Read yesterday's meeting notes** from \`knowledge/Meetings/\`. The directory structure is nested: \`knowledge/Meetings/<source>/<YYYY-MM-DD>/meeting-<timestamp>.md\` (e.g. \`knowledge/Meetings/rowboat/2026-03-30/meeting-2026-03-30T13-49-27.md\`). Use \`file-list\` with \`recursive: true\` on \`knowledge/Meetings\` to find all files, then filter for files in a folder matching yesterday's date. Read the matching files with \`file-readText\`. Summarize key outcomes: decisions made, action items assigned, blockers raised, anything that changes priorities.
 - Check yesterday's emails in \`gmail_sync/\` for anything that went unresolved.
 - Surface things that matter: commitments made, deadlines mentioned, important updates.
 - **If nothing notable happened, say "Quiet day yesterday — nothing to flag." and move on.** Don't manufacture content.
@@ -192,7 +192,7 @@ This is NOT a generic task list. These are the things the user should actually f
 - **Do NOT list calendar events as tasks.** They're already in the Calendar section.
 - **Do NOT list trivial admin** (filing small invoices, archiving spam, etc.) — the user can handle that in 30 seconds without being told to.
 - **Pull action items from yesterday's meeting notes** in \`knowledge/Meetings/<source>/<YYYY-MM-DD>/\` — these are often the most important source of real tasks.
-- Search through \`knowledge/\` using \`workspace-grep\` and \`workspace-readdir\` for checkbox items (\`- [ ]\`), explicit action items, deadlines, or follow-ups.
+- Search through \`knowledge/\` using \`file-grep\` and \`file-list\` for checkbox items (\`- [ ]\`), explicit action items, deadlines, or follow-ups.
 - **Rank by importance.** Lead with the most critical item. If something is time-sensitive, say when it needs to happen by.
 - Add brief context for why each item matters if it's not obvious.
 - **If there are no real tasks, say "No pressing tasks today — good day to make progress on bigger items." Don't invent busywork.**

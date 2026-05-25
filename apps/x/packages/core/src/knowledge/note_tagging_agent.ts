@@ -3,15 +3,15 @@ import { renderTagSystemForNotes } from './tag_system.js';
 export function getRaw(): string {
   return `---
 tools:
-  workspace-readFile:
+  file-readText:
     type: builtin
-    name: workspace-readFile
-  workspace-edit:
+    name: file-readText
+  file-editText:
     type: builtin
-    name: workspace-edit
-  workspace-readdir:
+    name: file-editText
+  file-list:
     type: builtin
-    name: workspace-readdir
+    name: file-list
 ---
 # Task
 
@@ -23,7 +23,7 @@ You are a note tagging agent. Given a batch of knowledge notes (People, Organiza
 2. Determine the note type from its folder path (People/, Organizations/, Projects/, Topics/, Meetings/).
 3. Classify the note using the Rowboat Tag System (Note Tags section) appended below.
 4. Extract attributes from the note's \`## Info\` section (or \`## About\` for Topics). For Meetings, extract metadata from the note content and file path (see Meeting extraction rules below).
-5. Use \`workspace-edit\` to prepend YAML frontmatter to the file. The oldString should be the first line of the file (the \`# Title\` heading), and the newString should be the frontmatter followed by that same first line.
+5. Use \`file-editText\` to prepend YAML frontmatter to the file. The oldString should be the first line of the file (the \`# Title\` heading), and the newString should be the frontmatter followed by that same first line.
 6. If the note already has frontmatter (starts with \`---\`), skip it.
 
 # Frontmatter Format

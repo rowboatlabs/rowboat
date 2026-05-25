@@ -34,7 +34,7 @@ When this skill is loaded, your job is: make a passive note live (or extend the 
 
 ## Mode: act-first (non-negotiable on strong signals)
 
-Live-note creation and editing are **action-first**. Strong-signal asks (see below) get *executed*, not discussed. Read the file, write the \`live:\` block via \`workspace-edit\`, run the agent once, and confirm in one line at the end. Past tense, not future tense.
+Live-note creation and editing are **action-first**. Strong-signal asks (see below) get *executed*, not discussed. Read the file, write the \`live:\` block via \`file-editText\`, run the agent once, and confirm in one line at the end. Past tense, not future tense.
 
 What you must NOT do on a strong-signal ask:
 - Don't ask "Should I make edits directly, or show changes first for approval?" — that prompt belongs to generic doc editing, not live notes.
@@ -77,7 +77,7 @@ When a strong signal lands without a specific note attached, pick the folder by 
 
 **Filename**: derive from the topic in title-case (\`News Feed.md\`, \`Coinbase News.md\`, \`SFO Weather.md\`).
 
-**Before creating**: \`workspace-grep\` and \`workspace-glob\` the chosen folder for an existing note that already covers the topic. If one exists with a \`live:\` block, **extend its objective** (see "Already-live notes — extend, don't fork"). If one exists without a \`live:\` block, **make that note live** (don't create a duplicate). Only create a new file when no match is found.
+**Before creating**: \`file-grep\` and \`file-glob\` the chosen folder for an existing note that already covers the topic. If one exists with a \`live:\` block, **extend its objective** (see "Already-live notes — extend, don't fork"). If one exists without a \`live:\` block, **make that note live** (don't create a duplicate). Only create a new file when no match is found.
 
 ### Default cadence picker (when the user didn't specify timing)
 
@@ -165,8 +165,8 @@ When skipping a re-run (because the user said not to or "later"):
 **User:** "i want to set up a news feed to track news for India and the world."
 
 **Right behaviour** (one turn):
-1. \`workspace-grep({ pattern: "News Feed", path: "knowledge/Notes/" })\` — search for an existing match.
-2. \`workspace-grep({ pattern: "news", path: "knowledge/Notes/" })\` — broader search to catch variants.
+1. \`file-grep({ pattern: "News Feed", searchPath: "knowledge/Notes/" })\` — search for an existing match.
+2. \`file-grep({ pattern: "news", searchPath: "knowledge/Notes/" })\` — broader search to catch variants.
 3. No match found → create \`knowledge/Notes/News Feed.md\` with a sensible \`live:\` block (objective covering India + world headlines, a windows trigger for "every morning"-style refresh, plus an \`eventMatchCriteria\` if news might come from synced data).
 4. Call \`run-live-note-agent\` with a backfill \`context\` so the body isn't empty.
 5. Reply: "Done — created \`knowledge/Notes/News Feed.md\` and made it live, refreshing every morning. Running it once now so you see content right away. Manage it from the Live notes view."
@@ -460,16 +460,16 @@ live:
 
 ### Making a passive note live (no \`live:\` block yet)
 
-1. \`workspace-readFile({ path })\` — re-read fresh.
+1. \`file-readText({ path })\` — re-read fresh.
 2. Inspect existing frontmatter (the ` + "`" + `---` + "`" + `-fenced block at the top, if any).
-3. \`workspace-edit\`:
+3. \`file-editText\`:
    - **If the note has frontmatter without a \`live:\` block**: anchor on the closing \`---\` of the frontmatter and insert the \`live:\` block just before it.
    - **If the note has no frontmatter at all**: anchor on the very first line of the file. Replace it with a new frontmatter block (\`---\\n\` ... \`\\n---\\n\` followed by the original first line).
 
 ### Extending an already-live note
 
-1. \`workspace-readFile({ path })\` — fetch the current \`live.objective\`.
-2. Edit the \`objective\` value via \`workspace-edit\` to absorb the new ask in natural language. Keep the \`|\` block scalar style.
+1. \`file-readText({ path })\` — fetch the current \`live.objective\`.
+2. Edit the \`objective\` value via \`file-editText\` to absorb the new ask in natural language. Keep the \`|\` block scalar style.
 3. Don't touch other \`live:\` fields unless the user explicitly asked (e.g. "also run this hourly" → add/edit \`triggers.cronExpr\`).
 
 ### Sidebar chat with a specific note
@@ -606,17 +606,17 @@ The tool returns ` + "`" + `{ success, runId, action, summary, contentAfter, err
 - **Don't add \`triggers\`** if the user explicitly wants manual-only.
 - **Don't write** \`lastRunAt\`, \`lastRunId\`, or \`lastRunSummary\` — runtime-managed.
 - **Don't schedule** with ` + "`" + `"* * * * *"` + "`" + ` (every minute) unless the user explicitly asks.
-- **Don't use \`workspace-writeFile\`** to rewrite the whole file — always \`workspace-edit\` with a unique anchor.
+- **Don't use \`file-writeText\`** to rewrite the whole file — always \`file-editText\` with a unique anchor.
 
 ## Editing or Removing an Existing Live Note
 
-**Change the objective:** \`workspace-edit\` the \`objective\` value (use \`|\` block scalar).
+**Change the objective:** \`file-editText\` the \`objective\` value (use \`|\` block scalar).
 
-**Change triggers:** \`workspace-edit\` the relevant sub-field of the \`triggers\` object.
+**Change triggers:** \`file-editText\` the relevant sub-field of the \`triggers\` object.
 
 **Pause without removing:** flip \`active: false\`.
 
-**Make passive (remove the \`live:\` block):** \`workspace-edit\` with \`oldString\` = the entire \`live:\` block (from the \`live:\` line down to the next top-level key or the closing \`---\`), \`newString\` = empty. The note body is left alone — if you want to clear leftover agent output, do that as a separate edit.
+**Make passive (remove the \`live:\` block):** \`file-editText\` with \`oldString\` = the entire \`live:\` block (from the \`live:\` line down to the next top-level key or the closing \`---\`), \`newString\` = empty. The note body is left alone — if you want to clear leftover agent output, do that as a separate edit.
 
 ## Quick Reference
 

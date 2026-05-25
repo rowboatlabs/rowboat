@@ -2,6 +2,9 @@ packages:
   - apps/*
   - packages/*
 
+catalog:
+  vitest: 4.1.7
+
 onlyBuiltDependencies:
   - core-js
   - electron

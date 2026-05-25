@@ -50,7 +50,7 @@ function buildMessage(
 **Instructions:**
 ${task.instructions}
 
-Your task folder is \`${wsFolder}\`. The user-visible artifact is \`${wsFolder}index.md\` — read it with \`workspace-readFile\` and update it with \`workspace-edit\` per the OUTPUT / ACTION mode rule. Do not touch \`${wsFolder}task.yaml\` (the runtime owns it).`;
+Your task folder is \`${wsFolder}\`. The user-visible artifact is \`${wsFolder}index.md\` — read it with \`file-readText\` and update it with \`file-editText\` per the OUTPUT / ACTION mode rule. Do not touch \`${wsFolder}task.yaml\` (the runtime owns it).`;
 
     return baseMessage + buildTriggerBlock({
         trigger,

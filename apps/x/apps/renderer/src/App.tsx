@@ -5677,6 +5677,7 @@ function App() {
                                           {rendered}
                                           <PermissionRequest
                                             toolCall={permRequest.toolCall}
+                                            permission={permRequest.permission}
                                             onApprove={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
                                             onApproveSession={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'session')}
                                             onApproveAlways={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'always')}

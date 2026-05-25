@@ -4,27 +4,27 @@ import { renderNoteEffectRules } from './tag_system.js';
 export function getRaw(): string {
   return `---
 tools:
-  workspace-writeFile:
+  file-writeText:
     type: builtin
-    name: workspace-writeFile
-  workspace-readFile:
+    name: file-writeText
+  file-readText:
     type: builtin
-    name: workspace-readFile
-  workspace-edit:
+    name: file-readText
+  file-editText:
     type: builtin
-    name: workspace-edit
-  workspace-readdir:
+    name: file-editText
+  file-list:
     type: builtin
-    name: workspace-readdir
-  workspace-mkdir:
+    name: file-list
+  file-mkdir:
     type: builtin
-    name: workspace-mkdir
-  workspace-grep:
+    name: file-mkdir
+  file-grep:
     type: builtin
-    name: workspace-grep
-  workspace-glob:
+    name: file-grep
+  file-glob:
     type: builtin
-    name: workspace-glob
+    name: file-glob
 ---
 # Context
 
@@ -92,17 +92,17 @@ You have access to these tools:
 
 **For reading files:**
 \`\`\`
-workspace-readFile({ path: "knowledge/People/Sarah Chen.md" })
+file-readText({ path: "knowledge/People/Sarah Chen.md" })
 \`\`\`
 
 **For creating NEW files:**
 \`\`\`
-workspace-writeFile({ path: "knowledge/People/Sarah Chen.md", data: "# Sarah Chen\\n\\n..." })
+file-writeText({ path: "knowledge/People/Sarah Chen.md", data: "# Sarah Chen\\n\\n..." })
 \`\`\`
 
 **For editing EXISTING files (preferred for updates):**
 \`\`\`
-workspace-edit({
+file-editText({
   path: "knowledge/People/Sarah Chen.md",
   oldString: "## Activity\\n",
   newString: "## Activity\\n- **2026-02-03** (meeting): New activity entry\\n"
@@ -111,27 +111,27 @@ workspace-edit({
 
 **For listing directories:**
 \`\`\`
-workspace-readdir({ path: "knowledge/People" })
+file-list({ path: "knowledge/People" })
 \`\`\`
 
 **For creating directories:**
 \`\`\`
-workspace-mkdir({ path: "knowledge/Projects", recursive: true })
+file-mkdir({ path: "knowledge/Projects", recursive: true })
 \`\`\`
 
 **For searching files:**
 \`\`\`
-workspace-grep({ pattern: "Acme Corp", searchPath: "knowledge", fileGlob: "*.md" })
+file-grep({ pattern: "Acme Corp", searchPath: "knowledge", fileGlob: "*.md" })
 \`\`\`
 
 **For finding files by pattern:**
 \`\`\`
-workspace-glob({ pattern: "**/*.md", cwd: "knowledge/People" })
+file-glob({ pattern: "**/*.md", cwd: "knowledge/People" })
 \`\`\`
 
 **IMPORTANT:**
-- Use \`workspace-edit\` for updating existing notes (adding activity, updating fields)
-- Use \`workspace-writeFile\` only for creating new notes
+- Use \`file-editText\` for updating existing notes (adding activity, updating fields)
+- Use \`file-writeText\` only for creating new notes
 - Prefer the knowledge_index for entity resolution (it's faster than grep)
 
 # Output
@@ -158,7 +158,7 @@ ${renderNoteEffectRules()}
 
 Read the source file and determine if it's a meeting or email.
 \`\`\`
-workspace-readFile({ path: "{source_file}" })
+file-readText({ path: "{source_file}" })
 \`\`\`
 
 **Meeting indicators:**
@@ -262,7 +262,7 @@ If processing, continue to Step 2.
 
 # Step 2: Read and Parse Source File
 \`\`\`
-workspace-readFile({ path: "{source_file}" })
+file-readText({ path: "{source_file}" })
 \`\`\`
 
 Extract metadata:
@@ -359,7 +359,7 @@ From index, find matches for:
 
 Only read the full note content when you need details not in the index (e.g., activity logs, open items):
 \`\`\`bash
-workspace-readFile({ path: "{knowledge_folder}/People/Sarah Chen.md" })
+file-readText({ path: "{knowledge_folder}/People/Sarah Chen.md" })
 \`\`\`
 
 **Why read these notes:**
@@ -445,10 +445,10 @@ When multiple candidates match a variant, disambiguate:
 **By organization (strongest signal):**
 \`\`\`
 # "David" could be David Kim or David Chen
-workspace-grep({ pattern: "Acme", searchPath: "{knowledge_folder}/People/David Kim.md" })
+file-grep({ pattern: "Acme", searchPath: "{knowledge_folder}/People/David Kim.md" })
 # Output: **Organization:** [[Acme Corp]]
 
-workspace-grep({ pattern: "Acme", searchPath: "{knowledge_folder}/People/David Chen.md" })
+file-grep({ pattern: "Acme", searchPath: "{knowledge_folder}/People/David Chen.md" })
 # Output: **Organization:** [[Other Corp]]
 
 # Source is from Acme context → "David" = "David Kim"
@@ -456,14 +456,14 @@ workspace-grep({ pattern: "Acme", searchPath: "{knowledge_folder}/People/David C
 
 **By email (definitive):**
 \`\`\`
-workspace-grep({ pattern: "david@acme.com", searchPath: "{knowledge_folder}/People/David Kim.md" })
+file-grep({ pattern: "david@acme.com", searchPath: "{knowledge_folder}/People/David Kim.md" })
 # Exact email match is definitive
 \`\`\`
 
 **By role:**
 \`\`\`
 # Source mentions "their CTO"
-workspace-grep({ pattern: "Role.*CTO", searchPath: "{knowledge_folder}/People" })
+file-grep({ pattern: "Role.*CTO", searchPath: "{knowledge_folder}/People" })
 # Filter results by organization context
 \`\`\`
 
@@ -959,7 +959,7 @@ Before writing, compare extracted content against existing notes.
 
 ## Check Activity Log
 \`\`\`
-workspace-grep({ pattern: "2025-01-15", searchPath: "{knowledge_folder}/People/Sarah Chen.md" })
+file-grep({ pattern: "2025-01-15", searchPath: "{knowledge_folder}/People/Sarah Chen.md" })
 \`\`\`
 
 If an entry for this date/source already exists, this may have been processed. Skip or verify different interaction.
@@ -993,20 +993,20 @@ If new info contradicts existing:
 - Wait for the tool to return before generating the next note.
 - Do NOT batch multiple write commands in a single response.
 
-**For NEW entities (use workspace-writeFile):**
+**For NEW entities (use file-writeText):**
 \`\`\`
-workspace-writeFile({
+file-writeText({
   path: "{knowledge_folder}/People/Jennifer.md",
   data: "# Jennifer\\n\\n## Summary\\n..."
 })
 \`\`\`
 
-**For EXISTING entities (use workspace-edit):**
-- Read current content first with workspace-readFile
-- Use workspace-edit to add activity entry at TOP (reverse chronological)
+**For EXISTING entities (use file-editText):**
+- Read current content first with file-readText
+- Use file-editText to add activity entry at TOP (reverse chronological)
 - Update fields using targeted edits
 \`\`\`
-workspace-edit({
+file-editText({
   path: "{knowledge_folder}/People/Sarah Chen.md",
   oldString: "## Activity\\n",
   newString: "## Activity\\n- **2026-02-03** (meeting): Met to discuss project timeline\\n"
@@ -1016,8 +1016,8 @@ workspace-edit({
 **For \`suggested-topics.md\`:**
 - Use workspace-relative path \`suggested-topics.md\`
 - Read the current file if you need the latest content
-- Use \`workspace-writeFile\` to create or rewrite the file when that is simpler and cleaner
-- Use \`workspace-edit\` for small targeted edits only if that keeps the file deduped and readable
+- Use \`file-writeText\` to create or rewrite the file when that is simpler and cleaner
+- Use \`file-editText\` for small targeted edits only if that keeps the file deduped and readable
 
 ## 9b: Apply State Changes
 

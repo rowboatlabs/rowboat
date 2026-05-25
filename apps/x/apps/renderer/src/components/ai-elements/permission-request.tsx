@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { AlertTriangleIcon, CheckCircleIcon, CheckIcon, ChevronDownIcon, XCircleIcon, XIcon } from "lucide-react";
 import type { ComponentProps } from "react";
 import { ToolCallPart } from "@x/shared/dist/message.js";
+import { ToolPermissionMetadata } from "@x/shared/dist/runs.js";
 import z from "zod";
 
 export type PermissionRequestProps = ComponentProps<"div"> & {
@@ -22,6 +23,15 @@ export type PermissionRequestProps = ComponentProps<"div"> & {
   onDeny?: () => void;
   isProcessing?: boolean;
   response?: 'approve' | 'deny' | null;
+  permission?: z.infer<typeof ToolPermissionMetadata>;
+};
+
+const fileActionLabels: Record<string, string> = {
+  read: "Read file",
+  list: "List folder",
+  search: "Search files",
+  write: "Write files",
+  delete: "Delete path",
 };
 
 export const PermissionRequest = ({
@@ -33,14 +43,16 @@ export const PermissionRequest = ({
   onDeny,
   isProcessing = false,
   response = null,
+  permission,
   ...props
 }: PermissionRequestProps) => {
   // Extract command from arguments if it's executeCommand
-  const command = toolCall.toolName === "executeCommand" 
+  const command = permission?.kind === "command" || toolCall.toolName === "executeCommand"
     ? (typeof toolCall.arguments === "object" && toolCall.arguments !== null && "command" in toolCall.arguments
         ? String(toolCall.arguments.command)
         : JSON.stringify(toolCall.arguments))
     : null;
+  const filePermission = permission?.kind === "file" ? permission : null;
 
   const isResponded = response !== null;
   const isApproved = response === 'approve';
@@ -113,7 +125,35 @@ export const PermissionRequest = ({
                 </pre>
               </div>
             )}
-            {!command && toolCall.arguments && (
+            {filePermission && (
+              <div className="rounded-md border bg-background/50 p-3 mt-3 space-y-3">
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground mb-1.5 uppercase tracking-wide">
+                    Action
+                  </p>
+                  <p className="text-xs font-medium text-foreground">
+                    {fileActionLabels[filePermission.operation] ?? filePermission.operation}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground mb-1.5 uppercase tracking-wide">
+                    Path{filePermission.paths.length === 1 ? "" : "s"}
+                  </p>
+                  <pre className="whitespace-pre-wrap text-xs font-mono text-foreground break-all">
+                    {filePermission.paths.join("\n")}
+                  </pre>
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground mb-1.5 uppercase tracking-wide">
+                    Approval Scope
+                  </p>
+                  <pre className="whitespace-pre-wrap text-xs font-mono text-foreground break-all">
+                    {filePermission.pathPrefix}
+                  </pre>
+                </div>
+              </div>
+            )}
+            {!command && !filePermission && toolCall.arguments && (
               <div className="rounded-md border bg-background/50 p-3 mt-3">
                 <p className="text-xs font-medium text-muted-foreground mb-1.5 uppercase tracking-wide">
                   Arguments
@@ -133,12 +173,12 @@ export const PermissionRequest = ({
                 size="sm"
                 onClick={onApprove}
                 disabled={isProcessing}
-                className={cn("flex-1", command && "rounded-r-none")}
+                className={cn("flex-1", (command || filePermission) && "rounded-r-none")}
               >
                 <CheckIcon className="size-4" />
                 Approve
               </Button>
-              {command && (
+              {(command || filePermission) && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button

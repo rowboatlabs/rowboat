@@ -1,17 +1,14 @@
 import { z, ZodType } from "zod";
 import * as path from "path";
 import * as fs from "fs/promises";
-import { createReadStream, existsSync, readFileSync } from "fs";
-import { createInterface } from "readline";
-import { execSync } from "child_process";
-import { glob } from "glob";
+import { existsSync, readFileSync } from "fs";
 import { executeCommand, executeCommandAbortable } from "./command-executor.js";
 import { resolveSkill, availableSkills } from "../assistant/skills/index.js";
 import { executeTool, listServers, listTools } from "../../mcp/mcp.js";
 import container from "../../di/container.js";
 import { IMcpConfigRepo } from "../..//mcp/repo.js";
 import { McpServerDefinition } from "@x/shared/dist/mcp.js";
-import * as workspace from "../../workspace/workspace.js";
+import * as files from "../../filesystem/files.js";
 import { IAgentsRepo } from "../../agents/repo.js";
 import { WorkDir } from "../../config/config.js";
 import { composioAccountsRepo } from "../../composio/repo.js";
@@ -156,12 +153,12 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         },
     },
 
-    'workspace-getRoot': {
-        description: 'Get the workspace root directory path',
+    'file-getRoot': {
+        description: 'Get the default root directory for relative file paths. Relative paths passed to file tools resolve against this directory.',
         inputSchema: z.object({}),
         execute: async () => {
             try {
-                return await workspace.getRoot();
+                return { root: WorkDir };
             } catch (error) {
                 return {
                     error: error instanceof Error ? error.message : 'Unknown error',
@@ -170,14 +167,14 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         },
     },
 
-    'workspace-exists': {
-        description: 'Check if a file or directory exists in the workspace',
+    'file-exists': {
+        description: 'Check if a file or directory exists. Accepts absolute paths, ~/ paths, or paths relative to the default root.',
         inputSchema: z.object({
-            path: z.string().min(1).describe('Workspace-relative path to check'),
+            path: z.string().min(1).describe('File or directory path to check'),
         }),
-        execute: async ({ path: relPath }: { path: string }) => {
+        execute: async ({ path: filePath }: { path: string }) => {
             try {
-                return await workspace.exists(relPath);
+                return await files.exists(filePath);
             } catch (error) {
                 return {
                     error: error instanceof Error ? error.message : 'Unknown error',
@@ -186,14 +183,14 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         },
     },
 
-    'workspace-stat': {
+    'file-stat': {
         description: 'Get file or directory statistics (size, modification time, etc.)',
         inputSchema: z.object({
-            path: z.string().min(1).describe('Workspace-relative path to stat'),
+            path: z.string().min(1).describe('File or directory path to stat'),
         }),
-        execute: async ({ path: relPath }: { path: string }) => {
+        execute: async ({ path: filePath }: { path: string }) => {
             try {
-                return await workspace.stat(relPath);
+                return await files.stat(filePath);
             } catch (error) {
                 return {
                     error: error instanceof Error ? error.message : 'Unknown error',
@@ -202,22 +199,22 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         },
     },
 
-    'workspace-readdir': {
+    'file-list': {
         description: 'List directory contents. Can recursively explore directory structure with options.',
         inputSchema: z.object({
-            path: z.string().describe('Workspace-relative directory path (empty string for root)'),
+            path: z.string().describe('Directory path to list. Use "." for the default root.'),
             recursive: z.boolean().optional().describe('Recursively list all subdirectories (default: false)'),
             includeStats: z.boolean().optional().describe('Include file stats like size and modification time (default: false)'),
             includeHidden: z.boolean().optional().describe('Include hidden files starting with . (default: false)'),
             allowedExtensions: z.array(z.string()).optional().describe('Filter by file extensions (e.g., [".json", ".ts"])'),
         }),
-        execute: async ({ 
-            path: relPath, 
-            recursive, 
-            includeStats, 
-            includeHidden, 
-            allowedExtensions 
-        }: { 
+        execute: async ({
+            path: filePath,
+            recursive,
+            includeStats,
+            includeHidden,
+            allowedExtensions
+        }: {
             path: string;
             recursive?: boolean;
             includeStats?: boolean;
@@ -225,13 +222,12 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
             allowedExtensions?: string[];
         }) => {
             try {
-                const entries = await workspace.readdir(relPath || '', {
+                return await files.list(filePath || '.', {
                     recursive,
                     includeStats,
                     includeHidden,
                     allowedExtensions,
                 });
-                return entries;
             } catch (error) {
                 return {
                     error: error instanceof Error ? error.message : 'Unknown error',
@@ -240,120 +236,24 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         },
     },
 
-    'workspace-readFile': {
-        description: 'Read a file from the workspace. For text files (utf8, the default), returns the content with each line prefixed by its 1-indexed line number (e.g. `12: some text`). Use the `offset` and `limit` parameters to page through large files; defaults read up to 2000 lines starting at line 1. Output is wrapped in `<path>`, `<type>`, `<content>` tags and ends with a footer indicating whether the read reached end-of-file or was truncated. Line numbers in the output are display-only — do NOT include them when later writing or editing the file. For `base64` / `binary` encodings, returns the raw bytes as a string and ignores `offset` / `limit`.',
+    'file-readText': {
+        description: 'Read a UTF-8 text file. Returns content with each line prefixed by its 1-indexed line number (e.g. `12: some text`). Use `offset` and `limit` to page through large files; defaults read up to 2000 lines starting at line 1. Output is wrapped in `<path>`, `<resolvedPath>`, `<type>`, `<content>` tags and ends with a footer indicating whether the read reached end-of-file or was truncated. Line numbers are display-only — do NOT include them when later writing or editing the file. Refuses binary files; use parseFile or LLMParse for documents, PDFs, images, and other non-text formats.',
         inputSchema: z.object({
-            path: z.string().min(1).describe('Workspace-relative file path'),
-            offset: z.coerce.number().int().min(1).optional().describe('1-indexed line to start reading from (default: 1). Utf8 only.'),
-            limit: z.coerce.number().int().min(1).optional().describe('Maximum number of lines to read (default: 2000). Utf8 only.'),
-            encoding: z.enum(['utf8', 'base64', 'binary']).optional().describe('File encoding (default: utf8)'),
+            path: z.string().min(1).describe('Text file path to read'),
+            offset: z.coerce.number().int().min(1).optional().describe('1-indexed line to start reading from (default: 1).'),
+            limit: z.coerce.number().int().min(1).optional().describe('Maximum number of lines to read (default: 2000).'),
         }),
         execute: async ({
-            path: relPath,
+            path: filePath,
             offset,
             limit,
-            encoding = 'utf8',
         }: {
             path: string;
             offset?: number;
             limit?: number;
-            encoding?: 'utf8' | 'base64' | 'binary';
         }) => {
             try {
-                if (encoding !== 'utf8') {
-                    return await workspace.readFile(relPath, encoding);
-                }
-
-                const DEFAULT_READ_LIMIT = 2000;
-                const MAX_LINE_LENGTH = 2000;
-                const MAX_LINE_SUFFIX = `... (line truncated to ${MAX_LINE_LENGTH} chars)`;
-                const MAX_BYTES = 50 * 1024;
-                const MAX_BYTES_LABEL = `${MAX_BYTES / 1024} KB`;
-
-                const absPath = workspace.resolveWorkspacePath(relPath);
-                const stats = await fs.lstat(absPath);
-                const stat = workspace.statToSchema(stats, 'file');
-                const etag = workspace.computeEtag(stats.size, stats.mtimeMs);
-
-                const effectiveOffset = offset ?? 1;
-                const effectiveLimit = limit ?? DEFAULT_READ_LIMIT;
-                const start = effectiveOffset - 1;
-
-                const stream = createReadStream(absPath, { encoding: 'utf8' });
-                const rl = createInterface({ input: stream, crlfDelay: Infinity });
-
-                const collected: string[] = [];
-                let totalLines = 0;
-                let bytes = 0;
-                let truncatedByBytes = false;
-                let hasMoreLines = false;
-
-                try {
-                    for await (const text of rl) {
-                        totalLines += 1;
-                        if (totalLines <= start) continue;
-
-                        if (collected.length >= effectiveLimit) {
-                            hasMoreLines = true;
-                            continue;
-                        }
-
-                        const line = text.length > MAX_LINE_LENGTH
-                            ? text.substring(0, MAX_LINE_LENGTH) + MAX_LINE_SUFFIX
-                            : text;
-                        const size = Buffer.byteLength(line, 'utf-8') + (collected.length > 0 ? 1 : 0);
-                        if (bytes + size > MAX_BYTES) {
-                            truncatedByBytes = true;
-                            hasMoreLines = true;
-                            break;
-                        }
-
-                        collected.push(line);
-                        bytes += size;
-                    }
-                } finally {
-                    rl.close();
-                    stream.destroy();
-                }
-
-                if (totalLines < effectiveOffset && !(totalLines === 0 && effectiveOffset === 1)) {
-                    return { error: `Offset ${effectiveOffset} is out of range for this file (${totalLines} lines)` };
-                }
-
-                const prefixed = collected.map((line, index) => `${index + effectiveOffset}: ${line}`);
-                const lastReadLine = effectiveOffset + collected.length - 1;
-                const nextOffset = lastReadLine + 1;
-
-                let footer: string;
-                if (truncatedByBytes) {
-                    footer = `(Output capped at ${MAX_BYTES_LABEL}. Showing lines ${effectiveOffset}-${lastReadLine}. Use offset=${nextOffset} to continue.)`;
-                } else if (hasMoreLines) {
-                    footer = `(Showing lines ${effectiveOffset}-${lastReadLine} of ${totalLines}. Use offset=${nextOffset} to continue.)`;
-                } else {
-                    footer = `(End of file - total ${totalLines} lines)`;
-                }
-
-                const content = [
-                    `<path>${relPath}</path>`,
-                    `<type>file</type>`,
-                    `<content>`,
-                    prefixed.join('\n'),
-                    '',
-                    footer,
-                    `</content>`,
-                ].join('\n');
-
-                return {
-                    path: relPath,
-                    encoding: 'utf8' as const,
-                    content,
-                    stat,
-                    etag,
-                    offset: effectiveOffset,
-                    limit: effectiveLimit,
-                    totalLines,
-                    hasMore: hasMoreLines || truncatedByBytes,
-                };
+                return await files.readText(filePath, offset, limit);
             } catch (error) {
                 return {
                     error: error instanceof Error ? error.message : 'Unknown error',
@@ -362,34 +262,30 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         },
     },
 
-    'workspace-writeFile': {
-        description: 'Write or update file contents in the workspace. Automatically creates parent directories and supports atomic writes.',
+    'file-writeText': {
+        description: 'Write or update UTF-8 text file contents. Automatically creates parent directories and supports atomic writes.',
         inputSchema: z.object({
-            path: z.string().min(1).describe('Workspace-relative file path'),
-            data: z.string().describe('File content to write'),
-            encoding: z.enum(['utf8', 'base64', 'binary']).optional().describe('Data encoding (default: utf8)'),
+            path: z.string().min(1).describe('Text file path to write'),
+            data: z.string().describe('UTF-8 text content to write'),
             atomic: z.boolean().optional().describe('Use atomic write (default: true)'),
             mkdirp: z.boolean().optional().describe('Create parent directories if needed (default: true)'),
             expectedEtag: z.string().optional().describe('ETag to check for concurrent modifications (conflict detection)'),
         }),
         execute: async ({
-            path: relPath,
+            path: filePath,
             data,
-            encoding,
             atomic,
             mkdirp,
             expectedEtag
         }: {
             path: string;
             data: string;
-            encoding?: 'utf8' | 'base64' | 'binary';
             atomic?: boolean;
             mkdirp?: boolean;
             expectedEtag?: string;
         }) => {
             try {
-                return await workspace.writeFile(relPath, data, {
-                    encoding,
+                return await files.writeText(filePath, data, {
                     atomic,
                     mkdirp,
                     expectedEtag,
@@ -402,16 +298,16 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         },
     },
 
-    'workspace-edit': {
-        description: 'Make precise edits to a file by replacing specific text. Safer than rewriting entire files - produces smaller diffs and reduces risk of data loss.',
+    'file-editText': {
+        description: 'Make precise edits to a UTF-8 text file by replacing specific text. Safer than rewriting entire files - produces smaller diffs and reduces risk of data loss. Refuses binary files.',
         inputSchema: z.object({
-            path: z.string().min(1).describe('Workspace-relative file path'),
+            path: z.string().min(1).describe('Text file path to edit'),
             oldString: z.string().describe('Exact text to find and replace'),
             newString: z.string().describe('Replacement text'),
             replaceAll: z.boolean().optional().describe('Replace all occurrences (default: false, fails if not unique)'),
         }),
         execute: async ({
-            path: relPath,
+            path: filePath,
             oldString,
             newString,
             replaceAll = false
@@ -422,46 +318,22 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
             replaceAll?: boolean;
         }) => {
             try {
-                const result = await workspace.readFile(relPath, 'utf8');
-                const content = result.data;
-
-                const occurrences = content.split(oldString).length - 1;
-
-                if (occurrences === 0) {
-                    return { error: 'oldString not found in file' };
-                }
-
-                if (occurrences > 1 && !replaceAll) {
-                    return {
-                        error: `oldString found ${occurrences} times. Use replaceAll: true or provide more context to make it unique.`
-                    };
-                }
-
-                const newContent = replaceAll
-                    ? content.replaceAll(oldString, newString)
-                    : content.replace(oldString, newString);
-
-                await workspace.writeFile(relPath, newContent, { encoding: 'utf8' });
-
-                return {
-                    success: true,
-                    replacements: replaceAll ? occurrences : 1
-                };
+                return await files.editText(filePath, oldString, newString, replaceAll);
             } catch (error) {
                 return { error: error instanceof Error ? error.message : 'Unknown error' };
             }
         },
     },
 
-    'workspace-mkdir': {
-        description: 'Create a directory in the workspace',
+    'file-mkdir': {
+        description: 'Create a directory',
         inputSchema: z.object({
-            path: z.string().min(1).describe('Workspace-relative directory path'),
+            path: z.string().min(1).describe('Directory path to create'),
             recursive: z.boolean().optional().describe('Create parent directories if needed (default: true)'),
         }),
-        execute: async ({ path: relPath, recursive = true }: { path: string; recursive?: boolean }) => {
+        execute: async ({ path: filePath, recursive = true }: { path: string; recursive?: boolean }) => {
             try {
-                return await workspace.mkdir(relPath, recursive);
+                return await files.mkdir(filePath, recursive);
             } catch (error) {
                 return {
                     error: error instanceof Error ? error.message : 'Unknown error',
@@ -470,16 +342,16 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         },
     },
 
-    'workspace-rename': {
-        description: 'Rename or move a file or directory in the workspace',
+    'file-rename': {
+        description: 'Rename or move a file or directory',
         inputSchema: z.object({
-            from: z.string().min(1).describe('Source workspace-relative path'),
-            to: z.string().min(1).describe('Destination workspace-relative path'),
+            from: z.string().min(1).describe('Source path'),
+            to: z.string().min(1).describe('Destination path'),
             overwrite: z.boolean().optional().describe('Overwrite destination if it exists (default: false)'),
         }),
         execute: async ({ from, to, overwrite = false }: { from: string; to: string; overwrite?: boolean }) => {
             try {
-                return await workspace.rename(from, to, overwrite);
+                return await files.rename(from, to, overwrite);
             } catch (error) {
                 return {
                     error: error instanceof Error ? error.message : 'Unknown error',
@@ -488,16 +360,16 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         },
     },
 
-    'workspace-copy': {
-        description: 'Copy a file in the workspace (directories not supported)',
+    'file-copy': {
+        description: 'Copy a file (directories not supported)',
         inputSchema: z.object({
-            from: z.string().min(1).describe('Source workspace-relative file path'),
-            to: z.string().min(1).describe('Destination workspace-relative file path'),
+            from: z.string().min(1).describe('Source file path'),
+            to: z.string().min(1).describe('Destination file path'),
             overwrite: z.boolean().optional().describe('Overwrite destination if it exists (default: false)'),
         }),
         execute: async ({ from, to, overwrite = false }: { from: string; to: string; overwrite?: boolean }) => {
             try {
-                return await workspace.copy(from, to, overwrite);
+                return await files.copy(from, to, overwrite);
             } catch (error) {
                 return {
                     error: error instanceof Error ? error.message : 'Unknown error',
@@ -506,16 +378,16 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         },
     },
 
-    'workspace-remove': {
-        description: 'Remove a file or directory from the workspace. Files are moved to trash by default for safety.',
+    'file-remove': {
+        description: 'Remove a file or directory. Files are moved to the Rowboat trash by default for safety.',
         inputSchema: z.object({
-            path: z.string().min(1).describe('Workspace-relative path to remove'),
+            path: z.string().min(1).describe('Path to remove'),
             recursive: z.boolean().optional().describe('Required for directories (default: false)'),
             trash: z.boolean().optional().describe('Move to trash instead of permanent delete (default: true)'),
         }),
-        execute: async ({ path: relPath, recursive, trash }: { path: string; recursive?: boolean; trash?: boolean }) => {
+        execute: async ({ path: filePath, recursive, trash }: { path: string; recursive?: boolean; trash?: boolean }) => {
             try {
-                return await workspace.remove(relPath, {
+                return await files.remove(filePath, {
                     recursive,
                     trash,
                 });
@@ -527,45 +399,26 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         },
     },
 
-    'workspace-glob': {
+    'file-glob': {
         description: 'Find files matching a glob pattern (e.g., "**/*.ts", "src/**/*.json"). Much faster than recursive readdir for finding files.',
         inputSchema: z.object({
             pattern: z.string().describe('Glob pattern to match files'),
-            cwd: z.string().optional().describe('Subdirectory to search in, relative to workspace root (default: workspace root)'),
+            cwd: z.string().optional().describe('Directory to search in (default: default root)'),
         }),
         execute: async ({ pattern, cwd }: { pattern: string; cwd?: string }) => {
             try {
-                const searchDir = cwd ? path.join(WorkDir, cwd) : WorkDir;
-
-                // Ensure search directory is within workspace
-                const resolvedSearchDir = path.resolve(searchDir);
-                if (!resolvedSearchDir.startsWith(WorkDir)) {
-                    return { error: 'Search directory must be within workspace' };
-                }
-
-                const files = await glob(pattern, {
-                    cwd: searchDir,
-                    nodir: true,
-                    ignore: ['node_modules/**', '.git/**'],
-                });
-
-                return {
-                    files,
-                    count: files.length,
-                    pattern,
-                    cwd: cwd || '.',
-                };
+                return await files.glob(pattern, cwd);
             } catch (error) {
                 return { error: error instanceof Error ? error.message : 'Unknown error' };
             }
         },
     },
 
-    'workspace-grep': {
-        description: 'Search file contents using regex. Returns matching files and lines. Uses ripgrep if available, falls back to grep.',
+    'file-grep': {
+        description: 'Search text file contents using regex. Returns matching files and lines. Skips binary files.',
         inputSchema: z.object({
             pattern: z.string().describe('Regex pattern to search for'),
-            searchPath: z.string().optional().describe('Directory or file to search, relative to workspace root (default: workspace root)'),
+            searchPath: z.string().optional().describe('Directory or file to search (default: default root)'),
             fileGlob: z.string().optional().describe('File pattern filter (e.g., "*.ts", "*.md")'),
             contextLines: z.number().optional().describe('Lines of context around matches (default: 0)'),
             maxResults: z.number().optional().describe('Maximum results to return (default: 100)'),
@@ -584,90 +437,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
             maxResults?: number;
         }) => {
             try {
-                const targetPath = searchPath ? path.join(WorkDir, searchPath) : WorkDir;
-
-                // Ensure target path is within workspace
-                const resolvedTargetPath = path.resolve(targetPath);
-                if (!resolvedTargetPath.startsWith(WorkDir)) {
-                    return { error: 'Search path must be within workspace' };
-                }
-
-                // Try ripgrep first
-                try {
-                    const rgArgs = [
-                        '--json',
-                        '-e', JSON.stringify(pattern),
-                        contextLines > 0 ? `-C ${contextLines}` : '',
-                        fileGlob ? `--glob ${JSON.stringify(fileGlob)}` : '',
-                        `--max-count ${maxResults}`,
-                        '--ignore-case',
-                        JSON.stringify(resolvedTargetPath),
-                    ].filter(Boolean).join(' ');
-
-                    const output = execSync(`rg ${rgArgs}`, {
-                        encoding: 'utf8',
-                        maxBuffer: 10 * 1024 * 1024,
-                        cwd: WorkDir,
-                    });
-
-                    const matches = output.trim().split('\n')
-                        .filter(Boolean)
-                        .map(line => {
-                            try {
-                                return JSON.parse(line);
-                            } catch {
-                                return null;
-                            }
-                        })
-                        .filter(m => m && m.type === 'match');
-
-                    return {
-                        matches: matches.map(m => ({
-                            file: path.relative(WorkDir, m.data.path.text),
-                            line: m.data.line_number,
-                            content: m.data.lines.text.trim(),
-                        })),
-                        count: matches.length,
-                        tool: 'ripgrep',
-                    };
-                } catch {
-                    // Fallback to basic grep if ripgrep not available or failed
-                    const grepArgs = [
-                        '-rn',
-                        fileGlob ? `--include=${JSON.stringify(fileGlob)}` : '',
-                        JSON.stringify(pattern),
-                        JSON.stringify(resolvedTargetPath),
-                        `| head -${maxResults}`,
-                    ].filter(Boolean).join(' ');
-
-                    try {
-                        const output = execSync(`grep ${grepArgs}`, {
-                            encoding: 'utf8',
-                            maxBuffer: 10 * 1024 * 1024,
-                            shell: '/bin/sh',
-                        });
-
-                        const lines = output.trim().split('\n').filter(Boolean);
-                        return {
-                            matches: lines.map(line => {
-                                const match = line.match(/^(.+?):(\d+):(.*)$/);
-                                if (match) {
-                                    return {
-                                        file: path.relative(WorkDir, match[1]),
-                                        line: parseInt(match[2], 10),
-                                        content: match[3].trim(),
-                                    };
-                                }
-                                return { file: '', line: 0, content: line };
-                            }),
-                            count: lines.length,
-                            tool: 'grep',
-                        };
-                    } catch {
-                        // No matches found (grep returns non-zero on no matches)
-                        return { matches: [], count: 0, tool: 'grep' };
-                    }
-                }
+                return await files.grep({ pattern, searchPath, fileGlob, contextLines, maxResults });
             } catch (error) {
                 return { error: error instanceof Error ? error.message : 'Unknown error' };
             }
@@ -677,7 +447,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
     'parseFile': {
         description: 'Parse and extract text content from files (PDF, Excel, CSV, Word .docx). Auto-detects format from file extension.',
         inputSchema: z.object({
-            path: z.string().min(1).describe('File path to parse. Can be an absolute path or a workspace-relative path.'),
+            path: z.string().min(1).describe('File path to parse. Can be absolute, ~/..., or relative to the default root.'),
         }),
         execute: async ({ path: filePath }: { path: string }) => {
             try {
@@ -692,14 +462,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                     };
                 }
 
-                // Read file as buffer — support both absolute and workspace-relative paths
-                let buffer: Buffer;
-                if (path.isAbsolute(filePath)) {
-                    buffer = await fs.readFile(filePath);
-                } else {
-                    const result = await workspace.readFile(filePath, 'base64');
-                    buffer = Buffer.from(result.data, 'base64');
-                }
+                const { buffer, resolvedPath } = await files.readBuffer(filePath);
 
                 if (ext === '.pdf') {
                     const { PDFParse } = await _importDynamic("pdf-parse");
@@ -716,6 +479,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                                 pages: textResult.total,
                                 title: infoResult.info?.Title || undefined,
                                 author: infoResult.info?.Author || undefined,
+                                resolvedPath,
                             },
                         };
                     } finally {
@@ -785,7 +549,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
     'LLMParse': {
         description: 'Send a file to the configured LLM as a multimodal attachment and ask it to extract content as markdown. Best for scanned PDFs, images with text, complex layouts, or any format where local parsing falls short. Supports documents (PDF, Word, Excel, PowerPoint, CSV, TXT, HTML) and images (PNG, JPG, GIF, WebP, SVG, BMP, TIFF).',
         inputSchema: z.object({
-            path: z.string().min(1).describe('File path to parse. Can be an absolute path or a workspace-relative path.'),
+            path: z.string().min(1).describe('File path to parse. Can be absolute, ~/..., or relative to the default root.'),
             prompt: z.string().optional().describe('Custom instruction for the LLM (defaults to "Convert this file to well-structured markdown.")'),
         }),
         execute: async ({ path: filePath, prompt }: { path: string; prompt?: string }) => {
@@ -801,14 +565,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                     };
                 }
 
-                // Read file as buffer — support both absolute and workspace-relative paths
-                let buffer: Buffer;
-                if (path.isAbsolute(filePath)) {
-                    buffer = await fs.readFile(filePath);
-                } else {
-                    const result = await workspace.readFile(filePath, 'base64');
-                    buffer = Buffer.from(result.data, 'base64');
-                }
+                const { buffer } = await files.readBuffer(filePath);
 
                 const base64 = buffer.toString('base64');
 
@@ -1228,7 +985,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 case 'open-note': {
                     const filePath = input.path as string;
                     try {
-                        const result = await workspace.exists(filePath);
+                        const result = await files.exists(filePath);
                         if (!result.exists) {
                             return { success: false, error: `File not found: ${filePath}` };
                         }
@@ -1256,15 +1013,15 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                     // Scan knowledge/ files and extract frontmatter properties
                     try {
                         const { parseFrontmatter } = await import("@x/shared/dist/frontmatter.js");
-                        const entries = await workspace.readdir("knowledge", { recursive: true, allowedExtensions: [".md"] });
-                        const files = entries.filter(e => e.kind === 'file');
+                        const entries = await files.list("knowledge", { recursive: true, allowedExtensions: [".md"] });
+                        const noteFiles = entries.filter(e => e.kind === 'file');
                         const properties = new Map<string, Set<string>>();
                         let noteCount = 0;
 
-                        for (const file of files) {
+                        for (const file of noteFiles) {
                             try {
-                                const { data } = await workspace.readFile(file.path);
-                                const { fields } = parseFrontmatter(data);
+                                const result = await fs.readFile(file.resolvedPath, 'utf8');
+                                const { fields } = parseFrontmatter(result);
                                 noteCount++;
                                 for (const [key, value] of Object.entries(fields)) {
                                     if (!value) continue;
@@ -1309,7 +1066,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                     const basePath = `bases/${safeName}.base`;
                     try {
                         const config = { name: safeName, filters: [], columns: [] };
-                        await workspace.writeFile(basePath, JSON.stringify(config, null, 2), { mkdirp: true });
+                        await files.writeText(basePath, JSON.stringify(config, null, 2), { mkdirp: true });
                         return { success: true, action: 'create-base', name: safeName, path: basePath };
                     } catch (error) {
                         return {
@@ -1655,7 +1412,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
     },
 
     'create-background-task': {
-        description: "Create a new background task on disk. This is the tool you call to materialize a bg-task — do NOT try to write `task.yaml` yourself with workspace-edit, and do NOT search the codebase for IPC channels like `bg-task:create`. The framework slugifies the name and lays out `bg-tasks/<slug>/{task.yaml,index.md,runs/}`. After this returns, immediately call `run-background-task-agent` with the returned slug so the user sees content right away.",
+        description: "Create a new background task on disk. This is the tool you call to materialize a bg-task — do NOT try to write `task.yaml` yourself with file-editText, and do NOT search the codebase for IPC channels like `bg-task:create`. The framework slugifies the name and lays out `bg-tasks/<slug>/{task.yaml,index.md,runs/}`. After this returns, immediately call `run-background-task-agent` with the returned slug so the user sees content right away.",
         inputSchema: CreateBackgroundTaskInput,
         execute: async (input: z.infer<typeof CreateBackgroundTaskInput>) => {
             try {
@@ -1675,7 +1432,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
     },
 
     'patch-background-task': {
-        description: "Update an existing background task — instructions, triggers, active, or model/provider. Use this when the user's new ask overlaps with an existing task (extend-don't-fork): rewrite the instructions in full to absorb the new ask rather than creating a duplicate sibling task. Look up existing tasks with `workspace-glob` on `bg-tasks/*/task.yaml` and `workspace-readFile` on the candidates first.",
+        description: "Update an existing background task — instructions, triggers, active, or model/provider. Use this when the user's new ask overlaps with an existing task (extend-don't-fork): rewrite the instructions in full to absorb the new ask rather than creating a duplicate sibling task. Look up existing tasks with `file-glob` on `bg-tasks/*/task.yaml` and `file-readText` on the candidates first.",
         inputSchema: PatchBackgroundTaskInput,
         execute: async (input: z.infer<typeof PatchBackgroundTaskInput>) => {
             try {

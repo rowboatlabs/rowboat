@@ -267,7 +267,7 @@ async function createNotesFromBatch(
     message += `- Create or update notes in "knowledge" directory (workspace-relative paths like "knowledge/People/Name.md")\n`;
     message += `- You may also create or update "${SUGGESTED_TOPICS_REL_PATH}" to maintain curated suggested-topic cards\n`;
     message += `- If the same entity appears in multiple files, merge the information into a single note\n`;
-    message += `- Use workspace tools to read existing notes or "${SUGGESTED_TOPICS_REL_PATH}" (when you need full content) and write updates\n`;
+    message += `- Use file tools to read existing notes or "${SUGGESTED_TOPICS_REL_PATH}" (when you need full content) and write updates\n`;
     message += `- Follow the note templates and guidelines in your instructions\n\n`;
 
     // Add the knowledge base index
@@ -297,16 +297,16 @@ async function createNotesFromBatch(
         if (event.type !== "tool-invocation") {
             return;
         }
-        if (event.toolName !== "workspace-writeFile" && event.toolName !== "workspace-edit") {
+        if (event.toolName !== "file-writeText" && event.toolName !== "file-editText") {
             return;
         }
         const toolPath = extractPathFromToolInput(event.input);
         if (!toolPath) {
             return;
         }
-        if (event.toolName === "workspace-writeFile") {
+        if (event.toolName === "file-writeText") {
             notesCreated.add(toolPath);
-        } else if (event.toolName === "workspace-edit") {
+        } else if (event.toolName === "file-editText") {
             notesModified.add(toolPath);
         }
     });

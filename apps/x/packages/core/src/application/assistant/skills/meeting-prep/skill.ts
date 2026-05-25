@@ -16,12 +16,12 @@ When the user asks to prep for a meeting or mentions attendees:
 1. **STOP** - Do not create a generic brief
 2. **SEARCH** - Look up each attendee in the knowledge base:
    \`\`\`
-   workspace-grep({ pattern: "Attendee Name", path: "knowledge/" })
+   file-grep({ pattern: "Attendee Name", searchPath: "knowledge/" })
    \`\`\`
 3. **READ** - Read their notes to understand who they are:
    \`\`\`
-   workspace-readFile("knowledge/People/Attendee Name.md")
-   workspace-readFile("knowledge/Organizations/Their Company.md")
+   file-readText("knowledge/People/Attendee Name.md")
+   file-readText("knowledge/Organizations/Their Company.md")
    \`\`\`
 4. **UNDERSTAND** - Extract their role, organization, relationship history, past interactions, open items
 5. **THEN BRIEF** - Only now create the meeting brief, using this context
@@ -68,13 +68,13 @@ For each attendee, search the knowledge base (path MUST be \`knowledge/\`):
 
 **Search People notes:**
 \`\`\`
-workspace-grep({ pattern: "attendee_name", path: "knowledge/People/" })
-workspace-grep({ pattern: "attendee_email", path: "knowledge/People/" })
+file-grep({ pattern: "attendee_name", searchPath: "knowledge/People/" })
+file-grep({ pattern: "attendee_email", searchPath: "knowledge/People/" })
 \`\`\`
 
 If a person note exists, read it:
 \`\`\`
-workspace-readFile("knowledge/People/Attendee Name.md")
+file-readText("knowledge/People/Attendee Name.md")
 \`\`\`
 
 Extract:
@@ -86,13 +86,13 @@ Extract:
 
 **Search Organization notes:**
 \`\`\`
-workspace-grep({ pattern: "company_name", path: "knowledge/Organizations/" })
+file-grep({ pattern: "company_name", searchPath: "knowledge/Organizations/" })
 \`\`\`
 
 **Search Projects:**
 \`\`\`
-workspace-grep({ pattern: "attendee_name", path: "knowledge/Projects/" })
-workspace-grep({ pattern: "company_name", path: "knowledge/Projects/" })
+file-grep({ pattern: "attendee_name", searchPath: "knowledge/Projects/" })
+file-grep({ pattern: "company_name", searchPath: "knowledge/Projects/" })
 \`\`\`
 
 ### Step 4: Create Meeting Brief

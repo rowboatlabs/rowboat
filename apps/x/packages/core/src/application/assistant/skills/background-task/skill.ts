@@ -25,11 +25,11 @@ Mixed instructions ("summarize and email it") trigger both.
 
 You have three dedicated builtin tools for this skill:
 
-- \`create-background-task\` — materializes a new task on disk. **Use this. Do not write \`task.yaml\` yourself with \`workspace-edit\`, and do not search the codebase for IPC channels like \`bg-task:create\`** — they're renderer-side and not callable from here.
+- \`create-background-task\` — materializes a new task on disk. **Use this. Do not write \`task.yaml\` yourself with \`file-editText\`, and do not search the codebase for IPC channels like \`bg-task:create\`** — they're renderer-side and not callable from here.
 - \`patch-background-task\` — updates an existing task (instructions / triggers / active / model). Use this for the extend-don't-fork case.
 - \`run-background-task-agent\` — manually fires a task to run now. Always call this immediately after \`create-background-task\` so the user sees content.
 
-To inspect what tasks already exist, use \`workspace-glob\` on \`bg-tasks/*/task.yaml\` and \`workspace-readFile\` on candidates. The user's bg-tasks folder is workspace-relative.
+To inspect what tasks already exist, use \`file-glob\` on \`bg-tasks/*/task.yaml\` and \`file-readText\` on candidates. The user's bg-tasks folder is workspace-relative.
 
 ## Mode: act-first
 

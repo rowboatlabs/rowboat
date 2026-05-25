@@ -91,13 +91,13 @@ async function tagNoteBatch(
     });
 
     let message = `Tag the following ${files.length} knowledge notes by prepending YAML frontmatter with appropriate tags.\n\n`;
-    message += `**Important:** Use workspace-relative paths with workspace-edit (e.g. "knowledge/People/Sarah Chen.md", NOT absolute paths).\n\n`;
+    message += `**Important:** Use workspace-relative paths with file-editText (e.g. "knowledge/People/Sarah Chen.md", NOT absolute paths).\n\n`;
 
     for (let i = 0; i < files.length; i++) {
         const file = files[i];
         const relativePath = path.relative(WorkDir, file.path);
         const truncated = file.content.length > MAX_CONTENT_LENGTH
-            ? file.content.slice(0, MAX_CONTENT_LENGTH) + '\n\n[... content truncated, use workspace-readFile for full content ...]'
+            ? file.content.slice(0, MAX_CONTENT_LENGTH) + '\n\n[... content truncated, use file-readText for full content ...]'
             : file.content;
 
         message += `## File ${i + 1}: ${relativePath}\n\n`;
@@ -111,7 +111,7 @@ async function tagNoteBatch(
         if (event.type !== 'tool-invocation') {
             return;
         }
-        if (event.toolName !== 'workspace-edit') {
+        if (event.toolName !== 'file-editText') {
             return;
         }
         try {
