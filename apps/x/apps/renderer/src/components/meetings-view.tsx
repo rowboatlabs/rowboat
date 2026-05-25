@@ -666,7 +666,7 @@ function EventDetailsPopover({ event, onClose }: { event: UpcomingEvent; onClose
       sideOffset={6}
       className="w-[min(380px,calc(100vw-32px))] rounded-lg p-0 shadow-xl"
       style={{
-        backgroundColor: 'var(--popover, #fff)',
+        backgroundColor: 'var(--muted, #f4f4f5)',
         borderColor: 'var(--border, #e4e4e7)',
         color: 'var(--popover-foreground, #09090b)',
       }}
@@ -680,7 +680,7 @@ function EventDetailsPopover({ event, onClose }: { event: UpcomingEvent; onClose
             style={{ color: 'var(--muted-foreground, #71717a)' }}
             aria-label="Open in Google Calendar"
             title="Open in Google Calendar"
-            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--muted, #f4f4f5)' }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--background, #ffffff)' }}
             onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
           >
             <ExternalLink className="size-4" />
@@ -693,7 +693,7 @@ function EventDetailsPopover({ event, onClose }: { event: UpcomingEvent; onClose
           style={{ color: 'var(--muted-foreground, #71717a)' }}
           aria-label="Close event details"
           title="Close"
-          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--muted, #f4f4f5)' }}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--background, #ffffff)' }}
           onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
         >
           <X className="size-4" />
