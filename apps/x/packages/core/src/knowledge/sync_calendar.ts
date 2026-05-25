@@ -30,6 +30,10 @@ function formatEventTime(event: AnyEvent): string {
     return `${startStr} → ${endStr}`;
 }
 
+function shouldSyncCalendarEvent(event: cal.Schema$Event): boolean {
+    return event.eventType !== 'workingLocation';
+}
+
 function formatEventBlock(event: AnyEvent, label: 'NEW' | 'UPDATED'): string {
     const id = getStr(event, 'id') ?? '(unknown id)';
     const title = getStr(event, 'summary') ?? '(no title)';
@@ -347,6 +351,9 @@ async function syncCalendarWindow(auth: OAuth2Client, syncDir: string, lookbackD
             console.log(`Found ${events.length} events.`);
             for (const event of events) {
                 if (event.id) {
+                    if (!shouldSyncCalendarEvent(event)) {
+                        continue;
+                    }
                     const result = await saveEvent(event, syncDir);
                     const attachmentsSaved = await processAttachments(drive, event, syncDir);
                     currentEventIds.add(event.id);
