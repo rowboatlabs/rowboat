@@ -133,6 +133,10 @@ interface ChatInputInnerProps {
   onTtsModeChange?: (mode: 'summary' | 'full') => void
   /** Fired when the user picks a different model in the dropdown (only when no run exists yet). */
   onSelectedModelChange?: (model: SelectedModel | null) => void
+  /** Work directory for this chat (per-chat). Null when none is set. */
+  workDir?: string | null
+  /** Fired when the user sets/changes/clears the work directory for this chat. */
+  onWorkDirChange?: (value: string | null) => void
 }
 
 function ChatInputInner({
@@ -159,6 +163,8 @@ function ChatInputInner({
   onToggleTts,
   onTtsModeChange,
   onSelectedModelChange,
+  workDir = null,
+  onWorkDirChange,
 }: ChatInputInnerProps) {
   const controller = usePromptInputController()
   const message = controller.textInput.value
@@ -173,7 +179,6 @@ function ChatInputInner({
   const [searchEnabled, setSearchEnabled] = useState(false)
   const [searchAvailable, setSearchAvailable] = useState(false)
   const [isRowboatConnected, setIsRowboatConnected] = useState(false)
-  const [workDir, setWorkDir] = useState<string | null>(null)
 
   // When a run exists, freeze the dropdown to the run's resolved model+provider.
   useEffect(() => {
@@ -256,22 +261,8 @@ function ChatInputInner({
     return () => window.removeEventListener('models-config-changed', handler)
   }, [loadModelConfig])
 
-  // Load currently configured work directory
-  const loadWorkDir = useCallback(async () => {
-    try {
-      const result = await window.ipc.invoke('workspace:readFile', { path: 'config/workdir.json' })
-      const parsed = JSON.parse(result.data)
-      const value = typeof parsed?.path === 'string' ? parsed.path.trim() : ''
-      setWorkDir(value || null)
-    } catch {
-      setWorkDir(null)
-    }
-  }, [])
-
-  useEffect(() => {
-    loadWorkDir()
-  }, [isActive, loadWorkDir])
-
+  // Work directory is owned per-chat by the parent (App). This component only
+  // drives the picker dialog and reports changes up via onWorkDirChange.
   const handleSetWorkDir = useCallback(async () => {
     try {
       let defaultPath: string | undefined = workDir ?? undefined
@@ -291,31 +282,18 @@ function ChatInputInner({
         defaultPath,
       })
       if (!chosen) return
-      await window.ipc.invoke('workspace:writeFile', {
-        path: 'config/workdir.json',
-        data: JSON.stringify({ path: chosen }, null, 2),
-      })
-      setWorkDir(chosen)
+      onWorkDirChange?.(chosen)
       toast.success(`Work directory set: ${chosen}`)
     } catch (err) {
       console.error('Failed to set work directory', err)
       toast.error('Failed to set work directory')
     }
-  }, [workDir])
+  }, [workDir, onWorkDirChange])
 
-  const handleClearWorkDir = useCallback(async () => {
-    try {
-      await window.ipc.invoke('workspace:writeFile', {
-        path: 'config/workdir.json',
-        data: JSON.stringify({}, null, 2),
-      })
-      setWorkDir(null)
-      toast.success('Work directory cleared')
-    } catch (err) {
-      console.error('Failed to clear work directory', err)
-      toast.error('Failed to clear work directory')
-    }
-  }, [])
+  const handleClearWorkDir = useCallback(() => {
+    onWorkDirChange?.(null)
+    toast.success('Work directory cleared')
+  }, [onWorkDirChange])
 
   // Check search tool availability (exa or signed-in via gateway)
   useEffect(() => {
@@ -802,6 +780,8 @@ export interface ChatInputWithMentionsProps {
   onToggleTts?: () => void
   onTtsModeChange?: (mode: 'summary' | 'full') => void
   onSelectedModelChange?: (model: SelectedModel | null) => void
+  workDir?: string | null
+  onWorkDirChange?: (value: string | null) => void
 }
 
 export function ChatInputWithMentions({
@@ -831,6 +811,8 @@ export function ChatInputWithMentions({
   onToggleTts,
   onTtsModeChange,
   onSelectedModelChange,
+  workDir,
+  onWorkDirChange,
 }: ChatInputWithMentionsProps) {
   return (
     <PromptInputProvider knowledgeFiles={knowledgeFiles} recentFiles={recentFiles} visibleFiles={visibleFiles}>
@@ -858,6 +840,8 @@ export function ChatInputWithMentions({
         onToggleTts={onToggleTts}
         onTtsModeChange={onTtsModeChange}
         onSelectedModelChange={onSelectedModelChange}
+        workDir={workDir}
+        onWorkDirChange={onWorkDirChange}
       />
     </PromptInputProvider>
   )

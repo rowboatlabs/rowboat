@@ -143,6 +143,8 @@ interface ChatSidebarProps {
   getInitialDraft?: (tabId: string) => string | undefined
   onDraftChangeForTab?: (tabId: string, text: string) => void
   onSelectedModelChangeForTab?: (tabId: string, model: SelectedModel | null) => void
+  workDirByTab?: Record<string, string | null>
+  onWorkDirChangeForTab?: (tabId: string, value: string | null) => void
   pendingAskHumanRequests?: ChatTabViewState['pendingAskHumanRequests']
   allPermissionRequests?: ChatTabViewState['allPermissionRequests']
   permissionResponses?: ChatTabViewState['permissionResponses']
@@ -199,6 +201,8 @@ export function ChatSidebar({
   getInitialDraft,
   onDraftChangeForTab,
   onSelectedModelChangeForTab,
+  workDirByTab = {},
+  onWorkDirChangeForTab,
   pendingAskHumanRequests = new Map(),
   allPermissionRequests = new Map(),
   permissionResponses = new Map(),
@@ -690,6 +694,8 @@ export function ChatSidebar({
                           initialDraft={getInitialDraft?.(tab.id)}
                           onDraftChange={onDraftChangeForTab ? (text) => onDraftChangeForTab(tab.id, text) : undefined}
                           onSelectedModelChange={onSelectedModelChangeForTab ? (m) => onSelectedModelChangeForTab(tab.id, m) : undefined}
+                          workDir={workDirByTab[tab.id] ?? null}
+                          onWorkDirChange={onWorkDirChangeForTab ? (v) => onWorkDirChangeForTab(tab.id, v) : undefined}
                           isRecording={isActive && isRecording}
                           recordingText={isActive ? recordingText : undefined}
                           recordingState={isActive ? recordingState : undefined}
