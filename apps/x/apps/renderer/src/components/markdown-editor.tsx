@@ -648,6 +648,13 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
 }, ref) {
   const isInternalUpdate = useRef(false)
   const wrapperRef = useRef<HTMLDivElement>(null)
+  // Read wikiLinks lazily inside the editor config via this ref. wikiLinks changes
+  // identity whenever the workspace directory tree changes (file watcher → new file
+  // list), and it used to be a useEditor() dependency — so any background write to
+  // the workspace destroyed and recreated the entire editor, resetting scroll to the
+  // top. Keeping it off the dep array (and reading the ref at event time) means the
+  // editor instance survives directory changes.
+  const wikiLinksRef = useRef(wikiLinks)
   const [activeWikiLink, setActiveWikiLink] = useState<WikiLinkMatch | null>(null)
   const [anchorPosition, setAnchorPosition] = useState<{ left: number; top: number } | null>(null)
   const [selectionHighlight, setSelectionHighlight] = useState<SelectionHighlightRange>(null)
@@ -670,6 +677,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
 
   // Keep ref in sync with state for the plugin to access
   selectionHighlightRef.current = selectionHighlight
+  wikiLinksRef.current = wikiLinks
 
   // Memoize the selection highlight extension
   const selectionHighlightExtension = useMemo(
@@ -776,11 +784,9 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       TranscriptBlockExtension,
       MermaidBlockExtension,
       WikiLink.configure({
-        onCreate: wikiLinks?.onCreate
-          ? (path: string) => {
-              void wikiLinks.onCreate(path)
-            }
-          : undefined,
+        onCreate: (path: string) => {
+          void wikiLinksRef.current?.onCreate?.(path)
+        },
       }),
       TaskList,
       TaskItem.configure({
@@ -912,7 +918,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
           if (heading && (!linkedNotePath || isSameNotePath(linkedNotePath, notePath))) {
             return scrollToHeading(_view, heading)
           }
-          wikiLinks?.onOpen?.(node.attrs.path)
+          wikiLinksRef.current?.onOpen?.(node.attrs.path)
           return true
         }
         return false
@@ -951,13 +957,15 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
         },
       },
     },
+    // NOTE: wikiLinks is intentionally NOT a dependency — it's read via wikiLinksRef
+    // at event time. Including it rebuilds the whole editor on every directory change
+    // (file watcher), which resets scroll to the top. See wikiLinksRef declaration.
   }, [
     editorSessionKey,
     maybeCommitPrimaryHeading,
     notePath,
     preventTitleHeadingDemotion,
     promoteFirstParagraphToTitleHeading,
-    wikiLinks,
   ])
 
   const orderedFiles = useMemo(() => {
@@ -1203,11 +1211,37 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       // Normalize for comparison (trim trailing whitespace from lines)
       const normalizeForCompare = (s: string) => s.split('\n').map(line => line.trimEnd()).join('\n').trim()
       if (normalizeForCompare(currentContent) !== normalizeForCompare(content)) {
+        // Preserve scroll + selection across an external content sync. setContent()
+        // resets the selection to the top of the doc and ProseMirror scrolls it into
+        // view; without restoring, a background writer touching the open file (graph
+        // builder, live-note runner, version-history commit) yanks the viewport back
+        // to the top repeatedly — making the note impossible to scroll. This editor
+        // instance is bound to a single note path, so the prior scrollTop is always
+        // valid for the reloaded content.
+        const wrapper = wrapperRef.current
+        const prevScrollTop = wrapper?.scrollTop ?? 0
+        const hadFocus = editor.isFocused
+        const { from: prevFrom, to: prevTo } = editor.state.selection
+
         isInternalUpdate.current = true
         const preprocessed = preprocessMarkdown(content)
         // Treat tab-open content as baseline: do not add hydration to undo history.
         editor.chain().setMeta('addToHistory', false).setContent(preprocessed).run()
+
+        // Only restore the caret for a focused editor, so we never steal focus or
+        // scroll for a passive viewer. Clamp to the (possibly shorter) new doc.
+        if (hadFocus) {
+          const docSize = editor.state.doc.content.size
+          const from = Math.min(prevFrom, docSize)
+          const to = Math.min(prevTo, docSize)
+          try {
+            editor.chain().setMeta('addToHistory', false).setTextSelection({ from, to }).run()
+          } catch { /* selection no longer valid in the new doc — ignore */ }
+        }
         isInternalUpdate.current = false
+
+        // Restore scroll last so it wins over any scrollIntoView triggered above.
+        if (wrapper) wrapper.scrollTop = prevScrollTop
       }
     }
   }, [editor, content])
