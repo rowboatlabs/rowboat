@@ -576,25 +576,28 @@ function ChatInputInner({
           </Tooltip>
         )}
         {searchAvailable && (
-          searchEnabled ? (
-            <button
-              type="button"
-              onClick={() => setSearchEnabled(false)}
-              className="flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-2.5 text-blue-600 transition-colors hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-400 dark:hover:bg-blue-900"
+          <button
+            type="button"
+            onClick={() => setSearchEnabled((v) => !v)}
+            aria-label="Search"
+            aria-pressed={searchEnabled}
+            className={cn(
+              'flex h-7 shrink-0 items-center rounded-full border px-1.5 transition-colors duration-150 ease-out',
+              searchEnabled
+                ? 'border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-400 dark:hover:bg-blue-900'
+                : 'border-transparent text-muted-foreground hover:bg-muted hover:text-foreground'
+            )}
+          >
+            <Globe className="h-4 w-4 shrink-0" />
+            <span
+              className={cn(
+                'overflow-hidden whitespace-nowrap text-xs font-medium transition-all duration-150 ease-out',
+                searchEnabled ? 'ml-1.5 max-w-[60px] opacity-100' : 'max-w-0 opacity-0'
+              )}
             >
-              <Globe className="h-3.5 w-3.5" />
-              <span className="text-xs font-medium">Search</span>
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setSearchEnabled(true)}
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              aria-label="Search"
-            >
-              <Globe className="h-4 w-4" />
-            </button>
-          )
+              Search
+            </span>
+          </button>
         )}
         <div className="flex-1" />
         {lockedModel ? (
