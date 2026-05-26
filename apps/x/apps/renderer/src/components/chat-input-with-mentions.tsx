@@ -28,7 +28,6 @@ import {
   DropdownMenuItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import {
@@ -547,28 +546,29 @@ function ChatInputInner({
               <FolderCog className="size-4" />
               <span>{workDir ? 'Change work directory' : 'Set work directory'}</span>
             </DropdownMenuItem>
-            {workDir && (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={() => { void handleClearWorkDir() }}>
-                  <X className="size-4" />
-                  <span>Clear work directory</span>
-                </DropdownMenuItem>
-              </>
-            )}
           </DropdownMenuContent>
         </DropdownMenu>
         {workDir && (
           <Tooltip>
             <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={handleSetWorkDir}
-                className="flex h-7 max-w-[180px] shrink-0 items-center gap-1.5 rounded-full border border-border bg-muted/40 px-2.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              >
-                <FolderCog className="h-3.5 w-3.5" />
-                <span className="truncate">{workDir.split('/').pop() || workDir}</span>
-              </button>
+              <div className="group flex h-7 max-w-[180px] shrink-0 items-center rounded-full border border-border bg-muted/40 pl-2.5 pr-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+                <button
+                  type="button"
+                  onClick={handleSetWorkDir}
+                  className="flex min-w-0 items-center gap-1.5"
+                >
+                  <FolderCog className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">{workDir.split('/').pop() || workDir}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleClearWorkDir}
+                  aria-label="Remove work directory"
+                  className="flex h-3.5 w-0 shrink-0 items-center justify-center overflow-hidden opacity-0 transition-all duration-150 ease-out hover:text-red-500 group-hover:ml-1 group-hover:w-3.5 group-hover:opacity-100"
+                >
+                  <X className="h-3.5 w-3.5 shrink-0" />
+                </button>
+              </div>
             </TooltipTrigger>
             <TooltipContent side="top">
               Work directory: {workDir}
@@ -584,7 +584,6 @@ function ChatInputInner({
             >
               <Globe className="h-3.5 w-3.5" />
               <span className="text-xs font-medium">Search</span>
-              <X className="h-3 w-3" />
             </button>
           ) : (
             <button
