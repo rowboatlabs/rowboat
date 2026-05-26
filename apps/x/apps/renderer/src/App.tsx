@@ -970,6 +970,7 @@ function App() {
   const newChatTabId = () => `chat-tab-${++chatTabIdCounterRef.current}`
   const chatDraftsRef = useRef(new Map<string, string>())
   const selectedModelByTabRef = useRef(new Map<string, { provider: string; model: string }>())
+  const pendingWorkDirByTabRef = useRef(new Map<string, string>())
   const chatScrollTopByTabRef = useRef(new Map<string, number>())
   const [toolOpenByTab, setToolOpenByTab] = useState<Record<string, Record<string, boolean>>>({})
   const [chatViewportAnchorByTab, setChatViewportAnchorByTab] = useState<Record<string, ChatViewportAnchorState>>({})
@@ -2354,10 +2355,13 @@ function App() {
       let newRunCreatedAt: string | null = null
       if (!currentRunId) {
         const selected = selectedModelByTabRef.current.get(submitTabId)
+        const pendingWorkDir = pendingWorkDirByTabRef.current.get(submitTabId)
         const run = await window.ipc.invoke('runs:create', {
           agentId,
           ...(selected ? { model: selected.model, provider: selected.provider } : {}),
+          ...(pendingWorkDir ? { workingDirectory: pendingWorkDir } : {}),
         })
+        pendingWorkDirByTabRef.current.delete(submitTabId)
         currentRunId = run.id
         newRunCreatedAt = run.createdAt
         setRunId(currentRunId)
@@ -2666,6 +2670,7 @@ function App() {
     })
     chatDraftsRef.current.delete(tabId)
     selectedModelByTabRef.current.delete(tabId)
+    pendingWorkDirByTabRef.current.delete(tabId)
     chatScrollTopByTabRef.current.delete(tabId)
     setToolOpenByTab((prev) => {
       if (!(tabId in prev)) return prev
@@ -5300,6 +5305,13 @@ function App() {
                                 selectedModelByTabRef.current.delete(tab.id)
                               }
                             }}
+                            onWorkDirChange={(dir) => {
+                              if (dir) {
+                                pendingWorkDirByTabRef.current.set(tab.id, dir)
+                              } else {
+                                pendingWorkDirByTabRef.current.delete(tab.id)
+                              }
+                            }}
                             isRecording={isActive && isRecording}
                             recordingText={isActive ? voice.interimText : undefined}
                             recordingState={isActive ? (voice.state === 'connecting' ? 'connecting' : 'listening') : undefined}
@@ -5358,6 +5370,13 @@ function App() {
                     selectedModelByTabRef.current.set(tabId, m)
                   } else {
                     selectedModelByTabRef.current.delete(tabId)
+                  }
+                }}
+                onWorkDirChangeForTab={(tabId, dir) => {
+                  if (dir) {
+                    pendingWorkDirByTabRef.current.set(tabId, dir)
+                  } else {
+                    pendingWorkDirByTabRef.current.delete(tabId)
                   }
                 }}
                 pendingAskHumanRequests={pendingAskHumanRequests}

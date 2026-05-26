@@ -31,6 +31,9 @@ export const StartEvent = BaseRunEvent.extend({
         "knowledge_sync",
     ]).optional(),
     subUseCase: z.string().optional(),
+    // Per-run work directory chosen at creation. Optional: a run may have none,
+    // and it can be changed later via WorkdirChangedEvent.
+    workingDirectory: z.string().optional(),
 });
 
 export const SpawnSubFlowEvent = BaseRunEvent.extend({
@@ -105,6 +108,12 @@ export const RunStoppedEvent = BaseRunEvent.extend({
     reason: z.enum(["user-requested", "force-stopped"]).optional(),
 });
 
+export const WorkdirChangedEvent = BaseRunEvent.extend({
+    type: z.literal("workdir-changed"),
+    // Absent/empty means the work directory was cleared.
+    workingDirectory: z.string().optional(),
+});
+
 export const RunEvent = z.union([
     RunProcessingStartEvent,
     RunProcessingEndEvent,
@@ -121,6 +130,7 @@ export const RunEvent = z.union([
     ToolPermissionResponseEvent,
     RunErrorEvent,
     RunStoppedEvent,
+    WorkdirChangedEvent,
 ]);
 
 export const ToolPermissionAuthorizePayload = ToolPermissionResponseEvent.pick({
@@ -153,6 +163,7 @@ export const Run = z.object({
     provider: z.string(),
     useCase: UseCase.optional(),
     subUseCase: z.string().optional(),
+    workingDirectory: z.string().optional(),
     log: z.array(RunEvent),
 });
 
@@ -172,4 +183,5 @@ export const CreateRunOptions = z.object({
     provider: z.string().optional(),
     useCase: UseCase.optional(),
     subUseCase: z.string().optional(),
+    workingDirectory: z.string().optional(),
 });

@@ -36,19 +36,6 @@ import { getRaw as getInlineTaskAgentRaw } from "../knowledge/inline_task_agent.
 import { getRaw as getAgentNotesAgentRaw } from "../knowledge/agent_notes_agent.js";
 
 const AGENT_NOTES_DIR = path.join(WorkDir, 'knowledge', 'Agent Notes');
-const WORKDIR_CONFIG_FILE = path.join(WorkDir, 'config', 'workdir.json');
-
-function loadUserWorkDir(): string | null {
-    try {
-        if (!fs.existsSync(WORKDIR_CONFIG_FILE)) return null;
-        const raw = fs.readFileSync(WORKDIR_CONFIG_FILE, 'utf-8');
-        const parsed = JSON.parse(raw) as { path?: unknown };
-        const value = typeof parsed.path === 'string' ? parsed.path.trim() : '';
-        return value || null;
-    } catch {
-        return null;
-    }
-}
 
 function loadAgentNotesContext(): string | null {
     const sections: string[] = [];
@@ -673,6 +660,7 @@ export class AgentState {
     runProvider: string | null = null;
     runUseCase: UseCase | null = null;
     runSubUseCase: string | null = null;
+    workingDirectory: string | null = null;
     messages: z.infer<typeof MessageList> = [];
     lastAssistantMsg: z.infer<typeof AssistantMessage> | null = null;
     subflowStates: Record<string, AgentState> = {};
@@ -790,6 +778,10 @@ export class AgentState {
                 this.runProvider = event.provider;
                 this.runUseCase = event.useCase ?? null;
                 this.runSubUseCase = event.subUseCase ?? null;
+                this.workingDirectory = event.workingDirectory ?? null;
+                break;
+            case "workdir-changed":
+                this.workingDirectory = event.workingDirectory ?? null;
                 break;
             case "spawn-subflow":
                 // Seed the subflow state with its agent so downstream loadAgent works.
@@ -1122,7 +1114,7 @@ export async function* streamAgent({
             if (agentNotesContext) {
                 instructionsWithDateTime += `\n\n${agentNotesContext}`;
             }
-            const userWorkDir = loadUserWorkDir();
+            const userWorkDir = state.workingDirectory;
             if (userWorkDir) {
                 loopLogger.log('injecting user work directory', userWorkDir);
                 instructionsWithDateTime += `\n\n# User Work Directory

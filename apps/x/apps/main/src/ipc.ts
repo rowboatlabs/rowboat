@@ -524,6 +524,10 @@ export function setupIpcHandlers() {
     'runs:fetch': async (_event, args) => {
       return runsCore.fetchRun(args.runId);
     },
+    'runs:setWorkdir': async (_event, args) => {
+      await runsCore.setWorkdir(args.runId, args.workingDirectory);
+      return { success: true as const };
+    },
     'runs:list': async (_event, args) => {
       return runsCore.listRuns(args.cursor);
     },

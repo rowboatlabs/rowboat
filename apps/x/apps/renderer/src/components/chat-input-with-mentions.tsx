@@ -133,6 +133,9 @@ interface ChatInputInnerProps {
   onTtsModeChange?: (mode: 'summary' | 'full') => void
   /** Fired when the user picks a different model in the dropdown (only when no run exists yet). */
   onSelectedModelChange?: (model: SelectedModel | null) => void
+  /** Fired when the user sets/clears the work directory before a run exists, so the
+   * parent can pass it into runs:create. Once a run exists, changes go straight to the run. */
+  onWorkDirChange?: (dir: string | null) => void
 }
 
 function ChatInputInner({
@@ -159,6 +162,7 @@ function ChatInputInner({
   onToggleTts,
   onTtsModeChange,
   onSelectedModelChange,
+  onWorkDirChange,
 }: ChatInputInnerProps) {
   const controller = usePromptInputController()
   const message = controller.textInput.value
@@ -256,21 +260,22 @@ function ChatInputInner({
     return () => window.removeEventListener('models-config-changed', handler)
   }, [loadModelConfig])
 
-  // Load currently configured work directory
-  const loadWorkDir = useCallback(async () => {
-    try {
-      const result = await window.ipc.invoke('workspace:readFile', { path: 'config/workdir.json' })
-      const parsed = JSON.parse(result.data)
-      const value = typeof parsed?.path === 'string' ? parsed.path.trim() : ''
-      setWorkDir(value || null)
-    } catch {
-      setWorkDir(null)
-    }
-  }, [])
-
+  // The work directory is run-scoped. For an existing run, load it from the run.
+  // For a new chat (no run yet) the chosen directory lives in local state until
+  // the run is created, and is reported up via onWorkDirChange so it can be
+  // passed into runs:create.
   useEffect(() => {
-    loadWorkDir()
-  }, [isActive, loadWorkDir])
+    if (!runId) {
+      setWorkDir(null)
+      return
+    }
+    let cancelled = false
+    window.ipc.invoke('runs:fetch', { runId }).then((run) => {
+      if (cancelled) return
+      setWorkDir(run.workingDirectory ?? null)
+    }).catch(() => { /* legacy run or fetch failure — leave as-is */ })
+    return () => { cancelled = true }
+  }, [runId])
 
   const handleSetWorkDir = useCallback(async () => {
     try {
@@ -279,31 +284,33 @@ function ChatInputInner({
         defaultPath: workDir ?? undefined,
       })
       if (!chosen) return
-      await window.ipc.invoke('workspace:writeFile', {
-        path: 'config/workdir.json',
-        data: JSON.stringify({ path: chosen }, null, 2),
-      })
+      if (runId) {
+        await window.ipc.invoke('runs:setWorkdir', { runId, workingDirectory: chosen })
+      } else {
+        onWorkDirChange?.(chosen)
+      }
       setWorkDir(chosen)
       toast.success(`Work directory set: ${chosen}`)
     } catch (err) {
       console.error('Failed to set work directory', err)
       toast.error('Failed to set work directory')
     }
-  }, [workDir])
+  }, [workDir, runId, onWorkDirChange])
 
   const handleClearWorkDir = useCallback(async () => {
     try {
-      await window.ipc.invoke('workspace:writeFile', {
-        path: 'config/workdir.json',
-        data: JSON.stringify({}, null, 2),
-      })
+      if (runId) {
+        await window.ipc.invoke('runs:setWorkdir', { runId, workingDirectory: null })
+      } else {
+        onWorkDirChange?.(null)
+      }
       setWorkDir(null)
       toast.success('Work directory cleared')
     } catch (err) {
       console.error('Failed to clear work directory', err)
       toast.error('Failed to clear work directory')
     }
-  }, [])
+  }, [runId, onWorkDirChange])
 
   // Check search tool availability (exa or signed-in via gateway)
   useEffect(() => {
@@ -790,6 +797,7 @@ export interface ChatInputWithMentionsProps {
   onToggleTts?: () => void
   onTtsModeChange?: (mode: 'summary' | 'full') => void
   onSelectedModelChange?: (model: SelectedModel | null) => void
+  onWorkDirChange?: (dir: string | null) => void
 }
 
 export function ChatInputWithMentions({
@@ -819,6 +827,7 @@ export function ChatInputWithMentions({
   onToggleTts,
   onTtsModeChange,
   onSelectedModelChange,
+  onWorkDirChange,
 }: ChatInputWithMentionsProps) {
   return (
     <PromptInputProvider knowledgeFiles={knowledgeFiles} recentFiles={recentFiles} visibleFiles={visibleFiles}>
@@ -846,6 +855,7 @@ export function ChatInputWithMentions({
         onToggleTts={onToggleTts}
         onTtsModeChange={onTtsModeChange}
         onSelectedModelChange={onSelectedModelChange}
+        onWorkDirChange={onWorkDirChange}
       />
     </PromptInputProvider>
   )

@@ -5,7 +5,7 @@ import path from "path";
 import fsp from "fs/promises";
 import fs from "fs";
 import readline from "readline";
-import { Run, RunEvent, StartEvent, ListRunsResponse, MessageEvent, UseCase } from "@x/shared/dist/runs.js";
+import { Run, RunEvent, StartEvent, ListRunsResponse, MessageEvent, UseCase, WorkdirChangedEvent } from "@x/shared/dist/runs.js";
 import { getDefaultModelAndProvider } from "../models/defaults.js";
 
 /**
@@ -37,6 +37,7 @@ export type CreateRunRepoOptions = {
     provider: string;
     useCase: z.infer<typeof UseCase>;
     subUseCase?: string;
+    workingDirectory?: string;
 };
 
 function runLogPath(runId: string): string {
@@ -206,6 +207,7 @@ export class FSRunsRepo implements IRunsRepo {
             provider: options.provider,
             useCase: options.useCase,
             ...(options.subUseCase ? { subUseCase: options.subUseCase } : {}),
+            ...(options.workingDirectory ? { workingDirectory: options.workingDirectory } : {}),
             subflow: [],
             ts,
         };
@@ -218,6 +220,7 @@ export class FSRunsRepo implements IRunsRepo {
             provider: options.provider,
             useCase: options.useCase,
             ...(options.subUseCase ? { subUseCase: options.subUseCase } : {}),
+            ...(options.workingDirectory ? { workingDirectory: options.workingDirectory } : {}),
             log: [start],
         };
     }
@@ -244,6 +247,14 @@ export class FSRunsRepo implements IRunsRepo {
         };
         const events: z.infer<typeof RunEvent>[] = [start, ...rawEvents.slice(1) as z.infer<typeof RunEvent>[]];
         const title = this.extractTitle(events);
+        // The current work directory is the start event's value, overridden by the
+        // most recent workdir-changed event (append-only log — last write wins).
+        let workingDirectory: string | undefined = start.workingDirectory || undefined;
+        for (const event of events) {
+            if (event.type === 'workdir-changed') {
+                workingDirectory = (event as z.infer<typeof WorkdirChangedEvent>).workingDirectory || undefined;
+            }
+        }
         return {
             id,
             title,
@@ -253,6 +264,7 @@ export class FSRunsRepo implements IRunsRepo {
             provider: start.provider,
             ...(start.useCase ? { useCase: start.useCase } : {}),
             ...(start.subUseCase ? { subUseCase: start.subUseCase } : {}),
+            ...(workingDirectory ? { workingDirectory } : {}),
             log: events,
         };
     }

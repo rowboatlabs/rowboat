@@ -1,7 +1,7 @@
 import z from "zod";
 import container from "../di/container.js";
 import { IMessageQueue, UserMessageContentType, VoiceOutputMode, MiddlePaneContext } from "../application/lib/message-queue.js";
-import { AskHumanResponseEvent, ToolPermissionRequestEvent, ToolPermissionResponseEvent, CreateRunOptions, Run, ListRunsResponse, ToolPermissionAuthorizePayload, AskHumanResponsePayload } from "@x/shared/dist/runs.js";
+import { AskHumanResponseEvent, ToolPermissionRequestEvent, ToolPermissionResponseEvent, CreateRunOptions, Run, ListRunsResponse, ToolPermissionAuthorizePayload, AskHumanResponsePayload, WorkdirChangedEvent } from "@x/shared/dist/runs.js";
 import { IRunsRepo } from "./repo.js";
 import { IAgentRuntime } from "../agents/runtime.js";
 import { IBus } from "../application/lib/bus.js";
@@ -34,9 +34,21 @@ export async function createRun(opts: z.infer<typeof CreateRunOptions>): Promise
         provider,
         useCase,
         ...(opts.subUseCase ? { subUseCase: opts.subUseCase } : {}),
+        ...(opts.workingDirectory ? { workingDirectory: opts.workingDirectory } : {}),
     });
     await bus.publish(run.log[0]);
     return run;
+}
+
+export async function setWorkdir(runId: string, workingDirectory: string | null): Promise<void> {
+    const repo = container.resolve<IRunsRepo>('runsRepo');
+    const event: z.infer<typeof WorkdirChangedEvent> = {
+        runId,
+        type: "workdir-changed",
+        subflow: [],
+        ...(workingDirectory ? { workingDirectory } : {}),
+    };
+    await repo.appendEvents(runId, [event]);
 }
 
 export async function createMessage(runId: string, message: UserMessageContentType, voiceInput?: boolean, voiceOutput?: VoiceOutputMode, searchEnabled?: boolean, middlePaneContext?: MiddlePaneContext): Promise<string> {

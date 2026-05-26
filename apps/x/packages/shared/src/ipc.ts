@@ -234,6 +234,15 @@ const ipcSchemas = {
     }),
     res: Run,
   },
+  'runs:setWorkdir': {
+    req: z.object({
+      runId: z.string(),
+      workingDirectory: z.string().nullable(),
+    }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
   'runs:list': {
     req: z.object({
       cursor: z.string().optional(),
