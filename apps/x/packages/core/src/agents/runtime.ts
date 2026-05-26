@@ -38,7 +38,12 @@ import { getRaw as getInlineTaskAgentRaw } from "../knowledge/inline_task_agent.
 import { getRaw as getAgentNotesAgentRaw } from "../knowledge/agent_notes_agent.js";
 
 const AGENT_NOTES_DIR = path.join(WorkDir, 'knowledge', 'Agent Notes');
-const WORKDIR_CONFIG_FILE = path.join(WorkDir, 'config', 'workdir.json');
+
+// Work directory is scoped per run (per chat). Each run gets its own sidecar
+// config file so setting it in one chat does not leak into others.
+function workDirConfigFile(runId: string): string {
+    return path.join(WorkDir, 'config', `workdir-${runId}.json`);
+}
 
 type ToolPermissionMetadataValue = z.infer<typeof ToolPermissionMetadata>;
 
@@ -165,10 +170,11 @@ async function getToolPermissionMetadata(
     };
 }
 
-function loadUserWorkDir(): string | null {
+function loadUserWorkDir(runId: string): string | null {
     try {
-        if (!fs.existsSync(WORKDIR_CONFIG_FILE)) return null;
-        const raw = fs.readFileSync(WORKDIR_CONFIG_FILE, 'utf-8');
+        const file = workDirConfigFile(runId);
+        if (!fs.existsSync(file)) return null;
+        const raw = fs.readFileSync(file, 'utf-8');
         const parsed = JSON.parse(raw) as { path?: unknown };
         const value = typeof parsed.path === 'string' ? parsed.path.trim() : '';
         return value || null;
@@ -1259,7 +1265,7 @@ export async function* streamAgent({
             if (agentNotesContext) {
                 instructionsWithDateTime += `\n\n${agentNotesContext}`;
             }
-            const userWorkDir = loadUserWorkDir();
+            const userWorkDir = loadUserWorkDir(runId);
             if (userWorkDir) {
                 loopLogger.log('injecting user work directory', userWorkDir);
                 instructionsWithDateTime += `\n\n# User Work Directory
