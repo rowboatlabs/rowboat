@@ -32,7 +32,6 @@ import {
   FileTypeIcon,
   CloudDownloadIcon,
   LoaderIcon,
-  TriangleIcon,
   UploadCloudIcon,
   Radio,
 } from 'lucide-react'
@@ -73,6 +72,21 @@ const LIVE_PILL_VARIANT_CLASS: Record<LivePillVariant, string> = {
   idle: 'text-foreground hover:bg-accent',
   running: 'text-foreground bg-primary/10 hover:bg-primary/15 animate-pulse',
   error: 'text-amber-600 dark:text-amber-400 bg-amber-500/10 hover:bg-amber-500/15',
+}
+
+function GoogleDocsIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className}
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path fill="#4285F4" d="M6 2h8l5 5v15H6V2Z" />
+      <path fill="#AECBFA" d="M14 2v5h5l-5-5Z" />
+      <path fill="#FFFFFF" d="M8.5 11h7v1.2h-7V11Zm0 2.6h7v1.2h-7v-1.2Zm0 2.6h5.2v1.2H8.5v-1.2Z" />
+    </svg>
+  )
 }
 
 export function EditorToolbar({
@@ -435,14 +449,14 @@ export function EditorToolbar({
                 {googleDoc.isSyncing ? (
                   <LoaderIcon className="size-4 animate-spin" />
                 ) : (
-                  <TriangleIcon className="size-4" />
+                  <GoogleDocsIcon className="size-4" />
                 )}
                 <ChevronDownIcon className="size-3" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={googleDoc.onOpen}>
-                <TriangleIcon className="size-4 mr-2" />
+                <GoogleDocsIcon className="size-4 mr-2" />
                 Open Google Doc
               </DropdownMenuItem>
               <DropdownMenuSeparator />
