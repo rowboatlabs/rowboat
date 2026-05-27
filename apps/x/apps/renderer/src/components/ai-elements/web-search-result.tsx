@@ -7,12 +7,11 @@ import {
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import {
-  CheckCircleIcon,
   ChevronDownIcon,
   GlobeIcon,
   LoaderIcon,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 
 interface WebSearchResultProps {
@@ -26,6 +25,11 @@ interface WebSearchResultProps {
 // next one slides in. Kept slow enough to read the domain + title.
 const ROLL_INTERVAL_MS = 700;
 
+// How many favicons to show in the settled stack before the rest collapse
+// into a "+N" chip. The text names this many domains too, so the chip count
+// (total - MAX_STACK) lines up with the "and N others" in the summary.
+const MAX_STACK = 3;
+
 function getDomain(url: string): string {
   try {
     return new URL(url).hostname.replace(/^www\./, "");
@@ -34,8 +38,56 @@ function getDomain(url: string): string {
   }
 }
 
-function faviconUrl(domain: string): string {
-  return `https://www.google.com/s2/favicons?domain=${domain}&sz=16`;
+function faviconUrl(domain: string, size = 32): string {
+  return `https://www.google.com/s2/favicons?domain=${domain}&sz=${size}`;
+}
+
+// Collapse the result list into unique domains, preserving order.
+function uniqueDomains(results: WebSearchResultProps["results"]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const result of results) {
+    const domain = getDomain(result.url);
+    if (seen.has(domain)) continue;
+    seen.add(domain);
+    out.push(domain);
+  }
+  return out;
+}
+
+// Summary with text hierarchy: "Searched" + "and N others" are secondary
+// weight/color, the domain names are primary text at medium weight.
+function buildSearchedSummary(domains: string[]): React.ReactNode {
+  const muted = "font-normal text-muted-foreground";
+  const name = (d: string) => <span className="font-medium text-foreground">{d}</span>;
+  if (domains.length === 1) {
+    return (
+      <>
+        <span className={muted}>Searched </span>
+        {name(domains[0])}
+      </>
+    );
+  }
+  if (domains.length === 2) {
+    return (
+      <>
+        <span className={muted}>Searched </span>
+        {name(domains[0])}
+        <span className={muted}> and </span>
+        {name(domains[1])}
+      </>
+    );
+  }
+  const others = domains.length - 2;
+  return (
+    <>
+      <span className={muted}>Searched </span>
+      {name(domains[0])}
+      <span className={muted}>, </span>
+      {name(domains[1])}
+      <span className={muted}>{` and ${others} other${others !== 1 ? "s" : ""}`}</span>
+    </>
+  );
 }
 
 type RollPhase = "searching" | "rolling" | "settled";
@@ -43,6 +95,8 @@ type RollPhase = "searching" | "rolling" | "settled";
 export function WebSearchResult({ query, results, status, title = "Searched the web" }: WebSearchResultProps) {
   const isRunning = status === "pending" || status === "running";
   const [open, setOpen] = useState(false);
+
+  const domains = useMemo(() => uniqueDomains(results), [results]);
 
   // Drive the one-shot rolling reveal. Results arrive all at once, so we
   // simulate "fetching one site at a time" by stepping through them with the
@@ -89,7 +143,7 @@ export function WebSearchResult({ query, results, status, title = "Searched the 
   if (phase === "searching") {
     headerKey = "searching";
     headerContent = (
-      <span className="flex items-center gap-2 text-muted-foreground">
+      <span className="flex min-w-0 flex-1 items-center gap-2 text-muted-foreground">
         <LoaderIcon className="size-4 shrink-0 animate-spin" />
         <span className="truncate">Searching the web&hellip;</span>
       </span>
@@ -99,7 +153,7 @@ export function WebSearchResult({ query, results, status, title = "Searched the 
     const domain = getDomain(result.url);
     headerKey = `roll-${rollIndex}`;
     headerContent = (
-      <span className="flex items-center gap-2">
+      <span className="flex min-w-0 flex-1 items-center gap-2">
         <img src={faviconUrl(domain)} alt="" className="size-4 shrink-0 rounded-sm bg-muted/60" />
         <span className="truncate">
           <span className="text-muted-foreground">{domain}</span>
@@ -110,13 +164,34 @@ export function WebSearchResult({ query, results, status, title = "Searched the 
     );
   } else {
     headerKey = "settled";
+    const stack = domains.slice(0, MAX_STACK);
+    // Chip count matches the "and N others" in the text (total minus the 2
+    // named domains), shown only when there are sites beyond the stack.
+    const overflow = domains.length > MAX_STACK ? domains.length - 2 : 0;
     headerContent = (
-      <span className="flex items-center gap-2">
-        <GlobeIcon className="size-4 shrink-0 text-muted-foreground" />
-        <span className="truncate">
-          {results.length > 0
-            ? `Found ${results.length} source${results.length !== 1 ? "s" : ""}`
-            : title}
+      <span className="flex min-w-0 flex-1 items-center gap-2.5">
+        {domains.length > 0 ? (
+          <span className="flex shrink-0 items-center">
+            {stack.map((domain, i) => (
+              <img
+                key={domain}
+                src={faviconUrl(domain)}
+                alt=""
+                className="size-5 rounded-full bg-muted object-cover -ml-[5px] first:ml-0"
+                style={{ zIndex: stack.length - i }}
+              />
+            ))}
+            {overflow > 0 && (
+              <span className="ml-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-foreground/10 dark:bg-muted text-[10px] font-medium text-muted-foreground">
+                +{overflow}
+              </span>
+            )}
+          </span>
+        ) : (
+          <GlobeIcon className="size-4 shrink-0 text-muted-foreground" />
+        )}
+        <span className="truncate text-sm">
+          {domains.length > 0 ? buildSearchedSummary(domains) : title}
         </span>
       </span>
     );
@@ -126,11 +201,11 @@ export function WebSearchResult({ query, results, status, title = "Searched the 
     <Collapsible
       open={open}
       onOpenChange={setOpen}
-      className="not-prose mb-4 w-full rounded-md border"
+      className="not-prose mb-4 w-full rounded-md border bg-[var(--ws-surface)] [--ws-surface:color-mix(in_oklab,var(--background)_95%,var(--foreground))] dark:[--ws-surface:color-mix(in_oklab,var(--background)_93%,var(--foreground))] transition-colors duration-150 ease-out hover:border-foreground/30"
     >
-      <CollapsibleTrigger className="flex w-full items-center justify-between gap-4 p-3">
+      <CollapsibleTrigger className="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-2.5">
         {/* Rolling header: clipped, fixed height so sliding lines stay contained */}
-        <div className="relative min-w-0 flex-1 overflow-hidden" style={{ height: "1.25rem" }}>
+        <div className="relative min-w-0 flex-1 overflow-hidden" style={{ height: "1.5rem" }}>
           <AnimatePresence mode="popLayout" initial={false}>
             <motion.span
               key={headerKey}
@@ -138,35 +213,27 @@ export function WebSearchResult({ query, results, status, title = "Searched the 
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
               transition={{ duration: 0.18, ease: "easeOut" }}
-              className="absolute inset-0 truncate text-left font-medium text-sm leading-5"
+              className="absolute inset-0 flex items-center text-left font-medium text-sm"
             >
               {headerContent}
             </motion.span>
           </AnimatePresence>
         </div>
-        <div className="flex shrink-0 items-center gap-3">
-          {phase === "settled" && !isRunning && (
-            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <CheckCircleIcon className="size-3.5 text-green-600" />
-              Done
+        <div className="flex shrink-0 items-center gap-2">
+          {phase === "settled" && domains.length > 0 && (
+            <span className="whitespace-nowrap text-xs text-muted-foreground">
+              {domains.length} source{domains.length !== 1 ? "s" : ""}
             </span>
           )}
           <ChevronDownIcon className={cn("size-4 text-muted-foreground transition-transform", open && "rotate-180")} />
         </div>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <div className="px-3 pb-3 space-y-3">
-          {/* Query + result count */}
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 text-sm text-muted-foreground min-w-0">
-              <GlobeIcon className="size-3.5 shrink-0" />
-              <span className="truncate">{query}</span>
-            </div>
-            {results.length > 0 && (
-              <span className="text-xs text-muted-foreground whitespace-nowrap">
-                {results.length} result{results.length !== 1 ? "s" : ""}
-              </span>
-            )}
+        <div className="px-4 pb-3 space-y-3">
+          {/* Query */}
+          <div className="flex items-center gap-2 text-sm text-muted-foreground min-w-0">
+            <GlobeIcon className="size-3.5 shrink-0" />
+            <span className="truncate">{query}</span>
           </div>
 
           {/* Results list */}
@@ -203,20 +270,13 @@ export function WebSearchResult({ query, results, status, title = "Searched the 
             </div>
           )}
 
-          {/* Status */}
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            {isRunning ? (
-              <>
-                <LoaderIcon className="size-3.5 animate-spin" />
-                <span>Searching...</span>
-              </>
-            ) : (
-              <>
-                <CheckCircleIcon className="size-3.5 text-green-600" />
-                <span>Done</span>
-              </>
-            )}
-          </div>
+          {/* Status — only while the search is still running. */}
+          {isRunning && (
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <LoaderIcon className="size-3.5 animate-spin" />
+              <span>Searching...</span>
+            </div>
+          )}
         </div>
       </CollapsibleContent>
     </Collapsible>
