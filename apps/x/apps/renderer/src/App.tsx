@@ -1034,6 +1034,10 @@ function App() {
   const chatViewStateByTabRef = useRef(chatViewStateByTab)
   const chatDraftsRef = useRef(new Map<string, string>())
   const selectedModelByTabRef = useRef(new Map<string, { provider: string; model: string }>())
+  // Work directory is per-chat. Keyed by tab id; null/absent means none set.
+  const [workDirByTab, setWorkDirByTab] = useState<Record<string, string | null>>({})
+  const workDirByTabRef = useRef(workDirByTab)
+  workDirByTabRef.current = workDirByTab
   const chatScrollTopByTabRef = useRef(new Map<string, number>())
   const [toolOpenByTab, setToolOpenByTab] = useState<Record<string, Record<string, boolean>>>({})
   const [chatViewportAnchorByTab, setChatViewportAnchorByTab] = useState<Record<string, ChatViewportAnchorState>>({})
@@ -1046,6 +1050,36 @@ function App() {
       chatDraftsRef.current.delete(tabId)
     }
   }, [])
+  // Persist a run's work directory to its per-run sidecar config file. The agent
+  // runtime reads this same file (config/workdir-<runId>.json) on each turn.
+  const persistRunWorkDir = useCallback(async (runId: string, value: string | null) => {
+    try {
+      await window.ipc.invoke('workspace:writeFile', {
+        path: `config/workdir-${runId}.json`,
+        data: JSON.stringify(value ? { path: value } : {}, null, 2),
+      })
+    } catch (err) {
+      console.error('Failed to persist work directory for run', runId, err)
+    }
+  }, [])
+  // Read a run's persisted work directory (used when (re)opening a run into a tab).
+  const loadRunWorkDir = useCallback(async (runId: string): Promise<string | null> => {
+    try {
+      const result = await window.ipc.invoke('workspace:readFile', { path: `config/workdir-${runId}.json` })
+      const parsed = JSON.parse(result.data)
+      const value = typeof parsed?.path === 'string' ? parsed.path.trim() : ''
+      return value || null
+    } catch {
+      return null
+    }
+  }, [])
+  const setTabWorkDir = useCallback((tabId: string, value: string | null) => {
+    setWorkDirByTab((prev) => ({ ...prev, [tabId]: value }))
+    // If the tab is already bound to a run, persist immediately so the change
+    // applies to that chat's subsequent messages.
+    const runId = chatTabsRef.current.find((t) => t.id === tabId)?.runId
+    if (runId) void persistRunWorkDir(runId, value)
+  }, [persistRunWorkDir])
   const isToolOpenForTab = useCallback((tabId: string, toolId: string): boolean => {
     return toolOpenByTab[tabId]?.[toolId] ?? false
   }, [toolOpenByTab])
@@ -2023,10 +2057,16 @@ function App() {
       setPendingAskHumanRequests(pendingAsks)
       setAllPermissionRequests(allPermissionRequests)
       setPermissionResponses(permResponseMap)
+
+      // Restore the run's per-chat work directory into the tab it was loaded into.
+      const tabId = activeChatTabIdRef.current
+      const wd = await loadRunWorkDir(id)
+      if (loadRunRequestIdRef.current !== requestId) return
+      setWorkDirByTab((prev) => ({ ...prev, [tabId]: wd }))
     } catch (err) {
       console.error('Failed to load run:', err)
     }
-  }, [])
+  }, [loadRunWorkDir])
 
   const getStreamingBuffer = useCallback((id: string) => {
     const existing = streamingBuffersRef.current.get(id)
@@ -2492,6 +2532,10 @@ function App() {
             ? { ...tab, runId: currentRunId }
             : tab
         )))
+        // Flush this tab's pending work directory onto the freshly created run so
+        // the agent picks it up on the first turn. Done before createMessage below.
+        const pendingWorkDir = workDirByTabRef.current[submitTabId] ?? null
+        if (pendingWorkDir) await persistRunWorkDir(currentRunId, pendingWorkDir)
         isNewRun = true
       }
 
@@ -2687,6 +2731,8 @@ function App() {
       ...prev,
       [activeChatTabIdRef.current]: createEmptyChatTabViewState(),
     }))
+    // A brand-new chat starts with no work directory.
+    setWorkDirByTab(prev => ({ ...prev, [activeChatTabIdRef.current]: null }))
   }, [setChatViewportAnchor])
 
   // Chat tab operations
@@ -2774,6 +2820,12 @@ function App() {
     chatDraftsRef.current.delete(tabId)
     selectedModelByTabRef.current.delete(tabId)
     chatScrollTopByTabRef.current.delete(tabId)
+    setWorkDirByTab((prev) => {
+      if (!(tabId in prev)) return prev
+      const next = { ...prev }
+      delete next[tabId]
+      return next
+    })
     setToolOpenByTab((prev) => {
       if (!(tabId in prev)) return prev
       const next = { ...prev }
@@ -5835,6 +5887,8 @@ function App() {
                                 selectedModelByTabRef.current.delete(tab.id)
                               }
                             }}
+                            workDir={workDirByTab[tab.id] ?? null}
+                            onWorkDirChange={(v) => setTabWorkDir(tab.id, v)}
                             isRecording={isActive && isRecording}
                             recordingText={isActive ? voice.interimText : undefined}
                             recordingState={isActive ? (voice.state === 'connecting' ? 'connecting' : 'listening') : undefined}
@@ -5904,6 +5958,8 @@ function App() {
                     selectedModelByTabRef.current.delete(tabId)
                   }
                 }}
+                workDirByTab={workDirByTab}
+                onWorkDirChangeForTab={setTabWorkDir}
                 pendingAskHumanRequests={pendingAskHumanRequests}
                 allPermissionRequests={allPermissionRequests}
                 permissionResponses={permissionResponses}

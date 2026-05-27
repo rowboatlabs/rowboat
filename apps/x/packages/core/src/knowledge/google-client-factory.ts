@@ -8,6 +8,7 @@ import type { Configuration } from '../auth/oauth-client.js';
 import { OAuthTokens } from '../auth/types.js';
 import {
     ReconnectRequiredError,
+    TransientRefreshError,
     refreshTokensViaBackend,
 } from '../auth/google-backend-oauth.js';
 
@@ -52,11 +53,14 @@ export class GoogleClientFactory {
     };
 
     /**
-     * Promise singleton so a burst of getClient() calls during the brief
-     * expiry window all wait on a single refresh round-trip rather than
-     * fanning out parallel refreshes.
+     * Promise singleton so concurrent getClient() callers share a single
+     * pass through the read/refresh/build pipeline rather than fanning
+     * out parallel refreshes. The check-and-assign must be atomic (no
+     * `await` between them) so two callers in the same tick can't both
+     * pass the null check before either assigns — that's why getClient()
+     * is a thin synchronous wrapper around getClientInner().
      */
-    private static refreshInFlight: Promise<OAuth2Client | null> | null = null;
+    private static inFlightClient: Promise<OAuth2Client | null> | null = null;
 
     private static async resolveByokCredentials(): Promise<{ clientId: string; clientSecret?: string }> {
         const oauthRepo = container.resolve<IOAuthRepo>('oauthRepo');
@@ -69,13 +73,24 @@ export class GoogleClientFactory {
     }
 
     /**
-     * Get or create OAuth2Client, reusing cached instance when possible
+     * Get or create OAuth2Client, reusing the cached instance when possible.
+     *
+     * The check-and-assign of `inFlightClient` is synchronous so concurrent
+     * callers in the same tick coalesce onto a single pipeline run. The actual
+     * work lives in getClientInner(); this wrapper exists purely to guarantee
+     * the dedup invariant.
      */
     static async getClient(): Promise<OAuth2Client | null> {
-        if (this.refreshInFlight) {
-            return this.refreshInFlight;
+        if (this.inFlightClient) {
+            return this.inFlightClient;
         }
+        this.inFlightClient = this.getClientInner().finally(() => {
+            this.inFlightClient = null;
+        });
+        return this.inFlightClient;
+    }
 
+    private static async getClientInner(): Promise<OAuth2Client | null> {
         const oauthRepo = container.resolve<IOAuthRepo>('oauthRepo');
         const connection = await oauthRepo.read(this.PROVIDER_NAME);
         const tokens = connection.tokens ?? null;
@@ -110,16 +125,12 @@ export class GoogleClientFactory {
         // expiry — keeps long-running calls from racing the boundary.
         if (oauthClient.isTokenExpired(tokens)) {
             if (!tokens.refresh_token) {
-                console.log('[OAuth] Token expired and no refresh token available for Google.');
+                console.log('[OAuth] Google token expired and no refresh token available.');
                 await oauthRepo.upsert(this.PROVIDER_NAME, { error: 'Missing refresh token. Please reconnect.' });
                 this.clearCache();
                 return null;
             }
-
-            this.refreshInFlight = this.refreshAndBuild(tokens, mode).finally(() => {
-                this.refreshInFlight = null;
-            });
-            return this.refreshInFlight;
+            return this.refreshAndBuild(tokens, mode);
         }
 
         // Reuse client if tokens haven't changed
@@ -135,7 +146,8 @@ export class GoogleClientFactory {
         const oauthRepo = container.resolve<IOAuthRepo>('oauthRepo');
 
         try {
-            console.log(`[OAuth] Token expired, refreshing via ${mode}...`);
+            const secsSinceExpiry = Math.floor(Date.now() / 1000) - tokens.expires_at;
+            console.log(`[OAuth] Google token expired ${secsSinceExpiry}s ago, refreshing via ${mode}...`);
             const existingScopes = tokens.scopes;
 
             let refreshedTokens: OAuthTokens;
@@ -150,7 +162,8 @@ export class GoogleClientFactory {
             }
 
             await oauthRepo.upsert(this.PROVIDER_NAME, { tokens: refreshedTokens, error: null });
-            console.log('[OAuth] Token refreshed successfully');
+            const ttl = refreshedTokens.expires_at - Math.floor(Date.now() / 1000);
+            console.log(`[OAuth] Google token refreshed successfully (mode=${mode}, new expires_at=${refreshedTokens.expires_at}, ttl=${ttl}s)`);
             return this.buildAndCacheClient(refreshedTokens, mode);
         } catch (error) {
             if (error instanceof ReconnectRequiredError) {
@@ -159,9 +172,24 @@ export class GoogleClientFactory {
                 this.clearCache();
                 return null;
             }
+            if (error instanceof TransientRefreshError) {
+                // Transient (rate limit, in-flight dedup, upstream 5xx): leave
+                // stored tokens + cache alone, log, and let the next sync tick
+                // retry. Writing an `error` here would stick "Needs reconnect"
+                // in the UI for a problem the user can't fix by reconnecting.
+                console.warn(`[OAuth] Transient Google refresh failure (status=${error.status}): ${error.message} — will retry on next tick`);
+                return null;
+            }
             const message = error instanceof Error ? error.message : 'Failed to refresh token for Google';
             await oauthRepo.upsert(this.PROVIDER_NAME, { error: message });
             console.error('[OAuth] Failed to refresh token for Google:', error);
+            // Walk cause chain so we can see e.g. `Not signed into Rowboat`
+            // showing up under a generic `fetch failed` outer error.
+            let cause: unknown = error;
+            while (cause != null && typeof cause === 'object' && 'cause' in cause) {
+                cause = (cause as { cause?: unknown }).cause;
+                if (cause != null) console.error('[OAuth] Caused by:', cause);
+            }
             this.clearCache();
             return null;
         }
