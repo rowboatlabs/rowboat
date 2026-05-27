@@ -201,7 +201,7 @@ export function WebSearchResult({ query, results, status, title = "Searched the 
     <Collapsible
       open={open}
       onOpenChange={setOpen}
-      className="not-prose mb-4 w-full rounded-[28px] border bg-[var(--ws-surface)] [--ws-surface:color-mix(in_oklab,var(--background)_98.5%,var(--foreground))] dark:[--ws-surface:color-mix(in_oklab,var(--background)_98.5%,var(--foreground))] transition-colors duration-150 ease-out hover:border-foreground/30"
+      className="not-prose mb-4 w-full rounded-[28px] border bg-[var(--card-surface)] transition-colors duration-150 ease-out hover:border-foreground/30"
     >
       <CollapsibleTrigger className="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-2.5">
         {/* Rolling header: clipped, fixed height so sliding lines stay contained */}

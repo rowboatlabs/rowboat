@@ -1200,6 +1200,10 @@
   --scrollbar-track: oklch(0.95 0 0);
   --scrollbar-thumb: oklch(0.75 0 0);
   --scrollbar-thumb-hover: oklch(0.65 0 0);
+  /* Subtle raised-card surface: tints toward foreground, so it reads a hair
+     darker than the background in light mode and a hair lighter in dark mode.
+     Shared by the web search card and tool-call group. */
+  --card-surface: color-mix(in oklab, var(--background) 98.5%, var(--foreground));
   --rowboat-panel: oklch(0.97 0 0);
   --rowboat-raised: oklch(1 0 0);
   --rowboat-wash: color-mix(in oklab, var(--background) 88%, var(--primary) 12%);
