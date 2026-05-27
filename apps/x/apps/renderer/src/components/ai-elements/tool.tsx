@@ -62,6 +62,8 @@ export type ToolHeaderProps = {
   type: ToolUIPart["type"];
   state: ToolUIPart["state"];
   className?: string;
+  /** Hide the leading status icon (used for child rows inside a tool group). */
+  hideLeadIcon?: boolean;
 };
 
 // Lead icon shown to the left of the tool label: spinner while running, a
@@ -78,6 +80,7 @@ export const ToolHeader = ({
   title,
   type,
   state,
+  hideLeadIcon,
   ...props
 }: ToolHeaderProps) => {
   const displayTitle = title ?? type.split("-").slice(1).join("-")
@@ -91,7 +94,7 @@ export const ToolHeader = ({
       {...props}
     >
       <div className="flex min-w-0 flex-1 items-center gap-2">
-        {getLeadIcon(state)}
+        {!hideLeadIcon && getLeadIcon(state)}
         <span
           className="min-w-0 flex-1 truncate text-left font-medium text-sm"
           title={displayTitle}
@@ -273,13 +276,14 @@ export const ToolGroupComponent = ({ group, isToolOpen, onToolOpenChange }: Tool
                 key={tool.id}
                 open={isOpen}
                 onOpenChange={(o) => onToolOpenChange(tool.id, o)}
-                className="mb-0 rounded-md border-border/60 bg-transparent hover:border-border/60"
+                className="mb-0 rounded-[20px] border-border/60 bg-transparent hover:border-border/60"
               >
                 <ToolHeader
                   title={getToolDisplayName(tool)}
                   type={`tool-${tool.name}`}
                   state={toolState}
                   className="text-muted-foreground"
+                  hideLeadIcon
                 />
                 <ToolContent>
                   <ToolTabbedContent
