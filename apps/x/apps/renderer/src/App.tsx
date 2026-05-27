@@ -581,7 +581,7 @@ type ViewState =
   | { type: 'live-notes' }
   | { type: 'email' }
   | { type: 'workspace'; path?: string }
-  | { type: 'knowledge-view' }
+  | { type: 'knowledge-view'; folderPath?: string }
   | { type: 'chat-history' }
   | { type: 'home' }
 
@@ -591,6 +591,7 @@ function viewStatesEqual(a: ViewState, b: ViewState): boolean {
   if (a.type === 'file' && b.type === 'file') return a.path === b.path
   if (a.type === 'task' && b.type === 'task') return a.name === b.name
   if (a.type === 'workspace' && b.type === 'workspace') return (a.path ?? '') === (b.path ?? '')
+  if (a.type === 'knowledge-view' && b.type === 'knowledge-view') return (a.folderPath ?? '') === (b.folderPath ?? '')
   return true // both graph
 }
 
@@ -638,8 +639,10 @@ function parseDeepLink(input: string): ViewState | null {
       const path = params.get('path')
       return { type: 'workspace', path: path ?? undefined }
     }
-    case 'knowledge-view':
-      return { type: 'knowledge-view' }
+    case 'knowledge-view': {
+      const folderPath = params.get('folderPath')
+      return { type: 'knowledge-view', folderPath: folderPath ?? undefined }
+    }
     case 'chat-history':
       return { type: 'chat-history' }
     case 'home':
@@ -756,6 +759,9 @@ function App() {
   const [isWorkspaceOpen, setIsWorkspaceOpen] = useState(false)
   const [workspaceInitialPath, setWorkspaceInitialPath] = useState<string | null>(null)
   const [isKnowledgeViewOpen, setIsKnowledgeViewOpen] = useState(false)
+  // Folder being browsed inside the knowledge view (null = root overview).
+  // Lives in ViewState so folder drill-down participates in back/forward history.
+  const [knowledgeViewFolderPath, setKnowledgeViewFolderPath] = useState<string | null>(null)
   const [isChatHistoryOpen, setIsChatHistoryOpen] = useState(false)
   // Default landing view: Home in the middle with the chat docked on the right.
   const [isHomeOpen, setIsHomeOpen] = useState(true)
@@ -3457,13 +3463,13 @@ function App() {
     if (isLiveNotesOpen) return { type: 'live-notes' }
     if (isSuggestedTopicsOpen) return { type: 'suggested-topics' }
     if (isWorkspaceOpen) return { type: 'workspace', path: workspaceInitialPath ?? undefined }
-    if (isKnowledgeViewOpen) return { type: 'knowledge-view' }
+    if (isKnowledgeViewOpen) return { type: 'knowledge-view', folderPath: knowledgeViewFolderPath ?? undefined }
     if (isChatHistoryOpen) return { type: 'chat-history' }
     if (isHomeOpen) return { type: 'home' }
     if (selectedPath) return { type: 'file', path: selectedPath }
     if (isGraphOpen) return { type: 'graph' }
     return { type: 'chat', runId }
-  }, [selectedBackgroundTask, isEmailOpen, isMeetingsOpen, isLiveNotesOpen, isBgTasksOpen, isSuggestedTopicsOpen, selectedPath, isGraphOpen, isWorkspaceOpen, isKnowledgeViewOpen, isChatHistoryOpen, isHomeOpen, workspaceInitialPath, runId])
+  }, [selectedBackgroundTask, isEmailOpen, isMeetingsOpen, isLiveNotesOpen, isBgTasksOpen, isSuggestedTopicsOpen, selectedPath, isGraphOpen, isWorkspaceOpen, isKnowledgeViewOpen, knowledgeViewFolderPath, isChatHistoryOpen, isHomeOpen, workspaceInitialPath, runId])
 
   const appendUnique = useCallback((stack: ViewState[], entry: ViewState) => {
     const last = stack[stack.length - 1]
@@ -3803,6 +3809,7 @@ function App() {
         setIsEmailOpen(false)
         setIsWorkspaceOpen(false)
         setIsKnowledgeViewOpen(true)
+        setKnowledgeViewFolderPath(view.folderPath ?? null)
         setIsChatHistoryOpen(false)
       setIsHomeOpen(false)
         ensureKnowledgeViewFileTab()
@@ -5501,6 +5508,8 @@ function App() {
                       revealInFileManager: knowledgeActions.revealInFileManager,
                       onOpenInNewTab: knowledgeActions.onOpenInNewTab,
                     }}
+                    folderPath={knowledgeViewFolderPath}
+                    onNavigateFolder={(path) => { void navigateToView({ type: 'knowledge-view', folderPath: path ?? undefined }) }}
                     onOpenNote={(path) => navigateToFile(path)}
                     onOpenGraph={() => knowledgeActions.openGraph()}
                     onOpenSearch={() => { setSearchDefaultScope('knowledge'); setIsSearchOpen(true) }}

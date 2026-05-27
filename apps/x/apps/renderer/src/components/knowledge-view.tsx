@@ -49,6 +49,10 @@ export type KnowledgeViewActions = {
 type KnowledgeViewProps = {
   tree: TreeNode[]
   actions: KnowledgeViewActions
+  // Folder currently being browsed (null = root overview). Controlled by the
+  // app so drill-down participates in the global back/forward history.
+  folderPath: string | null
+  onNavigateFolder: (path: string | null) => void
   onOpenNote: (path: string) => void
   onOpenGraph: () => void
   onOpenSearch: () => void
@@ -141,14 +145,14 @@ function displayName(node: TreeNode): string {
 export function KnowledgeView({
   tree,
   actions,
+  folderPath,
+  onNavigateFolder,
   onOpenNote,
   onOpenGraph,
   onOpenSearch,
   onOpenBases,
   onVoiceNoteCreated,
 }: KnowledgeViewProps) {
-  // null = root (folder overview); otherwise the path of the folder being browsed.
-  const [folderPath, setFolderPath] = useState<string | null>(null)
   const [renameTarget, setRenameTarget] = useState<string | null>(null)
 
   const topLevel = useMemo(
@@ -170,7 +174,7 @@ export function KnowledgeView({
     [topLevel],
   )
 
-  const openFolder = useCallback((path: string) => setFolderPath(path), [])
+  const openFolder = useCallback((path: string) => onNavigateFolder(path), [onNavigateFolder])
 
   // When the open folder no longer exists (deleted/renamed externally), fall
   // back to the root overview rather than holding a dangling drill-down.
@@ -210,7 +214,7 @@ export function KnowledgeView({
               renameTarget={renameTarget}
               onRequestRename={setRenameTarget}
               onClearRename={() => setRenameTarget(null)}
-              onNavigate={setFolderPath}
+              onNavigate={onNavigateFolder}
               onOpenFolder={openFolder}
               onOpenNote={onOpenNote}
             />
