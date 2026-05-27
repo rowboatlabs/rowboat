@@ -201,7 +201,7 @@ export function WebSearchResult({ query, results, status, title = "Searched the 
     <Collapsible
       open={open}
       onOpenChange={setOpen}
-      className="not-prose mb-4 w-full rounded-md border bg-[var(--ws-surface)] [--ws-surface:color-mix(in_oklab,var(--background)_98.5%,var(--foreground))] dark:[--ws-surface:color-mix(in_oklab,var(--background)_98.5%,var(--foreground))] transition-colors duration-150 ease-out hover:border-foreground/30"
+      className="not-prose mb-4 w-full rounded-[28px] border bg-[var(--ws-surface)] [--ws-surface:color-mix(in_oklab,var(--background)_98.5%,var(--foreground))] dark:[--ws-surface:color-mix(in_oklab,var(--background)_98.5%,var(--foreground))] transition-colors duration-150 ease-out hover:border-foreground/30"
     >
       <CollapsibleTrigger className="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-2.5">
         {/* Rolling header: clipped, fixed height so sliding lines stay contained */}
@@ -228,7 +228,7 @@ export function WebSearchResult({ query, results, status, title = "Searched the 
           <ChevronDownIcon className={cn("size-4 text-muted-foreground transition-transform", open && "rotate-180")} />
         </div>
       </CollapsibleTrigger>
-      <CollapsibleContent>
+      <CollapsibleContent className="overflow-hidden data-[state=open]:animate-[collapsible-down_0.09s_ease-out] data-[state=closed]:animate-[collapsible-up_0.08s_ease-in]">
         <div className="px-4 pb-3 space-y-3">
           {/* Query */}
           <div className="flex items-center gap-2 text-sm text-muted-foreground min-w-0">
