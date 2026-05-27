@@ -77,6 +77,8 @@ const providerConfigs: ProviderConfig = {
     scopes: [
       'https://www.googleapis.com/auth/gmail.modify',
       'https://www.googleapis.com/auth/calendar.events.readonly',
+      'https://www.googleapis.com/auth/drive.readonly',
+      'https://www.googleapis.com/auth/documents',
     ],
   },
   'fireflies-ai': {

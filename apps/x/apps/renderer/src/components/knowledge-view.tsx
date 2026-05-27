@@ -38,6 +38,7 @@ interface TreeNode {
 
 export type KnowledgeViewActions = {
   createNote: (parentPath?: string) => void
+  addGoogleDoc: (parentPath?: string) => void
   createFolder: (parentPath?: string) => Promise<string>
   rename: (path: string, newName: string, isDir: boolean) => Promise<void>
   remove: (path: string) => Promise<void>
@@ -201,6 +202,14 @@ export function KnowledgeView({
           >
             <FilePlus className="size-4" />
             <span>New note</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => actions.addGoogleDoc(currentFolder?.path)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-accent"
+          >
+            <FileText className="size-4" />
+            <span>Add Google Doc</span>
           </button>
         </div>
       </div>
@@ -763,6 +772,10 @@ function RowContextMenu({
             <ContextMenuItem onClick={() => actions.createNote(node.path)}>
               <FilePlus className="mr-2 size-4" />
               New Note
+            </ContextMenuItem>
+            <ContextMenuItem onClick={() => actions.addGoogleDoc(node.path)}>
+              <FileText className="mr-2 size-4" />
+              Add Google Doc
             </ContextMenuItem>
             <ContextMenuItem onClick={() => void actions.createFolder(node.path)}>
               <FolderPlus className="mr-2 size-4" />

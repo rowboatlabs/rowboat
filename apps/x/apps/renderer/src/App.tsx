@@ -5,7 +5,7 @@ import { RunEvent, ListRunsResponse } from '@x/shared/src/runs.js';
 import type { LanguageModelUsage, ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
-import { Bug, CheckIcon, LoaderIcon, PanelLeftIcon, ArrowRight, MessageSquare, ChevronLeftIcon, ChevronRightIcon, MoreHorizontal, Plus, HistoryIcon } from 'lucide-react';
+import { Bug, CheckIcon, LoaderIcon, PanelLeftIcon, ArrowRight, MessageSquare, ChevronLeftIcon, ChevronRightIcon, MoreHorizontal, Plus, HistoryIcon, DownloadIcon, UploadCloud } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MarkdownEditor, type MarkdownEditorHandle } from './components/markdown-editor';
 import { ChatSidebar } from './components/chat-sidebar';
@@ -29,6 +29,7 @@ import { BgTasksView } from '@/components/bg-tasks-view';
 import { EmailView } from '@/components/email-view';
 import { WorkspaceView } from '@/components/workspace-view';
 import { KnowledgeView } from '@/components/knowledge-view';
+import { GoogleDocPickerDialog } from '@/components/google-doc-picker-dialog';
 import { ChatHistoryView } from '@/components/chat-history-view';
 import { HomeView } from '@/components/home-view';
 import { MeetingsView } from '@/components/meetings-view';
@@ -251,6 +252,43 @@ const stripKnowledgePrefixForWiki = (relPath: string) => {
 
 const stripMarkdownExtensionForWiki = (wikiPath: string) =>
   wikiPath.toLowerCase().endsWith('.md') ? wikiPath.slice(0, -3) : wikiPath
+
+type LinkedGoogleDocMeta = {
+  id: string
+  title: string
+  url?: string
+  syncedAt?: string
+}
+
+const parseLinkedGoogleDocFrontmatter = (raw: string | null | undefined): LinkedGoogleDocMeta | null => {
+  if (!raw?.includes('google_doc:')) return null
+  const doc: Partial<LinkedGoogleDocMeta> = {}
+  let inGoogleDoc = false
+  for (const line of raw.split('\n')) {
+    if (line.trim() === '---') {
+      inGoogleDoc = false
+      continue
+    }
+    const topLevel = line.match(/^([A-Za-z_][\w-]*):\s*.*$/)
+    if (topLevel) {
+      inGoogleDoc = topLevel[1] === 'google_doc'
+      continue
+    }
+    if (!inGoogleDoc) continue
+    const nested = line.match(/^\s+([A-Za-z_][\w-]*):\s*(.*)$/)
+    if (!nested) continue
+    const key = nested[1] as keyof LinkedGoogleDocMeta
+    if (!['id', 'title', 'url', 'syncedAt'].includes(key)) continue
+    let value = nested[2].trim()
+    try {
+      value = JSON.parse(value)
+    } catch {
+      value = value.replace(/^['"]|['"]$/g, '')
+    }
+    doc[key] = value
+  }
+  return doc.id && doc.title ? doc as LinkedGoogleDocMeta : null
+}
 
 const wikiPathCompareKey = (wikiPath: string) =>
   stripMarkdownExtensionForWiki(wikiPath).toLowerCase()
@@ -768,6 +806,8 @@ function App() {
   // Folder being browsed inside the knowledge view (null = root overview).
   // Lives in ViewState so folder drill-down participates in back/forward history.
   const [knowledgeViewFolderPath, setKnowledgeViewFolderPath] = useState<string | null>(null)
+  const [googleDocPickerOpen, setGoogleDocPickerOpen] = useState(false)
+  const [googleDocPickerTargetFolder, setGoogleDocPickerTargetFolder] = useState('knowledge')
   const [isChatHistoryOpen, setIsChatHistoryOpen] = useState(false)
   // Default landing view: Home in the middle with the chat docked on the right.
   const [isHomeOpen, setIsHomeOpen] = useState(true)
@@ -834,6 +874,7 @@ function App() {
   // Auto-save state
   const [isSaving, setIsSaving] = useState(false)
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
+  const [googleDocSyncDirection, setGoogleDocSyncDirection] = useState<'up' | 'down' | null>(null)
   const debouncedContent = useDebounce(editorContent, 500)
   const initialContentRef = useRef<string>('')
   const renameInProgressRef = useRef(false)
@@ -1352,6 +1393,30 @@ function App() {
     return isRecent
   }, [])
 
+  const reloadMarkdownFileIntoEditor = useCallback(async (path: string) => {
+    const result = await window.ipc.invoke('workspace:readFile', { path, encoding: 'utf8' })
+    const { raw: fm, body } = splitFrontmatter(result.data)
+    frontmatterByPathRef.current.set(path, fm)
+    setFileContent(result.data)
+    setEditorContent(body)
+    setEditorCacheForPath(path, body)
+    editorContentRef.current = body
+    editorPathRef.current = path
+    initialContentByPathRef.current.set(path, body)
+    initialContentRef.current = body
+    setLastSaved(new Date())
+    setEditorSessionByTabId((prev) => {
+      let changed = false
+      const next = { ...prev }
+      for (const tab of fileTabs) {
+        if (tab.path !== path) continue
+        next[tab.id] = (next[tab.id] ?? 0) + 1
+        changed = true
+      }
+      return changed ? next : prev
+    })
+  }, [fileTabs, setEditorCacheForPath])
+
   const handleEditorChange = useCallback((path: string, markdown: string) => {
     setEditorCacheForPath(path, markdown)
     const nextSelectedPath = selectedPathRef.current
@@ -1365,6 +1430,49 @@ function App() {
     editorContentRef.current = markdown
     setEditorContent(markdown)
   }, [setEditorCacheForPath])
+
+  const syncGoogleDocDown = useCallback(async () => {
+    const path = selectedPathRef.current
+    if (!path || !path.startsWith('knowledge/') || !path.endsWith('.md')) return
+
+    setGoogleDocSyncDirection('down')
+    markRecentLocalMarkdownWrite(path)
+    try {
+      await window.ipc.invoke('google-docs:refreshSnapshot', { path })
+      markRecentLocalMarkdownWrite(path)
+      await reloadMarkdownFileIntoEditor(path)
+      toast.success('Pulled latest Google Doc')
+    } catch (err) {
+      console.error('Failed to sync Google Doc down:', err)
+      toast.error(err instanceof Error ? err.message : 'Failed to pull Google Doc')
+    } finally {
+      setGoogleDocSyncDirection(null)
+    }
+  }, [markRecentLocalMarkdownWrite, reloadMarkdownFileIntoEditor])
+
+  const syncGoogleDocUp = useCallback(async () => {
+    const path = selectedPathRef.current
+    if (!path || !path.startsWith('knowledge/') || !path.endsWith('.md')) return
+
+    const body = editorContentByPathRef.current.get(path) ?? editorContentRef.current
+    const markdown = joinFrontmatter(frontmatterByPathRef.current.get(path) ?? null, body)
+    setGoogleDocSyncDirection('up')
+    markRecentLocalMarkdownWrite(path)
+    try {
+      const result = await window.ipc.invoke('google-docs:sync', { path, markdown })
+      if (!result.synced) {
+        throw new Error(result.error || 'This note is not linked to a Google Doc.')
+      }
+      markRecentLocalMarkdownWrite(path)
+      await reloadMarkdownFileIntoEditor(path)
+      toast.success('Pushed changes to Google Doc')
+    } catch (err) {
+      console.error('Failed to sync Google Doc up:', err)
+      toast.error(err instanceof Error ? err.message : 'Failed to push Google Doc')
+    } finally {
+      setGoogleDocSyncDirection(null)
+    }
+  }, [markRecentLocalMarkdownWrite, reloadMarkdownFileIntoEditor])
   // Keep processingRunIdsRef in sync for use in async callbacks
   useEffect(() => {
     processingRunIdsRef.current = processingRunIds
@@ -1656,6 +1764,7 @@ function App() {
     const baseline = initialContentByPathRef.current.get(pathAtStart) ?? initialContentRef.current
     if (debouncedContent === baseline) return
     if (!debouncedContent) return
+    if (selectedPathRef.current === pathAtStart && debouncedContent !== editorContentRef.current) return
 
     const saveFile = async () => {
       const wasActiveAtStart = selectedPathRef.current === pathAtStart
@@ -4517,6 +4626,10 @@ function App() {
         throw err
       }
     },
+    addGoogleDoc: (parentPath: string = 'knowledge') => {
+      setGoogleDocPickerTargetFolder(parentPath)
+      setGoogleDocPickerOpen(true)
+    },
     createFolder: async (parentPath: string = 'knowledge'): Promise<string> => {
       try {
         let index = 1
@@ -5255,7 +5368,10 @@ function App() {
     }
     return markdownTabs
   }, [fileTabs, selectedPath])
-
+  const selectedLinkedGoogleDoc = React.useMemo(() => {
+    if (!selectedPath?.startsWith('knowledge/') || !selectedPath.endsWith('.md')) return null
+    return parseLinkedGoogleDocFrontmatter(frontmatterByPathRef.current.get(selectedPath) ?? null)
+  }, [selectedPath, editorContent, editorContentByPath])
   return (
     <TooltipProvider delayDuration={0}>
       <SidebarSectionProvider defaultSection="tasks" onSectionChange={(section) => {
@@ -5364,6 +5480,46 @@ function App() {
                       </>
                     ) : null}
                   </div>
+                )}
+                {selectedLinkedGoogleDoc && (
+                  <>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          onClick={() => { void syncGoogleDocDown() }}
+                          disabled={googleDocSyncDirection !== null || isSaving || Boolean(viewingHistoricalVersion)}
+                          className="titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors self-center shrink-0 disabled:pointer-events-none disabled:opacity-50"
+                          aria-label="Sync down from Google Doc"
+                        >
+                          {googleDocSyncDirection === 'down' ? (
+                            <LoaderIcon className="size-4 animate-spin" />
+                          ) : (
+                            <DownloadIcon className="size-4" />
+                          )}
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">Sync down from Google Doc</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          onClick={() => { void syncGoogleDocUp() }}
+                          disabled={googleDocSyncDirection !== null || isSaving || Boolean(viewingHistoricalVersion)}
+                          className="titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors self-center shrink-0 disabled:pointer-events-none disabled:opacity-50"
+                          aria-label="Sync up to Google Doc"
+                        >
+                          {googleDocSyncDirection === 'up' ? (
+                            <LoaderIcon className="size-4 animate-spin" />
+                          ) : (
+                            <UploadCloud className="size-4" />
+                          )}
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">Sync up to Google Doc</TooltipContent>
+                    </Tooltip>
+                  </>
                 )}
                 {selectedPath && selectedPath.startsWith('knowledge/') && selectedPath.endsWith('.md') && (
                   <Tooltip>
@@ -5553,6 +5709,7 @@ function App() {
                     tree={tree}
                     actions={{
                       createNote: knowledgeActions.createNote,
+                      addGoogleDoc: knowledgeActions.addGoogleDoc,
                       createFolder: knowledgeActions.createFolder,
                       rename: knowledgeActions.rename,
                       remove: knowledgeActions.remove,
@@ -6052,6 +6209,17 @@ function App() {
           // webapp `/oauth/google/start` URL. The deep link returns and
           // completeRowboatGoogleConnect persists the tokens.
           void window.ipc.invoke('oauth:connect', { provider: 'google' })
+        }}
+      />
+      <GoogleDocPickerDialog
+        open={googleDocPickerOpen}
+        targetFolder={googleDocPickerTargetFolder}
+        onOpenChange={setGoogleDocPickerOpen}
+        onImported={(path) => {
+          const parentPath = path.split('/').slice(0, -1).join('/') || 'knowledge'
+          setExpandedPaths(prev => new Set([...prev, parentPath]))
+          void loadDirectory().then(setTree)
+          navigateToFile(path)
         }}
       />
       <Dialog open={showMeetingPermissions} onOpenChange={setShowMeetingPermissions}>

@@ -618,6 +618,65 @@ const ipcSchemas = {
     req: z.object({}),
     res: z.null(),
   },
+  // Google Docs linked knowledge files
+  'google-docs:getStatus': {
+    req: z.null(),
+    res: z.object({
+      connected: z.boolean(),
+      hasRequiredScopes: z.boolean(),
+      missingScopes: z.array(z.string()),
+    }),
+  },
+  'google-docs:list': {
+    req: z.object({
+      query: z.string().optional(),
+    }),
+    res: z.object({
+      files: z.array(z.object({
+        id: z.string(),
+        name: z.string(),
+        url: z.string(),
+        modifiedTime: z.string().nullable(),
+        owner: z.string().nullable(),
+      })),
+    }),
+  },
+  'google-docs:import': {
+    req: z.object({
+      fileId: z.string().min(1),
+      targetFolder: RelPath,
+    }),
+    res: z.object({
+      path: RelPath,
+      doc: z.object({
+        id: z.string(),
+        name: z.string(),
+        url: z.string(),
+        modifiedTime: z.string().nullable(),
+        owner: z.string().nullable(),
+      }),
+    }),
+  },
+  'google-docs:refreshSnapshot': {
+    req: z.object({
+      path: RelPath,
+    }),
+    res: z.object({
+      ok: z.literal(true),
+      syncedAt: z.string(),
+    }),
+  },
+  'google-docs:sync': {
+    req: z.object({
+      path: RelPath,
+      markdown: z.string(),
+    }),
+    res: z.object({
+      synced: z.boolean(),
+      syncedAt: z.string().optional(),
+      error: z.string().optional(),
+    }),
+  },
   // Search channels
   'search:query': {
     req: z.object({
