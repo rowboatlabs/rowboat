@@ -653,6 +653,63 @@ export const getToolGroupSummary = (tools: ToolCall[]): string => {
   return names.join(' · ')
 }
 
+// Past-tense action phrases for summarizing a finished tool group, e.g.
+// "read 3 files, listed directory". Keyed by builtin tool name.
+const TOOL_ACTION_VERBS: Record<string, { verb: string; one: string; many: string }> = {
+  'file-readText': { verb: 'read', one: 'file', many: 'files' },
+  'file-writeText': { verb: 'wrote', one: 'file', many: 'files' },
+  'file-editText': { verb: 'edited', one: 'file', many: 'files' },
+  'file-list': { verb: 'listed', one: 'directory', many: 'directories' },
+  'file-exists': { verb: 'checked', one: 'path', many: 'paths' },
+  'file-stat': { verb: 'inspected', one: 'file', many: 'files' },
+  'file-glob': { verb: 'searched for', one: 'file', many: 'files' },
+  'file-grep': { verb: 'searched', one: 'file', many: 'files' },
+  'file-mkdir': { verb: 'created', one: 'directory', many: 'directories' },
+  'file-rename': { verb: 'renamed', one: 'file', many: 'files' },
+  'file-copy': { verb: 'copied', one: 'file', many: 'files' },
+  'file-remove': { verb: 'removed', one: 'file', many: 'files' },
+  'file-getRoot': { verb: 'resolved', one: 'file root', many: 'file roots' },
+  'executeCommand': { verb: 'ran', one: 'command', many: 'commands' },
+  'executeMcpTool': { verb: 'ran', one: 'MCP tool', many: 'MCP tools' },
+  'listMcpServers': { verb: 'listed', one: 'MCP server', many: 'MCP servers' },
+  'listMcpTools': { verb: 'listed', one: 'MCP tool', many: 'MCP tools' },
+  'save-to-memory': { verb: 'saved', one: 'memory', many: 'memories' },
+  'loadSkill': { verb: 'loaded', one: 'skill', many: 'skills' },
+  'parseFile': { verb: 'parsed', one: 'file', many: 'files' },
+}
+
+// Summarize what a group of tools actually did, grouping identical actions
+// and counting them: "read 3 files, listed directory". Unmapped tools fall
+// back to their lowercased display name.
+export const getToolActionsSummary = (tools: ToolCall[]): string => {
+  const order: string[] = []
+  const grouped = new Map<string, { phrase: typeof TOOL_ACTION_VERBS[string] | null; count: number; fallback: string }>()
+  for (const tool of tools) {
+    const phrase = TOOL_ACTION_VERBS[tool.name] ?? null
+    const key = phrase ? `${phrase.verb}|${phrase.one}` : tool.name
+    const existing = grouped.get(key)
+    if (existing) {
+      existing.count++
+    } else {
+      grouped.set(key, { phrase, count: 1, fallback: getToolDisplayName(tool) })
+      order.push(key)
+    }
+  }
+  const phrases = order.map((key) => {
+    const { phrase, count, fallback } = grouped.get(key)!
+    if (!phrase) return fallback.toLowerCase()
+    if (count > 1) return `${phrase.verb} ${count} ${phrase.many}`
+    const article = /^[aeiou]/i.test(phrase.one) ? 'an' : 'a'
+    return `${phrase.verb} ${article} ${phrase.one}`
+  })
+  // Show at most two operations; collapse the rest into "more...".
+  const MAX_ACTIONS = 2
+  if (phrases.length > MAX_ACTIONS) {
+    return `${phrases.slice(0, MAX_ACTIONS).join(', ')}, more...`
+  }
+  return phrases.join(', ')
+}
+
 export const inferRunTitleFromMessage = (content: string): string | undefined => {
   const { message } = parseAttachedFiles(content)
   const normalized = message.replace(/\s+/g, ' ').trim()

@@ -382,7 +382,8 @@ function ChatInputInner({
     controller.textInput.clear()
     controller.mentions.clearMentions()
     setAttachments([])
-    setSearchEnabled(false)
+    // Web search toggle stays on for the rest of the chat session; the user
+    // turns it off explicitly. (Not persisted across app restarts.)
   }, [attachments, canSubmit, controller, message, onSubmit, searchEnabled])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
