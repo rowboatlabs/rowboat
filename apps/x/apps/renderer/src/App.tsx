@@ -5,7 +5,7 @@ import { RunEvent, ListRunsResponse } from '@x/shared/src/runs.js';
 import type { LanguageModelUsage, ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
-import { CheckIcon, LoaderIcon, PanelLeftIcon, ArrowRight, MessageSquare, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon, X } from 'lucide-react';
+import { CheckIcon, LoaderIcon, PanelLeftIcon, ArrowRight, MessageSquare, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MarkdownEditor, type MarkdownEditorHandle } from './components/markdown-editor';
 import { ChatSidebar } from './components/chat-sidebar';
@@ -3391,8 +3391,10 @@ function App() {
     setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false)
   }, [selectedPath, isGraphOpen, isSuggestedTopicsOpen, isMeetingsOpen, isLiveNotesOpen, isBgTasksOpen, isEmailOpen, isWorkspaceOpen, isKnowledgeViewOpen, isChatHistoryOpen, dismissBrowserOverlay])
 
-  const handleCloseFullScreenChat = useCallback(() => {
+  const handleCloseFullScreenChat = useCallback((): boolean => {
+    let restored = false
     if (expandedFrom) {
+      restored = true
       if (expandedFrom.graph) {
         setIsGraphOpen(true)
         setIsSuggestedTopicsOpen(false)
@@ -3434,10 +3436,16 @@ function App() {
         setIsSuggestedTopicsOpen(false)
         setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false)
         setSelectedPath(expandedFrom.path)
+      } else {
+        // expandedFrom was captured from a view this restorer doesn't track
+        // (e.g. Home): there's nothing to re-open, so report it and let the
+        // caller fall back instead of leaving a blank full-screen chat.
+        restored = false
       }
       setExpandedFrom(null)
       setIsRightPaneMaximized(false)
     }
+    return restored
   }, [expandedFrom])
 
   const currentViewState = React.useMemo<ViewState>(() => {
@@ -3885,12 +3893,13 @@ function App() {
   const pushChatToSidePane = useCallback(() => {
     setIsRightPaneMaximized(false)
     setIsChatSidebarOpen(true)
-    if (expandedFrom) {
-      handleCloseFullScreenChat()
-    } else {
+    // Restore the view we expanded from; if there was nothing to restore
+    // (e.g. the chat was started fresh from Home), fall back to Home so a
+    // single click always docks the chat instead of needing two.
+    if (!handleCloseFullScreenChat()) {
       void navigateToView({ type: 'home' })
     }
-  }, [expandedFrom, handleCloseFullScreenChat, navigateToView])
+  }, [handleCloseFullScreenChat, navigateToView])
 
   const navigateBack = useCallback(async () => {
     const { back, forward } = historyRef.current
@@ -5375,7 +5384,7 @@ function App() {
                     : (viewOpen && !isChatSidebarOpen)
                       ? { onClick: openChatSidePane, icon: <MessageSquare className="size-5" />, label: 'Open chat' }
                       : (viewOpen && isChatSidebarOpen && !isRightPaneMaximized)
-                        ? { onClick: toggleRightPaneMaximize, icon: <X className="size-5" />, label: 'Expand chat' }
+                        ? { onClick: () => setIsChatSidebarOpen(false), icon: <ArrowRight className="size-5" />, label: 'Expand pane' }
                         : null
                   return (
                     <Tooltip>
@@ -5899,7 +5908,6 @@ function App() {
                 }}
                 onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
                 onOpenFullScreen={toggleRightPaneMaximize}
-                onCloseChat={() => { setIsRightPaneMaximized(false); setIsChatSidebarOpen(false) }}
                 conversation={conversation}
                 currentAssistantMessage={currentAssistantMessage}
                 chatTabStates={chatViewStateByTab}
