@@ -80,7 +80,7 @@ import { splitFrontmatter, joinFrontmatter } from '@/lib/frontmatter'
 import { extractConferenceLink } from '@/lib/calendar-event'
 import { OnboardingModal } from '@/components/onboarding'
 import { ComposioGoogleMigrationModal } from '@/components/composio-google-migration-modal'
-import { CommandPalette, type CommandPaletteMention } from '@/components/search-dialog'
+import { CommandPalette, type CommandPaletteMention, type SearchType } from '@/components/search-dialog'
 import { LiveNoteSidebar } from '@/components/live-note-sidebar'
 import { BackgroundTaskDetail } from '@/components/background-task-detail'
 import { BrowserPane } from '@/components/browser-pane/BrowserPane'
@@ -1253,6 +1253,8 @@ function App() {
 
   // Search state
   const [isSearchOpen, setIsSearchOpen] = useState(false)
+  // Optional scope override for the next time search opens (cleared on close).
+  const [searchDefaultScope, setSearchDefaultScope] = useState<SearchType | undefined>(undefined)
 
   // Background tasks state
   type BackgroundTaskItem = {
@@ -5553,7 +5555,7 @@ function App() {
                     }}
                     onOpenNote={(path) => navigateToFile(path)}
                     onOpenGraph={() => knowledgeActions.openGraph()}
-                    onOpenSearch={() => setIsSearchOpen(true)}
+                    onOpenSearch={() => { setSearchDefaultScope('knowledge'); setIsSearchOpen(true) }}
                     onOpenBases={() => knowledgeActions.openBases()}
                     onVoiceNoteCreated={handleVoiceNoteCreated}
                   />
@@ -6016,7 +6018,8 @@ function App() {
         </div>
         <CommandPalette
           open={isSearchOpen}
-          onOpenChange={setIsSearchOpen}
+          onOpenChange={(o) => { setIsSearchOpen(o); if (!o) setSearchDefaultScope(undefined) }}
+          defaultScope={searchDefaultScope}
           onSelectFile={navigateToFile}
           onSelectRun={(id) => { void navigateToView({ type: 'chat', runId: id }) }}
         />

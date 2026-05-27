@@ -21,7 +21,7 @@ interface SearchResult {
   path: string
 }
 
-type SearchType = 'knowledge' | 'chat'
+export type SearchType = 'knowledge' | 'chat'
 
 function activeTabToTypes(section: ActiveSection): SearchType[] {
   if (section === 'knowledge') return ['knowledge']
@@ -46,6 +46,9 @@ interface CommandPaletteProps {
   onOpenChange: (open: boolean) => void
   onSelectFile: (path: string) => void
   onSelectRun: (runId: string) => void
+  // Overrides the sidebar-section default for the initial scope (e.g. the
+  // knowledge view opens search scoped to knowledge).
+  defaultScope?: SearchType
 }
 
 export function CommandPalette({
@@ -53,6 +56,7 @@ export function CommandPalette({
   onOpenChange,
   onSelectFile,
   onSelectRun,
+  defaultScope,
 }: CommandPaletteProps) {
   const { activeSection } = useSidebarSection()
   const searchInputRef = useRef<HTMLInputElement>(null)
@@ -61,7 +65,7 @@ export function CommandPalette({
   const [results, setResults] = useState<SearchResult[]>([])
   const [isSearching, setIsSearching] = useState(false)
   const [activeTypes, setActiveTypes] = useState<Set<SearchType>>(
-    () => new Set(activeTabToTypes(activeSection))
+    () => new Set(defaultScope ? [defaultScope] : activeTabToTypes(activeSection))
   )
   const debouncedQuery = useDebounce(query, 250)
 
@@ -69,9 +73,9 @@ export function CommandPalette({
   useEffect(() => {
     if (open) {
       setQuery('')
-      setActiveTypes(new Set(activeTabToTypes(activeSection)))
+      setActiveTypes(new Set(defaultScope ? [defaultScope] : activeTabToTypes(activeSection)))
     }
-  }, [open, activeSection])
+  }, [open, activeSection, defaultScope])
 
   useEffect(() => {
     if (!open) return
