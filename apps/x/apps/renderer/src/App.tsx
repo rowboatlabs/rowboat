@@ -4548,10 +4548,8 @@ function App() {
       void navigateToView({ type: 'workspace', path })
     },
     openKnowledgeView: () => {
-      if (!selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isMeetingsOpen && !isLiveNotesOpen && !isBgTasksOpen && !isEmailOpen && !isWorkspaceOpen && !isKnowledgeViewOpen && !isChatHistoryOpen && !selectedBackgroundTask) {
-        setIsChatSidebarOpen(false)
-        setIsRightPaneMaximized(false)
-      }
+      // Open in the middle pane without touching the chat sidebar — leave it
+      // open or closed exactly as the user had it (matches Email/Meetings).
       void navigateToView({ type: 'knowledge-view' })
     },
     createWorkspace: async (name: string): Promise<string> => {
