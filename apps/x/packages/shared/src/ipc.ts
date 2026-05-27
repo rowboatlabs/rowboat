@@ -290,6 +290,15 @@ const ipcSchemas = {
     }),
     res: z.object({ success: z.boolean() }),
   },
+  'runs:downloadLog': {
+    req: z.object({
+      runId: z.string().min(1),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
   'runs:events': {
     req: z.null(),
     res: z.null(),
