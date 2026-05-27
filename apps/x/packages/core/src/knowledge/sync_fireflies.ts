@@ -112,6 +112,13 @@ function sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+class RateLimitError extends Error {
+    constructor(message: string, public readonly retryAfterMs?: number) {
+        super(message);
+        this.name = 'RateLimitError';
+    }
+}
+
 /**
  * Execute an API call with rate limit handling and exponential backoff
  */
@@ -127,23 +134,42 @@ async function callWithRateLimit<T>(
             const result = await operation();
             return result;
         } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : String(error);
+            let retryAfterMs: number | undefined;
+            let isRateLimit = false;
 
-            // Check if it's a rate limit error (429 Too Many Requests)
-            if (errorMessage.includes('429') ||
-                errorMessage.includes('Too Many Requests') ||
-                errorMessage.includes('too many requests') ||
-                errorMessage.includes('rate limit')) {
+            if (error instanceof RateLimitError) {
+                isRateLimit = true;
+                retryAfterMs = error.retryAfterMs;
+            } else {
+                const errorMessage = error instanceof Error ? error.message : String(error);
 
+                // Check if it's a rate limit error (429 Too Many Requests)
+                if (errorMessage.includes('429') ||
+                    errorMessage.includes('Too Many Requests') ||
+                    errorMessage.includes('too many requests') ||
+                    errorMessage.includes('rate limit')) {
+                    isRateLimit = true;
+                }
+
+                // If it's an MCP error, it might have data with retry info
+                // We'll check for this pattern if we can identify it
+                const errorObj = error as any;
+                if (errorObj?.data?.retryAfter) {
+                    retryAfterMs = errorObj.data.retryAfter * 1000;
+                }
+            }
+
+            if (isRateLimit) {
                 retries++;
-                console.log(`[Fireflies] Rate limit hit for ${operationName}. Retry ${retries}/${MAX_RETRIES} in ${delay/1000}s...`);
+                const currentDelay = retryAfterMs !== undefined ? retryAfterMs : delay;
+                console.log(`[Fireflies] Rate limit hit for ${operationName}. Retry ${retries}/${MAX_RETRIES} in ${currentDelay / 1000}s...`);
 
                 if (retries >= MAX_RETRIES) {
                     console.error(`[Fireflies] Max retries reached for ${operationName}. Skipping.`);
                     return null;
                 }
 
-                await sleep(delay);
+                await sleep(currentDelay);
                 delay *= 2; // Exponential backoff
             } else {
                 // Not a rate limit error, throw it
@@ -205,17 +231,17 @@ function parseMcpResult<T>(result: McpToolResult): T | null {
         console.error('[Fireflies] MCP tool returned error');
         return null;
     }
-    
+
     if (!result.content || result.content.length === 0) {
         return null;
     }
-    
+
     // Find text content
     const textContent = result.content.find(c => c.type === 'text' && c.text);
     if (!textContent || !textContent.text) {
         return null;
     }
-    
+
     try {
         return JSON.parse(textContent.text) as T;
     } catch {
@@ -231,19 +257,19 @@ function parseMcpResult<T>(result: McpToolResult): T | null {
  */
 function parseToonTranscript(text: string): FirefliesTranscriptSentence[] {
     const sentences: FirefliesTranscriptSentence[] = [];
-    
+
     // Find the Sentences section
     const sentencesMatch = text.match(/Sentences:\s*([\s\S]*)/);
     if (!sentencesMatch) {
         return sentences;
     }
-    
+
     const sentencesText = sentencesMatch[1];
-    
+
     // Split by newlines and parse each line
     // Format: "Speaker Name: sentence text"
     const lines = sentencesText.split('\n').filter(line => line.trim());
-    
+
     for (const line of lines) {
         // Match "Speaker Name: text" pattern
         const match = line.match(/^([^:]+):\s*(.+)$/);
@@ -254,7 +280,7 @@ function parseToonTranscript(text: string): FirefliesTranscriptSentence[] {
             });
         }
     }
-    
+
     return sentences;
 }
 
@@ -265,7 +291,7 @@ function getRawText(result: McpToolResult): string | null {
     if (result.isError || !result.content || result.content.length === 0) {
         return null;
     }
-    
+
     const textContent = result.content.find(c => c.type === 'text' && c.text);
     return textContent?.text || null;
 }
@@ -275,52 +301,52 @@ function getRawText(result: McpToolResult): string | null {
  */
 function meetingToMarkdown(meeting: FirefliesMeetingData): string {
     let md = `# ${meeting.title || 'Untitled Meeting'}\n\n`;
-    
+
     // Metadata
     md += `**Meeting ID:** ${meeting.id}\n`;
-    
+
     const dateStr = meeting.dateString || meeting.date;
     if (dateStr) {
         const date = new Date(dateStr);
         md += `**Date:** ${date.toLocaleString()}\n`;
     }
-    
+
     const organizer = meeting.organizerEmail || meeting.organizer_email;
     if (organizer) {
         md += `**Organizer:** ${organizer}\n`;
     }
-    
+
     // Handle participants from either participants array or meetingAttendees
-    const participants = meeting.participants || 
+    const participants = meeting.participants ||
         meeting.meetingAttendees?.map(a => a.displayName || a.email) || [];
     if (participants.length > 0) {
         md += `**Participants:** ${participants.join(', ')}\n`;
     }
-    
+
     if (meeting.meetingLink) {
         md += `**Meeting Link:** ${meeting.meetingLink}\n`;
     }
-    
+
     if (meeting.duration) {
         md += `**Duration:** ${formatDuration(meeting.duration)}\n`;
     }
-    
+
     md += '\n---\n\n';
-    
+
     // Summary section
     if (meeting.summary) {
         const summary = meeting.summary;
-        
+
         // Handle short_summary or overview
         const overview = summary.short_summary || summary.overview;
         if (overview) {
             md += `## Overview\n\n${overview}\n\n`;
         }
-        
+
         if (summary.keywords && summary.keywords.length > 0) {
             md += `## Keywords\n\n${summary.keywords.join(', ')}\n\n`;
         }
-        
+
         if (summary.topics && summary.topics.length > 0) {
             md += `## Topics Discussed\n\n`;
             for (const topic of summary.topics) {
@@ -328,7 +354,7 @@ function meetingToMarkdown(meeting: FirefliesMeetingData): string {
             }
             md += '\n';
         }
-        
+
         // Handle action_items as string or array
         if (summary.action_items) {
             md += `## Action Items\n\n`;
@@ -342,7 +368,7 @@ function meetingToMarkdown(meeting: FirefliesMeetingData): string {
                 md += '\n';
             }
         }
-        
+
         if (summary.outline && summary.outline.length > 0) {
             md += `## Outline\n\n`;
             for (const point of summary.outline) {
@@ -351,27 +377,27 @@ function meetingToMarkdown(meeting: FirefliesMeetingData): string {
             md += '\n';
         }
     }
-    
+
     // Transcript section - handle both nested and flat sentence arrays
     const sentences = meeting.transcript?.sentences || meeting.sentences;
     if (sentences && sentences.length > 0) {
         md += `## Transcript\n\n`;
-        
+
         let currentSpeaker = '';
         for (const sentence of sentences) {
             const speaker = sentence.speaker_name || sentence.speakerName || 'Unknown';
             const startTime = sentence.start_time ?? sentence.startTime;
             const timestamp = formatTimestamp(startTime);
-            
+
             if (speaker !== currentSpeaker) {
                 md += `\n### ${speaker}\n`;
                 currentSpeaker = speaker;
             }
-            
+
             md += `${timestamp} ${sentence.text}\n`;
         }
     }
-    
+
     return md;
 }
 
@@ -432,7 +458,7 @@ async function syncMeetings() {
             }) as McpToolResult,
             'get_transcripts'
         );
-        
+
         // Handle rate-limited failure
         if (!transcriptsResult) {
             console.log('[Fireflies] Failed to fetch transcripts due to rate limit');
@@ -458,7 +484,7 @@ async function syncMeetings() {
             saveState(toDateStr, Array.from(syncedIds), new Date().toISOString());
             return;
         }
-        
+
         console.log(`[Fireflies] Found ${meetings.length} transcripts`);
 
         const newMeetings = meetings.filter(m => m.id && !syncedIds.has(m.id));
@@ -485,7 +511,7 @@ async function syncMeetings() {
             items: limitedTitles.items,
             truncated: limitedTitles.truncated,
         });
-        
+
         // Step 2: Fetch and save each transcript
         let newCount = 0;
         let processedInBatch = 0;
@@ -508,7 +534,7 @@ async function syncMeetings() {
 
             // Add delay between API calls to respect rate limits
             if (processedInBatch > 0) {
-                console.log(`[Fireflies] Waiting ${API_DELAY_MS/1000}s before next API call...`);
+                console.log(`[Fireflies] Waiting ${API_DELAY_MS / 1000}s before next API call...`);
                 await sleep(API_DELAY_MS);
             }
 
@@ -527,7 +553,7 @@ async function syncMeetings() {
                         }) as McpToolResult,
                         `get_transcript_${meetingId}`
                     );
-                    
+
                     if (transcriptResult) {
                         // Try JSON first
                         const transcriptData = parseMcpResult<{ sentences?: FirefliesTranscriptSentence[] } | FirefliesTranscriptSentence[]>(transcriptResult);
@@ -552,7 +578,7 @@ async function syncMeetings() {
                 } catch (err) {
                     console.log(`[Fireflies] Could not fetch transcript sentences: ${err}`);
                 }
-                
+
                 // Build meeting data from the list response + transcript
                 const meetingData: FirefliesMeetingData = {
                     id: meeting.id,
@@ -566,7 +592,7 @@ async function syncMeetings() {
                     summary: meeting.summary,
                     sentences: sentences,
                 };
-                
+
                 // Convert to markdown and save
                 const markdown = meetingToMarkdown(meetingData);
                 const meetingDate = new Date(meetingData.dateString || meetingData.date || Date.now());
@@ -579,7 +605,7 @@ async function syncMeetings() {
                 fs.mkdirSync(dateDir, { recursive: true });
                 const filename = `${cleanFilename(meetingData.title || 'untitled')}.md`;
                 const filePath = path.join(dateDir, filename);
-                
+
                 fs.writeFileSync(filePath, markdown);
                 console.log(`[Fireflies] Saved: ${filename}`);
 
@@ -607,7 +633,7 @@ async function syncMeetings() {
             outcome: newCount > 0 ? 'ok' : 'idle',
             summary: { transcripts: newCount },
         });
-        
+
     } catch (error) {
         console.error('[Fireflies] Error during sync:', error);
         if (run) {
@@ -629,7 +655,7 @@ async function syncMeetings() {
                 outcome: 'error',
             });
         }
-        
+
         // Check if it's an auth error
         const errorMessage = error instanceof Error ? error.message : String(error);
         if (errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
@@ -651,7 +677,7 @@ export async function init() {
         try {
             // Check if credentials are available
             const hasCredentials = await FirefliesClientFactory.hasValidCredentials();
-            
+
             if (!hasCredentials) {
                 console.log('[Fireflies] OAuth credentials not available. Sleeping...');
             } else {
