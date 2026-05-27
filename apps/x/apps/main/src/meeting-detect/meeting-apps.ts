@@ -7,13 +7,15 @@ export type MeetingAppKind = "zoom" | "teams" | "slack" | "discord" | "webex" | 
 interface AppRule {
     kind: MeetingAppKind;
     // Case-insensitive substring match against the executable path / basename
-    // (Windows: full exe path from registry; macOS: command name from lsof).
+    // (Windows: full exe path from registry; macOS: process name from pmset).
     match: string[];
 }
 
 const RULES: AppRule[] = [
     { kind: "zoom", match: ["zoom.exe", "zoom.us", "cpthost.exe"] },
-    { kind: "teams", match: ["ms-teams.exe", "teams.exe", "microsoft teams"] },
+    // "msteams" covers the current macOS/Windows process name (the new Teams ships
+    // as MSTeams); the others cover the classic client and the AUMID/bundle forms.
+    { kind: "teams", match: ["ms-teams.exe", "teams.exe", "msteams", "microsoft teams"] },
     { kind: "slack", match: ["slack.exe", "slack helper", "slack"] },
     { kind: "discord", match: ["discord.exe", "discord"] },
     { kind: "webex", match: ["webex.exe", "ciscowebex", "webexmta"] },
