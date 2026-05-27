@@ -26,15 +26,21 @@ import {
   Trash2Icon,
   ImageIcon,
   DownloadIcon,
+  ChevronDownIcon,
   FileTextIcon,
   FileIcon,
   FileTypeIcon,
+  CloudDownloadIcon,
+  LoaderIcon,
+  TriangleIcon,
+  UploadCloudIcon,
   Radio,
 } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 
@@ -45,6 +51,15 @@ interface EditorToolbarProps {
   onExport?: (format: 'md' | 'pdf' | 'docx') => void
   onOpenLiveNote?: () => void
   liveState?: LivePillState
+  googleDoc?: GoogleDocToolbarState
+}
+
+export interface GoogleDocToolbarState {
+  title: string
+  isSyncing?: 'up' | 'down' | null
+  onOpen: () => void
+  onSyncDown: () => void
+  onSyncUp: () => void
 }
 
 export type LivePillVariant = 'passive' | 'idle' | 'running' | 'error'
@@ -67,6 +82,7 @@ export function EditorToolbar({
   onExport,
   onOpenLiveNote,
   liveState,
+  googleDoc,
 }: EditorToolbarProps) {
   const [linkUrl, setLinkUrl] = useState('')
   const [isLinkPopoverOpen, setIsLinkPopoverOpen] = useState(false)
@@ -398,6 +414,45 @@ export function EditorToolbar({
               <DropdownMenuItem onClick={() => onExport('docx')}>
                 <FileTypeIcon className="size-4 mr-2" />
                 Word (.docx)
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </>
+      )}
+
+      {googleDoc && (
+        <>
+          <div className="separator" />
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 gap-1 px-2"
+                title={`Google Doc: ${googleDoc.title}`}
+                disabled={Boolean(googleDoc.isSyncing)}
+              >
+                {googleDoc.isSyncing ? (
+                  <LoaderIcon className="size-4 animate-spin" />
+                ) : (
+                  <TriangleIcon className="size-4" />
+                )}
+                <ChevronDownIcon className="size-3" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={googleDoc.onOpen}>
+                <TriangleIcon className="size-4 mr-2" />
+                Open Google Doc
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={googleDoc.onSyncDown} disabled={Boolean(googleDoc.isSyncing)}>
+                <CloudDownloadIcon className="size-4 mr-2" />
+                Sync down
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={googleDoc.onSyncUp} disabled={Boolean(googleDoc.isSyncing)}>
+                <UploadCloudIcon className="size-4 mr-2" />
+                Sync up
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

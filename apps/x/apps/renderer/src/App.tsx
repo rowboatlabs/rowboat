@@ -5,7 +5,7 @@ import { RunEvent, ListRunsResponse } from '@x/shared/src/runs.js';
 import type { LanguageModelUsage, ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
-import { Bug, CheckIcon, LoaderIcon, PanelLeftIcon, ArrowRight, MessageSquare, ChevronLeftIcon, ChevronRightIcon, MoreHorizontal, Plus, HistoryIcon, DownloadIcon, UploadCloud } from 'lucide-react';
+import { Bug, CheckIcon, LoaderIcon, PanelLeftIcon, ArrowRight, MessageSquare, ChevronLeftIcon, ChevronRightIcon, MoreHorizontal, Plus, HistoryIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MarkdownEditor, type MarkdownEditorHandle } from './components/markdown-editor';
 import { ChatSidebar } from './components/chat-sidebar';
@@ -1431,8 +1431,8 @@ function App() {
     setEditorContent(markdown)
   }, [setEditorCacheForPath])
 
-  const syncGoogleDocDown = useCallback(async () => {
-    const path = selectedPathRef.current
+  const syncGoogleDocDown = useCallback(async (targetPath?: string) => {
+    const path = targetPath ?? selectedPathRef.current
     if (!path || !path.startsWith('knowledge/') || !path.endsWith('.md')) return
 
     setGoogleDocSyncDirection('down')
@@ -1450,8 +1450,8 @@ function App() {
     }
   }, [markRecentLocalMarkdownWrite, reloadMarkdownFileIntoEditor])
 
-  const syncGoogleDocUp = useCallback(async () => {
-    const path = selectedPathRef.current
+  const syncGoogleDocUp = useCallback(async (targetPath?: string) => {
+    const path = targetPath ?? selectedPathRef.current
     if (!path || !path.startsWith('knowledge/') || !path.endsWith('.md')) return
 
     const body = editorContentByPathRef.current.get(path) ?? editorContentRef.current
@@ -5368,10 +5368,6 @@ function App() {
     }
     return markdownTabs
   }, [fileTabs, selectedPath])
-  const selectedLinkedGoogleDoc = React.useMemo(() => {
-    if (!selectedPath?.startsWith('knowledge/') || !selectedPath.endsWith('.md')) return null
-    return parseLinkedGoogleDocFrontmatter(frontmatterByPathRef.current.get(selectedPath) ?? null)
-  }, [selectedPath, editorContent, editorContentByPath])
   return (
     <TooltipProvider delayDuration={0}>
       <SidebarSectionProvider defaultSection="tasks" onSectionChange={(section) => {
@@ -5480,46 +5476,6 @@ function App() {
                       </>
                     ) : null}
                   </div>
-                )}
-                {selectedLinkedGoogleDoc && (
-                  <>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          type="button"
-                          onClick={() => { void syncGoogleDocDown() }}
-                          disabled={googleDocSyncDirection !== null || isSaving || Boolean(viewingHistoricalVersion)}
-                          className="titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors self-center shrink-0 disabled:pointer-events-none disabled:opacity-50"
-                          aria-label="Sync down from Google Doc"
-                        >
-                          {googleDocSyncDirection === 'down' ? (
-                            <LoaderIcon className="size-4 animate-spin" />
-                          ) : (
-                            <DownloadIcon className="size-4" />
-                          )}
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom">Sync down from Google Doc</TooltipContent>
-                    </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          type="button"
-                          onClick={() => { void syncGoogleDocUp() }}
-                          disabled={googleDocSyncDirection !== null || isSaving || Boolean(viewingHistoricalVersion)}
-                          className="titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors self-center shrink-0 disabled:pointer-events-none disabled:opacity-50"
-                          aria-label="Sync up to Google Doc"
-                        >
-                          {googleDocSyncDirection === 'up' ? (
-                            <LoaderIcon className="size-4 animate-spin" />
-                          ) : (
-                            <UploadCloud className="size-4" />
-                          )}
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom">Sync up to Google Doc</TooltipContent>
-                    </Tooltip>
-                  </>
                 )}
                 {selectedPath && selectedPath.startsWith('knowledge/') && selectedPath.endsWith('.md') && (
                   <Tooltip>
@@ -5794,6 +5750,8 @@ function App() {
                           ? tab.id === activeFileTabId || tab.path === selectedPath
                           : tab.path === selectedPath
                         const isViewingHistory = viewingHistoricalVersion && isActive && versionHistoryPath === tab.path
+                        const tabFrontmatter = frontmatterByPathRef.current.get(tab.path) ?? null
+                        const linkedGoogleDoc = parseLinkedGoogleDocFrontmatter(tabFrontmatter)
                         const tabContent = isViewingHistory
                           ? viewingHistoricalVersion.content
                           : editorContentByPath[tab.path]
@@ -5824,7 +5782,7 @@ function App() {
                               wikiLinks={wikiLinkConfig}
                               onImageUpload={handleImageUpload}
                               editorSessionKey={editorSessionByTabId[tab.id] ?? 0}
-                              frontmatter={frontmatterByPathRef.current.get(tab.path) ?? null}
+                              frontmatter={tabFrontmatter}
                               onFrontmatterChange={(newRaw) => {
                                 frontmatterByPathRef.current.set(tab.path, newRaw)
                                 // Write updated frontmatter to disk immediately
@@ -5846,6 +5804,17 @@ function App() {
                                 }
                               }}
                               editable={!isViewingHistory}
+                              googleDoc={linkedGoogleDoc && !isViewingHistory ? {
+                                title: linkedGoogleDoc.title,
+                                isSyncing: isActive ? googleDocSyncDirection : null,
+                                onOpen: () => {
+                                  if (linkedGoogleDoc.url) {
+                                    window.open(linkedGoogleDoc.url, '_blank')
+                                  }
+                                },
+                                onSyncDown: () => { void syncGoogleDocDown(tab.path) },
+                                onSyncUp: () => { void syncGoogleDocUp(tab.path) },
+                              } : undefined}
                               onExport={async (format) => {
                                 const markdown = tabContent
                                 const title = getBaseName(tab.path)
