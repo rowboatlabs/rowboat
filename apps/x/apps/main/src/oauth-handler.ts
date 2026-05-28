@@ -508,7 +508,7 @@ export async function disconnectProvider(provider: string): Promise<{ success: b
       if (connection.mode === 'rowboat' && connection.tokens?.access_token) {
         try {
           const revokeUrl = `https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(connection.tokens.access_token)}`;
-          const res = await fetch(revokeUrl, { method: 'POST' });
+          const res = await fetch(revokeUrl, { method: 'POST', signal: AbortSignal.timeout(5000) });
           if (!res.ok) {
             console.warn(`[OAuth] Google revoke returned ${res.status}; continuing with local disconnect`);
           }
@@ -529,6 +529,50 @@ export async function disconnectProvider(provider: string): Promise<{ success: b
   } catch (error) {
     console.error('OAuth disconnect failed:', error);
     return { success: false };
+  }
+}
+
+/**
+ * Startup migration for Google scope changes. When a connected Google grant was
+ * issued before a scope was added (e.g. old installs on gmail.readonly that
+ * never received gmail.modify), disconnect it so the renderer re-prompts the
+ * user through the normal connect flow and they re-grant with the current
+ * scopes. The currently-requested scopes in the provider config are the source
+ * of truth: a grant missing any of them is treated as stale.
+ *
+ * Tokens with no recorded scopes (very old installs that never persisted them)
+ * are also treated as stale. Safe to call on every startup — it's a no-op once
+ * the grant covers all current scopes.
+ */
+export async function disconnectGoogleIfScopesStale(): Promise<void> {
+  try {
+    const oauthRepo = getOAuthRepo();
+    const connection = await oauthRepo.read('google');
+
+    // Not connected — nothing to migrate.
+    if (!connection.tokens) {
+      return;
+    }
+
+    const providerConfig = await getProviderConfig('google');
+    const requiredScopes = providerConfig.scopes ?? [];
+    if (requiredScopes.length === 0) {
+      return;
+    }
+
+    const granted = new Set(connection.tokens.scopes ?? []);
+    const missingScopes = requiredScopes.filter((scope) => !granted.has(scope));
+    if (missingScopes.length === 0) {
+      return;
+    }
+
+    console.log(
+      `[OAuth] Google grant is missing current scopes [${missingScopes.join(', ')}]; ` +
+      'disconnecting so the user can reconnect with the new scopes.'
+    );
+    await disconnectProvider('google');
+  } catch (error) {
+    console.error('[OAuth] Google scope migration check failed:', error);
   }
 }
 
