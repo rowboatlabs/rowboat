@@ -5,7 +5,7 @@ import { RunEvent, ListRunsResponse } from '@x/shared/src/runs.js';
 import type { LanguageModelUsage, ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
-import { Bug, CheckIcon, LoaderIcon, PanelLeftIcon, ArrowRight, MessageSquare, ChevronLeftIcon, ChevronRightIcon, MoreHorizontal, Plus, HistoryIcon } from 'lucide-react';
+import { CheckIcon, LoaderIcon, PanelLeftIcon, ArrowRight, MessageSquare, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MarkdownEditor, type MarkdownEditorHandle } from './components/markdown-editor';
 import { ChatSidebar } from './components/chat-sidebar';
@@ -65,12 +65,6 @@ import {
 } from "@/components/ui/sidebar"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
 import { Toaster } from "@/components/ui/sonner"
 import { BillingErrorDialog } from "@/components/billing-error-dialog"
@@ -5215,25 +5209,6 @@ function App() {
     if (tabId === activeChatTabId) return activeChatTabState
     return chatViewStateByTab[tabId] ?? emptyChatTabState
   }, [activeChatTabId, activeChatTabState, chatViewStateByTab, emptyChatTabState])
-  const activeRunIdForDownload = activeChatTabState.runId
-  const handleDownloadActiveChatLog = useCallback(async () => {
-    if (!activeRunIdForDownload) {
-      toast.error('No chat log available yet')
-      return
-    }
-
-    try {
-      const result = await window.ipc.invoke('runs:downloadLog', { runId: activeRunIdForDownload })
-      if (result.success) {
-        toast.success('Chat log saved')
-      } else if (result.error) {
-        toast.error(result.error)
-      }
-    } catch (err) {
-      console.error('Download chat log failed:', err)
-      toast.error('Failed to download chat log')
-    }
-  }, [activeRunIdForDownload])
   const selectedTask = selectedBackgroundTask
     ? backgroundTasks.find(t => t.name === selectedBackgroundTask)
     : null
@@ -5421,33 +5396,6 @@ function App() {
                     <TooltipContent side="bottom">New chat</TooltipContent>
                   </Tooltip>
                 )}
-                  <DropdownMenu>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <DropdownMenuTrigger asChild>
-                          <button
-                            type="button"
-                            className="titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors self-center shrink-0"
-                            aria-label="Chat options"
-                          >
-                            <MoreHorizontal className="size-5" />
-                          </button>
-                        </DropdownMenuTrigger>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom">Chat options</TooltipContent>
-                    </Tooltip>
-                    <DropdownMenuContent align="end" className="min-w-48">
-                      <DropdownMenuItem
-                        disabled={!activeRunIdForDownload}
-                        onSelect={() => {
-                          void handleDownloadActiveChatLog()
-                        }}
-                      >
-                        <Bug className="size-4" />
-                        Download chat log
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
                 {/* Trailing layout control. Always mounted (just toggled invisible
                     when inactive) so its -webkit-app-region:no-drag rect is stable —
                     a freshly-mounted no-drag button inside the drag-region header
