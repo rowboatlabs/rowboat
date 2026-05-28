@@ -23,7 +23,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 24
+          node-version: 24.15.0
           cache: 'pnpm'
           cache-dependency-path: 'apps/x/pnpm-lock.yaml'
 
@@ -111,6 +111,7 @@ jobs:
         with:
           name: distributables
           path: apps/x/apps/main/out/make/*
+          if-no-files-found: error
           retention-days: 30
 
   build-linux:
@@ -128,7 +129,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 24
+          node-version: 24.15.0
           cache: 'pnpm'
           cache-dependency-path: 'apps/x/pnpm-lock.yaml'
 
@@ -175,6 +176,7 @@ jobs:
         with:
           name: distributables-linux
           path: apps/x/apps/main/out/make/*
+          if-no-files-found: error
           retention-days: 30
 
   build-windows:
@@ -192,7 +194,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 24
+          node-version: 24.15.0
           cache: 'pnpm'
           cache-dependency-path: 'apps/x/pnpm-lock.yaml'
 
@@ -241,4 +243,5 @@ jobs:
         with:
           name: distributables-windows
           path: apps/x/apps/main/out/make/*
+          if-no-files-found: error
           retention-days: 30
