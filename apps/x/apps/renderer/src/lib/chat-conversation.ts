@@ -517,9 +517,41 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
  * For builtin tools, returns a static friendly name (e.g., "Reading file").
  * Falls back to the raw tool name if no mapping exists.
  */
+// Phrases shown while a code-mode task is running. They advance over time (5s
+// each) to read as progress, then hold on the last one until the task finishes.
+const CODE_MODE_RUNNING_LABELS = [
+  'Working on the task…',
+  'Inspecting the project…',
+  'Digging into the code…',
+  'Figuring it out…',
+  'Making the changes…',
+  'Wiring things up…',
+  'Putting it together…',
+]
+const CODE_MODE_LABEL_INTERVAL_MS = 5000
+
+// Detect acpx coding-agent invocations (code mode) and produce a status-aware
+// label, e.g. "Working on the task…" → "Completed the task".
+export const getCodeModeCommandLabel = (tool: ToolCall): string | null => {
+  if (tool.name !== 'executeCommand') return null
+  const input = normalizeToolInput(tool.input) as Record<string, unknown> | undefined
+  const command = typeof input?.command === 'string' ? input.command : ''
+  const match = command.match(/\bacpx\b[\s\S]*?\b(claude|codex)\b\s+exec\b/)
+  if (!match) return null
+  if (tool.status === 'error') return `Couldn't complete the task`
+  if (tool.status === 'completed') return `Completed the task`
+  // Advance through the phrases from the tool's start, holding on the last.
+  const elapsed = Math.max(0, Date.now() - tool.timestamp)
+  const step = Math.floor(elapsed / CODE_MODE_LABEL_INTERVAL_MS)
+  const idx = Math.min(step, CODE_MODE_RUNNING_LABELS.length - 1)
+  return CODE_MODE_RUNNING_LABELS[idx]
+}
+
 export const getToolDisplayName = (tool: ToolCall): string => {
   const browserLabel = getBrowserControlLabel(tool)
   if (browserLabel) return browserLabel
+  const codeModeLabel = getCodeModeCommandLabel(tool)
+  if (codeModeLabel) return codeModeLabel
   const composioData = getComposioActionCardData(tool)
   if (composioData) return composioData.label
   return TOOL_DISPLAY_NAMES[tool.name] || tool.name

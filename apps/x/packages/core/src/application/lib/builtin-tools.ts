@@ -95,21 +95,47 @@ const LLMPARSE_MIME_TYPES: Record<string, string> = {
 // When the LLM invokes acpx via executeCommand, pre-resolve claude's real .exe
 // from the npm-shim layout and inject it via env so the bridge can spawn it.
 function resolveClaudeExeOnWindows(): string | undefined {
-    const pathDirs = (process.env.PATH ?? '').split(';');
-    for (const dir of pathDirs) {
-        const trimmed = dir.trim();
-        if (!trimmed) continue;
-        const cmdPath = path.join(trimmed, 'claude.cmd');
-        if (!existsSync(cmdPath)) continue;
-        const exeFromLayout = path.join(trimmed, 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe');
+    // Candidate dirs = everything on PATH, plus well-known npm/pnpm/volta global
+    // bin dirs. Electron's runtime PATH can omit these even when the user's shell
+    // includes them, which would otherwise leave us unable to find claude.exe and
+    // force a fallback to claude.cmd (which Node refuses to spawn — EINVAL).
+    const home = process.env.USERPROFILE ?? '';
+    const appData = process.env.APPDATA || (home && path.join(home, 'AppData', 'Roaming'));
+    const localAppData = process.env.LOCALAPPDATA || (home && path.join(home, 'AppData', 'Local'));
+    const programFiles = process.env.ProgramFiles || 'C:\\Program Files';
+    const knownDirs = [
+        appData && path.join(appData, 'npm'),
+        localAppData && path.join(localAppData, 'npm'),
+        appData && path.join(appData, 'pnpm'),
+        localAppData && path.join(localAppData, 'pnpm'),
+        home && path.join(home, '.volta', 'bin'),
+        path.join(programFiles, 'nodejs'),
+    ].filter(Boolean) as string[];
+
+    const pathDirs = (process.env.PATH ?? '').split(';').map((d) => d.trim()).filter(Boolean);
+    const seen = new Set<string>();
+    const candidates = [...pathDirs, ...knownDirs].filter((d) => {
+        const key = d.toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+
+    for (const dir of candidates) {
+        // Direct npm-shim layout: <dir>\node_modules\@anthropic-ai\claude-code\bin\claude.exe
+        const exeFromLayout = path.join(dir, 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe');
         if (existsSync(exeFromLayout)) return exeFromLayout;
+
+        // Otherwise parse the claude.cmd shim for the real exe path.
+        const cmdPath = path.join(dir, 'claude.cmd');
+        if (!existsSync(cmdPath)) continue;
         try {
             const content = readFileSync(cmdPath, 'utf-8');
             const absMatch = content.match(/[A-Z]:[\\/][^\s"]*claude\.exe/i);
             if (absMatch && existsSync(absMatch[0])) return absMatch[0];
             const relMatch = content.match(/%~dp0[\\/]?([^\s"%]+claude\.exe)/i);
             if (relMatch) {
-                const resolved = path.join(trimmed, relMatch[1]);
+                const resolved = path.join(dir, relMatch[1]);
                 if (existsSync(resolved)) return resolved;
             }
         } catch {
@@ -825,7 +851,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 }
 
                 // Fallback to original for backward compatibility
-                const result = await executeCommand(command, { cwd: workingDir });
+                const result = await executeCommand(command, { cwd: workingDir, env: envOverride });
 
                 return {
                     success: result.exitCode === 0,
