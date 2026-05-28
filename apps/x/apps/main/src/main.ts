@@ -51,6 +51,7 @@ import {
   extractDeepLinkFromArgv,
   setMainWindowForDeepLinks,
 } from "./deeplink.js";
+import { disconnectGoogleIfScopesStale } from "./oauth-handler.js";
 
 const execAsync = promisify(exec);
 
@@ -350,6 +351,11 @@ app.whenReady().then(async () => {
   registerConsumer(liveNoteEventConsumer);
   registerConsumer(backgroundTaskEventConsumer);
   initEventProcessor();
+
+  // If the stored Google grant predates a scope change (only old scopes),
+  // disconnect it now so the user re-connects with the current scopes before
+  // any Google sync runs against the stale grant.
+  await disconnectGoogleIfScopesStale();
 
   // start gmail sync
   initGmailSync();
