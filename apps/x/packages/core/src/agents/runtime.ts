@@ -3,7 +3,7 @@ import fs from "fs";
 import path from "path";
 import { WorkDir } from "../config/config.js";
 import { Agent, ToolAttachment } from "@x/shared/dist/agent.js";
-import { AssistantContentPart, AssistantMessage, Message, MessageList, ProviderOptions, ToolCallPart, ToolMessage } from "@x/shared/dist/message.js";
+import { AssistantContentPart, AssistantMessage, Message, MessageList, ProviderOptions, ToolCallPart, ToolMessage, UserMessageContext } from "@x/shared/dist/message.js";
 import { LanguageModel, stepCountIs, streamText, tool, Tool, ToolSet } from "ai";
 import { z } from "zod";
 import { LlmStepStreamEvent } from "@x/shared/dist/llm-step-events.js";
@@ -23,7 +23,7 @@ import { resolveProviderConfig } from "../models/defaults.js";
 import { IAgentsRepo } from "./repo.js";
 import { IMonotonicallyIncreasingIdGenerator } from "../application/lib/id-gen.js";
 import { IBus } from "../application/lib/bus.js";
-import { IMessageQueue } from "../application/lib/message-queue.js";
+import { IMessageQueue, type MiddlePaneContext } from "../application/lib/message-queue.js";
 import { IRunsRepo } from "../runs/repo.js";
 import { IRunsLock } from "../runs/lock.js";
 import { IAbortRegistry } from "../runs/abort-registry.js";
@@ -234,6 +234,96 @@ function loadAgentNotesContext(): string | null {
     if (sections.length === 0) return null;
     return `# Agent Memory\n\n${sections.join('\n\n')}`;
 }
+
+function isCopilotLikeAgent(agentName: string | null | undefined): boolean {
+    return agentName === 'copilot' || agentName === 'rowboatx';
+}
+
+function formatCurrentDateTime(now: Date): string {
+    return now.toLocaleString('en-US', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        timeZoneName: 'short',
+    });
+}
+
+function toUserMessageContextMiddlePane(middlePaneContext: MiddlePaneContext | null): z.infer<typeof UserMessageContext>['middlePane'] {
+    if (!middlePaneContext) {
+        return { kind: 'empty' };
+    }
+    if (middlePaneContext.kind === 'note') {
+        return {
+            kind: 'note',
+            path: middlePaneContext.path,
+            content: middlePaneContext.content,
+        };
+    }
+    return {
+        kind: 'browser',
+        url: middlePaneContext.url,
+        title: middlePaneContext.title,
+    };
+}
+
+function buildUserMessageContext({
+    agentName,
+    middlePaneContext,
+}: {
+    agentName: string | null | undefined;
+    middlePaneContext: MiddlePaneContext | null;
+}): z.infer<typeof UserMessageContext> {
+    return {
+        currentDateTime: formatCurrentDateTime(new Date()),
+        ...(isCopilotLikeAgent(agentName)
+            ? { middlePane: toUserMessageContextMiddlePane(middlePaneContext) }
+            : {}),
+    };
+}
+
+function formatUserMessageContextForLlm(userMessageContext: z.infer<typeof UserMessageContext>): string {
+    const sections: string[] = [];
+
+    if (userMessageContext.currentDateTime) {
+        sections.push(`Current date and time: ${userMessageContext.currentDateTime}`);
+    }
+
+    if (userMessageContext.middlePane) {
+        if (userMessageContext.middlePane.kind === 'empty') {
+            sections.push(`Middle pane:\nState: empty`);
+        } else if (userMessageContext.middlePane.kind === 'note') {
+            sections.push(`Middle pane:\nState: note\nPath: ${userMessageContext.middlePane.path}\n\nContent:\n\`\`\`\n${userMessageContext.middlePane.content}\n\`\`\``);
+        } else {
+            sections.push(`Middle pane:\nState: browser\nURL: ${userMessageContext.middlePane.url}\nTitle: ${userMessageContext.middlePane.title}`);
+        }
+    }
+
+    if (sections.length === 0) {
+        return '';
+    }
+
+    return `# User Context
+${sections.join('\n\n')}
+
+# User Message
+`;
+}
+
+const USER_CONTEXT_SYSTEM_INSTRUCTIONS = `# Hidden User Context
+User messages may include a hidden "# User Context" section before "# User Message". Treat it as runtime metadata captured when that specific user message was sent. The actual user-authored text starts under "# User Message".
+
+Use "Current date and time" for temporal reasoning.
+
+If Middle pane context is present, it reflects what the user had open at the time of that specific message and overrides earlier middle-pane references. If the conversation history references a different note or browser page, the user had since closed or navigated away from it. Do not treat earlier context as current.
+
+If Middle pane state is empty, the user was not looking at any relevant note or web page at that point. Answer the user's message on its own merits.
+
+If Middle pane state is note, the supplied path and content are available so you can reference the note when relevant. The user may or may not be talking about this note. Do NOT assume every message is about it. Only reference or act on this note when the user's message clearly relates to it, such as "this note", "what I'm looking at", "here", "above", "below", or questions whose subject is plainly the note's content. For unrelated questions, ignore this note entirely and answer normally. Do not mention that you can see this note unless it is relevant to the answer.
+
+If Middle pane state is browser, only the URL and page title are supplied; the page content itself is NOT included. If you need the page content to answer, use the browser tools available to you to read the page. The user may or may not be talking about this page. Only reference or act on this page when the user's message clearly relates to it, such as "this page", "this article", "what I'm looking at", "this site", or "summarize this". For unrelated questions, ignore this page entirely and answer normally. Do not mention that you can see the browser unless it is relevant to the answer.`;
 
 export interface IAgentRuntime {
     trigger(runId: string): Promise<void>;
@@ -722,17 +812,18 @@ export function convertFromMessages(messages: z.infer<typeof Message>[]): ModelM
                     providerOptions,
                 });
                 break;
-            case "user":
+            case "user": {
+                const userMessageContextPrefix = msg.userMessageContext ? formatUserMessageContextForLlm(msg.userMessageContext) : '';
                 if (typeof msg.content === 'string') {
                     // Legacy string — pass through unchanged
                     result.push({
                         role: "user",
-                        content: msg.content,
+                        content: `${userMessageContextPrefix}${msg.content}`,
                         providerOptions,
                     });
                 } else {
                     // New content parts array — collapse to text for LLM
-                    const textSegments: string[] = [];
+                    const textSegments: string[] = userMessageContextPrefix ? [userMessageContextPrefix] : [];
                     const attachmentLines: string[] = [];
 
                     for (const part of msg.content) {
@@ -746,7 +837,11 @@ export function convertFromMessages(messages: z.infer<typeof Message>[]): ModelM
                     }
 
                     if (attachmentLines.length > 0) {
-                        textSegments.unshift("User has attached the following files:", ...attachmentLines, "");
+                        if (userMessageContextPrefix) {
+                            textSegments.push("User has attached the following files:", ...attachmentLines, "");
+                        } else {
+                            textSegments.unshift("User has attached the following files:", ...attachmentLines, "");
+                        }
                     }
 
                     result.push({
@@ -756,6 +851,7 @@ export function convertFromMessages(messages: z.infer<typeof Message>[]): ModelM
                     });
                 }
                 break;
+            }
             case "tool":
                 result.push({
                     role: "tool",
@@ -1225,6 +1321,10 @@ export async function* streamAgent({
             // latest user message. If the user closed the pane between messages, clear it.
             middlePaneContext = msg.middlePaneContext ?? null;
             loopLogger.log('dequeued user message', msg.messageId);
+            const userMessageContext = buildUserMessageContext({
+                agentName: state.agentName,
+                middlePaneContext,
+            });
             yield* processEvent({
                 runId,
                 type: "message",
@@ -1232,6 +1332,7 @@ export async function* streamAgent({
                 message: {
                     role: "user",
                     content: msg.message,
+                    userMessageContext,
                 },
                 subflow: [],
             });
@@ -1253,17 +1354,7 @@ export async function* streamAgent({
         loopLogger.log('running llm turn');
         // stream agent response and build message
         const messageBuilder = new StreamStepMessageBuilder();
-        const now = new Date();
-        const currentDateTime = now.toLocaleString('en-US', {
-            weekday: 'long',
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric',
-            hour: 'numeric',
-            minute: '2-digit',
-            timeZoneName: 'short'
-        });
-        let instructionsWithDateTime = `Current date and time: ${currentDateTime}\n\n${agent.instructions}`;
+        let instructionsWithDateTime = `${agent.instructions}\n\n${USER_CONTEXT_SYSTEM_INSTRUCTIONS}`;
         // Inject Agent Notes context for copilot
         if (state.agentName === 'copilot' || state.agentName === 'rowboatx') {
             const agentNotesContext = loadAgentNotesContext();
@@ -1291,19 +1382,6 @@ Use absolute paths rooted at this directory with the \`file-*\` tools. For examp
 3. **Workspace-specific operations.** Anything that obviously belongs in the Rowboat workspace (config files, MCP servers, agent schedules, etc.) stays in the workspace, not the work directory.
 
 Do not announce the work directory unless it's relevant. Just use it.`;
-            }
-            // Always inject a Middle Pane section so the LLM has a clear, up-to-date signal
-            // that supersedes any earlier middle-pane mention in the conversation history.
-            const middlePaneHeader = `\n\n# Middle Pane (Current State)\nThis section reflects what the user has open in the middle pane RIGHT NOW, at the time of their latest message. **This is authoritative and overrides any earlier mention of a note or web page in this conversation** — if the conversation history references a different note or browser page, the user has since closed or navigated away from it. Do not treat earlier context as current.\n\n`;
-            if (!middlePaneContext) {
-                loopLogger.log('injecting middle pane context (empty)');
-                instructionsWithDateTime += `${middlePaneHeader}**Nothing relevant is open in the middle pane right now.** The user is not looking at any note or web page. If earlier in this conversation you referenced a note or browser page as "what the user is viewing", that is no longer accurate — do not refer to it as currently open. Answer the user's latest message on its own merits.`;
-            } else if (middlePaneContext.kind === 'note') {
-                loopLogger.log('injecting middle pane context (note)', middlePaneContext.path);
-                instructionsWithDateTime += `${middlePaneHeader}The user has a note open. Its path and full content are provided below so you can reference it when relevant.\n\n**How to use this context:**\n- The user may or may not be talking about this note. Do NOT assume every message is about it.\n- Only reference or act on this note when the user's message clearly relates to it (e.g. "this note", "what I'm looking at", "here", "above", "below", or questions whose subject is plainly this note's content).\n- For unrelated questions (general chat, questions about other notes, tasks, emails, calendar, etc.), ignore this context entirely and answer normally.\n- Do not mention that you can see this note unless it is relevant to the answer.\n\n## Open note path\n${middlePaneContext.path}\n\n## Open note content\n\`\`\`\n${middlePaneContext.content}\n\`\`\``;
-            } else if (middlePaneContext.kind === 'browser') {
-                loopLogger.log('injecting middle pane context (browser)', middlePaneContext.url);
-                instructionsWithDateTime += `${middlePaneHeader}The user has the embedded browser open and is viewing a web page. Only the URL and page title are shown below — the page content itself is NOT included here. If you need the page content to answer, use the browser tools available to you to read the page.\n\n**How to use this context:**\n- The user may or may not be talking about this page. Do NOT assume every message is about it.\n- Only reference or act on this page when the user's message clearly relates to it (e.g. "this page", "this article", "what I'm looking at", "this site", "summarize this").\n- For unrelated questions (general chat, questions about other notes, tasks, emails, calendar, etc.), ignore this context entirely and answer normally.\n- Do not mention that you can see the browser unless it is relevant to the answer.\n\n## Current page\nURL: ${middlePaneContext.url}\nTitle: ${middlePaneContext.title}`;
             }
         }
         if (voiceInput) {
