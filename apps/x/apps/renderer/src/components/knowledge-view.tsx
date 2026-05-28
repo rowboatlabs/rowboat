@@ -105,6 +105,21 @@ function latestMtime(node: TreeNode): number {
   return max
 }
 
+function GoogleDriveIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className}
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path fill="#1FA463" d="M8.52 3.5h6.96l6.95 12.04h-6.96L8.52 3.5Z" />
+      <path fill="#FFD04B" d="M1.57 15.54 8.52 3.5l3.48 6.02-3.48 6.02H1.57Z" />
+      <path fill="#4688F1" d="M8.52 15.54h13.91L18.95 21H5.05l3.47-5.46Z" />
+    </svg>
+  )
+}
+
 function sortNodes(nodes: TreeNode[]): TreeNode[] {
   return [...nodes].sort((a, b) => {
     if (a.kind !== b.kind) return a.kind === 'dir' ? -1 : 1
@@ -208,7 +223,7 @@ export function KnowledgeView({
             onClick={() => actions.addGoogleDoc(currentFolder?.path)}
             className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-accent"
           >
-            <FileText className="size-4" />
+            <GoogleDriveIcon className="size-4" />
             <span>Add Google Doc</span>
           </button>
         </div>
@@ -774,7 +789,7 @@ function RowContextMenu({
               New Note
             </ContextMenuItem>
             <ContextMenuItem onClick={() => actions.addGoogleDoc(node.path)}>
-              <FileText className="mr-2 size-4" />
+              <GoogleDriveIcon className="mr-2 size-4" />
               Add Google Doc
             </ContextMenuItem>
             <ContextMenuItem onClick={() => void actions.createFolder(node.path)}>

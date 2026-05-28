@@ -89,6 +89,21 @@ function GoogleDocsIcon({ className }: { className?: string }) {
   )
 }
 
+function GoogleDriveIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className}
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path fill="#1FA463" d="M8.52 3.5h6.96l6.95 12.04h-6.96L8.52 3.5Z" />
+      <path fill="#FFD04B" d="M1.57 15.54 8.52 3.5l3.48 6.02-3.48 6.02H1.57Z" />
+      <path fill="#4688F1" d="M8.52 15.54h13.91L18.95 21H5.05l3.47-5.46Z" />
+    </svg>
+  )
+}
+
 export function EditorToolbar({
   editor,
   onSelectionHighlight,
@@ -456,7 +471,7 @@ export function EditorToolbar({
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={googleDoc.onOpen}>
-                <GoogleDocsIcon className="size-4 mr-2" />
+                <GoogleDriveIcon className="size-4 mr-2" />
                 Open Google Doc
               </DropdownMenuItem>
               <DropdownMenuSeparator />
