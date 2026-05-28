@@ -5,7 +5,7 @@ import { RunEvent, ListRunsResponse } from '@x/shared/src/runs.js';
 import type { LanguageModelUsage, ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
-import { CheckIcon, LoaderIcon, PanelLeftIcon, ArrowRight, MessageSquare, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon, X } from 'lucide-react';
+import { Bug, CheckIcon, LoaderIcon, PanelLeftIcon, ArrowRight, MessageSquare, ChevronLeftIcon, ChevronRightIcon, MoreHorizontal, Plus, HistoryIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MarkdownEditor, type MarkdownEditorHandle } from './components/markdown-editor';
 import { ChatSidebar } from './components/chat-sidebar';
@@ -65,6 +65,12 @@ import {
 } from "@/components/ui/sidebar"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
 import { Toaster } from "@/components/ui/sonner"
 import { BillingErrorDialog } from "@/components/billing-error-dialog"
@@ -74,7 +80,7 @@ import { splitFrontmatter, joinFrontmatter } from '@/lib/frontmatter'
 import { extractConferenceLink } from '@/lib/calendar-event'
 import { OnboardingModal } from '@/components/onboarding'
 import { ComposioGoogleMigrationModal } from '@/components/composio-google-migration-modal'
-import { CommandPalette, type CommandPaletteMention } from '@/components/search-dialog'
+import { CommandPalette, type CommandPaletteMention, type SearchType } from '@/components/search-dialog'
 import { LiveNoteSidebar } from '@/components/live-note-sidebar'
 import { BackgroundTaskDetail } from '@/components/background-task-detail'
 import { BrowserPane } from '@/components/browser-pane/BrowserPane'
@@ -581,7 +587,7 @@ type ViewState =
   | { type: 'live-notes' }
   | { type: 'email' }
   | { type: 'workspace'; path?: string }
-  | { type: 'knowledge-view' }
+  | { type: 'knowledge-view'; folderPath?: string }
   | { type: 'chat-history' }
   | { type: 'home' }
 
@@ -591,6 +597,7 @@ function viewStatesEqual(a: ViewState, b: ViewState): boolean {
   if (a.type === 'file' && b.type === 'file') return a.path === b.path
   if (a.type === 'task' && b.type === 'task') return a.name === b.name
   if (a.type === 'workspace' && b.type === 'workspace') return (a.path ?? '') === (b.path ?? '')
+  if (a.type === 'knowledge-view' && b.type === 'knowledge-view') return (a.folderPath ?? '') === (b.folderPath ?? '')
   return true // both graph
 }
 
@@ -638,8 +645,10 @@ function parseDeepLink(input: string): ViewState | null {
       const path = params.get('path')
       return { type: 'workspace', path: path ?? undefined }
     }
-    case 'knowledge-view':
-      return { type: 'knowledge-view' }
+    case 'knowledge-view': {
+      const folderPath = params.get('folderPath')
+      return { type: 'knowledge-view', folderPath: folderPath ?? undefined }
+    }
     case 'chat-history':
       return { type: 'chat-history' }
     case 'home':
@@ -756,6 +765,9 @@ function App() {
   const [isWorkspaceOpen, setIsWorkspaceOpen] = useState(false)
   const [workspaceInitialPath, setWorkspaceInitialPath] = useState<string | null>(null)
   const [isKnowledgeViewOpen, setIsKnowledgeViewOpen] = useState(false)
+  // Folder being browsed inside the knowledge view (null = root overview).
+  // Lives in ViewState so folder drill-down participates in back/forward history.
+  const [knowledgeViewFolderPath, setKnowledgeViewFolderPath] = useState<string | null>(null)
   const [isChatHistoryOpen, setIsChatHistoryOpen] = useState(false)
   // Default landing view: Home in the middle with the chat docked on the right.
   const [isHomeOpen, setIsHomeOpen] = useState(true)
@@ -1247,6 +1259,8 @@ function App() {
 
   // Search state
   const [isSearchOpen, setIsSearchOpen] = useState(false)
+  // Optional scope override for the next time search opens (cleared on close).
+  const [searchDefaultScope, setSearchDefaultScope] = useState<SearchType | undefined>(undefined)
 
   // Background tasks state
   type BackgroundTaskItem = {
@@ -3407,8 +3421,10 @@ function App() {
     setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false)
   }, [selectedPath, isGraphOpen, isSuggestedTopicsOpen, isMeetingsOpen, isLiveNotesOpen, isBgTasksOpen, isEmailOpen, isWorkspaceOpen, isKnowledgeViewOpen, isChatHistoryOpen, dismissBrowserOverlay])
 
-  const handleCloseFullScreenChat = useCallback(() => {
+  const handleCloseFullScreenChat = useCallback((): boolean => {
+    let restored = false
     if (expandedFrom) {
+      restored = true
       if (expandedFrom.graph) {
         setIsGraphOpen(true)
         setIsSuggestedTopicsOpen(false)
@@ -3450,10 +3466,16 @@ function App() {
         setIsSuggestedTopicsOpen(false)
         setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false)
         setSelectedPath(expandedFrom.path)
+      } else {
+        // expandedFrom was captured from a view this restorer doesn't track
+        // (e.g. Home): there's nothing to re-open, so report it and let the
+        // caller fall back instead of leaving a blank full-screen chat.
+        restored = false
       }
       setExpandedFrom(null)
       setIsRightPaneMaximized(false)
     }
+    return restored
   }, [expandedFrom])
 
   const currentViewState = React.useMemo<ViewState>(() => {
@@ -3463,13 +3485,13 @@ function App() {
     if (isLiveNotesOpen) return { type: 'live-notes' }
     if (isSuggestedTopicsOpen) return { type: 'suggested-topics' }
     if (isWorkspaceOpen) return { type: 'workspace', path: workspaceInitialPath ?? undefined }
-    if (isKnowledgeViewOpen) return { type: 'knowledge-view' }
+    if (isKnowledgeViewOpen) return { type: 'knowledge-view', folderPath: knowledgeViewFolderPath ?? undefined }
     if (isChatHistoryOpen) return { type: 'chat-history' }
     if (isHomeOpen) return { type: 'home' }
     if (selectedPath) return { type: 'file', path: selectedPath }
     if (isGraphOpen) return { type: 'graph' }
     return { type: 'chat', runId }
-  }, [selectedBackgroundTask, isEmailOpen, isMeetingsOpen, isLiveNotesOpen, isBgTasksOpen, isSuggestedTopicsOpen, selectedPath, isGraphOpen, isWorkspaceOpen, isKnowledgeViewOpen, isChatHistoryOpen, isHomeOpen, workspaceInitialPath, runId])
+  }, [selectedBackgroundTask, isEmailOpen, isMeetingsOpen, isLiveNotesOpen, isBgTasksOpen, isSuggestedTopicsOpen, selectedPath, isGraphOpen, isWorkspaceOpen, isKnowledgeViewOpen, knowledgeViewFolderPath, isChatHistoryOpen, isHomeOpen, workspaceInitialPath, runId])
 
   const appendUnique = useCallback((stack: ViewState[], entry: ViewState) => {
     const last = stack[stack.length - 1]
@@ -3809,6 +3831,7 @@ function App() {
         setIsEmailOpen(false)
         setIsWorkspaceOpen(false)
         setIsKnowledgeViewOpen(true)
+        setKnowledgeViewFolderPath(view.folderPath ?? null)
         setIsChatHistoryOpen(false)
       setIsHomeOpen(false)
         ensureKnowledgeViewFileTab()
@@ -3901,12 +3924,13 @@ function App() {
   const pushChatToSidePane = useCallback(() => {
     setIsRightPaneMaximized(false)
     setIsChatSidebarOpen(true)
-    if (expandedFrom) {
-      handleCloseFullScreenChat()
-    } else {
+    // Restore the view we expanded from; if there was nothing to restore
+    // (e.g. the chat was started fresh from Home), fall back to Home so a
+    // single click always docks the chat instead of needing two.
+    if (!handleCloseFullScreenChat()) {
       void navigateToView({ type: 'home' })
     }
-  }, [expandedFrom, handleCloseFullScreenChat, navigateToView])
+  }, [handleCloseFullScreenChat, navigateToView])
 
   const navigateBack = useCallback(async () => {
     const { back, forward } = historyRef.current
@@ -4555,10 +4579,8 @@ function App() {
       void navigateToView({ type: 'workspace', path })
     },
     openKnowledgeView: () => {
-      if (!selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isMeetingsOpen && !isLiveNotesOpen && !isBgTasksOpen && !isEmailOpen && !isWorkspaceOpen && !isKnowledgeViewOpen && !isChatHistoryOpen && !selectedBackgroundTask) {
-        setIsChatSidebarOpen(false)
-        setIsRightPaneMaximized(false)
-      }
+      // Open in the middle pane without touching the chat sidebar — leave it
+      // open or closed exactly as the user had it (matches Email/Meetings).
       void navigateToView({ type: 'knowledge-view' })
     },
     createWorkspace: async (name: string): Promise<string> => {
@@ -5193,6 +5215,25 @@ function App() {
     if (tabId === activeChatTabId) return activeChatTabState
     return chatViewStateByTab[tabId] ?? emptyChatTabState
   }, [activeChatTabId, activeChatTabState, chatViewStateByTab, emptyChatTabState])
+  const activeRunIdForDownload = activeChatTabState.runId
+  const handleDownloadActiveChatLog = useCallback(async () => {
+    if (!activeRunIdForDownload) {
+      toast.error('No chat log available yet')
+      return
+    }
+
+    try {
+      const result = await window.ipc.invoke('runs:downloadLog', { runId: activeRunIdForDownload })
+      if (result.success) {
+        toast.success('Chat log saved')
+      } else if (result.error) {
+        toast.error(result.error)
+      }
+    } catch (err) {
+      console.error('Download chat log failed:', err)
+      toast.error('Failed to download chat log')
+    }
+  }, [activeRunIdForDownload])
   const selectedTask = selectedBackgroundTask
     ? backgroundTasks.find(t => t.name === selectedBackgroundTask)
     : null
@@ -5380,6 +5421,33 @@ function App() {
                     <TooltipContent side="bottom">New chat</TooltipContent>
                   </Tooltip>
                 )}
+                  <DropdownMenu>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type="button"
+                            className="titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors self-center shrink-0"
+                            aria-label="Chat options"
+                          >
+                            <MoreHorizontal className="size-5" />
+                          </button>
+                        </DropdownMenuTrigger>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">Chat options</TooltipContent>
+                    </Tooltip>
+                    <DropdownMenuContent align="end" className="min-w-48">
+                      <DropdownMenuItem
+                        disabled={!activeRunIdForDownload}
+                        onSelect={() => {
+                          void handleDownloadActiveChatLog()
+                        }}
+                      >
+                        <Bug className="size-4" />
+                        Download chat log
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 {/* Trailing layout control. Always mounted (just toggled invisible
                     when inactive) so its -webkit-app-region:no-drag rect is stable —
                     a freshly-mounted no-drag button inside the drag-region header
@@ -5391,7 +5459,7 @@ function App() {
                     : (viewOpen && !isChatSidebarOpen)
                       ? { onClick: openChatSidePane, icon: <MessageSquare className="size-5" />, label: 'Open chat' }
                       : (viewOpen && isChatSidebarOpen && !isRightPaneMaximized)
-                        ? { onClick: toggleRightPaneMaximize, icon: <X className="size-5" />, label: 'Expand chat' }
+                        ? { onClick: () => setIsChatSidebarOpen(false), icon: <ArrowRight className="size-5" />, label: 'Expand pane' }
                         : null
                   return (
                     <Tooltip>
@@ -5508,9 +5576,11 @@ function App() {
                       revealInFileManager: knowledgeActions.revealInFileManager,
                       onOpenInNewTab: knowledgeActions.onOpenInNewTab,
                     }}
+                    folderPath={knowledgeViewFolderPath}
+                    onNavigateFolder={(path) => { void navigateToView({ type: 'knowledge-view', folderPath: path ?? undefined }) }}
                     onOpenNote={(path) => navigateToFile(path)}
                     onOpenGraph={() => knowledgeActions.openGraph()}
-                    onOpenSearch={() => setIsSearchOpen(true)}
+                    onOpenSearch={() => { setSearchDefaultScope('knowledge'); setIsSearchOpen(true) }}
                     onOpenBases={() => knowledgeActions.openBases()}
                     onVoiceNoteCreated={handleVoiceNoteCreated}
                   />
@@ -5934,7 +6004,6 @@ function App() {
                 }}
                 onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
                 onOpenFullScreen={toggleRightPaneMaximize}
-                onCloseChat={() => { setIsRightPaneMaximized(false); setIsChatSidebarOpen(false) }}
                 conversation={conversation}
                 currentAssistantMessage={currentAssistantMessage}
                 chatTabStates={chatViewStateByTab}
@@ -5993,7 +6062,8 @@ function App() {
         </div>
         <CommandPalette
           open={isSearchOpen}
-          onOpenChange={setIsSearchOpen}
+          onOpenChange={(o) => { setIsSearchOpen(o); if (!o) setSearchDefaultScope(undefined) }}
+          defaultScope={searchDefaultScope}
           onSelectFile={navigateToFile}
           onSelectRun={(id) => { void navigateToView({ type: 'chat', runId: id }) }}
         />

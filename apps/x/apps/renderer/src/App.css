@@ -35,6 +35,30 @@
   }
 }
 
+/* Radix Collapsible expand/collapse — animate height (via the radix CSS var)
+   plus a subtle fade. Used by the web search card. */
+@keyframes collapsible-down {
+  from {
+    height: 0;
+    opacity: 0;
+  }
+  to {
+    height: var(--radix-collapsible-content-height);
+    opacity: 1;
+  }
+}
+
+@keyframes collapsible-up {
+  from {
+    height: var(--radix-collapsible-content-height);
+    opacity: 1;
+  }
+  to {
+    height: 0;
+    opacity: 0;
+  }
+}
+
 @media (prefers-reduced-motion: no-preference) {
   a:nth-of-type(2) .logo {
     animation: logo-spin infinite 20s linear;
@@ -1176,6 +1200,10 @@
   --scrollbar-track: oklch(0.95 0 0);
   --scrollbar-thumb: oklch(0.75 0 0);
   --scrollbar-thumb-hover: oklch(0.65 0 0);
+  /* Subtle raised-card surface: tints toward foreground, so it reads a hair
+     darker than the background in light mode and a hair lighter in dark mode.
+     Shared by the web search card and tool-call group. */
+  --card-surface: color-mix(in oklab, var(--background) 98.5%, var(--foreground));
   --rowboat-panel: oklch(0.97 0 0);
   --rowboat-raised: oklch(1 0 0);
   --rowboat-wash: color-mix(in oklab, var(--background) 88%, var(--primary) 12%);

@@ -691,10 +691,20 @@ export function SidebarContentPanel({
   // Single preview shown as a sublabel on the Email / Meetings nav buttons.
   const previewEmail = emailThreads[0]
   const previewMeeting = meetings[0]
-  const meetingIsRecording = previewMeeting != null
-    && recordingMeetingSource === previewMeeting.source
-    && (meetingRecordingState === 'recording' || meetingRecordingState === 'connecting' || meetingRecordingState === 'stopping')
-  const meetingIsBusy = meetingIsRecording && (meetingRecordingState === 'connecting' || meetingRecordingState === 'stopping')
+  // Drive the recording indicator off the global recording state — there is only
+  // one active recording, so it must show even for ad-hoc recordings or meetings
+  // that aren't the upcoming one previewed here.
+  const meetingIsRecording = meetingRecordingState === 'recording'
+    || meetingRecordingState === 'connecting'
+    || meetingRecordingState === 'stopping'
+  const meetingIsBusy = meetingRecordingState === 'connecting' || meetingRecordingState === 'stopping'
+  // Title of the meeting being recorded, when it's the upcoming one we preview.
+  const recordingMeeting = previewMeeting != null && recordingMeetingSource === previewMeeting.source
+    ? previewMeeting
+    : null
+  const meetingSublabel = meetingIsRecording
+    ? (recordingMeeting?.summary ?? 'Recording…')
+    : (previewMeeting ? `${previewMeeting.summary} · ${formatMeetingTime(previewMeeting)}` : null)
 
   return (
     <Sidebar className="rowboat-sidebar border-r-0" {...props}>
@@ -750,19 +760,22 @@ export function SidebarContentPanel({
                 <SidebarMenuButton
                   isActive={activeNav === 'meetings'}
                   onClick={onOpenMeetings}
-                  className={previewMeeting ? 'h-auto py-1.5' : undefined}
+                  className={meetingSublabel ? 'h-auto py-1.5' : undefined}
                 >
-                  <Mic className="size-4 shrink-0" />
+                  <Mic className={cn('size-4 shrink-0', meetingIsRecording && 'text-red-500')} />
                   <div className="flex min-w-0 flex-1 flex-col">
                     <span className="truncate">Meetings</span>
-                    {previewMeeting && (
-                      <span className="truncate text-[11px] text-muted-foreground">
-                        {meetingIsRecording ? previewMeeting.summary : `${previewMeeting.summary} · ${formatMeetingTime(previewMeeting)}`}
+                    {meetingSublabel && (
+                      <span className={cn(
+                        'truncate text-[11px]',
+                        meetingIsRecording ? 'text-red-500' : 'text-muted-foreground',
+                      )}>
+                        {meetingSublabel}
                       </span>
                     )}
                   </div>
                 </SidebarMenuButton>
-                {previewMeeting && (meetingIsRecording ? (
+                {meetingIsRecording ? (
                   <div className="absolute inset-y-0 right-1 flex items-center gap-1.5">
                     <span className="relative flex size-2">
                       <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
@@ -786,7 +799,7 @@ export function SidebarContentPanel({
                       </TooltipContent>
                     </Tooltip>
                   </div>
-                ) : (
+                ) : previewMeeting ? (
                   <div className="absolute inset-y-0 right-1 flex items-center gap-0.5 opacity-0 transition-opacity group-focus-within/menu-item:opacity-100 group-hover/menu-item:opacity-100">
                     <Tooltip>
                       <TooltipTrigger asChild>
@@ -819,7 +832,7 @@ export function SidebarContentPanel({
                       </Tooltip>
                     )}
                   </div>
-                ))}
+                ) : null}
               </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton

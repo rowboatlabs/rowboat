@@ -1,11 +1,18 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowRight, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Bug, MoreHorizontal } from 'lucide-react'
+import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { ChatHeader } from '@/components/chat-header'
 import { ChatEmptyState } from '@/components/chat-empty-state'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import {
   Conversation,
   ConversationContent,
@@ -125,7 +132,6 @@ interface ChatSidebarProps {
   onSelectRun?: (runId: string) => void
   onOpenChatHistory?: () => void
   onOpenFullScreen?: () => void
-  onCloseChat?: () => void
   conversation: ConversationItem[]
   currentAssistantMessage: string
   chatTabStates?: Record<string, ChatTabViewState>
@@ -183,7 +189,6 @@ export function ChatSidebar({
   onSelectRun,
   onOpenChatHistory,
   onOpenFullScreen,
-  onCloseChat,
   conversation,
   currentAssistantMessage,
   chatTabStates = {},
@@ -333,6 +338,25 @@ export function ChatSidebar({
     if (tabId === activeChatTabId) return activeTabState
     return chatTabStates[tabId] ?? emptyTabState
   }, [activeChatTabId, activeTabState, chatTabStates, emptyTabState])
+  const activeRunId = activeTabState.runId
+  const handleDownloadChatLog = useCallback(async () => {
+    if (!activeRunId) {
+      toast.error('No chat log available yet')
+      return
+    }
+
+    try {
+      const result = await window.ipc.invoke('runs:downloadLog', { runId: activeRunId })
+      if (result.success) {
+        toast.success('Chat log saved')
+      } else if (result.error) {
+        toast.error(result.error)
+      }
+    } catch (err) {
+      console.error('Download chat log failed:', err)
+      toast.error('Failed to download chat log')
+    }
+  }, [activeRunId])
 
   const renderConversationItem = (item: ConversationItem, tabId: string) => {
     if (isChatMessage(item)) {
@@ -515,40 +539,49 @@ export function ChatSidebar({
               onSelectRun={onSelectRun}
               onOpenChatHistory={onOpenChatHistory}
             />
-            {isMaximized ? (
-              onOpenFullScreen && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
+            <DropdownMenu>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <DropdownMenuTrigger asChild>
                     <Button
                       variant="ghost"
                       size="icon"
-                      onClick={onOpenFullScreen}
-                      className="titlebar-no-drag my-1 mr-2 h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
-                      aria-label="Dock chat to side pane"
+                      className="titlebar-no-drag my-1 h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+                      aria-label="Chat options"
                     >
-                      <ArrowRight className="size-5" />
+                      <MoreHorizontal className="size-5" />
                     </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">Dock to side pane</TooltipContent>
-                </Tooltip>
-              )
-            ) : (
-              onCloseChat && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={onCloseChat}
-                      className="titlebar-no-drag my-1 mr-2 h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
-                      aria-label="Close chat"
-                    >
-                      <X className="size-5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">Close chat</TooltipContent>
-                </Tooltip>
-              )
+                  </DropdownMenuTrigger>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Chat options</TooltipContent>
+              </Tooltip>
+              <DropdownMenuContent align="end" className="min-w-48">
+                <DropdownMenuItem
+                  disabled={!activeRunId}
+                  onSelect={() => {
+                    void handleDownloadChatLog()
+                  }}
+                >
+                  <Bug className="size-4" />
+                  Download chat log
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            {onOpenFullScreen && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={onOpenFullScreen}
+                    className="titlebar-no-drag my-1 mr-2 h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+                    aria-label={isMaximized ? 'Dock chat to side pane' : 'Expand chat'}
+                  >
+                    {isMaximized ? <ArrowRight className="size-5" /> : <ArrowLeft className="size-5" />}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">{isMaximized ? 'Dock to side pane' : 'Expand chat'}</TooltipContent>
+              </Tooltip>
             )}
           </header>
 

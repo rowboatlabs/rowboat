@@ -8,6 +8,7 @@ import {
   listProviders,
 } from './oauth-handler.js';
 import { watcher as watcherCore, workspace } from '@x/core';
+import { WorkDir } from '@x/core/dist/config/config.js';
 import { workspace as workspaceShared } from '@x/shared';
 import * as mcpCore from '@x/core/dist/mcp/mcp.js';
 import * as runsCore from '@x/core/dist/runs/runs.js';
@@ -551,6 +552,35 @@ export function setupIpcHandlers() {
     'runs:delete': async (_event, args) => {
       await runsCore.deleteRun(args.runId);
       return { success: true };
+    },
+    'runs:downloadLog': async (event, args) => {
+      const runFileName = `${args.runId}.jsonl`;
+      if (path.basename(runFileName) !== runFileName) {
+        return { success: false, error: 'Invalid run id' };
+      }
+
+      const sourcePath = path.join(WorkDir, 'runs', runFileName);
+      const win = BrowserWindow.fromWebContents(event.sender);
+      const result = await dialog.showSaveDialog(win!, {
+        defaultPath: `${runFileName}.log`,
+        filters: [
+          { name: 'Chat Log', extensions: ['log'] },
+          { name: 'JSONL', extensions: ['jsonl'] },
+          { name: 'All Files', extensions: ['*'] },
+        ],
+      });
+
+      if (result.canceled || !result.filePath) {
+        return { success: false };
+      }
+
+      try {
+        await fs.copyFile(sourcePath, result.filePath);
+        return { success: true };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to download chat log';
+        return { success: false, error: message };
+      }
     },
     'models:list': async () => {
       if (await isSignedIn()) {
