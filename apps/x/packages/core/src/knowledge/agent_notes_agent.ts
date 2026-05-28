@@ -1,21 +1,21 @@
 export function getRaw(): string {
   return `---
 tools:
-  workspace-writeFile:
+  file-writeText:
     type: builtin
-    name: workspace-writeFile
-  workspace-readFile:
+    name: file-writeText
+  file-readText:
     type: builtin
-    name: workspace-readFile
-  workspace-edit:
+    name: file-readText
+  file-editText:
     type: builtin
-    name: workspace-edit
-  workspace-readdir:
+    name: file-editText
+  file-list:
     type: builtin
-    name: workspace-readdir
-  workspace-mkdir:
+    name: file-list
+  file-mkdir:
     type: builtin
-    name: workspace-mkdir
+    name: file-mkdir
 ---
 # Agent Notes
 

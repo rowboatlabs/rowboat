@@ -1,6 +1,5 @@
 "use client";
 
-import { Badge } from "@/components/ui/badge";
 import {
   Collapsible,
   CollapsibleContent,
@@ -9,17 +8,15 @@ import {
 import { cn } from "@/lib/utils";
 import type { ToolUIPart } from "ai";
 import {
-  CheckCircleIcon,
   ChevronDownIcon,
-  CircleIcon,
-  ClockIcon,
-  WrenchIcon,
+  CircleCheck,
+  LoaderIcon,
   XCircleIcon,
 } from "lucide-react";
 import { type ComponentProps, type ReactNode, isValidElement, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import type { ToolCall, ToolGroup as ToolGroupType } from "@/lib/chat-conversation";
-import { getToolDisplayName, getToolGroupSummary, toToolState } from "@/lib/chat-conversation";
+import { getToolActionsSummary, getToolDisplayName, getToolGroupSummary, toToolState } from "@/lib/chat-conversation";
 
 const formatToolValue = (value: unknown) => {
   if (typeof value === "string") return value;
@@ -52,7 +49,10 @@ export type ToolProps = ComponentProps<typeof Collapsible>;
 
 export const Tool = ({ className, ...props }: ToolProps) => (
   <Collapsible
-    className={cn("not-prose mb-4 w-full rounded-md border", className)}
+    className={cn(
+      "not-prose mb-4 w-full rounded-[28px] border bg-[var(--card-surface)] transition-colors duration-150 ease-out hover:border-foreground/30",
+      className
+    )}
     {...props}
   />
 );
@@ -62,37 +62,17 @@ export type ToolHeaderProps = {
   type: ToolUIPart["type"];
   state: ToolUIPart["state"];
   className?: string;
+  /** Hide the leading status icon (used for child rows inside a tool group). */
+  hideLeadIcon?: boolean;
 };
 
-const getStatusBadge = (status: ToolUIPart["state"]) => {
-  const labels: Record<ToolUIPart["state"], string> = {
-    "input-streaming": "Pending",
-    "input-available": "Running",
-    // @ts-expect-error state only available in AI SDK v6
-    "approval-requested": "Awaiting Approval",
-    "approval-responded": "Responded",
-    "output-available": "Completed",
-    "output-error": "Error",
-    "output-denied": "Denied",
-  };
-
-  const icons: Record<ToolUIPart["state"], ReactNode> = {
-    "input-streaming": <CircleIcon className="size-4" />,
-    "input-available": <ClockIcon className="size-4 animate-pulse" />,
-    // @ts-expect-error state only available in AI SDK v6
-    "approval-requested": <ClockIcon className="size-4 text-yellow-600" />,
-    "approval-responded": <CheckCircleIcon className="size-4 text-blue-600" />,
-    "output-available": <CheckCircleIcon className="size-4 text-green-600" />,
-    "output-error": <XCircleIcon className="size-4 text-red-600" />,
-    "output-denied": <XCircleIcon className="size-4 text-orange-600" />,
-  };
-
-  return (
-    <Badge className="gap-1.5 rounded-full text-xs" variant="secondary">
-      {icons[status]}
-      {labels[status]}
-    </Badge>
-  );
+// Lead icon shown to the left of the tool label: spinner while running, a
+// green check when done, a red cross on error. Shared by ToolHeader (single
+// tools) and the tool-call group.
+const getLeadIcon = (state: ToolUIPart["state"]): ReactNode => {
+  if (state === "output-available") return <CircleCheck className="size-4 shrink-0 text-green-600" />;
+  if (state === "output-error") return <XCircleIcon className="size-4 shrink-0 text-red-600" />;
+  return <LoaderIcon className="size-4 shrink-0 animate-spin text-muted-foreground" />;
 };
 
 export const ToolHeader = ({
@@ -100,6 +80,7 @@ export const ToolHeader = ({
   title,
   type,
   state,
+  hideLeadIcon,
   ...props
 }: ToolHeaderProps) => {
   const displayTitle = title ?? type.split("-").slice(1).join("-")
@@ -107,13 +88,13 @@ export const ToolHeader = ({
   return (
     <CollapsibleTrigger
       className={cn(
-        "flex w-full items-center justify-between gap-4 p-3",
+        "group flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-2.5",
         className
       )}
       {...props}
     >
       <div className="flex min-w-0 flex-1 items-center gap-2">
-        <WrenchIcon className="size-4 shrink-0 text-muted-foreground" />
+        {!hideLeadIcon && getLeadIcon(state)}
         <span
           className="min-w-0 flex-1 truncate text-left font-medium text-sm"
           title={displayTitle}
@@ -121,10 +102,7 @@ export const ToolHeader = ({
           {displayTitle}
         </span>
       </div>
-      <div className="flex shrink-0 items-center gap-3">
-        {getStatusBadge(state)}
-        <ChevronDownIcon className="size-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
-      </div>
+      <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
     </CollapsibleTrigger>
   )
 };
@@ -134,7 +112,7 @@ export type ToolContentProps = ComponentProps<typeof CollapsibleContent>;
 export const ToolContent = ({ className, ...props }: ToolContentProps) => (
   <CollapsibleContent
     className={cn(
-      "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 text-popover-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in",
+      "overflow-hidden text-popover-foreground outline-none data-[state=open]:animate-[collapsible-down_0.09s_ease-out] data-[state=closed]:animate-[collapsible-up_0.08s_ease-in]",
       className
     )}
     {...props}
@@ -247,41 +225,48 @@ export const ToolGroupComponent = ({ group, isToolOpen, onToolOpenChange }: Tool
   const isCompleted = state === 'output-available' || state === 'output-error'
   const runningTool = group.items.find(t => t.status === 'running' || t.status === 'pending')
   const currentTool = runningTool ?? group.items[group.items.length - 1]
-  const summary = isCompleted
-    ? `Ran ${group.items.length} tool${group.items.length !== 1 ? 's' : ''}`
+  const toolCount = group.items.length
+  const ranLabel = `Ran ${toolCount} tool${toolCount !== 1 ? 's' : ''}`
+  const actions = isCompleted ? getToolActionsSummary(group.items) : ''
+  // Plain string used as the AnimatePresence key + tooltip; the rendered node
+  // shows the action summary in a lighter gray than the "Ran N tools" prefix.
+  const summaryText = isCompleted
+    ? `${ranLabel} · ${actions}`
     : currentTool ? getToolDisplayName(currentTool) : getToolGroupSummary(group.items)
+  const summaryNode: ReactNode = isCompleted
+    ? <>{ranLabel} <span className="font-normal text-muted-foreground">{`· ${actions}`}</span></>
+    : summaryText
+
+  const leadIcon = getLeadIcon(state)
 
   return (
     <Collapsible
       open={open}
       onOpenChange={setOpen}
-      className="not-prose mb-4 w-full rounded-md border"
+      className="not-prose mb-4 w-full rounded-[28px] border bg-[var(--card-surface)] transition-colors duration-150 ease-out hover:border-foreground/30"
     >
-      <CollapsibleTrigger className="flex w-full items-center justify-between gap-4 p-3">
+      <CollapsibleTrigger className="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-2.5">
         <div className="flex min-w-0 flex-1 items-center gap-2">
-          <WrenchIcon className="size-4 shrink-0 text-muted-foreground" />
+          {leadIcon}
           <div className="relative min-w-0 flex-1 overflow-hidden" style={{ height: '1.25rem' }}>
             <AnimatePresence mode="popLayout" initial={false}>
               <motion.span
-                key={summary}
+                key={summaryText}
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
                 transition={{ duration: 0.18, ease: 'easeOut' }}
                 className="absolute inset-0 truncate text-left font-medium text-sm leading-5"
-                title={summary}
+                title={summaryText}
               >
-                {summary}
+                {summaryNode}
               </motion.span>
             </AnimatePresence>
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-3">
-          {getStatusBadge(state)}
-          <ChevronDownIcon className={cn("size-4 text-muted-foreground transition-transform", open && "rotate-180")} />
-        </div>
+        <ChevronDownIcon className={cn("size-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />
       </CollapsibleTrigger>
-      <CollapsibleContent className="border-t">
+      <CollapsibleContent className="overflow-hidden data-[state=open]:animate-[collapsible-down_0.09s_ease-out] data-[state=closed]:animate-[collapsible-up_0.08s_ease-in]">
         <div className="flex flex-col gap-2 p-2">
           {group.items.map((tool) => {
             const toolState = toToolState(tool.status)
@@ -291,12 +276,14 @@ export const ToolGroupComponent = ({ group, isToolOpen, onToolOpenChange }: Tool
                 key={tool.id}
                 open={isOpen}
                 onOpenChange={(o) => onToolOpenChange(tool.id, o)}
-                className="mb-0 border-border/60"
+                className="mb-0 rounded-[20px] border-border/60 bg-transparent hover:border-border/60"
               >
                 <ToolHeader
                   title={getToolDisplayName(tool)}
                   type={`tool-${tool.name}`}
                   state={toolState}
+                  className="text-muted-foreground"
+                  hideLeadIcon
                 />
                 <ToolContent>
                   <ToolTabbedContent

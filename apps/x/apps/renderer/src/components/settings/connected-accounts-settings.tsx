@@ -26,10 +26,10 @@ export function ConnectedAccountsSettings({ dialogOpen }: ConnectedAccountsSetti
     return (
       <div
         key={provider}
-        className="flex items-center justify-between gap-3 rounded-lg px-4 py-3 hover:bg-accent/50 transition-colors"
+        className="flex items-center justify-between gap-2 rounded-md px-3 py-2 hover:bg-accent/50 transition-colors"
       >
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="flex size-9 items-center justify-center rounded-lg bg-muted">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="flex size-8 items-center justify-center rounded-md bg-muted">
             {icon}
           </div>
           <div className="flex flex-col min-w-0">
@@ -119,15 +119,15 @@ export function ConnectedAccountsSettings({ dialogOpen }: ConnectedAccountsSetti
         {/* Email & Calendar Section */}
         {(c.useComposioForGoogle || c.useComposioForGoogleCalendar || c.providers.includes('google')) && (
           <>
-            <div className="px-4 py-2">
+            <div className="px-3 pt-1 pb-0.5">
               <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
                 Email & Calendar
               </span>
             </div>
             {c.useComposioForGoogle ? (
-              <div className="flex items-center justify-between gap-3 rounded-lg px-4 py-3 hover:bg-accent/50 transition-colors">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="flex size-9 items-center justify-center rounded-lg bg-muted">
+              <div className="flex items-center justify-between gap-2 rounded-md px-3 py-2 hover:bg-accent/50 transition-colors">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="flex size-8 items-center justify-center rounded-md bg-muted">
                     <Mail className="size-4" />
                   </div>
                   <div className="flex flex-col min-w-0">
@@ -174,9 +174,9 @@ export function ConnectedAccountsSettings({ dialogOpen }: ConnectedAccountsSetti
               c.providers.includes('google') && renderOAuthProvider('google', 'Google', <Mail className="size-4" />, 'Sync emails and calendar')
             )}
             {c.useComposioForGoogleCalendar && (
-              <div className="flex items-center justify-between gap-3 rounded-lg px-4 py-3 hover:bg-accent/50 transition-colors">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="flex size-9 items-center justify-center rounded-lg bg-muted">
+              <div className="flex items-center justify-between gap-2 rounded-md px-3 py-2 hover:bg-accent/50 transition-colors">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="flex size-8 items-center justify-center rounded-md bg-muted">
                     <Calendar className="size-4" />
                   </div>
                   <div className="flex flex-col min-w-0">
@@ -220,14 +220,14 @@ export function ConnectedAccountsSettings({ dialogOpen }: ConnectedAccountsSetti
                 </div>
               </div>
             )}
-            <Separator className="my-3" />
+            <Separator className="my-2" />
           </>
         )}
 
         {/* Meeting Notes Section */}
         {c.providers.includes('fireflies-ai') && (
           <>
-            <div className="px-4 py-2">
+            <div className="px-3 pt-1 pb-0.5">
               <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
                 Meeting Notes
               </span>

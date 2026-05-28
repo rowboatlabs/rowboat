@@ -9,7 +9,7 @@ import { IAbortRegistry } from "./abort-registry.js";
 import { IRunsLock } from "./lock.js";
 import { forceCloseAllMcpClients } from "../mcp/mcp.js";
 import { extractCommandNames } from "../application/lib/command-executor.js";
-import { addToSecurityConfig } from "../config/security.js";
+import { addFileAccessGrant, addToSecurityConfig } from "../config/security.js";
 import { loadAgent } from "../agents/runtime.js";
 import { getDefaultModelAndProvider } from "../models/defaults.js";
 
@@ -39,9 +39,9 @@ export async function createRun(opts: z.infer<typeof CreateRunOptions>): Promise
     return run;
 }
 
-export async function createMessage(runId: string, message: UserMessageContentType, voiceInput?: boolean, voiceOutput?: VoiceOutputMode, searchEnabled?: boolean, middlePaneContext?: MiddlePaneContext): Promise<string> {
+export async function createMessage(runId: string, message: UserMessageContentType, voiceInput?: boolean, voiceOutput?: VoiceOutputMode, searchEnabled?: boolean, middlePaneContext?: MiddlePaneContext, codeMode?: 'claude' | 'codex'): Promise<string> {
     const queue = container.resolve<IMessageQueue>('messageQueue');
-    const id = await queue.enqueue(runId, message, voiceInput, voiceOutput, searchEnabled, middlePaneContext);
+    const id = await queue.enqueue(runId, message, voiceInput, voiceOutput, searchEnabled, middlePaneContext, codeMode);
     const runtime = container.resolve<IAgentRuntime>('agentRuntime');
     runtime.trigger(runId);
     return id;
@@ -60,7 +60,12 @@ export async function authorizePermission(runId: string, ev: z.infer<typeof Tool
                 && e.toolCall.toolCallId === rest.toolCallId
                 && JSON.stringify(e.subflow) === JSON.stringify(rest.subflow)
         );
-        if (permReqEvent && typeof permReqEvent.toolCall.arguments === 'object' && permReqEvent.toolCall.arguments !== null && 'command' in permReqEvent.toolCall.arguments) {
+        if (permReqEvent?.permission?.kind === "file") {
+            await addFileAccessGrant({
+                operation: permReqEvent.permission.operation,
+                pathPrefix: permReqEvent.permission.pathPrefix,
+            });
+        } else if (permReqEvent && typeof permReqEvent.toolCall.arguments === 'object' && permReqEvent.toolCall.arguments !== null && 'command' in permReqEvent.toolCall.arguments) {
             const commandNames = extractCommandNames(String(permReqEvent.toolCall.arguments.command));
             if (commandNames.length > 0) {
                 await addToSecurityConfig(commandNames);

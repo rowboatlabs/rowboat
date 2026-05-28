@@ -31,6 +31,9 @@ import { listGatewayModels } from '@x/core/dist/models/gateway.js';
 import type { IModelConfigRepo } from '@x/core/dist/models/repo.js';
 import type { IOAuthRepo } from '@x/core/dist/auth/repo.js';
 import { IGranolaConfigRepo } from '@x/core/dist/knowledge/granola/repo.js';
+import { ICodeModeConfigRepo } from '@x/core/dist/code-mode/repo.js';
+import { checkCodeModeAgentStatus } from '@x/core/dist/code-mode/status.js';
+import { invalidateCopilotInstructionsCache } from '@x/core/dist/application/assistant/instructions.js';
 import { triggerSync as triggerGranolaSync } from '@x/core/dist/knowledge/granola/sync.js';
 import { ISlackConfigRepo } from '@x/core/dist/slack/repo.js';
 import { isOnboardingComplete, markOnboardingComplete } from '@x/core/dist/config/note_creation_config.js';
@@ -48,7 +51,7 @@ import { summarizeMeeting } from '@x/core/dist/knowledge/summarize_meeting.js';
 import { getAccessToken } from '@x/core/dist/auth/tokens.js';
 import { getRowboatConfig } from '@x/core/dist/config/rowboat.js';
 import { runLiveNoteAgent } from '@x/core/dist/knowledge/live-note/runner.js';
-import { listImportantThreads, listEverythingElseThreads, saveMessageBodyHeight, triggerSync as triggerGmailSync } from '@x/core/dist/knowledge/sync_gmail.js';
+import { listImportantThreads, listEverythingElseThreads, saveMessageBodyHeight, triggerSync as triggerGmailSync, sendThreadReply, archiveThread, trashThread, markThreadRead, getAccountEmail, getConnectionStatus as getGmailConnectionStatus } from '@x/core/dist/knowledge/sync_gmail.js';
 import { liveNoteBus } from '@x/core/dist/knowledge/live-note/bus.js';
 import { getInstallationId } from '@x/core/dist/analytics/installation.js';
 import { API_URL } from '@x/core/dist/config/env.js';
@@ -494,6 +497,24 @@ export function setupIpcHandlers() {
       triggerGmailSync();
       return {};
     },
+    'gmail:sendReply': async (_event, args) => {
+      return sendThreadReply(args);
+    },
+    'gmail:getConnectionStatus': async () => {
+      return getGmailConnectionStatus();
+    },
+    'gmail:getAccountEmail': async () => {
+      return { email: await getAccountEmail() };
+    },
+    'gmail:archiveThread': async (_event, args) => {
+      return archiveThread(args.threadId);
+    },
+    'gmail:trashThread': async (_event, args) => {
+      return trashThread(args.threadId);
+    },
+    'gmail:markThreadRead': async (_event, args) => {
+      return markThreadRead(args.threadId);
+    },
     'gmail:saveMessageHeight': async (_event, args) => {
       saveMessageBodyHeight(args.threadId, args.messageId, args.height);
       return {};
@@ -508,7 +529,7 @@ export function setupIpcHandlers() {
       return runsCore.createRun(args);
     },
     'runs:createMessage': async (_event, args) => {
-      return { messageId: await runsCore.createMessage(args.runId, args.message, args.voiceInput, args.voiceOutput, args.searchEnabled, args.middlePaneContext) };
+      return { messageId: await runsCore.createMessage(args.runId, args.message, args.voiceInput, args.voiceOutput, args.searchEnabled, args.middlePaneContext, args.codeMode) };
     },
     'runs:authorizePermission': async (_event, args) => {
       await runsCore.authorizePermission(args.runId, args.authorization);
@@ -611,6 +632,20 @@ export function setupIpcHandlers() {
       const repo = container.resolve<IGranolaConfigRepo>('granolaConfigRepo');
       const config = await repo.getConfig();
       return { enabled: config.enabled };
+    },
+    'codeMode:getConfig': async () => {
+      const repo = container.resolve<ICodeModeConfigRepo>('codeModeConfigRepo');
+      const config = await repo.getConfig();
+      return { enabled: config.enabled };
+    },
+    'codeMode:setConfig': async (_event, args) => {
+      const repo = container.resolve<ICodeModeConfigRepo>('codeModeConfigRepo');
+      await repo.setConfig({ enabled: args.enabled });
+      invalidateCopilotInstructionsCache();
+      return { success: true };
+    },
+    'codeMode:checkAgentStatus': async () => {
+      return await checkCodeModeAgentStatus();
     },
     'granola:setConfig': async (_event, args) => {
       const repo = container.resolve<IGranolaConfigRepo>('granolaConfigRepo');

@@ -3,6 +3,8 @@ import { getRuntimeContext, getRuntimeContextPrompt } from "./runtime-context.js
 import { composioAccountsRepo } from "../../composio/repo.js";
 import { isConfigured as isComposioConfigured } from "../../composio/client.js";
 import { CURATED_TOOLKITS } from "@x/shared/dist/composio.js";
+import container from "../../di/container.js";
+import type { ICodeModeConfigRepo } from "../../code-mode/repo.js";
 
 const runtimeContextPrompt = getRuntimeContextPrompt(getRuntimeContext());
 
@@ -29,7 +31,7 @@ Load the \`composio-integration\` skill when the user asks to interact with any 
 `;
 }
 
-function buildStaticInstructions(composioEnabled: boolean, catalog: string): string {
+function buildStaticInstructions(composioEnabled: boolean, catalog: string, codeModeEnabled: boolean = true): string {
     // Conditionally include Composio-related instruction sections
     const emailDraftSuffix = composioEnabled
         ? ` Do NOT load this skill for reading, fetching, or checking emails — use the \`composio-integration\` skill for that instead.`
@@ -80,7 +82,9 @@ ${thirdPartyBlock}**Meeting Prep:** When users ask you to prepare for a meeting,
 
 **Document Collaboration:** When users ask you to work on a document, collaborate on writing, create a new document, edit/refine existing notes, or say things like "let's work on [X]", "help me write [X]", "create a doc for [X]", or "let's draft [X]", you MUST load the \`doc-collab\` skill first. **This applies even for small one-off edits** — the skill carries the canonical *terse-and-scannable* writing style for the knowledge base, and that style applies whether you're authoring a fresh note or fixing a single section. Load it before writing anything into a note.
 
-**Code with Agents:** When users ask you to write code, build a project, create a script, fix a bug, or do any software development task, load the \`code-with-agents\` skill first. It provides guidance for delegating coding work to Claude Code or Codex via acpx.
+${codeModeEnabled
+    ? `**Code with Agents:** When users ask you to write code, build a project, create a script, fix a bug, or do any software development task — **including simple things like "create a .c file" or "write a hello-world in Python"** — your FIRST action MUST be \`loadSkill('code-with-agents')\`. Do NOT reach for \`executeCommand\` (PowerShell / bash / shell) or any workspace file tool to do code work yourself before loading this skill. The skill decides whether to delegate to Claude Code / Codex (via acpx) or hand control back to you, and it presents the user a one-click choice when needed. Paths outside the Rowboat workspace root (e.g. \`G:/...\`, \`~/projects/...\`) are NORMAL for coding tasks — do NOT raise "outside workspace" concerns or fall back to your own tools.`
+    : `**Code with Agents (disabled):** Code mode is currently OFF in the user's settings. Do NOT load \`code-with-agents\` and do NOT call acpx. Handle coding requests yourself with your normal tools if you can. After answering, add a final line letting the user know they can delegate coding to Claude Code or Codex by enabling Code Mode in Settings → Code Mode.`}
 
 **App Control:** When users ask you to open notes, show the bases or graph view, filter or search notes, or manage saved views, load the \`app-navigation\` skill first. It provides structured guidance for navigating the app UI and controlling the knowledge base view.
 
@@ -140,39 +144,39 @@ Users can interact with the knowledge graph through you, open it directly in Obs
 **CRITICAL PATH REQUIREMENT:**
 - The workspace root is the configured workdir
 - The knowledge base is in the \`knowledge/\` subfolder
-- When using workspace tools, ALWAYS include \`knowledge/\` in the path
-- **WRONG:** \`workspace-grep({ pattern: "John", path: "" })\` or \`path: "."\` or any absolute path to the workspace root
-- **CORRECT:** \`workspace-grep({ pattern: "John", path: "knowledge/" })\`
+- When searching knowledge, ALWAYS include \`knowledge/\` in the search path
+- **WRONG:** \`file-grep({ pattern: "John", searchPath: "" })\` or \`searchPath: "."\` or any absolute path to the workspace root
+- **CORRECT:** \`file-grep({ pattern: "John", searchPath: "knowledge/" })\`
 
-Use the builtin workspace tools to search and read the knowledge base:
+Use the builtin file tools to search and read the knowledge base:
 
 **Finding notes:**
 \`\`\`
 # List all people notes
-workspace-readdir("knowledge/People")
+file-list("knowledge/People")
 
 # Search for a person by name - MUST include knowledge/ in path
-workspace-grep({ pattern: "Sarah Chen", path: "knowledge/" })
+file-grep({ pattern: "Sarah Chen", searchPath: "knowledge/" })
 
 # Find notes mentioning a company - MUST include knowledge/ in path
-workspace-grep({ pattern: "Acme Corp", path: "knowledge/" })
+file-grep({ pattern: "Acme Corp", searchPath: "knowledge/" })
 \`\`\`
 
 **Reading notes:**
 \`\`\`
 # Read a specific person's note
-workspace-readFile("knowledge/People/Sarah Chen.md")
+file-readText("knowledge/People/Sarah Chen.md")
 
 # Read an organization note
-workspace-readFile("knowledge/Organizations/Acme Corp.md")
+file-readText("knowledge/Organizations/Acme Corp.md")
 \`\`\`
 
 **When a user mentions someone by name:**
-1. First, search for them: \`workspace-grep({ pattern: "John", path: "knowledge/" })\`
-2. Read their note to get full context: \`workspace-readFile("knowledge/People/John Smith.md")\`
+1. First, search for them: \`file-grep({ pattern: "John", searchPath: "knowledge/" })\`
+2. Read their note to get full context: \`file-readText("knowledge/People/John Smith.md")\`
 3. Use the context (role, organization, past interactions, commitments) in your response
 
-**NEVER use an empty path or root path. ALWAYS set path to \`knowledge/\` or a subfolder like \`knowledge/People/\`.**
+**NEVER use an empty search path or root path for knowledge lookup. ALWAYS set searchPath to \`knowledge/\` or a subfolder like \`knowledge/People/\`.**
 
 ## When to Access the Knowledge Graph
 
@@ -237,29 +241,23 @@ ${toolPriority}
 
 ${runtimeContextPrompt}
 
-## Workspace Access & Scope
-- **Inside the workspace root:** Use builtin workspace tools (\`workspace-readFile\`, \`workspace-writeFile\`, etc.). These don't require security approval.
-- **Outside the workspace root (Desktop, Downloads, Documents, etc.):** Use \`executeCommand\` to run shell commands.
-- **IMPORTANT:** Do NOT access files outside the workspace root unless the user explicitly asks you to (e.g., "organize my Desktop", "find a file in Downloads").
-
-**CRITICAL - When the user asks you to work with files outside the workspace root:**
-- Follow the detected runtime platform above for shell syntax and filesystem path style.
-- On macOS/Linux, use POSIX-style commands and paths (e.g., \`~/Desktop\`, \`~/Downloads\`, \`open\` on macOS).
-- On Windows, use cmd-compatible commands and Windows paths (e.g., \`C:\\Users\\<name>\\Desktop\`).
-- You CAN access the user's full filesystem via \`executeCommand\` - there is no sandbox restriction on paths.
-- NEVER say "I can only run commands inside the workspace root" or "I don't have access to your Desktop" - just use \`executeCommand\`.
-- NEVER offer commands for the user to run manually - run them yourself with \`executeCommand\`.
-- NEVER say "I'll run shell commands equivalent to..." - just describe what you'll do in plain language (e.g., "I'll move 12 screenshots to a new Screenshots folder").
-- NEVER ask what OS the user is on if runtime platform is already available.
+## File Access & Scope
+- Use builtin file tools (\`file-readText\`, \`file-writeText\`, \`file-editText\`, etc.) for normal file work anywhere on the user's machine.
+- Relative paths resolve against the Rowboat workspace root. Use paths like \`knowledge/People/Ada.md\` for knowledge files.
+- Use absolute paths or \`~/...\` paths when the user refers to Desktop, Downloads, Documents, the injected work directory, or any other location outside the Rowboat workspace.
+- File operations inside the Rowboat workspace normally run without approval. File operations outside the workspace may trigger a permission prompt; this is expected.
+- Do NOT use \`executeCommand\` just to read, write, edit, list, search, move, copy, or remove files. Use file tools and let the permission system handle access.
+- Do NOT read binary files as text. Use \`parseFile\` or \`LLMParse\` for PDFs, Office docs, images, scanned docs, presentations, and other non-text formats.
+- Do NOT access files outside the workspace unless the user explicitly asks you to or the current task clearly requires it.
 - Load the \`organize-files\` skill for guidance on file organization tasks.
 
 ## Builtin Tools vs Shell Commands
 
-**IMPORTANT**: Rowboat provides builtin tools that are internal and do NOT require any user approval:
-- \`workspace-readFile\`, \`workspace-writeFile\`, \`workspace-edit\`, \`workspace-remove\` - File operations
-- \`workspace-readdir\`, \`workspace-exists\`, \`workspace-stat\`, \`workspace-glob\`, \`workspace-grep\` - Directory exploration and file search
-- \`workspace-mkdir\`, \`workspace-rename\`, \`workspace-copy\` - File/directory management
-- \`parseFile\` - Parse and extract text from files (PDF, Excel, CSV, Word .docx). Accepts absolute paths or workspace-relative paths — no need to copy files into the workspace first. Best for well-structured digital documents.
+**IMPORTANT**: Rowboat provides builtin tools:
+- \`file-readText\`, \`file-writeText\`, \`file-editText\`, \`file-remove\` - File operations
+- \`file-list\`, \`file-exists\`, \`file-stat\`, \`file-glob\`, \`file-grep\` - Directory exploration and file search
+- \`file-mkdir\`, \`file-rename\`, \`file-copy\` - File/directory management
+- \`parseFile\` - Parse and extract text from files (PDF, Excel, CSV, Word .docx). Accepts absolute, ~/..., or relative paths — no need to copy files into the workspace first. Best for well-structured digital documents.
 - \`LLMParse\` - Send a file to the configured LLM as a multimodal attachment to extract content as markdown. Use this instead of \`parseFile\` for scanned PDFs, images with text, complex layouts, presentations, or any format where local parsing falls short. Supports documents and images.
 - \`analyzeAgent\` - Agent analysis
 - \`addMcpServer\`, \`listMcpServers\`, \`listMcpTools\`, \`executeMcpTool\` - MCP server management and execution
@@ -270,23 +268,21 @@ ${slackToolsLine}- \`web-search\` - Search the web. Returns rich results with fu
 - \`save-to-memory\` - Save observations about the user to the agent memory system. Use this proactively during conversations.
 ${composioToolsLine}
 
-**Prefer these tools whenever possible** — they work instantly with zero friction. For file operations inside the workspace root, always use these instead of \`executeCommand\`.
+**Prefer these tools whenever possible.** For file operations anywhere on the machine, use file tools instead of \`executeCommand\`.
 
 **Shell commands via \`executeCommand\`:**
-- You can run ANY shell command via \`executeCommand\`. Some commands are pre-approved in \`config/security.json\` within the workspace root and run immediately.
+- You can run shell commands via \`executeCommand\`. Some commands are pre-approved in \`config/security.json\` within the workspace root and run immediately.
 - Commands not on the pre-approved list will trigger a one-time approval prompt for the user — this is fine and expected, just a minor friction. Do NOT let this stop you from running commands you need.
 - **Never say "I can't run this command"** or ask the user to run something manually. Just call \`executeCommand\` and let the approval flow handle it.
 - When calling \`executeCommand\`, do NOT provide the \`cwd\` parameter unless absolutely necessary. The default working directory is already set to the workspace root.
-- Always confirm with the user before executing commands that modify files outside the workspace root (e.g., "I'll move 12 screenshots to ~/Desktop/Screenshots. Proceed?").
+- Always confirm with the user before executing commands that modify files outside the workspace root. Prefer file tools for file changes.
 
 **CRITICAL: MCP Server Configuration**
 - ALWAYS use the \`addMcpServer\` builtin tool to add or update MCP servers—it validates the configuration before saving
-- NEVER manually edit \`config/mcp.json\` using \`workspace-writeFile\` for MCP servers
+- NEVER manually edit \`config/mcp.json\` using \`file-writeText\` for MCP servers
 - Invalid MCP configs will prevent the agent from starting with validation errors
 
-**Only \`executeCommand\` (shell/bash commands) goes through the approval flow.** If you need to delete a file, use the \`workspace-remove\` builtin tool, not \`executeCommand\` with \`rm\`. If you need to create a file, use \`workspace-writeFile\`, not \`executeCommand\` with \`touch\` or \`echo >\`.
-
-Rowboat's internal builtin tools never require approval — only shell commands via \`executeCommand\` do.
+File tools and \`executeCommand\` can both go through the approval flow depending on the path or command. If you need to delete a file, use \`file-remove\`, not \`executeCommand\` with \`rm\`. If you need to create a file, use \`file-writeText\`, not \`executeCommand\` with \`touch\` or \`echo >\`.
 
 ## File Path References
 
@@ -320,30 +316,29 @@ Never output raw file paths in plain text when they could be wrapped in a filepa
 /** Keep backward-compatible export for any external consumers */
 export const CopilotInstructions = buildStaticInstructions(true, skillCatalog);
 
-/**
- * Cached Composio instructions. Invalidated by calling invalidateCopilotInstructionsCache().
- */
 let cachedInstructions: string | null = null;
 
-/**
- * Invalidate the cached instructions so the next buildCopilotInstructions() call
- * regenerates the Composio section. Call this after connecting/disconnecting a toolkit.
- */
 export function invalidateCopilotInstructionsCache(): void {
     cachedInstructions = null;
 }
 
-/**
- * Build full copilot instructions with dynamic Composio tools section.
- * Results are cached and reused until invalidated via invalidateCopilotInstructionsCache().
- */
 export async function buildCopilotInstructions(): Promise<string> {
     if (cachedInstructions !== null) return cachedInstructions;
     const composioEnabled = await isComposioConfigured();
-    const catalog = composioEnabled
-        ? skillCatalog
-        : buildSkillCatalog({ excludeIds: ['composio-integration'] });
-    const baseInstructions = buildStaticInstructions(composioEnabled, catalog);
+    let codeModeEnabled = false;
+    try {
+        const repo = container.resolve<ICodeModeConfigRepo>('codeModeConfigRepo');
+        codeModeEnabled = (await repo.getConfig()).enabled;
+    } catch {
+        // repo unavailable — default to disabled
+    }
+    const excludeIds: string[] = [];
+    if (!composioEnabled) excludeIds.push('composio-integration');
+    if (!codeModeEnabled) excludeIds.push('code-with-agents');
+    const catalog = excludeIds.length > 0
+        ? buildSkillCatalog({ excludeIds })
+        : skillCatalog;
+    const baseInstructions = buildStaticInstructions(composioEnabled, catalog, codeModeEnabled);
     const composioPrompt = await getComposioToolsPrompt();
     cachedInstructions = composioPrompt
         ? baseInstructions + '\n' + composioPrompt

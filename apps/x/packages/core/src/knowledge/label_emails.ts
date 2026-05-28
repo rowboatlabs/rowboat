@@ -78,13 +78,13 @@ async function labelEmailBatch(
     });
 
     let message = `Label the following ${files.length} email files by prepending YAML frontmatter.\n\n`;
-    message += `**Important:** Use workspace-relative paths with workspace-edit (e.g. "gmail_sync/email.md", NOT absolute paths).\n\n`;
+    message += `**Important:** Use workspace-relative paths with file-editText (e.g. "gmail_sync/email.md", NOT absolute paths).\n\n`;
 
     for (let i = 0; i < files.length; i++) {
         const file = files[i];
         const relativePath = path.relative(WorkDir, file.path);
         const truncated = file.content.length > MAX_CONTENT_LENGTH
-            ? file.content.slice(0, MAX_CONTENT_LENGTH) + '\n\n[... content truncated, use workspace-readFile for full content ...]'
+            ? file.content.slice(0, MAX_CONTENT_LENGTH) + '\n\n[... content truncated, use file-readText for full content ...]'
             : file.content;
 
         message += `## File ${i + 1}: ${relativePath}\n\n`;
@@ -98,7 +98,7 @@ async function labelEmailBatch(
         if (event.type !== 'tool-invocation') {
             return;
         }
-        if (event.toolName !== 'workspace-edit') {
+        if (event.toolName !== 'file-editText') {
             return;
         }
         try {

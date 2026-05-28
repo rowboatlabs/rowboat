@@ -14,7 +14,7 @@ Open a specific knowledge file in the editor pane.
 - ` + "`path`" + `: Full workspace-relative path (e.g., ` + "`knowledge/People/John Smith.md`" + `)
 
 **Tips:**
-- Use ` + "`workspace-grep`" + ` first to find the exact path if you're unsure of the filename.
+- Use ` + "`file-grep`" + ` first to find the exact path if you're unsure of the filename.
 - Always pass the full ` + "`knowledge/...`" + ` path, not just the filename.
 
 ### open-view

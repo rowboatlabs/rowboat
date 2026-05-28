@@ -264,10 +264,11 @@ async function createNotesFromBatch(
     message += `**Instructions:**\n`;
     message += `- Use the KNOWLEDGE BASE INDEX below to resolve entities - DO NOT grep/search for existing notes\n`;
     message += `- Extract entities (people, organizations, projects, topics) from ALL files below\n`;
+    message += `- The source files below are INDEPENDENT — they are batched only for efficiency. Two entities are related ONLY if they co-occur within the same single source file (or in an existing note). NEVER link entities just because they appear in this batch (see "Source Scoping" in your instructions)\n`;
     message += `- Create or update notes in "knowledge" directory (workspace-relative paths like "knowledge/People/Name.md")\n`;
     message += `- You may also create or update "${SUGGESTED_TOPICS_REL_PATH}" to maintain curated suggested-topic cards\n`;
-    message += `- If the same entity appears in multiple files, merge the information into a single note\n`;
-    message += `- Use workspace tools to read existing notes or "${SUGGESTED_TOPICS_REL_PATH}" (when you need full content) and write updates\n`;
+    message += `- If the SAME entity appears in multiple files, merge the information into a single note (this is identity, not a relationship — do not link different entities across files)\n`;
+    message += `- Use file tools to read existing notes or "${SUGGESTED_TOPICS_REL_PATH}" (when you need full content) and write updates\n`;
     message += `- Follow the note templates and guidelines in your instructions\n\n`;
 
     // Add the knowledge base index
@@ -297,16 +298,16 @@ async function createNotesFromBatch(
         if (event.type !== "tool-invocation") {
             return;
         }
-        if (event.toolName !== "workspace-writeFile" && event.toolName !== "workspace-edit") {
+        if (event.toolName !== "file-writeText" && event.toolName !== "file-editText") {
             return;
         }
         const toolPath = extractPathFromToolInput(event.input);
         if (!toolPath) {
             return;
         }
-        if (event.toolName === "workspace-writeFile") {
+        if (event.toolName === "file-writeText") {
             notesCreated.add(toolPath);
-        } else if (event.toolName === "workspace-edit") {
+        } else if (event.toolName === "file-editText") {
             notesModified.add(toolPath);
         }
     });
@@ -357,7 +358,7 @@ async function buildGraphWithFiles(
         return { processedFiles: [], notesCreated: new Set(), notesModified: new Set(), hadError: false };
     }
 
-    const BATCH_SIZE = 10; // Reduced from 25 to 10 files per agent run for faster processing
+    const BATCH_SIZE = 1; // One source file per agent run — prevents cross-file entity contamination in the graph
     const totalBatches = Math.ceil(contentFiles.length / BATCH_SIZE);
 
     console.log(`Processing ${contentFiles.length} files in ${totalBatches} batches (${BATCH_SIZE} files per batch)...`);
@@ -543,7 +544,7 @@ async function processVoiceMemosForKnowledge(): Promise<boolean> {
     }
 
     // Process in batches like other sources
-    const BATCH_SIZE = 10;
+    const BATCH_SIZE = 1; // One source file per agent run — prevents cross-file entity contamination in the graph
     const totalBatches = Math.ceil(contentFiles.length / BATCH_SIZE);
 
     const notesCreated = new Set<string>();

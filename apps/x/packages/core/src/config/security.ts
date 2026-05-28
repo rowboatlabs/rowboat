@@ -42,23 +42,58 @@ const DEFAULT_ALLOW_LIST = [
     "yq"
 ]
 
+export type FileAccessOperation = "read" | "list" | "search" | "write" | "delete";
+
+export type FileAccessGrant = {
+    operation: FileAccessOperation;
+    pathPrefix: string;
+};
+
 let cachedAllowList: string[] | null = null;
+let cachedFileAccessAllowList: FileAccessGrant[] | null = null;
 let cachedMtimeMs: number | null = null;
 
 export async function addToSecurityConfig(commands: string[]): Promise<void> {
     ensureSecurityConfigSync();
-    const current = readAllowList();
-    const merged = new Set(current);
+    const current = readSecurityConfig();
+    const merged = new Set(current.allowedCommands);
     for (const cmd of commands) {
         const normalized = cmd.trim().toLowerCase();
         if (normalized) merged.add(normalized);
     }
     await fsPromises.writeFile(
         SECURITY_CONFIG_PATH,
-        JSON.stringify(Array.from(merged).sort(), null, 2) + "\n",
+        JSON.stringify({
+            allowedCommands: Array.from(merged).sort(),
+            allowedFileAccess: current.allowedFileAccess,
+        }, null, 2) + "\n",
         "utf8",
     );
     // Reset cache so next read picks up the new file
+    resetSecurityAllowListCache();
+}
+
+export async function addFileAccessGrant(grant: FileAccessGrant): Promise<void> {
+    ensureSecurityConfigSync();
+    const current = readSecurityConfig();
+    const normalizedGrant = normalizeFileAccessGrant(grant);
+    const exists = current.allowedFileAccess.some(existing =>
+        existing.operation === normalizedGrant.operation
+        && existing.pathPrefix === normalizedGrant.pathPrefix
+    );
+    const allowedFileAccess = exists
+        ? current.allowedFileAccess
+        : [...current.allowedFileAccess, normalizedGrant].sort((a, b) =>
+            `${a.operation}:${a.pathPrefix}`.localeCompare(`${b.operation}:${b.pathPrefix}`)
+        );
+    await fsPromises.writeFile(
+        SECURITY_CONFIG_PATH,
+        JSON.stringify({
+            allowedCommands: current.allowedCommands,
+            allowedFileAccess,
+        }, null, 2) + "\n",
+        "utf8",
+    );
     resetSecurityAllowListCache();
 }
 
@@ -103,28 +138,74 @@ function normalizeList(commands: unknown[]): string[] {
     return Array.from(seen);
 }
 
-function parseSecurityPayload(payload: unknown): string[] {
+function normalizeFileAccessGrant(grant: FileAccessGrant): FileAccessGrant {
+    return {
+        operation: grant.operation,
+        pathPrefix: path.resolve(grant.pathPrefix),
+    };
+}
+
+function normalizeFileAccessList(grants: unknown[]): FileAccessGrant[] {
+    const seen = new Set<string>();
+    const normalized: FileAccessGrant[] = [];
+    for (const entry of grants) {
+        if (!entry || typeof entry !== "object") continue;
+        const maybeGrant = entry as Record<string, unknown>;
+        const operation = maybeGrant.operation;
+        const pathPrefix = maybeGrant.pathPrefix;
+        if (
+            operation !== "read"
+            && operation !== "list"
+            && operation !== "search"
+            && operation !== "write"
+            && operation !== "delete"
+        ) {
+            continue;
+        }
+        if (typeof pathPrefix !== "string" || !pathPrefix.trim()) continue;
+        const grant = normalizeFileAccessGrant({ operation, pathPrefix });
+        const key = `${grant.operation}:${grant.pathPrefix}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        normalized.push(grant);
+    }
+    return normalized;
+}
+
+function parseSecurityPayload(payload: unknown): { allowedCommands: string[]; allowedFileAccess: FileAccessGrant[] } {
     if (Array.isArray(payload)) {
-        return normalizeList(payload);
+        return { allowedCommands: normalizeList(payload), allowedFileAccess: [] };
     }
 
     if (payload && typeof payload === "object") {
         const maybeObject = payload as Record<string, unknown>;
-        if (Array.isArray(maybeObject.allowedCommands)) {
-            return normalizeList(maybeObject.allowedCommands);
+        const allowedFileAccess = Array.isArray(maybeObject.allowedFileAccess)
+            ? normalizeFileAccessList(maybeObject.allowedFileAccess)
+            : [];
+
+        if (Array.isArray(maybeObject.allowedCommands) || Array.isArray(maybeObject.allowedFileAccess)) {
+            return {
+                allowedCommands: Array.isArray(maybeObject.allowedCommands)
+                    ? normalizeList(maybeObject.allowedCommands)
+                    : [],
+                allowedFileAccess,
+            };
         }
 
         const dynamicList = Object.entries(maybeObject)
             .filter(([, value]) => Boolean(value))
             .map(([key]) => key);
 
-        return normalizeList(dynamicList);
+        return {
+            allowedCommands: normalizeList(dynamicList),
+            allowedFileAccess,
+        };
     }
 
-    return [];
+    return { allowedCommands: [], allowedFileAccess: [] };
 }
 
-function readAllowList(): string[] {
+function readSecurityConfig(): { allowedCommands: string[]; allowedFileAccess: FileAccessGrant[] } {
     ensureSecurityConfigSync();
 
     try {
@@ -133,8 +214,12 @@ function readAllowList(): string[] {
         return parseSecurityPayload(parsed);
     } catch (error) {
         console.warn(`Failed to read security config at ${SECURITY_CONFIG_PATH}: ${error instanceof Error ? error.message : error}`);
-        return DEFAULT_ALLOW_LIST;
+        return { allowedCommands: DEFAULT_ALLOW_LIST, allowedFileAccess: [] };
     }
+}
+
+function readAllowList(): string[] {
+    return readSecurityConfig().allowedCommands;
 }
 
 export function getSecurityAllowList(): string[] {
@@ -149,12 +234,32 @@ export function getSecurityAllowList(): string[] {
         return cachedAllowList;
     } catch {
         cachedAllowList = null;
+        cachedFileAccessAllowList = null;
         cachedMtimeMs = null;
         return readAllowList();
     }
 }
 
+export function getFileAccessAllowList(): FileAccessGrant[] {
+    ensureSecurityConfigSync();
+    try {
+        const stats = fs.statSync(SECURITY_CONFIG_PATH);
+        if (cachedFileAccessAllowList && cachedMtimeMs === stats.mtimeMs) {
+            return cachedFileAccessAllowList;
+        }
+        cachedFileAccessAllowList = readSecurityConfig().allowedFileAccess;
+        cachedMtimeMs = stats.mtimeMs;
+        return cachedFileAccessAllowList;
+    } catch {
+        cachedAllowList = null;
+        cachedFileAccessAllowList = null;
+        cachedMtimeMs = null;
+        return readSecurityConfig().allowedFileAccess;
+    }
+}
+
 export function resetSecurityAllowListCache() {
     cachedAllowList = null;
+    cachedFileAccessAllowList = null;
     cachedMtimeMs = null;
 }

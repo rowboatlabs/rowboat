@@ -50,9 +50,29 @@ export const UserContentPart = z.union([UserTextPart, UserAttachmentPart]);
 // Named type for user message content — used everywhere instead of repeating the union
 export const UserMessageContent = z.union([z.string(), z.array(UserContentPart)]);
 
+export const UserMessageContext = z.object({
+    currentDateTime: z.string().optional(),
+    middlePane: z.discriminatedUnion("kind", [
+        z.object({
+            kind: z.literal("empty"),
+        }),
+        z.object({
+            kind: z.literal("note"),
+            path: z.string(),
+            content: z.string(),
+        }),
+        z.object({
+            kind: z.literal("browser"),
+            url: z.string(),
+            title: z.string(),
+        }),
+    ]).optional(),
+});
+
 export const UserMessage = z.object({
     role: z.literal("user"),
     content: UserMessageContent,
+    userMessageContext: UserMessageContext.optional(),
     providerOptions: ProviderOptions.optional(),
 });
 

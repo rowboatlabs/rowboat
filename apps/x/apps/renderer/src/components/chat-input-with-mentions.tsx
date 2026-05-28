@@ -18,6 +18,7 @@ import {
   Mic,
   Plus,
   Square,
+  Terminal,
   X,
 } from 'lucide-react'
 
@@ -28,7 +29,6 @@ import {
   DropdownMenuItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import {
@@ -109,7 +109,7 @@ function getAttachmentIcon(kind: AttachmentIconKind) {
 }
 
 interface ChatInputInnerProps {
-  onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[], searchEnabled?: boolean) => void
+  onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex') => void
   onStop?: () => void
   isProcessing: boolean
   isStopping?: boolean
@@ -133,6 +133,10 @@ interface ChatInputInnerProps {
   onTtsModeChange?: (mode: 'summary' | 'full') => void
   /** Fired when the user picks a different model in the dropdown (only when no run exists yet). */
   onSelectedModelChange?: (model: SelectedModel | null) => void
+  /** Work directory for this chat (per-chat). Null when none is set. */
+  workDir?: string | null
+  /** Fired when the user sets/changes/clears the work directory for this chat. */
+  onWorkDirChange?: (value: string | null) => void
 }
 
 function ChatInputInner({
@@ -159,6 +163,8 @@ function ChatInputInner({
   onToggleTts,
   onTtsModeChange,
   onSelectedModelChange,
+  workDir = null,
+  onWorkDirChange,
 }: ChatInputInnerProps) {
   const controller = usePromptInputController()
   const message = controller.textInput.value
@@ -173,7 +179,9 @@ function ChatInputInner({
   const [searchEnabled, setSearchEnabled] = useState(false)
   const [searchAvailable, setSearchAvailable] = useState(false)
   const [isRowboatConnected, setIsRowboatConnected] = useState(false)
-  const [workDir, setWorkDir] = useState<string | null>(null)
+  const [codingAgent, setCodingAgent] = useState<'claude' | 'codex'>('claude')
+  const [codeModeEnabled, setCodeModeEnabled] = useState(false)
+  const [codeModeFeatureEnabled, setCodeModeFeatureEnabled] = useState(false)
 
   // When a run exists, freeze the dropdown to the run's resolved model+provider.
   useEffect(() => {
@@ -256,54 +264,137 @@ function ChatInputInner({
     return () => window.removeEventListener('models-config-changed', handler)
   }, [loadModelConfig])
 
-  // Load currently configured work directory
-  const loadWorkDir = useCallback(async () => {
-    try {
-      const result = await window.ipc.invoke('workspace:readFile', { path: 'config/workdir.json' })
-      const parsed = JSON.parse(result.data)
-      const value = typeof parsed?.path === 'string' ? parsed.path.trim() : ''
-      setWorkDir(value || null)
-    } catch {
-      setWorkDir(null)
+  // Load the global code-mode feature flag (from settings) and stay in sync.
+  useEffect(() => {
+    const load = () => {
+      window.ipc.invoke('codeMode:getConfig', null)
+        .then((r) => setCodeModeFeatureEnabled(r.enabled))
+        .catch(() => setCodeModeFeatureEnabled(false))
     }
+    load()
+    window.addEventListener('code-mode-config-changed', load)
+    return () => window.removeEventListener('code-mode-config-changed', load)
   }, [])
 
+  // If the feature is turned off in settings, also turn off any per-conversation chip.
   useEffect(() => {
-    loadWorkDir()
-  }, [isActive, loadWorkDir])
+    if (!codeModeFeatureEnabled && codeModeEnabled) {
+      setCodeModeEnabled(false)
+    }
+  }, [codeModeFeatureEnabled, codeModeEnabled])
+
+  // Listen for coding-agent runs that were triggered without the explicit code-mode
+  // toggle. App.tsx dispatches this when it sees an acpx executeCommand fire. We
+  // flip the pill on with the detected agent so the UI reflects what's happening.
+  useEffect(() => {
+    const handler = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ runId?: string; agent?: 'claude' | 'codex' }>).detail
+      if (!detail || !detail.agent) return
+      if (runId && detail.runId && detail.runId !== runId) return
+      setCodeModeEnabled(true)
+      setCodingAgent(detail.agent)
+    }
+    window.addEventListener('code-mode-detected', handler)
+    return () => window.removeEventListener('code-mode-detected', handler)
+  }, [runId])
+
+  // Cross-platform basename — handles both / and \ separators.
+  const basename = useCallback((p: string): string => {
+    const trimmed = p.replace(/[\\/]+$/, '')
+    const idx = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'))
+    return idx >= 0 ? trimmed.slice(idx + 1) : trimmed
+  }, [])
+
+  // Load coding-agent preference for a given workdir.
+  // Storage: config/coding-agents.json — { [workDirPath]: 'claude' | 'codex' }
+  const loadCodingAgentFor = useCallback(async (dir: string | null): Promise<'claude' | 'codex'> => {
+    if (!dir) return 'claude'
+    try {
+      const result = await window.ipc.invoke('workspace:readFile', { path: 'config/coding-agents.json' })
+      const parsed = JSON.parse(result.data) as Record<string, unknown>
+      const value = parsed?.[dir]
+      if (value === 'codex' || value === 'claude') return value
+    } catch {
+      /* file missing or invalid — fall through to default */
+    }
+    return 'claude'
+  }, [])
+
+  const persistCodingAgent = useCallback(async (dir: string, agent: 'claude' | 'codex') => {
+    let existing: Record<string, 'claude' | 'codex'> = {}
+    try {
+      const result = await window.ipc.invoke('workspace:readFile', { path: 'config/coding-agents.json' })
+      const parsed = JSON.parse(result.data) as Record<string, unknown>
+      for (const [k, v] of Object.entries(parsed ?? {})) {
+        if (v === 'claude' || v === 'codex') existing[k] = v
+      }
+    } catch { /* start fresh */ }
+    existing[dir] = agent
+    await window.ipc.invoke('workspace:writeFile', {
+      path: 'config/coding-agents.json',
+      data: JSON.stringify(existing, null, 2),
+    })
+  }, [])
+
+  // Work directory is owned per-chat by the parent (App). This component only
+  // drives the picker dialog and reports changes up via onWorkDirChange. Whenever
+  // the work directory changes, load its persisted coding-agent preference.
+  useEffect(() => {
+    let cancelled = false
+    loadCodingAgentFor(workDir).then((agent) => {
+      if (!cancelled) setCodingAgent(agent)
+    })
+    return () => { cancelled = true }
+  }, [workDir, loadCodingAgentFor])
 
   const handleSetWorkDir = useCallback(async () => {
     try {
+      let defaultPath: string | undefined = workDir ?? undefined
+      try {
+        const { root } = await window.ipc.invoke('workspace:getRoot', null)
+        const workspaceRel = 'knowledge/Workspace'
+        const exists = await window.ipc.invoke('workspace:exists', { path: workspaceRel })
+        if (!exists.exists) {
+          await window.ipc.invoke('workspace:mkdir', { path: workspaceRel, recursive: true })
+        }
+        defaultPath = `${root.replace(/\/$/, '')}/${workspaceRel}`
+      } catch (err) {
+        console.error('Failed to resolve Workspace path; falling back to current workDir', err)
+      }
       const { path: chosen } = await window.ipc.invoke('dialog:openDirectory', {
         title: 'Choose work directory',
-        defaultPath: workDir ?? undefined,
+        defaultPath,
       })
       if (!chosen) return
-      await window.ipc.invoke('workspace:writeFile', {
-        path: 'config/workdir.json',
-        data: JSON.stringify({ path: chosen }, null, 2),
-      })
-      setWorkDir(chosen)
+      onWorkDirChange?.(chosen)
+      setCodingAgent(await loadCodingAgentFor(chosen))
       toast.success(`Work directory set: ${chosen}`)
     } catch (err) {
       console.error('Failed to set work directory', err)
       toast.error('Failed to set work directory')
     }
-  }, [workDir])
+  }, [workDir, onWorkDirChange, loadCodingAgentFor])
 
-  const handleClearWorkDir = useCallback(async () => {
+  const handleClearWorkDir = useCallback(() => {
+    onWorkDirChange?.(null)
+    setCodingAgent('claude')
+    toast.success('Work directory cleared')
+  }, [onWorkDirChange])
+
+  const handleToggleCodingAgent = useCallback(async () => {
+    const next: 'claude' | 'codex' = codingAgent === 'claude' ? 'codex' : 'claude'
+    setCodingAgent(next)
+    // Persist only when scoped to a workdir; without one there's nothing to key on.
+    if (!workDir) return
     try {
-      await window.ipc.invoke('workspace:writeFile', {
-        path: 'config/workdir.json',
-        data: JSON.stringify({}, null, 2),
-      })
-      setWorkDir(null)
-      toast.success('Work directory cleared')
+      await persistCodingAgent(workDir, next)
     } catch (err) {
-      console.error('Failed to clear work directory', err)
-      toast.error('Failed to clear work directory')
+      console.error('Failed to save coding agent', err)
+      toast.error('Failed to save coding agent')
+      // revert on failure
+      setCodingAgent(codingAgent)
     }
-  }, [])
+  }, [workDir, codingAgent, persistCodingAgent])
 
   // Check search tool availability (exa or signed-in via gateway)
   useEffect(() => {
@@ -389,12 +480,15 @@ function ChatInputInner({
 
   const handleSubmit = useCallback(() => {
     if (!canSubmit) return
-    onSubmit({ text: message.trim(), files: [] }, controller.mentions.mentions, attachments, searchEnabled || undefined)
+    // codeMode is sticky per conversation — don't reset after send.
+    const effectiveCodeMode = codeModeEnabled ? codingAgent : undefined
+    onSubmit({ text: message.trim(), files: [] }, controller.mentions.mentions, attachments, searchEnabled || undefined, effectiveCodeMode)
     controller.textInput.clear()
     controller.mentions.clearMentions()
     setAttachments([])
-    setSearchEnabled(false)
-  }, [attachments, canSubmit, controller, message, onSubmit, searchEnabled])
+    // Web search toggle stays on for the rest of the chat session; the user
+    // turns it off explicitly. (Not persisted across app restarts.)
+  }, [attachments, canSubmit, controller, message, onSubmit, searchEnabled, codeModeEnabled, codingAgent, workDir])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -539,15 +633,20 @@ function ChatInputInner({
       </div>
       <div className="flex items-center gap-2 px-4 pb-3">
         <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              aria-label="Add"
-            >
-              <Plus className="h-4 w-4" />
-            </button>
-          </DropdownMenuTrigger>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  aria-label="Add"
+                >
+                  <Plus className="h-4 w-4" />
+                </button>
+              </DropdownMenuTrigger>
+            </TooltipTrigger>
+            <TooltipContent side="top">Add files or set work directory</TooltipContent>
+          </Tooltip>
           <DropdownMenuContent align="start" className="min-w-56">
             <DropdownMenuItem onSelect={() => fileInputRef.current?.click()}>
               <ImagePlus className="size-4" />
@@ -557,28 +656,29 @@ function ChatInputInner({
               <FolderCog className="size-4" />
               <span>{workDir ? 'Change work directory' : 'Set work directory'}</span>
             </DropdownMenuItem>
-            {workDir && (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={() => { void handleClearWorkDir() }}>
-                  <X className="size-4" />
-                  <span>Clear work directory</span>
-                </DropdownMenuItem>
-              </>
-            )}
           </DropdownMenuContent>
         </DropdownMenu>
         {workDir && (
           <Tooltip>
             <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={handleSetWorkDir}
-                className="flex h-7 max-w-[180px] shrink-0 items-center gap-1.5 rounded-full border border-border bg-muted/40 px-2.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              >
-                <FolderCog className="h-3.5 w-3.5" />
-                <span className="truncate">{workDir.split('/').pop() || workDir}</span>
-              </button>
+              <div className="group flex h-7 max-w-[180px] shrink-0 items-center rounded-full border border-border bg-muted/40 pl-2.5 pr-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+                <button
+                  type="button"
+                  onClick={handleSetWorkDir}
+                  className="flex min-w-0 items-center gap-1.5"
+                >
+                  <FolderCog className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">{basename(workDir) || workDir}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleClearWorkDir}
+                  aria-label="Remove work directory"
+                  className="flex h-3.5 w-0 shrink-0 items-center justify-center overflow-hidden opacity-0 transition-all duration-150 ease-out hover:text-red-500 group-hover:ml-1 group-hover:w-3.5 group-hover:opacity-100"
+                >
+                  <X className="h-3.5 w-3.5 shrink-0" />
+                </button>
+              </div>
             </TooltipTrigger>
             <TooltipContent side="top">
               Work directory: {workDir}
@@ -586,27 +686,75 @@ function ChatInputInner({
           </Tooltip>
         )}
         {searchAvailable && (
-          searchEnabled ? (
-            <button
-              type="button"
-              onClick={() => setSearchEnabled(false)}
-              className="flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-2.5 text-blue-600 transition-colors hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-400 dark:hover:bg-blue-900"
+          <button
+            type="button"
+            onClick={() => setSearchEnabled((v) => !v)}
+            aria-label="Search"
+            aria-pressed={searchEnabled}
+            className={cn(
+              'flex h-7 shrink-0 items-center rounded-full border px-1.5 transition-colors duration-150 ease-out',
+              searchEnabled
+                ? 'border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-400 dark:hover:bg-blue-900'
+                : 'border-transparent text-muted-foreground hover:bg-muted hover:text-foreground'
+            )}
+          >
+            <Globe className="h-4 w-4 shrink-0" />
+            <span
+              className={cn(
+                'overflow-hidden whitespace-nowrap text-xs font-medium transition-all duration-150 ease-out',
+                searchEnabled ? 'ml-1.5 max-w-[60px] opacity-100' : 'max-w-0 opacity-0'
+              )}
             >
-              <Globe className="h-3.5 w-3.5" />
-              <span className="text-xs font-medium">Search</span>
-              <X className="h-3 w-3" />
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setSearchEnabled(true)}
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              aria-label="Search"
-            >
-              <Globe className="h-4 w-4" />
-            </button>
-          )
+              Search
+            </span>
+          </button>
         )}
+        {codeModeFeatureEnabled && (codeModeEnabled ? (
+          <div className="flex h-7 shrink-0 items-center rounded-full bg-secondary text-xs font-medium text-foreground">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => setCodeModeEnabled(false)}
+                  className="flex h-full items-center gap-1.5 rounded-l-full pl-2.5 pr-2 transition-colors hover:bg-secondary/70"
+                >
+                  <Terminal className="h-3.5 w-3.5" />
+                  <span>Code</span>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top">Code mode on — click to disable</TooltipContent>
+            </Tooltip>
+            <span className="text-foreground/30">·</span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={handleToggleCodingAgent}
+                  className="flex h-full items-center rounded-r-full pl-2 pr-2.5 transition-colors hover:bg-secondary/70"
+                >
+                  <span>{codingAgent === 'claude' ? 'Claude' : 'Codex'}</span>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                Coding agent: {codingAgent === 'claude' ? 'Claude Code' : 'Codex'} — click to swap
+              </TooltipContent>
+            </Tooltip>
+          </div>
+        ) : (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={() => setCodeModeEnabled(true)}
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                aria-label="Code mode"
+              >
+                <Terminal className="h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top">Use a coding agent (Claude Code or Codex)</TooltipContent>
+          </Tooltip>
+        ))}
         <div className="flex-1" />
         {lockedModel ? (
           <span
@@ -767,7 +915,7 @@ export interface ChatInputWithMentionsProps {
   knowledgeFiles: string[]
   recentFiles: string[]
   visibleFiles: string[]
-  onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[]) => void
+  onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex') => void
   onStop?: () => void
   isProcessing: boolean
   isStopping?: boolean
@@ -790,6 +938,8 @@ export interface ChatInputWithMentionsProps {
   onToggleTts?: () => void
   onTtsModeChange?: (mode: 'summary' | 'full') => void
   onSelectedModelChange?: (model: SelectedModel | null) => void
+  workDir?: string | null
+  onWorkDirChange?: (value: string | null) => void
 }
 
 export function ChatInputWithMentions({
@@ -819,6 +969,8 @@ export function ChatInputWithMentions({
   onToggleTts,
   onTtsModeChange,
   onSelectedModelChange,
+  workDir,
+  onWorkDirChange,
 }: ChatInputWithMentionsProps) {
   return (
     <PromptInputProvider knowledgeFiles={knowledgeFiles} recentFiles={recentFiles} visibleFiles={visibleFiles}>
@@ -846,6 +998,8 @@ export function ChatInputWithMentions({
         onToggleTts={onToggleTts}
         onTtsModeChange={onTtsModeChange}
         onSelectedModelChange={onSelectedModelChange}
+        workDir={workDir}
+        onWorkDirChange={onWorkDirChange}
       />
     </PromptInputProvider>
   )

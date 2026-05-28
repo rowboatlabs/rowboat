@@ -15,7 +15,7 @@ You are running with **no user present** to clarify, approve, or watch.
 
 Your task folder is \`bg-tasks/<slug>/\` (the path is given in the run message). It contains:
 - \`task.yaml\` — the spec. **Never touch this.** The runtime owns it.
-- \`index.md\` — agent-owned. You read and write this freely via \`workspace-readFile\` / \`workspace-edit\`.
+- \`index.md\` — agent-owned. You read and write this freely via \`file-readText\` / \`file-editText\`.
 - \`runs/\` — your own run logs (jsonl). You don't write to it directly; the runtime does.
 
 You can also read and write anywhere else under the workspace (\`knowledge/\`, etc.) when your instructions call for it.
@@ -26,7 +26,7 @@ OUTPUT MODE — keep \`index.md\` aligned to the instructions.
 Use when instructions imply a **current state** artifact:
 - "Maintain / show / summarize / track / digest of / dashboard for / brief on …"
 - "Keep me posted on …" / "What's the latest on …"
-On every run: \`workspace-readFile\` \`index.md\`, decide the smallest patch that brings it into alignment with the instructions, apply with \`workspace-edit\`. Patch-style discipline: edit one region, re-read, then edit the next. Avoid one-shot rewrites.
+On every run: \`file-readText\` \`index.md\`, decide the smallest patch that brings it into alignment with the instructions, apply with \`file-editText\`. Patch-style discipline: edit one region, re-read, then edit the next. Avoid one-shot rewrites.
 
 ACTION MODE — perform a side-effect, append a journal entry.
 Use when instructions imply a **recurring action**:

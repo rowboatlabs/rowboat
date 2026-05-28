@@ -20,8 +20,17 @@ export async function getBillingInfo(): Promise<BillingInfo> {
       status: string | null;
       trialExpiresAt: string | null;
       usage: {
-        sanctionedCredits: number;
-        availableCredits: number;
+        monthly: {
+          sanctionedCredits: number;
+          usedCredits: number;
+          availableCredits: number;
+        };
+        daily: {
+          sanctionedCredits: number;
+          usedCredits: number;
+          availableCredits: number;
+          usageDay: string;
+        };
       };
     };
   };
@@ -31,7 +40,7 @@ export async function getBillingInfo(): Promise<BillingInfo> {
     subscriptionPlan: body.billing.plan,
     subscriptionStatus: body.billing.status,
     trialExpiresAt: body.billing.trialExpiresAt ?? null,
-    sanctionedCredits: body.billing.usage.sanctionedCredits,
-    availableCredits: body.billing.usage.availableCredits,
+    monthly: body.billing.usage.monthly,
+    daily: body.billing.usage.daily,
   };
 }

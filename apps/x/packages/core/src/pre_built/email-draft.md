@@ -1,20 +1,20 @@
 ---
 tools:
-  workspace-readFile:
+  file-readText:
     type: builtin
-    name: workspace-readFile
-  workspace-writeFile:
+    name: file-readText
+  file-writeText:
     type: builtin
-    name: workspace-writeFile
-  workspace-readdir:
+    name: file-writeText
+  file-list:
     type: builtin
-    name: workspace-readdir
-  workspace-mkdir:
+    name: file-list
+  file-mkdir:
     type: builtin
-    name: workspace-mkdir
-  workspace-exists:
+    name: file-mkdir
+  file-exists:
     type: builtin
-    name: workspace-exists
+    name: file-exists
   executeCommand:
     type: builtin
     name: executeCommand
@@ -41,8 +41,8 @@ All state is stored in `pre-built/email-draft/`:
 
 On first run, check if state exists. If not, create it:
 
-1. Use `workspace-exists` to check if `pre-built/email-draft/state.json` exists
-2. If not, use `workspace-mkdir` to create `pre-built/email-draft/` and `pre-built/email-draft/drafts/`
+1. Use `file-exists` to check if `pre-built/email-draft/state.json` exists
+2. If not, use `file-mkdir` to create `pre-built/email-draft/` and `pre-built/email-draft/drafts/`
 3. Initialize `state.json` with empty arrays and a timestamp of "1970-01-01T00:00:00Z"
 
 ## Processing Flow
@@ -56,7 +56,7 @@ Read `pre-built/email-draft/state.json` to get:
 
 ### Step 2: Scan for New Emails
 
-List emails in `gmail_sync/` folder using `workspace-readdir`.
+List emails in `gmail_sync/` folder using `file-list`.
 
 For each email file:
 1. Extract the email ID from filename (e.g., `19048cf9c0317981.md` → `19048cf9c0317981`)

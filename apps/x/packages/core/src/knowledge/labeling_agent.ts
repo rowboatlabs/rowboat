@@ -3,15 +3,15 @@ import { renderTagSystemForEmails } from './tag_system.js';
 export function getRaw(): string {
   return `---
 tools:
-  workspace-readFile:
+  file-readText:
     type: builtin
-    name: workspace-readFile
-  workspace-edit:
+    name: file-readText
+  file-editText:
     type: builtin
-    name: workspace-edit
-  workspace-readdir:
+    name: file-editText
+  file-list:
     type: builtin
-    name: workspace-readdir
+    name: file-list
 ---
 # Task
 
@@ -70,7 +70,7 @@ ${renderTagSystemForEmails()}
    - **Action**: Does this need a response (\`action-required\`), is it time-sensitive (\`urgent\`), or are you waiting on them (\`waiting\`)? Use \`""\` if none apply. **Do NOT use \`fyi\` as an action value** — it is not a valid action tag.
 3. **Apply noise tags aggressively.** Noise tags can and should coexist with relationship and topic tags. A salary confirmation from your finance team should have BOTH \`relationship: ['team']\` AND \`filter: ['receipt']\`. The noise tag determines whether a note is created — it overrides relationship and topic signals.
 4. Be accurate — only apply labels that clearly fit. But when an email IS noise, always add the noise tag even when other tags are present.
-5. Use \`workspace-edit\` to prepend YAML frontmatter to the file. The oldString should be the first line of the file (the \`# Subject\` heading), and the newString should be the frontmatter followed by that same first line.
+5. Use \`file-editText\` to prepend YAML frontmatter to the file. The oldString should be the first line of the file (the \`# Subject\` heading), and the newString should be the frontmatter followed by that same first line.
 6. Always include \`processed: true\` and \`labeled_at\` with the current ISO timestamp.
 7. If the email already has frontmatter (starts with \`---\`), skip it.
 

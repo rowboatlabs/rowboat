@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug } from "lucide-react"
+import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Bug, Terminal, AlertTriangle, RefreshCw } from "lucide-react"
 
 import {
   Dialog,
@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Separator } from "@/components/ui/separator"
 import {
   Select,
   SelectContent,
@@ -25,7 +26,7 @@ import { toast } from "sonner"
 import { AccountSettings } from "@/components/settings/account-settings"
 import { ConnectedAccountsSettings } from "@/components/settings/connected-accounts-settings"
 
-type ConfigTab = "account" | "connected-accounts" | "models" | "mcp" | "security" | "appearance" | "tools" | "note-tagging"
+type ConfigTab = "account" | "connections" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "note-tagging" | "help"
 
 interface TabConfig {
   id: ConfigTab
@@ -43,10 +44,10 @@ const tabs: TabConfig[] = [
     description: "Manage your Rowboat account",
   },
   {
-    id: "connected-accounts",
-    label: "Connected Accounts",
+    id: "connections",
+    label: "Connections",
     icon: Plug,
-    description: "Manage connected services",
+    description: "Manage accounts and tools",
   },
   {
     id: "models",
@@ -70,16 +71,16 @@ const tabs: TabConfig[] = [
     description: "Configure allowed shell commands",
   },
   {
+    id: "code-mode",
+    label: "Code Mode",
+    icon: Terminal,
+    description: "Delegate coding tasks to Claude Code or Codex",
+  },
+  {
     id: "appearance",
     label: "Appearance",
     icon: Palette,
     description: "Customize the look and feel",
-  },
-  {
-    id: "tools",
-    label: "Tools Library",
-    icon: Wrench,
-    description: "Browse and enable toolkits",
   },
   {
     id: "note-tagging",
@@ -88,10 +89,93 @@ const tabs: TabConfig[] = [
     path: "config/tags.json",
     description: "Configure tags for notes and emails",
   },
+  {
+    id: "help",
+    label: "Help",
+    icon: HelpCircle,
+    description: "Get help and support",
+  },
 ]
 
 interface SettingsDialogProps {
-  children: React.ReactNode
+  /** Optional trigger element. Omit when controlling `open` externally. */
+  children?: React.ReactNode
+  /** Tab to open on when the dialog is shown. Defaults to "account". */
+  defaultTab?: ConfigTab
+  /** Controlled open state. When provided, the dialog is fully controlled. */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+}
+
+// --- Help & Support tab ---
+
+function HelpSettings() {
+  return (
+    <div className="space-y-4">
+      <div>
+        <h4 className="text-sm font-medium">Help &amp; Support</h4>
+        <p className="text-xs text-muted-foreground mt-0.5">Get help from our community</p>
+      </div>
+      <Button
+        variant="outline"
+        className="w-full justify-start gap-3 h-auto py-3"
+        onClick={() => window.open("https://github.com/rowboatlabs/rowboat/issues/new", "_blank")}
+      >
+        <div className="flex size-8 items-center justify-center rounded-md bg-destructive/10">
+          <Bug className="size-4 text-destructive" />
+        </div>
+        <div className="flex flex-col items-start">
+          <span className="text-sm font-medium">Report a bug</span>
+          <span className="text-xs text-muted-foreground">Send feedback to the Rowboat team</span>
+        </div>
+      </Button>
+      <Button
+        variant="outline"
+        className="w-full justify-start gap-3 h-auto py-3"
+        onClick={() => window.open("https://discord.com/invite/wajrgmJQ6b", "_blank")}
+      >
+        <div className="flex size-8 items-center justify-center rounded-md bg-[#5865F2]">
+          <MessageCircle className="size-4 text-white" />
+        </div>
+        <div className="flex flex-col items-start">
+          <span className="text-sm font-medium">Join our Discord</span>
+          <span className="text-xs text-muted-foreground">Chat with the community</span>
+        </div>
+      </Button>
+      <Button
+        variant="outline"
+        className="w-full justify-start gap-3 h-auto py-3"
+        onClick={() => window.open("mailto:contact@rowboatlabs.com", "_blank")}
+      >
+        <div className="flex size-8 items-center justify-center rounded-md bg-muted">
+          <Mail className="size-4" />
+        </div>
+        <div className="flex flex-col items-start">
+          <span className="text-sm font-medium">Contact us</span>
+          <span className="text-xs text-muted-foreground">contact@rowboatlabs.com</span>
+        </div>
+      </Button>
+      <div className="flex gap-3 text-xs text-muted-foreground">
+        <a
+          href="https://www.rowboatlabs.com/terms-of-service"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="hover:text-foreground transition-colors"
+        >
+          Terms of Service
+        </a>
+        <span>·</span>
+        <a
+          href="https://www.rowboatlabs.com/privacy-policy"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="hover:text-foreground transition-colors"
+        >
+          Privacy Policy
+        </a>
+      </div>
+    </div>
+  )
 }
 
 // --- Theme option for Appearance tab ---
@@ -1570,17 +1654,219 @@ function NoteTaggingSettings({ dialogOpen }: { dialogOpen: boolean }) {
   )
 }
 
+// --- Code Mode Settings ---
+
+type AgentStatus = { installed: boolean; signedIn: boolean }
+type CodeModeAgentStatus = { claude: AgentStatus; codex: AgentStatus }
+
+function AgentStatusRow({
+  name,
+  installLink,
+  signInCommand,
+  status,
+}: {
+  name: string
+  installLink: string
+  signInCommand: string
+  status: AgentStatus | null
+}) {
+  const ready = status?.installed && status?.signedIn
+  const needsSignInOnly = status?.installed && !status?.signedIn
+  return (
+    <div className="rounded-md border px-3 py-2.5 flex items-center gap-3">
+      <Terminal className="size-4 text-muted-foreground shrink-0" />
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-medium">{name}</div>
+        <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-3">
+          <span className={cn("inline-flex items-center gap-1", status?.installed ? "text-green-600" : "text-muted-foreground")}>
+            {status?.installed ? <CheckCircle2 className="size-3" /> : <X className="size-3" />}
+            Installed
+          </span>
+          <span className={cn("inline-flex items-center gap-1", status?.signedIn ? "text-green-600" : "text-muted-foreground")}>
+            {status?.signedIn ? <CheckCircle2 className="size-3" /> : <X className="size-3" />}
+            Signed in
+          </span>
+        </div>
+      </div>
+      {ready ? (
+        <span className="rounded-full bg-green-500/10 px-2 py-0.5 text-[10px] font-medium leading-none text-green-600">
+          Ready
+        </span>
+      ) : needsSignInOnly ? (
+        <span className="text-xs text-muted-foreground shrink-0">
+          Run <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">{signInCommand}</code>
+        </span>
+      ) : (
+        <a
+          href={installLink}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-xs text-primary hover:underline shrink-0"
+        >
+          Install &amp; sign in
+        </a>
+      )}
+    </div>
+  )
+}
+
+function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
+  const [enabled, setEnabled] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [status, setStatus] = useState<CodeModeAgentStatus | null>(null)
+  const [statusLoading, setStatusLoading] = useState(false)
+
+  const loadStatus = useCallback(async () => {
+    setStatusLoading(true)
+    try {
+      const result = await window.ipc.invoke("codeMode:checkAgentStatus", null)
+      setStatus(result)
+    } catch {
+      setStatus(null)
+    } finally {
+      setStatusLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!dialogOpen) return
+    let cancelled = false
+    async function load() {
+      setLoading(true)
+      try {
+        const result = await window.ipc.invoke("codeMode:getConfig", null)
+        if (!cancelled) setEnabled(result.enabled)
+      } catch {
+        if (!cancelled) setEnabled(false)
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    load()
+    loadStatus()
+    return () => { cancelled = true }
+  }, [dialogOpen, loadStatus])
+
+  const handleToggle = useCallback(async (next: boolean) => {
+    setSaving(true)
+    setEnabled(next)
+    try {
+      await window.ipc.invoke("codeMode:setConfig", { enabled: next })
+      window.dispatchEvent(new Event("code-mode-config-changed"))
+      toast.success(next ? "Code mode enabled" : "Code mode disabled")
+    } catch {
+      setEnabled(!next)
+      toast.error("Failed to update code mode")
+    } finally {
+      setSaving(false)
+    }
+  }, [])
+
+  const anyReady = status?.claude.installed && status?.claude.signedIn
+    || status?.codex.installed && status?.codex.signedIn
+
+  if (loading) {
+    return (
+      <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
+        <Loader2 className="size-4 animate-spin mr-2" />
+        Loading...
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="space-y-2 text-sm text-muted-foreground leading-relaxed">
+        <p>
+          <strong className="text-foreground">Code mode</strong> lets the assistant delegate coding tasks
+          to <strong className="text-foreground">Claude Code</strong> or <strong className="text-foreground">Codex</strong> running
+          on your machine. Pick the agent inline from the composer; the assistant calls it via
+          <code className="mx-1 rounded bg-muted px-1 py-0.5 text-[11px]">acpx</code>
+          and streams results back into chat.
+        </p>
+        <p>
+          Requires an active <strong className="text-foreground">Claude Code</strong> subscription or
+          a <strong className="text-foreground">ChatGPT/Codex</strong> subscription. You can have one or both.
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Agent status</span>
+          <button
+            onClick={() => { void loadStatus() }}
+            disabled={statusLoading}
+            className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            {statusLoading ? <Loader2 className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}
+            Re-check
+          </button>
+        </div>
+        <div className="space-y-2">
+          <AgentStatusRow
+            name="Claude Code"
+            installLink="https://claude.ai/code"
+            signInCommand="claude login"
+            status={status?.claude ?? null}
+          />
+          <AgentStatusRow
+            name="Codex"
+            installLink="https://developers.openai.com/codex/cli"
+            signInCommand="codex login"
+            status={status?.codex ?? null}
+          />
+        </div>
+      </div>
+
+      <div className="rounded-md border px-3 py-3 flex items-start gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-medium">Enable code mode</div>
+          <div className="text-xs text-muted-foreground mt-0.5">
+            Shows the code mode chip in the composer and lets the assistant delegate to your installed agents.
+          </div>
+        </div>
+        <Switch
+          checked={enabled}
+          onCheckedChange={handleToggle}
+          disabled={saving}
+        />
+      </div>
+
+      {enabled && status && !anyReady && (
+        <div className="rounded-md border border-amber-500/40 bg-amber-50/60 dark:bg-amber-950/20 px-3 py-2.5 flex items-start gap-2 text-xs">
+          <AlertTriangle className="size-4 text-amber-600 dark:text-amber-500 shrink-0 mt-0.5" />
+          <div className="text-amber-900 dark:text-amber-200">
+            Neither Claude Code nor Codex is ready. Install at least one and sign in with a subscription
+            account, then click Re-check.
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // --- Main Settings Dialog ---
 
-export function SettingsDialog({ children }: SettingsDialogProps) {
-  const [open, setOpen] = useState(false)
-  const [activeTab, setActiveTab] = useState<ConfigTab>("account")
+export function SettingsDialog({ children, defaultTab = "account", open: controlledOpen, onOpenChange }: SettingsDialogProps) {
+  const [internalOpen, setInternalOpen] = useState(false)
+  const open = controlledOpen ?? internalOpen
+  const setOpen = useCallback((next: boolean) => {
+    if (onOpenChange) onOpenChange(next)
+    else setInternalOpen(next)
+  }, [onOpenChange])
+  const [activeTab, setActiveTab] = useState<ConfigTab>(defaultTab)
   const [content, setContent] = useState("")
   const [originalContent, setOriginalContent] = useState("")
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [rowboatConnected, setRowboatConnected] = useState(false)
+
+  // Reset to the requested default tab each time the dialog is opened
+  useEffect(() => {
+    if (open) setActiveTab(defaultTab)
+  }, [open, defaultTab])
 
   // Check if user is signed in to Rowboat
   useEffect(() => {
@@ -1607,7 +1893,7 @@ export function SettingsDialog({ children }: SettingsDialogProps) {
   }
 
   const loadConfig = useCallback(async (tab: ConfigTab) => {
-    if (tab === "appearance" || tab === "models" || tab === "note-tagging" || tab === "account" || tab === "connected-accounts") return
+    if (tab === "appearance" || tab === "models" || tab === "note-tagging" || tab === "account" || tab === "connections" || tab === "help" || tab === "code-mode") return
     const tabConfig = tabs.find((t) => t.id === tab)!
     if (!tabConfig.path) return
     setLoading(true)
@@ -1673,7 +1959,7 @@ export function SettingsDialog({ children }: SettingsDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>{children}</DialogTrigger>
+      {children && <DialogTrigger asChild>{children}</DialogTrigger>}
       <DialogContent
         className="max-w-[900px]! w-[900px] h-[600px] p-0 gap-0 overflow-hidden"
       >
@@ -1715,11 +2001,21 @@ export function SettingsDialog({ children }: SettingsDialogProps) {
             </div>
 
             {/* Content */}
-            <div className={cn("flex-1 p-4 min-h-0", (activeTab === "models" || activeTab === "tools" || activeTab === "account" || activeTab === "connected-accounts") ? "overflow-y-auto" : activeTab === "note-tagging" ? "overflow-hidden flex flex-col" : "overflow-hidden")}>
+            <div className={cn("flex-1 p-4 min-h-0", (activeTab === "models" || activeTab === "connections" || activeTab === "account" || activeTab === "code-mode") ? "overflow-y-auto" : activeTab === "note-tagging" ? "overflow-hidden flex flex-col" : "overflow-hidden")}>
               {activeTab === "account" ? (
                 <AccountSettings dialogOpen={open} />
-              ) : activeTab === "connected-accounts" ? (
-                <ConnectedAccountsSettings dialogOpen={open} />
+              ) : activeTab === "connections" ? (
+                <div className="space-y-6">
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-semibold">Primary accounts</h4>
+                    <ConnectedAccountsSettings dialogOpen={open} />
+                  </div>
+                  <Separator />
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-semibold">Library</h4>
+                    <ToolsLibrarySettings dialogOpen={open} rowboatConnected={rowboatConnected} />
+                  </div>
+                </div>
               ) : activeTab === "models" ? (
                 rowboatConnected
                   ? <RowboatModelSettings dialogOpen={open} />
@@ -1728,8 +2024,10 @@ export function SettingsDialog({ children }: SettingsDialogProps) {
                 <NoteTaggingSettings dialogOpen={open} />
               ) : activeTab === "appearance" ? (
                 <AppearanceSettings />
-              ) : activeTab === "tools" ? (
-                <ToolsLibrarySettings dialogOpen={open} rowboatConnected={rowboatConnected} />
+              ) : activeTab === "help" ? (
+                <HelpSettings />
+              ) : activeTab === "code-mode" ? (
+                <CodeModeSettings dialogOpen={open} />
               ) : loading ? (
                 <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
                   Loading...

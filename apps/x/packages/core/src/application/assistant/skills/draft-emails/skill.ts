@@ -16,11 +16,11 @@ When the user says "draft an email to Monica" or mentions ANY person, organizati
 1. **STOP** - Do not draft anything yet
 2. **SEARCH** - Look them up in the knowledge base (path MUST be \`knowledge/\`):
    \`\`\`
-   workspace-grep({ pattern: "Monica", path: "knowledge/" })
+   file-grep({ pattern: "Monica", searchPath: "knowledge/" })
    \`\`\`
 3. **READ** - Read their note to understand who they are:
    \`\`\`
-   workspace-readFile("knowledge/People/Monica Smith.md")
+   file-readText("knowledge/People/Monica Smith.md")
    \`\`\`
 4. **UNDERSTAND** - Extract their role, organization, relationship history, past interactions, open items
 5. **THEN DRAFT** - Only now draft the email, using this context
@@ -133,19 +133,19 @@ Before drafting, gather relevant context. **Always check the knowledge base firs
 First, search for the sender and any mentioned entities (path MUST be \`knowledge/\`):
 \`\`\`
 # Search for the sender by name or email
-workspace-grep({ pattern: "sender_name_or_email", path: "knowledge/" })
+file-grep({ pattern: "sender_name_or_email", searchPath: "knowledge/" })
 
 # List all people to find potential matches
-workspace-readdir("knowledge/People")
+file-list("knowledge/People")
 \`\`\`
 
 Then read the relevant notes:
 \`\`\`
 # Read the sender's note
-workspace-readFile("knowledge/People/Sender Name.md")
+file-readText("knowledge/People/Sender Name.md")
 
 # Read their organization's note
-workspace-readFile("knowledge/Organizations/Company Name.md")
+file-readText("knowledge/Organizations/Company Name.md")
 \`\`\`
 
 Extract from these notes:

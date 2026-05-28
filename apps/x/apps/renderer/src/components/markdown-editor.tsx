@@ -1,5 +1,5 @@
 import { useEditor, EditorContent, Extension, Editor } from '@tiptap/react'
-import { Plugin, PluginKey } from '@tiptap/pm/state'
+import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state'
 import { Decoration, DecorationSet, EditorView } from '@tiptap/pm/view'
 import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
@@ -83,7 +83,8 @@ function nodeToText(node: JsonNode): string {
       return text
     } else if (child.type === 'wikiLink') {
       const path = (child.attrs?.path as string) || ''
-      return path ? `[[${path}]]` : ''
+      const label = (child.attrs?.label as string | null | undefined) || ''
+      return path ? `[[${path}${label ? `|${label}` : ''}]]` : ''
     } else if (child.type === 'hardBreak') {
       return '\n'
     }
@@ -189,7 +190,8 @@ function blockToMarkdown(node: JsonNode): string {
       return '---'
     case 'wikiLink': {
       const path = (node.attrs?.path as string) || ''
-      return `[[${path}]]`
+      const label = (node.attrs?.label as string | null | undefined) || ''
+      return `[[${path}${label ? `|${label}` : ''}]]`
     }
     case 'image': {
       const src = (node.attrs?.src as string) || ''
@@ -297,7 +299,7 @@ import { FrontmatterProperties } from './frontmatter-properties'
 import { WikiLink } from '@/extensions/wiki-link'
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 import { Command, CommandEmpty, CommandItem, CommandList } from '@/components/ui/command'
-import { ensureMarkdownExtension, normalizeWikiPath, wikiLabel } from '@/lib/wiki-links'
+import { ensureMarkdownExtension, normalizeWikiPath, splitWikiFragment, wikiLabel } from '@/lib/wiki-links'
 import { extractAllFrontmatterValues, buildFrontmatter } from '@/lib/frontmatter'
 import { RowboatMentionPopover } from './rowboat-mention-popover'
 import '@/styles/editor.css'
@@ -523,6 +525,106 @@ const TabIndentExtension = Extension.create({
   },
 })
 
+const slugifyHeading = (text: string) =>
+  text
+    .trim()
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+
+const decodeLinkTarget = (target: string) => {
+  try {
+    return decodeURIComponent(target)
+  } catch {
+    return target
+  }
+}
+
+const scrollToHeading = (view: EditorView, rawTarget: string) => {
+  const target = decodeLinkTarget(rawTarget.replace(/^#/, '')).trim()
+  if (!target) return false
+
+  const targetSlug = slugifyHeading(target)
+  let foundPos: number | null = null
+  view.state.doc.descendants((node, pos) => {
+    if (node.type.name !== 'heading') return true
+    const headingText = node.textContent.trim()
+    if (
+      headingText.toLowerCase() === target.toLowerCase()
+      || slugifyHeading(headingText) === targetSlug
+    ) {
+      foundPos = pos
+      return false
+    }
+    return true
+  })
+
+  if (foundPos === null) return false
+
+  const selectionPos = Math.min(foundPos + 1, view.state.doc.content.size)
+  view.dispatch(
+    view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(selectionPos)))
+  )
+  view.focus()
+
+  const domAtPos = view.domAtPos(foundPos + 1)
+  const node = domAtPos.node
+  const headingEl = node.nodeType === Node.ELEMENT_NODE
+    ? (node as HTMLElement)
+    : node.parentElement
+  headingEl?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+  return true
+}
+
+const stripMarkdownExtension = (path: string) =>
+  path.toLowerCase().endsWith('.md') ? path.slice(0, -3) : path
+
+const isSameNotePath = (linkPath: string, notePath?: string) => {
+  if (!notePath) return false
+  const normalizedLink = stripMarkdownExtension(normalizeWikiPath(linkPath)).toLowerCase()
+  const normalizedNote = stripMarkdownExtension(normalizeWikiPath(notePath)).toLowerCase()
+  return normalizedLink === normalizedNote
+}
+
+const isExternalHref = (href: string) =>
+  /^(https?:|mailto:|tel:)/i.test(href)
+
+const collapseRelativeSegments = (relPath: string) => {
+  const parts = relPath.split('/').filter((part) => part !== '' && part !== '.')
+  const stack: string[] = []
+  for (const part of parts) {
+    if (part === '..') {
+      if (stack.length === 0) return null
+      stack.pop()
+    } else {
+      stack.push(part)
+    }
+  }
+  return stack.join('/')
+}
+
+const resolveWorkspaceLinkPath = (href: string, notePath?: string) => {
+  const withoutHash = href.split('#')[0]
+  const withoutQuery = withoutHash.split('?')[0]
+  const decoded = decodeLinkTarget(withoutQuery)
+  if (!decoded) return null
+
+  if (/^file:\/\//i.test(decoded)) {
+    try {
+      return decodeURIComponent(new URL(decoded).pathname)
+    } catch {
+      return decoded
+    }
+  }
+
+  if (/^[a-zA-Z]:[\\/]/.test(decoded) || decoded.startsWith('/')) return decoded
+  if (decoded.startsWith('knowledge/') || !notePath) return collapseRelativeSegments(decoded.replace(/^\.\//, ''))
+
+  const noteDir = notePath.split('/').slice(0, -1).join('/')
+  return collapseRelativeSegments(`${noteDir}/${decoded.replace(/^\.\//, '')}`)
+}
+
 export interface MarkdownEditorHandle {
   /** Returns {path, lineNumber} for the cursor's current position, or null if no notePath / no editor. */
   getCursorContext: () => { path: string; lineNumber: number } | null
@@ -546,6 +648,13 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
 }, ref) {
   const isInternalUpdate = useRef(false)
   const wrapperRef = useRef<HTMLDivElement>(null)
+  // Read wikiLinks lazily inside the editor config via this ref. wikiLinks changes
+  // identity whenever the workspace directory tree changes (file watcher → new file
+  // list), and it used to be a useEditor() dependency — so any background write to
+  // the workspace destroyed and recreated the entire editor, resetting scroll to the
+  // top. Keeping it off the dep array (and reading the ref at event time) means the
+  // editor instance survives directory changes.
+  const wikiLinksRef = useRef(wikiLinks)
   const [activeWikiLink, setActiveWikiLink] = useState<WikiLinkMatch | null>(null)
   const [anchorPosition, setAnchorPosition] = useState<{ left: number; top: number } | null>(null)
   const [selectionHighlight, setSelectionHighlight] = useState<SelectionHighlightRange>(null)
@@ -568,6 +677,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
 
   // Keep ref in sync with state for the plugin to access
   selectionHighlightRef.current = selectionHighlight
+  wikiLinksRef.current = wikiLinks
 
   // Memoize the selection highlight extension
   const selectionHighlightExtension = useMemo(
@@ -644,6 +754,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
         heading: {
           levels: [1, 2, 3],
         },
+        link: false,
       }),
       Link.configure({
         openOnClick: false,
@@ -673,11 +784,9 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       TranscriptBlockExtension,
       MermaidBlockExtension,
       WikiLink.configure({
-        onCreate: wikiLinks?.onCreate
-          ? (path: string) => {
-              void wikiLinks.onCreate(path)
-            }
-          : undefined,
+        onCreate: (path: string) => {
+          void wikiLinksRef.current?.onCreate?.(path)
+        },
       }),
       TaskList,
       TaskItem.configure({
@@ -804,15 +913,57 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       handleClickOn: (_view, _pos, node, _nodePos, event) => {
         if (node.type.name === 'wikiLink') {
           event.preventDefault()
-          wikiLinks?.onOpen?.(node.attrs.path)
+          const wikiPath = String(node.attrs.path ?? '')
+          const { path: linkedNotePath, heading } = splitWikiFragment(wikiPath)
+          if (heading && (!linkedNotePath || isSameNotePath(linkedNotePath, notePath))) {
+            return scrollToHeading(_view, heading)
+          }
+          wikiLinksRef.current?.onOpen?.(node.attrs.path)
           return true
         }
         return false
       },
+      handleDOMEvents: {
+        click: (view, event) => {
+          const target = event.target as Element | null
+          const link = target?.closest('a[href]') as HTMLAnchorElement | null
+          if (!link) return false
+          if (link.dataset.type === 'wiki-link') return false
+
+          const href = link.getAttribute('href') ?? ''
+          if (!href) return false
+
+          if (href.startsWith('#')) {
+            event.preventDefault()
+            return scrollToHeading(view, href)
+          }
+
+          if (isExternalHref(href)) {
+            event.preventDefault()
+            window.open(href, '_blank')
+            return true
+          }
+
+          const workspacePath = resolveWorkspaceLinkPath(href, notePath)
+          if (!workspacePath) return false
+
+          event.preventDefault()
+          void window.ipc.invoke('shell:openPath', { path: workspacePath }).then((result) => {
+            if (result.error) console.error('Failed to open linked file:', result.error)
+          }).catch((err) => {
+            console.error('Failed to open linked file:', err)
+          })
+          return true
+        },
+      },
     },
+    // NOTE: wikiLinks is intentionally NOT a dependency — it's read via wikiLinksRef
+    // at event time. Including it rebuilds the whole editor on every directory change
+    // (file watcher), which resets scroll to the top. See wikiLinksRef declaration.
   }, [
     editorSessionKey,
     maybeCommitPrimaryHeading,
+    notePath,
     preventTitleHeadingDemotion,
     promoteFirstParagraphToTitleHeading,
   ])
@@ -1060,11 +1211,37 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       // Normalize for comparison (trim trailing whitespace from lines)
       const normalizeForCompare = (s: string) => s.split('\n').map(line => line.trimEnd()).join('\n').trim()
       if (normalizeForCompare(currentContent) !== normalizeForCompare(content)) {
+        // Preserve scroll + selection across an external content sync. setContent()
+        // resets the selection to the top of the doc and ProseMirror scrolls it into
+        // view; without restoring, a background writer touching the open file (graph
+        // builder, live-note runner, version-history commit) yanks the viewport back
+        // to the top repeatedly — making the note impossible to scroll. This editor
+        // instance is bound to a single note path, so the prior scrollTop is always
+        // valid for the reloaded content.
+        const wrapper = wrapperRef.current
+        const prevScrollTop = wrapper?.scrollTop ?? 0
+        const hadFocus = editor.isFocused
+        const { from: prevFrom, to: prevTo } = editor.state.selection
+
         isInternalUpdate.current = true
         const preprocessed = preprocessMarkdown(content)
         // Treat tab-open content as baseline: do not add hydration to undo history.
         editor.chain().setMeta('addToHistory', false).setContent(preprocessed).run()
+
+        // Only restore the caret for a focused editor, so we never steal focus or
+        // scroll for a passive viewer. Clamp to the (possibly shorter) new doc.
+        if (hadFocus) {
+          const docSize = editor.state.doc.content.size
+          const from = Math.min(prevFrom, docSize)
+          const to = Math.min(prevTo, docSize)
+          try {
+            editor.chain().setMeta('addToHistory', false).setTextSelection({ from, to }).run()
+          } catch { /* selection no longer valid in the new doc — ignore */ }
+        }
         isInternalUpdate.current = false
+
+        // Restore scroll last so it wins over any scrollIntoView triggered above.
+        if (wrapper) wrapper.scrollTop = prevScrollTop
       }
     }
   }, [editor, content])
