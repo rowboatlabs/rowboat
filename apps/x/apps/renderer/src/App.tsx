@@ -5506,7 +5506,11 @@ function App() {
                       remove: knowledgeActions.remove,
                       copyPath: knowledgeActions.copyPath,
                       revealInFileManager: knowledgeActions.revealInFileManager,
+                      createNote: knowledgeActions.createNote,
+                      createFolder: knowledgeActions.createFolder,
+                      onOpenInNewTab: knowledgeActions.onOpenInNewTab,
                     }}
+                    onNavigate={(path) => { void navigateToView({ type: 'workspace', path: path === WORKSPACE_ROOT ? undefined : path }) }}
                     onOpenNote={(path) => navigateToFile(path)}
                     onCreateWorkspace={async (name) => { await knowledgeActions.createWorkspace(name) }}
                   />
