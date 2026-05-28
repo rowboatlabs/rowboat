@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import {
   ChevronRight,
   Copy,
+  ExternalLink,
   File as FileIcon,
   FilePlus,
   Folder as FolderIcon,
@@ -53,12 +54,18 @@ type WorkspaceActions = {
   remove: (path: string) => Promise<void>
   copyPath: (path: string) => void
   revealInFileManager: (path: string, isDir: boolean) => void
+  createNote: (parentPath?: string) => void
+  createFolder: (parentPath?: string) => Promise<string>
+  onOpenInNewTab?: (path: string) => void
 }
 
 type WorkspaceViewProps = {
   tree: TreeNode[]
   initialPath?: string | null
   actions: WorkspaceActions
+  // Folder currently being browsed. Controlled by the app so drill-down
+  // participates in the global back/forward history.
+  onNavigate: (path: string) => void
   onOpenNote: (path: string) => void
   onCreateWorkspace: (name: string) => Promise<void>
 }
@@ -69,6 +76,12 @@ function getFileManagerName(): string {
   if (platform.includes('mac')) return 'Finder'
   if (platform.includes('win')) return 'Explorer'
   return 'File Manager'
+}
+
+function fileExtensionLabel(name: string): string {
+  const dot = name.lastIndexOf('.')
+  if (dot <= 0 || dot === name.length - 1) return 'File'
+  return `${name.slice(dot + 1).toUpperCase()} file`
 }
 
 function findNode(nodes: TreeNode[] | undefined, path: string): TreeNode | null {
@@ -113,8 +126,8 @@ function readFileAsBase64(file: File): Promise<string> {
   })
 }
 
-export function WorkspaceView({ tree, initialPath, actions, onOpenNote, onCreateWorkspace }: WorkspaceViewProps) {
-  const [currentPath, setCurrentPath] = useState<string>(initialPath || WORKSPACE_ROOT)
+export function WorkspaceView({ tree, initialPath, actions, onNavigate, onOpenNote, onCreateWorkspace }: WorkspaceViewProps) {
+  const currentPath = initialPath || WORKSPACE_ROOT
   const [addOpen, setAddOpen] = useState(false)
   const [newName, setNewName] = useState('')
   const [creating, setCreating] = useState(false)
@@ -126,10 +139,6 @@ export function WorkspaceView({ tree, initialPath, actions, onOpenNote, onCreate
   const dragDepthRef = useRef(0)
   const filesInputRef = useRef<HTMLInputElement | null>(null)
   const folderInputRef = useRef<HTMLInputElement | null>(null)
-
-  useEffect(() => {
-    if (initialPath) setCurrentPath(initialPath)
-  }, [initialPath])
 
   const isRoot = currentPath === WORKSPACE_ROOT
   const fileManagerName = getFileManagerName()
@@ -160,12 +169,12 @@ export function WorkspaceView({ tree, initialPath, actions, onOpenNote, onCreate
     (item: TreeNode) => {
       if (renameTarget) return
       if (item.kind === 'dir') {
-        setCurrentPath(item.path)
+        onNavigate(item.path)
       } else {
         onOpenNote(item.path)
       }
     },
-    [onOpenNote, renameTarget],
+    [onNavigate, onOpenNote, renameTarget],
   )
 
   const beginRename = useCallback((item: TreeNode) => {
@@ -295,7 +304,7 @@ export function WorkspaceView({ tree, initialPath, actions, onOpenNote, onCreate
         <div className="flex min-w-0 items-center gap-1 text-sm">
           <button
             type="button"
-            onClick={() => setCurrentPath(WORKSPACE_ROOT)}
+            onClick={() => onNavigate(WORKSPACE_ROOT)}
             className={cn(
               'inline-flex items-center gap-1.5 rounded-md px-2 py-1 transition-colors',
               isRoot ? 'text-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-accent',
@@ -316,7 +325,7 @@ export function WorkspaceView({ tree, initialPath, actions, onOpenNote, onCreate
                 ) : (
                   <button
                     type="button"
-                    onClick={() => setCurrentPath(crumb.path)}
+                    onClick={() => onNavigate(crumb.path)}
                     className="rounded-md px-2 py-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground truncate"
                   >
                     {crumb.name}
@@ -326,31 +335,42 @@ export function WorkspaceView({ tree, initialPath, actions, onOpenNote, onCreate
             )
           })}
         </div>
-        {isRoot ? (
-          <Button size="sm" onClick={() => setAddOpen(true)}>
-            <Plus className="size-4" />
-            Add workspace
+        <div className="grid shrink-0 grid-cols-2 items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            className="w-full"
+            onClick={() => actions.revealInFileManager(currentPath, true)}
+          >
+            <FolderOpen className="size-4" />
+            Open in {fileManagerName}
           </Button>
-        ) : (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button size="sm">
-                <Plus className="size-4" />
-                Add
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => filesInputRef.current?.click()}>
-                <FilePlus className="mr-2 size-4" />
-                Add files…
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => folderInputRef.current?.click()}>
-                <FolderPlus className="mr-2 size-4" />
-                Add folder…
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
+          {isRoot ? (
+            <Button size="sm" className="w-full" onClick={() => setAddOpen(true)}>
+              <Plus className="size-4" />
+              Add workspace
+            </Button>
+          ) : (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="sm" className="w-full">
+                  <Plus className="size-4" />
+                  Add
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => filesInputRef.current?.click()}>
+                  <FilePlus className="mr-2 size-4" />
+                  Add files…
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => folderInputRef.current?.click()}>
+                  <FolderPlus className="mr-2 size-4" />
+                  Add folder…
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
       </div>
       <input
         ref={filesInputRef}
@@ -429,31 +449,56 @@ export function WorkspaceView({ tree, initialPath, actions, onOpenNote, onCreate
                     ) : (
                       <div className="truncate text-sm font-medium">{item.name}</div>
                     )}
-                    {item.kind === 'dir' && !isRenaming && (
-                      <div className="text-xs text-muted-foreground">
-                        {childCount} {childCount === 1 ? 'item' : 'items'}
+                    {!isRenaming && (
+                      <div className="truncate text-xs text-muted-foreground">
+                        {item.kind === 'dir'
+                          ? `${childCount} ${childCount === 1 ? 'item' : 'items'}`
+                          : fileExtensionLabel(item.name)}
                       </div>
                     )}
                   </div>
                 </button>
               )
+              const isDir = item.kind === 'dir'
               return (
                 <ContextMenu key={item.path}>
                   <ContextMenuTrigger asChild>{card}</ContextMenuTrigger>
-                  <ContextMenuContent className="w-48">
-                    <ContextMenuItem onClick={() => beginRename(item)}>
-                      <Pencil className="mr-2 size-4" />
-                      Rename
-                    </ContextMenuItem>
+                  <ContextMenuContent className="w-48" onCloseAutoFocus={(e) => e.preventDefault()}>
+                    {isDir && (
+                      <>
+                        <ContextMenuItem onClick={() => actions.createNote(item.path)}>
+                          <FilePlus className="mr-2 size-4" />
+                          New Note
+                        </ContextMenuItem>
+                        <ContextMenuItem onClick={() => void actions.createFolder(item.path)}>
+                          <FolderPlus className="mr-2 size-4" />
+                          New Folder
+                        </ContextMenuItem>
+                        <ContextMenuSeparator />
+                      </>
+                    )}
+                    {!isDir && actions.onOpenInNewTab && (
+                      <>
+                        <ContextMenuItem onClick={() => actions.onOpenInNewTab!(item.path)}>
+                          <ExternalLink className="mr-2 size-4" />
+                          Open in new tab
+                        </ContextMenuItem>
+                        <ContextMenuSeparator />
+                      </>
+                    )}
                     <ContextMenuItem onClick={() => { actions.copyPath(item.path); toast('Path copied', 'success') }}>
                       <Copy className="mr-2 size-4" />
                       Copy Path
                     </ContextMenuItem>
-                    <ContextMenuItem onClick={() => actions.revealInFileManager(item.path, item.kind === 'dir')}>
+                    <ContextMenuItem onClick={() => actions.revealInFileManager(item.path, isDir)}>
                       <FolderOpen className="mr-2 size-4" />
-                      Show in {fileManagerName}
+                      Open in {fileManagerName}
                     </ContextMenuItem>
                     <ContextMenuSeparator />
+                    <ContextMenuItem onClick={() => beginRename(item)}>
+                      <Pencil className="mr-2 size-4" />
+                      Rename
+                    </ContextMenuItem>
                     <ContextMenuItem variant="destructive" onClick={() => void handleDelete(item)}>
                       <Trash2 className="mr-2 size-4" />
                       Delete
