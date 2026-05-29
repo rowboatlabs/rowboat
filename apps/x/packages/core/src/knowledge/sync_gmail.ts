@@ -1060,16 +1060,20 @@ async function fullSync(auth: OAuth2Client, syncDir: string, attachmentsDir: str
     // If the state file holds a last_sync timestamp (e.g. left over from a
     // prior Composio sync, or from a previous successful native sync that
     // we're falling back to after a history.list 404), use that as the
-    // floor instead of the default lookback. Carries forward Composio's
-    // last_sync on first migration so we don't refetch the last 7 days.
+    // floor — but never reach back further than lookbackDays. This caps the
+    // window at "1 week at most": if last_sync is within the lookback window
+    // we resume from it (a smaller window), otherwise we clamp to lookbackDays
+    // ago. Mail older than the cap that arrived during a long offline gap is
+    // intentionally skipped rather than backfilled.
     const state = loadState(stateFile);
+    const lookbackFloor = new Date();
+    lookbackFloor.setDate(lookbackFloor.getDate() - lookbackDays);
     let pastDate: Date;
-    if (state.last_sync) {
+    if (state.last_sync && new Date(state.last_sync) > lookbackFloor) {
         pastDate = new Date(state.last_sync);
         console.log(`Performing full sync from last_sync=${state.last_sync}...`);
     } else {
-        pastDate = new Date();
-        pastDate.setDate(pastDate.getDate() - lookbackDays);
+        pastDate = lookbackFloor;
         console.log(`Performing full sync of last ${lookbackDays} days...`);
     }
 
@@ -1335,11 +1339,21 @@ async function performSync() {
         // this runs once, the cache directory is populated and we fall back to
         // partial-sync on subsequent calls.
         const cacheMissing = !fs.existsSync(CACHE_DIR) || fs.readdirSync(CACHE_DIR).length === 0;
+        // partialSync replays *every* messageAdded since the stored historyId,
+        // regardless of date — so after a long offline gap a still-valid
+        // historyId would pull the entire gap (e.g. 3 weeks). To honor the
+        // "1 week at most" cap, bypass it when last_sync is older than the
+        // lookback window and run a (date-clamped) fullSync instead.
+        const gapMs = state.last_sync ? Date.now() - new Date(state.last_sync).getTime() : 0;
+        const gapTooLarge = gapMs > LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
         if (!state.historyId) {
             console.log("No history ID found, starting full sync...");
             await fullSync(auth, SYNC_DIR, ATTACHMENTS_DIR, STATE_FILE, LOOKBACK_DAYS);
         } else if (cacheMissing) {
             console.log("History ID present but inbox cache empty — running full sync to backfill snapshots...");
+            await fullSync(auth, SYNC_DIR, ATTACHMENTS_DIR, STATE_FILE, LOOKBACK_DAYS);
+        } else if (gapTooLarge) {
+            console.log(`Last sync older than ${LOOKBACK_DAYS} days — running full sync clamped to the lookback window instead of partial sync...`);
             await fullSync(auth, SYNC_DIR, ATTACHMENTS_DIR, STATE_FILE, LOOKBACK_DAYS);
         } else {
             console.log("History ID found, starting partial sync...");
