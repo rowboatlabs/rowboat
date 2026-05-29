@@ -35,7 +35,7 @@ const nhm = new NodeHtmlMarkdown();
 // previously cached snapshots (e.g. attachment / recipient parsing fixes). The
 // short-circuit in buildAndCacheSnapshot only reuses a cache whose version matches,
 // so stale entries are transparently rebuilt on the next sync.
-const SNAPSHOT_PARSER_VERSION = 2;
+const SNAPSHOT_PARSER_VERSION = 3;
 
 interface SnapshotCacheEntry {
     historyId: string;
@@ -405,6 +405,112 @@ function normalizeBody(body: string): string {
     return body.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
+function isGmailQuoteAttribution(line: string): boolean {
+    const trimmed = line.trim();
+    return /^On\b.+\bwrote:\s*$/i.test(trimmed);
+}
+
+function isOriginalMessageBoundary(line: string): boolean {
+    return /^-{2,}\s*Original Message\s*-{2,}$/i.test(line.trim());
+}
+
+function isForwardedMessageBoundary(line: string): boolean {
+    return /^-{2,}\s*Forwarded message\s*-{2,}$/i.test(line.trim());
+}
+
+function isOutlookHeaderBoundary(lines: string[], index: number): boolean {
+    if (!/^From:\s+\S/i.test(lines[index]?.trim() || '')) return false;
+    const next = lines.slice(index + 1, index + 6).map((line) => line.trim());
+    return next.some((line) => /^(Sent|Date):\s+\S/i.test(line))
+        && next.some((line) => /^To:\s+\S/i.test(line))
+        && next.some((line) => /^Subject:\s+\S/i.test(line));
+}
+
+function findQuotedReplyBoundary(lines: string[]): number {
+    for (let i = 0; i < lines.length; i += 1) {
+        const line = lines[i] || '';
+        if (
+            isGmailQuoteAttribution(line)
+            || isOriginalMessageBoundary(line)
+            || isForwardedMessageBoundary(line)
+            || isOutlookHeaderBoundary(lines, i)
+        ) {
+            return i;
+        }
+
+        // Gmail plain text drafts often carry older messages as a quoted block.
+        // Treat a trailing blockquote as history, but avoid stripping an inline
+        // quote the user is actively writing at the top of the reply.
+        if (i > 0 && line.trim().startsWith('>') && (lines[i - 1]?.trim() === '' || lines[i - 1]?.trim().startsWith('>'))) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+export function stripGmailQuotedReplyText(text: string): string {
+    const normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const lines = normalized.split('\n');
+    const boundary = findQuotedReplyBoundary(lines);
+    const visible = boundary >= 0 ? lines.slice(0, boundary) : lines;
+    return visible
+        .join('\n')
+        .replace(/[ \t]+\n/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}
+
+function htmlQuoteBoundaryIndex(html: string): number {
+    const candidates: number[] = [];
+    const patterns = [
+        /<[^>]+\bclass\s*=\s*["'][^"']*\bgmail_(?:quote|attr)\b[^"']*["'][^>]*>/i,
+        /<blockquote\b[^>]*(?:type\s*=\s*["']cite["']|class\s*=\s*["'][^"']*\bgmail_quote\b[^"']*["'])[^>]*>/i,
+        /<(p|div|li)\b[^>]*>\s*(?:<(?:span|b|strong|i|em)\b[^>]*>\s*)*On\b[\s\S]{0,800}?\bwrote:\s*(?:<br\s*\/?>\s*)?(?:<\/(?:span|b|strong|i|em)>\s*)*<\/\1>/i,
+        /<(p|div|li)\b[^>]*>\s*-{2,}\s*(?:Original Message|Forwarded message)\s*-{2,}\s*<\/\1>/i,
+    ];
+
+    for (const pattern of patterns) {
+        const match = pattern.exec(html);
+        if (match?.index !== undefined) candidates.push(match.index);
+    }
+
+    return candidates.length > 0 ? Math.min(...candidates) : -1;
+}
+
+export function stripGmailQuotedReplyHtml(html: string): string {
+    const boundary = htmlQuoteBoundaryIndex(html);
+    const visible = boundary >= 0 ? html.slice(0, boundary) : html;
+    return visible.trim();
+}
+
+function textToHtml(text: string): string {
+    return text
+        .split(/\n{2,}/)
+        .map((para) => `<p>${escapeHtml(para).replace(/\n/g, '<br />')}</p>`)
+        .join('');
+}
+
+function escapeHtml(value: string): string {
+    return value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+export function sanitizeReplyBodyForGmailReply(bodyHtml: string, bodyText: string): { bodyHtml: string; bodyText: string } {
+    const cleanText = stripGmailQuotedReplyText(bodyText);
+    const cleanHtml = stripGmailQuotedReplyHtml(bodyHtml);
+    const textWasStripped = cleanText !== bodyText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+    const htmlWasStripped = cleanHtml !== bodyHtml.trim();
+
+    return {
+        bodyText: cleanText,
+        bodyHtml: textWasStripped && !htmlWasStripped ? textToHtml(cleanText) : cleanHtml,
+    };
+}
+
 function headerValue(headers: gmail.Schema$MessagePartHeader[] | undefined, name: string): string | undefined {
     return headers?.find(h => h.name?.toLowerCase() === name.toLowerCase())?.value || undefined;
 }
@@ -636,9 +742,13 @@ async function buildAndCacheSnapshot(
 
     const sentMessages = parsed.filter((m) => !m.isDraft);
     const draftMessages = parsed.filter((m) => m.isDraft);
-    const visibleMessages = sentMessages.map(({ isDraft: _isDraft, ...rest }) => rest);
+    const visibleMessages = sentMessages.map((msg) => {
+        const rest: Partial<typeof msg> = { ...msg };
+        delete rest.isDraft;
+        return rest as Omit<typeof msg, 'isDraft'>;
+    });
     const latestDraftBody = draftMessages.length > 0
-        ? draftMessages[draftMessages.length - 1]!.body.trim()
+        ? stripGmailQuotedReplyText(draftMessages[draftMessages.length - 1]!.body)
         : '';
 
     if (visibleMessages.length === 0) return null;
@@ -674,7 +784,10 @@ async function buildAndCacheSnapshot(
         const classification = await classifyThread(snapshot, userEmail, { skipDraft });
         snapshot.importance = classification.importance;
         if (classification.summary) snapshot.summary = classification.summary;
-        if (classification.draftResponse) snapshot.draft_response = classification.draftResponse;
+        if (classification.draftResponse) {
+            const draftResponse = stripGmailQuotedReplyText(classification.draftResponse);
+            if (draftResponse) snapshot.draft_response = draftResponse;
+        }
     } catch (err) {
         console.warn(`[Gmail] classify failed for ${threadId}:`, err);
     }
@@ -1330,6 +1443,10 @@ export async function sendThreadReply(opts: SendReplyOptions): Promise<SendReply
         const safeBcc = opts.bcc?.trim() ? requireSafeHeaderValue('Bcc', opts.bcc) : undefined;
         const safeInReplyTo = opts.inReplyTo ? requireSafeHeaderValue('In-Reply-To', opts.inReplyTo) : undefined;
         const safeReferences = opts.references ? requireSafeHeaderValue('References', opts.references) : undefined;
+        const replyBody = opts.threadId
+            ? sanitizeReplyBodyForGmailReply(opts.bodyHtml, opts.bodyText)
+            : { bodyHtml: opts.bodyHtml.trim(), bodyText: opts.bodyText.trim() };
+        if (!replyBody.bodyText.trim()) return { error: 'Draft is empty.' };
 
         const boundary = `b_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
         const headers: string[] = [];
@@ -1348,13 +1465,13 @@ export async function sendThreadReply(opts: SendReplyOptions): Promise<SendReply
         parts.push('Content-Type: text/plain; charset="UTF-8"');
         parts.push('Content-Transfer-Encoding: base64');
         parts.push('');
-        parts.push(encodeMimeBase64(opts.bodyText));
+        parts.push(encodeMimeBase64(replyBody.bodyText));
         parts.push('');
         parts.push(`--${boundary}`);
         parts.push('Content-Type: text/html; charset="UTF-8"');
         parts.push('Content-Transfer-Encoding: base64');
         parts.push('');
-        parts.push(encodeMimeBase64(opts.bodyHtml));
+        parts.push(encodeMimeBase64(replyBody.bodyHtml));
         parts.push('');
         parts.push(`--${boundary}--`);
 
