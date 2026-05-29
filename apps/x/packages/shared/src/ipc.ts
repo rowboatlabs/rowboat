@@ -38,6 +38,7 @@ const ipcSchemas = {
     res: z.object({
       installationId: z.string(),
       apiUrl: z.string(),
+      appVersion: z.string(),
     }),
   },
   'workspace:getRoot': {

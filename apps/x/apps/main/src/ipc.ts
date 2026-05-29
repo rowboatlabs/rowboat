@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow, shell, dialog, systemPreferences, desktopCapturer } from 'electron';
+import { ipcMain, BrowserWindow, shell, dialog, systemPreferences, desktopCapturer, app } from 'electron';
 import { ipc } from '@x/shared';
 import path from 'node:path';
 import os from 'node:os';
@@ -455,6 +455,7 @@ export function setupIpcHandlers() {
       return {
         installationId: getInstallationId(),
         apiUrl: API_URL,
+        appVersion: app.getVersion(),
       };
     },
     'workspace:getRoot': async () => {

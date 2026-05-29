@@ -6,6 +6,7 @@ import { API_URL } from '../config/env.js';
 // In dev/tsc, fall back to process.env so local runs work too.
 const POSTHOG_KEY = process.env.POSTHOG_KEY ?? process.env.VITE_PUBLIC_POSTHOG_KEY ?? '';
 const POSTHOG_HOST = process.env.POSTHOG_HOST ?? process.env.VITE_PUBLIC_POSTHOG_HOST ?? 'https://us.i.posthog.com';
+const APP_VERSION = (process.env.ROWBOAT_APP_VERSION ?? process.env.npm_package_version ?? '').trim();
 
 let client: PostHog | null = null;
 let initAttempted = false;
@@ -29,7 +30,7 @@ function getClient(): PostHog | null {
     // distinguishes prod / staging / custom — meaning is assigned in PostHog).
     client.identify({
       distinctId: getInstallationId(),
-      properties: { api_url: API_URL },
+      properties: { api_url: API_URL, ...appVersionProperties() },
     });
   } catch (err) {
     console.error('[Analytics] Failed to init PostHog:', err);
@@ -42,6 +43,10 @@ function activeDistinctId(): string {
   return identifiedUserId ?? getInstallationId();
 }
 
+function appVersionProperties(): Record<string, string> {
+  return APP_VERSION ? { app_version: APP_VERSION } : {};
+}
+
 export function capture(event: string, properties?: Record<string, unknown>): void {
   const ph = getClient();
   if (!ph) return;
@@ -49,7 +54,10 @@ export function capture(event: string, properties?: Record<string, unknown>): vo
     ph.capture({
       distinctId: activeDistinctId(),
       event,
-      properties,
+      properties: {
+        ...properties,
+        ...appVersionProperties(),
+      },
     });
   } catch (err) {
     console.error('[Analytics] capture failed:', err);
@@ -68,6 +76,7 @@ export function identify(userId: string, properties?: Record<string, unknown>): 
       properties: {
         ...properties,
         api_url: API_URL,
+        ...appVersionProperties(),
       },
     });
     identifiedUserId = userId;
