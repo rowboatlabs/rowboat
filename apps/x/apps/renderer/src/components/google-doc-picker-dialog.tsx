@@ -57,6 +57,7 @@ export function GoogleDocPickerDialog({
   const targetLabel = useMemo(() => targetFolder.replace(/^knowledge\/?/, '') || 'knowledge', [targetFolder])
 
   const loadStatus = useCallback(async () => {
+    setError(null)
     try {
       const result = await window.ipc.invoke('google-docs:getStatus', null)
       setStatus(result)
@@ -142,7 +143,15 @@ export function GoogleDocPickerDialog({
         </DialogHeader>
 
         <div className="flex min-h-0 flex-1 flex-col">
-          {!status ? (
+          {!status && error ? (
+            <div className="flex min-h-[320px] flex-1 flex-col items-center justify-center gap-4 px-8 text-center">
+              <div className="max-w-sm text-sm text-destructive">{error}</div>
+              <Button variant="outline" onClick={() => void loadStatus()}>
+                <RefreshCw className="size-4" />
+                Retry
+              </Button>
+            </div>
+          ) : !status ? (
             <div className="flex min-h-[320px] flex-1 items-center justify-center text-sm text-muted-foreground">
               <Loader2 className="mr-2 size-4 animate-spin" />
               Checking Google connection...
