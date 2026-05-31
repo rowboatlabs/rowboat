@@ -1,9 +1,10 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { google, drive_v3 as drive } from 'googleapis';
+import { google, drive_v3 as drive, docs_v1 } from 'googleapis';
 import { WorkDir } from '../config/config.js';
 import { resolveWorkspacePath } from '../workspace/workspace.js';
 import { GoogleClientFactory } from './google-client-factory.js';
+import { markdownToDocsRequests } from './markdown-to-docs.js';
 
 export const GOOGLE_DOC_SCOPES = [
   'https://www.googleapis.com/auth/drive.readonly',
@@ -127,15 +128,21 @@ function bodyFromMarkdown(markdown: string): string {
   return body;
 }
 
-function markdownSnapshotToPlainText(markdown: string): string {
-  return bodyFromMarkdown(markdown)
-    .replace(/^#{1,6}\s+/gm, '')
-    .replace(/^\s*[-*]\s+/gm, '- ')
-    .replace(/\*\*([^*]+)\*\*/g, '$1')
-    .replace(/\*([^*]+)\*/g, '$1')
-    .replace(/`([^`]+)`/g, '$1')
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-    .trimEnd();
+/**
+ * True when the Google Doc has been edited remotely since our last recorded
+ * sync — i.e. a sync-up would clobber changes we never pulled. Missing
+ * timestamps (e.g. legacy notes with no baseline) are treated as "not ahead"
+ * so the push is allowed rather than blocked forever.
+ */
+export function isRemoteAhead(
+  remoteModifiedTime: string | null | undefined,
+  lastKnownModifiedTime: string | undefined,
+): boolean {
+  if (!remoteModifiedTime || !lastKnownModifiedTime) return false;
+  const remote = Date.parse(remoteModifiedTime);
+  const known = Date.parse(lastKnownModifiedTime);
+  if (Number.isNaN(remote) || Number.isNaN(known)) return false;
+  return remote > known;
 }
 
 async function getDriveClient() {
@@ -267,21 +274,37 @@ export async function refreshGoogleDocSnapshot(relPath: string): Promise<{ ok: t
   return { ok: true, syncedAt };
 }
 
-export async function syncLinkedGoogleDocFromMarkdown(relPath: string, markdown: string): Promise<{ synced: boolean; syncedAt?: string; error?: string }> {
+export async function syncLinkedGoogleDocFromMarkdown(
+  relPath: string,
+  markdown: string,
+  opts: { force?: boolean } = {},
+): Promise<{ synced: boolean; syncedAt?: string; conflict?: boolean; error?: string }> {
   try {
     const normalized = relPath.replace(/\\/g, '/');
     if (!normalized.startsWith('knowledge/') || !normalized.endsWith('.md')) return { synced: false };
     const linked = parseLinkedGoogleDoc(markdown);
     if (!linked) return { synced: false };
 
-    const text = markdownSnapshotToPlainText(markdown);
+    // Conflict guard: don't silently overwrite remote edits we never pulled.
+    if (!opts.force) {
+      const meta = await getDocMetadata(linked.id);
+      if (isRemoteAhead(meta.modifiedTime, linked.remoteModifiedTime)) {
+        return {
+          synced: false,
+          conflict: true,
+          error: 'The Google Doc changed since your last sync. Pull the latest, or overwrite it.',
+        };
+      }
+    }
+
+    const body = bodyFromMarkdown(markdown);
     const docsClient = await getDocsClient();
     const current = await docsClient.documents.get({
       documentId: linked.id,
       fields: 'body(content(endIndex))',
     });
     const endIndex = current.data.body?.content?.at(-1)?.endIndex ?? 1;
-    const requests = [];
+    const requests: docs_v1.Schema$Request[] = [];
     if (endIndex > 2) {
       requests.push({
         deleteContentRange: {
@@ -289,14 +312,8 @@ export async function syncLinkedGoogleDocFromMarkdown(relPath: string, markdown:
         },
       });
     }
-    if (text.trim()) {
-      requests.push({
-        insertText: {
-          location: { index: 1 },
-          text: `${text.trimEnd()}\n`,
-        },
-      });
-    }
+    // Recreate the body with structure preserved (headings, emphasis, lists, links).
+    requests.push(...markdownToDocsRequests(body, 1));
     if (requests.length > 0) {
       await docsClient.documents.batchUpdate({
         documentId: linked.id,
@@ -304,9 +321,16 @@ export async function syncLinkedGoogleDocFromMarkdown(relPath: string, markdown:
       });
     }
 
+    // Re-read the revision so our stored baseline reflects this push and the
+    // next sync-up won't see a phantom conflict.
+    const meta = await getDocMetadata(linked.id);
     const absPath = path.join(WorkDir, normalized);
     const syncedAt = new Date().toISOString();
-    await fs.writeFile(absPath, buildStubContent({ ...linked, syncedAt }, bodyFromMarkdown(markdown)), 'utf8');
+    await fs.writeFile(absPath, buildStubContent({
+      ...linked,
+      syncedAt,
+      remoteModifiedTime: meta.modifiedTime ?? linked.remoteModifiedTime,
+    }, body), 'utf8');
     return { synced: true, syncedAt };
   } catch (error) {
     console.error('[GoogleDocs] Failed to sync linked Google Doc:', error);

@@ -693,10 +693,14 @@ const ipcSchemas = {
     req: z.object({
       path: RelPath,
       markdown: z.string(),
+      // Overwrite the Google Doc even if it changed remotely since last sync.
+      force: z.boolean().optional(),
     }),
     res: z.object({
       synced: z.boolean(),
       syncedAt: z.string().optional(),
+      // True when a remote edit was detected and the push was held back.
+      conflict: z.boolean().optional(),
       error: z.string().optional(),
     }),
   },

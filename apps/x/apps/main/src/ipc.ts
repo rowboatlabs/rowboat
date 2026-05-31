@@ -825,7 +825,7 @@ export function setupIpcHandlers() {
       return refreshGoogleDocSnapshot(args.path);
     },
     'google-docs:sync': async (_event, args) => {
-      return syncLinkedGoogleDocFromMarkdown(args.path, args.markdown);
+      return syncLinkedGoogleDocFromMarkdown(args.path, args.markdown, { force: args.force });
     },
     // Search handler
     'search:query': async (_event, args) => {
