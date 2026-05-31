@@ -23,10 +23,16 @@ type GoogleDocFrontmatter = {
   url: string;
   title: string;
   syncedAt?: string;
+  // Drive `modifiedTime` (RFC3339) captured at the last sync, used to detect
+  // remote edits before a sync-up would overwrite them.
+  remoteModifiedTime?: string;
 };
 
 const GOOGLE_DOC_MIME = 'application/vnd.google-apps.document';
-const TEXT_MIME = 'text/plain';
+// Google Docs natively export to Markdown, which preserves headings, bold,
+// lists, links and tables on the way into the local note — far better fidelity
+// than the old text/plain export.
+const MARKDOWN_MIME = 'text/markdown';
 
 function yamlQuote(value: string): string {
   return JSON.stringify(value);
@@ -56,7 +62,7 @@ function normalizeKnowledgeDir(targetFolder: string): string {
 
 function buildStubContent(doc: GoogleDocFrontmatter, snapshot: string): string {
   const syncedAt = doc.syncedAt ?? new Date().toISOString();
-  return [
+  const lines = [
     '---',
     'source:',
     '  - google-doc',
@@ -65,11 +71,12 @@ function buildStubContent(doc: GoogleDocFrontmatter, snapshot: string): string {
     `  url: ${yamlQuote(doc.url)}`,
     `  title: ${yamlQuote(doc.title)}`,
     `  syncedAt: ${yamlQuote(syncedAt)}`,
-    '---',
-    '',
-    snapshot.trimEnd(),
-    '',
-  ].join('\n');
+  ];
+  if (doc.remoteModifiedTime) {
+    lines.push(`  remoteModifiedTime: ${yamlQuote(doc.remoteModifiedTime)}`);
+  }
+  lines.push('---', '', snapshot.trimEnd(), '');
+  return lines.join('\n');
 }
 
 function parseLinkedGoogleDoc(markdown: string): GoogleDocFrontmatter | null {
@@ -96,7 +103,7 @@ function parseLinkedGoogleDoc(markdown: string): GoogleDocFrontmatter | null {
     if (!nested) continue;
     const key = nested[1] as keyof GoogleDocFrontmatter;
     let value = nested[2].trim();
-    if (!['id', 'url', 'title', 'syncedAt'].includes(key)) continue;
+    if (!['id', 'url', 'title', 'syncedAt', 'remoteModifiedTime'].includes(key)) continue;
     try {
       if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
         value = JSON.parse(value);
@@ -143,10 +150,10 @@ async function getDocsClient() {
   return google.docs({ version: 'v1', auth });
 }
 
-async function exportDocText(fileId: string): Promise<string> {
+async function exportDocMarkdown(fileId: string): Promise<string> {
   const driveClient = await getDriveClient();
   const result = await driveClient.files.export(
-    { fileId, mimeType: TEXT_MIME },
+    { fileId, mimeType: MARKDOWN_MIME },
     { responseType: 'text' },
   );
   return typeof result.data === 'string' ? result.data : String(result.data ?? '');
@@ -227,7 +234,7 @@ export async function importGoogleDoc(fileId: string, targetFolder: string): Pro
   if (!status.hasRequiredScopes) throw new Error('Google is missing Drive/Docs scopes. Reconnect Google.');
 
   const doc = await getDocMetadata(fileId);
-  const snapshot = await exportDocText(fileId);
+  const snapshot = await exportDocMarkdown(fileId);
   const relPath = await uniqueKnowledgePath(targetFolder, doc.name);
   const absPath = resolveWorkspacePath(relPath);
   await fs.mkdir(path.dirname(absPath), { recursive: true });
@@ -236,6 +243,7 @@ export async function importGoogleDoc(fileId: string, targetFolder: string): Pro
     url: doc.url,
     title: doc.name,
     syncedAt: new Date().toISOString(),
+    remoteModifiedTime: doc.modifiedTime ?? undefined,
   }, snapshot), 'utf8');
   return { path: relPath, doc };
 }
@@ -246,9 +254,16 @@ export async function refreshGoogleDocSnapshot(relPath: string): Promise<{ ok: t
   const linked = parseLinkedGoogleDoc(markdown);
   if (!linked) throw new Error('This note is not linked to a Google Doc.');
 
-  const snapshot = await exportDocText(linked.id);
+  const [snapshot, meta] = await Promise.all([
+    exportDocMarkdown(linked.id),
+    getDocMetadata(linked.id),
+  ]);
   const syncedAt = new Date().toISOString();
-  await fs.writeFile(absPath, buildStubContent({ ...linked, syncedAt }, snapshot), 'utf8');
+  await fs.writeFile(absPath, buildStubContent({
+    ...linked,
+    syncedAt,
+    remoteModifiedTime: meta.modifiedTime ?? linked.remoteModifiedTime,
+  }, snapshot), 'utf8');
   return { ok: true, syncedAt };
 }
 
