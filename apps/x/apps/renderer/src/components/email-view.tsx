@@ -69,6 +69,31 @@ function snippet(text?: string): string {
   return (text || '').replace(/\s+/g, ' ').trim().slice(0, 180)
 }
 
+function isReplyQuoteBoundary(lines: string[], index: number): boolean {
+  const line = lines[index]?.trim() || ''
+  if (/^On\b.+\bwrote:\s*$/i.test(line)) return true
+  if (/^-{2,}\s*(Original Message|Forwarded message)\s*-{2,}$/i.test(line)) return true
+  if (/^From:\s+\S/i.test(line)) {
+    const next = lines.slice(index + 1, index + 6).map((value) => value.trim())
+    return next.some((value) => /^(Sent|Date):\s+\S/i.test(value))
+      && next.some((value) => /^To:\s+\S/i.test(value))
+      && next.some((value) => /^Subject:\s+\S/i.test(value))
+  }
+  return false
+}
+
+function stripQuotedReplyText(text: string): string {
+  const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')
+  const boundary = lines.findIndex((line, index) => {
+    if (isReplyQuoteBoundary(lines, index)) return true
+    return index > 0
+      && line.trim().startsWith('>')
+      && (lines[index - 1]?.trim() === '' || lines[index - 1]?.trim().startsWith('>'))
+  })
+  const visible = boundary >= 0 ? lines.slice(0, boundary) : lines
+  return visible.join('\n').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
+}
+
 function getInitial(from?: string): string {
   return (extractName(from)[0] || '?').toUpperCase()
 }
@@ -692,7 +717,7 @@ function ComposeBox({
   const initialContent = useMemo(() => {
     if (mode === 'forward') return buildForwardedContent(thread)
     // Gmail-side draft (user's own work) wins over the AI-generated draft.
-    const source = thread.gmail_draft || thread.draft_response
+    const source = stripQuotedReplyText(thread.gmail_draft || thread.draft_response || '')
     if (!source) return ''
     return source
       .split(/\n{2,}/)
@@ -1048,8 +1073,7 @@ function ThreadDetail({
 
 const MAX_KEPT_OPEN = 5
 const PAGE_SIZE = 25
-const SECTIONS = ['important', 'other'] as const
-type InboxSection = (typeof SECTIONS)[number]
+type InboxSection = 'important' | 'other'
 
 interface SectionState {
   threads: GmailThread[]

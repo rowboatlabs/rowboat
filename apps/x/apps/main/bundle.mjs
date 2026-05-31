@@ -10,11 +10,13 @@
  */
 
 import * as esbuild from 'esbuild';
+import { readFile } from 'node:fs/promises';
 
 // In CommonJS, import.meta.url doesn't exist. We need to polyfill it.
 // The banner defines __import_meta_url at the top of the bundle,
 // and we use define to replace all import.meta.url references with it.
 const cjsBanner = `var __import_meta_url = require('url').pathToFileURL(__filename).href;`;
+const pkg = JSON.parse(await readFile(new URL('./package.json', import.meta.url), 'utf8'));
 
 await esbuild.build({
   entryPoints: ['./dist/main.js'],
@@ -36,6 +38,7 @@ await esbuild.build({
     // Empty strings disable analytics gracefully.
     'process.env.POSTHOG_KEY': JSON.stringify(process.env.VITE_PUBLIC_POSTHOG_KEY ?? ''),
     'process.env.POSTHOG_HOST': JSON.stringify(process.env.VITE_PUBLIC_POSTHOG_HOST ?? 'https://us.i.posthog.com'),
+    'process.env.ROWBOAT_APP_VERSION': JSON.stringify(pkg.version ?? ''),
   },
 });
 

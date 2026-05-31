@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow, shell, dialog, systemPreferences, desktopCapturer } from 'electron';
+import { ipcMain, BrowserWindow, shell, dialog, systemPreferences, desktopCapturer, app } from 'electron';
 import { ipc } from '@x/shared';
 import path from 'node:path';
 import os from 'node:os';
@@ -31,6 +31,9 @@ import { listGatewayModels } from '@x/core/dist/models/gateway.js';
 import type { IModelConfigRepo } from '@x/core/dist/models/repo.js';
 import type { IOAuthRepo } from '@x/core/dist/auth/repo.js';
 import { IGranolaConfigRepo } from '@x/core/dist/knowledge/granola/repo.js';
+import { ICodeModeConfigRepo } from '@x/core/dist/code-mode/repo.js';
+import { checkCodeModeAgentStatus } from '@x/core/dist/code-mode/status.js';
+import { invalidateCopilotInstructionsCache } from '@x/core/dist/application/assistant/instructions.js';
 import { triggerSync as triggerGranolaSync } from '@x/core/dist/knowledge/granola/sync.js';
 import { ISlackConfigRepo } from '@x/core/dist/slack/repo.js';
 import { isOnboardingComplete, markOnboardingComplete } from '@x/core/dist/config/note_creation_config.js';
@@ -453,6 +456,7 @@ export function setupIpcHandlers() {
       return {
         installationId: getInstallationId(),
         apiUrl: API_URL,
+        appVersion: app.getVersion(),
       };
     },
     'workspace:getRoot': async () => {
@@ -527,7 +531,7 @@ export function setupIpcHandlers() {
       return runsCore.createRun(args);
     },
     'runs:createMessage': async (_event, args) => {
-      return { messageId: await runsCore.createMessage(args.runId, args.message, args.voiceInput, args.voiceOutput, args.searchEnabled, args.middlePaneContext) };
+      return { messageId: await runsCore.createMessage(args.runId, args.message, args.voiceInput, args.voiceOutput, args.searchEnabled, args.middlePaneContext, args.codeMode) };
     },
     'runs:authorizePermission': async (_event, args) => {
       await runsCore.authorizePermission(args.runId, args.authorization);
@@ -630,6 +634,20 @@ export function setupIpcHandlers() {
       const repo = container.resolve<IGranolaConfigRepo>('granolaConfigRepo');
       const config = await repo.getConfig();
       return { enabled: config.enabled };
+    },
+    'codeMode:getConfig': async () => {
+      const repo = container.resolve<ICodeModeConfigRepo>('codeModeConfigRepo');
+      const config = await repo.getConfig();
+      return { enabled: config.enabled };
+    },
+    'codeMode:setConfig': async (_event, args) => {
+      const repo = container.resolve<ICodeModeConfigRepo>('codeModeConfigRepo');
+      await repo.setConfig({ enabled: args.enabled });
+      invalidateCopilotInstructionsCache();
+      return { success: true };
+    },
+    'codeMode:checkAgentStatus': async () => {
+      return await checkCodeModeAgentStatus();
     },
     'granola:setConfig': async (_event, args) => {
       const repo = container.resolve<IGranolaConfigRepo>('granolaConfigRepo');

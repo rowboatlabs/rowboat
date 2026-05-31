@@ -18,6 +18,7 @@ import {
   Mic,
   Plus,
   Square,
+  Terminal,
   X,
 } from 'lucide-react'
 
@@ -108,7 +109,7 @@ function getAttachmentIcon(kind: AttachmentIconKind) {
 }
 
 interface ChatInputInnerProps {
-  onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[], searchEnabled?: boolean) => void
+  onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex') => void
   onStop?: () => void
   isProcessing: boolean
   isStopping?: boolean
@@ -178,6 +179,9 @@ function ChatInputInner({
   const [searchEnabled, setSearchEnabled] = useState(false)
   const [searchAvailable, setSearchAvailable] = useState(false)
   const [isRowboatConnected, setIsRowboatConnected] = useState(false)
+  const [codingAgent, setCodingAgent] = useState<'claude' | 'codex'>('claude')
+  const [codeModeEnabled, setCodeModeEnabled] = useState(false)
+  const [codeModeFeatureEnabled, setCodeModeFeatureEnabled] = useState(false)
 
   // When a run exists, freeze the dropdown to the run's resolved model+provider.
   useEffect(() => {
@@ -260,8 +264,89 @@ function ChatInputInner({
     return () => window.removeEventListener('models-config-changed', handler)
   }, [loadModelConfig])
 
+  // Load the global code-mode feature flag (from settings) and stay in sync.
+  useEffect(() => {
+    const load = () => {
+      window.ipc.invoke('codeMode:getConfig', null)
+        .then((r) => setCodeModeFeatureEnabled(r.enabled))
+        .catch(() => setCodeModeFeatureEnabled(false))
+    }
+    load()
+    window.addEventListener('code-mode-config-changed', load)
+    return () => window.removeEventListener('code-mode-config-changed', load)
+  }, [])
+
+  // If the feature is turned off in settings, also turn off any per-conversation chip.
+  useEffect(() => {
+    if (!codeModeFeatureEnabled && codeModeEnabled) {
+      setCodeModeEnabled(false)
+    }
+  }, [codeModeFeatureEnabled, codeModeEnabled])
+
+  // Listen for coding-agent runs that were triggered without the explicit code-mode
+  // toggle. App.tsx dispatches this when it sees an acpx executeCommand fire. We
+  // flip the pill on with the detected agent so the UI reflects what's happening.
+  useEffect(() => {
+    const handler = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ runId?: string; agent?: 'claude' | 'codex' }>).detail
+      if (!detail || !detail.agent) return
+      if (runId && detail.runId && detail.runId !== runId) return
+      setCodeModeEnabled(true)
+      setCodingAgent(detail.agent)
+    }
+    window.addEventListener('code-mode-detected', handler)
+    return () => window.removeEventListener('code-mode-detected', handler)
+  }, [runId])
+
+  // Cross-platform basename — handles both / and \ separators.
+  const basename = useCallback((p: string): string => {
+    const trimmed = p.replace(/[\\/]+$/, '')
+    const idx = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'))
+    return idx >= 0 ? trimmed.slice(idx + 1) : trimmed
+  }, [])
+
+  // Load coding-agent preference for a given workdir.
+  // Storage: config/coding-agents.json — { [workDirPath]: 'claude' | 'codex' }
+  const loadCodingAgentFor = useCallback(async (dir: string | null): Promise<'claude' | 'codex'> => {
+    if (!dir) return 'claude'
+    try {
+      const result = await window.ipc.invoke('workspace:readFile', { path: 'config/coding-agents.json' })
+      const parsed = JSON.parse(result.data) as Record<string, unknown>
+      const value = parsed?.[dir]
+      if (value === 'codex' || value === 'claude') return value
+    } catch {
+      /* file missing or invalid — fall through to default */
+    }
+    return 'claude'
+  }, [])
+
+  const persistCodingAgent = useCallback(async (dir: string, agent: 'claude' | 'codex') => {
+    let existing: Record<string, 'claude' | 'codex'> = {}
+    try {
+      const result = await window.ipc.invoke('workspace:readFile', { path: 'config/coding-agents.json' })
+      const parsed = JSON.parse(result.data) as Record<string, unknown>
+      for (const [k, v] of Object.entries(parsed ?? {})) {
+        if (v === 'claude' || v === 'codex') existing[k] = v
+      }
+    } catch { /* start fresh */ }
+    existing[dir] = agent
+    await window.ipc.invoke('workspace:writeFile', {
+      path: 'config/coding-agents.json',
+      data: JSON.stringify(existing, null, 2),
+    })
+  }, [])
+
   // Work directory is owned per-chat by the parent (App). This component only
-  // drives the picker dialog and reports changes up via onWorkDirChange.
+  // drives the picker dialog and reports changes up via onWorkDirChange. Whenever
+  // the work directory changes, load its persisted coding-agent preference.
+  useEffect(() => {
+    let cancelled = false
+    loadCodingAgentFor(workDir).then((agent) => {
+      if (!cancelled) setCodingAgent(agent)
+    })
+    return () => { cancelled = true }
+  }, [workDir, loadCodingAgentFor])
+
   const handleSetWorkDir = useCallback(async () => {
     try {
       let defaultPath: string | undefined = workDir ?? undefined
@@ -282,17 +367,34 @@ function ChatInputInner({
       })
       if (!chosen) return
       onWorkDirChange?.(chosen)
+      setCodingAgent(await loadCodingAgentFor(chosen))
       toast.success(`Work directory set: ${chosen}`)
     } catch (err) {
       console.error('Failed to set work directory', err)
       toast.error('Failed to set work directory')
     }
-  }, [workDir, onWorkDirChange])
+  }, [workDir, onWorkDirChange, loadCodingAgentFor])
 
   const handleClearWorkDir = useCallback(() => {
     onWorkDirChange?.(null)
+    setCodingAgent('claude')
     toast.success('Work directory cleared')
   }, [onWorkDirChange])
+
+  const handleToggleCodingAgent = useCallback(async () => {
+    const next: 'claude' | 'codex' = codingAgent === 'claude' ? 'codex' : 'claude'
+    setCodingAgent(next)
+    // Persist only when scoped to a workdir; without one there's nothing to key on.
+    if (!workDir) return
+    try {
+      await persistCodingAgent(workDir, next)
+    } catch (err) {
+      console.error('Failed to save coding agent', err)
+      toast.error('Failed to save coding agent')
+      // revert on failure
+      setCodingAgent(codingAgent)
+    }
+  }, [workDir, codingAgent, persistCodingAgent])
 
   // Check search tool availability (exa or signed-in via gateway)
   useEffect(() => {
@@ -378,13 +480,15 @@ function ChatInputInner({
 
   const handleSubmit = useCallback(() => {
     if (!canSubmit) return
-    onSubmit({ text: message.trim(), files: [] }, controller.mentions.mentions, attachments, searchEnabled || undefined)
+    // codeMode is sticky per conversation — don't reset after send.
+    const effectiveCodeMode = codeModeEnabled ? codingAgent : undefined
+    onSubmit({ text: message.trim(), files: [] }, controller.mentions.mentions, attachments, searchEnabled || undefined, effectiveCodeMode)
     controller.textInput.clear()
     controller.mentions.clearMentions()
     setAttachments([])
     // Web search toggle stays on for the rest of the chat session; the user
     // turns it off explicitly. (Not persisted across app restarts.)
-  }, [attachments, canSubmit, controller, message, onSubmit, searchEnabled])
+  }, [attachments, canSubmit, controller, message, onSubmit, searchEnabled, codeModeEnabled, codingAgent, workDir])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -529,15 +633,20 @@ function ChatInputInner({
       </div>
       <div className="flex items-center gap-2 px-4 pb-3">
         <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              aria-label="Add"
-            >
-              <Plus className="h-4 w-4" />
-            </button>
-          </DropdownMenuTrigger>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  aria-label="Add"
+                >
+                  <Plus className="h-4 w-4" />
+                </button>
+              </DropdownMenuTrigger>
+            </TooltipTrigger>
+            <TooltipContent side="top">Add files or set work directory</TooltipContent>
+          </Tooltip>
           <DropdownMenuContent align="start" className="min-w-56">
             <DropdownMenuItem onSelect={() => fileInputRef.current?.click()}>
               <ImagePlus className="size-4" />
@@ -559,7 +668,7 @@ function ChatInputInner({
                   className="flex min-w-0 items-center gap-1.5"
                 >
                   <FolderCog className="h-3.5 w-3.5 shrink-0" />
-                  <span className="truncate">{workDir.split('/').pop() || workDir}</span>
+                  <span className="truncate">{basename(workDir) || workDir}</span>
                 </button>
                 <button
                   type="button"
@@ -600,6 +709,52 @@ function ChatInputInner({
             </span>
           </button>
         )}
+        {codeModeFeatureEnabled && (codeModeEnabled ? (
+          <div className="flex h-7 shrink-0 items-center rounded-full bg-secondary text-xs font-medium text-foreground">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => setCodeModeEnabled(false)}
+                  className="flex h-full items-center gap-1.5 rounded-l-full pl-2.5 pr-2 transition-colors hover:bg-secondary/70"
+                >
+                  <Terminal className="h-3.5 w-3.5" />
+                  <span>Code</span>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top">Code mode on — click to disable</TooltipContent>
+            </Tooltip>
+            <span className="text-foreground/30">·</span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={handleToggleCodingAgent}
+                  className="flex h-full items-center rounded-r-full pl-2 pr-2.5 transition-colors hover:bg-secondary/70"
+                >
+                  <span>{codingAgent === 'claude' ? 'Claude' : 'Codex'}</span>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                Coding agent: {codingAgent === 'claude' ? 'Claude Code' : 'Codex'} — click to swap
+              </TooltipContent>
+            </Tooltip>
+          </div>
+        ) : (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={() => setCodeModeEnabled(true)}
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                aria-label="Code mode"
+              >
+                <Terminal className="h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top">Use a coding agent (Claude Code or Codex)</TooltipContent>
+          </Tooltip>
+        ))}
         <div className="flex-1" />
         {lockedModel ? (
           <span
@@ -760,7 +915,7 @@ export interface ChatInputWithMentionsProps {
   knowledgeFiles: string[]
   recentFiles: string[]
   visibleFiles: string[]
-  onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[]) => void
+  onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex') => void
   onStop?: () => void
   isProcessing: boolean
   isStopping?: boolean

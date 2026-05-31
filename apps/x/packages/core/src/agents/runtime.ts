@@ -3,7 +3,7 @@ import fs from "fs";
 import path from "path";
 import { WorkDir } from "../config/config.js";
 import { Agent, ToolAttachment } from "@x/shared/dist/agent.js";
-import { AssistantContentPart, AssistantMessage, Message, MessageList, ProviderOptions, ToolCallPart, ToolMessage } from "@x/shared/dist/message.js";
+import { AssistantContentPart, AssistantMessage, Message, MessageList, ProviderOptions, ToolCallPart, ToolMessage, UserMessageContext } from "@x/shared/dist/message.js";
 import { LanguageModel, stepCountIs, streamText, tool, Tool, ToolSet } from "ai";
 import { z } from "zod";
 import { LlmStepStreamEvent } from "@x/shared/dist/llm-step-events.js";
@@ -23,7 +23,7 @@ import { resolveProviderConfig } from "../models/defaults.js";
 import { IAgentsRepo } from "./repo.js";
 import { IMonotonicallyIncreasingIdGenerator } from "../application/lib/id-gen.js";
 import { IBus } from "../application/lib/bus.js";
-import { IMessageQueue } from "../application/lib/message-queue.js";
+import { IMessageQueue, type MiddlePaneContext } from "../application/lib/message-queue.js";
 import { IRunsRepo } from "../runs/repo.js";
 import { IRunsLock } from "../runs/lock.js";
 import { IAbortRegistry } from "../runs/abort-registry.js";
@@ -235,6 +235,96 @@ function loadAgentNotesContext(): string | null {
     return `# Agent Memory\n\n${sections.join('\n\n')}`;
 }
 
+function isCopilotLikeAgent(agentName: string | null | undefined): boolean {
+    return agentName === 'copilot' || agentName === 'rowboatx';
+}
+
+function formatCurrentDateTime(now: Date): string {
+    return now.toLocaleString('en-US', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        timeZoneName: 'short',
+    });
+}
+
+function toUserMessageContextMiddlePane(middlePaneContext: MiddlePaneContext | null): z.infer<typeof UserMessageContext>['middlePane'] {
+    if (!middlePaneContext) {
+        return { kind: 'empty' };
+    }
+    if (middlePaneContext.kind === 'note') {
+        return {
+            kind: 'note',
+            path: middlePaneContext.path,
+            content: middlePaneContext.content,
+        };
+    }
+    return {
+        kind: 'browser',
+        url: middlePaneContext.url,
+        title: middlePaneContext.title,
+    };
+}
+
+function buildUserMessageContext({
+    agentName,
+    middlePaneContext,
+}: {
+    agentName: string | null | undefined;
+    middlePaneContext: MiddlePaneContext | null;
+}): z.infer<typeof UserMessageContext> {
+    return {
+        currentDateTime: formatCurrentDateTime(new Date()),
+        ...(isCopilotLikeAgent(agentName)
+            ? { middlePane: toUserMessageContextMiddlePane(middlePaneContext) }
+            : {}),
+    };
+}
+
+function formatUserMessageContextForLlm(userMessageContext: z.infer<typeof UserMessageContext>): string {
+    const sections: string[] = [];
+
+    if (userMessageContext.currentDateTime) {
+        sections.push(`Current date and time: ${userMessageContext.currentDateTime}`);
+    }
+
+    if (userMessageContext.middlePane) {
+        if (userMessageContext.middlePane.kind === 'empty') {
+            sections.push(`Middle pane:\nState: empty`);
+        } else if (userMessageContext.middlePane.kind === 'note') {
+            sections.push(`Middle pane:\nState: note\nPath: ${userMessageContext.middlePane.path}\n\nContent:\n\`\`\`\n${userMessageContext.middlePane.content}\n\`\`\``);
+        } else {
+            sections.push(`Middle pane:\nState: browser\nURL: ${userMessageContext.middlePane.url}\nTitle: ${userMessageContext.middlePane.title}`);
+        }
+    }
+
+    if (sections.length === 0) {
+        return '';
+    }
+
+    return `# User Context
+${sections.join('\n\n')}
+
+# User Message
+`;
+}
+
+const USER_CONTEXT_SYSTEM_INSTRUCTIONS = `# Hidden User Context
+User messages may include a hidden "# User Context" section before "# User Message". Treat it as runtime metadata captured when that specific user message was sent. The actual user-authored text starts under "# User Message".
+
+Use "Current date and time" for temporal reasoning.
+
+If Middle pane context is present, it reflects what the user had open at the time of that specific message and overrides earlier middle-pane references. If the conversation history references a different note or browser page, the user had since closed or navigated away from it. Do not treat earlier context as current.
+
+If Middle pane state is empty, the user was not looking at any relevant note or web page at that point. Answer the user's message on its own merits.
+
+If Middle pane state is note, the supplied path and content are available so you can reference the note when relevant. The user may or may not be talking about this note. Do NOT assume every message is about it. Only reference or act on this note when the user's message clearly relates to it, such as "this note", "what I'm looking at", "here", "above", "below", or questions whose subject is plainly the note's content. For unrelated questions, ignore this note entirely and answer normally. Do not mention that you can see this note unless it is relevant to the answer.
+
+If Middle pane state is browser, only the URL and page title are supplied; the page content itself is NOT included. If you need the page content to answer, use the browser tools available to you to read the page. The user may or may not be talking about this page. Only reference or act on this page when the user's message clearly relates to it, such as "this page", "this article", "what I'm looking at", "this site", or "summarize this". For unrelated questions, ignore this page entirely and answer normally. Do not mention that you can see the browser unless it is relevant to the answer.`;
+
 export interface IAgentRuntime {
     trigger(runId: string): Promise<void>;
 }
@@ -392,9 +482,10 @@ export async function mapAgentTool(t: z.infer<typeof ToolAttachment>): Promise<T
         case "builtin": {
             if (t.name === "ask-human") {
                 return tool({
-                    description: "Ask a human before proceeding",
+                    description: "Ask a human before proceeding. Optionally pass `options` (an array of short button labels) to render the question as a one-click choice; the user's response will be the chosen label verbatim.",
                     inputSchema: z.object({
                         question: z.string().describe("The question to ask the human"),
+                        options: z.array(z.string()).optional().describe("Optional short button labels (2-4 recommended). If provided, the user picks one with a single click instead of typing. The response you receive will be the chosen label."),
                     }),
                 });
             }
@@ -721,17 +812,18 @@ export function convertFromMessages(messages: z.infer<typeof Message>[]): ModelM
                     providerOptions,
                 });
                 break;
-            case "user":
+            case "user": {
+                const userMessageContextPrefix = msg.userMessageContext ? formatUserMessageContextForLlm(msg.userMessageContext) : '';
                 if (typeof msg.content === 'string') {
                     // Legacy string — pass through unchanged
                     result.push({
                         role: "user",
-                        content: msg.content,
+                        content: `${userMessageContextPrefix}${msg.content}`,
                         providerOptions,
                     });
                 } else {
                     // New content parts array — collapse to text for LLM
-                    const textSegments: string[] = [];
+                    const textSegments: string[] = userMessageContextPrefix ? [userMessageContextPrefix] : [];
                     const attachmentLines: string[] = [];
 
                     for (const part of msg.content) {
@@ -745,7 +837,11 @@ export function convertFromMessages(messages: z.infer<typeof Message>[]): ModelM
                     }
 
                     if (attachmentLines.length > 0) {
-                        textSegments.unshift("User has attached the following files:", ...attachmentLines, "");
+                        if (userMessageContextPrefix) {
+                            textSegments.push("User has attached the following files:", ...attachmentLines, "");
+                        } else {
+                            textSegments.unshift("User has attached the following files:", ...attachmentLines, "");
+                        }
                     }
 
                     result.push({
@@ -755,6 +851,7 @@ export function convertFromMessages(messages: z.infer<typeof Message>[]): ModelM
                     });
                 }
                 break;
+            }
             case "tool":
                 result.push({
                     role: "tool",
@@ -1065,6 +1162,7 @@ export async function* streamAgent({
     let voiceInput = false;
     let voiceOutput: 'summary' | 'full' | null = null;
     let searchEnabled = false;
+    let codeMode: 'claude' | 'codex' | null = null;
     let middlePaneContext:
         | { kind: 'note'; path: string; content: string }
         | { kind: 'browser'; url: string; title: string }
@@ -1213,6 +1311,9 @@ export async function* streamAgent({
             if (msg.searchEnabled) {
                 searchEnabled = true;
             }
+            // Code mode is per-message: latest message decides whether the assistant
+            // should route coding work through the code-with-agents skill / chosen agent.
+            codeMode = msg.codeMode ?? null;
             if (msg.voiceOutput) {
                 voiceOutput = msg.voiceOutput;
             }
@@ -1220,6 +1321,10 @@ export async function* streamAgent({
             // latest user message. If the user closed the pane between messages, clear it.
             middlePaneContext = msg.middlePaneContext ?? null;
             loopLogger.log('dequeued user message', msg.messageId);
+            const userMessageContext = buildUserMessageContext({
+                agentName: state.agentName,
+                middlePaneContext,
+            });
             yield* processEvent({
                 runId,
                 type: "message",
@@ -1227,6 +1332,7 @@ export async function* streamAgent({
                 message: {
                     role: "user",
                     content: msg.message,
+                    userMessageContext,
                 },
                 subflow: [],
             });
@@ -1248,17 +1354,7 @@ export async function* streamAgent({
         loopLogger.log('running llm turn');
         // stream agent response and build message
         const messageBuilder = new StreamStepMessageBuilder();
-        const now = new Date();
-        const currentDateTime = now.toLocaleString('en-US', {
-            weekday: 'long',
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric',
-            hour: 'numeric',
-            minute: '2-digit',
-            timeZoneName: 'short'
-        });
-        let instructionsWithDateTime = `Current date and time: ${currentDateTime}\n\n${agent.instructions}`;
+        let instructionsWithDateTime = `${agent.instructions}\n\n${USER_CONTEXT_SYSTEM_INSTRUCTIONS}`;
         // Inject Agent Notes context for copilot
         if (state.agentName === 'copilot' || state.agentName === 'rowboatx') {
             const agentNotesContext = loadAgentNotesContext();
@@ -1287,19 +1383,6 @@ Use absolute paths rooted at this directory with the \`file-*\` tools. For examp
 
 Do not announce the work directory unless it's relevant. Just use it.`;
             }
-            // Always inject a Middle Pane section so the LLM has a clear, up-to-date signal
-            // that supersedes any earlier middle-pane mention in the conversation history.
-            const middlePaneHeader = `\n\n# Middle Pane (Current State)\nThis section reflects what the user has open in the middle pane RIGHT NOW, at the time of their latest message. **This is authoritative and overrides any earlier mention of a note or web page in this conversation** — if the conversation history references a different note or browser page, the user has since closed or navigated away from it. Do not treat earlier context as current.\n\n`;
-            if (!middlePaneContext) {
-                loopLogger.log('injecting middle pane context (empty)');
-                instructionsWithDateTime += `${middlePaneHeader}**Nothing relevant is open in the middle pane right now.** The user is not looking at any note or web page. If earlier in this conversation you referenced a note or browser page as "what the user is viewing", that is no longer accurate — do not refer to it as currently open. Answer the user's latest message on its own merits.`;
-            } else if (middlePaneContext.kind === 'note') {
-                loopLogger.log('injecting middle pane context (note)', middlePaneContext.path);
-                instructionsWithDateTime += `${middlePaneHeader}The user has a note open. Its path and full content are provided below so you can reference it when relevant.\n\n**How to use this context:**\n- The user may or may not be talking about this note. Do NOT assume every message is about it.\n- Only reference or act on this note when the user's message clearly relates to it (e.g. "this note", "what I'm looking at", "here", "above", "below", or questions whose subject is plainly this note's content).\n- For unrelated questions (general chat, questions about other notes, tasks, emails, calendar, etc.), ignore this context entirely and answer normally.\n- Do not mention that you can see this note unless it is relevant to the answer.\n\n## Open note path\n${middlePaneContext.path}\n\n## Open note content\n\`\`\`\n${middlePaneContext.content}\n\`\`\``;
-            } else if (middlePaneContext.kind === 'browser') {
-                loopLogger.log('injecting middle pane context (browser)', middlePaneContext.url);
-                instructionsWithDateTime += `${middlePaneHeader}The user has the embedded browser open and is viewing a web page. Only the URL and page title are shown below — the page content itself is NOT included here. If you need the page content to answer, use the browser tools available to you to read the page.\n\n**How to use this context:**\n- The user may or may not be talking about this page. Do NOT assume every message is about it.\n- Only reference or act on this page when the user's message clearly relates to it (e.g. "this page", "this article", "what I'm looking at", "this site", "summarize this").\n- For unrelated questions (general chat, questions about other notes, tasks, emails, calendar, etc.), ignore this context entirely and answer normally.\n- Do not mention that you can see the browser unless it is relevant to the answer.\n\n## Current page\nURL: ${middlePaneContext.url}\nTitle: ${middlePaneContext.title}`;
-            }
         }
         if (voiceInput) {
             loopLogger.log('voice input enabled, injecting voice input prompt');
@@ -1315,6 +1398,50 @@ Do not announce the work directory unless it's relevant. Just use it.`;
         if (searchEnabled) {
             loopLogger.log('search enabled, injecting search prompt');
             instructionsWithDateTime += `\n\n# Search\nThe user has requested a search. Use the web-search tool to answer their query.`;
+        }
+        if (codeMode) {
+            loopLogger.log('code mode enabled, injecting coding-agent context', codeMode);
+            const agentDisplay = codeMode === 'claude' ? 'Claude Code' : 'Codex';
+            const otherAgent = codeMode === 'claude' ? 'codex' : 'claude';
+            const otherDisplay = codeMode === 'claude' ? 'Codex' : 'Claude Code';
+            // Deterministic, per-chat session name so the coding agent keeps
+            // context across the user's requests within this chat. Reusing the
+            // same -s <name> resumes the session; the first call creates it.
+            const sessionName = `rowboat-${runId}`;
+            instructionsWithDateTime += `\n\n# Code Mode (Active) — Default agent: ${agentDisplay}
+The user has turned on **code mode** and the composer chip is set to **${agentDisplay}** (\`${codeMode}\`). Use this as the **default** agent for coding tasks in this turn.
+
+**The user can override the agent at any time, two ways:**
+1. By toggling the chip in the composer (preferred).
+2. By asking you directly in chat ("use codex", "switch to claude", "do this with ${otherDisplay}", etc.). When the user explicitly asks to use a different agent in the current message, honor that — use \`${otherAgent}\` instead of \`${codeMode}\` for this turn, and briefly mention they can also toggle it via the chip for stickiness.
+
+**Persistent session for this chat — session name: \`${sessionName}\`.** This chat uses one named agent session so the agent keeps context across your requests. The session must exist before it can be prompted (\`-s\` only resumes; it does not create).
+
+**1. First coding action in this chat — ensure the session exists:**
+
+\`\`\`
+npx acpx@latest --approve-all --cwd <workdir> <agent> sessions ensure --name ${sessionName}
+\`\`\`
+
+(\`ensure\` creates the session if missing and reuses it if it already exists — safe to call when reopening this chat later.)
+
+**2. Then run the prompt:**
+
+\`\`\`
+npx acpx@latest --approve-all --timeout 600 --cwd <workdir> <agent> -s ${sessionName} "<prompt>"
+\`\`\`
+
+**3. Every follow-up coding request in this chat — reuse the same session (do NOT create again):**
+
+\`\`\`
+npx acpx@latest --approve-all --timeout 600 --cwd <workdir> <agent> -s ${sessionName} "<prompt>"
+\`\`\`
+
+Run these as **separate, sequential** \`executeCommand\` calls — issue the \`sessions ensure\` call first and WAIT for it to finish, then issue the prompt call. Do NOT fire both in the same turn / batch.
+
+Where \`<agent>\` is either \`claude\` or \`codex\` — pick based on (in priority order): an explicit in-chat override → the chip setting (\`${codeMode}\`). Use \`${sessionName}\` exactly — do NOT invent a different name, and do NOT use \`exec\` (it is one-shot and forgets).
+
+If the user's message is clearly NOT a coding request (small talk, an unrelated question), answer directly without invoking the coding agent. Code mode signals readiness, not that every message must route through the agent.`;
         }
         let streamError: string | null = null;
         for await (const event of streamLlm(
@@ -1371,11 +1498,16 @@ Do not announce the work directory unless it's relevant. Just use it.`;
                     const underlyingTool = agent.tools![part.toolName];
                     if (underlyingTool.type === "builtin" && underlyingTool.name === "ask-human") {
                         loopLogger.log('emitting ask-human-request, toolCallId:', part.toolCallId);
+                        const rawOptions = (part.arguments as { options?: unknown }).options;
+                        const options = Array.isArray(rawOptions)
+                            ? rawOptions.filter((o): o is string => typeof o === 'string' && o.trim().length > 0)
+                            : undefined;
                         yield* processEvent({
                             runId,
                             type: "ask-human-request",
                             toolCallId: part.toolCallId,
                             query: part.arguments.question,
+                            ...(options && options.length > 0 ? { options } : {}),
                             subflow: [],
                         });
                     }

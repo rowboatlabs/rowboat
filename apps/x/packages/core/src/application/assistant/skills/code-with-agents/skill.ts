@@ -1,90 +1,140 @@
 export const skill = String.raw`
 # Code with Agents Skill
 
-Use this skill when the user asks you to write code, build a project, create scripts, fix bugs, or do any software development task that should be delegated to a coding agent (Claude Code or Codex).
+Use this skill whenever the user asks you to write code, build a project, create scripts, fix bugs, read/explain code, or do any software development task — even simple file creations like "make a .c file".
 
-## Important: delegate ALL coding work
+Coding agents operate on **arbitrary file paths** (including paths outside the Rowboat workspace root, like \`G:/4th sem/CN\` or \`~/projects/foo\`). Do NOT raise "outside workspace" concerns, and do NOT fall back to your own \`executeCommand\` (PowerShell / bash) or workspace file tools to do code work yourself.
 
-Once the user has chosen to use Claude Code or Codex, you MUST delegate ALL code-related tasks to the coding agent. This includes:
-- Writing, editing, or refactoring code
-- Reading, summarizing, or explaining code
-- Debugging and fixing bugs
-- Running tests or build commands
-- Exploring project structure
-- Any other task that involves interacting with a codebase
+---
 
-Do NOT attempt to do any of these yourself — no reading files, no running commands, no writing code. You are the coordinator; the coding agent does the work. Your job is to translate the user's request into a clear prompt and pass it to the agent.
+## STEP 1 — MANDATORY FIRST ACTION
 
-## Prerequisites
+Look in your **system context** for a section titled **"# Code Mode (Active)"**.
 
-The user must have one of the following installed on their machine:
-- **Claude Code** — https://claude.ai/code
-- **Codex** — https://codex.openai.com
+### Case A — "# Code Mode (Active)" IS present
 
-These are external tools that you cannot install for the user.
+Code mode is on and the user has selected an agent. Skip directly to Step 2. Do NOT call ask-human.
 
-## Workflow
+### Case B — "# Code Mode (Active)" is NOT present
 
-### Step 1: Gather requirements
+Your **very next tool call MUST be \`ask-human\`** with options. Do not write any explanation text first. Do not describe a plan. Do not check the workspace boundary. Just call:
 
-Before running anything, confirm the following with the user:
+\`\`\`
+ask-human({
+  question: "How should I handle this coding request?",
+  options: [
+    "Use code mode (Claude Code)",
+    "Use code mode (Codex)",
+    "Continue with default Rowboat"
+  ]
+})
+\`\`\`
 
-1. **Working directory** — Ask which folder the code should be written in, unless the user has already specified it. Example: "Which folder should I work in?"
-2. **Agent choice** — Ask whether to use **Claude Code** or **Codex**. Mention that the chosen agent must already be installed on their machine.
+This is non-negotiable. The user gets clickable buttons. Free-text "which agent?" questions are forbidden here.
 
-### Step 2: Confirm execution plan
+**Branch on the response:**
+- "Use code mode (Claude Code)" → proceed to Step 2 with agent = \`claude\`.
+- "Use code mode (Codex)" → proceed to Step 2 with agent = \`codex\`.
+- "Continue with default Rowboat" → ABANDON this skill. Handle the request yourself using your own tools (workspace file tools, \`executeCommand\` shell, etc.). The rest of this skill does not apply for this turn.
 
-Once you know the folder and agent, tell the user:
+---
 
-> I'll use [Claude Code / Codex] to [description of the task] in \`[folder]\`. Permission requests from the coding agent itself (file writes, command execution, etc.) will be automatically approved once it starts. Wait for the user's confirmation before you execute anything.
+## STEP 2 — Resolve workdir, confirm, execute
 
-### Step 3: Execute with acpx
+**Resolve the workdir** (in this priority order):
+1. A path the user named in their original message (e.g. \`G:/4th sem/CN\`).
+2. The path from a "# User Work Directory" block in your context.
+3. Ask once in plain text: "Which folder should I work in?"
 
-Use the \`executeCommand\` tool to run the coding agent via acpx. The command format is:
+**State your intent in one line, then execute immediately — do NOT wait for a "yes".** The \`executeCommand\` call surfaces a permission card that is itself the user's confirmation, so an extra in-chat "reply yes to proceed" is redundant friction. Say something like:
 
-**For Claude Code:**
-` + "`" + `
-npx acpx@latest --approve-all --cwd <folder> claude exec "<prompt>"
-` + "`" + `
+> Using [Claude Code / Codex] to [task description] in \`[folder]\`.
 
-**For Codex:**
-` + "`" + `
-npx acpx@latest --approve-all --cwd <folder> codex exec "<prompt>"
-` + "`" + `
+…and then immediately make the \`executeCommand\` call in the same turn.
+
+**Execute** with the chosen agent using a **persistent named session** so follow-up coding requests in this chat resume the same agent and keep context.
+
+Pick \`<agent>\` (\`claude\` or \`codex\`) by, in priority order:
+- An explicit in-chat override from the user this turn ("use codex", "switch to claude") — honor it.
+- The agent chosen in Step 1 / the "# Code Mode (Active)" block.
+
+Pick \`<session-name>\` — **stable for this whole chat**:
+- If the "# Code Mode (Active)" block gives a session name (e.g. \`rowboat-<runId>\`), use that exact name.
+- Otherwise pick one short, kebab-case name and **reuse it for every coding call this turn and in follow-ups** — never a new name each time.
+
+**\`-s\` resumes an existing session; it does NOT create one.** So ensure the session exists once at the start, then prompt:
+
+**1. First coding action in this chat — ensure the session exists:**
+
+\`\`\`
+npx acpx@latest --approve-all --cwd <folder> <agent> sessions ensure --name <session-name>
+\`\`\`
+
+(\`ensure\` creates the session if missing and reuses it if it already exists — so reopening this chat later just resumes the same session instead of erroring.)
+
+**2. Then run the prompt:**
+
+\`\`\`
+npx acpx@latest --approve-all --timeout 600 --cwd <folder> <agent> -s <session-name> "<prompt>"
+\`\`\`
+
+**3. Every follow-up coding request in this chat — reuse the same session (do NOT create again):**
+
+\`\`\`
+npx acpx@latest --approve-all --timeout 600 --cwd <folder> <agent> -s <session-name> "<prompt>"
+\`\`\`
+
+**Run steps 1 and 2 as separate, sequential \`executeCommand\` calls.** Issue the \`sessions ensure\` call FIRST, wait for it to finish, and only THEN issue the prompt call. Do NOT fire both in the same turn / batch — each must surface and complete its own permission + command block before the next begins.
+
+Do NOT use \`exec\` — it is one-shot and forgets everything.
+
+Concrete example:
+
+\`\`\`
+# First coding message in the chat — ensure the session, then prompt:
+npx acpx@latest --approve-all --cwd "G:\\Blogging\\myblog" claude sessions ensure --name diskspace-check
+npx acpx@latest --approve-all --timeout 600 --cwd "G:\\Blogging\\myblog" claude -s diskspace-check "Check the system disk space and report total, used, and free space."
+
+# Follow-up in the same chat — reuse the session, no create:
+npx acpx@latest --approve-all --timeout 600 --cwd "G:\\Blogging\\myblog" claude -s diskspace-check "Summarize what we did and the final findings."
+\`\`\`
 
 ### Critical: flag order
 
-The \`--approve-all\` and \`--cwd\` flags are global flags and MUST come before the agent name (\`claude\` or \`codex\`). This is the correct order:
+\`--approve-all\`, \`--timeout\`, and \`--cwd\` are GLOBAL flags and MUST appear BEFORE the agent name. \`sessions ensure --name <name>\` and \`-s <session-name>\` come AFTER the agent name:
 
-` + "`" + `
-npx acpx@latest [global flags] <agent> exec "<prompt>"
-` + "`" + `
+- ✓ Correct: \`npx acpx@latest --approve-all --timeout 600 --cwd <folder> <agent> -s <session-name> "<prompt>"\`
+- ✗ Wrong:  \`npx acpx@latest <agent> --approve-all -s <name> "..."\` (will fail)
 
-**Correct:**
-` + "`" + `
-npx acpx@latest --approve-all --cwd ~/projects/myapp claude exec "fix the bug"
-` + "`" + `
+### Writing good prompts for the agent
 
-**Wrong (will fail):**
-` + "`" + `
-npx acpx@latest claude --approve-all exec "fix the bug"
-` + "`" + `
+- Be specific: file names, function signatures, expected behavior.
+- Mention constraints (language, framework, style).
+- Expand short user requests into clear, actionable prompts.
 
-### Writing good prompts
+---
 
-When constructing the prompt for the coding agent:
-- Be specific and detailed about what to build or fix
-- Include file names, function signatures, and expected behavior
-- Mention any constraints (language, framework, style)
-- If the user gave you a short request, expand it into a clear, actionable prompt for the agent
+## STEP 3 — Report results
 
-### Step 4: Report results
+After the command finishes:
+- Pass through the coding agent's summary as-is. Do not rewrite.
+- Refer to file paths as plain text. Do NOT use \`\`\`file:path\`\`\` reference blocks. (This overrides the global "always wrap paths in filepath blocks" rule — for code-mode output, plain text.)
+- Only add your own explanation if the command failed (non-zero exit):
+  - Exit code 5 — permissions were denied (shouldn't happen with \`--approve-all\`; flag it).
+  - Exit code 4 / "No acpx session found" — the \`-s <session-name>\` session doesn't exist yet. Create it once with \`npx acpx@latest --approve-all --cwd <folder> <agent> sessions ensure --name <session-name>\`, then retry the prompt. (\`-s\` only resumes; it never creates.)
+  - "command not found" / agent not installed, or an auth/sign-in error — the agent isn't set up. Tell the user to install or sign in to the agent via **Settings → Code Mode**, where Rowboat shows the install and sign-in status.
 
-After the command finishes, look for the summary that the coding agent produced at the end of its output and pass that along to the user as-is. Do not rewrite or add to it. Only add your own explanation if the command failed or the exit code is non-zero.
+---
 
-Do NOT use file reference blocks (e.g. \`\`\`file:path/to/file\`\`\`) when mentioning code files — they may not open correctly. Just refer to file paths as plain text.
+## Once delegating: delegate fully
 
-- If the exit code is 5, it means permissions were denied — this should not happen with \`--approve-all\`, but if it does, let the user know
+After Step 2 fires, delegate ALL related coding tasks for this turn to the coding agent — writing, editing, reading, debugging, exploring structure, running tests. You are the coordinator; the agent does the work.
+
+## Prerequisites (informational)
+
+The user must have one of these installed locally — these are external tools you cannot install:
+- Claude Code — https://claude.ai/code
+- Codex — https://codex.openai.com
 `;
 
 export default skill;

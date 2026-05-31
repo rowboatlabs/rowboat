@@ -5,7 +5,7 @@ import { RunEvent, ListRunsResponse } from '@x/shared/src/runs.js';
 import type { LanguageModelUsage, ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
-import { Bug, CheckIcon, LoaderIcon, PanelLeftIcon, ArrowRight, MessageSquare, ChevronLeftIcon, ChevronRightIcon, MoreHorizontal, Plus, HistoryIcon } from 'lucide-react';
+import { CheckIcon, LoaderIcon, PanelLeftIcon, ArrowRight, MessageSquare, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MarkdownEditor, type MarkdownEditorHandle } from './components/markdown-editor';
 import { ChatSidebar } from './components/chat-sidebar';
@@ -18,6 +18,7 @@ import { BasesView, type BaseConfig, DEFAULT_BASE_CONFIG } from '@/components/ba
 import { ImageFileViewer } from '@/components/image-file-viewer';
 import { VideoFileViewer } from '@/components/video-file-viewer';
 import { AudioFileViewer } from '@/components/audio-file-viewer';
+import { DocxFileViewer } from '@/components/docx-file-viewer';
 import { PersistentViewerCache } from '@/components/persistent-viewer-cache';
 import { UnsupportedFileViewer } from '@/components/unsupported-file-viewer';
 import { getViewerType, isCacheableViewerPath } from '@/lib/file-types';
@@ -66,12 +67,6 @@ import {
 } from "@/components/ui/sidebar"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
 import { Toaster } from "@/components/ui/sonner"
 import { BillingErrorDialog } from "@/components/billing-error-dialog"
@@ -1007,7 +1002,7 @@ function App() {
     voice.start()
   }, [voice])
 
-  const handlePromptSubmitRef = useRef<((message: PromptInputMessage, mentions?: FileMention[], stagedAttachments?: StagedAttachment[], searchEnabled?: boolean) => Promise<void>) | null>(null)
+  const handlePromptSubmitRef = useRef<((message: PromptInputMessage, mentions?: FileMention[], stagedAttachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex') => Promise<void>) | null>(null)
   const pendingVoiceInputRef = useRef(false)
 
   // Palette: per-tab editor handles for capturing cursor context on Cmd+K, and pending payload
@@ -2299,6 +2294,19 @@ function App() {
               status: 'running',
               timestamp: Date.now(),
             }])
+            // Detect acpx-driven coding-agent runs so the composer can retroactively
+            // flip code mode on with the right agent (when the user reached the skill
+            // via plain prompt rather than the explicit toggle).
+            if (llmEvent.toolName === 'executeCommand') {
+              const input = llmEvent.input as { command?: unknown } | undefined
+              const cmd = typeof input?.command === 'string' ? input.command : ''
+              const match = cmd.match(/\bacpx\b[\s\S]*?\b(claude|codex)\b/)
+              if (match) {
+                window.dispatchEvent(new CustomEvent('code-mode-detected', {
+                  detail: { runId: event.runId, agent: match[1] as 'claude' | 'codex' },
+                }))
+              }
+            }
           } else if (llmEvent.type === 'finish-step') {
             const nextUsage = normalizeUsage(llmEvent.usage)
             if (nextUsage) {
@@ -2413,7 +2421,7 @@ function App() {
             return next
           })
 
-          if (event.toolCallId && event.toolName !== 'executeCommand') {
+          if (event.toolCallId) {
             setToolOpenForTab(activeChatTabIdRef.current, event.toolCallId, false)
           }
 
@@ -2591,6 +2599,7 @@ function App() {
     mentions?: FileMention[],
     stagedAttachments: StagedAttachment[] = [],
     searchEnabled?: boolean,
+    codeMode?: 'claude' | 'codex',
   ) => {
     if (isProcessing) return
 
@@ -2702,6 +2711,7 @@ function App() {
           voiceInput: pendingVoiceInputRef.current || undefined,
           voiceOutput: ttsEnabledRef.current ? ttsModeRef.current : undefined,
           searchEnabled: searchEnabled || undefined,
+          codeMode: codeMode || undefined,
           middlePaneContext,
         })
         analytics.chatMessageSent({
@@ -2717,6 +2727,7 @@ function App() {
           voiceInput: pendingVoiceInputRef.current || undefined,
           voiceOutput: ttsEnabledRef.current ? ttsModeRef.current : undefined,
           searchEnabled: searchEnabled || undefined,
+          codeMode: codeMode || undefined,
           middlePaneContext,
         })
         analytics.chatMessageSent({
@@ -5312,25 +5323,6 @@ function App() {
     if (tabId === activeChatTabId) return activeChatTabState
     return chatViewStateByTab[tabId] ?? emptyChatTabState
   }, [activeChatTabId, activeChatTabState, chatViewStateByTab, emptyChatTabState])
-  const activeRunIdForDownload = activeChatTabState.runId
-  const handleDownloadActiveChatLog = useCallback(async () => {
-    if (!activeRunIdForDownload) {
-      toast.error('No chat log available yet')
-      return
-    }
-
-    try {
-      const result = await window.ipc.invoke('runs:downloadLog', { runId: activeRunIdForDownload })
-      if (result.success) {
-        toast.success('Chat log saved')
-      } else if (result.error) {
-        toast.error(result.error)
-      }
-    } catch (err) {
-      console.error('Download chat log failed:', err)
-      toast.error('Failed to download chat log')
-    }
-  }, [activeRunIdForDownload])
   const selectedTask = selectedBackgroundTask
     ? backgroundTasks.find(t => t.name === selectedBackgroundTask)
     : null
@@ -5517,33 +5509,6 @@ function App() {
                     <TooltipContent side="bottom">New chat</TooltipContent>
                   </Tooltip>
                 )}
-                  <DropdownMenu>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <DropdownMenuTrigger asChild>
-                          <button
-                            type="button"
-                            className="titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors self-center shrink-0"
-                            aria-label="Chat options"
-                          >
-                            <MoreHorizontal className="size-5" />
-                          </button>
-                        </DropdownMenuTrigger>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom">Chat options</TooltipContent>
-                    </Tooltip>
-                    <DropdownMenuContent align="end" className="min-w-48">
-                      <DropdownMenuItem
-                        disabled={!activeRunIdForDownload}
-                        onSelect={() => {
-                          void handleDownloadActiveChatLog()
-                        }}
-                      >
-                        <Bug className="size-4" />
-                        Download chat log
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
                 {/* Trailing layout control. Always mounted (just toggled invisible
                     when inactive) so its -webkit-app-region:no-drag rect is stable —
                     a freshly-mounted no-drag button inside the drag-region header
@@ -5654,7 +5619,11 @@ function App() {
                       remove: knowledgeActions.remove,
                       copyPath: knowledgeActions.copyPath,
                       revealInFileManager: knowledgeActions.revealInFileManager,
+                      createNote: knowledgeActions.createNote,
+                      createFolder: knowledgeActions.createFolder,
+                      onOpenInNewTab: knowledgeActions.onOpenInNewTab,
                     }}
+                    onNavigate={(path) => { void navigateToView({ type: 'workspace', path: path === WORKSPACE_ROOT ? undefined : path }) }}
                     onOpenNote={(path) => navigateToFile(path)}
                     onCreateWorkspace={async (name) => { await knowledgeActions.createWorkspace(name) }}
                   />
@@ -5880,6 +5849,10 @@ function App() {
                   <div className="flex-1 min-h-0 overflow-hidden">
                     <AudioFileViewer path={selectedPath} />
                   </div>
+                ) : selectedPath && getViewerType(selectedPath) === 'docx' ? (
+                  <div className="flex-1 min-h-0 overflow-hidden">
+                    <DocxFileViewer path={selectedPath} />
+                  </div>
                 ) : (
                   <div className="flex-1 min-h-0 overflow-hidden">
                     <UnsupportedFileViewer path={selectedPath} />
@@ -5962,7 +5935,6 @@ function App() {
                                       const response = tabState.permissionResponses.get(item.id) || null
                                       return (
                                         <React.Fragment key={item.id}>
-                                          {rendered}
                                           <PermissionRequest
                                             toolCall={permRequest.toolCall}
                                             permission={permRequest.permission}
@@ -5970,9 +5942,28 @@ function App() {
                                             onApproveSession={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'session')}
                                             onApproveAlways={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'always')}
                                             onDeny={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
+                                            onSwitchAgent={async (newAgent) => {
+                                              const runIdForSwitch = tab.runId
+                                              await handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')
+                                              window.dispatchEvent(new CustomEvent('code-mode-detected', {
+                                                detail: { runId: runIdForSwitch, agent: newAgent },
+                                              }))
+                                              if (runIdForSwitch) {
+                                                try {
+                                                  await window.ipc.invoke('runs:createMessage', {
+                                                    runId: runIdForSwitch,
+                                                    message: `Use ${newAgent === 'claude' ? 'Claude Code' : 'Codex'} instead — rerun the same task with the same prompt, just swap the agent binary to \`${newAgent}\`.`,
+                                                    codeMode: newAgent,
+                                                  })
+                                                } catch (err) {
+                                                  console.error('Failed to send swap-agent follow-up', err)
+                                                }
+                                              }
+                                            }}
                                             isProcessing={isActive && isProcessing}
                                             response={response}
                                           />
+                                          {rendered}
                                         </React.Fragment>
                                       )
                                     }
@@ -5984,6 +5975,7 @@ function App() {
                                   <AskHumanRequest
                                     key={request.toolCallId}
                                     query={request.query}
+                                    options={request.options}
                                     onResponse={(response) => handleAskHumanResponse(request.toolCallId, request.subflow, response)}
                                     isProcessing={isActive && isProcessing}
                                   />

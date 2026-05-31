@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import posthog from 'posthog-js'
+import { identifyUser, resetAnalyticsIdentity } from '@/lib/analytics'
 
 /**
  * Identifies the user in PostHog when signed into Rowboat,
@@ -17,7 +18,7 @@ export function useAnalyticsIdentity() {
         // Identify if Rowboat account is connected
         const rowboat = config.rowboat
         if (rowboat?.connected && rowboat?.userId) {
-          posthog.identify(rowboat.userId)
+          identifyUser(rowboat.userId)
         }
 
         // Set provider connection flags
@@ -69,7 +70,7 @@ export function useAnalyticsIdentity() {
       // Rowboat sign-in
       if (event.success) {
         if (event.userId) {
-          posthog.identify(event.userId)
+          identifyUser(event.userId)
         }
         posthog.people.set({ signed_in: true, rowboat_connected: true })
         posthog.capture('user_signed_in')
@@ -80,7 +81,7 @@ export function useAnalyticsIdentity() {
       // future events on this device don't get attributed to the prior user.
       posthog.people.set({ signed_in: false, rowboat_connected: false })
       posthog.capture('user_signed_out')
-      posthog.reset()
+      resetAnalyticsIdentity()
     })
 
     return cleanup

@@ -16,6 +16,8 @@
 
 ## Event catalog
 
+All PostHog events include `app_version` automatically. Main-process events add it in `packages/core/src/analytics/posthog.ts`; renderer events get it from the `analytics:bootstrap` IPC payload and an initialization-time `before_send` hook.
+
 ### `llm_usage`
 
 Emitted whenever ai-sdk returns token usage (one event per LLM call, not per run).
@@ -101,6 +103,7 @@ Persistent across sessions for the same user. Set via `posthog.people.set` or as
 | `email` | main on identify | From `/v1/me`; powers PostHog cohort match + integrations |
 | `plan`, `status` | main on identify | Subscription state |
 | `api_url` | both processes (init + identify) | Distinguishes prod / staging / custom — assign meaning in PostHog dashboard. `https://api.x.rowboatlabs.com` = production |
+| `app_version` | both processes (init + identify) | Electron app version; also included automatically on every event |
 | `signed_in` | renderer | `true` while rowboat OAuth is connected |
 | `{provider}_connected` | renderer | One of `gmail`, `calendar`, `slack`, `rowboat` |
 | `total_notes` | renderer (init) | Workspace size signal |

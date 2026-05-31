@@ -508,7 +508,7 @@ export async function disconnectProvider(provider: string): Promise<{ success: b
       if (connection.mode === 'rowboat' && connection.tokens?.access_token) {
         try {
           const revokeUrl = `https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(connection.tokens.access_token)}`;
-          const res = await fetch(revokeUrl, { method: 'POST' });
+          const res = await fetch(revokeUrl, { method: 'POST', signal: AbortSignal.timeout(5000) });
           if (!res.ok) {
             console.warn(`[OAuth] Google revoke returned ${res.status}; continuing with local disconnect`);
           }
@@ -529,6 +529,81 @@ export async function disconnectProvider(provider: string): Promise<{ success: b
   } catch (error) {
     console.error('OAuth disconnect failed:', error);
     return { success: false };
+  }
+}
+
+/**
+ * Startup migration for Google scope changes. When a connected Google grant was
+ * issued before a scope was added (e.g. old installs on gmail.readonly that
+ * never received gmail.modify), invalidate it so the user is prompted to
+ * reconnect and re-grant with the current scopes. The currently-requested
+ * scopes in the provider config are the source of truth: a grant missing any
+ * of them is treated as stale.
+ *
+ * We revoke + clear the stale token but DELIBERATELY keep the provider entry
+ * with an `error` set rather than calling disconnectProvider (which deletes the
+ * whole entry). The renderer's reconnect prompts — the sidebar "Reconnect your
+ * accounts" alert and the connectors "Reconnect" row — key off this `error`
+ * field, not off the connected flag. A fully deleted entry has no error and is
+ * indistinguishable from "never connected", so no prompt would ever appear.
+ *
+ * Tokens with no recorded scopes (very old installs that never persisted them)
+ * are also treated as stale. Safe to call on every startup — it's a no-op once
+ * the grant covers all current scopes, and once invalidated the early return on
+ * the missing token keeps it from re-running until the user reconnects.
+ */
+export async function disconnectGoogleIfScopesStale(): Promise<void> {
+  try {
+    const oauthRepo = getOAuthRepo();
+    const connection = await oauthRepo.read('google');
+
+    // Not connected (or already invalidated) — nothing to migrate.
+    if (!connection.tokens) {
+      return;
+    }
+
+    const providerConfig = await getProviderConfig('google');
+    const requiredScopes = providerConfig.scopes ?? [];
+    if (requiredScopes.length === 0) {
+      return;
+    }
+
+    const granted = new Set(connection.tokens.scopes ?? []);
+    const missingScopes = requiredScopes.filter((scope) => !granted.has(scope));
+    if (missingScopes.length === 0) {
+      return;
+    }
+
+    console.log(
+      `[OAuth] Google grant is missing current scopes [${missingScopes.join(', ')}]; ` +
+      'invalidating it so the user is prompted to reconnect with the new scopes.'
+    );
+
+    // Best-effort revoke at Google for rowboat-mode grants (mirrors disconnectProvider).
+    if (connection.mode === 'rowboat' && connection.tokens.access_token) {
+      try {
+        const revokeUrl = `https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(connection.tokens.access_token)}`;
+        const res = await fetch(revokeUrl, { method: 'POST', signal: AbortSignal.timeout(5000) });
+        if (!res.ok) {
+          console.warn(`[OAuth] Google revoke returned ${res.status}; continuing with local invalidation`);
+        }
+      } catch (error) {
+        console.warn('[OAuth] Google revoke failed; continuing with local invalidation:', error);
+      }
+    }
+
+    // Drop the stale token but keep the entry with an error so the reconnect
+    // prompt fires (see the note above).
+    await oauthRepo.upsert('google', {
+      tokens: null,
+      error: 'Google permissions changed. Please reconnect to continue.',
+    });
+
+    // Nudge any already-open window to re-read state. The renderer's initial
+    // mount also re-reads, so the prompt shows even if no window is up yet.
+    emitOAuthEvent({ provider: 'google', success: false });
+  } catch (error) {
+    console.error('[OAuth] Google scope migration check failed:', error);
   }
 }
 

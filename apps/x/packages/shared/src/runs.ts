@@ -75,6 +75,7 @@ export const AskHumanRequestEvent = BaseRunEvent.extend({
     type: z.literal("ask-human-request"),
     toolCallId: z.string(),
     query: z.string(),
+    options: z.array(z.string()).optional(),
 });
 
 export const AskHumanResponseEvent = BaseRunEvent.extend({

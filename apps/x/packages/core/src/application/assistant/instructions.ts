@@ -3,6 +3,8 @@ import { getRuntimeContext, getRuntimeContextPrompt } from "./runtime-context.js
 import { composioAccountsRepo } from "../../composio/repo.js";
 import { isConfigured as isComposioConfigured } from "../../composio/client.js";
 import { CURATED_TOOLKITS } from "@x/shared/dist/composio.js";
+import container from "../../di/container.js";
+import type { ICodeModeConfigRepo } from "../../code-mode/repo.js";
 
 const runtimeContextPrompt = getRuntimeContextPrompt(getRuntimeContext());
 
@@ -29,7 +31,7 @@ Load the \`composio-integration\` skill when the user asks to interact with any 
 `;
 }
 
-function buildStaticInstructions(composioEnabled: boolean, catalog: string): string {
+function buildStaticInstructions(composioEnabled: boolean, catalog: string, codeModeEnabled: boolean = true): string {
     // Conditionally include Composio-related instruction sections
     const emailDraftSuffix = composioEnabled
         ? ` Do NOT load this skill for reading, fetching, or checking emails — use the \`composio-integration\` skill for that instead.`
@@ -80,7 +82,9 @@ ${thirdPartyBlock}**Meeting Prep:** When users ask you to prepare for a meeting,
 
 **Document Collaboration:** When users ask you to work on a document, collaborate on writing, create a new document, edit/refine existing notes, or say things like "let's work on [X]", "help me write [X]", "create a doc for [X]", or "let's draft [X]", you MUST load the \`doc-collab\` skill first. **This applies even for small one-off edits** — the skill carries the canonical *terse-and-scannable* writing style for the knowledge base, and that style applies whether you're authoring a fresh note or fixing a single section. Load it before writing anything into a note.
 
-**Code with Agents:** When users ask you to write code, build a project, create a script, fix a bug, or do any software development task, load the \`code-with-agents\` skill first. It provides guidance for delegating coding work to Claude Code or Codex via acpx.
+${codeModeEnabled
+    ? `**Code with Agents:** When users ask you to write code, build a project, create a script, fix a bug, or do any software development task — **including simple things like "create a .c file" or "write a hello-world in Python"** — your FIRST action MUST be \`loadSkill('code-with-agents')\`. Do NOT reach for \`executeCommand\` (PowerShell / bash / shell) or any workspace file tool to do code work yourself before loading this skill. The skill decides whether to delegate to Claude Code / Codex (via acpx) or hand control back to you, and it presents the user a one-click choice when needed. Paths outside the Rowboat workspace root (e.g. \`G:/...\`, \`~/projects/...\`) are NORMAL for coding tasks — do NOT raise "outside workspace" concerns or fall back to your own tools.`
+    : `**Code with Agents (disabled):** Code mode is currently OFF in the user's settings. Do NOT load \`code-with-agents\` and do NOT call acpx. Handle coding requests yourself with your normal tools if you can. After answering, add a final line letting the user know they can delegate coding to Claude Code or Codex by enabling Code Mode in Settings → Code Mode.`}
 
 **App Control:** When users ask you to open notes, show the bases or graph view, filter or search notes, or manage saved views, load the \`app-navigation\` skill first. It provides structured guidance for navigating the app UI and controlling the knowledge base view.
 
@@ -312,30 +316,29 @@ Never output raw file paths in plain text when they could be wrapped in a filepa
 /** Keep backward-compatible export for any external consumers */
 export const CopilotInstructions = buildStaticInstructions(true, skillCatalog);
 
-/**
- * Cached Composio instructions. Invalidated by calling invalidateCopilotInstructionsCache().
- */
 let cachedInstructions: string | null = null;
 
-/**
- * Invalidate the cached instructions so the next buildCopilotInstructions() call
- * regenerates the Composio section. Call this after connecting/disconnecting a toolkit.
- */
 export function invalidateCopilotInstructionsCache(): void {
     cachedInstructions = null;
 }
 
-/**
- * Build full copilot instructions with dynamic Composio tools section.
- * Results are cached and reused until invalidated via invalidateCopilotInstructionsCache().
- */
 export async function buildCopilotInstructions(): Promise<string> {
     if (cachedInstructions !== null) return cachedInstructions;
     const composioEnabled = await isComposioConfigured();
-    const catalog = composioEnabled
-        ? skillCatalog
-        : buildSkillCatalog({ excludeIds: ['composio-integration'] });
-    const baseInstructions = buildStaticInstructions(composioEnabled, catalog);
+    let codeModeEnabled = false;
+    try {
+        const repo = container.resolve<ICodeModeConfigRepo>('codeModeConfigRepo');
+        codeModeEnabled = (await repo.getConfig()).enabled;
+    } catch {
+        // repo unavailable — default to disabled
+    }
+    const excludeIds: string[] = [];
+    if (!composioEnabled) excludeIds.push('composio-integration');
+    if (!codeModeEnabled) excludeIds.push('code-with-agents');
+    const catalog = excludeIds.length > 0
+        ? buildSkillCatalog({ excludeIds })
+        : skillCatalog;
+    const baseInstructions = buildStaticInstructions(composioEnabled, catalog, codeModeEnabled);
     const composioPrompt = await getComposioToolsPrompt();
     cachedInstructions = composioPrompt
         ? baseInstructions + '\n' + composioPrompt
