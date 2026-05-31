@@ -1454,7 +1454,19 @@ function App() {
     setGoogleDocSyncDirection('up')
     markRecentLocalMarkdownWrite(path)
     try {
-      const result = await window.ipc.invoke('google-docs:sync', { path, markdown })
+      let result = await window.ipc.invoke('google-docs:sync', { path, markdown })
+      if (result.conflict) {
+        const overwrite = window.confirm(
+          'This Google Doc changed since your last sync.\n\n' +
+          'Overwrite it with your local version? Cancel to keep the remote copy ' +
+          '(use “Sync down” to pull it first).',
+        )
+        if (!overwrite) {
+          toast.info('Sync up cancelled — remote Google Doc is unchanged')
+          return
+        }
+        result = await window.ipc.invoke('google-docs:sync', { path, markdown, force: true })
+      }
       if (!result.synced) {
         throw new Error(result.error || 'This note is not linked to a Google Doc.')
       }
@@ -5776,6 +5788,7 @@ function App() {
                               googleDoc={linkedGoogleDoc && !isViewingHistory ? {
                                 title: linkedGoogleDoc.title,
                                 isSyncing: isActive ? googleDocSyncDirection : null,
+                                lastSyncedAt: linkedGoogleDoc.syncedAt,
                                 onOpen: () => {
                                   if (linkedGoogleDoc.url) {
                                     window.open(linkedGoogleDoc.url, '_blank')

@@ -39,9 +39,11 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { formatRelativeTime } from '@/lib/relative-time'
 
 interface EditorToolbarProps {
   editor: Editor | null
@@ -56,6 +58,7 @@ interface EditorToolbarProps {
 export interface GoogleDocToolbarState {
   title: string
   isSyncing?: 'up' | 'down' | null
+  lastSyncedAt?: string
   onOpen: () => void
   onSyncDown: () => void
   onSyncUp: () => void
@@ -470,6 +473,12 @@ export function EditorToolbar({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              <DropdownMenuLabel className="font-normal text-muted-foreground">
+                {googleDoc.lastSyncedAt
+                  ? `Last synced ${formatRelativeTime(googleDoc.lastSyncedAt)}`
+                  : 'Not synced yet'}
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
               <DropdownMenuItem onClick={googleDoc.onOpen}>
                 <GoogleDriveIcon className="size-4 mr-2" />
                 Open Google Doc
