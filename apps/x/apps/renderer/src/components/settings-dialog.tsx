@@ -1781,9 +1781,8 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
         <p>
           <strong className="text-foreground">Code mode</strong> lets the assistant delegate coding tasks
           to <strong className="text-foreground">Claude Code</strong> or <strong className="text-foreground">Codex</strong> running
-          on your machine. Pick the agent inline from the composer; the assistant calls it via
-          <code className="mx-1 rounded bg-muted px-1 py-0.5 text-[11px]">acpx</code>
-          and streams results back into chat.
+          on your machine. Pick the agent inline from the composer; the assistant runs it on-device
+          and streams its work — tool calls, file diffs, and approvals — back into chat.
         </p>
         <p>
           Requires an active <strong className="text-foreground">Claude Code</strong> subscription or

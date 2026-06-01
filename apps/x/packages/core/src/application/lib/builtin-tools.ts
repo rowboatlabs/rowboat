@@ -15,7 +15,6 @@ import { executeAction as executeComposioAction, isConfigured as isComposioConfi
 import { CURATED_TOOLKITS, CURATED_TOOLKIT_SLUGS } from "@x/shared/dist/composio.js";
 import { BrowserControlInputSchema, type BrowserControlInput } from "@x/shared/dist/browser-control.js";
 import { BackgroundTaskSchema, TriggersSchema } from "@x/shared/dist/background-task.js";
-import { resolveClaudeExeOnWindows } from "../../code-mode/acp/claude-exec.js";
 import type { CodeModeManager } from "../../code-mode/acp/manager.js";
 import type { CodePermissionRegistry } from "../../code-mode/acp/permission-registry.js";
 import { ICodeModeConfigRepo } from "../../code-mode/repo.js";
@@ -94,14 +93,6 @@ const LLMPARSE_MIME_TYPES: Record<string, string> = {
     '.tiff': 'image/tiff',
 };
 
-function envForCommand(command: string): NodeJS.ProcessEnv | undefined {
-    if (process.platform !== 'win32') return undefined;
-    if (!/\bacpx\b/.test(command)) return undefined;
-    if (process.env.CLAUDE_CODE_EXECUTABLE) return undefined;
-    const exe = resolveClaudeExeOnWindows();
-    if (!exe) return undefined;
-    return { ...process.env, CLAUDE_CODE_EXECUTABLE: exe };
-}
 
 export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
     loadSkill: {
@@ -763,14 +754,11 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 //     };
                 // }
 
-                const envOverride = envForCommand(command);
-
                 // Use abortable version when we have a signal
                 if (ctx?.signal) {
                     const { promise, process: proc } = executeCommandAbortable(command, {
                         cwd: workingDir,
                         signal: ctx.signal,
-                        env: envOverride,
                         onData: (chunk: string) => {
                             ctx.publish({
                                 runId: ctx.runId,
@@ -800,7 +788,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 }
 
                 // Fallback to original for backward compatibility
-                const result = await executeCommand(command, { cwd: workingDir, env: envOverride });
+                const result = await executeCommand(command, { cwd: workingDir });
 
                 return {
                     success: result.exitCode === 0,

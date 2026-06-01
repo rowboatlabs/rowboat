@@ -283,20 +283,6 @@ function ChatInputInner({
     }
   }, [codeModeFeatureEnabled, codeModeEnabled])
 
-  // Listen for coding-agent runs that were triggered without the explicit code-mode
-  // toggle. App.tsx dispatches this when it sees an acpx executeCommand fire. We
-  // flip the pill on with the detected agent so the UI reflects what's happening.
-  useEffect(() => {
-    const handler = (ev: Event) => {
-      const detail = (ev as CustomEvent<{ runId?: string; agent?: 'claude' | 'codex' }>).detail
-      if (!detail || !detail.agent) return
-      if (runId && detail.runId && detail.runId !== runId) return
-      setCodeModeEnabled(true)
-      setCodingAgent(detail.agent)
-    }
-    window.addEventListener('code-mode-detected', handler)
-    return () => window.removeEventListener('code-mode-detected', handler)
-  }, [runId])
 
   // Cross-platform basename — handles both / and \ separators.
   const basename = useCallback((p: string): string => {

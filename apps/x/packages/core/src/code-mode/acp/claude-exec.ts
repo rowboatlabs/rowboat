@@ -5,7 +5,7 @@ import { commonInstallPaths } from '../status.js';
 
 // Windows-only: Node refuses to spawn `.cmd` files without `shell: true` (EINVAL),
 // and the Claude ACP adapter spawns its executable directly. So we pre-resolve
-// claude's real `.exe` from the npm-shim layout. Also used by the legacy acpx path.
+// claude's real `.exe` from the npm-shim layout. Used by resolveClaudeExecutable below.
 export function resolveClaudeExeOnWindows(): string | undefined {
     // Candidate dirs = everything on PATH, plus well-known npm/pnpm/volta global
     // bin dirs. Electron's runtime PATH can omit these even when the user's shell
