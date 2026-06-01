@@ -1,7 +1,6 @@
 import { z, ZodType } from "zod";
 import * as path from "path";
 import * as fs from "fs/promises";
-import { existsSync, readFileSync } from "fs";
 import { executeCommand, executeCommandAbortable } from "./command-executor.js";
 import { resolveSkill, availableSkills } from "../assistant/skills/index.js";
 import { executeTool, listServers, listTools } from "../../mcp/mcp.js";
@@ -16,6 +15,7 @@ import { executeAction as executeComposioAction, isConfigured as isComposioConfi
 import { CURATED_TOOLKITS, CURATED_TOOLKIT_SLUGS } from "@x/shared/dist/composio.js";
 import { BrowserControlInputSchema, type BrowserControlInput } from "@x/shared/dist/browser-control.js";
 import { BackgroundTaskSchema, TriggersSchema } from "@x/shared/dist/background-task.js";
+import { resolveClaudeExeOnWindows } from "../../code-mode/acp/claude-exec.js";
 
 // Inputs for the bg-task builtin tools. Reuse the canonical schema field
 // descriptions; only `triggers` gets a tighter contextual override (the
@@ -89,61 +89,6 @@ const LLMPARSE_MIME_TYPES: Record<string, string> = {
     '.bmp': 'image/bmp',
     '.tiff': 'image/tiff',
 };
-
-// Windows-only workaround: the Claude ACP bridge spawns CLAUDE_CODE_EXECUTABLE
-// without `shell: true`, and Node refuses to spawn .cmd files that way (EINVAL).
-// When the LLM invokes acpx via executeCommand, pre-resolve claude's real .exe
-// from the npm-shim layout and inject it via env so the bridge can spawn it.
-function resolveClaudeExeOnWindows(): string | undefined {
-    // Candidate dirs = everything on PATH, plus well-known npm/pnpm/volta global
-    // bin dirs. Electron's runtime PATH can omit these even when the user's shell
-    // includes them, which would otherwise leave us unable to find claude.exe and
-    // force a fallback to claude.cmd (which Node refuses to spawn — EINVAL).
-    const home = process.env.USERPROFILE ?? '';
-    const appData = process.env.APPDATA || (home && path.join(home, 'AppData', 'Roaming'));
-    const localAppData = process.env.LOCALAPPDATA || (home && path.join(home, 'AppData', 'Local'));
-    const programFiles = process.env.ProgramFiles || 'C:\\Program Files';
-    const knownDirs = [
-        appData && path.join(appData, 'npm'),
-        localAppData && path.join(localAppData, 'npm'),
-        appData && path.join(appData, 'pnpm'),
-        localAppData && path.join(localAppData, 'pnpm'),
-        home && path.join(home, '.volta', 'bin'),
-        path.join(programFiles, 'nodejs'),
-    ].filter(Boolean) as string[];
-
-    const pathDirs = (process.env.PATH ?? '').split(';').map((d) => d.trim()).filter(Boolean);
-    const seen = new Set<string>();
-    const candidates = [...pathDirs, ...knownDirs].filter((d) => {
-        const key = d.toLowerCase();
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-    });
-
-    for (const dir of candidates) {
-        // Direct npm-shim layout: <dir>\node_modules\@anthropic-ai\claude-code\bin\claude.exe
-        const exeFromLayout = path.join(dir, 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe');
-        if (existsSync(exeFromLayout)) return exeFromLayout;
-
-        // Otherwise parse the claude.cmd shim for the real exe path.
-        const cmdPath = path.join(dir, 'claude.cmd');
-        if (!existsSync(cmdPath)) continue;
-        try {
-            const content = readFileSync(cmdPath, 'utf-8');
-            const absMatch = content.match(/[A-Z]:[\\/][^\s"]*claude\.exe/i);
-            if (absMatch && existsSync(absMatch[0])) return absMatch[0];
-            const relMatch = content.match(/%~dp0[\\/]?([^\s"%]+claude\.exe)/i);
-            if (relMatch) {
-                const resolved = path.join(dir, relMatch[1]);
-                if (existsSync(resolved)) return resolved;
-            }
-        } catch {
-            // ignore shim parse failures
-        }
-    }
-    return undefined;
-}
 
 function envForCommand(command: string): NodeJS.ProcessEnv | undefined {
     if (process.platform !== 'win32') return undefined;
