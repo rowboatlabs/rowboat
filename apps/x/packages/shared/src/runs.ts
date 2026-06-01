@@ -1,5 +1,6 @@
 import { LlmStepStreamEvent } from "./llm-step-events.js";
 import { Message, ToolCallPart } from "./message.js";
+import { CodeRunEvent as CodeRunEventSchema, PermissionAsk } from "./code-mode.js";
 import z from "zod";
 
 const BaseRunEvent = z.object({
@@ -110,6 +111,23 @@ export const ToolPermissionResponseEvent = BaseRunEvent.extend({
     scope: z.enum(["once", "session", "always"]).optional(),
 });
 
+// A structured item from a code_agent_run coding turn (tool call, diff, plan,
+// message chunk, resolved permission). Fire-and-forget — rendered live.
+export const CodeRunStreamEvent = BaseRunEvent.extend({
+    type: z.literal("code-run-event"),
+    toolCallId: z.string(),
+    event: CodeRunEventSchema,
+});
+
+// The coding agent is asking for permission mid-turn and the run is BLOCKED until
+// the user answers via `codeRun:resolvePermission` (keyed by requestId).
+export const CodeRunPermissionRequestEvent = BaseRunEvent.extend({
+    type: z.literal("code-run-permission-request"),
+    toolCallId: z.string(),
+    requestId: z.string(),
+    ask: PermissionAsk,
+});
+
 export const RunErrorEvent = BaseRunEvent.extend({
     type: z.literal("error"),
     error: z.string(),
@@ -134,6 +152,8 @@ export const RunEvent = z.union([
     AskHumanResponseEvent,
     ToolPermissionRequestEvent,
     ToolPermissionResponseEvent,
+    CodeRunStreamEvent,
+    CodeRunPermissionRequestEvent,
     RunErrorEvent,
     RunStoppedEvent,
 ]);

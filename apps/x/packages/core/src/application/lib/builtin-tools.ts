@@ -16,6 +16,10 @@ import { CURATED_TOOLKITS, CURATED_TOOLKIT_SLUGS } from "@x/shared/dist/composio
 import { BrowserControlInputSchema, type BrowserControlInput } from "@x/shared/dist/browser-control.js";
 import { BackgroundTaskSchema, TriggersSchema } from "@x/shared/dist/background-task.js";
 import { resolveClaudeExeOnWindows } from "../../code-mode/acp/claude-exec.js";
+import type { CodeModeManager } from "../../code-mode/acp/manager.js";
+import type { CodePermissionRegistry } from "../../code-mode/acp/permission-registry.js";
+import { ICodeModeConfigRepo } from "../../code-mode/repo.js";
+import type { ApprovalPolicy } from "@x/shared/dist/code-mode.js";
 
 // Inputs for the bg-task builtin tools. Reuse the canonical schema field
 // descriptions; only `triggers` gets a tighter contextual override (the
@@ -812,6 +816,85 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                     message: `Failed to execute command: ${error instanceof Error ? error.message : 'Unknown error'}`,
                     command,
                 };
+            }
+        },
+    },
+
+    code_agent_run: {
+        description: 'Run a coding/software task with the selected on-device coding agent (Claude Code or Codex) inside a project folder. Streams the agent\'s tool calls, file diffs, and plan into the chat and surfaces permission requests inline. Use this for ALL code-mode work (writing/editing/reading code, running tests, debugging, exploring a repo). Reuses one persistent session per chat, so follow-up requests keep context.',
+        inputSchema: z.object({
+            agent: z.enum(['claude', 'codex']).describe('Which coding agent to use: "claude" (Claude Code) or "codex". Pick per the active code-mode selection / any in-chat override.'),
+            cwd: z.string().describe('Absolute path to the working directory / project folder the agent should operate in.'),
+            prompt: z.string().describe('The full, self-contained coding instruction for the agent (file names, expected behavior, constraints).'),
+        }),
+        execute: async ({ agent, cwd, prompt }: { agent: 'claude' | 'codex', cwd: string, prompt: string }, ctx?: ToolContext) => {
+            if (!ctx) {
+                return { success: false, message: 'code_agent_run requires run context (runId / streaming).' };
+            }
+            const manager = container.resolve<CodeModeManager>('codeModeManager');
+            const registry = container.resolve<CodePermissionRegistry>('codePermissionRegistry');
+
+            // Approval policy from settings; default to asking the user.
+            let policy: ApprovalPolicy = 'ask';
+            try {
+                const cfg = await container.resolve<ICodeModeConfigRepo>('codeModeConfigRepo').getConfig();
+                if (cfg.approvalPolicy) policy = cfg.approvalPolicy;
+            } catch {
+                // fall back to 'ask'
+            }
+
+            // Cancel the coding turn (and unblock any pending approval) if the run is stopped.
+            const onAbort = () => {
+                manager.cancel(ctx.runId).catch(() => {});
+                registry.cancelRun(ctx.runId);
+            };
+            if (ctx.signal.aborted) onAbort();
+            else ctx.signal.addEventListener('abort', onAbort, { once: true });
+
+            let finalText = '';
+            const changedFiles = new Set<string>();
+            try {
+                const result = await manager.runPrompt({
+                    runId: ctx.runId,
+                    agent,
+                    cwd,
+                    prompt,
+                    policy,
+                    onEvent: (event) => {
+                        if (event.type === 'message' && event.role === 'agent') finalText += event.text;
+                        if (event.type === 'tool_call_update') for (const f of event.diffs) changedFiles.add(f);
+                        void ctx.publish({
+                            runId: ctx.runId,
+                            type: 'code-run-event',
+                            toolCallId: ctx.toolCallId,
+                            event,
+                            subflow: [],
+                        });
+                    },
+                    ask: (permAsk) => registry.request(ctx.runId, (requestId) => {
+                        void ctx.publish({
+                            runId: ctx.runId,
+                            type: 'code-run-permission-request',
+                            toolCallId: ctx.toolCallId,
+                            requestId,
+                            ask: permAsk,
+                            subflow: [],
+                        });
+                    }),
+                });
+                return {
+                    success: result.stopReason === 'end_turn',
+                    stopReason: result.stopReason,
+                    summary: finalText.trim(),
+                    changedFiles: [...changedFiles],
+                };
+            } catch (error) {
+                return {
+                    success: false,
+                    message: `Coding agent failed: ${error instanceof Error ? error.message : String(error)}`,
+                };
+            } finally {
+                ctx.signal.removeEventListener('abort', onAbort);
             }
         },
     },

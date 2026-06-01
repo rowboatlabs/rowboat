@@ -1404,10 +1404,6 @@ Do not announce the work directory unless it's relevant. Just use it.`;
             const agentDisplay = codeMode === 'claude' ? 'Claude Code' : 'Codex';
             const otherAgent = codeMode === 'claude' ? 'codex' : 'claude';
             const otherDisplay = codeMode === 'claude' ? 'Codex' : 'Claude Code';
-            // Deterministic, per-chat session name so the coding agent keeps
-            // context across the user's requests within this chat. Reusing the
-            // same -s <name> resumes the session; the first call creates it.
-            const sessionName = `rowboat-${runId}`;
             instructionsWithDateTime += `\n\n# Code Mode (Active) — Default agent: ${agentDisplay}
 The user has turned on **code mode** and the composer chip is set to **${agentDisplay}** (\`${codeMode}\`). Use this as the **default** agent for coding tasks in this turn.
 
@@ -1415,31 +1411,12 @@ The user has turned on **code mode** and the composer chip is set to **${agentDi
 1. By toggling the chip in the composer (preferred).
 2. By asking you directly in chat ("use codex", "switch to claude", "do this with ${otherDisplay}", etc.). When the user explicitly asks to use a different agent in the current message, honor that — use \`${otherAgent}\` instead of \`${codeMode}\` for this turn, and briefly mention they can also toggle it via the chip for stickiness.
 
-**Persistent session for this chat — session name: \`${sessionName}\`.** This chat uses one named agent session so the agent keeps context across your requests. The session must exist before it can be prompted (\`-s\` only resumes; it does not create).
+**How to run coding work — call the \`code_agent_run\` tool** with:
+- \`agent\`: \`${codeMode}\` by default (or the in-chat override above).
+- \`cwd\`: the absolute project/working directory (resolve it per the code-with-agents skill — a path the user named, the "# User Work Directory" block, or ask once).
+- \`prompt\`: a clear, self-contained coding instruction.
 
-**1. First coding action in this chat — ensure the session exists:**
-
-\`\`\`
-npx acpx@latest --approve-all --cwd <workdir> <agent> sessions ensure --name ${sessionName}
-\`\`\`
-
-(\`ensure\` creates the session if missing and reuses it if it already exists — safe to call when reopening this chat later.)
-
-**2. Then run the prompt:**
-
-\`\`\`
-npx acpx@latest --approve-all --timeout 600 --cwd <workdir> <agent> -s ${sessionName} "<prompt>"
-\`\`\`
-
-**3. Every follow-up coding request in this chat — reuse the same session (do NOT create again):**
-
-\`\`\`
-npx acpx@latest --approve-all --timeout 600 --cwd <workdir> <agent> -s ${sessionName} "<prompt>"
-\`\`\`
-
-Run these as **separate, sequential** \`executeCommand\` calls — issue the \`sessions ensure\` call first and WAIT for it to finish, then issue the prompt call. Do NOT fire both in the same turn / batch.
-
-Where \`<agent>\` is either \`claude\` or \`codex\` — pick based on (in priority order): an explicit in-chat override → the chip setting (\`${codeMode}\`). Use \`${sessionName}\` exactly — do NOT invent a different name, and do NOT use \`exec\` (it is one-shot and forgets).
+The tool runs the agent on-device and streams its tool calls, file diffs, and plan into the chat; any action needing approval surfaces as an inline permission card, so you do NOT pre-confirm with an in-chat "reply yes". This chat keeps ONE persistent agent session, so follow-up coding requests automatically resume with full context — just call \`code_agent_run\` again. Do NOT shell out to \`acpx\` or \`executeCommand\` for coding, and do NOT fall back to your own file tools.
 
 If the user's message is clearly NOT a coding request (small talk, an unrelated question), answer directly without invoking the coding agent. Code mode signals readiness, not that every message must route through the agent.`;
         }

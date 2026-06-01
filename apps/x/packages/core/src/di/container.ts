@@ -16,6 +16,8 @@ import { IAbortRegistry, InMemoryAbortRegistry } from "../runs/abort-registry.js
 import { FSAgentScheduleRepo, IAgentScheduleRepo } from "../agent-schedule/repo.js";
 import { FSAgentScheduleStateRepo, IAgentScheduleStateRepo } from "../agent-schedule/state-repo.js";
 import { FSSlackConfigRepo, ISlackConfigRepo } from "../slack/repo.js";
+import { CodeModeManager } from "../code-mode/acp/manager.js";
+import { CodePermissionRegistry } from "../code-mode/acp/permission-registry.js";
 import type { IBrowserControlService } from "../application/browser-control/service.js";
 import type { INotificationService } from "../application/notification/service.js";
 
@@ -43,6 +45,11 @@ container.register({
     agentScheduleRepo: asClass<IAgentScheduleRepo>(FSAgentScheduleRepo).singleton(),
     agentScheduleStateRepo: asClass<IAgentScheduleStateRepo>(FSAgentScheduleStateRepo).singleton(),
     slackConfigRepo: asClass<ISlackConfigRepo>(FSSlackConfigRepo).singleton(),
+
+    // ACP code-mode engine: the manager holds live agent connections for the app
+    // lifetime (warm sessions across messages); the registry brokers mid-run approvals.
+    codeModeManager: asClass(CodeModeManager).singleton(),
+    codePermissionRegistry: asClass(CodePermissionRegistry).singleton(),
 });
 
 export default container;

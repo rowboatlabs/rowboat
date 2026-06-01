@@ -152,7 +152,9 @@ Avoid: "I updated the note.", "Done!", "Here is the update:". The summary is a d
 export function buildLiveNoteAgent(): z.infer<typeof Agent> {
     const tools: Record<string, z.infer<typeof ToolAttachment>> = {};
     for (const name of Object.keys(BuiltinTools)) {
-        if (name === 'executeCommand') continue;
+        // code_agent_run requires an interactive UI for permission approvals — skip it
+        // here (headless) so it can't hang on an approval no one can answer.
+        if (name === 'executeCommand' || name === 'code_agent_run') continue;
         tools[name] = { type: 'builtin', name };
     }
 

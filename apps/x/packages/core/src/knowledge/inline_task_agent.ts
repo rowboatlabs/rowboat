@@ -1,7 +1,10 @@
 import { BuiltinTools } from '../application/lib/builtin-tools.js';
 
 export function getRaw(): string {
+  // code_agent_run needs an interactive UI to answer its permission asks; exclude it
+  // from this headless agent so it can't hang waiting on an approval no one can give.
   const toolEntries = Object.keys(BuiltinTools)
+    .filter(name => name !== 'code_agent_run')
     .map(name => `  ${name}:\n    type: builtin\n    name: ${name}`)
     .join('\n');
 
