@@ -2,6 +2,7 @@ import type { ToolUIPart } from 'ai'
 import z from 'zod'
 import { AskHumanRequestEvent, ToolPermissionRequestEvent } from '@x/shared/src/runs.js'
 import { COMPOSIO_DISPLAY_NAMES } from '@x/shared/src/composio.js'
+import type { CodeRunEvent, PermissionAsk } from '@x/shared/src/code-mode.js'
 
 export interface MessageAttachment {
   path: string
@@ -27,6 +28,9 @@ export interface ToolCall {
   streamingOutput?: string
   status: 'pending' | 'running' | 'completed' | 'error'
   timestamp: number
+  // code_agent_run only: structured ACP stream items + the in-flight permission ask.
+  codeRunEvents?: CodeRunEvent[]
+  pendingCodePermission?: { requestId: string; ask: PermissionAsk } | null
 }
 
 export interface ErrorMessage {
@@ -632,6 +636,7 @@ export const isToolGroup = (item: GroupedConversationItem): item is ToolGroup =>
 
 const isPlainToolCall = (item: ConversationItem): item is ToolCall => {
   if (!isToolCall(item)) return false
+  if (item.name === 'code_agent_run') return false // rich standalone block, never grouped
   if (getWebSearchCardData(item)) return false
   if (getComposioConnectCardData(item)) return false
   if (getAppActionCardData(item)) return false
