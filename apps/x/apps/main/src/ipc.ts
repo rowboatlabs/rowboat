@@ -643,11 +643,11 @@ export function setupIpcHandlers() {
     'codeMode:getConfig': async () => {
       const repo = container.resolve<ICodeModeConfigRepo>('codeModeConfigRepo');
       const config = await repo.getConfig();
-      return { enabled: config.enabled };
+      return { enabled: config.enabled, approvalPolicy: config.approvalPolicy };
     },
     'codeMode:setConfig': async (_event, args) => {
       const repo = container.resolve<ICodeModeConfigRepo>('codeModeConfigRepo');
-      await repo.setConfig({ enabled: args.enabled });
+      await repo.setConfig({ enabled: args.enabled, approvalPolicy: args.approvalPolicy });
       invalidateCopilotInstructionsCache();
       return { success: true };
     },

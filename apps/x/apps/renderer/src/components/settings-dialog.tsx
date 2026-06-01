@@ -25,6 +25,7 @@ import { useTheme } from "@/contexts/theme-context"
 import { toast } from "sonner"
 import { AccountSettings } from "@/components/settings/account-settings"
 import { ConnectedAccountsSettings } from "@/components/settings/connected-accounts-settings"
+import type { ApprovalPolicy } from "@x/shared/src/code-mode.js"
 
 type ConfigTab = "account" | "connections" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "note-tagging" | "help"
 
@@ -1712,6 +1713,7 @@ function AgentStatusRow({
 
 function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
   const [enabled, setEnabled] = useState(false)
+  const [approvalPolicy, setApprovalPolicy] = useState<ApprovalPolicy>('ask')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [status, setStatus] = useState<CodeModeAgentStatus | null>(null)
@@ -1736,7 +1738,10 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
       setLoading(true)
       try {
         const result = await window.ipc.invoke("codeMode:getConfig", null)
-        if (!cancelled) setEnabled(result.enabled)
+        if (!cancelled) {
+          setEnabled(result.enabled)
+          setApprovalPolicy(result.approvalPolicy ?? 'ask')
+        }
       } catch {
         if (!cancelled) setEnabled(false)
       } finally {
@@ -1752,7 +1757,7 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
     setSaving(true)
     setEnabled(next)
     try {
-      await window.ipc.invoke("codeMode:setConfig", { enabled: next })
+      await window.ipc.invoke("codeMode:setConfig", { enabled: next, approvalPolicy })
       window.dispatchEvent(new Event("code-mode-config-changed"))
       toast.success(next ? "Code mode enabled" : "Code mode disabled")
     } catch {
@@ -1761,7 +1766,22 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
     } finally {
       setSaving(false)
     }
-  }, [])
+  }, [approvalPolicy])
+
+  const handlePolicyChange = useCallback(async (next: ApprovalPolicy) => {
+    const prev = approvalPolicy
+    setSaving(true)
+    setApprovalPolicy(next)
+    try {
+      await window.ipc.invoke("codeMode:setConfig", { enabled, approvalPolicy: next })
+      window.dispatchEvent(new Event("code-mode-config-changed"))
+    } catch {
+      setApprovalPolicy(prev)
+      toast.error("Failed to update approval policy")
+    } finally {
+      setSaving(false)
+    }
+  }, [enabled, approvalPolicy])
 
   const anyReady = status?.claude.installed && status?.claude.signedIn
     || status?.codex.installed && status?.codex.signedIn
@@ -1831,6 +1851,35 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
           disabled={saving}
         />
       </div>
+
+      {enabled && (
+        <div className="rounded-md border px-3 py-3 space-y-2">
+          <div className="text-sm font-medium">Approvals</div>
+          <div className="text-xs text-muted-foreground">
+            How the coding agent checks in before changing files or running commands. You always see
+            everything it does in the timeline — this only controls the prompts.
+          </div>
+          <Select
+            value={approvalPolicy}
+            onValueChange={(v) => handlePolicyChange(v as ApprovalPolicy)}
+            disabled={saving}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ask">Ask every time</SelectItem>
+              <SelectItem value="auto-approve-reads">Auto-approve reads</SelectItem>
+              <SelectItem value="yolo">Auto-approve everything (YOLO)</SelectItem>
+            </SelectContent>
+          </Select>
+          <div className="text-xs text-muted-foreground">
+            {approvalPolicy === 'ask' && 'You approve every file change and command the agent wants to run.'}
+            {approvalPolicy === 'auto-approve-reads' && 'Reading and searching run automatically; you still approve writes, edits, and commands.'}
+            {approvalPolicy === 'yolo' && 'The agent runs everything — writes, edits, and commands — without asking. Use only in folders you trust.'}
+          </div>
+        </div>
+      )}
 
       {enabled && status && !anyReady && (
         <div className="rounded-md border border-amber-500/40 bg-amber-50/60 dark:bg-amber-950/20 px-3 py-2.5 flex items-start gap-2 text-xs">
