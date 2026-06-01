@@ -52,7 +52,7 @@ import { getAccessToken } from '@x/core/dist/auth/tokens.js';
 import { getRowboatConfig } from '@x/core/dist/config/rowboat.js';
 import { runLiveNoteAgent } from '@x/core/dist/knowledge/live-note/runner.js';
 import { listImportantThreads, listEverythingElseThreads, saveMessageBodyHeight, triggerSync as triggerGmailSync, sendThreadReply, archiveThread, trashThread, markThreadRead, getAccountEmail, getConnectionStatus as getGmailConnectionStatus } from '@x/core/dist/knowledge/sync_gmail.js';
-import { getGoogleDocsConnectionStatus, importGoogleDoc, listGoogleDocs, syncGoogleDocDown, syncGoogleDocUp, getGoogleDocLink } from '@x/core/dist/knowledge/google_docs.js';
+import { getGoogleDocsConnectionStatus, importGoogleDoc, getGoogleAccessToken, syncGoogleDocDown, syncGoogleDocUp, getGoogleDocLink } from '@x/core/dist/knowledge/google_docs.js';
 import { liveNoteBus } from '@x/core/dist/knowledge/live-note/bus.js';
 import { getInstallationId } from '@x/core/dist/analytics/installation.js';
 import { API_URL } from '@x/core/dist/config/env.js';
@@ -815,8 +815,8 @@ export function setupIpcHandlers() {
     'google-docs:getStatus': async () => {
       return getGoogleDocsConnectionStatus();
     },
-    'google-docs:list': async (_event, args) => {
-      return listGoogleDocs(args.query);
+    'google-docs:getAccessToken': async () => {
+      return { accessToken: await getGoogleAccessToken() };
     },
     'google-docs:import': async (_event, args) => {
       return importGoogleDoc(args.fileId, args.targetFolder);

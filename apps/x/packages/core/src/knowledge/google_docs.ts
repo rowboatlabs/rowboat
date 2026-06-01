@@ -5,10 +5,11 @@ import { google, drive_v3 as drive } from 'googleapis';
 import { resolveWorkspacePath } from '../workspace/workspace.js';
 import { GoogleClientFactory } from './google-client-factory.js';
 
-// Full Drive scope: export Google Docs to .docx (read) and write the edited
-// .docx back via files.update (write). drive.readonly can't do the write half.
+// Per-file Drive scope (non-restricted). The user picks a doc via the Google
+// Picker, which grants this app read/write to that file — enough to export/
+// download it and write edits back, without the restricted full-drive scope.
 export const GOOGLE_DOC_SCOPES = [
-  'https://www.googleapis.com/auth/drive',
+  'https://www.googleapis.com/auth/drive.file',
 ] as const;
 
 export type GoogleDocListItem = {
@@ -56,10 +57,6 @@ function sanitizeFilename(name: string): string {
     .trim()
     .slice(0, 120);
   return cleaned || 'Google Doc';
-}
-
-function escapeDriveQueryValue(value: string): string {
-  return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
 
 function normalizeRel(relPath: string): string {
@@ -198,34 +195,13 @@ export async function getGoogleDocsConnectionStatus(): Promise<{
   return GoogleClientFactory.getCredentialStatus([...GOOGLE_DOC_SCOPES]);
 }
 
-export async function listGoogleDocs(query?: string): Promise<{ files: GoogleDocListItem[] }> {
-  const status = await getGoogleDocsConnectionStatus();
-  if (!status.connected) throw new Error('Google is not connected.');
-  if (!status.hasRequiredScopes) throw new Error('Google is missing Drive access. Reconnect Google.');
-
-  const driveClient = await getDriveClient();
-  // Native Google Docs (exportable) and uploaded Word files (downloadable).
-  const typeClause = `(mimeType='${GOOGLE_DOC_MIME}' or mimeType='${DOCX_MIME}')`;
-  const clauses = [typeClause, 'trashed=false'];
-  const trimmed = query?.trim();
-  if (trimmed) {
-    clauses.push(`name contains '${escapeDriveQueryValue(trimmed)}'`);
-  }
-  const q = clauses.join(' and ');
-  const result = await driveClient.files.list({
-    q,
-    pageSize: 25,
-    orderBy: 'modifiedTime desc',
-    fields: 'files(id,name,webViewLink,modifiedTime,mimeType,owners(displayName,emailAddress))',
-    // Also surface docs in shared drives and "Shared with me", not just My Drive.
-    corpora: 'allDrives',
-    includeItemsFromAllDrives: true,
-    supportsAllDrives: true,
-  });
-
-  const files = (result.data.files ?? []).map(toGoogleDocListItem).filter((file) => file.id);
-  console.log(`[GoogleDocs] list q="${q}" → ${files.length} doc(s)`);
-  return { files };
+/**
+ * The live Google OAuth access token, for the renderer to drive the Google
+ * Picker (file selection happens client-side; the app never lists Drive).
+ */
+export async function getGoogleAccessToken(): Promise<string | null> {
+  const auth = await GoogleClientFactory.getClient();
+  return auth?.credentials?.access_token ?? null;
 }
 
 /** Import a Google Doc as a local .docx and register the link. */

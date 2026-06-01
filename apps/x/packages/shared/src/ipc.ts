@@ -650,18 +650,11 @@ const ipcSchemas = {
       missingScopes: z.array(z.string()),
     }),
   },
-  'google-docs:list': {
-    req: z.object({
-      query: z.string().optional(),
-    }),
+  // Live Google OAuth access token for driving the Google Picker in the renderer.
+  'google-docs:getAccessToken': {
+    req: z.null(),
     res: z.object({
-      files: z.array(z.object({
-        id: z.string(),
-        name: z.string(),
-        url: z.string(),
-        modifiedTime: z.string().nullable(),
-        owner: z.string().nullable(),
-      })),
+      accessToken: z.string().nullable(),
     }),
   },
   'google-docs:import': {
