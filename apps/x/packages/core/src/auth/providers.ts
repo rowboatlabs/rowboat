@@ -77,8 +77,10 @@ const providerConfigs: ProviderConfig = {
     scopes: [
       'https://www.googleapis.com/auth/gmail.modify',
       'https://www.googleapis.com/auth/calendar.events.readonly',
-      'https://www.googleapis.com/auth/drive.readonly',
-      'https://www.googleapis.com/auth/documents',
+      // Full Drive access: read/export Google Docs to .docx AND write the edited
+      // .docx back into the original doc (files.update needs write, which
+      // drive.readonly does not grant). Covers list/get/export/update.
+      'https://www.googleapis.com/auth/drive',
     ],
   },
   'fireflies-ai': {

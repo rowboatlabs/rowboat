@@ -5,9 +5,10 @@ import { google, drive_v3 as drive } from 'googleapis';
 import { resolveWorkspacePath } from '../workspace/workspace.js';
 import { GoogleClientFactory } from './google-client-factory.js';
 
+// Full Drive scope: export Google Docs to .docx (read) and write the edited
+// .docx back via files.update (write). drive.readonly can't do the write half.
 export const GOOGLE_DOC_SCOPES = [
-  'https://www.googleapis.com/auth/drive.readonly',
-  'https://www.googleapis.com/auth/documents',
+  'https://www.googleapis.com/auth/drive',
 ] as const;
 
 export type GoogleDocListItem = {
@@ -181,7 +182,7 @@ export async function getGoogleDocsConnectionStatus(): Promise<{
 export async function listGoogleDocs(query?: string): Promise<{ files: GoogleDocListItem[] }> {
   const status = await getGoogleDocsConnectionStatus();
   if (!status.connected) throw new Error('Google is not connected.');
-  if (!status.hasRequiredScopes) throw new Error('Google is missing Drive/Docs scopes. Reconnect Google.');
+  if (!status.hasRequiredScopes) throw new Error('Google is missing Drive access. Reconnect Google.');
 
   const driveClient = await getDriveClient();
   const clauses = [`mimeType='${GOOGLE_DOC_MIME}'`, 'trashed=false'];
@@ -206,7 +207,7 @@ export async function importGoogleDoc(fileId: string, targetFolder: string): Pro
 }> {
   const status = await getGoogleDocsConnectionStatus();
   if (!status.connected) throw new Error('Google is not connected.');
-  if (!status.hasRequiredScopes) throw new Error('Google is missing Drive/Docs scopes. Reconnect Google.');
+  if (!status.hasRequiredScopes) throw new Error('Google is missing Drive access. Reconnect Google.');
 
   const doc = await getDocMetadata(fileId);
   const bytes = await exportDocx(fileId);
