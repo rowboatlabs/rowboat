@@ -15,17 +15,24 @@ const REGISTRY_ABS = '/ws/knowledge/.assets/google-docs/links.json';
 let vfs: Map<string, string | Buffer>;
 let exportCalls: Array<{ fileId: string; mimeType: string }>;
 let updateCalls: Array<{ fileId: string }>;
+let getMediaCalls: number;
 
-const driveFile = {
-  id: 'doc-123',
-  name: 'My Doc',
-  webViewLink: 'https://docs.google.com/document/d/doc-123/edit',
-  modifiedTime: '2026-05-28T10:00:00.000Z',
-  owners: [{ displayName: 'Arjun', emailAddress: 'arjun@example.com' }],
-};
-
+const GDOC_MIME = 'application/vnd.google-apps.document';
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
+function makeDriveFile() {
+  return {
+    id: 'doc-123',
+    name: 'My Doc',
+    webViewLink: 'https://docs.google.com/document/d/doc-123/edit',
+    modifiedTime: '2026-05-28T10:00:00.000Z',
+    mimeType: GDOC_MIME,
+    owners: [{ displayName: 'Arjun', emailAddress: 'arjun@example.com' }],
+  };
+}
+let driveFile = makeDriveFile();
 const docxBytes = () => new TextEncoder().encode('DOCX_BYTES').buffer;
+const downloadedBytes = () => new TextEncoder().encode('DOWNLOADED').buffer;
 
 function seedRegistry(entries: Record<string, unknown>) {
   vfs.set(REGISTRY_ABS, JSON.stringify(entries));
@@ -41,6 +48,8 @@ beforeEach(() => {
   vfs = new Map();
   exportCalls = [];
   updateCalls = [];
+  getMediaCalls = 0;
+  driveFile = makeDriveFile();
 
   vi.doMock('node:fs/promises', () => ({
     default: {
@@ -71,7 +80,10 @@ beforeEach(() => {
 
   const driveClient = {
     files: {
-      get: vi.fn(async () => ({ data: driveFile })),
+      get: vi.fn(async (params: { alt?: string }) => {
+        if (params.alt === 'media') { getMediaCalls += 1; return { data: downloadedBytes() }; }
+        return { data: driveFile };
+      }),
       export: vi.fn(async (params: { fileId: string; mimeType: string }) => {
         exportCalls.push({ fileId: params.fileId, mimeType: params.mimeType });
         return { data: docxBytes() };
@@ -108,8 +120,22 @@ describe('importGoogleDoc', () => {
     expect(link).toMatchObject({
       id: 'doc-123',
       title: 'My Doc',
+      mimeType: GDOC_MIME,
       remoteModifiedTime: '2026-05-28T10:00:00.000Z',
     });
+  });
+
+  it('downloads an uploaded .docx file directly (no export, no double extension)', async () => {
+    driveFile = { ...makeDriveFile(), name: 'Report.docx', mimeType: DOCX_MIME };
+    const { importGoogleDoc } = await import('./google_docs.js');
+    const result = await importGoogleDoc('doc-123', 'knowledge');
+
+    // Uploaded Word file → files.get(alt=media), not files.export.
+    expect(exportCalls).toHaveLength(0);
+    expect(getMediaCalls).toBe(1);
+    // No "Report.docx.docx".
+    expect(result.path).toBe('knowledge/Report.docx');
+    expect(readRegistry()['knowledge/Report.docx'].mimeType).toBe(DOCX_MIME);
   });
 });
 

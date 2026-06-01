@@ -17,9 +17,12 @@ export type GoogleDocListItem = {
   url: string;
   modifiedTime: string | null;
   owner: string | null;
+  // Drive mimeType — distinguishes a native Google Doc (needs export) from an
+  // uploaded Word file (download its bytes directly).
+  mimeType: string;
 };
 
-// Metadata linking a local .docx file to its source Google Doc. Stored in a
+// Metadata linking a local .docx file to its source Drive file. Stored in a
 // registry (see LINKS_REL) because a .docx is binary and can't carry the
 // frontmatter a markdown note would.
 export type GoogleDocLink = {
@@ -27,14 +30,18 @@ export type GoogleDocLink = {
   url: string;
   title: string;
   syncedAt: string;
+  // Source Drive mimeType (native Google Doc vs uploaded .docx) — decides
+  // whether a pull exports or downloads.
+  mimeType?: string;
   // Drive `modifiedTime` (RFC3339) at the last sync — used to detect remote
   // edits before a sync-up would overwrite them.
   remoteModifiedTime?: string;
 };
 
 const GOOGLE_DOC_MIME = 'application/vnd.google-apps.document';
-// The Google Doc is exported to / imported from a real Word document so the
-// in-app docx editor round-trips it with full fidelity (tables, images, styles).
+// A native Google Doc is exported to / written back as a real Word document so
+// the in-app docx editor round-trips it with full fidelity. Uploaded .docx
+// files already are Word documents and are downloaded/uploaded as-is.
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
 // Hidden registry mapping workspace-relative .docx paths → their Google Doc.
@@ -123,10 +130,19 @@ async function getDriveClient() {
   return google.drive({ version: 'v3', auth });
 }
 
-async function exportDocx(fileId: string): Promise<Buffer> {
+// Get the file as .docx bytes: a native Google Doc is exported; an uploaded
+// Word file is downloaded as-is.
+async function fetchAsDocx(fileId: string, mimeType: string | undefined): Promise<Buffer> {
   const driveClient = await getDriveClient();
-  const result = await driveClient.files.export(
-    { fileId, mimeType: DOCX_MIME },
+  if (!mimeType || mimeType === GOOGLE_DOC_MIME) {
+    const result = await driveClient.files.export(
+      { fileId, mimeType: DOCX_MIME },
+      { responseType: 'arraybuffer' },
+    );
+    return Buffer.from(result.data as ArrayBuffer);
+  }
+  const result = await driveClient.files.get(
+    { fileId, alt: 'media', supportsAllDrives: true },
     { responseType: 'arraybuffer' },
   );
   return Buffer.from(result.data as ArrayBuffer);
@@ -136,7 +152,8 @@ async function getDocMetadata(fileId: string): Promise<GoogleDocListItem> {
   const driveClient = await getDriveClient();
   const result = await driveClient.files.get({
     fileId,
-    fields: 'id,name,webViewLink,modifiedTime,owners(displayName,emailAddress)',
+    fields: 'id,name,webViewLink,modifiedTime,mimeType,owners(displayName,emailAddress)',
+    supportsAllDrives: true,
   });
   const file = result.data;
   if (!file.id || !file.name) throw new Error('Selected Google Doc is missing metadata.');
@@ -150,12 +167,14 @@ function toGoogleDocListItem(file: drive.Schema$File): GoogleDocListItem {
     url: file.webViewLink ?? `https://docs.google.com/document/d/${file.id}/edit`,
     modifiedTime: file.modifiedTime ?? null,
     owner: file.owners?.[0]?.displayName ?? file.owners?.[0]?.emailAddress ?? null,
+    mimeType: file.mimeType ?? GOOGLE_DOC_MIME,
   };
 }
 
 async function uniqueDocxPath(targetFolder: string, title: string): Promise<string> {
   const folder = normalizeKnowledgeDir(targetFolder);
-  const base = sanitizeFilename(title);
+  // Strip an existing .docx so an uploaded "Report.docx" doesn't become "Report.docx.docx".
+  const base = sanitizeFilename(title.replace(/\.docx$/i, ''));
   let candidate = `${folder}/${base}.docx`;
   let index = 1;
   while (true) {
@@ -185,7 +204,9 @@ export async function listGoogleDocs(query?: string): Promise<{ files: GoogleDoc
   if (!status.hasRequiredScopes) throw new Error('Google is missing Drive access. Reconnect Google.');
 
   const driveClient = await getDriveClient();
-  const clauses = [`mimeType='${GOOGLE_DOC_MIME}'`, 'trashed=false'];
+  // Native Google Docs (exportable) and uploaded Word files (downloadable).
+  const typeClause = `(mimeType='${GOOGLE_DOC_MIME}' or mimeType='${DOCX_MIME}')`;
+  const clauses = [typeClause, 'trashed=false'];
   const trimmed = query?.trim();
   if (trimmed) {
     clauses.push(`name contains '${escapeDriveQueryValue(trimmed)}'`);
@@ -195,7 +216,7 @@ export async function listGoogleDocs(query?: string): Promise<{ files: GoogleDoc
     q,
     pageSize: 25,
     orderBy: 'modifiedTime desc',
-    fields: 'files(id,name,webViewLink,modifiedTime,owners(displayName,emailAddress))',
+    fields: 'files(id,name,webViewLink,modifiedTime,mimeType,owners(displayName,emailAddress))',
     // Also surface docs in shared drives and "Shared with me", not just My Drive.
     corpora: 'allDrives',
     includeItemsFromAllDrives: true,
@@ -217,7 +238,7 @@ export async function importGoogleDoc(fileId: string, targetFolder: string): Pro
   if (!status.hasRequiredScopes) throw new Error('Google is missing Drive access. Reconnect Google.');
 
   const doc = await getDocMetadata(fileId);
-  const bytes = await exportDocx(fileId);
+  const bytes = await fetchAsDocx(fileId, doc.mimeType);
   const relPath = await uniqueDocxPath(targetFolder, doc.name);
   const absPath = resolveWorkspacePath(relPath);
   await fs.mkdir(path.dirname(absPath), { recursive: true });
@@ -227,6 +248,7 @@ export async function importGoogleDoc(fileId: string, targetFolder: string): Pro
     url: doc.url,
     title: doc.name,
     syncedAt: new Date().toISOString(),
+    mimeType: doc.mimeType,
     remoteModifiedTime: doc.modifiedTime ?? undefined,
   });
   return { path: relPath, doc };
@@ -237,7 +259,10 @@ export async function syncGoogleDocDown(relPath: string): Promise<{ ok: true; sy
   const link = await getGoogleDocLink(relPath);
   if (!link) throw new Error('This file is not linked to a Google Doc.');
 
-  const [bytes, meta] = await Promise.all([exportDocx(link.id), getDocMetadata(link.id)]);
+  const [bytes, meta] = await Promise.all([
+    fetchAsDocx(link.id, link.mimeType),
+    getDocMetadata(link.id),
+  ]);
   await fs.writeFile(resolveWorkspacePath(normalizeRel(relPath)), bytes);
   const syncedAt = new Date().toISOString();
   await setLink(relPath, {
@@ -245,6 +270,7 @@ export async function syncGoogleDocDown(relPath: string): Promise<{ ok: true; sy
     url: link.url,
     title: link.title,
     syncedAt,
+    mimeType: link.mimeType ?? meta.mimeType,
     remoteModifiedTime: meta.modifiedTime ?? link.remoteModifiedTime,
   });
   return { ok: true, syncedAt };
@@ -273,11 +299,13 @@ export async function syncGoogleDocUp(
 
     const bytes = await fs.readFile(resolveWorkspacePath(normalizeRel(relPath)));
     const driveClient = await getDriveClient();
-    // Uploading .docx media to a Google Doc converts it back into the existing
-    // doc, keeping the file's id, URL and Google-Doc type intact.
+    // For a native Google Doc, uploading .docx media converts it back into the
+    // existing doc (id/URL/type preserved). For an uploaded .docx file, it just
+    // replaces the bytes.
     await driveClient.files.update({
       fileId: link.id,
       media: { mimeType: DOCX_MIME, body: Readable.from(bytes) },
+      supportsAllDrives: true,
     });
 
     const meta = await getDocMetadata(link.id);
@@ -287,6 +315,7 @@ export async function syncGoogleDocUp(
       url: link.url,
       title: link.title,
       syncedAt,
+      mimeType: link.mimeType ?? meta.mimeType,
       remoteModifiedTime: meta.modifiedTime ?? link.remoteModifiedTime,
     });
     return { synced: true, syncedAt };
