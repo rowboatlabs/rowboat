@@ -10,6 +10,8 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { GoogleClientIdModal } from '@/components/google-client-id-modal'
+import { setGoogleCredentials } from '@/lib/google-credentials-store'
 import { formatRelativeTime } from '@/lib/relative-time'
 import { toast } from '@/lib/toast'
 
@@ -52,6 +54,7 @@ export function GoogleDocPickerDialog({
   const [connecting, setConnecting] = useState(false)
   const [importingId, setImportingId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [byokOpen, setByokOpen] = useState(false)
 
   const canList = Boolean(status?.connected && status.hasRequiredScopes)
   const targetLabel = useMemo(() => targetFolder.replace(/^knowledge\/?/, '') || 'knowledge', [targetFolder])
@@ -114,6 +117,33 @@ export function GoogleDocPickerDialog({
     }
   }, [])
 
+  // BYOK: connect Google with the user's own OAuth client. Unlike the managed
+  // (rowboat) sign-in, this local flow requests the Drive + Docs scopes, so a
+  // signed-in user can actually grant Docs access without a backend change.
+  const handleByokSubmit = useCallback((clientId: string, clientSecret: string) => {
+    setGoogleCredentials(clientId, clientSecret)
+    setByokOpen(false)
+    setConnecting(true)
+    setError(null)
+    void window.ipc.invoke('oauth:connect', { provider: 'google', clientId, clientSecret })
+      .then((result) => {
+        if (!result.success) setError(result.error ?? 'Failed to start Google connection')
+        else toast('Finish Google consent in the browser…', 'info')
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to start Google connection'))
+      .finally(() => setConnecting(false))
+  }, [])
+
+  // Re-check scopes as soon as a Google connection completes in the browser.
+  useEffect(() => {
+    if (!open) return
+    const cleanup = window.ipc.on('oauth:didConnect', (event) => {
+      if (event.provider !== 'google') return
+      void loadStatus()
+    })
+    return cleanup
+  }, [open, loadStatus])
+
   const handleImport = useCallback(async (doc: GoogleDocListItem) => {
     setImportingId(doc.id)
     setError(null)
@@ -133,6 +163,7 @@ export function GoogleDocPickerDialog({
   }, [onImported, onOpenChange, targetFolder])
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[min(720px,calc(100vh-4rem))] max-w-2xl flex-col gap-0 overflow-hidden p-0">
         <DialogHeader className="shrink-0 border-b border-border px-5 py-4">
@@ -159,19 +190,26 @@ export function GoogleDocPickerDialog({
           ) : !status.connected || !status.hasRequiredScopes ? (
             <div className="flex min-h-[360px] flex-1 flex-col items-center justify-center gap-4 overflow-y-auto px-8 py-8 text-center">
               <div className="max-w-sm text-sm text-muted-foreground">
-                {!status.connected
-                  ? 'Connect Google to choose Docs from Drive.'
-                  : 'Reconnect Google so Rowboat can read Drive metadata and edit Google Docs.'}
+                To choose Google Docs, Rowboat needs Drive&nbsp;+&nbsp;Docs access.
               </div>
               {status.missingScopes.length > 0 && (
                 <div className="max-w-md rounded-md border border-border bg-muted/30 px-3 py-2 text-left text-xs text-muted-foreground">
                   Missing scopes: {status.missingScopes.join(', ')}
                 </div>
               )}
-              <Button onClick={handleConnect} disabled={connecting}>
-                {connecting ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
-                Connect Google
-              </Button>
+              <div className="flex w-full max-w-xs flex-col gap-2">
+                <Button onClick={() => setByokOpen(true)} disabled={connecting}>
+                  {connecting ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+                  Connect with your Google credentials
+                </Button>
+                <Button variant="outline" onClick={handleConnect} disabled={connecting}>
+                  Use managed Google sign-in
+                </Button>
+              </div>
+              <p className="max-w-sm text-xs text-muted-foreground">
+                Managed sign-in may not grant Docs access yet. If it keeps asking for scopes,
+                connect a Google OAuth client (Desktop app) with the Drive&nbsp;API and Docs&nbsp;API enabled.
+              </p>
             </div>
           ) : (
             <>
@@ -232,5 +270,12 @@ export function GoogleDocPickerDialog({
         </div>
       </DialogContent>
     </Dialog>
+    <GoogleClientIdModal
+      open={byokOpen}
+      onOpenChange={setByokOpen}
+      onSubmit={handleByokSubmit}
+      description="Enter a Google OAuth client (Desktop app) with the Drive API and Docs API enabled to grant Docs access."
+    />
+    </>
   )
 }
