@@ -1,10 +1,9 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { google, drive_v3 as drive, docs_v1 } from 'googleapis';
-import { WorkDir } from '../config/config.js';
+import { Readable } from 'node:stream';
+import { google, drive_v3 as drive } from 'googleapis';
 import { resolveWorkspacePath } from '../workspace/workspace.js';
 import { GoogleClientFactory } from './google-client-factory.js';
-import { markdownToDocsRequests } from './markdown-to-docs.js';
 
 export const GOOGLE_DOC_SCOPES = [
   'https://www.googleapis.com/auth/drive.readonly',
@@ -19,25 +18,28 @@ export type GoogleDocListItem = {
   owner: string | null;
 };
 
-type GoogleDocFrontmatter = {
+// Metadata linking a local .docx file to its source Google Doc. Stored in a
+// registry (see LINKS_REL) because a .docx is binary and can't carry the
+// frontmatter a markdown note would.
+export type GoogleDocLink = {
   id: string;
   url: string;
   title: string;
-  syncedAt?: string;
-  // Drive `modifiedTime` (RFC3339) captured at the last sync, used to detect
-  // remote edits before a sync-up would overwrite them.
+  syncedAt: string;
+  // Drive `modifiedTime` (RFC3339) at the last sync — used to detect remote
+  // edits before a sync-up would overwrite them.
   remoteModifiedTime?: string;
 };
 
 const GOOGLE_DOC_MIME = 'application/vnd.google-apps.document';
-// Google Docs natively export to Markdown, which preserves headings, bold,
-// lists, links and tables on the way into the local note — far better fidelity
-// than the old text/plain export.
-const MARKDOWN_MIME = 'text/markdown';
+// The Google Doc is exported to / imported from a real Word document so the
+// in-app docx editor round-trips it with full fidelity (tables, images, styles).
+const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
-function yamlQuote(value: string): string {
-  return JSON.stringify(value);
-}
+// Hidden registry mapping workspace-relative .docx paths → their Google Doc.
+// Lives under .assets so workspace:readdir (includeHidden:false) keeps it out
+// of the Knowledge tree.
+const LINKS_REL = 'knowledge/.assets/google-docs/links.json';
 
 function sanitizeFilename(name: string): string {
   const cleaned = name
@@ -52,8 +54,12 @@ function escapeDriveQueryValue(value: string): string {
   return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
 
+function normalizeRel(relPath: string): string {
+  return relPath.replace(/\\/g, '/');
+}
+
 function normalizeKnowledgeDir(targetFolder: string): string {
-  const normalized = targetFolder.replace(/\\/g, '/').replace(/\/+$/, '');
+  const normalized = normalizeRel(targetFolder).replace(/\/+$/, '');
   if (!normalized || normalized === 'knowledge') return 'knowledge';
   if (!normalized.startsWith('knowledge/')) {
     throw new Error('Google Docs can only be added under knowledge/.');
@@ -61,78 +67,11 @@ function normalizeKnowledgeDir(targetFolder: string): string {
   return normalized;
 }
 
-function buildStubContent(doc: GoogleDocFrontmatter, snapshot: string): string {
-  const syncedAt = doc.syncedAt ?? new Date().toISOString();
-  const lines = [
-    '---',
-    'source:',
-    '  - google-doc',
-    'google_doc:',
-    `  id: ${yamlQuote(doc.id)}`,
-    `  url: ${yamlQuote(doc.url)}`,
-    `  title: ${yamlQuote(doc.title)}`,
-    `  syncedAt: ${yamlQuote(syncedAt)}`,
-  ];
-  if (doc.remoteModifiedTime) {
-    lines.push(`  remoteModifiedTime: ${yamlQuote(doc.remoteModifiedTime)}`);
-  }
-  lines.push('---', '', snapshot.trimEnd(), '');
-  return lines.join('\n');
-}
-
-function parseLinkedGoogleDoc(markdown: string): GoogleDocFrontmatter | null {
-  if (!markdown.startsWith('---')) return null;
-  const endIndex = markdown.indexOf('\n---', 3);
-  if (endIndex === -1) return null;
-  const raw = markdown.slice(0, endIndex + 4);
-  const lines = raw.split('\n');
-  let inGoogleDoc = false;
-  const doc: Partial<GoogleDocFrontmatter> = {};
-
-  for (const line of lines) {
-    if (line === '---') {
-      inGoogleDoc = false;
-      continue;
-    }
-    const topLevel = line.match(/^([A-Za-z_][\w-]*):\s*(.*)$/);
-    if (topLevel) {
-      inGoogleDoc = topLevel[1] === 'google_doc';
-      continue;
-    }
-    if (!inGoogleDoc) continue;
-    const nested = line.match(/^\s+([A-Za-z_][\w-]*):\s*(.*)$/);
-    if (!nested) continue;
-    const key = nested[1] as keyof GoogleDocFrontmatter;
-    let value = nested[2].trim();
-    if (!['id', 'url', 'title', 'syncedAt', 'remoteModifiedTime'].includes(key)) continue;
-    try {
-      if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-        value = JSON.parse(value);
-      }
-    } catch {
-      value = value.replace(/^['"]|['"]$/g, '');
-    }
-    doc[key] = value;
-  }
-
-  if (!doc.id || !doc.url || !doc.title) return null;
-  return doc as GoogleDocFrontmatter;
-}
-
-function bodyFromMarkdown(markdown: string): string {
-  if (!markdown.startsWith('---')) return markdown;
-  const endIndex = markdown.indexOf('\n---', 3);
-  if (endIndex === -1) return markdown;
-  let body = markdown.slice(endIndex + 4);
-  if (body.startsWith('\n')) body = body.slice(1);
-  return body;
-}
-
 /**
  * True when the Google Doc has been edited remotely since our last recorded
  * sync — i.e. a sync-up would clobber changes we never pulled. Missing
- * timestamps (e.g. legacy notes with no baseline) are treated as "not ahead"
- * so the push is allowed rather than blocked forever.
+ * timestamps (e.g. links created before a baseline existed) are treated as
+ * "not ahead" so the push is allowed rather than blocked forever.
  */
 export function isRemoteAhead(
   remoteModifiedTime: string | null | undefined,
@@ -145,25 +84,51 @@ export function isRemoteAhead(
   return remote > known;
 }
 
+// --- Link registry ---------------------------------------------------------
+
+async function readLinks(): Promise<Record<string, GoogleDocLink>> {
+  try {
+    const raw = await fs.readFile(resolveWorkspacePath(LINKS_REL), 'utf8');
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+async function writeLinks(map: Record<string, GoogleDocLink>): Promise<void> {
+  const absPath = resolveWorkspacePath(LINKS_REL);
+  await fs.mkdir(path.dirname(absPath), { recursive: true });
+  await fs.writeFile(absPath, JSON.stringify(map, null, 2), 'utf8');
+}
+
+async function setLink(relPath: string, link: GoogleDocLink): Promise<void> {
+  const links = await readLinks();
+  links[normalizeRel(relPath)] = link;
+  await writeLinks(links);
+}
+
+/** The Google Doc linked to a local .docx, or null if the file isn't linked. */
+export async function getGoogleDocLink(relPath: string): Promise<GoogleDocLink | null> {
+  const links = await readLinks();
+  return links[normalizeRel(relPath)] ?? null;
+}
+
+// --- Drive / Docs clients --------------------------------------------------
+
 async function getDriveClient() {
   const auth = await GoogleClientFactory.getClient();
   if (!auth) throw new Error('Google is not connected.');
   return google.drive({ version: 'v3', auth });
 }
 
-async function getDocsClient() {
-  const auth = await GoogleClientFactory.getClient();
-  if (!auth) throw new Error('Google is not connected.');
-  return google.docs({ version: 'v1', auth });
-}
-
-async function exportDocMarkdown(fileId: string): Promise<string> {
+async function exportDocx(fileId: string): Promise<Buffer> {
   const driveClient = await getDriveClient();
   const result = await driveClient.files.export(
-    { fileId, mimeType: MARKDOWN_MIME },
-    { responseType: 'text' },
+    { fileId, mimeType: DOCX_MIME },
+    { responseType: 'arraybuffer' },
   );
-  return typeof result.data === 'string' ? result.data : String(result.data ?? '');
+  return Buffer.from(result.data as ArrayBuffer);
 }
 
 async function getDocMetadata(fileId: string): Promise<GoogleDocListItem> {
@@ -187,21 +152,23 @@ function toGoogleDocListItem(file: drive.Schema$File): GoogleDocListItem {
   };
 }
 
-async function uniqueKnowledgePath(targetFolder: string, title: string): Promise<string> {
+async function uniqueDocxPath(targetFolder: string, title: string): Promise<string> {
   const folder = normalizeKnowledgeDir(targetFolder);
   const base = sanitizeFilename(title);
-  let candidate = `${folder}/${base}.md`;
+  let candidate = `${folder}/${base}.docx`;
   let index = 1;
   while (true) {
     try {
       await fs.access(resolveWorkspacePath(candidate));
-      candidate = `${folder}/${base}-${index}.md`;
+      candidate = `${folder}/${base}-${index}.docx`;
       index += 1;
     } catch {
       return candidate;
     }
   }
 }
+
+// --- Public API ------------------------------------------------------------
 
 export async function getGoogleDocsConnectionStatus(): Promise<{
   connected: boolean;
@@ -232,6 +199,7 @@ export async function listGoogleDocs(query?: string): Promise<{ files: GoogleDoc
   return { files: (result.data.files ?? []).map(toGoogleDocListItem).filter((file) => file.id) };
 }
 
+/** Import a Google Doc as a local .docx and register the link. */
 export async function importGoogleDoc(fileId: string, targetFolder: string): Promise<{
   path: string;
   doc: GoogleDocListItem;
@@ -241,54 +209,52 @@ export async function importGoogleDoc(fileId: string, targetFolder: string): Pro
   if (!status.hasRequiredScopes) throw new Error('Google is missing Drive/Docs scopes. Reconnect Google.');
 
   const doc = await getDocMetadata(fileId);
-  const snapshot = await exportDocMarkdown(fileId);
-  const relPath = await uniqueKnowledgePath(targetFolder, doc.name);
+  const bytes = await exportDocx(fileId);
+  const relPath = await uniqueDocxPath(targetFolder, doc.name);
   const absPath = resolveWorkspacePath(relPath);
   await fs.mkdir(path.dirname(absPath), { recursive: true });
-  await fs.writeFile(absPath, buildStubContent({
+  await fs.writeFile(absPath, bytes);
+  await setLink(relPath, {
     id: doc.id,
     url: doc.url,
     title: doc.name,
     syncedAt: new Date().toISOString(),
     remoteModifiedTime: doc.modifiedTime ?? undefined,
-  }, snapshot), 'utf8');
+  });
   return { path: relPath, doc };
 }
 
-export async function refreshGoogleDocSnapshot(relPath: string): Promise<{ ok: true; syncedAt: string }> {
-  const absPath = resolveWorkspacePath(relPath);
-  const markdown = await fs.readFile(absPath, 'utf8');
-  const linked = parseLinkedGoogleDoc(markdown);
-  if (!linked) throw new Error('This note is not linked to a Google Doc.');
+/** Pull the latest Google Doc and overwrite the local .docx. */
+export async function syncGoogleDocDown(relPath: string): Promise<{ ok: true; syncedAt: string }> {
+  const link = await getGoogleDocLink(relPath);
+  if (!link) throw new Error('This file is not linked to a Google Doc.');
 
-  const [snapshot, meta] = await Promise.all([
-    exportDocMarkdown(linked.id),
-    getDocMetadata(linked.id),
-  ]);
+  const [bytes, meta] = await Promise.all([exportDocx(link.id), getDocMetadata(link.id)]);
+  await fs.writeFile(resolveWorkspacePath(normalizeRel(relPath)), bytes);
   const syncedAt = new Date().toISOString();
-  await fs.writeFile(absPath, buildStubContent({
-    ...linked,
+  await setLink(relPath, {
+    id: link.id,
+    url: link.url,
+    title: link.title,
     syncedAt,
-    remoteModifiedTime: meta.modifiedTime ?? linked.remoteModifiedTime,
-  }, snapshot), 'utf8');
+    remoteModifiedTime: meta.modifiedTime ?? link.remoteModifiedTime,
+  });
   return { ok: true, syncedAt };
 }
 
-export async function syncLinkedGoogleDocFromMarkdown(
+/** Push the local .docx back into the Google Doc (in place, preserving its id/URL). */
+export async function syncGoogleDocUp(
   relPath: string,
-  markdown: string,
   opts: { force?: boolean } = {},
 ): Promise<{ synced: boolean; syncedAt?: string; conflict?: boolean; error?: string }> {
   try {
-    const normalized = relPath.replace(/\\/g, '/');
-    if (!normalized.startsWith('knowledge/') || !normalized.endsWith('.md')) return { synced: false };
-    const linked = parseLinkedGoogleDoc(markdown);
-    if (!linked) return { synced: false };
+    const link = await getGoogleDocLink(relPath);
+    if (!link) return { synced: false, error: 'This file is not linked to a Google Doc.' };
 
     // Conflict guard: don't silently overwrite remote edits we never pulled.
     if (!opts.force) {
-      const meta = await getDocMetadata(linked.id);
-      if (isRemoteAhead(meta.modifiedTime, linked.remoteModifiedTime)) {
+      const meta = await getDocMetadata(link.id);
+      if (isRemoteAhead(meta.modifiedTime, link.remoteModifiedTime)) {
         return {
           synced: false,
           conflict: true,
@@ -297,40 +263,24 @@ export async function syncLinkedGoogleDocFromMarkdown(
       }
     }
 
-    const body = bodyFromMarkdown(markdown);
-    const docsClient = await getDocsClient();
-    const current = await docsClient.documents.get({
-      documentId: linked.id,
-      fields: 'body(content(endIndex))',
+    const bytes = await fs.readFile(resolveWorkspacePath(normalizeRel(relPath)));
+    const driveClient = await getDriveClient();
+    // Uploading .docx media to a Google Doc converts it back into the existing
+    // doc, keeping the file's id, URL and Google-Doc type intact.
+    await driveClient.files.update({
+      fileId: link.id,
+      media: { mimeType: DOCX_MIME, body: Readable.from(bytes) },
     });
-    const endIndex = current.data.body?.content?.at(-1)?.endIndex ?? 1;
-    const requests: docs_v1.Schema$Request[] = [];
-    if (endIndex > 2) {
-      requests.push({
-        deleteContentRange: {
-          range: { startIndex: 1, endIndex: endIndex - 1 },
-        },
-      });
-    }
-    // Recreate the body with structure preserved (headings, emphasis, lists, links).
-    requests.push(...markdownToDocsRequests(body, 1));
-    if (requests.length > 0) {
-      await docsClient.documents.batchUpdate({
-        documentId: linked.id,
-        requestBody: { requests },
-      });
-    }
 
-    // Re-read the revision so our stored baseline reflects this push and the
-    // next sync-up won't see a phantom conflict.
-    const meta = await getDocMetadata(linked.id);
-    const absPath = path.join(WorkDir, normalized);
+    const meta = await getDocMetadata(link.id);
     const syncedAt = new Date().toISOString();
-    await fs.writeFile(absPath, buildStubContent({
-      ...linked,
+    await setLink(relPath, {
+      id: link.id,
+      url: link.url,
+      title: link.title,
       syncedAt,
-      remoteModifiedTime: meta.modifiedTime ?? linked.remoteModifiedTime,
-    }, body), 'utf8');
+      remoteModifiedTime: meta.modifiedTime ?? link.remoteModifiedTime,
+    });
     return { synced: true, syncedAt };
   } catch (error) {
     console.error('[GoogleDocs] Failed to sync linked Google Doc:', error);

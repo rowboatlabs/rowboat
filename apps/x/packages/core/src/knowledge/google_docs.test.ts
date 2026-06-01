@@ -1,28 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
- * Phase 1 — read-path fidelity.
+ * Google Docs ⇄ local .docx round-trip.
  *
- * Google Docs are pulled in as Markdown (text/markdown export), not flattened
- * to text/plain, so headings / bold / lists / links survive into the local
- * note. Import and sync-down also record the Drive `modifiedTime` in
- * frontmatter so a later sync-up can detect remote edits.
+ * Import exports the Doc as a Word document (full fidelity) and registers the
+ * link in a hidden JSON registry (a .docx can't carry frontmatter). Sync down
+ * re-exports and overwrites the file; sync up uploads the local .docx back into
+ * the same Google Doc, guarded against clobbering remote edits.
  */
 
-const MARKDOWN_SNAPSHOT = [
-  '# Title',
-  '',
-  'Some **bold** and a [link](https://example.com).',
-  '',
-  '- one',
-  '- two',
-].join('\n');
+const REGISTRY_ABS = '/ws/knowledge/.assets/google-docs/links.json';
 
-// In-memory capture of the most recent writeFile.
-let written: { path: string; content: string } | null = null;
-let readFileContent = '';
-let exportCalls: Array<{ fileId: string; mimeType: string }> = [];
-let batchUpdateCalls: Array<{ documentId: string; requests: unknown[] }> = [];
+// Virtual filesystem: absolute path → contents.
+let vfs: Map<string, string | Buffer>;
+let exportCalls: Array<{ fileId: string; mimeType: string }>;
+let updateCalls: Array<{ fileId: string }>;
 
 const driveFile = {
   id: 'doc-123',
@@ -32,24 +24,38 @@ const driveFile = {
   owners: [{ displayName: 'Arjun', emailAddress: 'arjun@example.com' }],
 };
 
+const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const docxBytes = () => new TextEncoder().encode('DOCX_BYTES').buffer;
+
+function seedRegistry(entries: Record<string, unknown>) {
+  vfs.set(REGISTRY_ABS, JSON.stringify(entries));
+}
+
+function readRegistry(): Record<string, Record<string, unknown>> {
+  const raw = vfs.get(REGISTRY_ABS);
+  return raw ? JSON.parse(raw as string) : {};
+}
+
 beforeEach(() => {
   vi.resetModules();
-  written = null;
+  vfs = new Map();
   exportCalls = [];
-  batchUpdateCalls = [];
+  updateCalls = [];
 
   vi.doMock('node:fs/promises', () => ({
     default: {
-      readFile: vi.fn(async () => readFileContent),
-      writeFile: vi.fn(async (path: string, content: string) => { written = { path, content }; }),
+      readFile: vi.fn(async (p: string) => {
+        if (!vfs.has(p)) throw new Error(`ENOENT: ${p}`);
+        return vfs.get(p);
+      }),
+      writeFile: vi.fn(async (p: string, data: string | Buffer) => { vfs.set(p, data); }),
       mkdir: vi.fn(async () => undefined),
-      access: vi.fn(async () => { throw new Error('ENOENT'); }),
+      access: vi.fn(async (p: string) => { if (!vfs.has(p)) throw new Error(`ENOENT: ${p}`); }),
     },
   }));
 
-  vi.doMock('../config/config.js', () => ({ WorkDir: '/ws' }));
   vi.doMock('../workspace/workspace.js', () => ({
-    resolveWorkspacePath: (rel: string) => `/ws/${rel}`,
+    resolveWorkspacePath: (rel: string) => `/ws/${rel.replace(/\\/g, '/')}`,
   }));
 
   vi.doMock('./google-client-factory.js', () => ({
@@ -68,145 +74,122 @@ beforeEach(() => {
       get: vi.fn(async () => ({ data: driveFile })),
       export: vi.fn(async (params: { fileId: string; mimeType: string }) => {
         exportCalls.push({ fileId: params.fileId, mimeType: params.mimeType });
-        return { data: MARKDOWN_SNAPSHOT };
+        return { data: docxBytes() };
       }),
       list: vi.fn(async () => ({ data: { files: [driveFile] } })),
-    },
-  };
-
-  const docsClient = {
-    documents: {
-      get: vi.fn(async () => ({ data: { body: { content: [{ endIndex: 12 }] } } })),
-      batchUpdate: vi.fn(async (params: { documentId: string; requestBody: { requests: unknown[] } }) => {
-        batchUpdateCalls.push({ documentId: params.documentId, requests: params.requestBody.requests });
+      update: vi.fn(async (params: { fileId: string }) => {
+        updateCalls.push({ fileId: params.fileId });
         return { data: {} };
       }),
     },
   };
 
   vi.doMock('googleapis', () => ({
-    google: {
-      drive: vi.fn(() => driveClient),
-      docs: vi.fn(() => docsClient),
-    },
+    google: { drive: vi.fn(() => driveClient), docs: vi.fn(() => ({})) },
   }));
 });
 
-function linkedMarkdown(remoteModifiedTime: string, body = '# Title\n\nhello **world**'): string {
-  return [
-    '---',
-    'source:',
-    '  - google-doc',
-    'google_doc:',
-    '  id: "doc-123"',
-    '  url: "https://docs.google.com/document/d/doc-123/edit"',
-    '  title: "My Doc"',
-    '  syncedAt: "2026-05-20T00:00:00.000Z"',
-    `  remoteModifiedTime: ${JSON.stringify(remoteModifiedTime)}`,
-    '---',
-    '',
-    body,
-    '',
-  ].join('\n');
-}
-
-afterEach(() => {
-  vi.clearAllMocks();
-});
+afterEach(() => { vi.clearAllMocks(); });
 
 describe('importGoogleDoc', () => {
-  it('exports as Markdown (not plain text) and keeps the formatting in the note body', async () => {
+  it('exports a .docx, writes it to the folder, and registers the link', async () => {
     const { importGoogleDoc } = await import('./google_docs.js');
     const result = await importGoogleDoc('doc-123', 'knowledge');
 
-    expect(exportCalls).toEqual([{ fileId: 'doc-123', mimeType: 'text/markdown' }]);
-    expect(result.path).toBe('knowledge/My Doc.md');
-    expect(written).not.toBeNull();
+    expect(exportCalls).toEqual([{ fileId: 'doc-123', mimeType: DOCX_MIME }]);
+    expect(result.path).toBe('knowledge/My Doc.docx');
 
-    const content = written!.content;
-    // Markdown structure survives the import.
-    expect(content).toContain('# Title');
-    expect(content).toContain('**bold**');
-    expect(content).toContain('[link](https://example.com)');
-    expect(content).toContain('- one');
-  });
+    // The .docx bytes landed on disk.
+    expect(vfs.has('/ws/knowledge/My Doc.docx')).toBe(true);
+    expect(Buffer.isBuffer(vfs.get('/ws/knowledge/My Doc.docx'))).toBe(true);
 
-  it('records the Drive modifiedTime in frontmatter for conflict detection', async () => {
-    const { importGoogleDoc } = await import('./google_docs.js');
-    await importGoogleDoc('doc-123', 'knowledge');
-
-    expect(written!.content).toContain('remoteModifiedTime: "2026-05-28T10:00:00.000Z"');
-    expect(written!.content).toContain('id: "doc-123"');
+    // The link was recorded with the remote revision for conflict detection.
+    const link = readRegistry()['knowledge/My Doc.docx'];
+    expect(link).toMatchObject({
+      id: 'doc-123',
+      title: 'My Doc',
+      remoteModifiedTime: '2026-05-28T10:00:00.000Z',
+    });
   });
 });
 
-describe('refreshGoogleDocSnapshot (sync down)', () => {
-  it('re-exports Markdown and refreshes remoteModifiedTime while preserving the link', async () => {
-    readFileContent = [
-      '---',
-      'source:',
-      '  - google-doc',
-      'google_doc:',
-      '  id: "doc-123"',
-      '  url: "https://docs.google.com/document/d/doc-123/edit"',
-      '  title: "My Doc"',
-      '  syncedAt: "2026-05-20T00:00:00.000Z"',
-      '  remoteModifiedTime: "2026-05-20T00:00:00.000Z"',
-      '---',
-      '',
-      'old body',
-      '',
-    ].join('\n');
+describe('getGoogleDocLink', () => {
+  it('returns the registered link, or null for an unlinked file', async () => {
+    seedRegistry({
+      'knowledge/My Doc.docx': { id: 'doc-123', url: 'u', title: 'My Doc', syncedAt: 's' },
+    });
+    const { getGoogleDocLink } = await import('./google_docs.js');
+    expect(await getGoogleDocLink('knowledge/My Doc.docx')).toMatchObject({ id: 'doc-123' });
+    expect(await getGoogleDocLink('knowledge/Other.docx')).toBeNull();
+  });
+});
 
-    const { refreshGoogleDocSnapshot } = await import('./google_docs.js');
-    const result = await refreshGoogleDocSnapshot('knowledge/My Doc.md');
+describe('syncGoogleDocDown', () => {
+  it('re-exports the .docx and refreshes the stored revision', async () => {
+    seedRegistry({
+      'knowledge/My Doc.docx': {
+        id: 'doc-123', url: 'u', title: 'My Doc',
+        syncedAt: '2026-05-20T00:00:00.000Z', remoteModifiedTime: '2026-05-20T00:00:00.000Z',
+      },
+    });
+    vfs.set('/ws/knowledge/My Doc.docx', Buffer.from('OLD'));
+
+    const { syncGoogleDocDown } = await import('./google_docs.js');
+    const result = await syncGoogleDocDown('knowledge/My Doc.docx');
 
     expect(result.ok).toBe(true);
-    expect(exportCalls).toEqual([{ fileId: 'doc-123', mimeType: 'text/markdown' }]);
-    // Body replaced with the fresh Markdown export.
-    expect(written!.content).toContain('# Title');
-    expect(written!.content).not.toContain('old body');
-    // modifiedTime advanced to the remote value.
-    expect(written!.content).toContain('remoteModifiedTime: "2026-05-28T10:00:00.000Z"');
+    expect(exportCalls).toEqual([{ fileId: 'doc-123', mimeType: DOCX_MIME }]);
+    // File overwritten with fresh export, revision advanced.
+    expect((vfs.get('/ws/knowledge/My Doc.docx') as Buffer).toString()).toBe('DOCX_BYTES');
+    expect(readRegistry()['knowledge/My Doc.docx'].remoteModifiedTime).toBe('2026-05-28T10:00:00.000Z');
   });
 });
 
-describe('syncLinkedGoogleDocFromMarkdown (sync up)', () => {
+describe('syncGoogleDocUp', () => {
+  beforeEach(() => { vfs.set('/ws/knowledge/My Doc.docx', Buffer.from('LOCAL EDITS')); });
+
   it('blocks the push when the doc changed remotely since the last sync', async () => {
-    // Stored baseline is older than the doc's current modifiedTime (2026-05-28).
-    const markdown = linkedMarkdown('2026-05-20T00:00:00.000Z');
-    const { syncLinkedGoogleDocFromMarkdown } = await import('./google_docs.js');
-    const result = await syncLinkedGoogleDocFromMarkdown('knowledge/My Doc.md', markdown);
+    seedRegistry({
+      'knowledge/My Doc.docx': {
+        id: 'doc-123', url: 'u', title: 'My Doc',
+        syncedAt: '2026-05-20T00:00:00.000Z', remoteModifiedTime: '2026-05-20T00:00:00.000Z',
+      },
+    });
+    const { syncGoogleDocUp } = await import('./google_docs.js');
+    const result = await syncGoogleDocUp('knowledge/My Doc.docx');
 
     expect(result.synced).toBe(false);
     expect(result.conflict).toBe(true);
-    expect(batchUpdateCalls).toHaveLength(0); // remote was not touched
+    expect(updateCalls).toHaveLength(0);
   });
 
-  it('overwrites on force even when the remote is ahead', async () => {
-    const markdown = linkedMarkdown('2026-05-20T00:00:00.000Z');
-    const { syncLinkedGoogleDocFromMarkdown } = await import('./google_docs.js');
-    const result = await syncLinkedGoogleDocFromMarkdown('knowledge/My Doc.md', markdown, { force: true });
+  it('overwrites on force, uploading the local .docx back to the Google Doc', async () => {
+    seedRegistry({
+      'knowledge/My Doc.docx': {
+        id: 'doc-123', url: 'u', title: 'My Doc',
+        syncedAt: '2026-05-20T00:00:00.000Z', remoteModifiedTime: '2026-05-20T00:00:00.000Z',
+      },
+    });
+    const { syncGoogleDocUp } = await import('./google_docs.js');
+    const result = await syncGoogleDocUp('knowledge/My Doc.docx', { force: true });
 
     expect(result.synced).toBe(true);
-    expect(batchUpdateCalls).toHaveLength(1);
+    expect(updateCalls).toEqual([{ fileId: 'doc-123' }]);
+    expect(readRegistry()['knowledge/My Doc.docx'].remoteModifiedTime).toBe('2026-05-28T10:00:00.000Z');
   });
 
-  it('pushes structure-preserving requests and refreshes the stored revision', async () => {
-    // Baseline matches the remote, so there is no conflict.
-    const markdown = linkedMarkdown('2026-05-28T10:00:00.000Z');
-    const { syncLinkedGoogleDocFromMarkdown } = await import('./google_docs.js');
-    const result = await syncLinkedGoogleDocFromMarkdown('knowledge/My Doc.md', markdown);
+  it('pushes straight through when the baseline matches the remote', async () => {
+    seedRegistry({
+      'knowledge/My Doc.docx': {
+        id: 'doc-123', url: 'u', title: 'My Doc',
+        syncedAt: '2026-05-28T10:00:00.000Z', remoteModifiedTime: '2026-05-28T10:00:00.000Z',
+      },
+    });
+    const { syncGoogleDocUp } = await import('./google_docs.js');
+    const result = await syncGoogleDocUp('knowledge/My Doc.docx');
 
     expect(result.synced).toBe(true);
-    expect(batchUpdateCalls).toHaveLength(1);
-    const requests = batchUpdateCalls[0].requests as Array<Record<string, unknown>>;
-    // Old content cleared, then a heading style applied (structure, not flat text).
-    expect(requests.some((r) => 'deleteContentRange' in r)).toBe(true);
-    expect(requests.some((r) => 'updateParagraphStyle' in r)).toBe(true);
-    expect(requests.some((r) => 'updateTextStyle' in r)).toBe(true);
-    // Local note's baseline is bumped to the post-push revision.
-    expect(written!.content).toContain('remoteModifiedTime: "2026-05-28T10:00:00.000Z"');
+    expect(updateCalls).toEqual([{ fileId: 'doc-123' }]);
   });
 });
 

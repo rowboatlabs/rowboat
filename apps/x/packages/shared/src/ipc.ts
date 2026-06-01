@@ -692,9 +692,10 @@ const ipcSchemas = {
   'google-docs:sync': {
     req: z.object({
       path: RelPath,
-      markdown: z.string(),
       // Overwrite the Google Doc even if it changed remotely since last sync.
       force: z.boolean().optional(),
+      // Legacy field from the markdown-link path; ignored by the .docx sync.
+      markdown: z.string().optional(),
     }),
     res: z.object({
       synced: z.boolean(),
@@ -702,6 +703,21 @@ const ipcSchemas = {
       // True when a remote edit was detected and the push was held back.
       conflict: z.boolean().optional(),
       error: z.string().optional(),
+    }),
+  },
+  // Is this local .docx linked to a Google Doc? Drives the sync UI in the viewer.
+  'google-docs:getLink': {
+    req: z.object({
+      path: RelPath,
+    }),
+    res: z.object({
+      link: z.object({
+        id: z.string(),
+        url: z.string(),
+        title: z.string(),
+        syncedAt: z.string(),
+        remoteModifiedTime: z.string().optional(),
+      }).nullable(),
     }),
   },
   // Search channels
