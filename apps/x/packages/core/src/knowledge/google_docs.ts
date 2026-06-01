@@ -190,14 +190,21 @@ export async function listGoogleDocs(query?: string): Promise<{ files: GoogleDoc
   if (trimmed) {
     clauses.push(`name contains '${escapeDriveQueryValue(trimmed)}'`);
   }
+  const q = clauses.join(' and ');
   const result = await driveClient.files.list({
-    q: clauses.join(' and '),
+    q,
     pageSize: 25,
     orderBy: 'modifiedTime desc',
     fields: 'files(id,name,webViewLink,modifiedTime,owners(displayName,emailAddress))',
+    // Also surface docs in shared drives and "Shared with me", not just My Drive.
+    corpora: 'allDrives',
+    includeItemsFromAllDrives: true,
+    supportsAllDrives: true,
   });
 
-  return { files: (result.data.files ?? []).map(toGoogleDocListItem).filter((file) => file.id) };
+  const files = (result.data.files ?? []).map(toGoogleDocListItem).filter((file) => file.id);
+  console.log(`[GoogleDocs] list q="${q}" → ${files.length} doc(s)`);
+  return { files };
 }
 
 /** Import a Google Doc as a local .docx and register the link. */
