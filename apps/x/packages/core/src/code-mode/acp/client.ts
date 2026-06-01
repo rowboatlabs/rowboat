@@ -80,6 +80,10 @@ export class AcpClient {
     private child?: ChildProcess;
     private connection?: ClientSideConnection;
     private loadSession_ = false;
+    // Diagnostics: the adapter's stderr/exit are captured so a dropped connection
+    // reports WHY (e.g. a crash) instead of the SDK's bare "ACP connection closed".
+    private stderrTail = '';
+    private exitInfo: string | null = null;
 
     constructor(opts: AcpClientOptions) {
         this.agent = opts.agent;
@@ -104,9 +108,19 @@ export class AcpClient {
         const child = spawn(spec.command, spec.args, {
             cwd: this.cwd,
             env: spec.env,
-            stdio: ['pipe', 'pipe', 'inherit'],
+            // Capture stderr (not inherit) so we can attribute a dropped connection.
+            stdio: ['pipe', 'pipe', 'pipe'],
         });
         this.child = child;
+        child.stderr?.on('data', (d: Buffer) => {
+            this.stderrTail = (this.stderrTail + d.toString()).slice(-4000);
+        });
+        child.on('exit', (code, signal) => {
+            this.exitInfo = `adapter exited (code ${code}${signal ? `, signal ${signal}` : ''})`;
+        });
+        child.on('error', (err) => {
+            this.stderrTail = (this.stderrTail + `\nspawn error: ${err.message}`).slice(-4000);
+        });
 
         const stream = ndJsonStream(
             Writable.toWeb(child.stdin!) as WritableStream<Uint8Array>,
@@ -115,24 +129,51 @@ export class AcpClient {
         const client = this.buildClient();
         this.connection = new ClientSideConnection(() => client, stream);
 
-        const init = await this.connection.initialize({
-            protocolVersion: PROTOCOL_VERSION,
-            clientCapabilities: { fs: { readTextFile: true, writeTextFile: true } },
-        });
-        this.loadSession_ = init.agentCapabilities?.loadSession === true;
+        try {
+            const init = await this.connection.initialize({
+                protocolVersion: PROTOCOL_VERSION,
+                clientCapabilities: { fs: { readTextFile: true, writeTextFile: true } },
+            });
+            this.loadSession_ = init.agentCapabilities?.loadSession === true;
+        } catch (e) {
+            throw this.enrich(e, 'initialize');
+        }
     }
 
     async newSession(): Promise<string> {
-        const res = await this.conn().newSession({ cwd: this.cwd, mcpServers: [] });
-        return res.sessionId;
+        try {
+            const res = await this.conn().newSession({ cwd: this.cwd, mcpServers: [] });
+            return res.sessionId;
+        } catch (e) {
+            throw this.enrich(e, 'newSession');
+        }
     }
 
     async loadSession(sessionId: string): Promise<void> {
-        await this.conn().loadSession({ sessionId, cwd: this.cwd, mcpServers: [] });
+        try {
+            await this.conn().loadSession({ sessionId, cwd: this.cwd, mcpServers: [] });
+        } catch (e) {
+            throw this.enrich(e, 'loadSession');
+        }
     }
 
     async prompt(sessionId: string, text: string): Promise<PromptResponse> {
-        return this.conn().prompt({ sessionId, prompt: [{ type: 'text', text }] });
+        try {
+            return await this.conn().prompt({ sessionId, prompt: [{ type: 'text', text }] });
+        } catch (e) {
+            throw this.enrich(e, 'prompt');
+        }
+    }
+
+    // Wrap a connection error with the adapter's exit/stderr so failures are
+    // self-explanatory rather than the SDK's opaque "ACP connection closed".
+    private enrich(err: unknown, phase: string): Error {
+        const base = err instanceof Error ? err.message : String(err);
+        const parts = [
+            this.exitInfo,
+            this.stderrTail.trim() ? `adapter output: ${this.stderrTail.trim().slice(-1200)}` : '',
+        ].filter(Boolean);
+        return new Error(parts.length ? `${base} — ${parts.join(' | ')} [during ${phase}]` : `${base} [during ${phase}]`);
     }
 
     async cancel(sessionId: string): Promise<void> {

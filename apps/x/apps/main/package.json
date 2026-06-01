@@ -13,6 +13,8 @@
         "make": "electron-forge make"
     },
     "dependencies": {
+        "@agentclientprotocol/claude-agent-acp": "^0.39.0",
+        "@agentclientprotocol/codex-acp": "^0.0.44",
         "@x/core": "workspace:*",
         "@x/shared": "workspace:*",
         "chokidar": "^4.0.3",

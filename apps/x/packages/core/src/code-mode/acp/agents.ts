@@ -49,5 +49,12 @@ export function getAgentLaunchSpec(agent: CodingAgent): AgentLaunchSpec {
         if (exe) env.CLAUDE_CODE_EXECUTABLE = exe;
     }
 
+    // We spawn the adapter with process.execPath. Inside Electron's main process
+    // that is the Electron binary, NOT node — so set ELECTRON_RUN_AS_NODE=1 to make
+    // it behave as a plain Node runtime. (Harmless under a real node process, which
+    // ignores the var.) Without this the child never runs as node and the ACP stdio
+    // stream closes immediately ("ACP connection closed").
+    env.ELECTRON_RUN_AS_NODE = '1';
+
     return { command: process.execPath, args: [entry], env };
 }

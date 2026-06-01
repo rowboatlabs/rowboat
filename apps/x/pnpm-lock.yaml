@@ -47,6 +47,12 @@ importers:
 
   apps/main:
     dependencies:
+      '@agentclientprotocol/claude-agent-acp':
+        specifier: ^0.39.0
+        version: 0.39.0(@anthropic-ai/sdk@0.100.1(zod@4.2.1))(@modelcontextprotocol/sdk@1.25.1(hono@4.11.3)(zod@4.2.1))
+      '@agentclientprotocol/codex-acp':
+        specifier: ^0.0.44
+        version: 0.0.44(zod@4.2.1)
       '@x/core':
         specifier: workspace:*
         version: link:../../packages/core
