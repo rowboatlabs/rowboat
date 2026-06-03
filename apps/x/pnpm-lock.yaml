@@ -10,6 +10,11 @@ catalogs:
       specifier: 4.1.7
       version: 4.1.7
 
+patchedDependencies:
+  '@openai/codex@0.128.0':
+    hash: 9edd926108a95aaa788aa93870fd6b16d70eeccdf5740b503af5d34cc9f25e86
+    path: patches/@openai__codex@0.128.0.patch
+
 importers:
 
   .:
@@ -8249,7 +8254,7 @@ snapshots:
   '@agentclientprotocol/codex-acp@0.0.44(zod@4.2.1)':
     dependencies:
       '@agentclientprotocol/sdk': 0.21.1(zod@4.2.1)
-      '@openai/codex': 0.128.0
+      '@openai/codex': 0.128.0(patch_hash=9edd926108a95aaa788aa93870fd6b16d70eeccdf5740b503af5d34cc9f25e86)
       diff: 8.0.4
       open: 11.0.0
       vscode-jsonrpc: 8.2.1
@@ -10101,7 +10106,7 @@ snapshots:
 
   '@oozcitak/util@8.3.4': {}
 
-  '@openai/codex@0.128.0':
+  '@openai/codex@0.128.0(patch_hash=9edd926108a95aaa788aa93870fd6b16d70eeccdf5740b503af5d34cc9f25e86)':
     optionalDependencies:
       '@openai/codex-darwin-arm64': '@openai/codex@0.128.0-darwin-arm64'
       '@openai/codex-darwin-x64': '@openai/codex@0.128.0-darwin-x64'
