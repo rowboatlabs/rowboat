@@ -17,6 +17,7 @@ import {
   LoaderIcon,
   Mic,
   Plus,
+  ShieldCheck,
   Square,
   Terminal,
   X,
@@ -85,6 +86,8 @@ export interface SelectedModel {
   model: string
 }
 
+export type PermissionMode = 'manual' | 'auto'
+
 function getSelectedModelDisplayName(model: string) {
   return model.split('/').pop() || model
 }
@@ -109,7 +112,7 @@ function getAttachmentIcon(kind: AttachmentIconKind) {
 }
 
 interface ChatInputInnerProps {
-  onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex') => void
+  onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => void
   onStop?: () => void
   isProcessing: boolean
   isStopping?: boolean
@@ -182,11 +185,13 @@ function ChatInputInner({
   const [codingAgent, setCodingAgent] = useState<'claude' | 'codex'>('claude')
   const [codeModeEnabled, setCodeModeEnabled] = useState(false)
   const [codeModeFeatureEnabled, setCodeModeFeatureEnabled] = useState(false)
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>('auto')
 
   // When a run exists, freeze the dropdown to the run's resolved model+provider.
   useEffect(() => {
     if (!runId) {
       setLockedModel(null)
+      setPermissionMode('auto')
       return
     }
     let cancelled = false
@@ -195,6 +200,7 @@ function ChatInputInner({
       if (run.provider && run.model) {
         setLockedModel({ provider: run.provider, model: run.model })
       }
+      setPermissionMode(run.permissionMode ?? 'manual')
     }).catch(() => { /* legacy run or fetch failure — leave unlocked */ })
     return () => { cancelled = true }
   }, [runId])
@@ -482,13 +488,13 @@ function ChatInputInner({
     if (!canSubmit) return
     // codeMode is sticky per conversation — don't reset after send.
     const effectiveCodeMode = codeModeEnabled ? codingAgent : undefined
-    onSubmit({ text: message.trim(), files: [] }, controller.mentions.mentions, attachments, searchEnabled || undefined, effectiveCodeMode)
+    onSubmit({ text: message.trim(), files: [] }, controller.mentions.mentions, attachments, searchEnabled || undefined, effectiveCodeMode, permissionMode)
     controller.textInput.clear()
     controller.mentions.clearMentions()
     setAttachments([])
     // Web search toggle stays on for the rest of the chat session; the user
     // turns it off explicitly. (Not persisted across app restarts.)
-  }, [attachments, canSubmit, controller, message, onSubmit, searchEnabled, codeModeEnabled, codingAgent, workDir])
+  }, [attachments, canSubmit, controller, message, onSubmit, searchEnabled, codeModeEnabled, codingAgent, permissionMode, workDir])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -709,6 +715,36 @@ function ChatInputInner({
             </span>
           </button>
         )}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={() => {
+                if (runId) return
+                setPermissionMode((mode) => mode === 'auto' ? 'manual' : 'auto')
+              }}
+              disabled={Boolean(runId)}
+              className={cn(
+                "flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium transition-colors",
+                permissionMode === 'auto'
+                  ? "bg-secondary text-foreground hover:bg-secondary/70"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                runId && "cursor-not-allowed opacity-70 hover:bg-secondary"
+              )}
+              aria-label="Permission mode"
+            >
+              <ShieldCheck className="h-3.5 w-3.5" />
+              <span>{permissionMode === 'auto' ? 'Auto' : 'Manual'}</span>
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top">
+            {runId
+              ? `Permission mode is fixed for this run: ${permissionMode === 'auto' ? 'Auto' : 'Manual'}`
+              : permissionMode === 'auto'
+                ? 'Auto-permission on — click for manual approval prompts'
+                : 'Manual approval prompts — click for auto-permission'}
+          </TooltipContent>
+        </Tooltip>
         {codeModeFeatureEnabled && (codeModeEnabled ? (
           <div className="flex h-7 shrink-0 items-center rounded-full bg-secondary text-xs font-medium text-foreground">
             <Tooltip>
@@ -915,7 +951,7 @@ export interface ChatInputWithMentionsProps {
   knowledgeFiles: string[]
   recentFiles: string[]
   visibleFiles: string[]
-  onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex') => void
+  onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => void
   onStop?: () => void
   isProcessing: boolean
   isStopping?: boolean

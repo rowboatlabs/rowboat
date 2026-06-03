@@ -32,6 +32,7 @@ export async function createRun(opts: z.infer<typeof CreateRunOptions>): Promise
         agentId: opts.agentId,
         model,
         provider,
+        permissionMode: opts.permissionMode ?? "manual",
         useCase,
         ...(opts.subUseCase ? { subUseCase: opts.subUseCase } : {}),
     });
