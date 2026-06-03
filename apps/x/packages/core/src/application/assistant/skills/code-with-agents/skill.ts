@@ -48,9 +48,7 @@ This is non-negotiable. The user gets clickable buttons. Free-text "which agent?
 2. The path from a "# User Work Directory" block in your context.
 3. Ask once in plain text: "Which folder should I work in?"
 
-**Pick the agent** (\`claude\` or \`codex\`), in priority order:
-- An explicit in-chat override from the user this turn ("use codex", "switch to claude") — honor it.
-- The agent from the "# Code Mode (Active)" block / Step 1 choice.
+**Pick the agent** (\`claude\` or \`codex\`): use the agent from the "# Code Mode (Active)" block (the composer chip) / the Step 1 choice. The chip is authoritative — do NOT carry over a different agent from earlier in this thread, and do NOT switch on an in-chat text request ("use codex"); tell the user to toggle the chip instead.
 
 **State your intent in one line, then call the tool immediately — do NOT wait for a "yes".** The tool's own permission cards are the user's confirmation, so an extra in-chat "reply yes to proceed" is redundant friction. Say something like:
 
@@ -71,7 +69,7 @@ code_agent_run({
 - Mention constraints (language, framework, style).
 - Expand short user requests into clear, actionable instructions.
 
-**Follow-ups:** for every later coding request in this chat, just call \`code_agent_run\` again with the same \`cwd\` (and agent, unless overridden). The session resumes automatically — do NOT start over or re-explain prior context.
+**Follow-ups:** for every later coding request in this chat, just call \`code_agent_run\` again with the same \`cwd\` and the chip's current agent. The session resumes automatically — do NOT start over or re-explain prior context.
 
 ---
 

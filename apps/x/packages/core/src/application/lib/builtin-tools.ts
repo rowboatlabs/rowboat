@@ -811,7 +811,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
     code_agent_run: {
         description: 'Run a coding/software task with the selected on-device coding agent (Claude Code or Codex) inside a project folder. Streams the agent\'s tool calls, file diffs, and plan into the chat and surfaces permission requests inline. Use this for ALL code-mode work (writing/editing/reading code, running tests, debugging, exploring a repo). Reuses one persistent session per chat, so follow-up requests keep context.',
         inputSchema: z.object({
-            agent: z.enum(['claude', 'codex']).describe('Which coding agent to use: "claude" (Claude Code) or "codex". Pick per the active code-mode selection / any in-chat override.'),
+            agent: z.enum(['claude', 'codex']).describe('Which coding agent to use: "claude" (Claude Code) or "codex". Set this to the active code-mode chip agent. Note: when the chip is set, the backend uses the chip agent regardless of this value — this only takes effect in the ask-human flow where no chip is set.'),
             cwd: z.string().describe('Absolute path to the working directory / project folder the agent should operate in.'),
             prompt: z.string().describe('The full, self-contained coding instruction for the agent (file names, expected behavior, constraints).'),
         }),
@@ -819,6 +819,11 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
             if (!ctx) {
                 return { success: false, message: 'code_agent_run requires run context (runId / streaming).' };
             }
+            // The composer chip is the source of truth for the agent. The model's `agent`
+            // argument is only a fallback for the ask-human flow (code mode not active, no
+            // chip set) — otherwise it can anchor on the thread's earlier agent and ignore a
+            // chip change. Honor the chip so switching it deterministically switches agents.
+            const effectiveAgent = ctx.codeMode ?? agent;
             const manager = container.resolve<CodeModeManager>('codeModeManager');
             const registry = container.resolve<CodePermissionRegistry>('codePermissionRegistry');
 
@@ -831,11 +836,11 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 // fall back to 'ask'
             }
 
-            // Cancel the coding turn (and unblock any pending approval) if the run is stopped.
-            const onAbort = () => {
-                manager.cancel(ctx.runId).catch(() => {});
-                registry.cancelRun(ctx.runId);
-            };
+            // On stop, unblock any pending approval card so the broker stops waiting for
+            // an answer that will never come. The ACP cancel + force-kill backstop that
+            // actually ends the turn is handled inside manager.runPrompt via the signal
+            // we pass below.
+            const onAbort = () => registry.cancelRun(ctx.runId);
             if (ctx.signal.aborted) onAbort();
             else ctx.signal.addEventListener('abort', onAbort, { once: true });
 
@@ -844,10 +849,11 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
             try {
                 const result = await manager.runPrompt({
                     runId: ctx.runId,
-                    agent,
+                    agent: effectiveAgent,
                     cwd,
                     prompt,
                     policy,
+                    signal: ctx.signal,
                     onEvent: (event) => {
                         if (event.type === 'message' && event.role === 'agent') finalText += event.text;
                         if (event.type === 'tool_call_update') for (const f of event.diffs) changedFiles.add(f);
@@ -873,10 +879,23 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 return {
                     success: result.stopReason === 'end_turn',
                     stopReason: result.stopReason,
+                    // The agent that actually ran (the chip), so the UI can label the run
+                    // authoritatively rather than trusting the model's `agent` argument.
+                    agent: effectiveAgent,
                     summary: finalText.trim(),
                     changedFiles: [...changedFiles],
                 };
             } catch (error) {
+                // A stop mid-run isn't a failure — report it as a clean cancellation.
+                if (ctx.signal.aborted) {
+                    return {
+                        success: false,
+                        stopReason: 'cancelled',
+                        agent: effectiveAgent,
+                        summary: finalText.trim(),
+                        changedFiles: [...changedFiles],
+                    };
+                }
                 return {
                     success: false,
                     message: `Coding agent failed: ${error instanceof Error ? error.message : String(error)}`,

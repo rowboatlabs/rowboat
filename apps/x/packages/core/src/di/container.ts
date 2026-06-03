@@ -46,8 +46,9 @@ container.register({
     agentScheduleStateRepo: asClass<IAgentScheduleStateRepo>(FSAgentScheduleStateRepo).singleton(),
     slackConfigRepo: asClass<ISlackConfigRepo>(FSSlackConfigRepo).singleton(),
 
-    // ACP code-mode engine: the manager holds live agent connections for the app
-    // lifetime (warm sessions across messages); the registry brokers mid-run approvals.
+    // ACP code-mode engine: the manager holds a live agent connection per chat only
+    // around an active turn (torn down after a short idle grace; resumed via
+    // session/load); the registry brokers mid-run approvals.
     codeModeManager: asClass(CodeModeManager).singleton(),
     codePermissionRegistry: asClass(CodePermissionRegistry).singleton(),
 });

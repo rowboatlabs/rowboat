@@ -40,7 +40,8 @@ import started from "electron-squirrel-startup";
 import { execSync, exec, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { init as initChromeSync } from "@x/core/dist/knowledge/chrome-extension/server/server.js";
-import { registerBrowserControlService, registerNotificationService } from "@x/core/dist/di/container.js";
+import container, { registerBrowserControlService, registerNotificationService } from "@x/core/dist/di/container.js";
+import type { CodeModeManager } from "@x/core/dist/code-mode/acp/manager.js";
 import { browserViewManager, BROWSER_PARTITION } from "./browser/view.js";
 import { setupBrowserEventForwarding } from "./browser/ipc.js";
 import { ElectronBrowserControlService } from "./browser/control-service.js";
@@ -416,6 +417,12 @@ app.on("before-quit", () => {
   stopWorkspaceWatcher();
   stopRunsWatcher();
   stopServicesWatcher();
+  // Tear down any live ACP coding-agent adapter processes so they don't outlive the app.
+  try {
+    container.resolve<CodeModeManager>('codeModeManager').disposeAll();
+  } catch {
+    // nothing live to dispose
+  }
   shutdownLocalSites().catch((error) => {
     console.error('[LocalSites] Failed to shut down cleanly:', error);
   });

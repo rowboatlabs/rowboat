@@ -230,7 +230,12 @@ export function CodingRunBlock({
   onOpenChange: (open: boolean) => void
   onPermissionDecision: (decision: PermissionDecision) => void
 }) {
-  const agent = (item.input as { agent?: string } | undefined)?.agent
+  // Prefer the agent the backend actually ran (the chip) once the run returns; fall
+  // back to the requested input agent while it's still in flight. Never trust only the
+  // model's input — it can pass a stale agent the backend overrode with the chip.
+  const agent =
+    (item.result as { agent?: string } | undefined)?.agent ??
+    (item.input as { agent?: string } | undefined)?.agent
   const title = AGENT_LABEL[agent ?? ''] ?? 'Coding agent'
   return (
     <>

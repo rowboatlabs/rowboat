@@ -14,6 +14,10 @@ export interface ToolContext {
     signal: AbortSignal;
     abortRegistry: IAbortRegistry;
     publish: (event: z.infer<typeof RunEvent>) => Promise<void>;
+    // The composer code-mode chip for the message that triggered this turn. When set,
+    // it is the authoritative coding agent — code_agent_run uses it rather than the
+    // agent the model guessed, so switching the chip deterministically switches agents.
+    codeMode?: 'claude' | 'codex' | null;
 }
 
 async function execMcpTool(agentTool: z.infer<typeof ToolAttachment> & { type: "mcp" }, input: Record<string, unknown>): Promise<unknown> {

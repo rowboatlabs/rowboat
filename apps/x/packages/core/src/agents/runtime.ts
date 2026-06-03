@@ -1255,6 +1255,7 @@ export async function* streamAgent({
                     signal,
                     abortRegistry,
                     publish: (event) => bus.publish(event),
+                    codeMode,
                 });
             }
             } catch (error) {
@@ -1402,17 +1403,15 @@ Do not announce the work directory unless it's relevant. Just use it.`;
         if (codeMode) {
             loopLogger.log('code mode enabled, injecting coding-agent context', codeMode);
             const agentDisplay = codeMode === 'claude' ? 'Claude Code' : 'Codex';
-            const otherAgent = codeMode === 'claude' ? 'codex' : 'claude';
-            const otherDisplay = codeMode === 'claude' ? 'Codex' : 'Claude Code';
-            instructionsWithDateTime += `\n\n# Code Mode (Active) — Default agent: ${agentDisplay}
-The user has turned on **code mode** and the composer chip is set to **${agentDisplay}** (\`${codeMode}\`). Use this as the **default** agent for coding tasks in this turn.
+            instructionsWithDateTime += `\n\n# Code Mode (Active) — Agent: ${agentDisplay}
+The user has turned on **code mode** and the composer chip is set to **${agentDisplay}** (\`${codeMode}\`). For EVERY coding task this turn, use **${agentDisplay}**, and narrate that agent ("Using ${agentDisplay} to …").
 
-**The user can override the agent at any time, two ways:**
-1. By toggling the chip in the composer (preferred).
-2. By asking you directly in chat ("use codex", "switch to claude", "do this with ${otherDisplay}", etc.). When the user explicitly asks to use a different agent in the current message, honor that — use \`${otherAgent}\` instead of \`${codeMode}\` for this turn, and briefly mention they can also toggle it via the chip for stickiness.
+The chip is the single source of truth for which agent runs:
+- Do NOT carry over a different agent from earlier in this thread — even if a previous run used the other agent, use **${agentDisplay}** now.
+- Do NOT switch agents based on an in-chat text request ("use codex", "switch to claude"). The agent only changes when the user toggles the chip; if they ask in chat, tell them to toggle the chip.
 
 **How to run coding work — call the \`code_agent_run\` tool** with:
-- \`agent\`: \`${codeMode}\` by default (or the in-chat override above).
+- \`agent\`: \`${codeMode}\` (always — match the chip).
 - \`cwd\`: the absolute project/working directory (resolve it per the code-with-agents skill — a path the user named, the "# User Work Directory" block, or ask once).
 - \`prompt\`: a clear, self-contained coding instruction.
 
