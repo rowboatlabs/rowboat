@@ -56,6 +56,7 @@ module.exports = {
                 description: 'AI coworker with memory',
                 name: `Rowboat-win32-${arch}`,
                 setupExe: `Rowboat-win32-${arch}-${pkg.version}-setup.exe`,
+                setupIcon: path.join(__dirname, 'icons/icon.ico'),
             })
         },
         {

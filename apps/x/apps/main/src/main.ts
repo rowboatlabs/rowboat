@@ -220,6 +220,7 @@ function createWindow() {
     backgroundColor: "#252525", // Prevent white flash (matches dark mode)
     titleBarStyle: "hiddenInset",
     trafficLightPosition: { x: 12, y: 12 },
+    icon: process.platform !== "darwin" ? path.join(__dirname, "../../icons/icon.png") : undefined,
     webPreferences: {
       // IMPORTANT: keep Node out of renderer
       nodeIntegration: false,
