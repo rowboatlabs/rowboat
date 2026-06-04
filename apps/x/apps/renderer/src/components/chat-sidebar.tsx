@@ -28,6 +28,7 @@ import { Tool, ToolContent, ToolGroupComponent, ToolHeader, ToolTabbedContent } 
 import { WebSearchResult } from '@/components/ai-elements/web-search-result'
 import { ComposioConnectCard } from '@/components/ai-elements/composio-connect-card'
 import { PermissionRequest } from '@/components/ai-elements/permission-request'
+import { AutoPermissionDecision } from '@/components/ai-elements/auto-permission-decision'
 import { TerminalOutput } from '@/components/terminal-output'
 import { AskHumanRequest } from '@/components/ai-elements/ask-human-request'
 import { type PromptInputMessage, type FileMention } from '@/components/ai-elements/prompt-input'
@@ -36,7 +37,7 @@ import { MarkdownPreOverride } from '@/components/ai-elements/markdown-code-over
 import { defaultRemarkPlugins } from 'streamdown'
 import remarkBreaks from 'remark-breaks'
 import { type ChatTab } from '@/components/tab-bar'
-import { ChatInputWithMentions, type StagedAttachment, type SelectedModel } from '@/components/chat-input-with-mentions'
+import { ChatInputWithMentions, type PermissionMode, type StagedAttachment, type SelectedModel } from '@/components/chat-input-with-mentions'
 import { ChatMessageAttachments } from '@/components/chat-message-attachments'
 import { useSidebar } from '@/components/ui/sidebar'
 import { wikiLabel } from '@/lib/wiki-links'
@@ -139,7 +140,7 @@ interface ChatSidebarProps {
   isProcessing: boolean
   isStopping?: boolean
   onStop?: () => void
-  onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[]) => void
+  onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => void
   knowledgeFiles?: string[]
   recentFiles?: string[]
   visibleFiles?: string[]
@@ -154,6 +155,7 @@ interface ChatSidebarProps {
   pendingAskHumanRequests?: ChatTabViewState['pendingAskHumanRequests']
   allPermissionRequests?: ChatTabViewState['allPermissionRequests']
   permissionResponses?: ChatTabViewState['permissionResponses']
+  autoPermissionDecisions?: ChatTabViewState['autoPermissionDecisions']
   onPermissionResponse?: (toolCallId: string, subflow: string[], response: PermissionResponse, scope?: 'once' | 'session' | 'always') => void
   onAskHumanResponse?: (toolCallId: string, subflow: string[], response: string) => void
   isToolOpenForTab?: (tabId: string, toolId: string) => boolean
@@ -211,6 +213,7 @@ export function ChatSidebar({
   pendingAskHumanRequests = new Map(),
   allPermissionRequests = new Map(),
   permissionResponses = new Map(),
+  autoPermissionDecisions = new Map(),
   onPermissionResponse,
   onAskHumanResponse,
   isToolOpenForTab,
@@ -325,6 +328,7 @@ export function ChatSidebar({
     pendingAskHumanRequests,
     allPermissionRequests,
     permissionResponses,
+    autoPermissionDecisions,
   }), [
     runId,
     conversation,
@@ -332,6 +336,7 @@ export function ChatSidebar({
     pendingAskHumanRequests,
     allPermissionRequests,
     permissionResponses,
+    autoPermissionDecisions,
   ])
   const emptyTabState = useMemo<ChatTabViewState>(() => createEmptyChatTabViewState(), [])
   const getTabState = useCallback((tabId: string): ChatTabViewState => {
@@ -358,7 +363,11 @@ export function ChatSidebar({
     }
   }, [activeRunId])
 
-  const renderConversationItem = (item: ConversationItem, tabId: string) => {
+  const renderConversationItem = (
+    item: ConversationItem,
+    tabId: string,
+    options?: { autoPermissionDetail?: { decision: 'allow'; reason: string } },
+  ) => {
     if (isChatMessage(item)) {
       if (item.role === 'user') {
         if (item.attachments && item.attachments.length > 0) {
@@ -451,6 +460,7 @@ export function ChatSidebar({
           key={item.id}
           open={isToolOpenForTab?.(tabId, item.id) ?? false}
           onOpenChange={(open) => onToolOpenChangeForTab?.(tabId, item.id, open)}
+          autoPermissionDetail={options?.autoPermissionDetail}
         >
           <ToolHeader title={toolTitle} type={`tool-${item.name}`} state={toToolState(item.status)} />
           <ToolContent>
@@ -626,7 +636,7 @@ export function ChatSidebar({
                             <>
                               {groupConversationItems(
                                 tabState.conversation,
-                                (id) => !!tabState.allPermissionRequests.get(id)
+                                (id) => !!tabState.allPermissionRequests.get(id) || !!tabState.autoPermissionDecisions.get(id)
                               ).map((item) => {
                                 if (isToolGroup(item)) {
                                   return (
@@ -638,22 +648,43 @@ export function ChatSidebar({
                                     />
                                   )
                                 }
-                                const rendered = renderConversationItem(item, tab.id)
-                                if (isToolCall(item) && onPermissionResponse) {
+                                const autoDecision = isToolCall(item)
+                                  ? tabState.autoPermissionDecisions.get(item.id)
+                                  : undefined
+                                const rendered = renderConversationItem(
+                                  item,
+                                  tab.id,
+                                  autoDecision?.decision === 'allow'
+                                    ? { autoPermissionDetail: { decision: 'allow', reason: autoDecision.reason } }
+                                    : undefined,
+                                )
+                                if (isToolCall(item)) {
+                                  const deniedAutoDecision = autoDecision?.decision === 'deny' ? autoDecision : null
                                   const permRequest = tabState.allPermissionRequests.get(item.id)
-                                  if (permRequest) {
+                                  if (deniedAutoDecision || (permRequest && onPermissionResponse)) {
                                     const response = tabState.permissionResponses.get(item.id) || null
                                     return (
                                       <React.Fragment key={item.id}>
-                                        <PermissionRequest
-                                          toolCall={permRequest.toolCall}
-                                          onApprove={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
-                                          onApproveSession={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'session')}
-                                          onApproveAlways={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'always')}
-                                          onDeny={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
-                                          isProcessing={isActive && isProcessing}
-                                          response={response}
-                                        />
+                                        {deniedAutoDecision && (
+                                          <AutoPermissionDecision
+                                            toolCall={deniedAutoDecision.toolCall}
+                                            permission={deniedAutoDecision.permission}
+                                            decision={deniedAutoDecision.decision}
+                                            reason={deniedAutoDecision.reason}
+                                          />
+                                        )}
+                                        {permRequest && onPermissionResponse && (
+                                          <PermissionRequest
+                                            toolCall={permRequest.toolCall}
+                                            permission={permRequest.permission}
+                                            onApprove={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
+                                            onApproveSession={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'session')}
+                                            onApproveAlways={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'always')}
+                                            onDeny={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
+                                            isProcessing={isActive && isProcessing}
+                                            response={response}
+                                          />
+                                        )}
                                         {rendered}
                                       </React.Fragment>
                                     )

@@ -35,6 +35,7 @@ export type CreateRunRepoOptions = {
     agentId: string;
     model: string;
     provider: string;
+    permissionMode: "manual" | "auto";
     useCase: z.infer<typeof UseCase>;
     subUseCase?: string;
 };
@@ -204,6 +205,7 @@ export class FSRunsRepo implements IRunsRepo {
             agentName: options.agentId,
             model: options.model,
             provider: options.provider,
+            permissionMode: options.permissionMode,
             useCase: options.useCase,
             ...(options.subUseCase ? { subUseCase: options.subUseCase } : {}),
             subflow: [],
@@ -216,6 +218,7 @@ export class FSRunsRepo implements IRunsRepo {
             agentId: options.agentId,
             model: options.model,
             provider: options.provider,
+            permissionMode: options.permissionMode,
             useCase: options.useCase,
             ...(options.subUseCase ? { subUseCase: options.subUseCase } : {}),
             log: [start],
@@ -251,6 +254,7 @@ export class FSRunsRepo implements IRunsRepo {
             agentId: start.agentName,
             model: start.model,
             provider: start.provider,
+            permissionMode: start.permissionMode ?? "manual",
             ...(start.useCase ? { useCase: start.useCase } : {}),
             ...(start.subUseCase ? { subUseCase: start.subUseCase } : {}),
             log: events,

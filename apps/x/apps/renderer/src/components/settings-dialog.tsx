@@ -277,17 +277,27 @@ const defaultBaseURLs: Partial<Record<LlmProviderFlavor, string>> = {
   "openai-compatible": "http://localhost:1234/v1",
 }
 
+type ProviderModelConfig = {
+  apiKey: string
+  baseURL: string
+  models: string[]
+  knowledgeGraphModel: string
+  meetingNotesModel: string
+  liveNoteAgentModel: string
+  autoPermissionDecisionModel: string
+}
+
 function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
   const [provider, setProvider] = useState<LlmProviderFlavor>("openai")
   const [defaultProvider, setDefaultProvider] = useState<LlmProviderFlavor | null>(null)
-  const [providerConfigs, setProviderConfigs] = useState<Record<LlmProviderFlavor, { apiKey: string; baseURL: string; models: string[]; knowledgeGraphModel: string; meetingNotesModel: string; liveNoteAgentModel: string }>>({
-    openai: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "" },
-    anthropic: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "" },
-    google: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "" },
-    openrouter: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "" },
-    aigateway: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "" },
-    ollama: { apiKey: "", baseURL: "http://localhost:11434", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "" },
-    "openai-compatible": { apiKey: "", baseURL: "http://localhost:1234/v1", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "" },
+  const [providerConfigs, setProviderConfigs] = useState<Record<LlmProviderFlavor, ProviderModelConfig>>({
+    openai: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
+    anthropic: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
+    google: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
+    openrouter: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
+    aigateway: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
+    ollama: { apiKey: "", baseURL: "http://localhost:11434", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
+    "openai-compatible": { apiKey: "", baseURL: "http://localhost:1234/v1", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
   })
   const [modelsCatalog, setModelsCatalog] = useState<Record<string, LlmModelOption[]>>({})
   const [modelsLoading, setModelsLoading] = useState(false)
@@ -313,7 +323,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
     (!requiresBaseURL || activeConfig.baseURL.trim().length > 0)
 
   const updateConfig = useCallback(
-    (prov: LlmProviderFlavor, updates: Partial<{ apiKey: string; baseURL: string; models: string[]; knowledgeGraphModel: string; meetingNotesModel: string; liveNoteAgentModel: string }>) => {
+    (prov: LlmProviderFlavor, updates: Partial<ProviderModelConfig>) => {
       setProviderConfigs(prev => ({
         ...prev,
         [prov]: { ...prev[prov], ...updates },
@@ -388,6 +398,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
                     knowledgeGraphModel: e.knowledgeGraphModel || "",
                     meetingNotesModel: e.meetingNotesModel || "",
                     liveNoteAgentModel: e.liveNoteAgentModel || "",
+                    autoPermissionDecisionModel: e.autoPermissionDecisionModel || "",
                   };
                 }
               }
@@ -406,6 +417,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
                 knowledgeGraphModel: parsed.knowledgeGraphModel || "",
                 meetingNotesModel: parsed.meetingNotesModel || "",
                 liveNoteAgentModel: parsed.liveNoteAgentModel || "",
+                autoPermissionDecisionModel: parsed.autoPermissionDecisionModel || "",
               };
             }
             return next;
@@ -481,6 +493,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
         knowledgeGraphModel: activeConfig.knowledgeGraphModel.trim() || undefined,
         meetingNotesModel: activeConfig.meetingNotesModel.trim() || undefined,
         liveNoteAgentModel: activeConfig.liveNoteAgentModel.trim() || undefined,
+        autoPermissionDecisionModel: activeConfig.autoPermissionDecisionModel.trim() || undefined,
       }
       const result = await window.ipc.invoke("models:test", providerConfig)
       if (result.success) {
@@ -515,6 +528,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
         knowledgeGraphModel: config.knowledgeGraphModel.trim() || undefined,
         meetingNotesModel: config.meetingNotesModel.trim() || undefined,
         liveNoteAgentModel: config.liveNoteAgentModel.trim() || undefined,
+        autoPermissionDecisionModel: config.autoPermissionDecisionModel.trim() || undefined,
       })
       setDefaultProvider(prov)
       window.dispatchEvent(new Event('models-config-changed'))
@@ -546,6 +560,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
         parsed.knowledgeGraphModel = defConfig.knowledgeGraphModel.trim() || undefined
         parsed.meetingNotesModel = defConfig.meetingNotesModel.trim() || undefined
         parsed.liveNoteAgentModel = defConfig.liveNoteAgentModel.trim() || undefined
+        parsed.autoPermissionDecisionModel = defConfig.autoPermissionDecisionModel.trim() || undefined
       }
       await window.ipc.invoke("workspace:writeFile", {
         path: "config/models.json",
@@ -553,7 +568,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
       })
       setProviderConfigs(prev => ({
         ...prev,
-        [prov]: { apiKey: "", baseURL: defaultBaseURLs[prov] || "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "" },
+        [prov]: { apiKey: "", baseURL: defaultBaseURLs[prov] || "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
       }))
       setTestState({ status: "idle" })
       window.dispatchEvent(new Event('models-config-changed'))
@@ -796,6 +811,40 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
             <Select
               value={activeConfig.liveNoteAgentModel || "__same__"}
               onValueChange={(value) => updateConfig(provider, { liveNoteAgentModel: value === "__same__" ? "" : value })}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select a model" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__same__">Same as assistant</SelectItem>
+                {modelsForProvider.map((m) => (
+                  <SelectItem key={m.id} value={m.id}>
+                    {m.name || m.id}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </div>
+
+        {/* Auto-permission model */}
+        <div className="space-y-2">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Auto-permission model</span>
+          {modelsLoading ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" />
+              Loading...
+            </div>
+          ) : showModelInput ? (
+            <Input
+              value={activeConfig.autoPermissionDecisionModel}
+              onChange={(e) => updateConfig(provider, { autoPermissionDecisionModel: e.target.value })}
+              placeholder={primaryModel || "Enter model"}
+            />
+          ) : (
+            <Select
+              value={activeConfig.autoPermissionDecisionModel || "__same__"}
+              onValueChange={(value) => updateConfig(provider, { autoPermissionDecisionModel: value === "__same__" ? "" : value })}
             >
               <SelectTrigger>
                 <SelectValue placeholder="Select a model" />

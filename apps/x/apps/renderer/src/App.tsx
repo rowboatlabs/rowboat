@@ -11,7 +11,7 @@ import { MarkdownEditor, type MarkdownEditorHandle } from './components/markdown
 import { ChatSidebar } from './components/chat-sidebar';
 import { ChatHeader } from './components/chat-header';
 import { ChatEmptyState } from './components/chat-empty-state';
-import { ChatInputWithMentions, type StagedAttachment } from './components/chat-input-with-mentions';
+import { ChatInputWithMentions, type PermissionMode, type StagedAttachment } from './components/chat-input-with-mentions';
 import { ChatMessageAttachments } from '@/components/chat-message-attachments'
 import { GraphView, type GraphEdge, type GraphNode } from '@/components/graph-view';
 import { BasesView, type BaseConfig, DEFAULT_BASE_CONFIG } from '@/components/bases-view';
@@ -56,9 +56,10 @@ import { WebSearchResult } from '@/components/ai-elements/web-search-result';
 import { AppActionCard } from '@/components/ai-elements/app-action-card';
 import { ComposioConnectCard } from '@/components/ai-elements/composio-connect-card';
 import { PermissionRequest } from '@/components/ai-elements/permission-request';
+import { AutoPermissionDecision } from '@/components/ai-elements/auto-permission-decision';
 import { TerminalOutput } from '@/components/terminal-output';
 import { AskHumanRequest } from '@/components/ai-elements/ask-human-request';
-import { ToolPermissionRequestEvent, AskHumanRequestEvent } from '@x/shared/src/runs.js';
+import { ToolPermissionAutoDecisionEvent, ToolPermissionRequestEvent, AskHumanRequestEvent } from '@x/shared/src/runs.js';
 import {
   SidebarInset,
   SidebarProvider,
@@ -961,7 +962,7 @@ function App() {
     voice.start()
   }, [voice])
 
-  const handlePromptSubmitRef = useRef<((message: PromptInputMessage, mentions?: FileMention[], stagedAttachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex') => Promise<void>) | null>(null)
+  const handlePromptSubmitRef = useRef<((message: PromptInputMessage, mentions?: FileMention[], stagedAttachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => Promise<void>) | null>(null)
   const pendingVoiceInputRef = useRef(false)
 
   // Palette: per-tab editor handles for capturing cursor context on Cmd+K, and pending payload
@@ -1180,6 +1181,7 @@ function App() {
   const [allPermissionRequests, setAllPermissionRequests] = useState<Map<string, z.infer<typeof ToolPermissionRequestEvent>>>(new Map())
   // Track permission responses (toolCallId -> response)
   const [permissionResponses, setPermissionResponses] = useState<Map<string, 'approve' | 'deny'>>(new Map())
+  const [autoPermissionDecisions, setAutoPermissionDecisions] = useState<Map<string, z.infer<typeof ToolPermissionAutoDecisionEvent>>>(new Map())
 
   useEffect(() => {
     chatViewStateByTabRef.current = chatViewStateByTab
@@ -1193,6 +1195,7 @@ function App() {
       pendingAskHumanRequests: new Map(pendingAskHumanRequests),
       allPermissionRequests: new Map(allPermissionRequests),
       permissionResponses: new Map(permissionResponses),
+      autoPermissionDecisions: new Map(autoPermissionDecisions),
     }
     setChatViewStateByTab((prev) => ({ ...prev, [activeChatTabId]: snapshot }))
   }, [
@@ -1203,6 +1206,7 @@ function App() {
     pendingAskHumanRequests,
     allPermissionRequests,
     permissionResponses,
+    autoPermissionDecisions,
   ])
 
   useEffect(() => {
@@ -2026,6 +2030,7 @@ function App() {
       // Track permission requests and responses from history
       const allPermissionRequests = new Map<string, z.infer<typeof ToolPermissionRequestEvent>>()
       const permResponseMap = new Map<string, 'approve' | 'deny'>()
+      const autoPermissionDecisions = new Map<string, z.infer<typeof ToolPermissionAutoDecisionEvent>>()
       const askHumanRequests = new Map<string, z.infer<typeof AskHumanRequestEvent>>()
       const respondedAskHumanIds = new Set<string>()
 
@@ -2034,6 +2039,8 @@ function App() {
           allPermissionRequests.set(event.toolCall.toolCallId, event)
         } else if (event.type === 'tool-permission-response') {
           permResponseMap.set(event.toolCallId, event.response)
+        } else if (event.type === 'tool-permission-auto-decision') {
+          autoPermissionDecisions.set(event.toolCallId, event)
         } else if (event.type === 'ask-human-request') {
           askHumanRequests.set(event.toolCallId, event)
         } else if (event.type === 'ask-human-response') {
@@ -2066,6 +2073,7 @@ function App() {
       setPendingAskHumanRequests(pendingAsks)
       setAllPermissionRequests(allPermissionRequests)
       setPermissionResponses(permResponseMap)
+      setAutoPermissionDecisions(autoPermissionDecisions)
 
       // Restore the run's per-chat work directory into the tab it was loaded into.
       const tabId = activeChatTabIdRef.current
@@ -2375,6 +2383,16 @@ function App() {
         break
       }
 
+      case 'tool-permission-auto-decision': {
+        if (!isActiveRun) return
+        setAutoPermissionDecisions(prev => {
+          const next = new Map(prev)
+          next.set(event.toolCallId, event)
+          return next
+        })
+        break
+      }
+
       case 'ask-human-request': {
         if (!isActiveRun) return
         const key = event.toolCallId
@@ -2491,6 +2509,7 @@ function App() {
     stagedAttachments: StagedAttachment[] = [],
     searchEnabled?: boolean,
     codeMode?: 'claude' | 'codex',
+    permissionMode?: PermissionMode,
   ) => {
     if (isProcessing) return
 
@@ -2530,6 +2549,7 @@ function App() {
         const run = await window.ipc.invoke('runs:create', {
           agentId,
           ...(selected ? { model: selected.model, provider: selected.provider } : {}),
+          permissionMode: permissionMode ?? 'manual',
         })
         currentRunId = run.id
         newRunCreatedAt = run.createdAt
@@ -2734,6 +2754,7 @@ function App() {
     setPendingAskHumanRequests(new Map())
     setAllPermissionRequests(new Map())
     setPermissionResponses(new Map())
+    setAutoPermissionDecisions(new Map())
     setSelectedBackgroundTask(null)
     setChatViewportAnchor(activeChatTabIdRef.current, null)
     setChatViewStateByTab(prev => ({
@@ -2760,6 +2781,7 @@ function App() {
       setPendingAskHumanRequests(new Map())
       setAllPermissionRequests(new Map())
       setPermissionResponses(new Map())
+      setAutoPermissionDecisions(new Map())
       setChatViewportAnchor(tab.id, null)
     }
   }, [loadRun, setChatViewportAnchor])
@@ -2785,6 +2807,7 @@ function App() {
     setPendingAskHumanRequests(new Map(cached.pendingAskHumanRequests))
     setAllPermissionRequests(new Map(cached.allPermissionRequests))
     setPermissionResponses(new Map(cached.permissionResponses))
+    setAutoPermissionDecisions(new Map(cached.autoPermissionDecisions))
     setIsProcessing(Boolean(resolvedRunId && processingRunIdsRef.current.has(resolvedRunId)))
     return true
   }, [])
@@ -5057,7 +5080,11 @@ function App() {
     }
   }, [isGraphOpen, knowledgeFilePaths])
 
-  const renderConversationItem = (item: ConversationItem, tabId: string) => {
+  const renderConversationItem = (
+    item: ConversationItem,
+    tabId: string,
+    options?: { autoPermissionDetail?: { decision: 'allow'; reason: string } },
+  ) => {
     if (isChatMessage(item)) {
       if (item.role === 'user') {
         if (item.attachments && item.attachments.length > 0) {
@@ -5155,6 +5182,7 @@ function App() {
           key={item.id}
           open={isToolOpenForTab(tabId, item.id)}
           onOpenChange={(open) => setToolOpenForTab(tabId, item.id, open)}
+          autoPermissionDetail={options?.autoPermissionDetail}
         >
           <ToolHeader
             title={toolTitle}
@@ -5197,6 +5225,7 @@ function App() {
     pendingAskHumanRequests,
     allPermissionRequests,
     permissionResponses,
+    autoPermissionDecisions,
   }), [
     runId,
     conversation,
@@ -5204,6 +5233,7 @@ function App() {
     pendingAskHumanRequests,
     allPermissionRequests,
     permissionResponses,
+    autoPermissionDecisions,
   ])
   const emptyChatTabState = React.useMemo<ChatTabViewState>(() => createEmptyChatTabViewState(), [])
   const getChatTabStateForRender = useCallback((tabId: string): ChatTabViewState => {
@@ -5790,7 +5820,7 @@ function App() {
                               <>
                                 {groupConversationItems(
                                   tabState.conversation,
-                                  (id) => !!tabState.allPermissionRequests.get(id)
+                                  (id) => !!tabState.allPermissionRequests.get(id) || !!tabState.autoPermissionDecisions.get(id)
                                 ).map(item => {
                                   if (isToolGroup(item)) {
                                     return (
@@ -5802,41 +5832,61 @@ function App() {
                                       />
                                     )
                                   }
-                                  const rendered = renderConversationItem(item, tab.id)
+                                  const autoDecision = isToolCall(item)
+                                    ? tabState.autoPermissionDecisions.get(item.id)
+                                    : undefined
+                                  const rendered = renderConversationItem(
+                                    item,
+                                    tab.id,
+                                    autoDecision?.decision === 'allow'
+                                      ? { autoPermissionDetail: { decision: 'allow', reason: autoDecision.reason } }
+                                      : undefined,
+                                  )
                                   if (isToolCall(item)) {
+                                    const deniedAutoDecision = autoDecision?.decision === 'deny' ? autoDecision : null
                                     const permRequest = tabState.allPermissionRequests.get(item.id)
-                                    if (permRequest) {
+                                    if (deniedAutoDecision || permRequest) {
                                       const response = tabState.permissionResponses.get(item.id) || null
                                       return (
                                         <React.Fragment key={item.id}>
-                                          <PermissionRequest
-                                            toolCall={permRequest.toolCall}
-                                            permission={permRequest.permission}
-                                            onApprove={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
-                                            onApproveSession={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'session')}
-                                            onApproveAlways={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'always')}
-                                            onDeny={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
-                                            onSwitchAgent={async (newAgent) => {
-                                              const runIdForSwitch = tab.runId
-                                              await handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')
-                                              window.dispatchEvent(new CustomEvent('code-mode-detected', {
-                                                detail: { runId: runIdForSwitch, agent: newAgent },
-                                              }))
-                                              if (runIdForSwitch) {
-                                                try {
-                                                  await window.ipc.invoke('runs:createMessage', {
-                                                    runId: runIdForSwitch,
-                                                    message: `Use ${newAgent === 'claude' ? 'Claude Code' : 'Codex'} instead — rerun the same task with the same prompt, just swap the agent binary to \`${newAgent}\`.`,
-                                                    codeMode: newAgent,
-                                                  })
-                                                } catch (err) {
-                                                  console.error('Failed to send swap-agent follow-up', err)
+                                          {deniedAutoDecision && (
+                                            <AutoPermissionDecision
+                                              toolCall={deniedAutoDecision.toolCall}
+                                              permission={deniedAutoDecision.permission}
+                                              decision={deniedAutoDecision.decision}
+                                              reason={deniedAutoDecision.reason}
+                                            />
+                                          )}
+                                          {permRequest && (
+                                            <PermissionRequest
+                                              toolCall={permRequest.toolCall}
+                                              permission={permRequest.permission}
+                                              onApprove={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
+                                              onApproveSession={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'session')}
+                                              onApproveAlways={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'always')}
+                                              onDeny={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
+                                              onSwitchAgent={async (newAgent) => {
+                                                const runIdForSwitch = tab.runId
+                                                await handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')
+                                                window.dispatchEvent(new CustomEvent('code-mode-detected', {
+                                                  detail: { runId: runIdForSwitch, agent: newAgent },
+                                                }))
+                                                if (runIdForSwitch) {
+                                                  try {
+                                                    await window.ipc.invoke('runs:createMessage', {
+                                                      runId: runIdForSwitch,
+                                                      message: `Use ${newAgent === 'claude' ? 'Claude Code' : 'Codex'} instead — rerun the same task with the same prompt, just swap the agent binary to \`${newAgent}\`.`,
+                                                      codeMode: newAgent,
+                                                    })
+                                                  } catch (err) {
+                                                    console.error('Failed to send swap-agent follow-up', err)
+                                                  }
                                                 }
-                                              }
-                                            }}
-                                            isProcessing={isActive && isProcessing}
-                                            response={response}
-                                          />
+                                              }}
+                                              isProcessing={isActive && isProcessing}
+                                              response={response}
+                                            />
+                                          )}
                                           {rendered}
                                         </React.Fragment>
                                       )
@@ -5989,6 +6039,7 @@ function App() {
                 pendingAskHumanRequests={pendingAskHumanRequests}
                 allPermissionRequests={allPermissionRequests}
                 permissionResponses={permissionResponses}
+                autoPermissionDecisions={autoPermissionDecisions}
                 onPermissionResponse={handlePermissionResponse}
                 onAskHumanResponse={handleAskHumanResponse}
                 isToolOpenForTab={isToolOpenForTab}

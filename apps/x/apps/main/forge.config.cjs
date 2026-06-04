@@ -66,7 +66,9 @@ module.exports = {
                     bin: "rowboat",
                     description: 'AI coworker with memory',
                     maintainer: 'rowboatlabs',
-                    homepage: 'https://rowboatlabs.com'
+                    homepage: 'https://rowboatlabs.com',
+                    icon: path.join(__dirname, 'icons/icon.png'),
+                    mimeType: ['x-scheme-handler/rowboat'],
                 }
             })
         },
@@ -77,7 +79,9 @@ module.exports = {
                     name: `Rowboat-linux`,
                     bin: "rowboat",
                     description: 'AI coworker with memory',
-                    homepage: 'https://rowboatlabs.com'
+                    homepage: 'https://rowboatlabs.com',
+                    icon: path.join(__dirname, 'icons/icon.png'),
+                    mimeType: ['x-scheme-handler/rowboat'],
                 }
             }
         },
