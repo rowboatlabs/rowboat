@@ -1,6 +1,6 @@
 import type { ToolUIPart } from 'ai'
 import z from 'zod'
-import { AskHumanRequestEvent, ToolPermissionRequestEvent } from '@x/shared/src/runs.js'
+import { AskHumanRequestEvent, ToolPermissionAutoDecisionEvent, ToolPermissionRequestEvent } from '@x/shared/src/runs.js'
 import { COMPOSIO_DISPLAY_NAMES } from '@x/shared/src/composio.js'
 import type { CodeRunEvent, PermissionAsk } from '@x/shared/src/code-mode.js'
 
@@ -50,6 +50,7 @@ export type ChatTabViewState = {
   pendingAskHumanRequests: Map<string, z.infer<typeof AskHumanRequestEvent>>
   allPermissionRequests: Map<string, z.infer<typeof ToolPermissionRequestEvent>>
   permissionResponses: Map<string, PermissionResponse>
+  autoPermissionDecisions: Map<string, z.infer<typeof ToolPermissionAutoDecisionEvent>>
 }
 
 export type ChatViewportAnchorState = {
@@ -64,6 +65,7 @@ export const createEmptyChatTabViewState = (): ChatTabViewState => ({
   pendingAskHumanRequests: new Map(),
   allPermissionRequests: new Map(),
   permissionResponses: new Map(),
+  autoPermissionDecisions: new Map(),
 })
 
 export type ToolState = 'input-streaming' | 'input-available' | 'output-available' | 'output-error'

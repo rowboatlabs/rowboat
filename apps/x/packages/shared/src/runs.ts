@@ -22,6 +22,7 @@ export const StartEvent = BaseRunEvent.extend({
     agentName: z.string(),
     model: z.string(),
     provider: z.string(),
+    permissionMode: z.enum(["manual", "auto"]).optional(),
     // useCase/subUseCase tag the run for analytics. Optional on read so legacy
     // run files written before these fields existed still parse cleanly.
     useCase: z.enum([
@@ -128,6 +129,15 @@ export const CodeRunPermissionRequestEvent = BaseRunEvent.extend({
     ask: PermissionAsk,
 });
 
+export const ToolPermissionAutoDecisionEvent = BaseRunEvent.extend({
+    type: z.literal("tool-permission-auto-decision"),
+    toolCallId: z.string(),
+    toolCall: ToolCallPart,
+    permission: ToolPermissionMetadata.optional(),
+    decision: z.enum(["allow", "deny"]),
+    reason: z.string(),
+});
+
 export const RunErrorEvent = BaseRunEvent.extend({
     type: z.literal("error"),
     error: z.string(),
@@ -154,6 +164,7 @@ export const RunEvent = z.union([
     ToolPermissionResponseEvent,
     CodeRunStreamEvent,
     CodeRunPermissionRequestEvent,
+    ToolPermissionAutoDecisionEvent,
     RunErrorEvent,
     RunStoppedEvent,
 ]);
@@ -186,6 +197,7 @@ export const Run = z.object({
     agentId: z.string(),
     model: z.string(),
     provider: z.string(),
+    permissionMode: z.enum(["manual", "auto"]).optional(),
     useCase: UseCase.optional(),
     subUseCase: z.string().optional(),
     log: z.array(RunEvent),
@@ -205,6 +217,7 @@ export const CreateRunOptions = z.object({
     agentId: z.string(),
     model: z.string().optional(),
     provider: z.string().optional(),
+    permissionMode: z.enum(["manual", "auto"]).optional(),
     useCase: UseCase.optional(),
     subUseCase: z.string().optional(),
 });
