@@ -5,7 +5,7 @@ import { RunEvent, ListRunsResponse } from '@x/shared/src/runs.js';
 import type { LanguageModelUsage, ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
-import { CheckIcon, LoaderIcon, PanelLeftIcon, ArrowRight, MessageSquare, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon } from 'lucide-react';
+import { CheckIcon, LoaderIcon, PanelLeftIcon, ArrowLeft, ArrowRight, MessageSquare, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MarkdownEditor, type MarkdownEditorHandle } from './components/markdown-editor';
 import { ChatSidebar } from './components/chat-sidebar';
@@ -117,6 +117,7 @@ import { useVoiceTTS } from '@/hooks/useVoiceTTS'
 import { useMeetingTranscription, type CalendarEventMeta } from '@/hooks/useMeetingTranscription'
 import { useAnalyticsIdentity } from '@/hooks/useAnalyticsIdentity'
 import * as analytics from '@/lib/analytics'
+import { useTheme } from '@/contexts/theme-context'
 
 type DirEntry = z.infer<typeof workspace.DirEntry>
 type RunEventType = z.infer<typeof RunEvent>
@@ -165,6 +166,7 @@ function AutoScrollPre({ className, children }: { className?: string; children: 
 }
 
 const DEFAULT_SIDEBAR_WIDTH = 256
+const DEFAULT_CHAT_PANE_WIDTH = 460
 const wikiLinkRegex = /\[\[([^[\]]+)\]\]/g
 const graphPalette = [
   { hue: 210, sat: 72, light: 52 },
@@ -736,6 +738,9 @@ function ContentHeader({
 }
 
 function App() {
+  const { chatPanePlacement, chatPaneSize } = useTheme()
+  const isChatPaneInMiddle = chatPanePlacement === 'middle'
+
   type ShortcutPane = 'left' | 'right'
   type MarkdownHistoryHandlers = { undo: () => boolean; redo: () => boolean }
 
@@ -765,7 +770,7 @@ function App() {
   // Lives in ViewState so folder drill-down participates in back/forward history.
   const [knowledgeViewFolderPath, setKnowledgeViewFolderPath] = useState<string | null>(null)
   const [isChatHistoryOpen, setIsChatHistoryOpen] = useState(false)
-  // Default landing view: Home in the middle with the chat docked on the right.
+  // Default landing view: Home with the chat docked according to appearance settings.
   const [isHomeOpen, setIsHomeOpen] = useState(true)
   const [emailInitialThreadId, setEmailInitialThreadId] = useState<string | null>(null)
   const [emailThreadIdVersion, setEmailThreadIdVersion] = useState(0)
@@ -5246,6 +5251,17 @@ function App() {
   const isRightPaneContext = Boolean(selectedPath || isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen || isHomeOpen || isBrowserOpen)
   const isRightPaneOnlyMode = isRightPaneContext && isChatSidebarOpen && isRightPaneMaximized
   const shouldCollapseLeftPane = isRightPaneOnlyMode
+  const nonChatPaneStyle = React.useMemo<React.CSSProperties>(() => {
+    const style: React.CSSProperties = { maxWidth: insetMaxWidth }
+    if (!isRightPaneContext || !isChatSidebarOpen || isRightPaneMaximized) return style
+    if (chatPaneSize === 'chat-equal') {
+      return { ...style, width: 0, flex: '1 1 0' }
+    }
+    if (chatPaneSize === 'chat-bigger') {
+      return { ...style, width: DEFAULT_CHAT_PANE_WIDTH, flex: '0 0 auto' }
+    }
+    return style
+  }, [chatPaneSize, insetMaxWidth, isChatSidebarOpen, isRightPaneContext, isRightPaneMaximized])
   // Collapsing: pin max-width to the snapshot px (no transition) for one frame so it's
   // binding immediately (no flex jump), then animate to 0. Expanding goes back to 100%
   // — its non-binding range lands at the end of the range, where it isn't visible.
@@ -5323,10 +5339,11 @@ function App() {
             <SidebarInset
               className={cn(
                 "overflow-hidden! min-h-0 min-w-0",
+                isRightPaneContext && isChatPaneInMiddle && "order-3",
                 insetAnimateMaxWidth && "transition-[max-width] duration-200 ease-linear",
                 shouldCollapseLeftPane && "pointer-events-none select-none"
               )}
-              style={{ maxWidth: insetMaxWidth }}
+              style={nonChatPaneStyle}
               aria-hidden={shouldCollapseLeftPane}
               onMouseDownCapture={() => setActiveShortcutPane('left')}
               onFocusCapture={() => setActiveShortcutPane('left')}
@@ -5438,7 +5455,11 @@ function App() {
                     : (viewOpen && !isChatSidebarOpen)
                       ? { onClick: openChatSidePane, icon: <MessageSquare className="size-5" />, label: 'Open chat' }
                       : (viewOpen && isChatSidebarOpen && !isRightPaneMaximized)
-                        ? { onClick: () => setIsChatSidebarOpen(false), icon: <ArrowRight className="size-5" />, label: 'Expand pane' }
+                        ? {
+                            onClick: () => setIsChatSidebarOpen(false),
+                            icon: isChatPaneInMiddle ? <ArrowLeft className="size-5" /> : <ArrowRight className="size-5" />,
+                            label: 'Expand pane'
+                          }
                         : null
                   return (
                     <Tooltip>
@@ -5989,10 +6010,13 @@ function App() {
               )}
             </SidebarInset>
 
-            {/* Chat sidebar - shown when viewing files/graph */}
+            {/* Chat pane - shown when viewing files/graph */}
             {isRightPaneContext && (
               <ChatSidebar
-                defaultWidth={460}
+                placement={chatPanePlacement}
+                paneSize={chatPaneSize}
+                className={isChatPaneInMiddle ? "order-2" : undefined}
+                defaultWidth={DEFAULT_CHAT_PANE_WIDTH}
                 isOpen={isChatSidebarOpen}
                 isMaximized={isRightPaneMaximized}
                 chatTabs={chatTabs}
