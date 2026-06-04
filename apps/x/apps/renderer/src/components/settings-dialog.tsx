@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Bug, Terminal, AlertTriangle, RefreshCw } from "lucide-react"
+import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Bug, Terminal, AlertTriangle, RefreshCw, PanelRight } from "lucide-react"
 
 import {
   Dialog,
@@ -210,7 +210,7 @@ function ThemeOption({
 }
 
 function AppearanceSettings() {
-  const { theme, setTheme } = useTheme()
+  const { theme, setTheme, chatPanePlacement, setChatPanePlacement } = useTheme()
 
   return (
     <div className="space-y-6">
@@ -237,6 +237,26 @@ function AppearanceSettings() {
             icon={Monitor}
             isSelected={theme === "system"}
             onClick={() => setTheme("system")}
+          />
+        </div>
+      </div>
+      <div>
+        <h4 className="text-sm font-medium mb-3">Chat</h4>
+        <p className="text-xs text-muted-foreground mb-4">
+          Choose where chat sits when another pane is open
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <ThemeOption
+            label="Chat right"
+            icon={PanelRight}
+            isSelected={chatPanePlacement === "right"}
+            onClick={() => setChatPanePlacement("right")}
+          />
+          <ThemeOption
+            label="Chat middle"
+            icon={MessageCircle}
+            isSelected={chatPanePlacement === "middle"}
+            onClick={() => setChatPanePlacement("middle")}
           />
         </div>
       </div>

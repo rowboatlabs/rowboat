@@ -3,16 +3,24 @@
 import * as React from "react"
 
 export type Theme = "light" | "dark" | "system"
+export type ChatPanePlacement = "right" | "middle"
 
 type ThemeContextProps = {
   theme: Theme
   resolvedTheme: "light" | "dark"
   setTheme: (theme: Theme) => void
+  chatPanePlacement: ChatPanePlacement
+  setChatPanePlacement: (placement: ChatPanePlacement) => void
 }
 
 const ThemeContext = React.createContext<ThemeContextProps | null>(null)
 
 const STORAGE_KEY = "rowboat-theme"
+const CHAT_PANE_PLACEMENT_STORAGE_KEY = "rowboat-chat-pane-placement"
+
+function isChatPanePlacement(value: string | null): value is ChatPanePlacement {
+  return value === "right" || value === "middle"
+}
 
 function getSystemTheme(): "light" | "dark" {
   if (typeof window === "undefined") return "light"
@@ -38,6 +46,11 @@ export function ThemeProvider({
     if (typeof window === "undefined") return defaultTheme
     const stored = localStorage.getItem(STORAGE_KEY) as Theme | null
     return stored || defaultTheme
+  })
+  const [chatPanePlacement, setChatPanePlacementState] = React.useState<ChatPanePlacement>(() => {
+    if (typeof window === "undefined") return "right"
+    const stored = localStorage.getItem(CHAT_PANE_PLACEMENT_STORAGE_KEY)
+    return isChatPanePlacement(stored) ? stored : "right"
   })
 
   const [resolvedTheme, setResolvedTheme] = React.useState<"light" | "dark">(() => {
@@ -76,13 +89,20 @@ export function ThemeProvider({
     setThemeState(newTheme)
   }, [])
 
+  const setChatPanePlacement = React.useCallback((placement: ChatPanePlacement) => {
+    localStorage.setItem(CHAT_PANE_PLACEMENT_STORAGE_KEY, placement)
+    setChatPanePlacementState(placement)
+  }, [])
+
   const contextValue = React.useMemo<ThemeContextProps>(
     () => ({
       theme,
       resolvedTheme,
       setTheme,
+      chatPanePlacement,
+      setChatPanePlacement,
     }),
-    [theme, resolvedTheme, setTheme]
+    [theme, resolvedTheme, setTheme, chatPanePlacement, setChatPanePlacement]
   )
 
   return (

@@ -5,7 +5,7 @@ import { RunEvent, ListRunsResponse } from '@x/shared/src/runs.js';
 import type { LanguageModelUsage, ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
-import { CheckIcon, LoaderIcon, PanelLeftIcon, ArrowRight, MessageSquare, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon } from 'lucide-react';
+import { CheckIcon, LoaderIcon, PanelLeftIcon, ArrowLeft, ArrowRight, MessageSquare, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MarkdownEditor, type MarkdownEditorHandle } from './components/markdown-editor';
 import { ChatSidebar } from './components/chat-sidebar';
@@ -117,6 +117,7 @@ import { useVoiceTTS } from '@/hooks/useVoiceTTS'
 import { useMeetingTranscription, type CalendarEventMeta } from '@/hooks/useMeetingTranscription'
 import { useAnalyticsIdentity } from '@/hooks/useAnalyticsIdentity'
 import * as analytics from '@/lib/analytics'
+import { useTheme } from '@/contexts/theme-context'
 
 type DirEntry = z.infer<typeof workspace.DirEntry>
 type RunEventType = z.infer<typeof RunEvent>
@@ -736,6 +737,9 @@ function ContentHeader({
 }
 
 function App() {
+  const { chatPanePlacement } = useTheme()
+  const isChatPaneInMiddle = chatPanePlacement === 'middle'
+
   type ShortcutPane = 'left' | 'right'
   type MarkdownHistoryHandlers = { undo: () => boolean; redo: () => boolean }
 
@@ -765,7 +769,7 @@ function App() {
   // Lives in ViewState so folder drill-down participates in back/forward history.
   const [knowledgeViewFolderPath, setKnowledgeViewFolderPath] = useState<string | null>(null)
   const [isChatHistoryOpen, setIsChatHistoryOpen] = useState(false)
-  // Default landing view: Home in the middle with the chat docked on the right.
+  // Default landing view: Home with the chat docked according to appearance settings.
   const [isHomeOpen, setIsHomeOpen] = useState(true)
   const [emailInitialThreadId, setEmailInitialThreadId] = useState<string | null>(null)
   const [emailThreadIdVersion, setEmailThreadIdVersion] = useState(0)
@@ -5323,6 +5327,7 @@ function App() {
             <SidebarInset
               className={cn(
                 "overflow-hidden! min-h-0 min-w-0",
+                isRightPaneContext && isChatPaneInMiddle && "order-3",
                 insetAnimateMaxWidth && "transition-[max-width] duration-200 ease-linear",
                 shouldCollapseLeftPane && "pointer-events-none select-none"
               )}
@@ -5438,7 +5443,11 @@ function App() {
                     : (viewOpen && !isChatSidebarOpen)
                       ? { onClick: openChatSidePane, icon: <MessageSquare className="size-5" />, label: 'Open chat' }
                       : (viewOpen && isChatSidebarOpen && !isRightPaneMaximized)
-                        ? { onClick: () => setIsChatSidebarOpen(false), icon: <ArrowRight className="size-5" />, label: 'Expand pane' }
+                        ? {
+                            onClick: () => setIsChatSidebarOpen(false),
+                            icon: isChatPaneInMiddle ? <ArrowLeft className="size-5" /> : <ArrowRight className="size-5" />,
+                            label: 'Expand pane'
+                          }
                         : null
                   return (
                     <Tooltip>
@@ -5989,9 +5998,11 @@ function App() {
               )}
             </SidebarInset>
 
-            {/* Chat sidebar - shown when viewing files/graph */}
+            {/* Chat pane - shown when viewing files/graph */}
             {isRightPaneContext && (
               <ChatSidebar
+                placement={chatPanePlacement}
+                className={isChatPaneInMiddle ? "order-2" : undefined}
                 defaultWidth={460}
                 isOpen={isChatSidebarOpen}
                 isMaximized={isRightPaneMaximized}
