@@ -12,6 +12,18 @@ export interface ProviderStatus {
   error?: string
 }
 
+type KnowledgeSourceConfig = {
+  id: string
+  provider: 'gmail' | 'meeting' | 'voice_memo' | 'slack' | 'github' | 'linear'
+  enabled: boolean
+  artifactDir: string
+  syncMode: 'file' | 'poll' | 'event' | 'manual'
+  intervalMs?: number
+  scopes: Array<{ type: string; id: string; name?: string; workspaceUrl?: string }>
+  instructions?: string
+  filters?: Record<string, unknown>
+}
+
 export function useConnectors(active: boolean) {
   const [providers, setProviders] = useState<string[]>([])
   const [providersLoading, setProvidersLoading] = useState(true)
@@ -37,6 +49,9 @@ export function useConnectors(active: boolean) {
   const [slackPickerOpen, setSlackPickerOpen] = useState(false)
   const [slackDiscovering, setSlackDiscovering] = useState(false)
   const [slackDiscoverError, setSlackDiscoverError] = useState<string | null>(null)
+  const [slackKnowledgeEnabled, setSlackKnowledgeEnabled] = useState(false)
+  const [slackKnowledgeChannels, setSlackKnowledgeChannels] = useState("")
+  const [slackKnowledgeSaving, setSlackKnowledgeSaving] = useState(false)
 
   // Composio Gmail/Calendar sync was removed. These flags are seeded false
   // and never flipped — the IPC that used to set them is gone. The setters
@@ -165,6 +180,17 @@ export function useConnectors(active: boolean) {
       setSlackEnabled(false)
       setSlackWorkspaces([])
       setSlackPickerOpen(false)
+      await window.ipc.invoke('knowledgeSources:upsert', {
+        id: 'slack',
+        provider: 'slack',
+        enabled: false,
+        artifactDir: 'knowledge_sources/slack',
+        syncMode: 'poll',
+        intervalMs: 5 * 60 * 1000,
+        scopes: [],
+      })
+      setSlackKnowledgeEnabled(false)
+      setSlackKnowledgeChannels("")
       toast.success('Slack disabled')
     } catch (error) {
       console.error('Failed to update Slack config:', error)
@@ -173,6 +199,77 @@ export function useConnectors(active: boolean) {
       setSlackLoading(false)
     }
   }, [])
+
+  const refreshKnowledgeSources = useCallback(async () => {
+    try {
+      const result = await window.ipc.invoke('knowledgeSources:getConfig', null)
+      const slackSource = (result.sources as KnowledgeSourceConfig[]).find(source => source.id === 'slack')
+      setSlackKnowledgeEnabled(Boolean(slackSource?.enabled))
+      setSlackKnowledgeChannels((slackSource?.scopes ?? [])
+        .filter(scope => scope.type === 'channel')
+        .map(scope => {
+          const channel = scope.name || scope.id
+          return scope.workspaceUrl ? `${scope.workspaceUrl} ${channel}` : channel
+        })
+        .join('\n'))
+    } catch (error) {
+      console.error('Failed to load knowledge sources:', error)
+      setSlackKnowledgeEnabled(false)
+      setSlackKnowledgeChannels("")
+    }
+  }, [])
+
+  const parseSlackKnowledgeScopes = useCallback(() => {
+    const defaultWorkspaceUrl = slackWorkspaces.length === 1 ? slackWorkspaces[0]?.url : undefined
+    return slackKnowledgeChannels
+      .split(/\n+/)
+      .map(line => line.trim())
+      .filter(Boolean)
+      .map(line => {
+        const parts = line.split(/\s+/)
+        const first = parts[0] ?? ''
+        const hasWorkspace = /^https?:\/\//.test(first)
+        const workspaceUrl = hasWorkspace ? first : defaultWorkspaceUrl
+        const channelRaw = hasWorkspace ? parts.slice(1).join(' ') : line
+        const channel = channelRaw.trim()
+        return {
+          type: 'channel',
+          id: channel.replace(/^#/, ''),
+          name: channel.startsWith('#') ? channel : `#${channel}`,
+          workspaceUrl,
+        }
+      })
+      .filter(scope => scope.id.length > 0)
+  }, [slackKnowledgeChannels, slackWorkspaces])
+
+  const handleSlackKnowledgeSave = useCallback(async () => {
+    try {
+      setSlackKnowledgeSaving(true)
+      const scopes = parseSlackKnowledgeScopes()
+      await window.ipc.invoke('knowledgeSources:upsert', {
+        id: 'slack',
+        provider: 'slack',
+        enabled: slackKnowledgeEnabled && scopes.length > 0,
+        artifactDir: 'knowledge_sources/slack',
+        syncMode: 'poll',
+        intervalMs: 5 * 60 * 1000,
+        scopes,
+        instructions: 'Use Slack messages to update durable knowledge about projects, people, decisions, blockers, owners, deadlines, and status changes.',
+        filters: {
+          limit: 100,
+          maxBodyChars: 4000,
+          recentBackfillSeconds: 6 * 60 * 60,
+        },
+      })
+      toast.success('Slack knowledge source saved')
+      await refreshKnowledgeSources()
+    } catch (error) {
+      console.error('Failed to save Slack knowledge source:', error)
+      toast.error('Failed to save Slack knowledge source')
+    } finally {
+      setSlackKnowledgeSaving(false)
+    }
+  }, [parseSlackKnowledgeScopes, refreshKnowledgeSources, slackKnowledgeEnabled])
 
   // Gmail (Composio)
   const refreshGmailStatus = useCallback(async () => {
@@ -417,6 +514,7 @@ export function useConnectors(active: boolean) {
   const refreshAllStatuses = useCallback(async () => {
     refreshGranolaConfig()
     refreshSlackConfig()
+    refreshKnowledgeSources()
 
     if (useComposioForGoogle) {
       refreshGmailStatus()
@@ -461,7 +559,7 @@ export function useConnectors(active: boolean) {
     }
 
     setProviderStates(newStates)
-  }, [providers, refreshGranolaConfig, refreshSlackConfig, refreshGmailStatus, useComposioForGoogle, refreshGoogleCalendarStatus, useComposioForGoogleCalendar])
+  }, [providers, refreshGranolaConfig, refreshSlackConfig, refreshKnowledgeSources, refreshGmailStatus, useComposioForGoogle, refreshGoogleCalendarStatus, useComposioForGoogleCalendar])
 
   // Refresh when active or providers change
   useEffect(() => {
@@ -587,9 +685,15 @@ export function useConnectors(active: boolean) {
     setSlackPickerOpen,
     slackDiscovering,
     slackDiscoverError,
+    slackKnowledgeEnabled,
+    setSlackKnowledgeEnabled,
+    slackKnowledgeChannels,
+    setSlackKnowledgeChannels,
+    slackKnowledgeSaving,
     handleSlackEnable,
     handleSlackSaveWorkspaces,
     handleSlackDisable,
+    handleSlackKnowledgeSave,
 
     // Gmail (Composio)
     useComposioForGoogle,

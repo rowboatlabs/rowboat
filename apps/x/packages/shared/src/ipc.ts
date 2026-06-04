@@ -24,6 +24,25 @@ import { EmailBlockSchema, GmailThreadSchema } from './blocks.js';
 // Runtime Validation Schemas (Single Source of Truth)
 // ============================================================================
 
+const KnowledgeSourceScopeSchema = z.object({
+  type: z.string(),
+  id: z.string(),
+  name: z.string().optional(),
+  workspaceUrl: z.string().optional(),
+});
+
+const KnowledgeSourceConfigSchema = z.object({
+  id: z.string(),
+  provider: z.enum(['gmail', 'meeting', 'voice_memo', 'slack', 'github', 'linear']),
+  enabled: z.boolean(),
+  artifactDir: z.string(),
+  syncMode: z.enum(['file', 'poll', 'event', 'manual']).default('file'),
+  intervalMs: z.number().int().positive().optional(),
+  scopes: z.array(KnowledgeSourceScopeSchema).default([]),
+  instructions: z.string().optional(),
+  filters: z.record(z.string(), z.unknown()).optional(),
+});
+
 const ipcSchemas = {
   'app:getVersions': {
     req: z.null(),
@@ -476,6 +495,52 @@ const ipcSchemas = {
     res: z.object({
       workspaces: z.array(z.object({ url: z.string(), name: z.string() })),
       error: z.string().optional(),
+    }),
+  },
+  'slack:listChannels': {
+    req: z.object({
+      workspaceUrl: z.string(),
+    }),
+    res: z.object({
+      channels: z.array(z.object({
+        id: z.string(),
+        name: z.string(),
+        isPrivate: z.boolean().optional(),
+        isMember: z.boolean().optional(),
+      })),
+      error: z.string().optional(),
+    }),
+  },
+  'slack:getRecentMessages': {
+    req: z.object({
+      limit: z.number().int().positive().max(20).optional(),
+    }),
+    res: z.object({
+      enabled: z.boolean(),
+      messages: z.array(z.object({
+        id: z.string(),
+        workspaceName: z.string().optional(),
+        workspaceUrl: z.string().optional(),
+        channelId: z.string().optional(),
+        channelName: z.string().optional(),
+        author: z.string().optional(),
+        text: z.string(),
+        ts: z.string(),
+        url: z.string().optional(),
+      })),
+      error: z.string().optional(),
+    }),
+  },
+  'knowledgeSources:getConfig': {
+    req: z.null(),
+    res: z.object({
+      sources: z.array(KnowledgeSourceConfigSchema),
+    }),
+  },
+  'knowledgeSources:upsert': {
+    req: KnowledgeSourceConfigSchema,
+    res: z.object({
+      sources: z.array(KnowledgeSourceConfigSchema),
     }),
   },
   'onboarding:getStatus': {
