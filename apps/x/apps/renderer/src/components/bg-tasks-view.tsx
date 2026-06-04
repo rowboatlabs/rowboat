@@ -1237,6 +1237,8 @@ function TaskDetail({
     const [confirmingDelete, setConfirmingDelete] = useState(false)
     const [sidebarOpen, setSidebarOpen] = useState(true)
     const [outputRefreshKey, setOutputRefreshKey] = useState(0)
+    // Whether we've already chosen the initial sidebar state for this task.
+    const sidebarInitialized = useRef(false)
 
     const agentStatus = useBackgroundTaskAgentStatus()
     const liveStatus = agentStatus.get(slug)
@@ -1252,6 +1254,23 @@ function TaskDetail({
             if (result.success && result.task) {
                 setTask(result.task)
                 setDraft(result.task)
+                // On first open, collapse the details sidebar when the agent
+                // already has output — let the user read it without chrome.
+                // Resolved before `loading` clears so the sidebar never flashes.
+                if (!sidebarInitialized.current) {
+                    sidebarInitialized.current = true
+                    try {
+                        const out = await window.ipc.invoke('workspace:readFile', {
+                            path: `bg-tasks/${slug}/index.md`,
+                        })
+                        const body = (out.data ?? '').trim()
+                        if (body && body !== `# ${result.task.name}`) {
+                            setSidebarOpen(false)
+                        }
+                    } catch {
+                        // No output file yet — keep the sidebar open.
+                    }
+                }
             }
         } finally {
             setLoading(false)
