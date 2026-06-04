@@ -22,11 +22,41 @@ const RankedSlackMessagesSchema = z.object({
     rankedIds: z.array(z.string()).describe('Message ids in the order they should appear on Home.'),
 });
 
+const EXPIRED_ROUTINE_AGE_MS = 2 * 60 * 60 * 1000;
+const ROUTINE_EVENT_RE = /\b(stand[-\s]?up|daily\s+(sync|scrum|standup)|scrum|check[-\s]?in)\b/i;
+const ROUTINE_LOGISTICS_RE = /\b(skip|skipping|miss|missing|can't|cannot|cant|won't|wont|join|attend|possible|move|reschedule|shift|late|running\s+late|stomach|sick|not\s+feeling|headache|doctor|appointment|today|todays|today's|tomorrow|at\s+\d{1,2}(:\d{2})?\s*(am|pm)?)\b/i;
+const DURABLE_SIGNAL_RE = /\b(blocker|blocked|decision|decided|owner|deadline|shipped|fixed|done|launched|deployed|merged|bug|issue|incident|outage|customer|contract|pricing|proposal|launch|release|handoff|review|approval|approved)\b/i;
+
 function timeRank(candidates: SlackHomeRankCandidate[], limit: number): string[] {
     return [...candidates]
         .sort((a, b) => Number(b.ts) - Number(a.ts))
         .slice(0, limit)
         .map(candidate => candidate.id);
+}
+
+function slackTsToMs(ts: string): number | null {
+    const seconds = Number(ts.split('.')[0]);
+    if (!Number.isFinite(seconds)) return null;
+    return seconds * 1000;
+}
+
+function isExpiredRoutineLogistics(candidate: SlackHomeRankCandidate, nowMs: number): boolean {
+    const sentAtMs = slackTsToMs(candidate.ts);
+    if (sentAtMs === null) return false;
+    if (nowMs - sentAtMs < EXPIRED_ROUTINE_AGE_MS) return false;
+
+    const text = candidate.text.replace(/\s+/g, ' ').trim();
+    if (!ROUTINE_EVENT_RE.test(text)) return false;
+    if (DURABLE_SIGNAL_RE.test(text)) return false;
+
+    return ROUTINE_LOGISTICS_RE.test(text);
+}
+
+export function filterSlackHomeCandidatesForRelevance(
+    candidates: SlackHomeRankCandidate[],
+    nowMs = Date.now(),
+): SlackHomeRankCandidate[] {
+    return candidates.filter(candidate => !isExpiredRoutineLogistics(candidate, nowMs));
 }
 
 function truncate(value: string, max: number): string {
@@ -60,8 +90,9 @@ Deprioritize:
 - greetings, thanks, jokes, reactions, short acknowledgements, bot noise
 - vague chatter without clear project/action relevance
 - near-duplicates of the same point
+- routine logistics whose value expires quickly, such as standup scheduling, standup attendance, sick notes, lunch/commute coordination, and "can we move this?" chatter once the event is likely past
 
-Return only ids from the candidate list. Prefer relevance over recency, but use recency as a tiebreaker.
+Return only ids from the candidate list. You may return fewer than ${limit} ids if fewer messages are useful. Prefer relevance over recency, but use recency as a tiebreaker.
 
 # Candidates
 
@@ -72,8 +103,10 @@ export async function rankSlackHomeMessages(
     candidates: SlackHomeRankCandidate[],
     limit: number,
 ): Promise<string[]> {
-    if (candidates.length <= limit) {
-        return timeRank(candidates, limit);
+    const relevantCandidates = filterSlackHomeCandidatesForRelevance(candidates);
+
+    if (relevantCandidates.length <= limit) {
+        return timeRank(relevantCandidates, limit);
     }
 
     try {
@@ -85,7 +118,7 @@ export async function rankSlackHomeMessages(
         const result = await withUseCase({ useCase: 'knowledge_sync', subUseCase: 'slack_home_rank' }, () => generateObject({
             model,
             system: 'You rank Slack messages for a personal productivity Home screen. Be selective and return valid ids only.',
-            prompt: buildPrompt(candidates, limit),
+            prompt: buildPrompt(relevantCandidates, limit),
             schema: RankedSlackMessagesSchema,
         }));
 
@@ -97,7 +130,7 @@ export async function rankSlackHomeMessages(
             usage: result.usage,
         });
 
-        const validIds = new Set(candidates.map(candidate => candidate.id));
+        const validIds = new Set(relevantCandidates.map(candidate => candidate.id));
         const ranked = result.object.rankedIds.filter(id => validIds.has(id));
         const seen = new Set<string>();
         const deduped = ranked.filter(id => {
@@ -106,22 +139,9 @@ export async function rankSlackHomeMessages(
             return true;
         });
 
-        if (deduped.length === 0) {
-            return timeRank(candidates, limit);
-        }
-
-        const fallback = timeRank(candidates, limit);
-        for (const id of fallback) {
-            if (deduped.length >= limit) break;
-            if (!seen.has(id)) {
-                deduped.push(id);
-                seen.add(id);
-            }
-        }
-
         return deduped.slice(0, limit);
     } catch (error) {
         console.warn('[SlackHomeRank] LLM ranking failed, falling back to recency:', error);
-        return timeRank(candidates, limit);
+        return timeRank(relevantCandidates, limit);
     }
 }
