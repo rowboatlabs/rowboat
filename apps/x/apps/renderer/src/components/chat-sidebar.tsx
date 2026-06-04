@@ -41,6 +41,7 @@ import { ChatInputWithMentions, type PermissionMode, type StagedAttachment, type
 import { ChatMessageAttachments } from '@/components/chat-message-attachments'
 import { useSidebar } from '@/components/ui/sidebar'
 import { wikiLabel } from '@/lib/wiki-links'
+import type { ChatPaneSize } from '@/contexts/theme-context'
 import {
   type ChatViewportAnchorState,
   type ChatTabViewState,
@@ -126,6 +127,7 @@ interface ChatSidebarProps {
   isOpen?: boolean
   isMaximized?: boolean
   placement?: 'middle' | 'right'
+  paneSize?: ChatPaneSize
   className?: string
   chatTabs: ChatTab[]
   activeChatTabId: string
@@ -186,6 +188,7 @@ export function ChatSidebar({
   isOpen = true,
   isMaximized = false,
   placement = 'right',
+  paneSize = 'chat-smaller',
   className,
   chatTabs,
   activeChatTabId,
@@ -251,6 +254,7 @@ export function ChatSidebar({
   const prevIsMaximizedRef = useRef(isMaximized)
   const justToggledMaximize = prevIsMaximizedRef.current !== isMaximized
   const isMiddlePlacement = placement === 'middle'
+  const isResizable = paneSize === 'chat-smaller'
 
   const getMaxAllowedWidth = useCallback(() => {
     if (typeof window === 'undefined') return MAX_WIDTH
@@ -508,8 +512,11 @@ export function ChatSidebar({
       // not add extra width to the right and overflow the app viewport.
       return { width: 0, flex: '1 1 auto' }
     }
+    if (paneSize === 'chat-equal' || paneSize === 'chat-bigger') {
+      return { width: 0, flex: '1 1 0' }
+    }
     return { width, flex: '0 0 auto' }
-  }, [isOpen, isMaximized, width])
+  }, [isOpen, isMaximized, paneSize, width])
 
   return (
     <div
@@ -525,7 +532,7 @@ export function ChatSidebar({
       )}
       style={paneStyle}
     >
-      {!isMaximized && (
+      {!isMaximized && isResizable && (
         <div
           onMouseDown={handleMouseDown}
           className={cn(

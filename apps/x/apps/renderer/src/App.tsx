@@ -166,6 +166,7 @@ function AutoScrollPre({ className, children }: { className?: string; children: 
 }
 
 const DEFAULT_SIDEBAR_WIDTH = 256
+const DEFAULT_CHAT_PANE_WIDTH = 460
 const wikiLinkRegex = /\[\[([^[\]]+)\]\]/g
 const graphPalette = [
   { hue: 210, sat: 72, light: 52 },
@@ -737,7 +738,7 @@ function ContentHeader({
 }
 
 function App() {
-  const { chatPanePlacement } = useTheme()
+  const { chatPanePlacement, chatPaneSize } = useTheme()
   const isChatPaneInMiddle = chatPanePlacement === 'middle'
 
   type ShortcutPane = 'left' | 'right'
@@ -5250,6 +5251,17 @@ function App() {
   const isRightPaneContext = Boolean(selectedPath || isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen || isHomeOpen || isBrowserOpen)
   const isRightPaneOnlyMode = isRightPaneContext && isChatSidebarOpen && isRightPaneMaximized
   const shouldCollapseLeftPane = isRightPaneOnlyMode
+  const nonChatPaneStyle = React.useMemo<React.CSSProperties>(() => {
+    const style: React.CSSProperties = { maxWidth: insetMaxWidth }
+    if (!isRightPaneContext || !isChatSidebarOpen || isRightPaneMaximized) return style
+    if (chatPaneSize === 'chat-equal') {
+      return { ...style, width: 0, flex: '1 1 0' }
+    }
+    if (chatPaneSize === 'chat-bigger') {
+      return { ...style, width: DEFAULT_CHAT_PANE_WIDTH, flex: '0 0 auto' }
+    }
+    return style
+  }, [chatPaneSize, insetMaxWidth, isChatSidebarOpen, isRightPaneContext, isRightPaneMaximized])
   // Collapsing: pin max-width to the snapshot px (no transition) for one frame so it's
   // binding immediately (no flex jump), then animate to 0. Expanding goes back to 100%
   // — its non-binding range lands at the end of the range, where it isn't visible.
@@ -5331,7 +5343,7 @@ function App() {
                 insetAnimateMaxWidth && "transition-[max-width] duration-200 ease-linear",
                 shouldCollapseLeftPane && "pointer-events-none select-none"
               )}
-              style={{ maxWidth: insetMaxWidth }}
+              style={nonChatPaneStyle}
               aria-hidden={shouldCollapseLeftPane}
               onMouseDownCapture={() => setActiveShortcutPane('left')}
               onFocusCapture={() => setActiveShortcutPane('left')}
@@ -6002,8 +6014,9 @@ function App() {
             {isRightPaneContext && (
               <ChatSidebar
                 placement={chatPanePlacement}
+                paneSize={chatPaneSize}
                 className={isChatPaneInMiddle ? "order-2" : undefined}
-                defaultWidth={460}
+                defaultWidth={DEFAULT_CHAT_PANE_WIDTH}
                 isOpen={isChatSidebarOpen}
                 isMaximized={isRightPaneMaximized}
                 chatTabs={chatTabs}

@@ -210,7 +210,7 @@ function ThemeOption({
 }
 
 function AppearanceSettings() {
-  const { theme, setTheme, chatPanePlacement, setChatPanePlacement } = useTheme()
+  const { theme, setTheme, chatPanePlacement, setChatPanePlacement, chatPaneSize, setChatPaneSize } = useTheme()
 
   return (
     <div className="space-y-6">
@@ -257,6 +257,30 @@ function AppearanceSettings() {
             icon={MessageCircle}
             isSelected={chatPanePlacement === "middle"}
             onClick={() => setChatPanePlacement("middle")}
+          />
+        </div>
+        <h4 className="mt-6 text-sm font-medium mb-3">Chat size</h4>
+        <p className="text-xs text-muted-foreground mb-4">
+          Choose how much width chat gets when another pane is open
+        </p>
+        <div className="grid grid-cols-3 gap-3">
+          <ThemeOption
+            label="Chat smaller"
+            icon={MessageCircle}
+            isSelected={chatPaneSize === "chat-smaller"}
+            onClick={() => setChatPaneSize("chat-smaller")}
+          />
+          <ThemeOption
+            label="Chat equal"
+            icon={Monitor}
+            isSelected={chatPaneSize === "chat-equal"}
+            onClick={() => setChatPaneSize("chat-equal")}
+          />
+          <ThemeOption
+            label="Chat bigger"
+            icon={PanelRight}
+            isSelected={chatPaneSize === "chat-bigger"}
+            onClick={() => setChatPaneSize("chat-bigger")}
           />
         </div>
       </div>
