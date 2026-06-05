@@ -80,7 +80,7 @@ export async function executeCommand(
     cwd?: string;
     timeout?: number; // timeout in milliseconds
     maxBuffer?: number; // max buffer size in bytes
-    env?: NodeJS.ProcessEnv; // override environment (e.g. CLAUDE_CODE_EXECUTABLE for acpx)
+    env?: NodeJS.ProcessEnv; // override environment
   }
 ): Promise<CommandResult> {
   try {
