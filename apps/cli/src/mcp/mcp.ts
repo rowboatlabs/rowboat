@@ -20,6 +20,20 @@ type mcpState = {
 };
 const clients: Record<string, mcpState> = {};
 
+async function connectClient(transport: Transport): Promise<Client> {
+    const client = new Client({
+        name: 'rowboatx',
+        version: '1.0.0',
+    });
+    try {
+        await client.connect(transport);
+    } catch (error) {
+        await transport.close().catch(() => undefined);
+        throw error;
+    }
+    return client;
+}
+
 async function getClient(serverName: string): Promise<Client> {
     if (clients[serverName] && clients[serverName].state === "connected") {
         return clients[serverName].client!;
@@ -30,34 +44,25 @@ async function getClient(serverName: string): Promise<Client> {
     if (!config) {
         throw new Error(`MCP server ${serverName} not found`);
     }
-    let transport: Transport | undefined = undefined;
     try {
-        // create transport
+        let client: Client;
         if ("command" in config) {
-            transport = new StdioClientTransport({
+            client = await connectClient(new StdioClientTransport({
                 command: config.command,
                 args: config.args,
                 env: config.env,
-            });
+            }));
         } else {
+            const url = new URL(config.url);
+            // forward configured headers (e.g. Authorization) to the transport
+            const requestInit = config.headers ? { headers: config.headers } : undefined;
             try {
-                transport = new StreamableHTTPClientTransport(new URL(config.url));
+                client = await connectClient(new StreamableHTTPClientTransport(url, { requestInit }));
             } catch (error) {
                 // if that fails, try sse transport
-                transport = new SSEClientTransport(new URL(config.url));
+                client = await connectClient(new SSEClientTransport(url, { requestInit }));
             }
         }
-
-        if (!transport) {
-            throw new Error(`No transport found for ${serverName}`);
-        }
-
-        // create client
-        const client = new Client({
-            name: 'rowboatx',
-            version: '1.0.0',
-        });
-        await client.connect(transport);
 
         // store
         clients[serverName] = {
@@ -72,7 +77,6 @@ async function getClient(serverName: string): Promise<Client> {
             client: null,
             error: error instanceof Error ? error.message : "Unknown error",
         };
-        transport?.close();
         throw error;
     }
 }
