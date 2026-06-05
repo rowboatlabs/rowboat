@@ -800,6 +800,108 @@
   gap: 4px;
   flex: 1;
   min-width: 0;
+  position: relative;
+}
+
+.gmail-recipient-suggestions {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  width: max-content;
+  min-width: 280px;
+  max-width: min(440px, 100%);
+  background: var(--gm-bg-elevated, #1e1e1e);
+  border: 1px solid var(--gm-border);
+  border-radius: 10px;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.18),
+    0 12px 32px rgba(0, 0, 0, 0.36);
+  max-height: 296px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  transform-origin: top left;
+  animation: gmail-recipient-suggestions-in 110ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+@keyframes gmail-recipient-suggestions-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.gmail-recipient-suggestion {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--gm-text);
+  cursor: pointer;
+  transition: background-color 80ms linear;
+}
+
+.gmail-recipient-suggestion:hover {
+  background: var(--gm-bg-pill-hover);
+}
+
+.gmail-recipient-suggestion.is-active {
+  background: rgba(99, 142, 255, 0.18);
+}
+
+.gmail-recipient-suggestion-avatar {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  text-transform: uppercase;
+}
+
+.gmail-recipient-suggestion-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  line-height: 1.25;
+}
+
+.gmail-recipient-suggestion-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.gmail-recipient-suggestion-email {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--gm-text-muted);
+  margin-top: 1px;
+}
+
+.gmail-recipient-suggestion-match {
+  background: transparent;
+  color: inherit;
+  font-weight: 700;
+  padding: 0;
 }
 
 .gmail-recipient-chip {

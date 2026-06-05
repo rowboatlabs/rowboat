@@ -201,6 +201,21 @@ const ipcSchemas = {
     }),
     res: z.object({}),
   },
+  'gmail:searchContacts': {
+    req: z.object({
+      query: z.string(),
+      limit: z.number().int().positive().optional(),
+      excludeEmails: z.array(z.string()).optional(),
+    }),
+    res: z.object({
+      contacts: z.array(z.object({
+        name: z.string(),
+        email: z.string(),
+        count: z.number(),
+        lastSeenMs: z.number(),
+      })),
+    }),
+  },
   'mcp:listTools': {
     req: z.object({
       serverName: z.string(),
