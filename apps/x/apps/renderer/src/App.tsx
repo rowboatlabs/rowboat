@@ -29,6 +29,7 @@ import { LiveNotesView } from '@/components/live-notes-view';
 import { BgTasksView } from '@/components/bg-tasks-view';
 import { EmailView } from '@/components/email-view';
 import { WorkspaceView } from '@/components/workspace-view';
+import { CodingRunBlock } from '@/components/coding-run';
 import { KnowledgeView } from '@/components/knowledge-view';
 import { ChatHistoryView } from '@/components/chat-history-view';
 import { HomeView } from '@/components/home-view';
@@ -2198,19 +2199,6 @@ function App() {
               status: 'running',
               timestamp: Date.now(),
             }])
-            // Detect acpx-driven coding-agent runs so the composer can retroactively
-            // flip code mode on with the right agent (when the user reached the skill
-            // via plain prompt rather than the explicit toggle).
-            if (llmEvent.toolName === 'executeCommand') {
-              const input = llmEvent.input as { command?: unknown } | undefined
-              const cmd = typeof input?.command === 'string' ? input.command : ''
-              const match = cmd.match(/\bacpx\b[\s\S]*?\b(claude|codex)\b/)
-              if (match) {
-                window.dispatchEvent(new CustomEvent('code-mode-detected', {
-                  detail: { runId: event.runId, agent: match[1] as 'claude' | 'codex' },
-                }))
-              }
-            }
           } else if (llmEvent.type === 'finish-step') {
             const nextUsage = normalizeUsage(llmEvent.usage)
             if (nextUsage) {
@@ -2308,6 +2296,8 @@ function App() {
                   ...item,
                   result: event.result as ToolUIPart['output'],
                   status: 'completed' as const,
+                  // a code_agent_run finished — drop any lingering permission card
+                  pendingCodePermission: null,
                 }
               }
               return item
@@ -2385,6 +2375,33 @@ function App() {
           next.set(event.toolCallId, event.response)
           return next
         })
+        break
+      }
+
+      case 'code-run-event': {
+        if (!isActiveRun) return
+        setConversation(prev => prev.map(item => {
+          if (isToolCall(item) && item.id === event.toolCallId) {
+            const existing = item.codeRunEvents ?? []
+            if (existing.length === 0) {
+              setToolOpenForTab(activeChatTabIdRef.current, item.id, true)
+            }
+            return { ...item, codeRunEvents: [...existing, event.event] }
+          }
+          return item
+        }))
+        break
+      }
+
+      case 'code-run-permission-request': {
+        if (!isActiveRun) return
+        setConversation(prev => prev.map(item => {
+          if (isToolCall(item) && item.id === event.toolCallId) {
+            setToolOpenForTab(activeChatTabIdRef.current, item.id, true)
+            return { ...item, pendingCodePermission: { requestId: event.requestId, ask: event.ask } }
+          }
+          return item
+        }))
         break
       }
 
@@ -2729,6 +2746,26 @@ function App() {
       })
     }
   }, [runId])
+
+  // Answer a mid-run permission request from a code_agent_run coding turn. The
+  // pending ask lives on the tool call itself, so we optimistically clear it and
+  // tell main which decision the user picked (keyed by the request id).
+  const handleCodePermissionResponse = useCallback(async (
+    toolCallId: string,
+    requestId: string,
+    decision: 'allow_once' | 'allow_always' | 'reject',
+  ) => {
+    setConversation(prev => prev.map(item =>
+      isToolCall(item) && item.id === toolCallId
+        ? { ...item, pendingCodePermission: null }
+        : item
+    ))
+    try {
+      await window.ipc.invoke('codeRun:resolvePermission', { requestId, decision })
+    } catch (error) {
+      console.error('Failed to resolve code permission:', error)
+    }
+  }, [])
 
   const handleAskHumanResponse = useCallback(async (toolCallId: string, subflow: string[], response: string) => {
     if (!runId) return
@@ -5147,6 +5184,21 @@ function App() {
     }
 
     if (isToolCall(item)) {
+      if (item.name === 'code_agent_run') {
+        return (
+          <CodingRunBlock
+            key={item.id}
+            item={item}
+            open={isToolOpenForTab(tabId, item.id)}
+            onOpenChange={(open) => setToolOpenForTab(tabId, item.id, open)}
+            onPermissionDecision={(decision) => {
+              if (item.pendingCodePermission) {
+                handleCodePermissionResponse(item.id, item.pendingCodePermission.requestId, decision)
+              }
+            }}
+          />
+        )
+      }
       const appActionData = getAppActionCardData(item)
       if (appActionData) {
         return <AppActionCard key={item.id} data={appActionData} status={item.status} />
@@ -5886,24 +5938,6 @@ function App() {
                                               onApproveSession={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'session')}
                                               onApproveAlways={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'always')}
                                               onDeny={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
-                                              onSwitchAgent={async (newAgent) => {
-                                                const runIdForSwitch = tab.runId
-                                                await handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')
-                                                window.dispatchEvent(new CustomEvent('code-mode-detected', {
-                                                  detail: { runId: runIdForSwitch, agent: newAgent },
-                                                }))
-                                                if (runIdForSwitch) {
-                                                  try {
-                                                    await window.ipc.invoke('runs:createMessage', {
-                                                      runId: runIdForSwitch,
-                                                      message: `Use ${newAgent === 'claude' ? 'Claude Code' : 'Codex'} instead — rerun the same task with the same prompt, just swap the agent binary to \`${newAgent}\`.`,
-                                                      codeMode: newAgent,
-                                                    })
-                                                  } catch (err) {
-                                                    console.error('Failed to send swap-agent follow-up', err)
-                                                  }
-                                                }
-                                              }}
                                               isProcessing={isActive && isProcessing}
                                               response={response}
                                             />

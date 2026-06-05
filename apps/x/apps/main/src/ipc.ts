@@ -32,6 +32,7 @@ import type { IModelConfigRepo } from '@x/core/dist/models/repo.js';
 import type { IOAuthRepo } from '@x/core/dist/auth/repo.js';
 import { IGranolaConfigRepo } from '@x/core/dist/knowledge/granola/repo.js';
 import { ICodeModeConfigRepo } from '@x/core/dist/code-mode/repo.js';
+import { CodePermissionRegistry } from '@x/core/dist/code-mode/acp/permission-registry.js';
 import { checkCodeModeAgentStatus } from '@x/core/dist/code-mode/status.js';
 import { invalidateCopilotInstructionsCache } from '@x/core/dist/application/assistant/instructions.js';
 import { triggerSync as triggerGranolaSync } from '@x/core/dist/knowledge/granola/sync.js';
@@ -536,6 +537,11 @@ export function setupIpcHandlers() {
       await runsCore.authorizePermission(args.runId, args.authorization);
       return { success: true };
     },
+    'codeRun:resolvePermission': async (_event, args) => {
+      const registry = container.resolve<CodePermissionRegistry>('codePermissionRegistry');
+      registry.resolve(args.requestId, args.decision);
+      return { success: true };
+    },
     'runs:provideHumanInput': async (_event, args) => {
       await runsCore.replyToHumanInputRequest(args.runId, args.reply);
       return { success: true };
@@ -637,11 +643,11 @@ export function setupIpcHandlers() {
     'codeMode:getConfig': async () => {
       const repo = container.resolve<ICodeModeConfigRepo>('codeModeConfigRepo');
       const config = await repo.getConfig();
-      return { enabled: config.enabled };
+      return { enabled: config.enabled, approvalPolicy: config.approvalPolicy };
     },
     'codeMode:setConfig': async (_event, args) => {
       const repo = container.resolve<ICodeModeConfigRepo>('codeModeConfigRepo');
-      await repo.setConfig({ enabled: args.enabled });
+      await repo.setConfig({ enabled: args.enabled, approvalPolicy: args.approvalPolicy });
       invalidateCopilotInstructionsCache();
       return { success: true };
     },

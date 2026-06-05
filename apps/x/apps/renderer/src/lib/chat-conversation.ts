@@ -2,6 +2,7 @@ import type { ToolUIPart } from 'ai'
 import z from 'zod'
 import { AskHumanRequestEvent, ToolPermissionAutoDecisionEvent, ToolPermissionRequestEvent } from '@x/shared/src/runs.js'
 import { COMPOSIO_DISPLAY_NAMES } from '@x/shared/src/composio.js'
+import type { CodeRunEvent, PermissionAsk } from '@x/shared/src/code-mode.js'
 
 export interface MessageAttachment {
   path: string
@@ -27,6 +28,9 @@ export interface ToolCall {
   streamingOutput?: string
   status: 'pending' | 'running' | 'completed' | 'error'
   timestamp: number
+  // code_agent_run only: structured ACP stream items + the in-flight permission ask.
+  codeRunEvents?: CodeRunEvent[]
+  pendingCodePermission?: { requestId: string; ask: PermissionAsk } | null
 }
 
 export interface ErrorMessage {
@@ -519,41 +523,9 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
  * For builtin tools, returns a static friendly name (e.g., "Reading file").
  * Falls back to the raw tool name if no mapping exists.
  */
-// Phrases shown while a code-mode task is running. They advance over time (5s
-// each) to read as progress, then hold on the last one until the task finishes.
-const CODE_MODE_RUNNING_LABELS = [
-  'Working on the task…',
-  'Inspecting the project…',
-  'Digging into the code…',
-  'Figuring it out…',
-  'Making the changes…',
-  'Wiring things up…',
-  'Putting it together…',
-]
-const CODE_MODE_LABEL_INTERVAL_MS = 5000
-
-// Detect acpx coding-agent invocations (code mode) and produce a status-aware
-// label, e.g. "Working on the task…" → "Completed the task".
-export const getCodeModeCommandLabel = (tool: ToolCall): string | null => {
-  if (tool.name !== 'executeCommand') return null
-  const input = normalizeToolInput(tool.input) as Record<string, unknown> | undefined
-  const command = typeof input?.command === 'string' ? input.command : ''
-  const match = command.match(/\bacpx\b[\s\S]*?\b(claude|codex)\b\s+exec\b/)
-  if (!match) return null
-  if (tool.status === 'error') return `Couldn't complete the task`
-  if (tool.status === 'completed') return `Completed the task`
-  // Advance through the phrases from the tool's start, holding on the last.
-  const elapsed = Math.max(0, Date.now() - tool.timestamp)
-  const step = Math.floor(elapsed / CODE_MODE_LABEL_INTERVAL_MS)
-  const idx = Math.min(step, CODE_MODE_RUNNING_LABELS.length - 1)
-  return CODE_MODE_RUNNING_LABELS[idx]
-}
-
 export const getToolDisplayName = (tool: ToolCall): string => {
   const browserLabel = getBrowserControlLabel(tool)
   if (browserLabel) return browserLabel
-  const codeModeLabel = getCodeModeCommandLabel(tool)
-  if (codeModeLabel) return codeModeLabel
   const composioData = getComposioActionCardData(tool)
   if (composioData) return composioData.label
   return TOOL_DISPLAY_NAMES[tool.name] || tool.name
@@ -634,6 +606,7 @@ export const isToolGroup = (item: GroupedConversationItem): item is ToolGroup =>
 
 const isPlainToolCall = (item: ConversationItem): item is ToolCall => {
   if (!isToolCall(item)) return false
+  if (item.name === 'code_agent_run') return false // rich standalone block, never grouped
   if (getWebSearchCardData(item)) return false
   if (getComposioConnectCardData(item)) return false
   if (getAppActionCardData(item)) return false
