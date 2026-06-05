@@ -13,8 +13,13 @@ export interface StoredSession {
     sessionId: string;
 }
 
+// Per-run ACP session state lives in its own directory (not WorkDir/config): it's
+// runtime state that accumulates one file per chat run, so it's kept separate from
+// user/app config to be listed and cleaned up on its own.
+const SESSIONS_DIR = path.join(WorkDir, 'code-mode', 'sessions');
+
 function sessionFile(runId: string): string {
-    return path.join(WorkDir, 'config', `codesession-${runId}.json`);
+    return path.join(SESSIONS_DIR, `${runId}.json`);
 }
 
 export async function readStoredSession(runId: string): Promise<StoredSession | null> {
