@@ -1,5 +1,6 @@
 import { LlmStepStreamEvent } from "./llm-step-events.js";
 import { Message, ToolCallPart } from "./message.js";
+import { CodeRunEvent as CodeRunEventSchema, PermissionAsk } from "./code-mode.js";
 import z from "zod";
 
 const BaseRunEvent = z.object({
@@ -21,6 +22,7 @@ export const StartEvent = BaseRunEvent.extend({
     agentName: z.string(),
     model: z.string(),
     provider: z.string(),
+    permissionMode: z.enum(["manual", "auto"]).optional(),
     // useCase/subUseCase tag the run for analytics. Optional on read so legacy
     // run files written before these fields existed still parse cleanly.
     useCase: z.enum([
@@ -110,6 +112,32 @@ export const ToolPermissionResponseEvent = BaseRunEvent.extend({
     scope: z.enum(["once", "session", "always"]).optional(),
 });
 
+// A structured item from a code_agent_run coding turn (tool call, diff, plan,
+// message chunk, resolved permission). Fire-and-forget — rendered live.
+export const CodeRunStreamEvent = BaseRunEvent.extend({
+    type: z.literal("code-run-event"),
+    toolCallId: z.string(),
+    event: CodeRunEventSchema,
+});
+
+// The coding agent is asking for permission mid-turn and the run is BLOCKED until
+// the user answers via `codeRun:resolvePermission` (keyed by requestId).
+export const CodeRunPermissionRequestEvent = BaseRunEvent.extend({
+    type: z.literal("code-run-permission-request"),
+    toolCallId: z.string(),
+    requestId: z.string(),
+    ask: PermissionAsk,
+});
+
+export const ToolPermissionAutoDecisionEvent = BaseRunEvent.extend({
+    type: z.literal("tool-permission-auto-decision"),
+    toolCallId: z.string(),
+    toolCall: ToolCallPart,
+    permission: ToolPermissionMetadata.optional(),
+    decision: z.enum(["allow", "deny"]),
+    reason: z.string(),
+});
+
 export const RunErrorEvent = BaseRunEvent.extend({
     type: z.literal("error"),
     error: z.string(),
@@ -134,6 +162,9 @@ export const RunEvent = z.union([
     AskHumanResponseEvent,
     ToolPermissionRequestEvent,
     ToolPermissionResponseEvent,
+    CodeRunStreamEvent,
+    CodeRunPermissionRequestEvent,
+    ToolPermissionAutoDecisionEvent,
     RunErrorEvent,
     RunStoppedEvent,
 ]);
@@ -166,6 +197,7 @@ export const Run = z.object({
     agentId: z.string(),
     model: z.string(),
     provider: z.string(),
+    permissionMode: z.enum(["manual", "auto"]).optional(),
     useCase: UseCase.optional(),
     subUseCase: z.string().optional(),
     log: z.array(RunEvent),
@@ -185,6 +217,7 @@ export const CreateRunOptions = z.object({
     agentId: z.string(),
     model: z.string().optional(),
     provider: z.string().optional(),
+    permissionMode: z.enum(["manual", "auto"]).optional(),
     useCase: UseCase.optional(),
     subUseCase: z.string().optional(),
 });

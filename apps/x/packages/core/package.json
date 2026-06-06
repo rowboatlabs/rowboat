@@ -11,6 +11,9 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@agentclientprotocol/claude-agent-acp": "^0.39.0",
+    "@agentclientprotocol/codex-acp": "^0.0.44",
+    "@agentclientprotocol/sdk": "^0.22.1",
     "@ai-sdk/anthropic": "^2.0.63",
     "@ai-sdk/google": "^2.0.53",
     "@ai-sdk/openai": "^2.0.91",

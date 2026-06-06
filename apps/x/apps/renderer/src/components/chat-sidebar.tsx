@@ -28,6 +28,7 @@ import { Tool, ToolContent, ToolGroupComponent, ToolHeader, ToolTabbedContent } 
 import { WebSearchResult } from '@/components/ai-elements/web-search-result'
 import { ComposioConnectCard } from '@/components/ai-elements/composio-connect-card'
 import { PermissionRequest } from '@/components/ai-elements/permission-request'
+import { AutoPermissionDecision } from '@/components/ai-elements/auto-permission-decision'
 import { TerminalOutput } from '@/components/terminal-output'
 import { AskHumanRequest } from '@/components/ai-elements/ask-human-request'
 import { type PromptInputMessage, type FileMention } from '@/components/ai-elements/prompt-input'
@@ -36,10 +37,11 @@ import { MarkdownPreOverride } from '@/components/ai-elements/markdown-code-over
 import { defaultRemarkPlugins } from 'streamdown'
 import remarkBreaks from 'remark-breaks'
 import { type ChatTab } from '@/components/tab-bar'
-import { ChatInputWithMentions, type StagedAttachment, type SelectedModel } from '@/components/chat-input-with-mentions'
+import { ChatInputWithMentions, type PermissionMode, type StagedAttachment, type SelectedModel } from '@/components/chat-input-with-mentions'
 import { ChatMessageAttachments } from '@/components/chat-message-attachments'
 import { useSidebar } from '@/components/ui/sidebar'
 import { wikiLabel } from '@/lib/wiki-links'
+import type { ChatPaneSize } from '@/contexts/theme-context'
 import {
   type ChatViewportAnchorState,
   type ChatTabViewState,
@@ -124,6 +126,9 @@ interface ChatSidebarProps {
   defaultWidth?: number
   isOpen?: boolean
   isMaximized?: boolean
+  placement?: 'middle' | 'right'
+  paneSize?: ChatPaneSize
+  className?: string
   chatTabs: ChatTab[]
   activeChatTabId: string
   getChatTabTitle: (tab: ChatTab) => string
@@ -139,7 +144,7 @@ interface ChatSidebarProps {
   isProcessing: boolean
   isStopping?: boolean
   onStop?: () => void
-  onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[]) => void
+  onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => void
   knowledgeFiles?: string[]
   recentFiles?: string[]
   visibleFiles?: string[]
@@ -154,6 +159,7 @@ interface ChatSidebarProps {
   pendingAskHumanRequests?: ChatTabViewState['pendingAskHumanRequests']
   allPermissionRequests?: ChatTabViewState['allPermissionRequests']
   permissionResponses?: ChatTabViewState['permissionResponses']
+  autoPermissionDecisions?: ChatTabViewState['autoPermissionDecisions']
   onPermissionResponse?: (toolCallId: string, subflow: string[], response: PermissionResponse, scope?: 'once' | 'session' | 'always') => void
   onAskHumanResponse?: (toolCallId: string, subflow: string[], response: string) => void
   isToolOpenForTab?: (tabId: string, toolId: string) => boolean
@@ -181,6 +187,9 @@ export function ChatSidebar({
   defaultWidth = DEFAULT_WIDTH,
   isOpen = true,
   isMaximized = false,
+  placement = 'right',
+  paneSize = 'chat-smaller',
+  className,
   chatTabs,
   activeChatTabId,
   getChatTabTitle,
@@ -211,6 +220,7 @@ export function ChatSidebar({
   pendingAskHumanRequests = new Map(),
   allPermissionRequests = new Map(),
   permissionResponses = new Map(),
+  autoPermissionDecisions = new Map(),
   onPermissionResponse,
   onAskHumanResponse,
   isToolOpenForTab,
@@ -243,6 +253,8 @@ export function ChatSidebar({
   const startWidthRef = useRef(0)
   const prevIsMaximizedRef = useRef(isMaximized)
   const justToggledMaximize = prevIsMaximizedRef.current !== isMaximized
+  const isMiddlePlacement = placement === 'middle'
+  const isResizable = paneSize === 'chat-smaller'
 
   const getMaxAllowedWidth = useCallback(() => {
     if (typeof window === 'undefined') return MAX_WIDTH
@@ -303,7 +315,9 @@ export function ChatSidebar({
     setIsResizing(true)
 
     const handleMouseMove = (event: MouseEvent) => {
-      const delta = startXRef.current - event.clientX
+      const delta = isMiddlePlacement
+        ? event.clientX - startXRef.current
+        : startXRef.current - event.clientX
       const maxAllowedWidth = getMaxAllowedWidth()
       setWidth(clampPaneWidth(startWidthRef.current + delta, maxAllowedWidth))
     }
@@ -316,7 +330,7 @@ export function ChatSidebar({
 
     document.addEventListener('mousemove', handleMouseMove)
     document.addEventListener('mouseup', handleMouseUp)
-  }, [width, getMaxAllowedWidth])
+  }, [width, getMaxAllowedWidth, isMiddlePlacement])
 
   const activeTabState = useMemo<ChatTabViewState>(() => ({
     runId: runId ?? null,
@@ -325,6 +339,7 @@ export function ChatSidebar({
     pendingAskHumanRequests,
     allPermissionRequests,
     permissionResponses,
+    autoPermissionDecisions,
   }), [
     runId,
     conversation,
@@ -332,6 +347,7 @@ export function ChatSidebar({
     pendingAskHumanRequests,
     allPermissionRequests,
     permissionResponses,
+    autoPermissionDecisions,
   ])
   const emptyTabState = useMemo<ChatTabViewState>(() => createEmptyChatTabViewState(), [])
   const getTabState = useCallback((tabId: string): ChatTabViewState => {
@@ -358,7 +374,11 @@ export function ChatSidebar({
     }
   }, [activeRunId])
 
-  const renderConversationItem = (item: ConversationItem, tabId: string) => {
+  const renderConversationItem = (
+    item: ConversationItem,
+    tabId: string,
+    options?: { autoPermissionDetail?: { decision: 'allow'; reason: string } },
+  ) => {
     if (isChatMessage(item)) {
       if (item.role === 'user') {
         if (item.attachments && item.attachments.length > 0) {
@@ -451,6 +471,7 @@ export function ChatSidebar({
           key={item.id}
           open={isToolOpenForTab?.(tabId, item.id) ?? false}
           onOpenChange={(open) => onToolOpenChangeForTab?.(tabId, item.id, open)}
+          autoPermissionDetail={options?.autoPermissionDetail}
         >
           <ToolHeader title={toolTitle} type={`tool-${item.name}`} state={toToolState(item.status)} />
           <ToolContent>
@@ -491,8 +512,11 @@ export function ChatSidebar({
       // not add extra width to the right and overflow the app viewport.
       return { width: 0, flex: '1 1 auto' }
     }
+    if (paneSize === 'chat-equal' || paneSize === 'chat-bigger') {
+      return { width: 0, flex: '1 1 0' }
+    }
     return { width, flex: '0 0 auto' }
-  }, [isOpen, isMaximized, width])
+  }, [isOpen, isMaximized, paneSize, width])
 
   return (
     <div
@@ -501,16 +525,19 @@ export function ChatSidebar({
       onMouseDownCapture={onActivate}
       onFocusCapture={onActivate}
       className={cn(
-        'relative flex min-w-0 flex-col overflow-hidden border-l border-border bg-background',
-        !isResizing && !justToggledMaximize && 'transition-[width] duration-200 ease-linear'
+        'relative flex min-w-0 flex-col overflow-hidden bg-background',
+        isMiddlePlacement ? 'border-r border-border' : 'border-l border-border',
+        !isResizing && !justToggledMaximize && 'transition-[width] duration-200 ease-linear',
+        className
       )}
       style={paneStyle}
     >
-      {!isMaximized && (
+      {!isMaximized && isResizable && (
         <div
           onMouseDown={handleMouseDown}
           className={cn(
-            'absolute inset-y-0 left-0 z-20 w-4 -translate-x-1/2 cursor-col-resize',
+            'absolute inset-y-0 z-20 w-4 cursor-col-resize',
+            isMiddlePlacement ? 'right-0 translate-x-1/2' : 'left-0 -translate-x-1/2',
             'after:absolute after:inset-y-0 after:left-1/2 after:w-[2px] after:transition-colors',
             'hover:after:bg-sidebar-border',
             isResizing && 'after:bg-primary'
@@ -577,7 +604,9 @@ export function ChatSidebar({
                     className="titlebar-no-drag my-1 mr-2 h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
                     aria-label={isMaximized ? 'Dock chat to side pane' : 'Expand chat'}
                   >
-                    {isMaximized ? <ArrowRight className="size-5" /> : <ArrowLeft className="size-5" />}
+                    {isMaximized
+                      ? (isMiddlePlacement ? <ArrowLeft className="size-5" /> : <ArrowRight className="size-5" />)
+                      : (isMiddlePlacement ? <ArrowRight className="size-5" /> : <ArrowLeft className="size-5" />)}
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom">{isMaximized ? 'Dock to side pane' : 'Expand chat'}</TooltipContent>
@@ -626,7 +655,7 @@ export function ChatSidebar({
                             <>
                               {groupConversationItems(
                                 tabState.conversation,
-                                (id) => !!tabState.allPermissionRequests.get(id)
+                                (id) => !!tabState.allPermissionRequests.get(id) || !!tabState.autoPermissionDecisions.get(id)
                               ).map((item) => {
                                 if (isToolGroup(item)) {
                                   return (
@@ -638,22 +667,43 @@ export function ChatSidebar({
                                     />
                                   )
                                 }
-                                const rendered = renderConversationItem(item, tab.id)
-                                if (isToolCall(item) && onPermissionResponse) {
+                                const autoDecision = isToolCall(item)
+                                  ? tabState.autoPermissionDecisions.get(item.id)
+                                  : undefined
+                                const rendered = renderConversationItem(
+                                  item,
+                                  tab.id,
+                                  autoDecision?.decision === 'allow'
+                                    ? { autoPermissionDetail: { decision: 'allow', reason: autoDecision.reason } }
+                                    : undefined,
+                                )
+                                if (isToolCall(item)) {
+                                  const deniedAutoDecision = autoDecision?.decision === 'deny' ? autoDecision : null
                                   const permRequest = tabState.allPermissionRequests.get(item.id)
-                                  if (permRequest) {
+                                  if (deniedAutoDecision || (permRequest && onPermissionResponse)) {
                                     const response = tabState.permissionResponses.get(item.id) || null
                                     return (
                                       <React.Fragment key={item.id}>
-                                        <PermissionRequest
-                                          toolCall={permRequest.toolCall}
-                                          onApprove={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
-                                          onApproveSession={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'session')}
-                                          onApproveAlways={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'always')}
-                                          onDeny={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
-                                          isProcessing={isActive && isProcessing}
-                                          response={response}
-                                        />
+                                        {deniedAutoDecision && (
+                                          <AutoPermissionDecision
+                                            toolCall={deniedAutoDecision.toolCall}
+                                            permission={deniedAutoDecision.permission}
+                                            decision={deniedAutoDecision.decision}
+                                            reason={deniedAutoDecision.reason}
+                                          />
+                                        )}
+                                        {permRequest && onPermissionResponse && (
+                                          <PermissionRequest
+                                            toolCall={permRequest.toolCall}
+                                            permission={permRequest.permission}
+                                            onApprove={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
+                                            onApproveSession={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'session')}
+                                            onApproveAlways={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'always')}
+                                            onDeny={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
+                                            isProcessing={isActive && isProcessing}
+                                            response={response}
+                                          />
+                                        )}
                                         {rendered}
                                       </React.Fragment>
                                     )

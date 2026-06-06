@@ -53,6 +53,7 @@ export class FSModelConfigRepo implements IModelConfigRepo {
             knowledgeGraphModel: config.knowledgeGraphModel,
             meetingNotesModel: config.meetingNotesModel,
             liveNoteAgentModel: config.liveNoteAgentModel,
+            autoPermissionDecisionModel: config.autoPermissionDecisionModel,
         };
 
         const toWrite = { ...config, providers: existingProviders };

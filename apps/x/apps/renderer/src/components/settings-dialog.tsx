@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Bug, Terminal, AlertTriangle, RefreshCw } from "lucide-react"
+import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Bug, Terminal, AlertTriangle, RefreshCw, PanelRight } from "lucide-react"
 
 import {
   Dialog,
@@ -25,6 +25,7 @@ import { useTheme } from "@/contexts/theme-context"
 import { toast } from "sonner"
 import { AccountSettings } from "@/components/settings/account-settings"
 import { ConnectedAccountsSettings } from "@/components/settings/connected-accounts-settings"
+import type { ApprovalPolicy } from "@x/shared/src/code-mode.js"
 
 type ConfigTab = "account" | "connections" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "note-tagging" | "help"
 
@@ -210,7 +211,7 @@ function ThemeOption({
 }
 
 function AppearanceSettings() {
-  const { theme, setTheme } = useTheme()
+  const { theme, setTheme, chatPanePlacement, setChatPanePlacement, chatPaneSize, setChatPaneSize } = useTheme()
 
   return (
     <div className="space-y-6">
@@ -237,6 +238,50 @@ function AppearanceSettings() {
             icon={Monitor}
             isSelected={theme === "system"}
             onClick={() => setTheme("system")}
+          />
+        </div>
+      </div>
+      <div>
+        <h4 className="text-sm font-medium mb-3">Chat</h4>
+        <p className="text-xs text-muted-foreground mb-4">
+          Choose where chat sits when another pane is open
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <ThemeOption
+            label="Chat right"
+            icon={PanelRight}
+            isSelected={chatPanePlacement === "right"}
+            onClick={() => setChatPanePlacement("right")}
+          />
+          <ThemeOption
+            label="Chat middle"
+            icon={MessageCircle}
+            isSelected={chatPanePlacement === "middle"}
+            onClick={() => setChatPanePlacement("middle")}
+          />
+        </div>
+        <h4 className="mt-6 text-sm font-medium mb-3">Chat size</h4>
+        <p className="text-xs text-muted-foreground mb-4">
+          Choose how much width chat gets when another pane is open
+        </p>
+        <div className="grid grid-cols-3 gap-3">
+          <ThemeOption
+            label="Chat smaller"
+            icon={MessageCircle}
+            isSelected={chatPaneSize === "chat-smaller"}
+            onClick={() => setChatPaneSize("chat-smaller")}
+          />
+          <ThemeOption
+            label="Chat equal"
+            icon={Monitor}
+            isSelected={chatPaneSize === "chat-equal"}
+            onClick={() => setChatPaneSize("chat-equal")}
+          />
+          <ThemeOption
+            label="Chat bigger"
+            icon={PanelRight}
+            isSelected={chatPaneSize === "chat-bigger"}
+            onClick={() => setChatPaneSize("chat-bigger")}
           />
         </div>
       </div>
@@ -277,17 +322,27 @@ const defaultBaseURLs: Partial<Record<LlmProviderFlavor, string>> = {
   "openai-compatible": "http://localhost:1234/v1",
 }
 
+type ProviderModelConfig = {
+  apiKey: string
+  baseURL: string
+  models: string[]
+  knowledgeGraphModel: string
+  meetingNotesModel: string
+  liveNoteAgentModel: string
+  autoPermissionDecisionModel: string
+}
+
 function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
   const [provider, setProvider] = useState<LlmProviderFlavor>("openai")
   const [defaultProvider, setDefaultProvider] = useState<LlmProviderFlavor | null>(null)
-  const [providerConfigs, setProviderConfigs] = useState<Record<LlmProviderFlavor, { apiKey: string; baseURL: string; models: string[]; knowledgeGraphModel: string; meetingNotesModel: string; liveNoteAgentModel: string }>>({
-    openai: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "" },
-    anthropic: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "" },
-    google: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "" },
-    openrouter: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "" },
-    aigateway: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "" },
-    ollama: { apiKey: "", baseURL: "http://localhost:11434", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "" },
-    "openai-compatible": { apiKey: "", baseURL: "http://localhost:1234/v1", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "" },
+  const [providerConfigs, setProviderConfigs] = useState<Record<LlmProviderFlavor, ProviderModelConfig>>({
+    openai: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
+    anthropic: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
+    google: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
+    openrouter: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
+    aigateway: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
+    ollama: { apiKey: "", baseURL: "http://localhost:11434", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
+    "openai-compatible": { apiKey: "", baseURL: "http://localhost:1234/v1", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
   })
   const [modelsCatalog, setModelsCatalog] = useState<Record<string, LlmModelOption[]>>({})
   const [modelsLoading, setModelsLoading] = useState(false)
@@ -313,7 +368,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
     (!requiresBaseURL || activeConfig.baseURL.trim().length > 0)
 
   const updateConfig = useCallback(
-    (prov: LlmProviderFlavor, updates: Partial<{ apiKey: string; baseURL: string; models: string[]; knowledgeGraphModel: string; meetingNotesModel: string; liveNoteAgentModel: string }>) => {
+    (prov: LlmProviderFlavor, updates: Partial<ProviderModelConfig>) => {
       setProviderConfigs(prev => ({
         ...prev,
         [prov]: { ...prev[prov], ...updates },
@@ -388,6 +443,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
                     knowledgeGraphModel: e.knowledgeGraphModel || "",
                     meetingNotesModel: e.meetingNotesModel || "",
                     liveNoteAgentModel: e.liveNoteAgentModel || "",
+                    autoPermissionDecisionModel: e.autoPermissionDecisionModel || "",
                   };
                 }
               }
@@ -406,6 +462,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
                 knowledgeGraphModel: parsed.knowledgeGraphModel || "",
                 meetingNotesModel: parsed.meetingNotesModel || "",
                 liveNoteAgentModel: parsed.liveNoteAgentModel || "",
+                autoPermissionDecisionModel: parsed.autoPermissionDecisionModel || "",
               };
             }
             return next;
@@ -481,6 +538,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
         knowledgeGraphModel: activeConfig.knowledgeGraphModel.trim() || undefined,
         meetingNotesModel: activeConfig.meetingNotesModel.trim() || undefined,
         liveNoteAgentModel: activeConfig.liveNoteAgentModel.trim() || undefined,
+        autoPermissionDecisionModel: activeConfig.autoPermissionDecisionModel.trim() || undefined,
       }
       const result = await window.ipc.invoke("models:test", providerConfig)
       if (result.success) {
@@ -515,6 +573,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
         knowledgeGraphModel: config.knowledgeGraphModel.trim() || undefined,
         meetingNotesModel: config.meetingNotesModel.trim() || undefined,
         liveNoteAgentModel: config.liveNoteAgentModel.trim() || undefined,
+        autoPermissionDecisionModel: config.autoPermissionDecisionModel.trim() || undefined,
       })
       setDefaultProvider(prov)
       window.dispatchEvent(new Event('models-config-changed'))
@@ -546,6 +605,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
         parsed.knowledgeGraphModel = defConfig.knowledgeGraphModel.trim() || undefined
         parsed.meetingNotesModel = defConfig.meetingNotesModel.trim() || undefined
         parsed.liveNoteAgentModel = defConfig.liveNoteAgentModel.trim() || undefined
+        parsed.autoPermissionDecisionModel = defConfig.autoPermissionDecisionModel.trim() || undefined
       }
       await window.ipc.invoke("workspace:writeFile", {
         path: "config/models.json",
@@ -553,7 +613,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
       })
       setProviderConfigs(prev => ({
         ...prev,
-        [prov]: { apiKey: "", baseURL: defaultBaseURLs[prov] || "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "" },
+        [prov]: { apiKey: "", baseURL: defaultBaseURLs[prov] || "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
       }))
       setTestState({ status: "idle" })
       window.dispatchEvent(new Event('models-config-changed'))
@@ -796,6 +856,40 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
             <Select
               value={activeConfig.liveNoteAgentModel || "__same__"}
               onValueChange={(value) => updateConfig(provider, { liveNoteAgentModel: value === "__same__" ? "" : value })}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select a model" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__same__">Same as assistant</SelectItem>
+                {modelsForProvider.map((m) => (
+                  <SelectItem key={m.id} value={m.id}>
+                    {m.name || m.id}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </div>
+
+        {/* Auto-permission model */}
+        <div className="space-y-2">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Auto-permission model</span>
+          {modelsLoading ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" />
+              Loading...
+            </div>
+          ) : showModelInput ? (
+            <Input
+              value={activeConfig.autoPermissionDecisionModel}
+              onChange={(e) => updateConfig(provider, { autoPermissionDecisionModel: e.target.value })}
+              placeholder={primaryModel || "Enter model"}
+            />
+          ) : (
+            <Select
+              value={activeConfig.autoPermissionDecisionModel || "__same__"}
+              onValueChange={(value) => updateConfig(provider, { autoPermissionDecisionModel: value === "__same__" ? "" : value })}
             >
               <SelectTrigger>
                 <SelectValue placeholder="Select a model" />
@@ -1712,6 +1806,7 @@ function AgentStatusRow({
 
 function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
   const [enabled, setEnabled] = useState(false)
+  const [approvalPolicy, setApprovalPolicy] = useState<ApprovalPolicy>('ask')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [status, setStatus] = useState<CodeModeAgentStatus | null>(null)
@@ -1736,7 +1831,10 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
       setLoading(true)
       try {
         const result = await window.ipc.invoke("codeMode:getConfig", null)
-        if (!cancelled) setEnabled(result.enabled)
+        if (!cancelled) {
+          setEnabled(result.enabled)
+          setApprovalPolicy(result.approvalPolicy ?? 'ask')
+        }
       } catch {
         if (!cancelled) setEnabled(false)
       } finally {
@@ -1752,7 +1850,7 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
     setSaving(true)
     setEnabled(next)
     try {
-      await window.ipc.invoke("codeMode:setConfig", { enabled: next })
+      await window.ipc.invoke("codeMode:setConfig", { enabled: next, approvalPolicy })
       window.dispatchEvent(new Event("code-mode-config-changed"))
       toast.success(next ? "Code mode enabled" : "Code mode disabled")
     } catch {
@@ -1761,7 +1859,22 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
     } finally {
       setSaving(false)
     }
-  }, [])
+  }, [approvalPolicy])
+
+  const handlePolicyChange = useCallback(async (next: ApprovalPolicy) => {
+    const prev = approvalPolicy
+    setSaving(true)
+    setApprovalPolicy(next)
+    try {
+      await window.ipc.invoke("codeMode:setConfig", { enabled, approvalPolicy: next })
+      window.dispatchEvent(new Event("code-mode-config-changed"))
+    } catch {
+      setApprovalPolicy(prev)
+      toast.error("Failed to update approval policy")
+    } finally {
+      setSaving(false)
+    }
+  }, [enabled, approvalPolicy])
 
   const anyReady = status?.claude.installed && status?.claude.signedIn
     || status?.codex.installed && status?.codex.signedIn
@@ -1781,9 +1894,8 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
         <p>
           <strong className="text-foreground">Code mode</strong> lets the assistant delegate coding tasks
           to <strong className="text-foreground">Claude Code</strong> or <strong className="text-foreground">Codex</strong> running
-          on your machine. Pick the agent inline from the composer; the assistant calls it via
-          <code className="mx-1 rounded bg-muted px-1 py-0.5 text-[11px]">acpx</code>
-          and streams results back into chat.
+          on your machine. Pick the agent inline from the composer; the assistant runs it on-device
+          and streams its work — tool calls, file diffs, and approvals — back into chat.
         </p>
         <p>
           Requires an active <strong className="text-foreground">Claude Code</strong> subscription or
@@ -1832,6 +1944,35 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
           disabled={saving}
         />
       </div>
+
+      {enabled && (
+        <div className="rounded-md border px-3 py-3 space-y-2">
+          <div className="text-sm font-medium">Approvals</div>
+          <div className="text-xs text-muted-foreground">
+            How the coding agent checks in before changing files or running commands. You always see
+            everything it does in the timeline — this only controls the prompts.
+          </div>
+          <Select
+            value={approvalPolicy}
+            onValueChange={(v) => handlePolicyChange(v as ApprovalPolicy)}
+            disabled={saving}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ask">Ask every time</SelectItem>
+              <SelectItem value="auto-approve-reads">Auto-approve reads</SelectItem>
+              <SelectItem value="yolo">Auto-approve everything (YOLO)</SelectItem>
+            </SelectContent>
+          </Select>
+          <div className="text-xs text-muted-foreground">
+            {approvalPolicy === 'ask' && 'You approve every file change and command the agent wants to run.'}
+            {approvalPolicy === 'auto-approve-reads' && 'Reading and searching run automatically; you still approve writes, edits, and commands.'}
+            {approvalPolicy === 'yolo' && 'The agent runs everything — writes, edits, and commands — without asking. Use only in folders you trust.'}
+          </div>
+        </div>
+      )}
 
       {enabled && status && !anyReady && (
         <div className="rounded-md border border-amber-500/40 bg-amber-50/60 dark:bg-amber-950/20 px-3 py-2.5 flex items-start gap-2 text-xs">

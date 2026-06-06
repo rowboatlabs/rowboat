@@ -5,12 +5,18 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { ToolUIPart } from "ai";
 import {
   ChevronDownIcon,
   CircleCheck,
   LoaderIcon,
+  ShieldCheckIcon,
   XCircleIcon,
 } from "lucide-react";
 import { type ComponentProps, type ReactNode, isValidElement, useState } from "react";
@@ -45,17 +51,51 @@ const ToolCode = ({
   </pre>
 );
 
-export type ToolProps = ComponentProps<typeof Collapsible>;
+export type ToolAutoPermissionDetail = {
+  decision: "allow";
+  reason: string;
+};
 
-export const Tool = ({ className, ...props }: ToolProps) => (
-  <Collapsible
-    className={cn(
-      "not-prose mb-4 w-full rounded-[28px] border bg-[var(--card-surface)] transition-colors duration-150 ease-out hover:border-foreground/30",
-      className
-    )}
-    {...props}
-  />
-);
+export type ToolProps = ComponentProps<typeof Collapsible> & {
+  autoPermissionDetail?: ToolAutoPermissionDetail;
+};
+
+export const Tool = ({ className, children, autoPermissionDetail, ...props }: ToolProps) => {
+  const toolCard = (
+    <Collapsible
+      className={cn(
+        autoPermissionDetail
+          ? "w-full rounded-[28px] border bg-[var(--card-surface)] transition-colors duration-150 ease-out hover:border-foreground/30"
+          : "not-prose mb-4 w-full rounded-[28px] border bg-[var(--card-surface)] transition-colors duration-150 ease-out hover:border-foreground/30",
+        className
+      )}
+      {...props}
+    >
+      {children}
+    </Collapsible>
+  );
+
+  if (!autoPermissionDetail) return toolCard;
+
+  return (
+    <div className="not-prose mb-4 w-full">
+      {toolCard}
+      <div className="mt-1 flex justify-end px-3">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex cursor-help items-center gap-1 text-[11px] text-muted-foreground/70">
+              <ShieldCheckIcon className="size-3 text-muted-foreground/70" />
+              Auto-approved
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" align="end" className="max-w-sm">
+            {autoPermissionDetail.reason}
+          </TooltipContent>
+        </Tooltip>
+      </div>
+    </div>
+  );
+};
 
 export type ToolHeaderProps = {
   title?: string;
