@@ -20,6 +20,7 @@ import { BrowserStateSchema } from './browser-control.js';
 import { BillingInfoSchema } from './billing.js';
 import { EmailBlockSchema, GmailThreadSchema } from './blocks.js';
 import { PermissionDecision, ApprovalPolicy } from './code-mode.js';
+import { NotificationSettingsSchema } from './notification-settings.js';
 
 // ============================================================================
 // Runtime Validation Schemas (Single Source of Truth)
@@ -1002,6 +1003,17 @@ const ipcSchemas = {
   'billing:getInfo': {
     req: z.null(),
     res: BillingInfoSchema,
+  },
+  // Notification settings channels
+  'notifications:getSettings': {
+    req: z.null(),
+    res: NotificationSettingsSchema,
+  },
+  'notifications:setSettings': {
+    req: NotificationSettingsSchema,
+    res: z.object({
+      success: z.literal(true),
+    }),
   },
 } as const;
 
