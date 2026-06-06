@@ -23,7 +23,11 @@
         },
         {
           "group": "Development",
-          "pages": ["docs/development/contribution-guide", "docs/getting-started/license"]
+          "pages": [
+            "docs/development/contribution-guide",
+            "docs/development/custom-oauth-configuration",
+            "docs/getting-started/license"
+          ]
         }
       ]
     },
