@@ -36,6 +36,7 @@ import { getRaw as getLabelingAgentRaw } from "../knowledge/labeling_agent.js";
 import { getRaw as getNoteTaggingAgentRaw } from "../knowledge/note_tagging_agent.js";
 import { getRaw as getInlineTaskAgentRaw } from "../knowledge/inline_task_agent.js";
 import { getRaw as getAgentNotesAgentRaw } from "../knowledge/agent_notes_agent.js";
+import { unwrapAiError } from "./ai-error.js";
 
 const AGENT_NOTES_DIR = path.join(WorkDir, 'knowledge', 'Agent Notes');
 
@@ -436,7 +437,7 @@ export class AgentRuntime implements IAgentRuntime {
         } catch (error) {
             console.error(`Run ${runId} failed:`, error);
             const message = error instanceof Error
-                ? (error.stack || error.message || error.name)
+                ? unwrapAiError(error)
                 : typeof error === "string" ? error : JSON.stringify(error);
             const errorEvent: z.infer<typeof RunEvent> = {
                 runId,
@@ -598,27 +599,10 @@ export class StreamStepMessageBuilder {
 }
 
 function formatLlmStreamError(rawError: unknown): string {
-    let name: string | undefined;
-    let responseBody: string | undefined;
-    if (rawError && typeof rawError === "object") {
-        const err = rawError as Record<string, unknown>;
-        const nested = (err.error && typeof err.error === "object") ? err.error as Record<string, unknown> : null;
-        const nameValue = err.name ?? nested?.name;
-        const responseBodyValue = err.responseBody ?? nested?.responseBody;
-        if (nameValue !== undefined) {
-            name = String(nameValue);
-        }
-        if (responseBodyValue !== undefined) {
-            responseBody = String(responseBodyValue);
-        }
-    } else if (typeof rawError === "string") {
-        responseBody = rawError;
+    if (rawError instanceof Error) {
+        return unwrapAiError(rawError);
     }
-
-    const lines: string[] = [];
-    if (name) lines.push(`name: ${name}`);
-    if (responseBody) lines.push(`responseBody: ${responseBody}`);
-    return lines.length ? lines.join("\n") : "Model stream error";
+    return "Model stream error";
 }
 
 export async function loadAgent(id: string): Promise<z.infer<typeof Agent>> {

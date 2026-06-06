@@ -1,5 +1,6 @@
 import { bus } from "../runs/bus.js";
 import { fetchRun } from "../runs/runs.js";
+import { unwrapAiError } from "./ai-error.js";
 
 type RunRecord = Awaited<ReturnType<typeof fetchRun>>;
 
@@ -25,7 +26,7 @@ export function getErrorDetails(error: unknown): string {
         return error.errors.join("\n\n");
     }
     if (error instanceof Error) {
-        return error.message;
+        return unwrapAiError(error);
     }
     return String(error);
 }
