@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   ArrowUp,
@@ -283,29 +283,41 @@ function ChatInputInner({
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('auto')
   const [recentWorkDirs, setRecentWorkDirs] = useState<RecentWorkDir[]>([])
   const toolbarRef = useRef<HTMLDivElement>(null)
+  const leftGroupRef = useRef<HTMLDivElement>(null)
   const [isCompact, setIsCompact] = useState(false)
-
-  // Compute the minimum toolbar content-box width needed to show all items in full mode.
-  // When the measured width drops below this, we switch to icon-only compact mode.
-  const compactThreshold = useMemo(() => {
-    // Base: + button (28) + permission mode "Auto" (65) + model selector (80) + submit (28) + 3 gaps
-    let w = 28 + 65 + 80 + 28 + 3 * 8
-    if (workDir) w += 120 + 8              // workDir badge + gap
-    if (searchAvailable && searchEnabled) w += 75 + 8   // expanded search label + gap
-    else if (searchAvailable) w += 28 + 8  // search icon + gap
-    if (codeModeEnabled && codeModeFeatureEnabled) w += 85 + 8  // code pill + gap
-    return w
-  }, [workDir, searchAvailable, searchEnabled, codeModeEnabled, codeModeFeatureEnabled])
+  // Outer toolbar width when we last switched to compact — used to add hysteresis so
+  // we don't oscillate back to full mode the moment icons fit.
+  const compactAtWidthRef = useRef<number | null>(null)
 
   useEffect(() => {
-    const el = toolbarRef.current
-    if (!el) return
-    const ro = new ResizeObserver(([entry]) => {
-      setIsCompact(entry.contentRect.width < compactThreshold)
+    const outer = toolbarRef.current
+    const left = leftGroupRef.current
+    if (!outer || !left) return
+    const ro = new ResizeObserver(() => {
+      const outerWidth = outer.clientWidth
+      setIsCompact(prev => {
+        if (!prev) {
+          // Full mode: switch to compact if left-group content overflows its box
+          if (left.scrollWidth > left.clientWidth) {
+            compactAtWidthRef.current = outerWidth
+            return true
+          }
+          return false
+        } else {
+          // Compact mode: only return to full when container has grown 60 px beyond
+          // where we went compact — prevents rapid oscillation at the boundary.
+          const trigger = compactAtWidthRef.current
+          if (trigger !== null && outerWidth >= trigger + 60) {
+            compactAtWidthRef.current = null
+            return false
+          }
+          return true
+        }
+      })
     })
-    ro.observe(el)
+    ro.observe(outer)
     return () => ro.disconnect()
-  }, [compactThreshold])
+  }, [])
 
   // When a run exists, freeze the dropdown to the run's resolved model+provider.
   useEffect(() => {
@@ -782,7 +794,7 @@ function ChatInputInner({
         />
       </div>
       <div ref={toolbarRef} className="flex items-center gap-2 px-4 pb-3">
-        <div className="flex min-w-0 flex-1 items-center gap-2">
+        <div ref={leftGroupRef} className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
         <DropdownMenu>
           <Tooltip>
             <TooltipTrigger asChild>
