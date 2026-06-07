@@ -33,10 +33,8 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
-  DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
@@ -1079,8 +1077,6 @@ function ChatInputInner({
               <TooltipContent side="top">More options</TooltipContent>
             </Tooltip>
             <DropdownMenuContent align="start" side="top" className="min-w-52">
-              <DropdownMenuLabel>Options</DropdownMenuLabel>
-              <DropdownMenuSeparator />
               {workDir && collapseLevel >= 8 && (
                 <DropdownMenuItem onSelect={() => { void handleSetWorkDir() }}>
                   <FolderCog className="size-4" />
