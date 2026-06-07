@@ -283,41 +283,36 @@ function ChatInputInner({
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('auto')
   const [recentWorkDirs, setRecentWorkDirs] = useState<RecentWorkDir[]>([])
   const toolbarRef = useRef<HTMLDivElement>(null)
-  const leftGroupRef = useRef<HTMLDivElement>(null)
-  const [isCompact, setIsCompact] = useState(false)
-  // Outer toolbar width when we last switched to compact — used to add hysteresis so
-  // we don't oscillate back to full mode the moment icons fit.
-  const compactAtWidthRef = useRef<number | null>(null)
+  // 0 = all full; collapse order (right→left): 1=code, 2=search, 3=workDir, 4=perm
+  const [collapseLevel, setCollapseLevel] = useState(0)
 
   useEffect(() => {
-    const outer = toolbarRef.current
-    const left = leftGroupRef.current
-    if (!outer || !left) return
-    const ro = new ResizeObserver(() => {
-      const outerWidth = outer.clientWidth
-      setIsCompact(prev => {
-        if (!prev) {
-          // Full mode: switch to compact if left-group content overflows its box
-          if (left.scrollWidth > left.clientWidth) {
-            compactAtWidthRef.current = outerWidth
-            return true
-          }
-          return false
-        } else {
-          // Compact mode: only return to full when container has grown 60 px beyond
-          // where we went compact — prevents rapid oscillation at the boundary.
-          const trigger = compactAtWidthRef.current
-          if (trigger !== null && outerWidth >= trigger + 60) {
-            compactAtWidthRef.current = null
-            return false
-          }
-          return true
-        }
-      })
+    const el = toolbarRef.current
+    if (!el) return
+    const ro = new ResizeObserver(([entry]) => {
+      const w = entry.contentRect.width
+      // Approximate full/compact px widths per item (icon = 28, gap = 8)
+      const codeOn = codeModeEnabled && codeModeFeatureEnabled
+      const codeFullW  = codeOn ? 85 + 8 : 0
+      const codeIconW  = codeOn ? 28 + 8 : 0
+      const searchFullW = searchAvailable ? (searchEnabled ? 75 + 8 : 28 + 8) : 0
+      const searchIconW = searchAvailable ? 28 + 8 : 0
+      const workDirFullW = workDir ? 120 + 8 : 0
+      const workDirIconW = workDir ? 28 + 8 : 0
+      const permFullW  = 65 + 8   // "Auto" label
+      const permIconW  = 28 + 8
+      const base = 28 + 80 + 28 + 2 * 8  // +btn + model + submit + 2 outer gaps
+      // Min container width to fit each level without overflowing
+      const t0 = base + permFullW  + workDirFullW  + searchFullW  + codeFullW   // all full
+      const t1 = base + permFullW  + workDirFullW  + searchFullW  + codeIconW   // code → icon
+      const t2 = base + permFullW  + workDirFullW  + searchIconW  + codeIconW   // search → icon
+      const t3 = base + permFullW  + workDirIconW  + searchIconW  + codeIconW   // workDir → icon
+      const t4 = base + permIconW  + workDirIconW  + searchIconW  + codeIconW   // perm → icon
+      setCollapseLevel(w >= t0 ? 0 : w >= t1 ? 1 : w >= t2 ? 2 : w >= t3 ? 3 : w >= t4 ? 4 : 4)
     })
-    ro.observe(outer)
+    ro.observe(el)
     return () => ro.disconnect()
-  }, [])
+  }, [workDir, searchAvailable, searchEnabled, codeModeEnabled, codeModeFeatureEnabled])
 
   // When a run exists, freeze the dropdown to the run's resolved model+provider.
   useEffect(() => {
@@ -794,7 +789,7 @@ function ChatInputInner({
         />
       </div>
       <div ref={toolbarRef} className="flex items-center gap-2 px-4 pb-3">
-        <div ref={leftGroupRef} className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+        <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
         <DropdownMenu>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -902,7 +897,7 @@ function ChatInputInner({
         {workDir && (
           <Tooltip>
             <TooltipTrigger asChild>
-              {isCompact ? (
+              {collapseLevel >= 3 ? (
                 <button
                   type="button"
                   onClick={handleSetWorkDir}
@@ -953,7 +948,7 @@ function ChatInputInner({
             <span
               className={cn(
                 'overflow-hidden whitespace-nowrap text-xs font-medium transition-all duration-150 ease-out',
-                searchEnabled ? 'ml-1.5 max-w-[60px] opacity-100' : 'max-w-0 opacity-0'
+                searchEnabled && collapseLevel < 2 ? 'ml-1.5 max-w-[60px] opacity-100' : 'max-w-0 opacity-0'
               )}
             >
               Search
@@ -971,7 +966,7 @@ function ChatInputInner({
               disabled={Boolean(runId)}
               className={cn(
                 "flex h-7 shrink-0 items-center gap-1.5 rounded-full text-xs font-medium transition-colors",
-                isCompact ? "w-7 justify-center" : "px-2.5",
+                collapseLevel >= 4 ? "w-7 justify-center" : "px-2.5",
                 permissionMode === 'auto'
                   ? "bg-secondary text-foreground hover:bg-secondary/70"
                   : "text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -980,7 +975,7 @@ function ChatInputInner({
               aria-label="Permission mode"
             >
               <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
-              {!isCompact && <span>{permissionMode === 'auto' ? 'Auto' : 'Manual'}</span>}
+              {collapseLevel < 4 && <span>{permissionMode === 'auto' ? 'Auto' : 'Manual'}</span>}
             </button>
           </TooltipTrigger>
           <TooltipContent side="top">
@@ -992,7 +987,7 @@ function ChatInputInner({
           </TooltipContent>
         </Tooltip>
         {codeModeFeatureEnabled && (codeModeEnabled ? (
-          isCompact ? (
+          collapseLevel >= 1 ? (
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
