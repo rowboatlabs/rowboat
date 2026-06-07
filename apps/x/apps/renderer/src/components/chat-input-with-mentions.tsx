@@ -302,12 +302,12 @@ function ChatInputInner({
       const permFullW  = 65 + 8   // "Auto" label
       const permIconW  = 28 + 8
       const base = 28 + 80 + 28 + 2 * 8  // +btn + model + submit + 2 outer gaps
-      // Min container width to fit each level without overflowing
-      const t0 = base + permFullW  + workDirFullW  + searchFullW  + codeFullW   // all full
-      const t1 = base + permFullW  + workDirFullW  + searchFullW  + codeIconW   // code → icon
-      const t2 = base + permFullW  + workDirFullW  + searchIconW  + codeIconW   // search → icon
-      const t3 = base + permFullW  + workDirIconW  + searchIconW  + codeIconW   // workDir → icon
-      const t4 = base + permIconW  + workDirIconW  + searchIconW  + codeIconW   // perm → icon
+      // Collapse order right→left: code(1) → perm(2) → search(3) → workDir(4)
+      const t0 = base + workDirFullW  + searchFullW  + permFullW  + codeFullW   // all full
+      const t1 = base + workDirFullW  + searchFullW  + permFullW  + codeIconW   // code → icon
+      const t2 = base + workDirFullW  + searchFullW  + permIconW  + codeIconW   // perm → icon
+      const t3 = base + workDirFullW  + searchIconW  + permIconW  + codeIconW   // search → icon
+      const t4 = base + workDirIconW  + searchIconW  + permIconW  + codeIconW   // workDir → icon
       setCollapseLevel(w >= t0 ? 0 : w >= t1 ? 1 : w >= t2 ? 2 : w >= t3 ? 3 : w >= t4 ? 4 : 4)
     })
     ro.observe(el)
@@ -897,7 +897,7 @@ function ChatInputInner({
         {workDir && (
           <Tooltip>
             <TooltipTrigger asChild>
-              {collapseLevel >= 3 ? (
+              {collapseLevel >= 4 ? (
                 <button
                   type="button"
                   onClick={handleSetWorkDir}
@@ -945,7 +945,7 @@ function ChatInputInner({
             )}
           >
             <Globe className="h-4 w-4 shrink-0" />
-            {searchEnabled && collapseLevel < 2 && (
+            {searchEnabled && collapseLevel < 3 && (
               <span className="ml-1.5 whitespace-nowrap text-xs font-medium">
                 Search
               </span>
@@ -963,7 +963,7 @@ function ChatInputInner({
               disabled={Boolean(runId)}
               className={cn(
                 "flex h-7 shrink-0 items-center gap-1.5 rounded-full text-xs font-medium transition-colors",
-                collapseLevel >= 4 ? "w-7 justify-center" : "px-2.5",
+                collapseLevel >= 2 ? "w-7 justify-center" : "px-2.5",
                 permissionMode === 'auto'
                   ? "bg-secondary text-foreground hover:bg-secondary/70"
                   : "text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -972,7 +972,7 @@ function ChatInputInner({
               aria-label="Permission mode"
             >
               <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
-              {collapseLevel < 4 && <span>{permissionMode === 'auto' ? 'Auto' : 'Manual'}</span>}
+              {collapseLevel < 2 && <span>{permissionMode === 'auto' ? 'Auto' : 'Manual'}</span>}
             </button>
           </TooltipTrigger>
           <TooltipContent side="top">
