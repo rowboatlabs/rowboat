@@ -282,6 +282,18 @@ function ChatInputInner({
   const [codeModeFeatureEnabled, setCodeModeFeatureEnabled] = useState(false)
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('auto')
   const [recentWorkDirs, setRecentWorkDirs] = useState<RecentWorkDir[]>([])
+  const toolbarRef = useRef<HTMLDivElement>(null)
+  const [isCompact, setIsCompact] = useState(false)
+
+  useEffect(() => {
+    const el = toolbarRef.current
+    if (!el) return
+    const ro = new ResizeObserver(([entry]) => {
+      setIsCompact(entry.contentRect.width < 320)
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
   // When a run exists, freeze the dropdown to the run's resolved model+provider.
   useEffect(() => {
@@ -757,8 +769,8 @@ function ChatInputInner({
           className="min-h-6 rounded-none border-0 py-0 shadow-none focus-visible:ring-0"
         />
       </div>
-      <div className="flex items-center gap-2 px-4 pb-3">
-        <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+      <div ref={toolbarRef} className="flex items-center gap-2 px-4 pb-3">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
         <DropdownMenu>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -866,6 +878,15 @@ function ChatInputInner({
         {workDir && (
           <Tooltip>
             <TooltipTrigger asChild>
+              {isCompact ? (
+                <button
+                  type="button"
+                  onClick={handleSetWorkDir}
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border bg-muted/40 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  <FolderCog className="h-3.5 w-3.5" />
+                </button>
+              ) : (
               <div className="group flex h-7 max-w-[180px] shrink-0 items-center rounded-full border border-border bg-muted/40 pl-2.5 pr-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
                 <button
                   type="button"
@@ -884,6 +905,7 @@ function ChatInputInner({
                   <X className="h-3.5 w-3.5 shrink-0" />
                 </button>
               </div>
+              )}
             </TooltipTrigger>
             <TooltipContent side="top">
               Work directory: {workDir}
@@ -924,7 +946,8 @@ function ChatInputInner({
               }}
               disabled={Boolean(runId)}
               className={cn(
-                "flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium transition-colors",
+                "flex h-7 shrink-0 items-center gap-1.5 rounded-full text-xs font-medium transition-colors",
+                isCompact ? "w-7 justify-center" : "px-2.5",
                 permissionMode === 'auto'
                   ? "bg-secondary text-foreground hover:bg-secondary/70"
                   : "text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -932,8 +955,8 @@ function ChatInputInner({
               )}
               aria-label="Permission mode"
             >
-              <ShieldCheck className="h-3.5 w-3.5" />
-              <span>{permissionMode === 'auto' ? 'Auto' : 'Manual'}</span>
+              <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
+              {!isCompact && <span>{permissionMode === 'auto' ? 'Auto' : 'Manual'}</span>}
             </button>
           </TooltipTrigger>
           <TooltipContent side="top">
@@ -945,6 +968,20 @@ function ChatInputInner({
           </TooltipContent>
         </Tooltip>
         {codeModeFeatureEnabled && (codeModeEnabled ? (
+          isCompact ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => setCodeModeEnabled(false)}
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-secondary text-foreground transition-colors hover:bg-secondary/70"
+                >
+                  <Terminal className="h-3.5 w-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top">Code mode on ({codingAgent === 'claude' ? 'Claude Code' : 'Codex'}) — click to disable</TooltipContent>
+            </Tooltip>
+          ) : (
           <div className="flex h-7 shrink-0 items-center rounded-full bg-secondary text-xs font-medium text-foreground">
             <Tooltip>
               <TooltipTrigger asChild>
@@ -975,6 +1012,7 @@ function ChatInputInner({
               </TooltipContent>
             </Tooltip>
           </div>
+          )
         ) : (
           <Tooltip>
             <TooltipTrigger asChild>
