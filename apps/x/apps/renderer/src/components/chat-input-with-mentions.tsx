@@ -313,10 +313,14 @@ function ChatInputInner({
     return () => ro.disconnect()
   }, [])
 
-  // …or when the set/labels of items changes (these all affect item widths).
+  // …or when the *set* of items changes (an item appears/disappears, or the model
+  // name width changes). Deliberately excludes the in-place toggles (searchEnabled,
+  // permissionMode, codeModeEnabled, codingAgent): those fire from the overflow menu
+  // for items already inside it, so resetting here would unmount the open menu. The
+  // no-dep effect below still re-collapses if any toggle happens to widen the row.
   useLayoutEffect(() => {
     setCollapseLevel(0)
-  }, [workDir, searchEnabled, searchAvailable, codeModeEnabled, codeModeFeatureEnabled, codingAgent, permissionMode, lockedModel, activeModelKey])
+  }, [workDir, searchAvailable, codeModeFeatureEnabled, lockedModel, activeModelKey])
 
   // After each render, if the left group still overflows, collapse one more step.
   // Runs before paint, so the intermediate (overflowing) state is never visible.
