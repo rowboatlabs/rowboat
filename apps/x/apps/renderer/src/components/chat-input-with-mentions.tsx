@@ -653,7 +653,7 @@ function ChatInputInner({
   const currentWorkDirPath = workDir ? compactWorkDirPath(workDir) : ''
 
   return (
-    <div className="rowboat-chat-input rounded-lg border border-border bg-background shadow-none">
+    <div className="rowboat-chat-input @container rounded-lg border border-border bg-background shadow-none">
       {attachments.length > 0 && (
         <div className="flex flex-wrap gap-2 px-4 pb-1 pt-3">
           {attachments.map((attachment) => {
@@ -756,7 +756,7 @@ function ChatInputInner({
           className="min-h-6 rounded-none border-0 py-0 shadow-none focus-visible:ring-0"
         />
       </div>
-      <div className="@container flex items-center gap-2 px-4 pb-3">
+      <div className="flex items-center gap-2 px-4 pb-3">
         <div className="flex min-w-0 flex-1 items-center gap-2">
         <DropdownMenu>
           <Tooltip>
