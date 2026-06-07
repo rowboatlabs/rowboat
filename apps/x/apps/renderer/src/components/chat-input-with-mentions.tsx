@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   ArrowUp,
@@ -283,36 +283,39 @@ function ChatInputInner({
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('auto')
   const [recentWorkDirs, setRecentWorkDirs] = useState<RecentWorkDir[]>([])
   const toolbarRef = useRef<HTMLDivElement>(null)
-  // 0 = all full; collapse order (right→left): 1=code, 2=search, 3=workDir, 4=perm
+  const leftGroupRef = useRef<HTMLDivElement>(null)
+  // 0 = all full; collapse order (right→left): 1=code, 2=perm, 3=search, 4=workDir
   const [collapseLevel, setCollapseLevel] = useState(0)
 
+  // After every render, synchronously check if the left group overflows and step up
+  // one collapse level if so. Cascades (each level change triggers another check)
+  // until items fit — all resolved before the browser paints, so no half-visible text.
+  useLayoutEffect(() => {
+    const left = leftGroupRef.current
+    if (!left) return
+    if (left.scrollWidth > left.clientWidth + 1) {
+      setCollapseLevel(prev => Math.min(4, prev + 1))
+    }
+  }, [collapseLevel, workDir, codeModeEnabled, codeModeFeatureEnabled, searchEnabled, searchAvailable])
+
+  // When the outer toolbar grows, try stepping back down one level at a time.
+  // Require slack > item's expansion delta + buffer to avoid oscillation at boundaries.
   useEffect(() => {
-    const el = toolbarRef.current
-    if (!el) return
-    const ro = new ResizeObserver(([entry]) => {
-      const w = entry.contentRect.width
-      // Approximate full/compact px widths per item (icon = 28, gap = 8)
-      const codeOn = codeModeEnabled && codeModeFeatureEnabled
-      const codeFullW  = codeOn ? 85 + 8 : 0
-      const codeIconW  = codeOn ? 28 + 8 : 0
-      const searchFullW = searchAvailable ? (searchEnabled ? 75 + 8 : 28 + 8) : 0
-      const searchIconW = searchAvailable ? 28 + 8 : 0
-      const workDirFullW = workDir ? 120 + 8 : 0
-      const workDirIconW = workDir ? 28 + 8 : 0
-      const permFullW  = 65 + 8   // "Auto" label
-      const permIconW  = 28 + 8
-      const base = 28 + 80 + 28 + 2 * 8  // +btn + model + submit + 2 outer gaps
-      // Collapse order right→left: code(1) → perm(2) → search(3) → workDir(4)
-      const t0 = base + workDirFullW  + searchFullW  + permFullW  + codeFullW   // all full
-      const t1 = base + workDirFullW  + searchFullW  + permFullW  + codeIconW   // code → icon
-      const t2 = base + workDirFullW  + searchFullW  + permIconW  + codeIconW   // perm → icon
-      const t3 = base + workDirFullW  + searchIconW  + permIconW  + codeIconW   // search → icon
-      const t4 = base + workDirIconW  + searchIconW  + permIconW  + codeIconW   // workDir → icon
-      setCollapseLevel(w >= t0 ? 0 : w >= t1 ? 1 : w >= t2 ? 2 : w >= t3 ? 3 : w >= t4 ? 4 : 4)
+    const outer = toolbarRef.current
+    const left = leftGroupRef.current
+    if (!outer || !left) return
+    // Width gained when un-collapsing each level (full-width minus icon-width, px)
+    const expandDelta = [107, 62, 52, 132] // levels 1→0, 2→1, 3→2, 4→3
+    const ro = new ResizeObserver(() => {
+      const slack = left.clientWidth - left.scrollWidth
+      setCollapseLevel(prev => {
+        if (prev === 0) return 0
+        return slack > (expandDelta[prev - 1] ?? 0) + 20 ? prev - 1 : prev
+      })
     })
-    ro.observe(el)
+    ro.observe(outer)
     return () => ro.disconnect()
-  }, [workDir, searchAvailable, searchEnabled, codeModeEnabled, codeModeFeatureEnabled])
+  }, [])
 
   // When a run exists, freeze the dropdown to the run's resolved model+provider.
   useEffect(() => {
@@ -789,7 +792,7 @@ function ChatInputInner({
         />
       </div>
       <div ref={toolbarRef} className="flex items-center gap-2 px-4 pb-3">
-        <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+        <div ref={leftGroupRef} className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
         <DropdownMenu>
           <Tooltip>
             <TooltipTrigger asChild>
