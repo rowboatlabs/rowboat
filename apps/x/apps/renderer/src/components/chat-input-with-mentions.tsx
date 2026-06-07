@@ -19,6 +19,7 @@ import {
   ImagePlus,
   LoaderIcon,
   Mic,
+  MoreHorizontal,
   Plus,
   ShieldCheck,
   Square,
@@ -29,10 +30,13 @@ import {
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
@@ -283,10 +287,12 @@ function ChatInputInner({
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('auto')
   const [recentWorkDirs, setRecentWorkDirs] = useState<RecentWorkDir[]>([])
 
-  // Responsive toolbar: measure real overflow and collapse items to icons
-  // right→left (1=code, 2=perm, 3=search-label, 4=workDir) until everything fits.
-  // overflow-hidden on the left group is the hard guarantee that nothing can ever
-  // overlap; the measurement just decides how much to collapse before that clip.
+  // Responsive toolbar: measure real overflow and progressively collapse items
+  // right→left until everything fits. Stages:
+  //   1 code→icon · 2 perm→icon · 3 search label hidden · 4 workDir→icon
+  //   5 code→menu · 6 perm→menu · 7 search→menu · 8 workDir→menu
+  // Once items move into the "⋯" overflow menu (≥5) no icon is ever hidden.
+  // overflow-hidden on the left group is the hard guarantee against any overlap.
   const toolbarRef = useRef<HTMLDivElement>(null)
   const leftGroupRef = useRef<HTMLDivElement>(null)
   const lastWidthRef = useRef(0)
@@ -307,18 +313,18 @@ function ChatInputInner({
     return () => ro.disconnect()
   }, [])
 
-  // …or when the set/labels of items changes (workdir name, search/code toggles).
+  // …or when the set/labels of items changes (these all affect item widths).
   useLayoutEffect(() => {
     setCollapseLevel(0)
-  }, [workDir, searchEnabled, searchAvailable, codeModeEnabled, codeModeFeatureEnabled, lockedModel, activeModelKey])
+  }, [workDir, searchEnabled, searchAvailable, codeModeEnabled, codeModeFeatureEnabled, codingAgent, permissionMode, lockedModel, activeModelKey])
 
   // After each render, if the left group still overflows, collapse one more step.
   // Runs before paint, so the intermediate (overflowing) state is never visible.
   useLayoutEffect(() => {
     const el = leftGroupRef.current
     if (!el) return
-    if (el.scrollWidth > el.clientWidth + 1 && collapseLevel < 4) {
-      setCollapseLevel((l) => Math.min(4, l + 1))
+    if (el.scrollWidth > el.clientWidth + 1 && collapseLevel < 8) {
+      setCollapseLevel((l) => Math.min(8, l + 1))
     }
   })
 
@@ -797,7 +803,7 @@ function ChatInputInner({
         />
       </div>
       <div ref={toolbarRef} className="flex items-center gap-2 px-4 pb-3">
-        <div ref={leftGroupRef} className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+        <div ref={leftGroupRef} className="flex min-w-0 items-center gap-2 overflow-hidden">
         <DropdownMenu>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -902,7 +908,7 @@ function ChatInputInner({
             </div>
           </DropdownMenuContent>
         </DropdownMenu>
-        {workDir && (
+        {workDir && collapseLevel < 8 && (
           <Tooltip>
             <TooltipTrigger asChild>
               {/* Level 4: collapse to a square icon */}
@@ -935,7 +941,7 @@ function ChatInputInner({
             </TooltipContent>
           </Tooltip>
         )}
-        {searchAvailable && (
+        {searchAvailable && collapseLevel < 7 && (
           <button
             type="button"
             onClick={() => setSearchEnabled((v) => !v)}
@@ -956,6 +962,7 @@ function ChatInputInner({
             )}
           </button>
         )}
+        {collapseLevel < 6 && (
         <Tooltip>
           <TooltipTrigger asChild>
             <button
@@ -987,7 +994,8 @@ function ChatInputInner({
                 : 'Manual approval prompts — click for auto-permission'}
           </TooltipContent>
         </Tooltip>
-        {codeModeFeatureEnabled && (codeModeEnabled ? (
+        )}
+        {codeModeFeatureEnabled && collapseLevel < 5 && (codeModeEnabled ? (
           collapseLevel >= 1 ? (
             /* Level 1: collapse the pill to a single icon */
             <Tooltip>
@@ -1050,6 +1058,72 @@ function ChatInputInner({
           </Tooltip>
         ))}
         </div>
+        {collapseLevel >= 5 && (
+          <DropdownMenu>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="More options"
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  >
+                    <MoreHorizontal className="h-4 w-4" />
+                  </button>
+                </DropdownMenuTrigger>
+              </TooltipTrigger>
+              <TooltipContent side="top">More options</TooltipContent>
+            </Tooltip>
+            <DropdownMenuContent align="start" side="top" className="min-w-52">
+              <DropdownMenuLabel>Options</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {workDir && collapseLevel >= 8 && (
+                <DropdownMenuItem onSelect={() => { void handleSetWorkDir() }}>
+                  <FolderCog className="size-4" />
+                  <span className="min-w-0 flex-1 truncate">{basename(workDir) || workDir}</span>
+                </DropdownMenuItem>
+              )}
+              {searchAvailable && collapseLevel >= 7 && (
+                <DropdownMenuCheckboxItem
+                  checked={searchEnabled}
+                  onSelect={(e) => e.preventDefault()}
+                  onCheckedChange={(c) => setSearchEnabled(Boolean(c))}
+                >
+                  Web search
+                </DropdownMenuCheckboxItem>
+              )}
+              {collapseLevel >= 6 && (
+                <DropdownMenuCheckboxItem
+                  checked={permissionMode === 'auto'}
+                  disabled={Boolean(runId)}
+                  onSelect={(e) => e.preventDefault()}
+                  onCheckedChange={(c) => setPermissionMode(c ? 'auto' : 'manual')}
+                >
+                  Auto-approve actions
+                </DropdownMenuCheckboxItem>
+              )}
+              {codeModeFeatureEnabled && collapseLevel >= 5 && (
+                <>
+                  <DropdownMenuCheckboxItem
+                    checked={codeModeEnabled}
+                    onSelect={(e) => e.preventDefault()}
+                    onCheckedChange={(c) => setCodeModeEnabled(Boolean(c))}
+                  >
+                    Code mode
+                  </DropdownMenuCheckboxItem>
+                  {codeModeEnabled && (
+                    <DropdownMenuItem onSelect={(e) => { e.preventDefault(); handleToggleCodingAgent() }}>
+                      <Terminal className="size-4" />
+                      <span className="min-w-0 flex-1">Coding agent</span>
+                      <span className="text-xs text-muted-foreground">{codingAgent === 'claude' ? 'Claude' : 'Codex'}</span>
+                    </DropdownMenuItem>
+                  )}
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+        <div className="flex-1" />
         {lockedModel ? (
           <span
             className="flex h-7 min-w-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground"
