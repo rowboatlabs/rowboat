@@ -758,6 +758,7 @@ function ChatInputInner({
         />
       </div>
       <div className="flex items-center gap-2 px-4 pb-3">
+        <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
         <DropdownMenu>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -989,7 +990,7 @@ function ChatInputInner({
             <TooltipContent side="top">Use a coding agent (Claude Code or Codex)</TooltipContent>
           </Tooltip>
         ))}
-        <div className="flex-1" />
+        </div>
         {lockedModel ? (
           <span
             className="flex h-7 min-w-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground"
