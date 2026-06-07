@@ -1,7 +1,6 @@
 import { z, ZodType } from "zod";
 import * as path from "path";
 import * as fs from "fs/promises";
-import { existsSync, readFileSync } from "fs";
 import { executeCommand, executeCommandAbortable } from "./command-executor.js";
 import { resolveSkill, availableSkills } from "../assistant/skills/index.js";
 import { executeTool, listServers, listTools } from "../../mcp/mcp.js";
@@ -16,6 +15,10 @@ import { executeAction as executeComposioAction, isConfigured as isComposioConfi
 import { CURATED_TOOLKITS, CURATED_TOOLKIT_SLUGS } from "@x/shared/dist/composio.js";
 import { BrowserControlInputSchema, type BrowserControlInput } from "@x/shared/dist/browser-control.js";
 import { BackgroundTaskSchema, TriggersSchema } from "@x/shared/dist/background-task.js";
+import type { CodeModeManager } from "../../code-mode/acp/manager.js";
+import type { CodePermissionRegistry } from "../../code-mode/acp/permission-registry.js";
+import { ICodeModeConfigRepo } from "../../code-mode/repo.js";
+import type { ApprovalPolicy } from "@x/shared/dist/code-mode.js";
 
 // Inputs for the bg-task builtin tools. Reuse the canonical schema field
 // descriptions; only `triggers` gets a tighter contextual override (the
@@ -90,69 +93,6 @@ const LLMPARSE_MIME_TYPES: Record<string, string> = {
     '.tiff': 'image/tiff',
 };
 
-// Windows-only workaround: the Claude ACP bridge spawns CLAUDE_CODE_EXECUTABLE
-// without `shell: true`, and Node refuses to spawn .cmd files that way (EINVAL).
-// When the LLM invokes acpx via executeCommand, pre-resolve claude's real .exe
-// from the npm-shim layout and inject it via env so the bridge can spawn it.
-function resolveClaudeExeOnWindows(): string | undefined {
-    // Candidate dirs = everything on PATH, plus well-known npm/pnpm/volta global
-    // bin dirs. Electron's runtime PATH can omit these even when the user's shell
-    // includes them, which would otherwise leave us unable to find claude.exe and
-    // force a fallback to claude.cmd (which Node refuses to spawn — EINVAL).
-    const home = process.env.USERPROFILE ?? '';
-    const appData = process.env.APPDATA || (home && path.join(home, 'AppData', 'Roaming'));
-    const localAppData = process.env.LOCALAPPDATA || (home && path.join(home, 'AppData', 'Local'));
-    const programFiles = process.env.ProgramFiles || 'C:\\Program Files';
-    const knownDirs = [
-        appData && path.join(appData, 'npm'),
-        localAppData && path.join(localAppData, 'npm'),
-        appData && path.join(appData, 'pnpm'),
-        localAppData && path.join(localAppData, 'pnpm'),
-        home && path.join(home, '.volta', 'bin'),
-        path.join(programFiles, 'nodejs'),
-    ].filter(Boolean) as string[];
-
-    const pathDirs = (process.env.PATH ?? '').split(';').map((d) => d.trim()).filter(Boolean);
-    const seen = new Set<string>();
-    const candidates = [...pathDirs, ...knownDirs].filter((d) => {
-        const key = d.toLowerCase();
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-    });
-
-    for (const dir of candidates) {
-        // Direct npm-shim layout: <dir>\node_modules\@anthropic-ai\claude-code\bin\claude.exe
-        const exeFromLayout = path.join(dir, 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe');
-        if (existsSync(exeFromLayout)) return exeFromLayout;
-
-        // Otherwise parse the claude.cmd shim for the real exe path.
-        const cmdPath = path.join(dir, 'claude.cmd');
-        if (!existsSync(cmdPath)) continue;
-        try {
-            const content = readFileSync(cmdPath, 'utf-8');
-            const absMatch = content.match(/[A-Z]:[\\/][^\s"]*claude\.exe/i);
-            if (absMatch && existsSync(absMatch[0])) return absMatch[0];
-            const relMatch = content.match(/%~dp0[\\/]?([^\s"%]+claude\.exe)/i);
-            if (relMatch) {
-                const resolved = path.join(dir, relMatch[1]);
-                if (existsSync(resolved)) return resolved;
-            }
-        } catch {
-            // ignore shim parse failures
-        }
-    }
-    return undefined;
-}
-
-function envForCommand(command: string): NodeJS.ProcessEnv | undefined {
-    if (process.platform !== 'win32') return undefined;
-    if (!/\bacpx\b/.test(command)) return undefined;
-    if (process.env.CLAUDE_CODE_EXECUTABLE) return undefined;
-    const exe = resolveClaudeExeOnWindows();
-    if (!exe) return undefined;
-    return { ...process.env, CLAUDE_CODE_EXECUTABLE: exe };
-}
 
 export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
     loadSkill: {
@@ -814,14 +754,11 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 //     };
                 // }
 
-                const envOverride = envForCommand(command);
-
                 // Use abortable version when we have a signal
                 if (ctx?.signal) {
                     const { promise, process: proc } = executeCommandAbortable(command, {
                         cwd: workingDir,
                         signal: ctx.signal,
-                        env: envOverride,
                         onData: (chunk: string) => {
                             ctx.publish({
                                 runId: ctx.runId,
@@ -851,7 +788,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 }
 
                 // Fallback to original for backward compatibility
-                const result = await executeCommand(command, { cwd: workingDir, env: envOverride });
+                const result = await executeCommand(command, { cwd: workingDir });
 
                 return {
                     success: result.exitCode === 0,
@@ -867,6 +804,104 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                     message: `Failed to execute command: ${error instanceof Error ? error.message : 'Unknown error'}`,
                     command,
                 };
+            }
+        },
+    },
+
+    code_agent_run: {
+        description: 'Run a coding/software task with the selected on-device coding agent (Claude Code or Codex) inside a project folder. Streams the agent\'s tool calls, file diffs, and plan into the chat and surfaces permission requests inline. Use this for ALL code-mode work (writing/editing/reading code, running tests, debugging, exploring a repo). Reuses one persistent session per chat, so follow-up requests keep context.',
+        inputSchema: z.object({
+            agent: z.enum(['claude', 'codex']).describe('Which coding agent to use: "claude" (Claude Code) or "codex". Set this to the active code-mode chip agent. Note: when the chip is set, the backend uses the chip agent regardless of this value — this only takes effect in the ask-human flow where no chip is set.'),
+            cwd: z.string().describe('Absolute path to the working directory / project folder the agent should operate in.'),
+            prompt: z.string().describe('The full, self-contained coding instruction for the agent (file names, expected behavior, constraints).'),
+        }),
+        execute: async ({ agent, cwd, prompt }: { agent: 'claude' | 'codex', cwd: string, prompt: string }, ctx?: ToolContext) => {
+            if (!ctx) {
+                return { success: false, message: 'code_agent_run requires run context (runId / streaming).' };
+            }
+            // The composer chip is the source of truth for the agent. The model's `agent`
+            // argument is only a fallback for the ask-human flow (code mode not active, no
+            // chip set) — otherwise it can anchor on the thread's earlier agent and ignore a
+            // chip change. Honor the chip so switching it deterministically switches agents.
+            const effectiveAgent = ctx.codeMode ?? agent;
+            const manager = container.resolve<CodeModeManager>('codeModeManager');
+            const registry = container.resolve<CodePermissionRegistry>('codePermissionRegistry');
+
+            // Approval policy from settings; default to asking the user.
+            let policy: ApprovalPolicy = 'ask';
+            try {
+                const cfg = await container.resolve<ICodeModeConfigRepo>('codeModeConfigRepo').getConfig();
+                if (cfg.approvalPolicy) policy = cfg.approvalPolicy;
+            } catch {
+                // fall back to 'ask'
+            }
+
+            // On stop, unblock any pending approval card so the broker stops waiting for
+            // an answer that will never come. The ACP cancel + force-kill backstop that
+            // actually ends the turn is handled inside manager.runPrompt via the signal
+            // we pass below.
+            const onAbort = () => registry.cancelRun(ctx.runId);
+            if (ctx.signal.aborted) onAbort();
+            else ctx.signal.addEventListener('abort', onAbort, { once: true });
+
+            let finalText = '';
+            const changedFiles = new Set<string>();
+            try {
+                const result = await manager.runPrompt({
+                    runId: ctx.runId,
+                    agent: effectiveAgent,
+                    cwd,
+                    prompt,
+                    policy,
+                    signal: ctx.signal,
+                    onEvent: (event) => {
+                        if (event.type === 'message' && event.role === 'agent') finalText += event.text;
+                        if (event.type === 'tool_call_update') for (const f of event.diffs) changedFiles.add(f);
+                        void ctx.publish({
+                            runId: ctx.runId,
+                            type: 'code-run-event',
+                            toolCallId: ctx.toolCallId,
+                            event,
+                            subflow: [],
+                        });
+                    },
+                    ask: (permAsk) => registry.request(ctx.runId, (requestId) => {
+                        void ctx.publish({
+                            runId: ctx.runId,
+                            type: 'code-run-permission-request',
+                            toolCallId: ctx.toolCallId,
+                            requestId,
+                            ask: permAsk,
+                            subflow: [],
+                        });
+                    }),
+                });
+                return {
+                    success: result.stopReason === 'end_turn',
+                    stopReason: result.stopReason,
+                    // The agent that actually ran (the chip), so the UI can label the run
+                    // authoritatively rather than trusting the model's `agent` argument.
+                    agent: effectiveAgent,
+                    summary: finalText.trim(),
+                    changedFiles: [...changedFiles],
+                };
+            } catch (error) {
+                // A stop mid-run isn't a failure — report it as a clean cancellation.
+                if (ctx.signal.aborted) {
+                    return {
+                        success: false,
+                        stopReason: 'cancelled',
+                        agent: effectiveAgent,
+                        summary: finalText.trim(),
+                        changedFiles: [...changedFiles],
+                    };
+                }
+                return {
+                    success: false,
+                    message: `Coding agent failed: ${error instanceof Error ? error.message : String(error)}`,
+                };
+            } finally {
+                ctx.signal.removeEventListener('abort', onAbort);
             }
         },
     },

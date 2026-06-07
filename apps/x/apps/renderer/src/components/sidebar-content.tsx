@@ -511,7 +511,7 @@ export function SidebarContentPanel({
     const out: TreeNode[] = []
     const walk = (nodes: TreeNode[]) => {
       for (const n of nodes) {
-        if (n.path === 'knowledge/Meetings' || n.path === 'knowledge/Workspace') continue
+        if (n.path === 'knowledge/Meetings' || n.path === 'knowledge/Workspace' || n.path === 'knowledge/Agent Notes') continue
         if (n.kind === 'file') out.push(n)
         else if (n.children?.length) walk(n.children)
       }
@@ -520,11 +520,11 @@ export function SidebarContentPanel({
     return out
       .filter((n) => n.stat?.mtimeMs)
       .sort((a, b) => (b.stat?.mtimeMs ?? 0) - (a.stat?.mtimeMs ?? 0))
-      .slice(0, 5)
+      .slice(0, 10)
   }, [tree])
 
   // Recents: most recently touched notes / agents / chats, interleaved by
-  // recency. Capped per type (3 notes, 2 agents, 1 chat) and 5 overall.
+  // recency. Capped per type (4 notes, 4 agents, 4 chats) and 12 overall.
   type QuickAccessItem = {
     key: string
     label: string
@@ -535,7 +535,7 @@ export function SidebarContentPanel({
   const quickAccessItems = React.useMemo<QuickAccessItem[]>(() => {
     const items: QuickAccessItem[] = []
 
-    for (const note of recentNotes.slice(0, 3)) {
+    for (const note of recentNotes.slice(0, 4)) {
       items.push({
         key: `note:${note.path}`,
         label: displayNoteName(note),
@@ -550,7 +550,7 @@ export function SidebarContentPanel({
       const ms = ts ? new Date(ts).getTime() : 0
       return Number.isFinite(ms) ? ms : 0
     }
-    for (const t of [...bgTaskSummaries].sort((a, b) => agentRecency(b) - agentRecency(a)).slice(0, 2)) {
+    for (const t of [...bgTaskSummaries].sort((a, b) => agentRecency(b) - agentRecency(a)).slice(0, 4)) {
       items.push({
         key: `agent:${t.slug}`,
         label: t.name,
@@ -564,7 +564,7 @@ export function SidebarContentPanel({
       const ms = new Date(r.createdAt).getTime()
       return Number.isFinite(ms) ? ms : 0
     }
-    for (const r of [...recentRuns].sort((a, b) => chatRecency(b) - chatRecency(a)).slice(0, 1)) {
+    for (const r of [...recentRuns].sort((a, b) => chatRecency(b) - chatRecency(a)).slice(0, 4)) {
       items.push({
         key: `chat:${r.id}`,
         label: r.title || '(Untitled chat)',
@@ -574,7 +574,7 @@ export function SidebarContentPanel({
       })
     }
 
-    return items.sort((a, b) => b.recency - a.recency).slice(0, 5)
+    return items.sort((a, b) => b.recency - a.recency).slice(0, 12)
   }, [recentNotes, bgTaskSummaries, recentRuns, onSelectFile, onOpenAgent, onOpenRun])
 
   // Workspace count for the Workspaces sublabel — top-level dir children of
