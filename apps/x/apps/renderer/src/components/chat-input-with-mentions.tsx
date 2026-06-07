@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   ArrowUp,
@@ -285,15 +285,27 @@ function ChatInputInner({
   const toolbarRef = useRef<HTMLDivElement>(null)
   const [isCompact, setIsCompact] = useState(false)
 
+  // Compute the minimum toolbar content-box width needed to show all items in full mode.
+  // When the measured width drops below this, we switch to icon-only compact mode.
+  const compactThreshold = useMemo(() => {
+    // Base: + button (28) + permission mode "Auto" (65) + model selector (80) + submit (28) + 3 gaps
+    let w = 28 + 65 + 80 + 28 + 3 * 8
+    if (workDir) w += 120 + 8              // workDir badge + gap
+    if (searchAvailable && searchEnabled) w += 75 + 8   // expanded search label + gap
+    else if (searchAvailable) w += 28 + 8  // search icon + gap
+    if (codeModeEnabled && codeModeFeatureEnabled) w += 85 + 8  // code pill + gap
+    return w
+  }, [workDir, searchAvailable, searchEnabled, codeModeEnabled, codeModeFeatureEnabled])
+
   useEffect(() => {
     const el = toolbarRef.current
     if (!el) return
     const ro = new ResizeObserver(([entry]) => {
-      setIsCompact(entry.contentRect.width < 320)
+      setIsCompact(entry.contentRect.width < compactThreshold)
     })
     ro.observe(el)
     return () => ro.disconnect()
-  }, [])
+  }, [compactThreshold])
 
   // When a run exists, freeze the dropdown to the run's resolved model+provider.
   useEffect(() => {
