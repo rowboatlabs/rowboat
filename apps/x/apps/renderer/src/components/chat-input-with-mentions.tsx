@@ -992,22 +992,22 @@ function ChatInputInner({
         <div className="flex-1" />
         {lockedModel ? (
           <span
-            className="flex h-7 shrink-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground"
+            className="flex h-7 min-w-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground"
             title={`${providerDisplayNames[lockedModel.provider] || lockedModel.provider} — fixed for this chat`}
           >
-            <span className="max-w-[150px] truncate">{getSelectedModelDisplayName(lockedModel.model)}</span>
+            <span className="min-w-0 truncate">{getSelectedModelDisplayName(lockedModel.model)}</span>
           </span>
         ) : configuredModels.length > 0 ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                className="flex h-7 shrink-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                className="flex h-7 min-w-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               >
-                <span className="max-w-[150px] truncate">
+                <span className="min-w-0 truncate">
                   {getSelectedModelDisplayName(configuredModels.find((m) => `${m.provider}/${m.model}` === activeModelKey)?.model || configuredModels[0]?.model || 'Model')}
                 </span>
-                <ChevronDown className="h-3 w-3" />
+                <ChevronDown className="h-3 w-3 shrink-0" />
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
