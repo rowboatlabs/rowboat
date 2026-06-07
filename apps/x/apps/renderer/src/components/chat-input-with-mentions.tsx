@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   ArrowUp,
@@ -282,41 +282,6 @@ function ChatInputInner({
   const [codeModeFeatureEnabled, setCodeModeFeatureEnabled] = useState(false)
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('auto')
   const [recentWorkDirs, setRecentWorkDirs] = useState<RecentWorkDir[]>([])
-  const toolbarRef = useRef<HTMLDivElement>(null)
-  const leftGroupRef = useRef<HTMLDivElement>(null)
-  // 0 = all full; collapse order (right→left): 1=code, 2=perm, 3=search, 4=workDir
-  const [collapseLevel, setCollapseLevel] = useState(0)
-
-  // After every render, synchronously check if the left group overflows and step up
-  // one collapse level if so. Cascades (each level change triggers another check)
-  // until items fit — all resolved before the browser paints, so no half-visible text.
-  useLayoutEffect(() => {
-    const left = leftGroupRef.current
-    if (!left) return
-    if (left.scrollWidth > left.clientWidth + 1) {
-      setCollapseLevel(prev => Math.min(4, prev + 1))
-    }
-  }, [collapseLevel, workDir, codeModeEnabled, codeModeFeatureEnabled, searchEnabled, searchAvailable])
-
-  // When the outer toolbar grows, try stepping back down one level at a time.
-  // Require slack > item's expansion delta + buffer to avoid oscillation at boundaries.
-  useEffect(() => {
-    const outer = toolbarRef.current
-    const left = leftGroupRef.current
-    if (!outer || !left) return
-    // Width gained when un-collapsing each level (full-width minus icon-width, px)
-    const expandDelta = [107, 62, 52, 132] // levels 1→0, 2→1, 3→2, 4→3
-    const ro = new ResizeObserver(() => {
-      const slack = left.clientWidth - left.scrollWidth
-      setCollapseLevel(prev => {
-        if (prev === 0) return 0
-        return slack > (expandDelta[prev - 1] ?? 0) + 20 ? prev - 1 : prev
-      })
-    })
-    ro.observe(outer)
-    return () => ro.disconnect()
-  }, [])
-
   // When a run exists, freeze the dropdown to the run's resolved model+provider.
   useEffect(() => {
     if (!runId) {
@@ -791,8 +756,8 @@ function ChatInputInner({
           className="min-h-6 rounded-none border-0 py-0 shadow-none focus-visible:ring-0"
         />
       </div>
-      <div ref={toolbarRef} className="flex items-center gap-2 px-4 pb-3">
-        <div ref={leftGroupRef} className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+      <div className="@container flex items-center gap-2 px-4 pb-3">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
         <DropdownMenu>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -900,34 +865,25 @@ function ChatInputInner({
         {workDir && (
           <Tooltip>
             <TooltipTrigger asChild>
-              {collapseLevel >= 4 ? (
-                <button
-                  type="button"
-                  onClick={handleSetWorkDir}
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border bg-muted/40 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                >
-                  <FolderCog className="h-3.5 w-3.5" />
-                </button>
-              ) : (
-              <div className="group flex h-7 max-w-[180px] shrink-0 items-center rounded-full border border-border bg-muted/40 pl-2.5 pr-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+              {/* Collapses to a square icon below ~370px container width */}
+              <div className="group flex h-7 max-w-[180px] shrink-0 items-center rounded-full border border-border bg-muted/40 pl-2.5 pr-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground @max-[370px]:w-7 @max-[370px]:max-w-7 @max-[370px]:justify-center @max-[370px]:px-0">
                 <button
                   type="button"
                   onClick={handleSetWorkDir}
                   className="flex min-w-0 items-center gap-1.5"
                 >
                   <FolderCog className="h-3.5 w-3.5 shrink-0" />
-                  <span className="truncate">{basename(workDir) || workDir}</span>
+                  <span className="truncate @max-[370px]:hidden">{basename(workDir) || workDir}</span>
                 </button>
                 <button
                   type="button"
                   onClick={handleClearWorkDir}
                   aria-label="Remove work directory"
-                  className="flex h-3.5 w-0 shrink-0 items-center justify-center overflow-hidden opacity-0 transition-all duration-150 ease-out hover:text-red-500 group-hover:ml-1 group-hover:w-3.5 group-hover:opacity-100"
+                  className="flex h-3.5 w-0 shrink-0 items-center justify-center overflow-hidden opacity-0 transition-all duration-150 ease-out hover:text-red-500 group-hover:ml-1 group-hover:w-3.5 group-hover:opacity-100 @max-[370px]:hidden"
                 >
                   <X className="h-3.5 w-3.5 shrink-0" />
                 </button>
               </div>
-              )}
             </TooltipTrigger>
             <TooltipContent side="top">
               Work directory: {workDir}
@@ -948,8 +904,8 @@ function ChatInputInner({
             )}
           >
             <Globe className="h-4 w-4 shrink-0" />
-            {searchEnabled && collapseLevel < 3 && (
-              <span className="ml-1.5 whitespace-nowrap text-xs font-medium">
+            {searchEnabled && (
+              <span className="ml-1.5 whitespace-nowrap text-xs font-medium @max-[410px]:hidden">
                 Search
               </span>
             )}
@@ -965,8 +921,7 @@ function ChatInputInner({
               }}
               disabled={Boolean(runId)}
               className={cn(
-                "flex h-7 shrink-0 items-center gap-1.5 rounded-full text-xs font-medium transition-colors",
-                collapseLevel >= 2 ? "w-7 justify-center" : "px-2.5",
+                "flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium transition-colors @max-[460px]:w-7 @max-[460px]:justify-center @max-[460px]:px-0",
                 permissionMode === 'auto'
                   ? "bg-secondary text-foreground hover:bg-secondary/70"
                   : "text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -975,7 +930,7 @@ function ChatInputInner({
               aria-label="Permission mode"
             >
               <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
-              {collapseLevel < 2 && <span>{permissionMode === 'auto' ? 'Auto' : 'Manual'}</span>}
+              <span className="@max-[460px]:hidden">{permissionMode === 'auto' ? 'Auto' : 'Manual'}</span>
             </button>
           </TooltipTrigger>
           <TooltipContent side="top">
@@ -987,51 +942,52 @@ function ChatInputInner({
           </TooltipContent>
         </Tooltip>
         {codeModeFeatureEnabled && (codeModeEnabled ? (
-          collapseLevel >= 1 ? (
+          <>
+            {/* Compact icon — shown below ~560px when there's no room for the full pill */}
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   type="button"
                   onClick={() => setCodeModeEnabled(false)}
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-secondary text-foreground transition-colors hover:bg-secondary/70"
+                  className="hidden h-7 w-7 shrink-0 items-center justify-center rounded-full bg-secondary text-foreground transition-colors hover:bg-secondary/70 @max-[560px]:flex"
                 >
                   <Terminal className="h-3.5 w-3.5" />
                 </button>
               </TooltipTrigger>
               <TooltipContent side="top">Code mode on ({codingAgent === 'claude' ? 'Claude Code' : 'Codex'}) — click to disable</TooltipContent>
             </Tooltip>
-          ) : (
-          <div className="flex h-7 shrink-0 items-center rounded-full bg-secondary text-xs font-medium text-foreground">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={() => setCodeModeEnabled(false)}
-                  className="flex h-full items-center gap-1.5 rounded-l-full pl-2.5 pr-2 transition-colors hover:bg-secondary/70"
-                >
-                  <Terminal className="h-3.5 w-3.5" />
-                  <span>Code</span>
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="top">Code mode on — click to disable</TooltipContent>
-            </Tooltip>
-            <span className="text-foreground/30">·</span>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={handleToggleCodingAgent}
-                  className="flex h-full items-center rounded-r-full pl-2 pr-2.5 transition-colors hover:bg-secondary/70"
-                >
-                  <span>{codingAgent === 'claude' ? 'Claude' : 'Codex'}</span>
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="top">
-                Coding agent: {codingAgent === 'claude' ? 'Claude Code' : 'Codex'} — click to swap
-              </TooltipContent>
-            </Tooltip>
-          </div>
-          )
+            {/* Full pill — hidden below ~560px */}
+            <div className="flex h-7 shrink-0 items-center rounded-full bg-secondary text-xs font-medium text-foreground @max-[560px]:hidden">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() => setCodeModeEnabled(false)}
+                    className="flex h-full items-center gap-1.5 rounded-l-full pl-2.5 pr-2 transition-colors hover:bg-secondary/70"
+                  >
+                    <Terminal className="h-3.5 w-3.5" />
+                    <span>Code</span>
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">Code mode on — click to disable</TooltipContent>
+              </Tooltip>
+              <span className="text-foreground/30">·</span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={handleToggleCodingAgent}
+                    className="flex h-full items-center rounded-r-full pl-2 pr-2.5 transition-colors hover:bg-secondary/70"
+                  >
+                    <span>{codingAgent === 'claude' ? 'Claude' : 'Codex'}</span>
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  Coding agent: {codingAgent === 'claude' ? 'Claude Code' : 'Codex'} — click to swap
+                </TooltipContent>
+              </Tooltip>
+            </div>
+          </>
         ) : (
           <Tooltip>
             <TooltipTrigger asChild>
