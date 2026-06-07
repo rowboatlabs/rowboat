@@ -945,14 +945,11 @@ function ChatInputInner({
             )}
           >
             <Globe className="h-4 w-4 shrink-0" />
-            <span
-              className={cn(
-                'overflow-hidden whitespace-nowrap text-xs font-medium transition-all duration-150 ease-out',
-                searchEnabled && collapseLevel < 2 ? 'ml-1.5 max-w-[60px] opacity-100' : 'max-w-0 opacity-0'
-              )}
-            >
-              Search
-            </span>
+            {searchEnabled && collapseLevel < 2 && (
+              <span className="ml-1.5 whitespace-nowrap text-xs font-medium">
+                Search
+              </span>
+            )}
           </button>
         )}
         <Tooltip>
