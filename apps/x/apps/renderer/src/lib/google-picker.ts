@@ -21,6 +21,7 @@ type PickerCallbackData = {
 
 type PickerBuilder = {
   addView: (v: PickerView) => PickerBuilder
+  setOrigin: (o: string) => PickerBuilder
   setOAuthToken: (t: string) => PickerBuilder
   setDeveloperKey: (k: string) => PickerBuilder
   setAppId: (id: string) => PickerBuilder
@@ -96,11 +97,11 @@ export async function openGooglePicker(opts: {
 
   const view = new picker.DocsView()
     .setIncludeFolders(false)
-    .setOwnedByMe(false)
     .setMimeTypes(`${DOC_MIME},${DOCX_MIME}`)
 
   const builder = new picker.PickerBuilder()
     .addView(view)
+    .setOrigin(window.location.protocol + '//' + window.location.host)
     .setOAuthToken(opts.accessToken)
     .setTitle('Choose a document to sync')
     .setCallback((data) => {

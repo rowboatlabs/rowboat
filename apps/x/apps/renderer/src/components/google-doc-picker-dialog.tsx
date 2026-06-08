@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { GoogleClientIdModal } from '@/components/google-client-id-modal'
 import { setGoogleCredentials } from '@/lib/google-credentials-store'
-import { openGooglePicker, getStoredPickerApiKey, setStoredPickerApiKey } from '@/lib/google-picker'
+import { getStoredPickerApiKey, setStoredPickerApiKey } from '@/lib/google-picker'
 import { toast } from '@/lib/toast'
 
 type GoogleDocsStatus = {
@@ -131,24 +131,34 @@ export function GoogleDocPickerDialog({
       return
     }
 
-    // Hand off to Google's Picker; close our modal so it isn't trapped behind it.
+    // Open the Picker in the user's real browser (Chrome) via a localhost
+    // loopback in the main process. Google 403s the Picker inside Electron;
+    // a real browser is a trusted context. Close our modal during the hand-off.
     onOpenChange(false)
+    toast('Continue in your browser to choose a document…', 'info')
+    let picked: { id: string; name: string; mimeType: string } | null = null
     try {
-      await openGooglePicker({
+      picked = await window.ipc.invoke('google-docs:openPicker', {
         accessToken,
-        apiKey: key,
-        onPicked: async (file) => {
-          try {
-            const result = await window.ipc.invoke('google-docs:import', { fileId: file.id, targetFolder })
-            toast(`Added “${file.name}”`, 'success')
-            onImported(result.path)
-          } catch (err) {
-            toast(err instanceof Error ? err.message : 'Failed to import the document', 'error')
-          }
-        },
+        apiKey: key || undefined,
       })
     } catch (err) {
+      setOpening(false)
       toast(err instanceof Error ? err.message : 'Failed to open the Google Picker', 'error')
+      return
+    }
+
+    if (!picked) {
+      setOpening(false)
+      return
+    }
+
+    try {
+      const result = await window.ipc.invoke('google-docs:import', { fileId: picked.id, targetFolder })
+      toast(`Added “${picked.name}”`, 'success')
+      onImported(result.path)
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Failed to import the document', 'error')
     } finally {
       setOpening(false)
     }
@@ -226,8 +236,14 @@ export function GoogleDocPickerDialog({
                 </p>
               </div>
               {error && (
-                <div className="max-w-sm rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                  {error}
+                <div className="flex max-w-sm flex-col items-center gap-2">
+                  <div className="w-full rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                    {error}
+                  </div>
+                  <Button variant="outline" size="sm" onClick={() => setByokOpen(true)} disabled={connecting}>
+                    <RefreshCw className="size-4" />
+                    Reconnect Google
+                  </Button>
                 </div>
               )}
               <Button onClick={() => void handleChoose()} disabled={opening}>

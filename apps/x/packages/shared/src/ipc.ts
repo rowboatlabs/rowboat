@@ -657,6 +657,20 @@ const ipcSchemas = {
       accessToken: z.string().nullable(),
     }),
   },
+  // Open a Google Picker in a dedicated BrowserWindow (avoids session-cookie
+  // issues when running the Picker widget inside the renderer iframe).
+  'google-docs:openPicker': {
+    req: z.object({
+      accessToken: z.string(),
+      apiKey: z.string().optional(),
+      appId: z.string().optional(),
+    }),
+    res: z.object({
+      id: z.string(),
+      name: z.string(),
+      mimeType: z.string(),
+    }).nullable(),
+  },
   'google-docs:import': {
     req: z.object({
       fileId: z.string().min(1),
