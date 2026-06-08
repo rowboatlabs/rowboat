@@ -39,17 +39,17 @@ jobs:
           node -e "
             const fs = require('fs');
             const version = '${{ steps.version.outputs.version }}';
-            
+
             // Update apps/x/package.json
             const rootPackage = JSON.parse(fs.readFileSync('apps/x/package.json', 'utf8'));
             rootPackage.version = version;
             fs.writeFileSync('apps/x/package.json', JSON.stringify(rootPackage, null, 2) + '\n');
-            
+
             // Update apps/x/apps/main/package.json
             const mainPackage = JSON.parse(fs.readFileSync('apps/x/apps/main/package.json', 'utf8'));
             mainPackage.version = version;
             fs.writeFileSync('apps/x/apps/main/package.json', JSON.stringify(mainPackage, null, 2) + '\n');
-            
+
             console.log('Updated version to:', version);
           "
 
@@ -61,25 +61,25 @@ jobs:
           # Create a temporary keychain
           KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
           KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
-          
+
           # Create keychain
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          
+
           # Decode and import certificate
           echo "$APPLE_CERTIFICATE" | base64 --decode > $RUNNER_TEMP/certificate.p12
           security import $RUNNER_TEMP/certificate.p12 -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
-          
+
           # Allow codesign to access the keychain
           security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          
+
           # Add keychain to search list
           security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain
-          
+
           # Verify certificate was imported
           security find-identity -v "$KEYCHAIN_PATH"
-          
+
           # Clean up certificate file
           rm -f $RUNNER_TEMP/certificate.p12
 
@@ -145,17 +145,17 @@ jobs:
           node -e "
             const fs = require('fs');
             const version = '${{ steps.version.outputs.version }}';
-            
+
             // Update apps/x/package.json
             const rootPackage = JSON.parse(fs.readFileSync('apps/x/package.json', 'utf8'));
             rootPackage.version = version;
             fs.writeFileSync('apps/x/package.json', JSON.stringify(rootPackage, null, 2) + '\n');
-            
+
             // Update apps/x/apps/main/package.json
             const mainPackage = JSON.parse(fs.readFileSync('apps/x/apps/main/package.json', 'utf8'));
             mainPackage.version = version;
             fs.writeFileSync('apps/x/apps/main/package.json', JSON.stringify(mainPackage, null, 2) + '\n');
-            
+
             console.log('Updated version to:', version);
           "
 
@@ -212,17 +212,17 @@ jobs:
           node -e "
             const fs = require('fs');
             const version = '${{ steps.version.outputs.version }}';
-            
+
             // Update apps/x/package.json
             const rootPackage = JSON.parse(fs.readFileSync('apps/x/package.json', 'utf8'));
             rootPackage.version = version;
             fs.writeFileSync('apps/x/package.json', JSON.stringify(rootPackage, null, 2) + '\n');
-            
+
             // Update apps/x/apps/main/package.json
             const mainPackage = JSON.parse(fs.readFileSync('apps/x/apps/main/package.json', 'utf8'));
             mainPackage.version = version;
             fs.writeFileSync('apps/x/apps/main/package.json', JSON.stringify(mainPackage, null, 2) + '\n');
-            
+
             console.log('Updated version to:', version);
           "
 
