@@ -43,6 +43,16 @@ Download latest for Mac/Windows/Linux: [Download](https://www.rowboatlabs.com/do
 
 ⭐ If you find Rowboat useful, please star the repo. It helps more people find it.
 
+<p align="center">
+  <a href="https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=rowboat">
+    <img src="assets/atlas-cloud-logo.png" alt="Atlas Cloud" width="200">
+  </a>
+</p>
+
+> 🎁 **[Atlas Cloud](https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=rowboat)** powers Rowboat's `openai-compatible` provider with a single API key covering DeepSeek, Qwen, GLM, Kimi, MiniMax and more — no separate vendor accounts needed. Instead of juggling multiple API keys for different models, point Rowboat at `https://api.atlascloud.ai/v1` and switch models freely.
+> 
+> Budget-friendly access: [Atlas Cloud coding plan](https://www.atlascloud.ai/console/coding-plan)
+
 ## Demo
 [![Demo](https://github.com/user-attachments/assets/8b9a859b-d4f1-47ca-9d1d-9d26d982e15d)](https://www.youtube.com/watch?v=7xTpciZCfpw)
 
@@ -135,6 +145,24 @@ Rowboat works with the model setup you prefer:
 - **Local models** via Ollama or LM Studio
 - **Hosted models** (bring your own API key/provider)
 - Swap models anytime — your data stays in your local Markdown vault
+
+To use **[Atlas Cloud](https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=rowboat)** (OpenAI-compatible, 59+ models including DeepSeek, Qwen, GLM, Kimi, MiniMax), set `~/.rowboat/config/models.json`:
+
+```json
+{
+  "providers": {
+    "atlascloud": {
+      "flavor": "openai-compatible",
+      "apiKey": "<your-atlascloud-api-key>",
+      "baseURL": "https://api.atlascloud.ai/v1"
+    }
+  },
+  "defaults": {
+    "provider": "atlascloud",
+    "model": "deepseek-ai/deepseek-v4-pro"
+  }
+}
+```
 
 ## Extend Rowboat with tools (MCP)
 

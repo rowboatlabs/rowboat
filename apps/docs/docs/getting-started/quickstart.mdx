@@ -25,3 +25,23 @@ To use Brave web search, add the Brave API key in `~/.rowboat/config/brave-searc
 To use Exa research search, add the Exa API key in `~/.rowboat/config/exa-search.json`.
 
 (Use the same JSON format as above.)
+
+## Custom LLM provider (optional)
+
+Rowboat supports any OpenAI-compatible backend via `~/.rowboat/config/models.json`. Example using [Atlas Cloud](https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=rowboat) (DeepSeek, Qwen, GLM, Kimi, MiniMax, and more):
+
+```json
+{
+  "providers": {
+    "atlascloud": {
+      "flavor": "openai-compatible",
+      "apiKey": "<your-atlascloud-api-key>",
+      "baseURL": "https://api.atlascloud.ai/v1"
+    }
+  },
+  "defaults": {
+    "provider": "atlascloud",
+    "model": "deepseek-ai/deepseek-v4-pro"
+  }
+}
+```
