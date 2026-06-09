@@ -40,6 +40,13 @@ const POST_CALENDAR_END_SILENCE_MS = 2 * 60 * 1000;
 // How often the silence checker runs.
 const SILENCE_CHECK_INTERVAL_MS = 5 * 1000;
 
+// On macOS (ScreenCaptureKit) the system-audio track neither fires "ended" nor
+// "mute" reliably when the meeting ends, so we poll its state instead. Auto-stop
+// once the track reports muted for MUTE_POLLS_TO_STOP consecutive polls — long
+// enough to ride out a brief audio interruption.
+const TRACK_POLL_INTERVAL_MS = 3 * 1000;
+const MUTE_POLLS_TO_STOP = 3;
+
 // ---------------------------------------------------------------------------
 // Headphone detection
 // ---------------------------------------------------------------------------
@@ -142,6 +149,10 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
     const silenceCheckRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const calendarEndMsRef = useRef<number | null>(null);
     const nudgeToastIdRef = useRef<string | number | null>(null);
+    // On macOS (ScreenCaptureKit) the system-audio track doesn't reliably fire
+    // "ended"/"mute" when the meeting ends, so we poll its readyState/muted
+    // state instead.
+    const trackPollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const onAutoStopRef = useRef(onAutoStop);
     onAutoStopRef.current = onAutoStop;
     const dateRef = useRef<string>('');
@@ -190,6 +201,10 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
         if (nudgeToastIdRef.current !== null) {
             toast.dismiss(nudgeToastIdRef.current);
             nudgeToastIdRef.current = null;
+        }
+        if (trackPollingRef.current) {
+            clearInterval(trackPollingRef.current);
+            trackPollingRef.current = null;
         }
         if (processorRef.current) {
             processorRef.current.disconnect();
@@ -354,6 +369,34 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
                 onAutoStopRef.current?.();
             });
         });
+
+        // On macOS the "ended"/"mute" events don't fire reliably when the
+        // meeting ends, so poll the system-audio track's state. An ended track
+        // stops immediately; a track muted for MUTE_POLLS_TO_STOP consecutive
+        // polls is treated as the meeting ending (the counter resets the moment
+        // it unmutes, so a brief interruption won't trigger a stop).
+        const pollTrack = systemStream.getAudioTracks()[0];
+        if (pollTrack) {
+            let mutedPolls = 0;
+            if (trackPollingRef.current) clearInterval(trackPollingRef.current);
+            trackPollingRef.current = setInterval(() => {
+                console.log('[meeting] track poll: readyState=' + pollTrack.readyState + ' muted=' + pollTrack.muted);
+                if (pollTrack.readyState === 'ended') {
+                    console.log('[meeting] system-audio track ended (poll) — auto-stopping');
+                    onAutoStopRef.current?.();
+                    return;
+                }
+                if (pollTrack.muted) {
+                    mutedPolls++;
+                    if (mutedPolls >= MUTE_POLLS_TO_STOP) {
+                        console.log('[meeting] system-audio track muted (poll) — auto-stopping');
+                        onAutoStopRef.current?.();
+                    }
+                } else {
+                    mutedPolls = 0;
+                }
+            }, TRACK_POLL_INTERVAL_MS);
+        }
 
         // ----- Audio pipeline -----
         const audioCtx = new AudioContext({ sampleRate: 16000 });
