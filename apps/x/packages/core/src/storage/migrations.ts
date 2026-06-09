@@ -1,0 +1,50 @@
+import type { Kysely } from "kysely";
+import { Migrator, type Migration, type MigrationProvider } from "kysely/migration";
+
+// Kysely migrations are intentionally schema-agnostic and frozen in time.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type MigrationDb = Kysely<any>;
+
+const migrations: Record<string, Migration> = {
+    "2026-06-09_0001_initial_storage": {
+        async up(db: MigrationDb): Promise<void> {
+            await db.schema
+                .createTable("storage_metadata")
+                .ifNotExists()
+                .addColumn("key", "text", (col) => col.primaryKey())
+                .addColumn("value", "text", (col) => col.notNull())
+                .addColumn("updated_at", "text", (col) => col.notNull())
+                .execute();
+        },
+        async down(db: MigrationDb): Promise<void> {
+            await db.schema.dropTable("storage_metadata").ifExists().execute();
+        },
+    },
+};
+
+class InCodeMigrationProvider implements MigrationProvider {
+    async getMigrations(): Promise<Record<string, Migration>> {
+        return migrations;
+    }
+}
+
+export async function migrateToLatest(db: MigrationDb): Promise<void> {
+    const migrator = new Migrator({
+        db,
+        provider: new InCodeMigrationProvider(),
+    });
+
+    const { error, results } = await migrator.migrateToLatest();
+
+    for (const result of results ?? []) {
+        if (result.status === "Success") {
+            console.log(`[storage] migration applied: ${result.migrationName}`);
+        } else if (result.status === "Error") {
+            console.error(`[storage] migration failed: ${result.migrationName}`);
+        }
+    }
+
+    if (error) {
+        throw new Error("Failed to migrate SQLite storage", { cause: error });
+    }
+}

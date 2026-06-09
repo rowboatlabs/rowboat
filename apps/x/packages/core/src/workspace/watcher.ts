@@ -9,6 +9,11 @@ import { Stats } from 'node:fs';
 
 export type WorkspaceChangeCallback = (event: z.infer<typeof WorkspaceChangeEvent>) => void;
 
+export function shouldIgnoreWorkspacePath(absPath: string): boolean {
+  const relPath = absToRelPosix(absPath);
+  return relPath === 'db' || relPath?.startsWith('db/') === true;
+}
+
 /**
  * Create a workspace watcher
  * Watches the configured workspace root recursively and emits change events via callback
@@ -29,8 +34,12 @@ export async function createWorkspaceWatcher(
   const codeModeDir = path.join(WorkDir, 'code-mode');
   const watcher = chokidar.watch(WorkDir, {
     ignoreInitial: true,
+    // Ignore the SQLite db dir (storage) AND code-section worktrees (full repo
+    // checkouts that would flood the event stream).
     ignored: (watchedPath: string) =>
-      watchedPath === codeModeDir || watchedPath.startsWith(codeModeDir + path.sep),
+      shouldIgnoreWorkspacePath(watchedPath) ||
+      watchedPath === codeModeDir ||
+      watchedPath.startsWith(codeModeDir + path.sep),
     awaitWriteFinish: {
       stabilityThreshold: 150,
       pollInterval: 50,

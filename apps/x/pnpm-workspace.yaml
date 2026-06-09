@@ -19,6 +19,7 @@ onlyBuiltDependencies:
   - electron
   - electron-winstaller
   - esbuild
+  - better-sqlite3
   - fs-xattr
   - macos-alias
   - protobufjs

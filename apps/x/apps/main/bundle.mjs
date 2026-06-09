@@ -27,11 +27,13 @@ await esbuild.build({
   platform: 'node',
   target: 'node20',
   outfile: './.package/dist/main.cjs',
-  // electron is provided by the runtime. node-pty is a NATIVE module: it can't
-  // be inlined (its loader requires .node binaries + a spawn-helper relative to
-  // its own package dir), so it stays external and is copied into
-  // .package/node_modules below, where require() from dist/main.cjs finds it.
-  external: ['electron', 'node-pty'],
+  // electron is provided by the runtime. node-pty and better-sqlite3 are NATIVE
+  // modules: they can't be inlined (their loaders require .node binaries — and
+  // node-pty a spawn-helper — relative to their own package dirs), so they stay
+  // external and are staged into .package/node_modules (node-pty below;
+  // better-sqlite3 via forge.config.cjs generateAssets) where require() from
+  // dist/main.cjs finds them.
+  external: ['electron', 'node-pty', 'better-sqlite3'],
   // Use CommonJS format - many dependencies use require() which doesn't work
   // well with esbuild's ESM shim. CJS handles dynamic requires natively.
   format: 'cjs',

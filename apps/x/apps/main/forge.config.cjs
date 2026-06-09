@@ -35,13 +35,19 @@ module.exports = {
         // Regexes are ANCHORED to the app root: .package/node_modules (where
         // bundle.mjs stages the native node-pty module) must survive packaging.
         prune: false,
-        ignore: [
-            /^\/src\//,
-            /^\/node_modules\//,
-            /.gitignore/,
-            /bundle\.mjs/,
-            /tsconfig.json/,
-        ],
+        // Keep .package/node_modules (staged native modules: node-pty and
+        // better-sqlite3) — everything else under those rules is pruned.
+        ignore: (file) => {
+            const normalized = file.split(path.sep).join('/');
+            if (normalized.includes('/.package/node_modules/')) return false;
+            return [
+                /\/src\//,
+                /\/node_modules\//,
+                /\.gitignore$/,
+                /\/bundle\.mjs$/,
+                /\/tsconfig\.json$/,
+            ].some((pattern) => pattern.test(normalized));
+        },
     },
     makers: [
         {
@@ -179,6 +185,44 @@ module.exports = {
             execSync('node bundle.mjs', {
                 cwd: __dirname,
                 stdio: 'inherit'
+            });
+
+            // Copy native runtime dependencies that cannot be bundled by esbuild.
+            console.log('Copying native runtime dependencies...');
+            const stagedNodeModules = path.join(packageDir, 'node_modules');
+            fs.mkdirSync(stagedNodeModules, { recursive: true });
+            fs.writeFileSync(path.join(packageDir, 'package.json'), JSON.stringify({
+                name: `${pkg.name}-native-runtime`,
+                version: pkg.version,
+                private: true,
+                dependencies: {
+                    'better-sqlite3': require(require.resolve('better-sqlite3/package.json', {
+                        paths: [path.join(__dirname, '../../packages/core')],
+                    })).version,
+                },
+            }, null, 2));
+            const copyRuntimePackage = (packageName) => {
+                const packageJsonPath = require.resolve(`${packageName}/package.json`, {
+                    paths: [path.join(__dirname, '../../packages/core')],
+                });
+                const packageSrc = path.dirname(packageJsonPath);
+                const packageDest = path.join(stagedNodeModules, packageName);
+                fs.rmSync(packageDest, { recursive: true, force: true });
+                fs.cpSync(packageSrc, packageDest, { recursive: true });
+            };
+            for (const packageName of ['better-sqlite3', 'bindings', 'file-uri-to-path']) {
+                copyRuntimePackage(packageName);
+            }
+            const { rebuild } = require(path.join(__dirname, '../../node_modules/.pnpm/node_modules/@electron/rebuild'));
+            const electronVersion = require(require.resolve('electron/package.json', { paths: [__dirname] })).version;
+            await rebuild({
+                buildPath: packageDir,
+                electronVersion,
+                platform,
+                arch,
+                onlyModules: ['better-sqlite3'],
+                force: true,
+                buildFromSource: true,
             });
 
             // Copy preload dist into staging directory

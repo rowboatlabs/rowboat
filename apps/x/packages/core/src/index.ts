@@ -12,3 +12,6 @@ export * as versionHistory from './knowledge/version_history.js';
 
 // Voice mode (config + TTS)
 export * as voice from './voice/voice.js';
+
+// SQLite storage
+export * as storage from './storage/index.js';

@@ -35,6 +35,7 @@ import { backgroundTaskEventConsumer } from "@x/core/dist/background-tasks/event
 import { init as initLocalSites, shutdown as shutdownLocalSites } from "@x/core/dist/local-sites/server.js";
 import { shutdown as shutdownAnalytics } from "@x/core/dist/analytics/posthog.js";
 import { identifyIfSignedIn } from "@x/core/dist/analytics/identify.js";
+import { initStorage, shutdownStorage } from "@x/core/dist/storage/index.js";
 
 import { initConfigs } from "@x/core/dist/config/initConfigs.js";
 import { resolveWorkspacePath } from "@x/core/dist/workspace/workspace.js";
@@ -329,6 +330,9 @@ app.whenReady().then(async () => {
   // Initialize all config files before UI can access them
   await initConfigs();
 
+  // Initialize SQLite storage before any DB-backed services or repos are used.
+  await initStorage();
+
   // PostHog identify() is idempotent — call it on every startup so existing
   // signed-in installs (and every cold start of v0.3.4+) get re-identified.
   // Otherwise main-process events stay anonymous until the user re-signs-in.
@@ -456,5 +460,8 @@ app.on("before-quit", () => {
   });
   shutdownAnalytics().catch((error) => {
     console.error('[Analytics] Failed to flush on quit:', error);
+  });
+  shutdownStorage().catch((error) => {
+    console.error('[storage] Failed to close SQLite storage:', error);
   });
 });
