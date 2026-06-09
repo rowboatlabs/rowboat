@@ -1,5 +1,6 @@
 import { createRequire } from 'module';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
 import type { CodingAgent } from './types.js';
 import { resolveClaudeExecutable } from './claude-exec.js';
 
@@ -20,13 +21,36 @@ export interface AgentLaunchSpec {
     env: NodeJS.ProcessEnv;
 }
 
+// Locate an adapter's package.json. In packaged builds Electron Forge strips the
+// workspace node_modules, so the adapters (+ their dependency closure) are staged
+// next to the bundle at `.package/acp/node_modules` by the generateAssets hook (see
+// apps/main/forge.config.cjs). In dev they resolve normally via the pnpm symlink.
+// Try the staged location first, then fall back to ordinary resolution.
+function resolveAdapterPkgJson(pkg: string): string {
+    // The main process is esbuild-bundled to `.package/dist/main.cjs`, so the staged
+    // adapters live one level up at `.package/acp`. (import.meta.url is rewritten to
+    // the bundle path by bundle.mjs, so this holds in both dev and packaged builds.)
+    const stagedRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'acp');
+    for (const opts of [{ paths: [stagedRoot] }, undefined]) {
+        try {
+            return require.resolve(`${pkg}/package.json`, opts);
+        } catch {
+            // not here — try the next resolution strategy
+        }
+    }
+    throw new Error(
+        `ACP adapter '${pkg}' not found — expected it staged at ` +
+        `${path.join(stagedRoot, 'node_modules', pkg)} (packaged build) or resolvable ` +
+        `from node_modules (dev).`,
+    );
+}
+
 // Resolve the adapter's executable ENTRY (its `bin`, not its library `main`) to an
-// absolute path so we can spawn it directly with `node <entry>`. createRequire lets
-// us resolve workspace/pnpm-installed packages from this module's location.
+// absolute path so we can spawn it directly with `node <entry>`.
 function resolveAdapterEntry(pkg: string): string {
-    const pkgJsonPath = require.resolve(`${pkg}/package.json`);
+    const pkgJsonPath = resolveAdapterPkgJson(pkg);
     const pkgDir = path.dirname(pkgJsonPath);
-    const pkgJson = require(`${pkg}/package.json`) as { bin?: string | Record<string, string> };
+    const pkgJson = require(pkgJsonPath) as { bin?: string | Record<string, string> };
     const bin = pkgJson.bin;
     const rel = typeof bin === 'string' ? bin : bin ? Object.values(bin)[0] : undefined;
     if (!rel) {

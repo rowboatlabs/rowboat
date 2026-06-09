@@ -5,6 +5,77 @@
 const path = require('path');
 const pkg = require('./package.json');
 
+// Stage the ACP coding-adapters (@agentclientprotocol/*-acp) and their full
+// production dependency closure into the packaged app.
+//
+// Why this is needed: code mode spawns each adapter as a SEPARATE `node <entry>`
+// process and locates it at runtime via require.resolve — so it must ship as a real
+// on-disk file. esbuild can't inline it (dynamic resolve + spawn target), and Forge
+// strips the workspace node_modules (see `ignore` below). Without this, packaged
+// builds throw `Cannot find module '@agentclientprotocol/...'`.
+//
+// Why we reconstruct a nested tree instead of copying node_modules: pnpm's store is a
+// symlink farm that legitimately holds multiple versions of the same package (e.g.
+// @agentclientprotocol/sdk 0.21 for claude vs 0.22 for codex, and the @openai/codex
+// launcher-vs-platform-binary alias). We rebuild an npm-style nested node_modules —
+// dereferencing symlinks and nesting on version conflict — which resolves correctly
+// regardless of pnpm layout. Platform-specific optional deps that aren't installed
+// for the current OS resolve to null and are skipped, so each OS ships its own binary.
+function stageAcpAdapters(mainDir, destNodeModules) {
+    const fs = require('fs');
+    const ADAPTERS = [
+        '@agentclientprotocol/claude-agent-acp',
+        '@agentclientprotocol/codex-acp',
+    ];
+
+    // Resolve a dependency's real directory by walking node_modules the way Node does,
+    // looking for the package DIRECTORY. We deliberately do NOT use
+    // require.resolve(`${key}/package.json`): that throws for packages whose `exports`
+    // map doesn't expose package.json (e.g. @anthropic-ai/claude-agent-sdk), which would
+    // silently drop them and their subtrees. realpathSync dereferences pnpm's symlinks.
+    // Returns null for deps not installed for this OS (platform-optional binaries).
+    const realDirOf = (key, fromDir) => {
+        let dir = fromDir;
+        for (;;) {
+            const cand = path.join(dir, 'node_modules', ...key.split('/'));
+            if (fs.existsSync(path.join(cand, 'package.json'))) return fs.realpathSync(cand);
+            const parent = path.dirname(dir);
+            if (parent === dir) return null;
+            dir = parent;
+        }
+    };
+
+    let copied = 0;
+    const install = (srcDir, key, destNM, chain) => {
+        const destDir = path.join(destNM, ...key.split('/'));
+        if (fs.existsSync(destDir)) return; // already placed at this exact location
+        if (chain.has(srcDir)) return;      // dependency cycle — resolves to ancestor copy
+        fs.mkdirSync(path.dirname(destDir), { recursive: true });
+        fs.cpSync(srcDir, destDir, {
+            recursive: true,
+            dereference: true,
+            filter: (s) => path.basename(s) !== 'node_modules', // deps handled by recursion
+        });
+        copied++;
+        const pj = JSON.parse(fs.readFileSync(path.join(srcDir, 'package.json'), 'utf8'));
+        const deps = { ...pj.dependencies, ...pj.optionalDependencies };
+        const nextChain = new Set(chain).add(srcDir);
+        for (const depKey of Object.keys(deps)) {
+            const depDir = realDirOf(depKey, srcDir);
+            if (depDir) install(depDir, depKey, path.join(destDir, 'node_modules'), nextChain);
+        }
+    };
+
+    for (const key of ADAPTERS) {
+        const srcDir = realDirOf(key, mainDir);
+        if (!srcDir) {
+            throw new Error(`ACP adapter '${key}' is not installed in ${mainDir} — run pnpm install`);
+        }
+        install(srcDir, key, destNodeModules, new Set());
+    }
+    return copied;
+}
+
 module.exports = {
     packagerConfig: {
         executableName: 'rowboat',
@@ -29,17 +100,21 @@ module.exports = {
             appleIdPassword: process.env.APPLE_PASSWORD,
             teamId: process.env.APPLE_TEAM_ID
         },
-        // Since we bundle everything with esbuild, we don't need node_modules at all.
-        // These settings prevent Forge's dependency walker (flora-colossus) from trying
-        // to analyze/copy node_modules, which fails with pnpm's symlinked workspaces.
+        // Since we bundle the main process with esbuild, we don't need the workspace
+        // node_modules. These settings prevent Forge's dependency walker (flora-colossus)
+        // from trying to analyze/copy node_modules, which fails with pnpm's symlinked
+        // workspaces.
         prune: false,
-        ignore: [
-            /src\//,
-            /node_modules\//,
-            /.gitignore/,
-            /bundle\.mjs/,
-            /tsconfig.json/,
-        ],
+        // Strip the workspace node_modules, BUT always keep everything under `.package/`
+        // — that's our staged output, which now also includes the ACP adapters + their
+        // dependency closure (staged by the generateAssets hook). Without the `.package`
+        // exemption the /node_modules/ rule would strip the staged adapters and code mode
+        // would break in packaged builds.
+        ignore: (p) => {
+            if (p === '/.package' || p.startsWith('/.package/')) return false;
+            return [/src\//, /node_modules\//, /\.gitignore/, /bundle\.mjs/, /tsconfig\.json/]
+                .some((re) => re.test(p));
+        },
     },
     makers: [
         {
@@ -177,6 +252,15 @@ module.exports = {
             const rendererDest = path.join(packageDir, 'renderer/dist');
             fs.mkdirSync(rendererDest, { recursive: true });
             fs.cpSync(rendererSrc, rendererDest, { recursive: true });
+
+            // Stage the ACP coding-adapters (+ their dependency closure) into .package/acp.
+            // They are spawned as separate node processes at runtime and Forge strips the
+            // workspace node_modules, so they must be copied in explicitly. See
+            // stageAcpAdapters() above for the why.
+            console.log('Staging ACP adapters...');
+            const acpDest = path.join(packageDir, 'acp', 'node_modules');
+            const staged = stageAcpAdapters(__dirname, acpDest);
+            console.log(`✅ Staged ${staged} ACP adapter packages into .package/acp/node_modules`);
 
             console.log('✅ All assets staged in .package/');
         },
