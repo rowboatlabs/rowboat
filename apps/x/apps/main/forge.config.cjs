@@ -16,17 +16,29 @@ const pkg = require('./package.json');
 //
 // Why we reconstruct a nested tree instead of copying node_modules: pnpm's store is a
 // symlink farm that legitimately holds multiple versions of the same package (e.g.
-// @agentclientprotocol/sdk 0.21 for claude vs 0.22 for codex, and the @openai/codex
-// launcher-vs-platform-binary alias). We rebuild an npm-style nested node_modules —
-// dereferencing symlinks and nesting on version conflict — which resolves correctly
-// regardless of pnpm layout. Platform-specific optional deps that aren't installed
-// for the current OS resolve to null and are skipped, so each OS ships its own binary.
+// @agentclientprotocol/sdk 0.21 for claude vs 0.22 for codex). We rebuild an npm-style
+// nested node_modules — dereferencing symlinks and nesting on version conflict — which
+// resolves correctly regardless of pnpm layout.
+//
+// What we DON'T bundle: the agents' native engines (claude.exe / codex.exe, ~230 MB
+// each, shipped as platform-specific packages). Code mode drives each agent from the
+// user's LOCAL install via CLAUDE_CODE_EXECUTABLE / CODEX_PATH (see
+// packages/core/src/code-mode/acp/agents.ts), so the bundled engines would be dead
+// weight. Skipping them keeps each OS installer ~470 MB smaller. (The adapters only
+// fall back to a bundled engine when those env vars are unset, which agents.ts never
+// leaves unset — it errors clearly if the local agent isn't installed.)
 function stageAcpAdapters(mainDir, destNodeModules) {
     const fs = require('fs');
     const ADAPTERS = [
         '@agentclientprotocol/claude-agent-acp',
         '@agentclientprotocol/codex-acp',
     ];
+
+    // The bundled native engines, shipped as platform packages. Driven from the user's
+    // local install instead (see comment above), so they're excluded from staging.
+    const isNativeEngine = (key) =>
+        /^@anthropic-ai\/claude-agent-sdk-(win32|darwin|linux)/.test(key) || // bundled claude.exe
+        /^@openai\/codex-(win32|darwin|linux)/.test(key);                    // bundled codex.exe
 
     // Resolve a dependency's real directory by walking node_modules the way Node does,
     // looking for the package DIRECTORY. We deliberately do NOT use
@@ -46,6 +58,7 @@ function stageAcpAdapters(mainDir, destNodeModules) {
     };
 
     let copied = 0;
+    const skippedEngines = new Set();
     const install = (srcDir, key, destNM, chain) => {
         const destDir = path.join(destNM, ...key.split('/'));
         if (fs.existsSync(destDir)) return; // already placed at this exact location
@@ -61,6 +74,7 @@ function stageAcpAdapters(mainDir, destNodeModules) {
         const deps = { ...pj.dependencies, ...pj.optionalDependencies };
         const nextChain = new Set(chain).add(srcDir);
         for (const depKey of Object.keys(deps)) {
+            if (isNativeEngine(depKey)) { skippedEngines.add(depKey); continue; }
             const depDir = realDirOf(depKey, srcDir);
             if (depDir) install(depDir, depKey, path.join(destDir, 'node_modules'), nextChain);
         }
@@ -72,6 +86,9 @@ function stageAcpAdapters(mainDir, destNodeModules) {
             throw new Error(`ACP adapter '${key}' is not installed in ${mainDir} — run pnpm install`);
         }
         install(srcDir, key, destNodeModules, new Set());
+    }
+    if (skippedEngines.size) {
+        console.log(`  (skipped bundled native engines — driven from local install: ${[...skippedEngines].join(', ')})`);
     }
     return copied;
 }

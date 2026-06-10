@@ -3,6 +3,7 @@ import * as path from 'path';
 import { fileURLToPath } from 'url';
 import type { CodingAgent } from './types.js';
 import { resolveClaudeExecutable } from './claude-exec.js';
+import { resolveCodexExecutable } from './codex-exec.js';
 
 const require = createRequire(import.meta.url);
 
@@ -63,14 +64,36 @@ export function getAgentLaunchSpec(agent: CodingAgent): AgentLaunchSpec {
     const entry = resolveAdapterEntry(ADAPTER_PACKAGE[agent]);
     const env: NodeJS.ProcessEnv = { ...process.env };
 
-    // Point the Claude adapter at the real claude executable. On Windows this is
-    // mandatory (Node can't spawn the .cmd shim — EINVAL); on macOS/Linux it's a
-    // PATH safety net for GUI launches. Resolver is a no-op when claude isn't found,
-    // leaving the adapter to do its own lookup. (Codex relies on PATH for now — wire
-    // an equivalent when we add Codex support.)
+    // Point each adapter at the user's LOCAL agent executable. We intentionally do not
+    // bundle the agents' native engines (~230 MB each) into packaged builds — the
+    // adapters fall back to a bundled engine only when these are unset, and we strip
+    // those binaries during packaging (see apps/main/forge.config.cjs). So a local
+    // install is required; throw a clear error instead of letting the adapter fail
+    // cryptically on the absent bundled engine.
     if (agent === 'claude' && !env.CLAUDE_CODE_EXECUTABLE) {
+        // On Windows resolving the real .exe is also mandatory: Node can't spawn the
+        // .cmd shim (EINVAL). On macOS/Linux it doubles as a PATH safety net for GUI
+        // launches that don't inherit the login shell's PATH.
         const exe = resolveClaudeExecutable();
-        if (exe) env.CLAUDE_CODE_EXECUTABLE = exe;
+        if (!exe) {
+            throw new Error(
+                'Claude Code CLI not found. Install it (`npm i -g @anthropic-ai/claude-code`) to use Claude in code mode.',
+            );
+        }
+        env.CLAUDE_CODE_EXECUTABLE = exe;
+    }
+
+    if (agent === 'codex' && !env.CODEX_PATH) {
+        // codex-acp spawns this with shell:true on Windows (a .cmd shim is fine) and
+        // via PATH on unix. Without CODEX_PATH the adapter tries its bundled engine,
+        // which we don't ship — so resolve the local install or fail clearly.
+        const exe = resolveCodexExecutable();
+        if (!exe) {
+            throw new Error(
+                'Codex CLI not found. Install it (`npm i -g @openai/codex`) to use Codex in code mode.',
+            );
+        }
+        env.CODEX_PATH = exe;
     }
 
     // We spawn the adapter with process.execPath. Inside Electron's main process
