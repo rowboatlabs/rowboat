@@ -944,6 +944,24 @@ export function setupIpcHandlers() {
     'voice:synthesize': async (_event, args) => {
       return voice.synthesizeSpeech(args.text);
     },
+    'voice:ensureMicAccess': async () => {
+      if (process.platform !== 'darwin') return { granted: true };
+      const status = systemPreferences.getMediaAccessStatus('microphone');
+      console.log('[voice] Microphone permission status:', status);
+      if (status === 'granted') return { granted: true };
+      // 'not-determined' shows the native TCC prompt and resolves once the
+      // user responds; 'denied'/'restricted' resolve false without prompting.
+      // Awaiting this here means the triggering mic click proceeds to
+      // getUserMedia only after permission is settled — fixing the first
+      // click silently failing while the prompt was still up.
+      try {
+        const granted = await systemPreferences.askForMediaAccess('microphone');
+        console.log('[voice] Microphone permission after prompt:', granted);
+        return { granted };
+      } catch {
+        return { granted: false };
+      }
+    },
     // Live-note handlers
     'live-note:run': async (_event, args) => {
       const result = await runLiveNoteAgent(args.filePath, 'manual', args.context);
