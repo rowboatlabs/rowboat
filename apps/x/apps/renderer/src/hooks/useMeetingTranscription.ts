@@ -40,12 +40,19 @@ const POST_CALENDAR_END_SILENCE_MS = 2 * 60 * 1000;
 // How often the silence checker runs.
 const SILENCE_CHECK_INTERVAL_MS = 5 * 1000;
 
-// On macOS (ScreenCaptureKit) the system-audio track neither fires "ended" nor
-// "mute" reliably when the meeting ends, so we poll its state instead. Auto-stop
-// once the track reports muted for MUTE_POLLS_TO_STOP consecutive polls — long
-// enough to ride out a brief audio interruption.
+// On macOS (ScreenCaptureKit) the system-audio track never fires "ended"/"mute"
+// when the meeting ends, and its readyState stays "live" — only track.muted flips
+// to true. But muted is ambiguous: it also goes true whenever no system audio is
+// playing (a quiet but live meeting), so muted alone can't safely trigger a stop.
+// See the poll in start() for how the muted signal is gated on the scheduled
+// calendar end so a quiet stretch never cuts a live meeting short.
 const TRACK_POLL_INTERVAL_MS = 3 * 1000;
 const MUTE_POLLS_TO_STOP = 3;
+
+// The ScreenCaptureKit quirk above is macOS-only; on Windows the track's "ended"
+// event fires normally (handled by the listener in start()), so the poll below is
+// gated to macOS.
+const isMac = typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac');
 
 // ---------------------------------------------------------------------------
 // Headphone detection
@@ -370,17 +377,26 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
             });
         });
 
-        // On macOS the "ended"/"mute" events don't fire reliably when the
-        // meeting ends, so poll the system-audio track's state. An ended track
-        // stops immediately; a track muted for MUTE_POLLS_TO_STOP consecutive
-        // polls is treated as the meeting ending (the counter resets the moment
-        // it unmutes, so a brief interruption won't trigger a stop).
+        // On macOS the system-audio track's "ended"/"mute" events don't fire when
+        // the meeting ends, so poll its state instead. (On Windows the "ended"
+        // listener above already covers this, so the poll is macOS-only.)
+        //
+        //  - readyState === 'ended' is unambiguous (the source is gone) → stop now.
+        //    It never actually fires on macOS (readyState stays 'live'); it's just
+        //    a safety net should polling ever observe the track ending.
+        //  - muted is ambiguous on macOS: it flips true both when the meeting ends
+        //    AND when nothing is playing system audio (a quiet but live meeting).
+        //    So we only treat sustained mute as "meeting over" once we're past the
+        //    linked event's scheduled end — a dead audio track after the meeting
+        //    was due to finish is a strong signal. With no calendar event, or
+        //    before the scheduled end, we DON'T hard-stop on mute; the silence
+        //    checker's nudge + backstop handles it, so a quiet stretch can never
+        //    silently cut a live meeting short.
         const pollTrack = systemStream.getAudioTracks()[0];
-        if (pollTrack) {
+        if (isMac && pollTrack) {
             let mutedPolls = 0;
             if (trackPollingRef.current) clearInterval(trackPollingRef.current);
             trackPollingRef.current = setInterval(() => {
-                console.log('[meeting] track poll: readyState=' + pollTrack.readyState + ' muted=' + pollTrack.muted);
                 if (pollTrack.readyState === 'ended') {
                     console.log('[meeting] system-audio track ended (poll) — auto-stopping');
                     onAutoStopRef.current?.();
@@ -388,8 +404,10 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
                 }
                 if (pollTrack.muted) {
                     mutedPolls++;
-                    if (mutedPolls >= MUTE_POLLS_TO_STOP) {
-                        console.log('[meeting] system-audio track muted (poll) — auto-stopping');
+                    const endMs = calendarEndMsRef.current;
+                    const pastCalendarEnd = endMs != null && Date.now() > endMs;
+                    if (pastCalendarEnd && mutedPolls >= MUTE_POLLS_TO_STOP) {
+                        console.log('[meeting] system-audio track muted past scheduled end (poll) — auto-stopping');
                         onAutoStopRef.current?.();
                     }
                 } else {
