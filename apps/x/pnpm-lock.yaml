@@ -95,6 +95,9 @@ importers:
       '@electron-forge/cli':
         specifier: ^7.10.2
         version: 7.11.1(encoding@0.1.13)(esbuild@0.24.2)
+      '@electron-forge/maker-base':
+        specifier: ^7.11.1
+        version: 7.11.1
       '@electron-forge/maker-deb':
         specifier: ^7.11.1
         version: 7.11.1

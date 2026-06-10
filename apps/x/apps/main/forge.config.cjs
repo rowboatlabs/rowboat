@@ -87,6 +87,21 @@ module.exports = {
             }
         },
         {
+            name: require.resolve('./makers/maker-pacman.cjs'),
+            platforms: ['linux'],
+            config: {
+                name: 'rowboat',
+                bin: 'rowboat',
+                executableName: 'rowboat',
+                description: 'AI coworker with memory',
+                maintainer: 'rowboatlabs',
+                homepage: 'https://rowboatlabs.com',
+                license: 'Apache',
+                icon: path.join(__dirname, 'icons/icon.png'),
+                mimeType: ['x-scheme-handler/rowboat'],
+            }
+        },
+        {
             name: '@electron-forge/maker-zip',
             platform: ["darwin", "win32", "linux"],
         }
