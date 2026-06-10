@@ -702,6 +702,16 @@ const ipcSchemas = {
       mimeType: z.string(),
     }),
   },
+  // Ensures the OS-level microphone permission is settled before capturing.
+  // On first-ever use (macOS) the permission is 'not-determined'; resolving
+  // the native prompt up front prevents the in-flight getUserMedia from
+  // rejecting on the first mic click.
+  'voice:ensureMicAccess': {
+    req: z.null(),
+    res: z.object({
+      granted: z.boolean(),
+    }),
+  },
   'meeting:checkScreenPermission': {
     req: z.null(),
     res: z.object({
