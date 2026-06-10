@@ -53,6 +53,8 @@ import { getAccessToken } from '@x/core/dist/auth/tokens.js';
 import { getRowboatConfig } from '@x/core/dist/config/rowboat.js';
 import { runLiveNoteAgent } from '@x/core/dist/knowledge/live-note/runner.js';
 import { listImportantThreads, listEverythingElseThreads, saveMessageBodyHeight, triggerSync as triggerGmailSync, sendThreadReply, archiveThread, trashThread, markThreadRead, getAccountEmail, getConnectionStatus as getGmailConnectionStatus } from '@x/core/dist/knowledge/sync_gmail.js';
+import { searchContacts as searchGmailContacts, warmContactIndex } from '@x/core/dist/knowledge/gmail_contacts.js';
+import { searchSentContacts, warmSentContacts } from '@x/core/dist/knowledge/gmail_sent_contacts.js';
 import { liveNoteBus } from '@x/core/dist/knowledge/live-note/bus.js';
 import { getInstallationId } from '@x/core/dist/analytics/installation.js';
 import { API_URL } from '@x/core/dist/config/env.js';
@@ -444,6 +446,13 @@ export function setupIpcHandlers() {
   // Forward knowledge commit events to renderer for panel refresh
   versionHistory.onCommit(() => emitKnowledgeCommitEvent());
 
+  // Pre-warm the Gmail contact indices so the first compose-box keystroke is instant.
+  // - warmContactIndex(): synchronous local-snapshot fallback (instant, narrow coverage).
+  // - warmSentContacts(): kicks off a background Gmail API sync of the SENT label
+  //   for full historical coverage of people you've actually emailed.
+  warmContactIndex();
+  warmSentContacts();
+
   registerIpcHandlers({
     'app:getVersions': async () => {
       // args is null for this channel (no request payload)
@@ -520,6 +529,22 @@ export function setupIpcHandlers() {
     'gmail:saveMessageHeight': async (_event, args) => {
       saveMessageBodyHeight(args.threadId, args.messageId, args.height);
       return {};
+    },
+    'gmail:searchContacts': async (_event, args) => {
+      const query = args?.query ?? '';
+      const limit = args?.limit;
+      const excludeEmails = args?.excludeEmails;
+
+      // Primary source: people you've actually sent mail to (Gmail SENT label,
+      // cached + refreshed via the Gmail API). Fallback: local-snapshot index
+      // — used only when the SENT index hasn't been populated yet (very first
+      // launch, before the background sync finishes).
+      const sent = await searchSentContacts(query, { limit, excludeEmails }).catch(() => []);
+      if (sent.length > 0) {
+        return { contacts: sent };
+      }
+      const fallback = await searchGmailContacts(query, { limit, excludeEmails });
+      return { contacts: fallback };
     },
     'mcp:listTools': async (_event, args) => {
       return mcpCore.listTools(args.serverName, args.cursor);
