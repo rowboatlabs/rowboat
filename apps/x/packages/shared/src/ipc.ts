@@ -19,6 +19,7 @@ import { ZListToolkitsResponse } from './composio.js';
 import { BrowserStateSchema } from './browser-control.js';
 import { BillingInfoSchema } from './billing.js';
 import { EmailBlockSchema, GmailThreadSchema } from './blocks.js';
+import { PermissionDecision, ApprovalPolicy } from './code-mode.js';
 
 // ============================================================================
 // Runtime Validation Schemas (Single Source of Truth)
@@ -472,11 +473,23 @@ const ipcSchemas = {
     req: z.null(),
     res: z.object({
       enabled: z.boolean(),
+      approvalPolicy: ApprovalPolicy.optional(),
     }),
   },
   'codeMode:setConfig': {
     req: z.object({
       enabled: z.boolean(),
+      approvalPolicy: ApprovalPolicy.optional(),
+    }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  // Answer a mid-run permission request from a code_agent_run coding turn.
+  'codeRun:resolvePermission': {
+    req: z.object({
+      requestId: z.string(),
+      decision: PermissionDecision,
     }),
     res: z.object({
       success: z.literal(true),
@@ -714,6 +727,16 @@ const ipcSchemas = {
     res: z.object({
       audioBase64: z.string(),
       mimeType: z.string(),
+    }),
+  },
+  // Ensures the OS-level microphone permission is settled before capturing.
+  // On first-ever use (macOS) the permission is 'not-determined'; resolving
+  // the native prompt up front prevents the in-flight getUserMedia from
+  // rejecting on the first mic click.
+  'voice:ensureMicAccess': {
+    req: z.null(),
+    res: z.object({
+      granted: z.boolean(),
     }),
   },
   'meeting:checkScreenPermission': {

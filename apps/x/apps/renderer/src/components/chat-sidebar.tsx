@@ -41,6 +41,7 @@ import { ChatInputWithMentions, type PermissionMode, type StagedAttachment, type
 import { ChatMessageAttachments } from '@/components/chat-message-attachments'
 import { useSidebar } from '@/components/ui/sidebar'
 import { wikiLabel } from '@/lib/wiki-links'
+import type { ChatPaneSize } from '@/contexts/theme-context'
 import {
   type ChatViewportAnchorState,
   type ChatTabViewState,
@@ -125,6 +126,9 @@ interface ChatSidebarProps {
   defaultWidth?: number
   isOpen?: boolean
   isMaximized?: boolean
+  placement?: 'middle' | 'right'
+  paneSize?: ChatPaneSize
+  className?: string
   chatTabs: ChatTab[]
   activeChatTabId: string
   getChatTabTitle: (tab: ChatTab) => string
@@ -183,6 +187,9 @@ export function ChatSidebar({
   defaultWidth = DEFAULT_WIDTH,
   isOpen = true,
   isMaximized = false,
+  placement = 'right',
+  paneSize = 'chat-smaller',
+  className,
   chatTabs,
   activeChatTabId,
   getChatTabTitle,
@@ -246,6 +253,8 @@ export function ChatSidebar({
   const startWidthRef = useRef(0)
   const prevIsMaximizedRef = useRef(isMaximized)
   const justToggledMaximize = prevIsMaximizedRef.current !== isMaximized
+  const isMiddlePlacement = placement === 'middle'
+  const isResizable = paneSize === 'chat-smaller'
 
   const getMaxAllowedWidth = useCallback(() => {
     if (typeof window === 'undefined') return MAX_WIDTH
@@ -306,7 +315,9 @@ export function ChatSidebar({
     setIsResizing(true)
 
     const handleMouseMove = (event: MouseEvent) => {
-      const delta = startXRef.current - event.clientX
+      const delta = isMiddlePlacement
+        ? event.clientX - startXRef.current
+        : startXRef.current - event.clientX
       const maxAllowedWidth = getMaxAllowedWidth()
       setWidth(clampPaneWidth(startWidthRef.current + delta, maxAllowedWidth))
     }
@@ -319,7 +330,7 @@ export function ChatSidebar({
 
     document.addEventListener('mousemove', handleMouseMove)
     document.addEventListener('mouseup', handleMouseUp)
-  }, [width, getMaxAllowedWidth])
+  }, [width, getMaxAllowedWidth, isMiddlePlacement])
 
   const activeTabState = useMemo<ChatTabViewState>(() => ({
     runId: runId ?? null,
@@ -501,8 +512,11 @@ export function ChatSidebar({
       // not add extra width to the right and overflow the app viewport.
       return { width: 0, flex: '1 1 auto' }
     }
+    if (paneSize === 'chat-equal' || paneSize === 'chat-bigger') {
+      return { width: 0, flex: '1 1 0' }
+    }
     return { width, flex: '0 0 auto' }
-  }, [isOpen, isMaximized, width])
+  }, [isOpen, isMaximized, paneSize, width])
 
   return (
     <div
@@ -511,16 +525,19 @@ export function ChatSidebar({
       onMouseDownCapture={onActivate}
       onFocusCapture={onActivate}
       className={cn(
-        'relative flex min-w-0 flex-col overflow-hidden border-l border-border bg-background',
-        !isResizing && !justToggledMaximize && 'transition-[width] duration-200 ease-linear'
+        'relative flex min-w-0 flex-col overflow-hidden bg-background',
+        isMiddlePlacement ? 'border-r border-border' : 'border-l border-border',
+        !isResizing && !justToggledMaximize && 'transition-[width] duration-200 ease-linear',
+        className
       )}
       style={paneStyle}
     >
-      {!isMaximized && (
+      {!isMaximized && isResizable && (
         <div
           onMouseDown={handleMouseDown}
           className={cn(
-            'absolute inset-y-0 left-0 z-20 w-4 -translate-x-1/2 cursor-col-resize',
+            'absolute inset-y-0 z-20 w-4 cursor-col-resize',
+            isMiddlePlacement ? 'right-0 translate-x-1/2' : 'left-0 -translate-x-1/2',
             'after:absolute after:inset-y-0 after:left-1/2 after:w-[2px] after:transition-colors',
             'hover:after:bg-sidebar-border',
             isResizing && 'after:bg-primary'
@@ -587,7 +604,9 @@ export function ChatSidebar({
                     className="titlebar-no-drag my-1 mr-2 h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
                     aria-label={isMaximized ? 'Dock chat to side pane' : 'Expand chat'}
                   >
-                    {isMaximized ? <ArrowRight className="size-5" /> : <ArrowLeft className="size-5" />}
+                    {isMaximized
+                      ? (isMiddlePlacement ? <ArrowLeft className="size-5" /> : <ArrowRight className="size-5" />)
+                      : (isMiddlePlacement ? <ArrowRight className="size-5" /> : <ArrowLeft className="size-5" />)}
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom">{isMaximized ? 'Dock to side pane' : 'Expand chat'}</TooltipContent>

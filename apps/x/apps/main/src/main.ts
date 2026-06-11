@@ -40,7 +40,8 @@ import started from "electron-squirrel-startup";
 import { execSync, exec, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { init as initChromeSync } from "@x/core/dist/knowledge/chrome-extension/server/server.js";
-import { registerBrowserControlService, registerNotificationService } from "@x/core/dist/di/container.js";
+import container, { registerBrowserControlService, registerNotificationService } from "@x/core/dist/di/container.js";
+import type { CodeModeManager } from "@x/core/dist/code-mode/acp/manager.js";
 import { browserViewManager, BROWSER_PARTITION } from "./browser/view.js";
 import { setupBrowserEventForwarding } from "./browser/ipc.js";
 import { ElectronBrowserControlService } from "./browser/control-service.js";
@@ -220,6 +221,7 @@ function createWindow() {
     backgroundColor: "#252525", // Prevent white flash (matches dark mode)
     titleBarStyle: "hiddenInset",
     trafficLightPosition: { x: 12, y: 12 },
+    icon: process.platform !== "darwin" ? path.join(__dirname, "../../icons/icon.png") : undefined,
     webPreferences: {
       // IMPORTANT: keep Node out of renderer
       nodeIntegration: false,
@@ -251,14 +253,34 @@ function createWindow() {
     return { action: "deny" };
   });
 
-  // Handle navigation to external URLs (e.g., clicking a link without target="_blank")
-  win.webContents.on("will-navigate", (event, url) => {
+  // Handle navigation to external URLs (e.g., clicking a link without target="_blank").
+  // Returns true when the URL was external and routed to the system browser.
+  const routeExternalNavigation = (url: string): boolean => {
     const isInternal =
       url.startsWith("app://") || url.startsWith("http://localhost:5173");
-    if (!isInternal) {
-      event.preventDefault();
-      shell.openExternal(url);
-    }
+    if (isInternal) return false;
+    shell.openExternal(url);
+    return true;
+  };
+
+  win.webContents.on("will-navigate", (event, url) => {
+    if (routeExternalNavigation(url)) event.preventDefault();
+  });
+
+  // Subframe navigations (e.g. links clicked inside the sandboxed iframe that
+  // renders a background-task / workspace `index.html`) fire `will-frame-navigate`,
+  // not `will-navigate`. Route their external links to the system browser too,
+  // so HTML reports behave like the markdown viewer. Main-frame navigations are
+  // already handled by `will-navigate` above — skip them here to avoid double-open.
+  //
+  // Scope this to our own HTML viewer frames (identified by their app://workspace
+  // document origin). Third-party note embeds (YouTube, Figma, Twitter via the
+  // embed/iframe blocks) load from their own origins — leave their internal
+  // navigation untouched so the embeds keep working.
+  win.webContents.on("will-frame-navigate", (event) => {
+    if (event.isMainFrame) return;
+    if (!event.frame?.url.startsWith("app://workspace/")) return;
+    if (routeExternalNavigation(event.url)) event.preventDefault();
   });
 
   // Attach the embedded browser pane manager to this window.
@@ -416,6 +438,12 @@ app.on("before-quit", () => {
   stopWorkspaceWatcher();
   stopRunsWatcher();
   stopServicesWatcher();
+  // Tear down any live ACP coding-agent adapter processes so they don't outlive the app.
+  try {
+    container.resolve<CodeModeManager>('codeModeManager').disposeAll();
+  } catch {
+    // nothing live to dispose
+  }
   shutdownLocalSites().catch((error) => {
     console.error('[LocalSites] Failed to shut down cleanly:', error);
   });

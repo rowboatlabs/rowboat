@@ -5,7 +5,7 @@ import { RunEvent, ListRunsResponse } from '@x/shared/src/runs.js';
 import type { LanguageModelUsage, ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
-import { CheckIcon, LoaderIcon, PanelLeftIcon, ArrowRight, MessageSquare, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon } from 'lucide-react';
+import { CheckIcon, LoaderIcon, PanelLeftIcon, ArrowLeft, ArrowRight, MessageSquare, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MarkdownEditor, type MarkdownEditorHandle } from './components/markdown-editor';
 import { ChatSidebar } from './components/chat-sidebar';
@@ -29,6 +29,7 @@ import { LiveNotesView } from '@/components/live-notes-view';
 import { BgTasksView } from '@/components/bg-tasks-view';
 import { EmailView } from '@/components/email-view';
 import { WorkspaceView } from '@/components/workspace-view';
+import { CodingRunBlock } from '@/components/coding-run';
 import { KnowledgeView } from '@/components/knowledge-view';
 import { ChatHistoryView } from '@/components/chat-history-view';
 import { HomeView } from '@/components/home-view';
@@ -117,6 +118,7 @@ import { useVoiceTTS } from '@/hooks/useVoiceTTS'
 import { useMeetingTranscription, type CalendarEventMeta } from '@/hooks/useMeetingTranscription'
 import { useAnalyticsIdentity } from '@/hooks/useAnalyticsIdentity'
 import * as analytics from '@/lib/analytics'
+import { useTheme } from '@/contexts/theme-context'
 
 type DirEntry = z.infer<typeof workspace.DirEntry>
 type RunEventType = z.infer<typeof RunEvent>
@@ -165,6 +167,7 @@ function AutoScrollPre({ className, children }: { className?: string; children: 
 }
 
 const DEFAULT_SIDEBAR_WIDTH = 256
+const DEFAULT_CHAT_PANE_WIDTH = 460
 const wikiLinkRegex = /\[\[([^[\]]+)\]\]/g
 const graphPalette = [
   { hue: 210, sat: 72, light: 52 },
@@ -736,6 +739,9 @@ function ContentHeader({
 }
 
 function App() {
+  const { chatPanePlacement, chatPaneSize } = useTheme()
+  const isChatPaneInMiddle = chatPanePlacement === 'middle'
+
   type ShortcutPane = 'left' | 'right'
   type MarkdownHistoryHandlers = { undo: () => boolean; redo: () => boolean }
 
@@ -765,7 +771,7 @@ function App() {
   // Lives in ViewState so folder drill-down participates in back/forward history.
   const [knowledgeViewFolderPath, setKnowledgeViewFolderPath] = useState<string | null>(null)
   const [isChatHistoryOpen, setIsChatHistoryOpen] = useState(false)
-  // Default landing view: Home in the middle with the chat docked on the right.
+  // Default landing view: Home with the chat docked according to appearance settings.
   const [isHomeOpen, setIsHomeOpen] = useState(true)
   const [emailInitialThreadId, setEmailInitialThreadId] = useState<string | null>(null)
   const [emailThreadIdVersion, setEmailThreadIdVersion] = useState(0)
@@ -2193,19 +2199,6 @@ function App() {
               status: 'running',
               timestamp: Date.now(),
             }])
-            // Detect acpx-driven coding-agent runs so the composer can retroactively
-            // flip code mode on with the right agent (when the user reached the skill
-            // via plain prompt rather than the explicit toggle).
-            if (llmEvent.toolName === 'executeCommand') {
-              const input = llmEvent.input as { command?: unknown } | undefined
-              const cmd = typeof input?.command === 'string' ? input.command : ''
-              const match = cmd.match(/\bacpx\b[\s\S]*?\b(claude|codex)\b/)
-              if (match) {
-                window.dispatchEvent(new CustomEvent('code-mode-detected', {
-                  detail: { runId: event.runId, agent: match[1] as 'claude' | 'codex' },
-                }))
-              }
-            }
           } else if (llmEvent.type === 'finish-step') {
             const nextUsage = normalizeUsage(llmEvent.usage)
             if (nextUsage) {
@@ -2303,6 +2296,8 @@ function App() {
                   ...item,
                   result: event.result as ToolUIPart['output'],
                   status: 'completed' as const,
+                  // a code_agent_run finished — drop any lingering permission card
+                  pendingCodePermission: null,
                 }
               }
               return item
@@ -2380,6 +2375,33 @@ function App() {
           next.set(event.toolCallId, event.response)
           return next
         })
+        break
+      }
+
+      case 'code-run-event': {
+        if (!isActiveRun) return
+        setConversation(prev => prev.map(item => {
+          if (isToolCall(item) && item.id === event.toolCallId) {
+            const existing = item.codeRunEvents ?? []
+            if (existing.length === 0) {
+              setToolOpenForTab(activeChatTabIdRef.current, item.id, true)
+            }
+            return { ...item, codeRunEvents: [...existing, event.event] }
+          }
+          return item
+        }))
+        break
+      }
+
+      case 'code-run-permission-request': {
+        if (!isActiveRun) return
+        setConversation(prev => prev.map(item => {
+          if (isToolCall(item) && item.id === event.toolCallId) {
+            setToolOpenForTab(activeChatTabIdRef.current, item.id, true)
+            return { ...item, pendingCodePermission: { requestId: event.requestId, ask: event.ask } }
+          }
+          return item
+        }))
         break
       }
 
@@ -2724,6 +2746,26 @@ function App() {
       })
     }
   }, [runId])
+
+  // Answer a mid-run permission request from a code_agent_run coding turn. The
+  // pending ask lives on the tool call itself, so we optimistically clear it and
+  // tell main which decision the user picked (keyed by the request id).
+  const handleCodePermissionResponse = useCallback(async (
+    toolCallId: string,
+    requestId: string,
+    decision: 'allow_once' | 'allow_always' | 'reject',
+  ) => {
+    setConversation(prev => prev.map(item =>
+      isToolCall(item) && item.id === toolCallId
+        ? { ...item, pendingCodePermission: null }
+        : item
+    ))
+    try {
+      await window.ipc.invoke('codeRun:resolvePermission', { requestId, decision })
+    } catch (error) {
+      console.error('Failed to resolve code permission:', error)
+    }
+  }, [])
 
   const handleAskHumanResponse = useCallback(async (toolCallId: string, subflow: string[], response: string) => {
     if (!runId) return
@@ -5142,6 +5184,21 @@ function App() {
     }
 
     if (isToolCall(item)) {
+      if (item.name === 'code_agent_run') {
+        return (
+          <CodingRunBlock
+            key={item.id}
+            item={item}
+            open={isToolOpenForTab(tabId, item.id)}
+            onOpenChange={(open) => setToolOpenForTab(tabId, item.id, open)}
+            onPermissionDecision={(decision) => {
+              if (item.pendingCodePermission) {
+                handleCodePermissionResponse(item.id, item.pendingCodePermission.requestId, decision)
+              }
+            }}
+          />
+        )
+      }
       const appActionData = getAppActionCardData(item)
       if (appActionData) {
         return <AppActionCard key={item.id} data={appActionData} status={item.status} />
@@ -5246,6 +5303,17 @@ function App() {
   const isRightPaneContext = Boolean(selectedPath || isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen || isHomeOpen || isBrowserOpen)
   const isRightPaneOnlyMode = isRightPaneContext && isChatSidebarOpen && isRightPaneMaximized
   const shouldCollapseLeftPane = isRightPaneOnlyMode
+  const nonChatPaneStyle = React.useMemo<React.CSSProperties>(() => {
+    const style: React.CSSProperties = { maxWidth: insetMaxWidth }
+    if (!isRightPaneContext || !isChatSidebarOpen || isRightPaneMaximized) return style
+    if (chatPaneSize === 'chat-equal') {
+      return { ...style, width: 0, flex: '1 1 0' }
+    }
+    if (chatPaneSize === 'chat-bigger') {
+      return { ...style, width: DEFAULT_CHAT_PANE_WIDTH, flex: '0 0 auto' }
+    }
+    return style
+  }, [chatPaneSize, insetMaxWidth, isChatSidebarOpen, isRightPaneContext, isRightPaneMaximized])
   // Collapsing: pin max-width to the snapshot px (no transition) for one frame so it's
   // binding immediately (no flex jump), then animate to 0. Expanding goes back to 100%
   // — its non-binding range lands at the end of the range, where it isn't visible.
@@ -5323,10 +5391,11 @@ function App() {
             <SidebarInset
               className={cn(
                 "overflow-hidden! min-h-0 min-w-0",
+                isRightPaneContext && isChatPaneInMiddle && "order-3",
                 insetAnimateMaxWidth && "transition-[max-width] duration-200 ease-linear",
                 shouldCollapseLeftPane && "pointer-events-none select-none"
               )}
-              style={{ maxWidth: insetMaxWidth }}
+              style={nonChatPaneStyle}
               aria-hidden={shouldCollapseLeftPane}
               onMouseDownCapture={() => setActiveShortcutPane('left')}
               onFocusCapture={() => setActiveShortcutPane('left')}
@@ -5438,7 +5507,11 @@ function App() {
                     : (viewOpen && !isChatSidebarOpen)
                       ? { onClick: openChatSidePane, icon: <MessageSquare className="size-5" />, label: 'Open chat' }
                       : (viewOpen && isChatSidebarOpen && !isRightPaneMaximized)
-                        ? { onClick: () => setIsChatSidebarOpen(false), icon: <ArrowRight className="size-5" />, label: 'Expand pane' }
+                        ? {
+                            onClick: () => setIsChatSidebarOpen(false),
+                            icon: isChatPaneInMiddle ? <ArrowLeft className="size-5" /> : <ArrowRight className="size-5" />,
+                            label: 'Expand pane'
+                          }
                         : null
                   return (
                     <Tooltip>
@@ -5865,24 +5938,6 @@ function App() {
                                               onApproveSession={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'session')}
                                               onApproveAlways={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'always')}
                                               onDeny={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
-                                              onSwitchAgent={async (newAgent) => {
-                                                const runIdForSwitch = tab.runId
-                                                await handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')
-                                                window.dispatchEvent(new CustomEvent('code-mode-detected', {
-                                                  detail: { runId: runIdForSwitch, agent: newAgent },
-                                                }))
-                                                if (runIdForSwitch) {
-                                                  try {
-                                                    await window.ipc.invoke('runs:createMessage', {
-                                                      runId: runIdForSwitch,
-                                                      message: `Use ${newAgent === 'claude' ? 'Claude Code' : 'Codex'} instead — rerun the same task with the same prompt, just swap the agent binary to \`${newAgent}\`.`,
-                                                      codeMode: newAgent,
-                                                    })
-                                                  } catch (err) {
-                                                    console.error('Failed to send swap-agent follow-up', err)
-                                                  }
-                                                }
-                                              }}
                                               isProcessing={isActive && isProcessing}
                                               response={response}
                                             />
@@ -5989,10 +6044,13 @@ function App() {
               )}
             </SidebarInset>
 
-            {/* Chat sidebar - shown when viewing files/graph */}
+            {/* Chat pane - shown when viewing files/graph */}
             {isRightPaneContext && (
               <ChatSidebar
-                defaultWidth={460}
+                placement={chatPanePlacement}
+                paneSize={chatPaneSize}
+                className={isChatPaneInMiddle ? "order-2" : undefined}
+                defaultWidth={DEFAULT_CHAT_PANE_WIDTH}
                 isOpen={isChatSidebarOpen}
                 isMaximized={isRightPaneMaximized}
                 chatTabs={chatTabs}

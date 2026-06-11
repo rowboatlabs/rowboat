@@ -56,6 +56,7 @@ module.exports = {
                 description: 'AI coworker with memory',
                 name: `Rowboat-win32-${arch}`,
                 setupExe: `Rowboat-win32-${arch}-${pkg.version}-setup.exe`,
+                setupIcon: path.join(__dirname, 'icons/icon.ico'),
             })
         },
         {
@@ -83,6 +84,21 @@ module.exports = {
                     icon: path.join(__dirname, 'icons/icon.png'),
                     mimeType: ['x-scheme-handler/rowboat'],
                 }
+            }
+        },
+        {
+            name: require.resolve('./makers/maker-pacman.cjs'),
+            platforms: ['linux'],
+            config: {
+                name: 'rowboat',
+                bin: 'rowboat',
+                executableName: 'rowboat',
+                description: 'AI coworker with memory',
+                maintainer: 'rowboatlabs',
+                homepage: 'https://rowboatlabs.com',
+                license: 'Apache',
+                icon: path.join(__dirname, 'icons/icon.png'),
+                mimeType: ['x-scheme-handler/rowboat'],
             }
         },
         {
