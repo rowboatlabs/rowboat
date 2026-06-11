@@ -17,6 +17,7 @@ import { isBlocked, extractCommandNames } from "../application/lib/command-execu
 import { getFileAccessAllowList, type FileAccessGrant, type FileAccessOperation } from "../config/security.js";
 import { resolveFilePathForPermission } from "../filesystem/files.js";
 import container from "../di/container.js";
+import { notifyIfEnabled } from "../application/notification/notifier.js";
 import { IModelConfigRepo } from "../models/repo.js";
 import { createProvider } from "../models/models.js";
 import { resolveProviderConfig } from "../models/defaults.js";
@@ -377,6 +378,7 @@ export class AgentRuntime implements IAgentRuntime {
                 type: "run-processing-start",
                 subflow: [],
             });
+            let totalEvents = 0;
             while (true) {
                 // Check for abort before each iteration
                 if (signal.aborted) {
@@ -417,6 +419,7 @@ export class AgentRuntime implements IAgentRuntime {
                     throw error;
                 }
 
+                totalEvents += eventCount;
                 // if no events, break
                 if (!eventCount) {
                     break;
@@ -433,6 +436,27 @@ export class AgentRuntime implements IAgentRuntime {
                 };
                 await this.runsRepo.appendEvents(runId, [stoppedEvent]);
                 await this.bus.publish(stoppedEvent);
+            } else if (totalEvents > 0) {
+                // The run reached a natural stopping point and actually did
+                // something this cycle. Notify "chat completion" — unless it
+                // paused on a permission request, which surfaces its own
+                // notification (distinguish by inspecting the final state).
+                const finalRun = await this.runsRepo.fetch(runId);
+                if (finalRun) {
+                    const finalState = new AgentState();
+                    for (const event of finalRun.log) {
+                        finalState.ingest(event);
+                    }
+                    if (finalState.getPendingPermissions().length === 0) {
+                        void notifyIfEnabled("chat_completion", {
+                            title: "Response ready",
+                            message: "Your agent finished responding.",
+                            link: `rowboat://open?type=chat&runId=${runId}`,
+                            actionLabel: "Open",
+                            onlyWhenBackground: true,
+                        });
+                    }
+                }
             }
         } catch (error) {
             console.error(`Run ${runId} failed:`, error);
@@ -1545,6 +1569,16 @@ If the user's message is clearly NOT a coding request (small talk, an unrelated 
             }
 
             if (permissionCandidates.length > 0) {
+                // Permission prompts block the run, so they surface even when the
+                // app is focused (no onlyWhenBackground gate).
+                const notifyPermissionPrompt = (toolCall: typeof permissionCandidates[number]["toolCall"]) => {
+                    void notifyIfEnabled("agent_permission", {
+                        title: "Permission needed",
+                        message: `${agent.name} wants to run "${toolCall.toolName}". Review to continue.`,
+                        link: `rowboat://open?type=chat&runId=${runId}`,
+                        actionLabel: "Review",
+                    });
+                };
                 if (state.permissionMode === "auto") {
                     let decisionsByToolCallId = new Map<string, { decision: "allow" | "deny"; reason: string }>();
                     try {
@@ -1578,6 +1612,7 @@ If the user's message is clearly NOT a coding request (small talk, an unrelated 
                                 permission: candidate.permission,
                                 subflow: [],
                             });
+                            notifyPermissionPrompt(candidate.toolCall);
                             continue;
                         }
 
@@ -1609,6 +1644,7 @@ If the user's message is clearly NOT a coding request (small talk, an unrelated 
                                 permission: candidate.permission,
                                 subflow: [],
                             });
+                            notifyPermissionPrompt(candidate.toolCall);
                         }
                     }
                 } else {
@@ -1621,6 +1657,7 @@ If the user's message is clearly NOT a coding request (small talk, an unrelated 
                             permission: candidate.permission,
                             subflow: [],
                         });
+                        notifyPermissionPrompt(candidate.toolCall);
                     }
                 }
             }

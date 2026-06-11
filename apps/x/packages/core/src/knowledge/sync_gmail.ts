@@ -9,6 +9,7 @@ import { serviceLogger, type ServiceRunContext } from '../services/service_logge
 import { limitEventItems } from './limit_event_items.js';
 import { createEvent } from '../events/producer.js';
 import { classifyThread, getUserEmail } from './classify_thread.js';
+import { notifyIfEnabled } from '../application/notification/notifier.js';
 
 // Configuration
 const SYNC_DIR = path.join(WorkDir, 'gmail_sync');
@@ -218,6 +219,26 @@ function summarizeGmailSync(threads: SyncedThread[]): string {
     }
 
     return lines.join('\n');
+}
+
+/**
+ * Fire one OS notification per genuinely-new email thread. Only ever called
+ * from the partial-sync (incremental) path, so the first-time connect — which
+ * goes through fullSync — never notifies. Suppressed while the app is focused.
+ */
+function notifyNewEmails(threads: SyncedThread[]): void {
+    for (const { threadId } of threads) {
+        const snapshot = readCachedSnapshot(threadId)?.snapshot;
+        const subject = snapshot?.subject?.trim() || '(no subject)';
+        const from = snapshot?.from?.trim();
+        void notifyIfEnabled('new_email', {
+            title: from ? `New email from ${from}` : 'New email',
+            message: subject,
+            link: 'rowboat://open?type=chat',
+            actionLabel: 'Open',
+            onlyWhenBackground: true,
+        });
+    }
 }
 
 async function publishGmailSyncEvent(threads: SyncedThread[]): Promise<void> {
@@ -1260,6 +1281,9 @@ async function partialSync(auth: OAuth2Client, startHistoryId: string, syncDir: 
             const result = await processThread(auth, tid, syncDir, attachmentsDir);
             if (result) synced.push(result);
         }
+        // Notify for the history-derived new threads only — before the older
+        // backfilled threads are merged in below, so backfill stays silent.
+        notifyNewEmails(synced);
         const backfilled = await backfillMissingRecentThreads(auth, syncDir, attachmentsDir, stateFile, lookbackDays);
         synced.push(...backfilled);
 

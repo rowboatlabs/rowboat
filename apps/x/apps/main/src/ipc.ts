@@ -42,6 +42,7 @@ import { knowledgeSourcesRepo } from '@x/core/dist/knowledge/sources/repo.js';
 import { rankSlackHomeMessages } from '@x/core/dist/knowledge/sources/rank_slack_home.js';
 import { syncSlackKnowledgeSources, triggerSync as triggerSlackKnowledgeSync } from '@x/core/dist/knowledge/sources/sync_slack.js';
 import { isOnboardingComplete, markOnboardingComplete } from '@x/core/dist/config/note_creation_config.js';
+import { loadNotificationSettings, saveNotificationSettings } from '@x/core/dist/config/notification_config.js';
 import * as composioHandler from './composio-handler.js';
 import { consumePendingDeepLink } from './deeplink.js';
 import { qualifyAndDisconnectComposioGoogle } from '@x/core/dist/migrations/composio-google-migration.js';
@@ -1364,6 +1365,13 @@ export function setupIpcHandlers() {
     // Billing handler
     'billing:getInfo': async () => {
       return await getBillingInfo();
+    },
+    'notifications:getSettings': async () => {
+      return loadNotificationSettings();
+    },
+    'notifications:setSettings': async (_event, args) => {
+      saveNotificationSettings(args);
+      return { success: true };
     },
     // Embedded browser handlers (WebContentsView + navigation)
     ...browserIpcHandlers,

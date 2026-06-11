@@ -2,6 +2,15 @@ packages:
   - apps/*
   - packages/*
 
+allowBuilds:
+  core-js: set this to true or false
+  electron: set this to true or false
+  electron-winstaller: set this to true or false
+  esbuild: set this to true or false
+  fs-xattr: set this to true or false
+  macos-alias: set this to true or false
+  protobufjs: set this to true or false
+
 catalog:
   vitest: 4.1.7
 
