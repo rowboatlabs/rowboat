@@ -10,7 +10,9 @@ export const skill = String.raw`
 A *background task* is a persistent agent the user configures once and the framework keeps firing — on a schedule, inside time-of-day windows, and/or in response to matching incoming events (Gmail threads, calendar changes). Each task lives at \`bg-tasks/<slug>/\` and owns two artifacts:
 
 - \`task.yaml\` — the spec (the user's **instructions**, triggers, runtime state). You and the user both treat this as the source of truth.
-- \`index.md\` — the agent-owned body. The runtime never writes here; the bg-task agent does, each run.
+- \`index.md\` — the agent-owned body (a note). The runtime never writes here; the bg-task agent does, each run.
+
+For **visual** output — a dashboard, a styled report, a metrics table with conditional colors, a chart — the agent may instead write a self-contained \`index.html\`, which the task view renders full-screen in a sandboxed iframe with CSS and layout preserved. The agent picks the format per run from the instructions; you don't set it, but when the ask is inherently visual, say so in the instructions (e.g. "…rendered as a styled HTML dashboard") so the agent leans that way.
 
 A task is one of two shapes — the agent decides per run from the verbs in \`instructions\`:
 

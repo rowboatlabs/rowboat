@@ -1,0 +1,15 @@
+diff --git a/bin/codex.js b/bin/codex.js
+index 67ab3e2d95dfac1c91882578b5403916c3121484..f8030b6e1459e05161af99e152b2e7f65ea6c41d 100644
+--- a/bin/codex.js
++++ b/bin/codex.js
+@@ -175,6 +175,10 @@ env[packageManagerEnvVar] = "1";
+ const child = spawn(binaryPath, process.argv.slice(2), {
+   stdio: "inherit",
+   env,
++  // Native console-subsystem binary: without this Windows pops a visible console
++  // window when launched from a console-less (Electron GUI) parent. Closing that
++  // window wedges the agent. CREATE_NO_WINDOW keeps the console hidden.
++  windowsHide: true,
+ });
+ 
+ child.on("error", (err) => {

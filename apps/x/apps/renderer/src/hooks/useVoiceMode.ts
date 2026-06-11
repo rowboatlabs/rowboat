@@ -151,6 +151,20 @@ export function useVoiceMode() {
         analytics.voiceInputStarted();
         posthog.people.set_once({ has_used_voice: true });
 
+        // Settle the OS-level microphone permission before capturing. On the
+        // first-ever use (macOS) the permission is 'not-determined'; calling
+        // getUserMedia directly would reject while the native prompt is up,
+        // making the first mic click silently do nothing. Resolving it here
+        // lets this same click proceed once the user grants access.
+        const mic = await window.ipc
+            .invoke('voice:ensureMicAccess', null)
+            .catch(() => ({ granted: true }));
+        if (!mic.granted) {
+            console.error('Microphone access denied');
+            stopAudioCapture();
+            return;
+        }
+
         // Kick off mic + WebSocket in parallel, don't await WebSocket
         const [stream] = await Promise.all([
             navigator.mediaDevices.getUserMedia({ audio: true }).catch((err) => {
@@ -161,7 +175,10 @@ export function useVoiceMode() {
         ]);
 
         if (!stream) {
-            setState('idle');
+            // connectWs() may have already opened a socket — tear everything
+            // down (close WS, reset buffers, state) rather than only resetting
+            // state, which would leak the socket into the next attempt.
+            stopAudioCapture();
             return;
         }
 
@@ -192,7 +209,7 @@ export function useVoiceMode() {
 
         source.connect(processor);
         processor.connect(audioCtx.destination);
-    }, [state, connectWs]);
+    }, [state, connectWs, stopAudioCapture]);
 
     /** Stop recording and return the full transcript (finalized + any current interim) */
     const submit = useCallback((): string => {

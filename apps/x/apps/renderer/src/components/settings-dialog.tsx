@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Bug, Terminal, AlertTriangle, RefreshCw } from "lucide-react"
+import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Bug, Terminal, AlertTriangle, RefreshCw, PanelRight } from "lucide-react"
 
 import {
   Dialog,
@@ -25,6 +25,7 @@ import { useTheme } from "@/contexts/theme-context"
 import { toast } from "sonner"
 import { AccountSettings } from "@/components/settings/account-settings"
 import { ConnectedAccountsSettings } from "@/components/settings/connected-accounts-settings"
+import type { ApprovalPolicy } from "@x/shared/src/code-mode.js"
 
 type ConfigTab = "account" | "connections" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "note-tagging" | "help"
 
@@ -210,7 +211,7 @@ function ThemeOption({
 }
 
 function AppearanceSettings() {
-  const { theme, setTheme } = useTheme()
+  const { theme, setTheme, chatPanePlacement, setChatPanePlacement, chatPaneSize, setChatPaneSize } = useTheme()
 
   return (
     <div className="space-y-6">
@@ -237,6 +238,50 @@ function AppearanceSettings() {
             icon={Monitor}
             isSelected={theme === "system"}
             onClick={() => setTheme("system")}
+          />
+        </div>
+      </div>
+      <div>
+        <h4 className="text-sm font-medium mb-3">Chat</h4>
+        <p className="text-xs text-muted-foreground mb-4">
+          Choose where chat sits when another pane is open
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <ThemeOption
+            label="Chat right"
+            icon={PanelRight}
+            isSelected={chatPanePlacement === "right"}
+            onClick={() => setChatPanePlacement("right")}
+          />
+          <ThemeOption
+            label="Chat middle"
+            icon={MessageCircle}
+            isSelected={chatPanePlacement === "middle"}
+            onClick={() => setChatPanePlacement("middle")}
+          />
+        </div>
+        <h4 className="mt-6 text-sm font-medium mb-3">Chat size</h4>
+        <p className="text-xs text-muted-foreground mb-4">
+          Choose how much width chat gets when another pane is open
+        </p>
+        <div className="grid grid-cols-3 gap-3">
+          <ThemeOption
+            label="Chat smaller"
+            icon={MessageCircle}
+            isSelected={chatPaneSize === "chat-smaller"}
+            onClick={() => setChatPaneSize("chat-smaller")}
+          />
+          <ThemeOption
+            label="Chat equal"
+            icon={Monitor}
+            isSelected={chatPaneSize === "chat-equal"}
+            onClick={() => setChatPaneSize("chat-equal")}
+          />
+          <ThemeOption
+            label="Chat bigger"
+            icon={PanelRight}
+            isSelected={chatPaneSize === "chat-bigger"}
+            onClick={() => setChatPaneSize("chat-bigger")}
           />
         </div>
       </div>
@@ -1761,6 +1806,7 @@ function AgentStatusRow({
 
 function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
   const [enabled, setEnabled] = useState(false)
+  const [approvalPolicy, setApprovalPolicy] = useState<ApprovalPolicy>('ask')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [status, setStatus] = useState<CodeModeAgentStatus | null>(null)
@@ -1785,7 +1831,10 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
       setLoading(true)
       try {
         const result = await window.ipc.invoke("codeMode:getConfig", null)
-        if (!cancelled) setEnabled(result.enabled)
+        if (!cancelled) {
+          setEnabled(result.enabled)
+          setApprovalPolicy(result.approvalPolicy ?? 'ask')
+        }
       } catch {
         if (!cancelled) setEnabled(false)
       } finally {
@@ -1801,7 +1850,7 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
     setSaving(true)
     setEnabled(next)
     try {
-      await window.ipc.invoke("codeMode:setConfig", { enabled: next })
+      await window.ipc.invoke("codeMode:setConfig", { enabled: next, approvalPolicy })
       window.dispatchEvent(new Event("code-mode-config-changed"))
       toast.success(next ? "Code mode enabled" : "Code mode disabled")
     } catch {
@@ -1810,7 +1859,22 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
     } finally {
       setSaving(false)
     }
-  }, [])
+  }, [approvalPolicy])
+
+  const handlePolicyChange = useCallback(async (next: ApprovalPolicy) => {
+    const prev = approvalPolicy
+    setSaving(true)
+    setApprovalPolicy(next)
+    try {
+      await window.ipc.invoke("codeMode:setConfig", { enabled, approvalPolicy: next })
+      window.dispatchEvent(new Event("code-mode-config-changed"))
+    } catch {
+      setApprovalPolicy(prev)
+      toast.error("Failed to update approval policy")
+    } finally {
+      setSaving(false)
+    }
+  }, [enabled, approvalPolicy])
 
   const anyReady = status?.claude.installed && status?.claude.signedIn
     || status?.codex.installed && status?.codex.signedIn
@@ -1830,9 +1894,8 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
         <p>
           <strong className="text-foreground">Code mode</strong> lets the assistant delegate coding tasks
           to <strong className="text-foreground">Claude Code</strong> or <strong className="text-foreground">Codex</strong> running
-          on your machine. Pick the agent inline from the composer; the assistant calls it via
-          <code className="mx-1 rounded bg-muted px-1 py-0.5 text-[11px]">acpx</code>
-          and streams results back into chat.
+          on your machine. Pick the agent inline from the composer; the assistant runs it on-device
+          and streams its work — tool calls, file diffs, and approvals — back into chat.
         </p>
         <p>
           Requires an active <strong className="text-foreground">Claude Code</strong> subscription or
@@ -1881,6 +1944,35 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
           disabled={saving}
         />
       </div>
+
+      {enabled && (
+        <div className="rounded-md border px-3 py-3 space-y-2">
+          <div className="text-sm font-medium">Approvals</div>
+          <div className="text-xs text-muted-foreground">
+            How the coding agent checks in before changing files or running commands. You always see
+            everything it does in the timeline — this only controls the prompts.
+          </div>
+          <Select
+            value={approvalPolicy}
+            onValueChange={(v) => handlePolicyChange(v as ApprovalPolicy)}
+            disabled={saving}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ask">Ask every time</SelectItem>
+              <SelectItem value="auto-approve-reads">Auto-approve reads</SelectItem>
+              <SelectItem value="yolo">Auto-approve everything (YOLO)</SelectItem>
+            </SelectContent>
+          </Select>
+          <div className="text-xs text-muted-foreground">
+            {approvalPolicy === 'ask' && 'You approve every file change and command the agent wants to run.'}
+            {approvalPolicy === 'auto-approve-reads' && 'Reading and searching run automatically; you still approve writes, edits, and commands.'}
+            {approvalPolicy === 'yolo' && 'The agent runs everything — writes, edits, and commands — without asking. Use only in folders you trust.'}
+          </div>
+        </div>
+      )}
 
       {enabled && status && !anyReady && (
         <div className="rounded-md border border-amber-500/40 bg-amber-50/60 dark:bg-amber-950/20 px-3 py-2.5 flex items-start gap-2 text-xs">

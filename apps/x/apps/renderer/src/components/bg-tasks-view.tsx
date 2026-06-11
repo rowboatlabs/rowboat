@@ -19,6 +19,7 @@ import type { ConversationItem } from '@/lib/chat-conversation'
 import { runLogToConversation } from '@/lib/run-to-conversation'
 import { CompactConversation } from '@/components/compact-conversation'
 import { RichMarkdownViewer } from '@/components/rich-markdown-viewer'
+import { HtmlFileViewer } from '@/components/html-file-viewer'
 
 // ---------------------------------------------------------------------------
 // Trigger helpers (inlined; extract to shared <TriggersEditor> as a follow-up)
@@ -502,15 +503,22 @@ function SectionRegion({ label, children }: { label?: string; children: React.Re
 }
 
 // ---------------------------------------------------------------------------
-// Output pane — index.md (main pane content)
+// Output pane — index.html (preferred) or index.md (main pane content)
 //
-// Renders the task's `index.md` like a note: max-width 720px centered, same
-// typography (~16px, 1.5 line-height, generous padding) as the note editor's
-// ProseMirror rule in `editor.css`. No chrome above the body — just the
-// markdown, with a small floating Source ⇄ Rendered toggle in the top-right.
+// A task's agent-owned artifact is either:
+//   - `index.html` — a self-contained, styled web page. Rendered full-bleed in
+//     a sandboxed iframe (via `HtmlFileViewer` / the `app://workspace`
+//     protocol) so CSS, layout, and scripts render faithfully. Preferred when
+//     present and non-empty.
+//   - `index.md`   — a note. Rendered like the note editor: max-width 720px
+//     centered, same typography as `editor.css`, via `RichMarkdownViewer`.
+//
+// In both cases a small floating Source ⇄ Rendered toggle in the top-right
+// swaps the rendered view for the raw file source.
 // ---------------------------------------------------------------------------
 
 function OutputPane({ slug, taskName, refreshKey }: { slug: string; taskName: string; refreshKey: number }) {
+    const [mode, setMode] = useState<'md' | 'html'>('md')
     const [body, setBody] = useState<string>('')
     const [loading, setLoading] = useState(true)
     const [viewSource, setViewSource] = useState(false)
@@ -519,21 +527,33 @@ function OutputPane({ slug, taskName, refreshKey }: { slug: string; taskName: st
         let cancelled = false
         setLoading(true)
         void (async () => {
+            // Prefer index.html when it exists and has content; otherwise fall
+            // back to index.md (the default seeded artifact).
             try {
-                const result = await window.ipc.invoke('workspace:readFile', {
+                const html = await window.ipc.invoke('workspace:readFile', {
+                    path: `bg-tasks/${slug}/index.html`,
+                })
+                if (html.data.trim()) {
+                    if (!cancelled) { setMode('html'); setBody(html.data) }
+                    return
+                }
+            } catch {
+                // No index.html — fall through to markdown.
+            }
+            try {
+                const md = await window.ipc.invoke('workspace:readFile', {
                     path: `bg-tasks/${slug}/index.md`,
                 })
-                if (!cancelled) setBody(result.data)
+                if (!cancelled) { setMode('md'); setBody(md.data) }
             } catch {
-                if (!cancelled) setBody('')
-            } finally {
-                if (!cancelled) setLoading(false)
+                if (!cancelled) { setMode('md'); setBody('') }
             }
-        })()
+        })().finally(() => { if (!cancelled) setLoading(false) })
         return () => { cancelled = true }
     }, [slug, refreshKey])
 
-    const isEmpty = !body.trim() || body.trim() === `# ${taskName}`
+    const isEmpty = mode === 'md' && (!body.trim() || body.trim() === `# ${taskName}`)
+    const showHtml = mode === 'html' && !viewSource
 
     return (
         <div className="relative flex-1 overflow-hidden bg-background">
@@ -542,29 +562,35 @@ function OutputPane({ slug, taskName, refreshKey }: { slug: string; taskName: st
                     type="button"
                     onClick={() => setViewSource(v => !v)}
                     className="absolute right-4 top-3 z-10 rounded-md bg-background/70 px-2 py-0.5 text-[11px] text-muted-foreground backdrop-blur hover:bg-accent hover:text-foreground"
-                    aria-label={viewSource ? 'Show rendered output' : 'Show source markdown'}
+                    aria-label={viewSource ? 'Show rendered output' : 'Show source'}
                 >
                     {viewSource ? 'Rendered' : 'Source'}
                 </button>
             )}
 
-            <div className="h-full overflow-y-auto">
-                <div className="mx-auto max-w-[720px] px-16 py-8">
-                    {loading ? (
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                            <Loader2 className="size-3 animate-spin" /> Loading…
-                        </div>
-                    ) : isEmpty ? (
-                        <p className="text-sm italic text-muted-foreground">
-                            No output yet. Click <span className="font-medium text-foreground">Run now</span> in the sidebar, or wait for a trigger to fire.
-                        </p>
-                    ) : viewSource ? (
-                        <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[13px] leading-relaxed">{body}</pre>
-                    ) : (
-                        <RichMarkdownViewer content={body} />
-                    )}
+            {showHtml ? (
+                // Full-bleed: the iframe fills the pane and scrolls internally.
+                // Remount on refreshKey so a re-run's updated index.html reloads.
+                <HtmlFileViewer key={`${slug}-${refreshKey}`} path={`bg-tasks/${slug}/index.html`} />
+            ) : (
+                <div className="h-full overflow-y-auto">
+                    <div className="mx-auto max-w-[720px] px-16 py-8">
+                        {loading ? (
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                <Loader2 className="size-3 animate-spin" /> Loading…
+                            </div>
+                        ) : isEmpty ? (
+                            <p className="text-sm italic text-muted-foreground">
+                                No output yet. Click <span className="font-medium text-foreground">Run now</span> in the sidebar, or wait for a trigger to fire.
+                            </p>
+                        ) : viewSource ? (
+                            <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[13px] leading-relaxed">{body}</pre>
+                        ) : (
+                            <RichMarkdownViewer content={body} />
+                        )}
+                    </div>
                 </div>
-            </div>
+            )}
         </div>
     )
 }
@@ -1237,6 +1263,8 @@ function TaskDetail({
     const [confirmingDelete, setConfirmingDelete] = useState(false)
     const [sidebarOpen, setSidebarOpen] = useState(true)
     const [outputRefreshKey, setOutputRefreshKey] = useState(0)
+    // Whether we've already chosen the initial sidebar state for this task.
+    const sidebarInitialized = useRef(false)
 
     const agentStatus = useBackgroundTaskAgentStatus()
     const liveStatus = agentStatus.get(slug)
@@ -1252,6 +1280,23 @@ function TaskDetail({
             if (result.success && result.task) {
                 setTask(result.task)
                 setDraft(result.task)
+                // On first open, collapse the details sidebar when the agent
+                // already has output — let the user read it without chrome.
+                // Resolved before `loading` clears so the sidebar never flashes.
+                if (!sidebarInitialized.current) {
+                    sidebarInitialized.current = true
+                    try {
+                        const out = await window.ipc.invoke('workspace:readFile', {
+                            path: `bg-tasks/${slug}/index.md`,
+                        })
+                        const body = (out.data ?? '').trim()
+                        if (body && body !== `# ${result.task.name}`) {
+                            setSidebarOpen(false)
+                        }
+                    } catch {
+                        // No output file yet — keep the sidebar open.
+                    }
+                }
             }
         } finally {
             setLoading(false)

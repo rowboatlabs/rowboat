@@ -12,7 +12,7 @@ const execAsync = promisify(exec);
 // We scan these directly because Electron's spawned shell sometimes doesn't
 // inherit the user's full PATH (especially on macOS GUI launches, and even on
 // Windows when global npm prefix isn't propagated to system PATH).
-function commonInstallPaths(binary: string): string[] {
+export function commonInstallPaths(binary: string): string[] {
     const home = os.homedir();
     if (process.platform === 'win32') {
         const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');

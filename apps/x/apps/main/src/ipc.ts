@@ -33,6 +33,7 @@ import type { IModelConfigRepo } from '@x/core/dist/models/repo.js';
 import type { IOAuthRepo } from '@x/core/dist/auth/repo.js';
 import { IGranolaConfigRepo } from '@x/core/dist/knowledge/granola/repo.js';
 import { ICodeModeConfigRepo } from '@x/core/dist/code-mode/repo.js';
+import { CodePermissionRegistry } from '@x/core/dist/code-mode/acp/permission-registry.js';
 import { checkCodeModeAgentStatus } from '@x/core/dist/code-mode/status.js';
 import { invalidateCopilotInstructionsCache } from '@x/core/dist/application/assistant/instructions.js';
 import { triggerSync as triggerGranolaSync } from '@x/core/dist/knowledge/granola/sync.js';
@@ -56,6 +57,8 @@ import { getAccessToken } from '@x/core/dist/auth/tokens.js';
 import { getRowboatConfig } from '@x/core/dist/config/rowboat.js';
 import { runLiveNoteAgent } from '@x/core/dist/knowledge/live-note/runner.js';
 import { listImportantThreads, listEverythingElseThreads, saveMessageBodyHeight, triggerSync as triggerGmailSync, sendThreadReply, archiveThread, trashThread, markThreadRead, getAccountEmail, getConnectionStatus as getGmailConnectionStatus } from '@x/core/dist/knowledge/sync_gmail.js';
+import { searchContacts as searchGmailContacts, warmContactIndex } from '@x/core/dist/knowledge/gmail_contacts.js';
+import { searchSentContacts, warmSentContacts } from '@x/core/dist/knowledge/gmail_sent_contacts.js';
 import { liveNoteBus } from '@x/core/dist/knowledge/live-note/bus.js';
 import { getInstallationId } from '@x/core/dist/analytics/installation.js';
 import { API_URL } from '@x/core/dist/config/env.js';
@@ -586,6 +589,13 @@ export function setupIpcHandlers() {
   // Forward knowledge commit events to renderer for panel refresh
   versionHistory.onCommit(() => emitKnowledgeCommitEvent());
 
+  // Pre-warm the Gmail contact indices so the first compose-box keystroke is instant.
+  // - warmContactIndex(): synchronous local-snapshot fallback (instant, narrow coverage).
+  // - warmSentContacts(): kicks off a background Gmail API sync of the SENT label
+  //   for full historical coverage of people you've actually emailed.
+  warmContactIndex();
+  warmSentContacts();
+
   registerIpcHandlers({
     'app:getVersions': async () => {
       // args is null for this channel (no request payload)
@@ -663,6 +673,22 @@ export function setupIpcHandlers() {
       saveMessageBodyHeight(args.threadId, args.messageId, args.height);
       return {};
     },
+    'gmail:searchContacts': async (_event, args) => {
+      const query = args?.query ?? '';
+      const limit = args?.limit;
+      const excludeEmails = args?.excludeEmails;
+
+      // Primary source: people you've actually sent mail to (Gmail SENT label,
+      // cached + refreshed via the Gmail API). Fallback: local-snapshot index
+      // — used only when the SENT index hasn't been populated yet (very first
+      // launch, before the background sync finishes).
+      const sent = await searchSentContacts(query, { limit, excludeEmails }).catch(() => []);
+      if (sent.length > 0) {
+        return { contacts: sent };
+      }
+      const fallback = await searchGmailContacts(query, { limit, excludeEmails });
+      return { contacts: fallback };
+    },
     'mcp:listTools': async (_event, args) => {
       return mcpCore.listTools(args.serverName, args.cursor);
     },
@@ -677,6 +703,11 @@ export function setupIpcHandlers() {
     },
     'runs:authorizePermission': async (_event, args) => {
       await runsCore.authorizePermission(args.runId, args.authorization);
+      return { success: true };
+    },
+    'codeRun:resolvePermission': async (_event, args) => {
+      const registry = container.resolve<CodePermissionRegistry>('codePermissionRegistry');
+      registry.resolve(args.requestId, args.decision);
       return { success: true };
     },
     'runs:provideHumanInput': async (_event, args) => {
@@ -780,11 +811,11 @@ export function setupIpcHandlers() {
     'codeMode:getConfig': async () => {
       const repo = container.resolve<ICodeModeConfigRepo>('codeModeConfigRepo');
       const config = await repo.getConfig();
-      return { enabled: config.enabled };
+      return { enabled: config.enabled, approvalPolicy: config.approvalPolicy };
     },
     'codeMode:setConfig': async (_event, args) => {
       const repo = container.resolve<ICodeModeConfigRepo>('codeModeConfigRepo');
-      await repo.setConfig({ enabled: args.enabled });
+      await repo.setConfig({ enabled: args.enabled, approvalPolicy: args.approvalPolicy });
       invalidateCopilotInstructionsCache();
       return { success: true };
     },
@@ -1182,6 +1213,24 @@ export function setupIpcHandlers() {
     },
     'voice:synthesize': async (_event, args) => {
       return voice.synthesizeSpeech(args.text);
+    },
+    'voice:ensureMicAccess': async () => {
+      if (process.platform !== 'darwin') return { granted: true };
+      const status = systemPreferences.getMediaAccessStatus('microphone');
+      console.log('[voice] Microphone permission status:', status);
+      if (status === 'granted') return { granted: true };
+      // 'not-determined' shows the native TCC prompt and resolves once the
+      // user responds; 'denied'/'restricted' resolve false without prompting.
+      // Awaiting this here means the triggering mic click proceeds to
+      // getUserMedia only after permission is settled — fixing the first
+      // click silently failing while the prompt was still up.
+      try {
+        const granted = await systemPreferences.askForMediaAccess('microphone');
+        console.log('[voice] Microphone permission after prompt:', granted);
+        return { granted };
+      } catch {
+        return { granted: false };
+      }
     },
     // Live-note handlers
     'live-note:run': async (_event, args) => {
