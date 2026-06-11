@@ -1403,6 +1403,44 @@ export async function getAccountEmail(): Promise<string | null> {
     return getUserEmail(auth);
 }
 
+let cachedAccountName: string | null | undefined;
+
+/**
+ * The connected account's display name, parsed from the `From` header of a
+ * recent SENT message (which is the user themselves). Cached for the process
+ * lifetime. Uses only the existing gmail.modify scope — no profile/userinfo
+ * scope, so it never triggers a re-consent. Used by the composer to sign off
+ * AI-generated emails with the real name.
+ */
+export async function getAccountName(): Promise<string | null> {
+    if (cachedAccountName !== undefined) return cachedAccountName;
+    try {
+        const auth = await GoogleClientFactory.getClient();
+        if (!auth) return null;
+        const gmailClient = google.gmail({ version: 'v1', auth });
+        const list = await gmailClient.users.messages.list({ userId: 'me', labelIds: ['SENT'], maxResults: 1 });
+        const id = list.data.messages?.[0]?.id;
+        if (!id) {
+            cachedAccountName = null;
+            return null;
+        }
+        const msg = await gmailClient.users.messages.get({
+            userId: 'me',
+            id,
+            format: 'metadata',
+            metadataHeaders: ['From'],
+        });
+        const from = msg.data.payload?.headers?.find((h) => h.name?.toLowerCase() === 'from')?.value || '';
+        // Pull the display name out of `"Name" <email>` / `Name <email>`.
+        const name = from.match(/^\s*"?([^"<]+?)"?\s*</)?.[1]?.trim() || null;
+        cachedAccountName = name;
+        return name;
+    } catch (err) {
+        console.warn('[Gmail] getAccountName failed:', err);
+        return null;
+    }
+}
+
 export async function getConnectionStatus(): Promise<GmailConnectionStatus> {
     const status = await GoogleClientFactory.getCredentialStatus(REQUIRED_SCOPE);
     let email: string | null = null;

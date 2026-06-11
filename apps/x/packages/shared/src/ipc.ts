@@ -181,6 +181,12 @@ const ipcSchemas = {
       email: z.string().nullable(),
     }),
   },
+  'gmail:getAccountName': {
+    req: z.object({}),
+    res: z.object({
+      name: z.string().nullable(),
+    }),
+  },
   'gmail:archiveThread': {
     req: z.object({ threadId: z.string().min(1) }),
     res: z.object({ ok: z.boolean(), error: z.string().optional() }),
@@ -200,6 +206,21 @@ const ipcSchemas = {
       height: z.number().int().positive(),
     }),
     res: z.object({}),
+  },
+  'gmail:searchContacts': {
+    req: z.object({
+      query: z.string(),
+      limit: z.number().int().positive().optional(),
+      excludeEmails: z.array(z.string()).optional(),
+    }),
+    res: z.object({
+      contacts: z.array(z.object({
+        name: z.string(),
+        email: z.string(),
+        count: z.number(),
+        lastSeenMs: z.number(),
+      })),
+    }),
   },
   'mcp:listTools': {
     req: z.object({
@@ -336,6 +357,27 @@ const ipcSchemas = {
     req: LlmModelConfig,
     res: z.object({
       success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  'llm:getDefaultModel': {
+    req: z.null(),
+    res: z.object({
+      model: z.string(),
+      provider: z.string(),
+    }),
+  },
+  'llm:generate': {
+    req: z.object({
+      prompt: z.string().min(1),
+      system: z.string().optional(),
+      model: z.string().optional(),
+      provider: z.string().optional(),
+    }),
+    res: z.object({
+      text: z.string().optional(),
+      model: z.string().optional(),
+      provider: z.string().optional(),
       error: z.string().optional(),
     }),
   },
