@@ -4,6 +4,7 @@ import builtinToolsSkill from "./builtin-tools/skill.js";
 import deletionGuardrailsSkill from "./deletion-guardrails/skill.js";
 import docCollabSkill from "./doc-collab/skill.js";
 import draftEmailsSkill from "./draft-emails/skill.js";
+import readEmailsSkill from "./read-emails/skill.js";
 import mcpIntegrationSkill from "./mcp-integration/skill.js";
 import meetingPrepSkill from "./meeting-prep/skill.js";
 import organizeFilesSkill from "./organize-files/skill.js";
@@ -53,6 +54,12 @@ const definitions: SkillDefinition[] = [
     title: "Draft Emails",
     summary: "Process incoming emails and create draft responses using calendar and knowledge base for context.",
     content: draftEmailsSkill,
+  },
+  {
+    id: "read-emails",
+    title: "Read Emails",
+    summary: "Read, check, search, and summarize the user's Gmail inbox using the native gmail-* tools and cached per-thread summaries.",
+    content: readEmailsSkill,
   },
   {
     id: "meeting-prep",

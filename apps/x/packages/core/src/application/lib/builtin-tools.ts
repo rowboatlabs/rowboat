@@ -14,6 +14,15 @@ import { WorkDir } from "../../config/config.js";
 import { composioAccountsRepo } from "../../composio/repo.js";
 import { executeAction as executeComposioAction, isConfigured as isComposioConfigured, searchTools as searchComposioTools } from "../../composio/client.js";
 import { CURATED_TOOLKITS, CURATED_TOOLKIT_SLUGS } from "@x/shared/dist/composio.js";
+import {
+    gmailCheckConnection,
+    gmailListThreads,
+    gmailReadThread,
+    gmailSearchEmails,
+    type GmailListThreadsInput,
+    type GmailReadThreadInput,
+    type GmailSearchEmailsInput,
+} from "./gmail-tools.js";
 import { BrowserControlInputSchema, type BrowserControlInput } from "@x/shared/dist/browser-control.js";
 import { BackgroundTaskSchema, TriggersSchema } from "@x/shared/dist/background-task.js";
 
@@ -1255,6 +1264,49 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 message: `Saved to memory: ${note}`,
             };
         },
+    },
+
+    // ========================================================================
+    // Native Gmail Tools
+    // ========================================================================
+    // Always registered (not gated on connection status — the instructions
+    // cache would drift otherwise). Each execute checks the native Google
+    // connection itself and returns a connect-in-Settings payload when
+    // disconnected. Execute bodies live in gmail-tools.ts.
+
+    'gmail-checkConnection': {
+        description: 'Check whether the native Gmail integration is connected and which account it uses. Returns { connected, email } or a not-connected payload with next steps.',
+        inputSchema: z.object({}),
+        execute: async () => gmailCheckConnection(),
+    },
+
+    'gmail-listThreads': {
+        description: "List the user's Gmail inbox from the locally synced cache. Each thread includes an LLM-generated 1-2 sentence summary and importance classification — prefer these summaries for 'summarize my emails' style requests instead of reading full bodies. Load the `read-emails` skill for usage guidance.",
+        inputSchema: z.object({
+            section: z.enum(['important', 'other']).optional().describe("Inbox section: 'important' (real correspondence) or 'other' (newsletters, notifications). Defaults to 'important'."),
+            cursor: z.string().optional().describe('Pagination cursor from a previous call (nextCursor).'),
+            limit: z.number().int().min(1).max(50).optional().describe('Threads per page. Defaults to 20.'),
+            sync: z.boolean().optional().describe('Set true to trigger a background re-sync first (does not wait for it).'),
+        }),
+        execute: async (input: GmailListThreadsInput) => gmailListThreads(input),
+    },
+
+    'gmail-readThread': {
+        description: 'Read the full messages of one Gmail thread by threadId (from gmail-listThreads or gmail-searchEmails). Returns plain-text bodies (quoted replies stripped, capped per message) plus the cached summary/importance and any attachments.',
+        inputSchema: z.object({
+            threadId: z.string().describe('The Gmail thread id.'),
+            maxMessages: z.number().int().min(1).max(25).optional().describe('Most-recent messages to include. Defaults to 10; older ones are counted in omittedOlderMessages.'),
+        }),
+        execute: async (input: GmailReadThreadInput) => gmailReadThread(input),
+    },
+
+    'gmail-searchEmails': {
+        description: "Search Gmail live with a Gmail query string (from:, subject:, newer_than:7d, has:attachment, is:unread, label:, free text). Use when the cached inbox can't answer — older mail, specific sender/date searches. Follow up with gmail-readThread for bodies.",
+        inputSchema: z.object({
+            query: z.string().describe('Gmail search query, e.g. "from:stripe.com newer_than:30d".'),
+            maxResults: z.number().int().min(1).max(25).optional().describe('Max threads to return. Defaults to 10.'),
+        }),
+        execute: async (input: GmailSearchEmailsInput) => gmailSearchEmails(input),
     },
 
     // ========================================================================

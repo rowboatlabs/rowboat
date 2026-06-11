@@ -668,6 +668,102 @@ export async function listRecentThreadIds(daysAgo: number = 2): Promise<RecentTh
     return results;
 }
 
+/** Read one cached thread snapshot from inbox_lists/ (null when not cached). */
+export function getThreadSnapshot(threadId: string): GmailThreadSnapshot | null {
+    return readCachedSnapshot(threadId)?.snapshot ?? null;
+}
+
+export interface LiveSearchThread {
+    threadId: string;
+    snippet?: string;
+    subject?: string;
+    from?: string;
+    to?: string;
+    date?: string;
+    /** Cached snapshot when the thread is already in inbox_lists/. */
+    snapshot?: GmailThreadSnapshot;
+}
+
+/**
+ * Search Gmail live with a Gmail query string (from:, subject:, newer_than:, …).
+ * Reuses cached snapshots when available; otherwise fetches metadata headers
+ * only. Callers follow up with getThreadSnapshot/fetchThreadLive for bodies.
+ */
+export async function searchThreadsLive(query: string, maxResults: number = 10): Promise<LiveSearchThread[]> {
+    const gmailClient = await getGmailClientOrThrow();
+    const res = await gmailClient.users.threads.list({
+        userId: 'me',
+        q: query,
+        maxResults: Math.max(1, Math.min(25, maxResults)),
+    });
+    const threads = (res.data.threads || []).filter((t) => !!t.id);
+    return Promise.all(threads.map(async (thread) => {
+        const threadId = thread.id!;
+        const cached = readCachedSnapshot(threadId)?.snapshot;
+        if (cached) return { threadId, snippet: thread.snippet || undefined, snapshot: cached };
+        try {
+            const meta = await gmailClient.users.threads.get({
+                userId: 'me',
+                id: threadId,
+                format: 'metadata',
+                metadataHeaders: ['Subject', 'From', 'To', 'Date'],
+            });
+            const msgs = meta.data.messages || [];
+            const latest = msgs[msgs.length - 1];
+            const headers = latest?.payload?.headers || undefined;
+            return {
+                threadId,
+                snippet: thread.snippet || latest?.snippet || undefined,
+                subject: headerValue(headers, 'Subject'),
+                from: headerValue(headers, 'From'),
+                to: headerValue(headers, 'To'),
+                date: headerValue(headers, 'Date'),
+            };
+        } catch {
+            return { threadId, snippet: thread.snippet || undefined };
+        }
+    }));
+}
+
+/**
+ * Live-fetch a thread that isn't in the snapshot cache (e.g. an older thread
+ * surfaced by searchThreadsLive). Plain-text bodies only — no HTML inlining,
+ * no classification, and nothing is written to the cache.
+ */
+export async function fetchThreadLive(threadId: string): Promise<GmailThreadSnapshot | null> {
+    const gmailClient = await getGmailClientOrThrow();
+    const res = await gmailClient.users.threads.get({ userId: 'me', id: threadId, format: 'full' });
+    const messages = (res.data.messages || []).filter((msg) => !(msg.labelIds?.includes('DRAFT') ?? false));
+    if (messages.length === 0) return null;
+    const parsed = messages.map((msg) => {
+        const headers = msg.payload?.headers || undefined;
+        const parts = msg.payload ? extractBodyParts(msg.payload) : { text: '', html: '' };
+        const attachments = msg.payload && msg.id ? extractAttachments(msg.id, msg.payload, parts.html) : [];
+        return {
+            id: msg.id || undefined,
+            from: headerValue(headers, 'From') || 'Unknown',
+            to: headerValue(headers, 'To'),
+            cc: headerValue(headers, 'Cc'),
+            date: headerValue(headers, 'Date'),
+            subject: headerValue(headers, 'Subject') || '(No Subject)',
+            body: msg.payload ? normalizeBody(getBody(msg.payload)) : '',
+            unread: msg.labelIds?.includes('UNREAD') ?? false,
+            attachments: attachments.length > 0 ? attachments : undefined,
+        };
+    });
+    const latest = parsed[parsed.length - 1]!;
+    return {
+        threadId,
+        threadUrl: `https://mail.google.com/mail/u/0/#all/${threadId}`,
+        subject: latest.subject || parsed[0]?.subject,
+        from: latest.from,
+        to: latest.to,
+        date: latest.date,
+        unread: parsed.some((m) => m.unread),
+        messages: parsed,
+    };
+}
+
 /**
  * Build a GmailThreadSnapshot from an already-fetched threads.get response,
  * classify it, and write to inbox_lists/. Called by the background sync

@@ -1,7 +1,9 @@
 export const skill = String.raw`
 # Composio Integration
 
-**Load this skill** when the user asks to interact with ANY third-party service — email, GitHub, Slack, LinkedIn, Notion, Jira, Google Sheets, calendar, etc. This skill provides the complete workflow for discovering, connecting, and executing Composio tools.
+**Load this skill** when the user asks to interact with ANY third-party service — GitHub, Slack, LinkedIn, Notion, Jira, Google Sheets, calendar, etc. This skill provides the complete workflow for discovering, connecting, and executing Composio tools.
+
+**Gmail exception:** if the native Gmail tools (\`gmail-listThreads\`, \`gmail-readThread\`, \`gmail-searchEmails\`) are available, use those for ALL Gmail reading/fetching/searching (load the \`read-emails\` skill). Only use the Composio \`gmail\` toolkit when the native tools report they are not connected (\`composioFallback: true\`).
 
 ## Available Tools
 
@@ -16,7 +18,7 @@ export const skill = String.raw`
 
 | Service | Slug |
 |---------|------|
-| Gmail | \`gmail\` |
+| Gmail | \`gmail\` (fallback only — prefer the native \`gmail-*\` tools) |
 | Google Calendar | \`googlecalendar\` |
 | Google Sheets | \`googlesheets\` |
 | Google Docs | \`googledocs\` |
@@ -89,13 +91,13 @@ User says: "Get me the open issues on rowboatlabs/rowboat"
    → finds \`GITHUB_ISSUES_LIST_FOR_REPO\` with required: ["owner", "repo"]
 2. \`composio-execute-tool({ toolSlug: "GITHUB_ISSUES_LIST_FOR_REPO", toolkitSlug: "github", arguments: { owner: "rowboatlabs", repo: "rowboat", state: "open", per_page: 100 } })\`
 
-### Example: Gmail Fetch
+### Example: Notion Search
 
-User says: "What's my latest email?"
+User says: "Find my Notion page about Q3 planning"
 
-1. \`composio-search-tools({ query: "fetch emails", toolkitSlug: "gmail" })\`
-   → finds \`GMAIL_FETCH_EMAILS\`
-2. \`composio-execute-tool({ toolSlug: "GMAIL_FETCH_EMAILS", toolkitSlug: "gmail", arguments: { user_id: "me", max_results: 5 } })\`
+1. \`composio-search-tools({ query: "search pages", toolkitSlug: "notion" })\`
+   → finds \`NOTION_SEARCH_NOTION_PAGE\`
+2. \`composio-execute-tool({ toolSlug: "NOTION_SEARCH_NOTION_PAGE", toolkitSlug: "notion", arguments: { query: "Q3 planning" } })\`
 
 ### Example: LinkedIn Profile (no-arg tool)
 

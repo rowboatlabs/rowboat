@@ -17,6 +17,7 @@ import { capture as analyticsCapture, identify as analyticsIdentify, reset as an
 import { isSignedIn } from '@x/core/dist/account/account.js';
 import { getWebappUrl } from '@x/core/dist/config/remote-config.js';
 import { claimTokensViaBackend } from '@x/core/dist/auth/google-backend-oauth.js';
+import { invalidateCopilotInstructionsCache } from '@x/core/dist/application/assistant/instructions.js';
 
 function buildRedirectUri(port: number): string {
   return `http://localhost:${port}/oauth/callback`;
@@ -330,6 +331,9 @@ export async function connectProvider(provider: string, credentials?: { clientId
           if (provider === 'google') {
             triggerGmailSync();
             triggerCalendarSync();
+            // Copilot instructions route email tasks based on native Gmail
+            // connection state — rebuild them on the next agent run.
+            invalidateCopilotInstructionsCache();
           } else if (provider === 'fireflies-ai') {
             triggerFirefliesSync();
           }
@@ -481,6 +485,7 @@ export async function completeRowboatGoogleConnect(state: string): Promise<void>
     });
     triggerGmailSync();
     triggerCalendarSync();
+    invalidateCopilotInstructionsCache();
     emitOAuthEvent({ provider: 'google', success: true });
     console.log('[OAuth] Rowboat-mode Google connect complete');
   } catch (error) {
@@ -519,6 +524,9 @@ export async function disconnectProvider(provider: string): Promise<{ success: b
     }
 
     await oauthRepo.delete(provider);
+    if (provider === 'google') {
+      invalidateCopilotInstructionsCache();
+    }
     if (provider === 'rowboat') {
       analyticsCapture('user_signed_out');
       analyticsReset();
@@ -598,6 +606,7 @@ export async function disconnectGoogleIfScopesStale(): Promise<void> {
       tokens: null,
       error: 'Google permissions changed. Please reconnect to continue.',
     });
+    invalidateCopilotInstructionsCache();
 
     // Nudge any already-open window to re-read state. The renderer's initial
     // mount also re-reads, so the prompt shows even if no window is up yet.

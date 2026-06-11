@@ -5,6 +5,7 @@ import { isConfigured as isComposioConfigured } from "../../composio/client.js";
 import { CURATED_TOOLKITS } from "@x/shared/dist/composio.js";
 import container from "../../di/container.js";
 import type { ICodeModeConfigRepo } from "../../code-mode/repo.js";
+import { getConnectionStatus as getGmailConnectionStatus } from "../../knowledge/sync_gmail.js";
 
 const runtimeContextPrompt = getRuntimeContextPrompt(getRuntimeContext());
 
@@ -31,19 +32,35 @@ Load the \`composio-integration\` skill when the user asks to interact with any 
 `;
 }
 
-function buildStaticInstructions(composioEnabled: boolean, catalog: string, codeModeEnabled: boolean = true): string {
-    // Conditionally include Composio-related instruction sections
-    const emailDraftSuffix = composioEnabled
-        ? ` Do NOT load this skill for reading, fetching, or checking emails — use the \`composio-integration\` skill for that instead.`
-        : ` Do NOT load this skill for reading, fetching, or checking emails.`;
+function buildStaticInstructions(composioEnabled: boolean, catalog: string, codeModeEnabled: boolean = true, nativeGmailConnected: boolean = false): string {
+    // Conditionally include Composio- and native-Gmail-related instruction sections
+    const emailDraftSuffix = nativeGmailConnected
+        ? ` Do NOT load this skill for reading, fetching, or checking emails — load the \`read-emails\` skill and use the native \`gmail-*\` tools for that instead.`
+        : composioEnabled
+            ? ` Do NOT load this skill for reading, fetching, or checking emails — use the \`composio-integration\` skill for that instead.`
+            : ` Do NOT load this skill for reading, fetching, or checking emails.`;
 
-    const thirdPartyBlock = composioEnabled
-        ? `\n**Third-Party Services:** When users ask to interact with any external service (Gmail, GitHub, Slack, LinkedIn, Notion, Google Sheets, Jira, etc.) — reading emails, listing issues, sending messages, fetching profiles — load the \`composio-integration\` skill first. Do NOT look in local \`gmail_sync/\` or \`calendar_sync/\` folders for live data.\n`
+    const nativeGmailBlock = nativeGmailConnected
+        ? `\n**Email (Gmail):** Reading, checking, searching, or summarizing email uses the NATIVE Gmail tools (\`gmail-listThreads\`, \`gmail-readThread\`, \`gmail-searchEmails\`) — load the \`read-emails\` skill first. Do NOT use Composio for Gmail. Do NOT read raw files from \`gmail_sync/\`.\n`
         : '';
 
+    const composioServiceExamples = nativeGmailConnected
+        ? '(GitHub, Slack, LinkedIn, Notion, Google Sheets, Jira, etc.)'
+        : '(Gmail, GitHub, Slack, LinkedIn, Notion, Google Sheets, Jira, etc.)';
+    const thirdPartyBlock = composioEnabled
+        ? `${nativeGmailBlock}\n**Third-Party Services:** When users ask to interact with any external service ${composioServiceExamples} — ${nativeGmailConnected ? '' : 'reading emails, '}listing issues, sending messages, fetching profiles — load the \`composio-integration\` skill first. Do NOT look in local \`gmail_sync/\` or \`calendar_sync/\` folders for live data.\n`
+        : nativeGmailBlock;
+
+    const gmailToolPriority = nativeGmailConnected
+        ? ` For Gmail reading/search, use the native \`gmail-*\` tools (load the \`read-emails\` skill).`
+        : '';
     const toolPriority = composioEnabled
-        ? `For third-party services (GitHub, Gmail, Slack, etc.), load the \`composio-integration\` skill. For capabilities Composio doesn't cover (web search, file scraping, audio), use MCP tools via the \`mcp-integration\` skill.`
-        : `For capabilities like web search, file scraping, and audio, use MCP tools via the \`mcp-integration\` skill.`;
+        ? `For third-party services ${nativeGmailConnected ? '(GitHub, Slack, Notion, etc.)' : '(GitHub, Gmail, Slack, etc.)'}, load the \`composio-integration\` skill.${gmailToolPriority} For capabilities Composio doesn't cover (web search, file scraping, audio), use MCP tools via the \`mcp-integration\` skill.`
+        : `For capabilities like web search, file scraping, and audio, use MCP tools via the \`mcp-integration\` skill.${gmailToolPriority}`;
+
+    const gmailToolsLine = nativeGmailConnected
+        ? `- \`gmail-checkConnection\`, \`gmail-listThreads\`, \`gmail-readThread\`, \`gmail-searchEmails\` - Native Gmail tools for reading, checking, searching, and summarizing email. Load the \`read-emails\` skill for usage guidance.\n`
+        : '';
 
     const slackToolsLine = composioEnabled
         ? `- \`slack-checkConnection\`, \`slack-listAvailableTools\`, \`slack-executeAction\` - Slack integration (requires Slack to be connected via Composio). Use \`slack-listAvailableTools\` first to discover available tool slugs, then \`slack-executeAction\` to execute them.\n`
@@ -266,7 +283,7 @@ ${slackToolsLine}- \`web-search\` - Search the web. Returns rich results with fu
 - \`app-navigation\` - Control the app UI: open notes, switch views, filter/search the knowledge base, manage saved views. **Load the \`app-navigation\` skill before using this tool.**
 - \`browser-control\` - Control the embedded browser pane: open sites, inspect the live page, switch tabs, and interact with indexed page elements. **Load the \`browser-control\` skill before using this tool.**
 - \`save-to-memory\` - Save observations about the user to the agent memory system. Use this proactively during conversations.
-${composioToolsLine}
+${gmailToolsLine}${composioToolsLine}
 
 **Prefer these tools whenever possible.** For file operations anywhere on the machine, use file tools instead of \`executeCommand\`.
 
@@ -332,13 +349,21 @@ export async function buildCopilotInstructions(): Promise<string> {
     } catch {
         // repo unavailable — default to disabled
     }
+    let nativeGmailConnected = false;
+    try {
+        const status = await getGmailConnectionStatus();
+        nativeGmailConnected = status.connected && status.hasRequiredScope;
+    } catch {
+        // connection check unavailable — keep composio routing
+    }
     const excludeIds: string[] = [];
     if (!composioEnabled) excludeIds.push('composio-integration');
     if (!codeModeEnabled) excludeIds.push('code-with-agents');
+    if (!nativeGmailConnected) excludeIds.push('read-emails');
     const catalog = excludeIds.length > 0
         ? buildSkillCatalog({ excludeIds })
         : skillCatalog;
-    const baseInstructions = buildStaticInstructions(composioEnabled, catalog, codeModeEnabled);
+    const baseInstructions = buildStaticInstructions(composioEnabled, catalog, codeModeEnabled, nativeGmailConnected);
     const composioPrompt = await getComposioToolsPrompt();
     cachedInstructions = composioPrompt
         ? baseInstructions + '\n' + composioPrompt
