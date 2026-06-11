@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Bug, Terminal, AlertTriangle, RefreshCw, PanelRight } from "lucide-react"
+import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Bug, Terminal, AlertTriangle, RefreshCw, PanelRight, Bell } from "lucide-react"
 
 import {
   Dialog,
@@ -27,7 +27,7 @@ import { AccountSettings } from "@/components/settings/account-settings"
 import { ConnectedAccountsSettings } from "@/components/settings/connected-accounts-settings"
 import type { ApprovalPolicy } from "@x/shared/src/code-mode.js"
 
-type ConfigTab = "account" | "connections" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "note-tagging" | "help"
+type ConfigTab = "account" | "connections" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "notifications" | "note-tagging" | "help"
 
 interface TabConfig {
   id: ConfigTab
@@ -82,6 +82,12 @@ const tabs: TabConfig[] = [
     label: "Appearance",
     icon: Palette,
     description: "Customize the look and feel",
+  },
+  {
+    id: "notifications",
+    label: "Notifications",
+    icon: Bell,
+    description: "Choose which notifications you receive",
   },
   {
     id: "note-tagging",
@@ -1987,6 +1993,99 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
   )
 }
 
+// --- Notification Settings ---
+
+type NotificationCategoryKey = "chat_completion" | "new_email" | "agent_permission"
+
+const NOTIFICATION_CATEGORIES: { key: NotificationCategoryKey; label: string; description: string }[] = [
+  {
+    key: "chat_completion",
+    label: "Chat responses",
+    description: "When an agent finishes responding while the app is in the background.",
+  },
+  {
+    key: "new_email",
+    label: "New email",
+    description: "When a new email arrives during sync while the app is in the background.",
+  },
+  {
+    key: "agent_permission",
+    label: "Permission requests",
+    description: "When an agent needs your approval to run a tool. Always shown, even when the app is focused.",
+  },
+]
+
+function NotificationSettings({ dialogOpen }: { dialogOpen: boolean }) {
+  const [categories, setCategories] = useState<Record<NotificationCategoryKey, boolean> | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (!dialogOpen) return
+    let cancelled = false
+    async function load() {
+      try {
+        const result = await window.ipc.invoke("notifications:getSettings", null)
+        if (!cancelled) setCategories(result.categories)
+      } catch {
+        if (!cancelled) toast.error("Failed to load notification settings")
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [dialogOpen])
+
+  const handleToggle = useCallback(async (key: NotificationCategoryKey, next: boolean) => {
+    // Optimistic update with rollback on failure.
+    const previous = categories
+    if (!previous) return
+    const updated = { ...previous, [key]: next }
+    setCategories(updated)
+    setSaving(true)
+    try {
+      await window.ipc.invoke("notifications:setSettings", { categories: updated })
+    } catch {
+      setCategories(previous)
+      toast.error("Failed to update notification settings")
+    } finally {
+      setSaving(false)
+    }
+  }, [categories])
+
+  if (!categories) {
+    return (
+      <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
+        <Loader2 className="size-4 animate-spin mr-2" />
+        Loading...
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="text-sm text-muted-foreground leading-relaxed">
+        Choose which desktop notifications Rowboat sends you. Ambient notifications are only shown
+        when the app is in the background.
+      </div>
+
+      <div className="space-y-2">
+        {NOTIFICATION_CATEGORIES.map((cat) => (
+          <div key={cat.key} className="rounded-md border px-3 py-3 flex items-start gap-3">
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-medium">{cat.label}</div>
+              <div className="text-xs text-muted-foreground mt-0.5">{cat.description}</div>
+            </div>
+            <Switch
+              checked={categories[cat.key]}
+              onCheckedChange={(next) => handleToggle(cat.key, next)}
+              disabled={saving}
+            />
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // --- Main Settings Dialog ---
 
 export function SettingsDialog({ children, defaultTab = "account", open: controlledOpen, onOpenChange }: SettingsDialogProps) {
@@ -2034,7 +2133,7 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
   }
 
   const loadConfig = useCallback(async (tab: ConfigTab) => {
-    if (tab === "appearance" || tab === "models" || tab === "note-tagging" || tab === "account" || tab === "connections" || tab === "help" || tab === "code-mode") return
+    if (tab === "appearance" || tab === "models" || tab === "note-tagging" || tab === "account" || tab === "connections" || tab === "help" || tab === "code-mode" || tab === "notifications") return
     const tabConfig = tabs.find((t) => t.id === tab)!
     if (!tabConfig.path) return
     setLoading(true)
@@ -2142,7 +2241,7 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
             </div>
 
             {/* Content */}
-            <div className={cn("flex-1 p-4 min-h-0", (activeTab === "models" || activeTab === "connections" || activeTab === "account" || activeTab === "code-mode") ? "overflow-y-auto" : activeTab === "note-tagging" ? "overflow-hidden flex flex-col" : "overflow-hidden")}>
+            <div className={cn("flex-1 p-4 min-h-0", (activeTab === "models" || activeTab === "connections" || activeTab === "account" || activeTab === "code-mode" || activeTab === "notifications") ? "overflow-y-auto" : activeTab === "note-tagging" ? "overflow-hidden flex flex-col" : "overflow-hidden")}>
               {activeTab === "account" ? (
                 <AccountSettings dialogOpen={open} />
               ) : activeTab === "connections" ? (
@@ -2165,6 +2264,8 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
                 <NoteTaggingSettings dialogOpen={open} />
               ) : activeTab === "appearance" ? (
                 <AppearanceSettings />
+              ) : activeTab === "notifications" ? (
+                <NotificationSettings dialogOpen={open} />
               ) : activeTab === "help" ? (
                 <HelpSettings />
               ) : activeTab === "code-mode" ? (
