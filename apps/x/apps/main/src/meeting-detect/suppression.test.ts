@@ -16,13 +16,37 @@ describe("Suppression", () => {
     });
 
     it("blocks re-popup for the same session once marked notified", async () => {
-        await suppression.markNotified("zoom.us#100");
+        await suppression.markNotified("zoom.us#100", "zoom.us");
         expect(suppression.shouldNotify("zoom.us#100", "zoom.us")).toBe(false);
     });
 
-    it("allows a different session for the same exe", async () => {
-        await suppression.markNotified("zoom.us#100");
-        expect(suppression.shouldNotify("zoom.us#101", "zoom.us")).toBe(true);
+    it("blocks a different session for the same exe within the notify cooldown", async () => {
+        // A flaky mic assertion clears the session and re-detects under a new key;
+        // the per-app cooldown must suppress the duplicate popup (issue #562 follow-up).
+        const t0 = new Date();
+        await suppression.markNotified("zoom.us#100", "zoom.us", t0);
+        const soon = new Date(t0.getTime() + 30 * 1000); // 30s later — within the 90s cooldown
+        expect(suppression.shouldNotify("zoom.us#101", "zoom.us", soon)).toBe(false);
+    });
+
+    it("allows the same exe again once the notify cooldown has elapsed", async () => {
+        const t0 = new Date();
+        await suppression.markNotified("zoom.us#100", "zoom.us", t0);
+        const after = new Date(t0.getTime() + 100 * 1000); // 100s — past the 90s cooldown
+        // Cooldown GC drops stale entries on reload, mirroring the dismiss-cooldown test.
+        const reloaded = new Suppression(store);
+        await reloaded.init();
+        expect(reloaded.shouldNotify("zoom.us#101", "zoom.us", after)).toBe(true);
+    });
+
+    it("keeps the cooldown across clearSession (the flicker case)", async () => {
+        const t0 = new Date();
+        await suppression.markNotified("Google Chrome#664", "Google Chrome", t0);
+        // Mic assertion blinks out → detector clears the session.
+        await suppression.clearSession("Google Chrome#664");
+        // Same session re-detected moments later must NOT re-popup.
+        const soon = new Date(t0.getTime() + 30 * 1000);
+        expect(suppression.shouldNotify("Google Chrome#664", "Google Chrome", soon)).toBe(false);
     });
 
     it("respects the dismiss cooldown window", async () => {
@@ -51,7 +75,7 @@ describe("Suppression", () => {
     });
 
     it("persists state through save/load", async () => {
-        await suppression.markNotified("zoom.us#100");
+        await suppression.markNotified("zoom.us#100", "zoom.us");
         await suppression.muteApp("Discord");
 
         const snap = store.snapshot();

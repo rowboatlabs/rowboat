@@ -134,7 +134,7 @@ export class MeetingDetectService {
             } else {
                 this.notifier.notify(payload.notify);
             }
-            await this.suppression.markNotified(event.sessionKey);
+            await this.suppression.markNotified(event.sessionKey, event.executable);
             console.log(`[MeetingDetect] popup fired for ${event.executable} (kind=${event.kind}, eventId=${correlated?.eventId ?? "ad-hoc"})`);
         } catch (err) {
             console.error("[MeetingDetect] popup failed:", err);

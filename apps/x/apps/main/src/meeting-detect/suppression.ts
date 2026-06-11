@@ -5,12 +5,21 @@ import { WorkDir } from "@x/core/dist/config/config.js";
 const STATE_FILE = path.join(WorkDir, "meeting_detect_state.json");
 // Don't re-popup for the same exe within this window if the user dismissed.
 const DISMISS_COOLDOWN_MS = 30 * 60 * 1000;
+// After showing a popup for an app, stay quiet for the SAME app for this long —
+// even if the mic/WebRTC assertion flickers and the detector clears + re-fires
+// the session. The macOS pmset assertion blinks out for stretches of a single
+// call (observed dropouts maxed around 84s), which would otherwise re-fire a
+// fresh popup every time it reappears. 90s covers the worst observed flicker.
+const NOTIFY_COOLDOWN_MS = 90 * 1000;
 // Drop session-key entries older than 24h.
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 
 interface SuppressionState {
     // Mic sessions we've already shown a popup for — keyed by detector sessionKey.
     notifiedSessions: Record<string, { notifiedAt: string }>;
+    // Apps we've recently shown a popup for — keyed by exe basename. Drives the
+    // per-app cooldown; survives clearSession() so a flickering session can't spam.
+    recentlyNotified: Record<string, { notifiedAt: string }>;
     // User explicitly dismissed for this exe at this time.
     recentlyDismissed: Record<string, { dismissedAt: string }>;
     // Permanent "never offer for this app" list — exe substring matches.
@@ -18,7 +27,7 @@ interface SuppressionState {
 }
 
 function empty(): SuppressionState {
-    return { notifiedSessions: {}, recentlyDismissed: {}, mutedApps: [] };
+    return { notifiedSessions: {}, recentlyNotified: {}, recentlyDismissed: {}, mutedApps: [] };
 }
 
 export interface SuppressionStore {
@@ -52,6 +61,7 @@ function normalize(raw: unknown): SuppressionState {
     const obj = raw as Partial<SuppressionState>;
     return {
         notifiedSessions: obj.notifiedSessions && typeof obj.notifiedSessions === "object" ? obj.notifiedSessions : {},
+        recentlyNotified: obj.recentlyNotified && typeof obj.recentlyNotified === "object" ? obj.recentlyNotified : {},
         recentlyDismissed: obj.recentlyDismissed && typeof obj.recentlyDismissed === "object" ? obj.recentlyDismissed : {},
         mutedApps: Array.isArray(obj.mutedApps) ? obj.mutedApps.filter((x) => typeof x === "string") : [],
     };
@@ -77,8 +87,19 @@ export class Suppression {
         if (this.isMuted(executable)) return false;
         if (this.state.notifiedSessions[sessionKey]) return false;
 
-        const dismissKey = dismissKeyFor(executable);
-        const recent = this.state.recentlyDismissed[dismissKey];
+        const appKey = dismissKeyFor(executable);
+
+        // Per-app cooldown: once we've popped for this app, stay quiet for the
+        // window even if the session cleared and re-fired (flaky mic assertion).
+        const lastNotified = this.state.recentlyNotified[appKey];
+        if (lastNotified) {
+            const notifiedAt = Date.parse(lastNotified.notifiedAt);
+            if (Number.isFinite(notifiedAt) && now.getTime() - notifiedAt < NOTIFY_COOLDOWN_MS) {
+                return false;
+            }
+        }
+
+        const recent = this.state.recentlyDismissed[appKey];
         if (recent) {
             const dismissedAt = Date.parse(recent.dismissedAt);
             if (Number.isFinite(dismissedAt) && now.getTime() - dismissedAt < DISMISS_COOLDOWN_MS) {
@@ -88,8 +109,11 @@ export class Suppression {
         return true;
     }
 
-    async markNotified(sessionKey: string, now: Date = new Date()): Promise<void> {
+    async markNotified(sessionKey: string, executable: string, now: Date = new Date()): Promise<void> {
         this.state.notifiedSessions[sessionKey] = { notifiedAt: now.toISOString() };
+        // App-level stamp drives the cooldown and is intentionally NOT removed by
+        // clearSession() — that's what makes a flickering session stop re-popping.
+        this.state.recentlyNotified[dismissKeyFor(executable)] = { notifiedAt: now.toISOString() };
         await this.persist();
     }
 
@@ -146,12 +170,17 @@ function gc(state: SuppressionState): SuppressionState {
         const ts = Date.parse(v.notifiedAt);
         if (Number.isFinite(ts) && now - ts < SESSION_TTL_MS) sessions[k] = v;
     }
+    const notified: SuppressionState["recentlyNotified"] = {};
+    for (const [k, v] of Object.entries(state.recentlyNotified)) {
+        const ts = Date.parse(v.notifiedAt);
+        if (Number.isFinite(ts) && now - ts < NOTIFY_COOLDOWN_MS) notified[k] = v;
+    }
     const dismissed: SuppressionState["recentlyDismissed"] = {};
     for (const [k, v] of Object.entries(state.recentlyDismissed)) {
         const ts = Date.parse(v.dismissedAt);
         if (Number.isFinite(ts) && now - ts < DISMISS_COOLDOWN_MS) dismissed[k] = v;
     }
-    return { notifiedSessions: sessions, recentlyDismissed: dismissed, mutedApps: state.mutedApps };
+    return { notifiedSessions: sessions, recentlyNotified: notified, recentlyDismissed: dismissed, mutedApps: state.mutedApps };
 }
 
 /** In-memory store for tests. */

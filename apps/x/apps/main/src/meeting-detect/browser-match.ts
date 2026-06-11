@@ -14,23 +14,39 @@ interface TitleRule {
     needles: string[];
 }
 
-// Substrings we look for in the foreground window title (or URL when we
-// have it). On Chrome/Edge/Firefox the page title is embedded in the window
-// title, which is the most reliable cross-platform signal.
-//   Meet page title:  "Meet - Daily Standup"  → matches "meet -"
-//   Zoom web client:  "Zoom Meeting"         → matches "zoom meeting"
-//   Teams web:        "<topic> | Microsoft Teams" → matches "microsoft teams"
+// Substrings that indicate the user is ACTIVELY IN A CALL — not merely that the
+// app happens to be open in a tab. Bare domains ("app.slack.com",
+// "teams.microsoft.com") match any Slack DM or Teams calendar tab, so we require
+// call-specific URL paths or title markers instead.
+//   Meet:   meeting URLs are meet.google.com/<code>; title "Meet - <name>".
+//   Zoom:   web client lives at zoom.us/j/<id> or zoom.us/wc/<id>.
+//   Teams:  a live meeting join URL contains "meetup-join" (teams.microsoft.com
+//           or teams.live.com); the bare domain (calendar, chat) does not.
+//   Slack:  a huddle shows "huddle" in the tab title; a plain Slack tab does not.
+//   Webex:  meeting URLs contain webex.com/meet or /wbxmjs.
 const RULES: TitleRule[] = [
-    { platform: "google-meet", needles: ["meet.google.com", "google meet", "meet -", "meet —", "meet |"] },
+    { platform: "google-meet", needles: ["meet.google.com/", "google meet", "meet -", "meet —", "meet |"] },
     { platform: "zoom-web", needles: ["zoom.us/j/", "zoom.us/wc/", "zoom meeting"] },
-    { platform: "teams-web", needles: ["teams.microsoft.com", "microsoft teams"] },
-    { platform: "slack-huddle", needles: ["app.slack.com", "slack huddle"] },
+    { platform: "teams-web", needles: ["meetup-join", "teams.live.com/meet"] },
     { platform: "webex-web", needles: ["webex.com/meet", "webex.com/wbxmjs", "webex meeting"] },
+    { platform: "slack-huddle", needles: ["huddle"] },
+];
+
+// When several tabs match different platforms (e.g. a Slack DM open behind the
+// real Google Meet call), prefer the more definitive meeting. Dedicated meeting
+// platforms outrank a Slack huddle, whose "huddle" title marker is the weakest
+// signal. Lower index = higher precedence.
+const PLATFORM_PRIORITY: BrowserMeetingPlatform[] = [
+    "google-meet",
+    "zoom-web",
+    "teams-web",
+    "webex-web",
+    "slack-huddle",
 ];
 
 /**
- * Look at the foreground window. If it's a browser and the title matches a
- * known meeting URL/platform, return a match. Returns null otherwise.
+ * Look at the browser's open tabs/windows. If any matches a known meeting
+ * URL/platform, return the highest-priority match. Returns null otherwise.
  *
  * Caller is expected to only invoke this when the detector classified the
  * mic-holder as `kind: "browser"`. That keeps active-win calls cheap — we
@@ -39,13 +55,28 @@ const RULES: TitleRule[] = [
 export async function matchBrowserMeeting(executable?: string): Promise<BrowserMeetingMatch | null> {
     const snap = await getWindowSnapshot(executable);
     if (!snap) return null;
-    // Scan ALL known window titles — on Windows tasklist returns every window,
-    // so even a backgrounded Meet tab still matches while Chrome holds the mic.
-    for (const title of snap.titles) {
+    return pickBestMatch(snap.titles);
+}
+
+/**
+ * Scan every tab title/URL, collect matches, and return the highest-priority
+ * one — not just the first tab that matches. This prevents a backgrounded Slack
+ * DM from beating the real Google Meet call to the result. Pure; exposed for tests.
+ */
+export function pickBestMatch(titles: string[]): BrowserMeetingMatch | null {
+    let best: BrowserMeetingMatch | null = null;
+    let bestRank = Number.POSITIVE_INFINITY;
+    for (const title of titles) {
         const m = matchTitleOrUrl(title, undefined);
-        if (m) return m;
+        if (!m) continue;
+        const rank = PLATFORM_PRIORITY.indexOf(m.platform);
+        if (rank < bestRank) {
+            best = m;
+            bestRank = rank;
+            if (rank === 0) break; // nothing outranks the top platform
+        }
     }
-    return null;
+    return best;
 }
 
 /** Pure matcher — exposed for tests; no OS calls. */
