@@ -14,6 +14,8 @@ export interface AgentLoopTurnsTable {
     provider: string | null;
     model: string | null;
     permission_mode: string;
+    session_id: string | null;
+    session_seq: number | null;
     messages: string;             // JSON: MessageList
     permission_requests: string;  // JSON: PermissionRequest[]
     permission_decisions: string; // JSON: PermissionDecision[]
@@ -25,7 +27,16 @@ export interface AgentLoopTurnsTable {
     completed_at: string | null;
 }
 
+export interface SessionsTable {
+    id: string;
+    agent_id: string | null;
+    title: string | null;
+    created_at: TimestampColumn;
+    updated_at: TimestampColumn;
+}
+
 export interface Database {
     storage_metadata: StorageMetadataTable;
     agent_loop_turns: AgentLoopTurnsTable;
+    sessions: SessionsTable;
 }

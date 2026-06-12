@@ -154,6 +154,14 @@ class SnapshottingStore implements TurnStore {
         this.snapshots.push(structuredClone(turn));
         await this.inner.update(turn);
     }
+
+    async latestForSession(sessionId: string) {
+        return this.inner.latestForSession(sessionId);
+    }
+
+    async listBySession(sessionId: string) {
+        return this.inner.listBySession(sessionId);
+    }
 }
 
 function makeLoop(opts: {
@@ -188,6 +196,8 @@ function emptyTurn(
         provider: null,
         model: null,
         permissionMode: "manual",
+        sessionId: null,
+        sessionSeq: null,
         messages: [],
         permissionRequests: [],
         permissionDecisions: [],
@@ -211,12 +221,12 @@ describe("AgentLoopImpl", () => {
     it("completes a simple text turn and persists input metadata", async () => {
         const { loop } = makeLoop({ steps: [{ kind: "message", message: assistantText("hi!") }] });
 
-        const turn = await loop.createTurn({
+        const turn = await (await loop.createTurn({
             agentId: "a1",
             provider: "openai",
             model: "gpt-x",
             messages: [userMsg("hello")],
-        }).result;
+        })).result;
 
         expect(turn.agentId).toBe("a1");
         expect(turn.provider).toBe("openai");
@@ -229,7 +239,8 @@ describe("AgentLoopImpl", () => {
 
     it("rejects a turn with no input messages", async () => {
         const { loop } = makeLoop();
-        await expect(loop.createTurn({ messages: [] }).result).rejects.toThrow();
+        // invalid input now fails at the call itself — nothing is persisted
+        await expect(loop.createTurn({ messages: [] })).rejects.toThrow();
     });
 
     it("runs tool calls: result and error both append ToolMessages and continue", async () => {
@@ -245,7 +256,7 @@ describe("AgentLoopImpl", () => {
             }),
         });
 
-        const turn = await loop.createTurn({ messages: [userMsg("go")] }).result;
+        const turn = await (await loop.createTurn({ messages: [userMsg("go")] })).result;
 
         expect(runner.ran).toEqual(["tc1", "tc2"]);
         expect(toolMessages(turn)).toEqual([
@@ -267,7 +278,7 @@ describe("AgentLoopImpl", () => {
             runner: new FakeToolRunner({ "ask-human": () => ({ type: "pending" }) }),
         });
 
-        const waiting = await loop.createTurn({ messages: [userMsg("go")] }).result;
+        const waiting = await (await loop.createTurn({ messages: [userMsg("go")] })).result;
         expect(deriveTurnStatus(waiting)).toBe("waiting");
         expect(waiting.dispatchedTools.map((t) => t.toolCallId)).toEqual(["tc1"]);
         expect(adapter.calls).toBe(1); // no model call while waiting
@@ -291,7 +302,7 @@ describe("AgentLoopImpl", () => {
             runner: new FakeToolRunner({ job: () => ({ type: "pending" }) }),
         });
 
-        const waiting = await loop.createTurn({ messages: [userMsg("go")] }).result;
+        const waiting = await (await loop.createTurn({ messages: [userMsg("go")] })).result;
         expect(waiting.dispatchedTools).toHaveLength(2);
 
         const stillWaiting = await loop.setToolResult(waiting.id, { toolCallId: "tc1", result: "r1" }).result;
@@ -309,7 +320,7 @@ describe("AgentLoopImpl", () => {
             runner: new FakeToolRunner({ job: () => ({ type: "pending" }) }),
         });
 
-        const waiting = await loop.createTurn({ messages: [userMsg("go")] }).result;
+        const waiting = await (await loop.createTurn({ messages: [userMsg("go")] })).result;
         await expect(
             loop.setToolResult(waiting.id, { toolCallId: "bogus", result: "x" }).result,
         ).rejects.toThrow("not awaiting an external result");
@@ -327,7 +338,7 @@ describe("AgentLoopImpl", () => {
                 gate: new FakePermissionGate({ required: () => true }),
             });
 
-            const turn = await loop.createTurn({ messages: [userMsg("go")] }).result;
+            const turn = await (await loop.createTurn({ messages: [userMsg("go")] })).result;
             expect(deriveTurnStatus(turn)).toBe("waiting");
             expect(turn.permissionRequests.map((r) => r.toolCallId)).toEqual(["tc1", "tc2"]);
 
@@ -351,7 +362,7 @@ describe("AgentLoopImpl", () => {
                 gate: new FakePermissionGate({ required: () => true }),
             });
 
-            const waiting = await loop.createTurn({ messages: [userMsg("go")] }).result;
+            const waiting = await (await loop.createTurn({ messages: [userMsg("go")] })).result;
 
             const afterDeny = await loop
                 .respondToPermission(waiting.id, "tc2", "denied", "nope").result;
@@ -376,7 +387,7 @@ describe("AgentLoopImpl", () => {
                 steps: [{ kind: "message", message: assistantToolCalls(toolCall("tc1", "write")) }],
                 gate: new FakePermissionGate({ required: () => true }),
             });
-            const waiting = await loop.createTurn({ messages: [userMsg("go")] }).result;
+            const waiting = await (await loop.createTurn({ messages: [userMsg("go")] })).result;
             await expect(
                 loop.respondToPermission(waiting.id, "bogus", "granted").result,
             ).rejects.toThrow("No open permission request");
@@ -413,7 +424,7 @@ describe("AgentLoopImpl", () => {
                 gate,
                 steps: [{ kind: "message", message: assistantToolCalls(toolCall("tc1", "write")) }],
             });
-            const turn = await loop.createTurn({ messages: [userMsg("go")] }).result;
+            const turn = await (await loop.createTurn({ messages: [userMsg("go")] })).result;
             expect(deriveTurnStatus(turn)).toBe("waiting");
             expect(gate.classifyCalls).toBe(0);
         });
@@ -437,10 +448,10 @@ describe("AgentLoopImpl", () => {
                 }),
             });
 
-            const turn = await loop.createTurn({
+            const turn = await (await loop.createTurn({
                 messages: [userMsg("go")],
                 permissionMode: "auto",
-            }).result;
+            })).result;
 
             expect(deriveTurnStatus(turn)).toBe("completed");
             expect(runner.ran).toEqual(["tc1"]);
@@ -465,10 +476,10 @@ describe("AgentLoopImpl", () => {
                 ],
             });
 
-            const waiting = await loop.createTurn({
+            const waiting = await (await loop.createTurn({
                 messages: [userMsg("go")],
                 permissionMode: "auto",
-            }).result;
+            })).result;
             expect(deriveTurnStatus(waiting)).toBe("waiting");
             expect(gate.classifyCalls).toBe(1);
 
@@ -520,15 +531,10 @@ describe("AgentLoopImpl", () => {
         });
     });
 
-    it("stopTurn mid-stream persists no partial message; turn is idle and resumable", async () => {
-        const { loop } = makeLoop({
-            steps: [
-                { kind: "hang" },
-                { kind: "message", message: assistantText("second try") },
-            ],
-        });
+    it("stopTurn mid-stream persists no partial message; the stop is a terminal error", async () => {
+        const { loop } = makeLoop({ steps: [{ kind: "hang" }] });
 
-        const handle = loop.createTurn({ messages: [userMsg("go")] });
+        const handle = await loop.createTurn({ messages: [userMsg("go")] });
         // wait for the first streamed delta, then stop
         const iterator = handle.events[Symbol.asyncIterator]();
         const first = await iterator.next();
@@ -536,13 +542,12 @@ describe("AgentLoopImpl", () => {
 
         const stopped = await loop.stopTurn(handle.id);
         expect(stopped.messages).toEqual([userMsg("go")]); // no partial persisted
-        expect(stopped.error).toBeNull();
-        expect(deriveTurnStatus(stopped)).toBe("idle");
+        expect(stopped.error?.code).toBe("stopped");
+        expect(deriveTurnStatus(stopped)).toBe("error");
         await expect(handle.result).resolves.toBeTruthy(); // original handle also rests
 
-        const resumed = await loop.resumeTurn(handle.id).result;
-        expect(resumed.messages).toEqual([userMsg("go"), assistantText("second try")]);
-        expect(deriveTurnStatus(resumed)).toBe("completed");
+        // stop is terminal: the turn can never be resumed or mutated
+        await expect(loop.resumeTurn(handle.id).result).rejects.toThrow("terminal error");
     });
 
     it("stopTurn immediately after createTurn aborts the queued advance", async () => {
@@ -550,17 +555,71 @@ describe("AgentLoopImpl", () => {
             steps: [{ kind: "message", message: assistantText("should not run") }],
         });
 
-        // No await between create and stop — the advance is still queued
+        // Stop as soon as the handle exists — the advance is still queued
         // behind the mutex and its controller must already be abortable.
-        const handle = loop.createTurn({ messages: [userMsg("go")] });
+        const handle = await loop.createTurn({ messages: [userMsg("go")] });
         const stopped = await loop.stopTurn(handle.id);
 
         expect(adapter.calls).toBe(0); // model never called
         expect(stopped.messages).toEqual([userMsg("go")]); // input fact persisted
-        expect(deriveTurnStatus(stopped)).toBe("idle");
+        expect(stopped.error?.code).toBe("stopped");
+        expect(deriveTurnStatus(stopped)).toBe("error");
+    });
 
-        const resumed = await loop.resumeTurn(handle.id).result;
-        expect(deriveTurnStatus(resumed)).toBe("completed");
+    it("stopTurn never overwrites a finished turn's outcome", async () => {
+        const { loop } = makeLoop({ steps: [{ kind: "message", message: assistantText("hi") }] });
+        const turn = await (await loop.createTurn({ messages: [userMsg("go")] })).result;
+
+        const stopped = await loop.stopTurn(turn.id);
+        expect(stopped.error).toBeNull();
+        expect(deriveTurnStatus(stopped)).toBe("completed");
+        // completed is just as terminal as stopped: no resume either
+        await expect(loop.resumeTurn(turn.id).result).rejects.toThrow("already completed");
+    });
+
+    it("a stopped turn rejects every mutation: tool results, permission responses, resume", async () => {
+        const { loop } = makeLoop({
+            steps: [{
+                kind: "message",
+                message: assistantToolCalls(toolCall("tc1", "job"), toolCall("tc2", "write")),
+            }],
+            runner: new FakeToolRunner({ job: () => ({ type: "pending" }) }),
+            gate: new FakePermissionGate({ required: (name) => name === "write" }),
+        });
+
+        // turn waits on tc2's permission; tc1 is deferred behind the batch
+        const waiting = await (await loop.createTurn({ messages: [userMsg("go")] })).result;
+        expect(deriveTurnStatus(waiting)).toBe("waiting");
+
+        const stopped = await loop.stopTurn(waiting.id);
+        expect(stopped.error?.code).toBe("stopped");
+
+        await expect(
+            loop.setToolResult(waiting.id, { toolCallId: "tc1", result: "late" }).result,
+        ).rejects.toThrow("terminal error");
+        await expect(
+            loop.respondToPermission(waiting.id, "tc2", "granted").result,
+        ).rejects.toThrow("terminal error");
+        await expect(loop.resumeTurn(waiting.id).result).rejects.toThrow("terminal error");
+
+        // and none of it mutated the stopped turn
+        const after = await loop.getTurn(waiting.id);
+        expect(after).toEqual(stopped);
+    });
+
+    it("stopTurn terminates a waiting turn so it can be abandoned", async () => {
+        const { loop } = makeLoop({
+            steps: [{ kind: "message", message: assistantToolCalls(toolCall("tc1", "write")) }],
+            gate: new FakePermissionGate({ required: () => true }),
+        });
+        const waiting = await (await loop.createTurn({ messages: [userMsg("go")] })).result;
+        expect(deriveTurnStatus(waiting)).toBe("waiting");
+
+        const stopped = await loop.stopTurn(waiting.id);
+        expect(stopped.error?.code).toBe("stopped");
+        expect(deriveTurnStatus(stopped)).toBe("error");
+        await expect(loop.respondToPermission(waiting.id, "tc1", "granted").result)
+            .rejects.toThrow("terminal error");
     });
 
     it("a throwing tool runner becomes an error ToolMessage, not a turn error", async () => {
@@ -574,7 +633,7 @@ describe("AgentLoopImpl", () => {
             }),
         });
 
-        const turn = await loop.createTurn({ messages: [userMsg("go")] }).result;
+        const turn = await (await loop.createTurn({ messages: [userMsg("go")] })).result;
         expect(turn.error).toBeNull();
         expect(toolMessages(turn)[0]?.content).toBe("Tool execution failed: ECONNRESET");
         expect(deriveTurnStatus(turn)).toBe("completed");
@@ -602,7 +661,7 @@ describe("AgentLoopImpl", () => {
     it("model failure is a terminal turn error; further mutations reject", async () => {
         const { loop } = makeLoop({ steps: [{ kind: "error", error: new Error("rate limited") }] });
 
-        const turn = await loop.createTurn({ messages: [userMsg("go")] }).result;
+        const turn = await (await loop.createTurn({ messages: [userMsg("go")] })).result;
         expect(deriveTurnStatus(turn)).toBe("error");
         expect(turn.error?.message).toBe("rate limited");
 
@@ -623,7 +682,7 @@ describe("AgentLoopImpl", () => {
             ],
         });
 
-        const turn = await loop.createTurn({ messages: [userMsg("go")] }).result;
+        const turn = await (await loop.createTurn({ messages: [userMsg("go")] })).result;
         expect(deriveTurnStatus(turn)).toBe("error");
         expect(turn.error?.message).toContain("exceeded 3 iterations");
     });
@@ -640,7 +699,7 @@ describe("AgentLoopImpl", () => {
             runner: new FakeToolRunner({ job: () => ({ type: "pending" }) }),
         });
 
-        const waiting = await loop.createTurn({ messages: [userMsg("go")] }).result;
+        const waiting = await (await loop.createTurn({ messages: [userMsg("go")] })).result;
 
         const [a, b] = await Promise.all([
             loop.setToolResult(waiting.id, { toolCallId: "tc1", result: "r1" }).result,
@@ -664,7 +723,7 @@ describe("AgentLoopImpl", () => {
             ],
         });
 
-        const handle = loop.createTurn({ messages: [userMsg("go")] });
+        const handle = await loop.createTurn({ messages: [userMsg("go")] });
         const types: string[] = [];
         for await (const event of handle.events) types.push(event.type);
 
@@ -683,7 +742,7 @@ describe("AgentLoopImpl", () => {
 
     it("getTurn returns the persisted turn; unknown ids reject", async () => {
         const { loop } = makeLoop({ steps: [{ kind: "message", message: assistantText("hi") }] });
-        const created = await loop.createTurn({ messages: [userMsg("hello")] }).result;
+        const created = await (await loop.createTurn({ messages: [userMsg("hello")] })).result;
 
         const fetched = await loop.getTurn(created.id);
         expect(fetched).toEqual(created);

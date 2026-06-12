@@ -44,13 +44,18 @@ async function loadStore() {
     return { store: new SqliteTurnStore(storageModule.getDb()), db: storageModule.getDb() };
 }
 
-function sampleTurn(id: string): z.infer<typeof AgentLoopTurn> {
+function sampleTurn(
+    id: string,
+    overrides: Partial<z.infer<typeof AgentLoopTurn>> = {},
+): z.infer<typeof AgentLoopTurn> {
     return {
         id,
         agentId: "agent-1",
         provider: "openai",
         model: "gpt-x",
         permissionMode: "auto",
+        sessionId: null,
+        sessionSeq: null,
         messages: [
             { role: "user", content: "hello" },
             {
@@ -80,6 +85,7 @@ function sampleTurn(id: string): z.infer<typeof AgentLoopTurn> {
         completedAt: null,
         createdAt: "2026-06-12T00:00:00Z",
         updatedAt: "2026-06-12T00:00:03Z",
+        ...overrides,
     };
 }
 
@@ -122,6 +128,35 @@ describe("SqliteTurnStore", () => {
         const { store } = await loadStore();
         expect(await store.get("missing")).toBeNull();
         await expect(store.update(sampleTurn("missing"))).rejects.toThrow("Turn not found");
+    });
+
+    it("round-trips session linkage and queries turns by session in seq order", async () => {
+        const { store } = await loadStore();
+        const t1 = sampleTurn("t1", { sessionId: "s1", sessionSeq: 1 });
+        const t2 = sampleTurn("t2", { sessionId: "s1", sessionSeq: 2 });
+        const other = sampleTurn("t3", { sessionId: "s2", sessionSeq: 1 });
+        // insert out of order to prove ordering comes from seq
+        await store.create(t2);
+        await store.create(t1);
+        await store.create(other);
+        await store.create(sampleTurn("standalone"));
+
+        expect(await store.get("t1")).toEqual(t1);
+        expect(await store.listBySession("s1")).toEqual([t1, t2]);
+        expect(await store.latestForSession("s1")).toEqual(t2);
+        expect(await store.latestForSession("missing")).toBeNull();
+        expect(await store.listBySession("missing")).toEqual([]);
+    });
+
+    it("rejects a duplicate session seq via the unique index", async () => {
+        const { store } = await loadStore();
+        await store.create(sampleTurn("t1", { sessionId: "s1", sessionSeq: 1 }));
+        await expect(
+            store.create(sampleTurn("t2", { sessionId: "s1", sessionSeq: 1 })),
+        ).rejects.toThrow();
+        // standalone turns never conflict (NULL session_id)
+        await store.create(sampleTurn("t3"));
+        await store.create(sampleTurn("t4"));
     });
 
     it("fails loudly on a corrupted JSON column", async () => {

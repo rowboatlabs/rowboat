@@ -53,6 +53,53 @@ const migrations: Record<string, Migration> = {
             await db.schema.dropTable("agent_loop_turns").ifExists().execute();
         },
     },
+    "2026-06-12_0003_sessions": {
+        async up(db: MigrationDb): Promise<void> {
+            await db.schema
+                .createTable("sessions")
+                .ifNotExists()
+                .addColumn("id", "text", (col) => col.primaryKey())
+                .addColumn("agent_id", "text")
+                .addColumn("title", "text")
+                .addColumn("created_at", "text", (col) => col.notNull())
+                .addColumn("updated_at", "text", (col) => col.notNull())
+                .execute();
+
+            await db.schema
+                .createIndex("sessions_updated_at_idx")
+                .ifNotExists()
+                .on("sessions")
+                .column("updated_at")
+                .execute();
+
+            await db.schema
+                .alterTable("agent_loop_turns")
+                .addColumn("session_id", "text")
+                .execute();
+            await db.schema
+                .alterTable("agent_loop_turns")
+                .addColumn("session_seq", "integer")
+                .execute();
+
+            // Tripwire: a second writer racing past the per-session mutex must
+            // fail loudly instead of silently forking the turn chain. NULL
+            // session_ids never conflict (standalone turns).
+            await db.schema
+                .createIndex("agent_loop_turns_session_seq_uniq")
+                .ifNotExists()
+                .unique()
+                .on("agent_loop_turns")
+                .columns(["session_id", "session_seq"])
+                .execute();
+        },
+        async down(db: MigrationDb): Promise<void> {
+            await db.schema.dropIndex("agent_loop_turns_session_seq_uniq").ifExists().execute();
+            await db.schema.alterTable("agent_loop_turns").dropColumn("session_seq").execute();
+            await db.schema.alterTable("agent_loop_turns").dropColumn("session_id").execute();
+            await db.schema.dropIndex("sessions_updated_at_idx").ifExists().execute();
+            await db.schema.dropTable("sessions").ifExists().execute();
+        },
+    },
 };
 
 class InCodeMigrationProvider implements MigrationProvider {

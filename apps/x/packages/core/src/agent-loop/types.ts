@@ -63,6 +63,11 @@ export const AgentLoopTurn = z.object({
     model: z.string().nullable(),
     permissionMode: PermissionMode,
 
+    // Session linkage — opaque to the loop (the sessions layer owns the
+    // meaning). seq is the turn's 1-based position within its session.
+    sessionId: z.string().nullable(),
+    sessionSeq: z.number().int().positive().nullable(),
+
     // append-only fact logs
     messages: MessageList,
     permissionRequests: z.array(PermissionRequest),
@@ -83,9 +88,14 @@ export const AgentLoopInput = z.object({
     provider: z.string().nullable().optional(),
     model: z.string().nullable().optional(),
     permissionMode: PermissionMode.optional(),
+    sessionId: z.string().nullable().optional(),
+    sessionSeq: z.number().int().positive().nullable().optional(),
     // May include prior-conversation history; turns are self-contained by design.
     messages: MessageList.min(1),
-});
+}).refine(
+    (input) => (input.sessionId == null) === (input.sessionSeq == null),
+    { message: "sessionId and sessionSeq must be set together" },
+);
 
 // ─── Tool definitions (environment, not turn state) ────────────────────────
 

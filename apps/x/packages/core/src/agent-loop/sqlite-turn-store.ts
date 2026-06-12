@@ -46,6 +46,27 @@ export class SqliteTurnStore implements TurnStore {
             throw new Error(`Turn not found: ${id}`);
         }
     }
+
+    async latestForSession(sessionId: string): Promise<z.infer<typeof AgentLoopTurn> | null> {
+        const row = await this.db
+            .selectFrom("agent_loop_turns")
+            .selectAll()
+            .where("session_id", "=", sessionId)
+            .orderBy("session_seq", "desc")
+            .limit(1)
+            .executeTakeFirst();
+        return row ? fromRow(row) : null;
+    }
+
+    async listBySession(sessionId: string): Promise<z.infer<typeof AgentLoopTurn>[]> {
+        const rows = await this.db
+            .selectFrom("agent_loop_turns")
+            .selectAll()
+            .where("session_id", "=", sessionId)
+            .orderBy("session_seq", "asc")
+            .execute();
+        return rows.map(fromRow);
+    }
 }
 
 function toRow(turn: z.infer<typeof AgentLoopTurn>): Insertable<AgentLoopTurnsTable> {
@@ -55,6 +76,8 @@ function toRow(turn: z.infer<typeof AgentLoopTurn>): Insertable<AgentLoopTurnsTa
         provider: turn.provider,
         model: turn.model,
         permission_mode: turn.permissionMode,
+        session_id: turn.sessionId,
+        session_seq: turn.sessionSeq,
         messages: JSON.stringify(turn.messages),
         permission_requests: JSON.stringify(turn.permissionRequests),
         permission_decisions: JSON.stringify(turn.permissionDecisions),
@@ -74,6 +97,8 @@ function fromRow(row: Selectable<AgentLoopTurnsTable>): z.infer<typeof AgentLoop
         provider: row.provider,
         model: row.model,
         permissionMode: PermissionMode.parse(row.permission_mode),
+        sessionId: row.session_id,
+        sessionSeq: row.session_seq,
         messages: MessageList.parse(JSON.parse(row.messages)),
         permissionRequests: z.array(PermissionRequest).parse(JSON.parse(row.permission_requests)),
         permissionDecisions: z.array(PermissionDecision).parse(JSON.parse(row.permission_decisions)),

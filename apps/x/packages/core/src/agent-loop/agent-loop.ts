@@ -3,6 +3,7 @@ import { z } from "zod";
 import { ToolCallPart, ToolMessage } from "@x/shared/dist/message.js";
 import { EventStream } from "./event-stream.js";
 import type { ModelAdapter } from "./model-adapter.js";
+import { KeyedMutex } from "./mutex.js";
 import type { PermissionGate } from "./permission-gate.js";
 import type { ToolRunner, ToolRunResult } from "./tool-runner.js";
 import type { TurnStore } from "./turn-store.js";
@@ -23,7 +24,10 @@ export type TurnHandle = {
 };
 
 export interface AgentLoop {
-    createTurn(input: z.infer<typeof AgentLoopInput>): TurnHandle;
+    // Async: the turn row is persisted before the handle is returned, so the
+    // turn (and its session seq, if any) is visible to other readers the
+    // moment the caller has the handle. The advance itself runs in background.
+    createTurn(input: z.infer<typeof AgentLoopInput>): Promise<TurnHandle>;
     respondToPermission(
         turnId: string,
         toolCallId: string,
@@ -31,28 +35,14 @@ export interface AgentLoop {
         reason?: string,
     ): TurnHandle;
     setToolResult(turnId: string, r: { toolCallId: string; result: unknown }): TurnHandle;
+    // Re-enters the reducer on an idle (crashed) or waiting turn. Rejects for
+    // terminal turns (completed, errored, or stopped) — like all mutations.
     resumeTurn(turnId: string): TurnHandle;
     getTurn(turnId: string): Promise<z.infer<typeof AgentLoopTurn>>;
+    // Aborts in-flight work and records the stop as a terminal turn error
+    // (code "stopped"). A stopped turn is immutable: it cannot be resumed,
+    // and pending permissions / dispatched results are abandoned.
     stopTurn(turnId: string): Promise<z.infer<typeof AgentLoopTurn>>;
-}
-
-// Serializes async work per key. Unlike the try-lock in runs/lock.ts, callers
-// queue instead of failing — public mutations on the same turn run in order.
-class TurnMutex {
-    private chains = new Map<string, Promise<unknown>>();
-
-    run<T>(key: string, fn: () => Promise<T>): Promise<T> {
-        const prev = this.chains.get(key) ?? Promise.resolve();
-        const next = prev.then(fn, fn);
-        const tail: Promise<void> = next
-            .catch(() => undefined)
-            .then(() => {
-                // Drop the entry once the chain is fully drained.
-                if (this.chains.get(key) === tail) this.chains.delete(key);
-            });
-        this.chains.set(key, tail);
-        return next;
-    }
 }
 
 function nowIso(): string {
@@ -83,7 +73,7 @@ export class AgentLoopImpl implements AgentLoop {
     private toolRunner: ToolRunner;
     private permissionGate: PermissionGate;
     private maxIterations: number;
-    private mutex = new TurnMutex();
+    private mutex = new KeyedMutex();
     // All not-yet-finished entries per turn (running AND queued behind the
     // mutex) — registered synchronously so stopTurn can never race past one.
     private active = new Map<string, Set<AbortController>>();
@@ -102,28 +92,35 @@ export class AgentLoopImpl implements AgentLoop {
         this.maxIterations = deps.maxIterations ?? DEFAULT_MAX_ITERATIONS;
     }
 
-    createTurn(input: z.infer<typeof AgentLoopInput>): TurnHandle {
+    async createTurn(input: z.infer<typeof AgentLoopInput>): Promise<TurnHandle> {
+        const parsed = AgentLoopInput.parse(input);
         const turnId = crypto.randomUUID();
-        return this.enter(turnId, async () => {
-            const parsed = AgentLoopInput.parse(input);
-            const now = nowIso();
-            await this.store.create({
-                id: turnId,
-                agentId: parsed.agentId ?? null,
-                provider: parsed.provider ?? null,
-                model: parsed.model ?? null,
-                permissionMode: parsed.permissionMode ?? "manual",
-                messages: parsed.messages,
-                permissionRequests: [],
-                permissionDecisions: [],
-                startedTools: [],
-                dispatchedTools: [],
-                error: null,
-                completedAt: null,
-                createdAt: now,
-                updatedAt: now,
-            });
+        const now = nowIso();
+        // Persist before returning: the id is a fresh UUID so there is no
+        // contention, and callers (the sessions layer) rely on the row — and
+        // its claimed session seq — being visible once they hold the handle.
+        // Between this write and enter() below the turn is store-visible but
+        // not yet stoppable; acceptable while turn ids only reach callers via
+        // the returned handle, not via store polling.
+        await this.store.create({
+            id: turnId,
+            agentId: parsed.agentId ?? null,
+            provider: parsed.provider ?? null,
+            model: parsed.model ?? null,
+            permissionMode: parsed.permissionMode ?? "manual",
+            sessionId: parsed.sessionId ?? null,
+            sessionSeq: parsed.sessionSeq ?? null,
+            messages: parsed.messages,
+            permissionRequests: [],
+            permissionDecisions: [],
+            startedTools: [],
+            dispatchedTools: [],
+            error: null,
+            completedAt: null,
+            createdAt: now,
+            updatedAt: now,
         });
+        return this.enter(turnId, async () => {});
     }
 
     respondToPermission(
@@ -174,7 +171,9 @@ export class AgentLoopImpl implements AgentLoop {
 
     resumeTurn(turnId: string): TurnHandle {
         return this.enter(turnId, async () => {
-            await this.mustGet(turnId);
+            // Resuming a terminal turn is a caller error — reject loudly
+            // instead of quietly resolving, like every other mutation.
+            this.assertMutable(await this.mustGet(turnId));
         });
     }
 
@@ -186,8 +185,21 @@ export class AgentLoopImpl implements AgentLoop {
         for (const controller of this.active.get(turnId) ?? []) {
             controller.abort();
         }
-        // Queue behind the in-flight advance so it has fully wound down.
-        return this.mutex.run(turnId, () => this.mustGet(turnId));
+        // Queue behind the in-flight advance so it has fully wound down, then
+        // make the stop itself a persisted fact: the turn lands in a terminal
+        // error and can never be resumed or mutated. A turn that already
+        // finished keeps its outcome — stop never overwrites it.
+        return this.mutex.run(turnId, async () => {
+            const turn = await this.mustGet(turnId);
+            if (turn.error !== null || turn.completedAt !== null) return turn;
+            turn.error = {
+                message: "Stopped by the user",
+                code: "stopped",
+                at: nowIso(),
+            };
+            await this.persist(turn);
+            return turn;
+        });
     }
 
     // ── internals ───────────────────────────────────────────────────────────
@@ -390,7 +402,9 @@ export class AgentLoopImpl implements AgentLoop {
                 turn.messages.push(assistantMessage);
                 await this.persist(turn);
             } catch (error) {
-                if (signal.aborted) return; // stopped: turn stays as persisted (idle)
+                // stopped: facts stay as persisted; stopTurn's queued job
+                // records the terminal "stopped" error after this winds down.
+                if (signal.aborted) return;
                 await this.setTurnError(turnId, error);
                 return;
             }
