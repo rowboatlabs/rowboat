@@ -519,6 +519,14 @@ const ipcSchemas = {
       success: z.literal(true),
     }),
   },
+  'slack:cliStatus': {
+    req: z.null(),
+    res: z.object({
+      available: z.boolean(),
+      version: z.string().optional(),
+      source: z.enum(['bundled', 'global', 'path']).optional(),
+    }),
+  },
   'slack:listWorkspaces': {
     req: z.null(),
     res: z.object({

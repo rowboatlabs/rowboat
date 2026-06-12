@@ -42,4 +42,32 @@ await esbuild.build({
   },
 });
 
-console.log('✅ Main process bundled to .package/dist-bundle/main.js');
+// Bundle the vendored agent-slack CLI into a single self-contained script next
+// to main.cjs. It runs as a child process (process.execPath with
+// ELECTRON_RUN_AS_NODE=1), so it must exist as a real file on disk — it can't
+// be inlined into main.cjs. Bundling here means the packaged app needs neither
+// node_modules nor a global npm install.
+const agentSlackPkg = JSON.parse(
+  await readFile(new URL('./node_modules/agent-slack/package.json', import.meta.url), 'utf8'),
+);
+await esbuild.build({
+  entryPoints: ['./node_modules/agent-slack/dist/index.js'],
+  bundle: true,
+  platform: 'node',
+  target: 'node22',
+  outfile: './.package/dist/agent-slack.cjs',
+  format: 'cjs',
+  banner: { js: cjsBanner },
+  define: {
+    'import.meta.url': '__import_meta_url',
+    // Without this constant the CLI's --version walks up the directory tree
+    // for a package.json and would find Rowboat's instead of agent-slack's.
+    'AGENT_SLACK_BUILD_VERSION': JSON.stringify(agentSlackPkg.version),
+  },
+  // The CLI probes bun:sqlite via dynamic import inside a try/catch and falls
+  // back to node:sqlite; keep it external so the probe fails at runtime the
+  // same way it does under plain node.
+  external: ['bun:sqlite'],
+});
+
+console.log(`✅ Main process bundled to .package/dist/main.cjs (+ agent-slack ${agentSlackPkg.version} CLI)`);

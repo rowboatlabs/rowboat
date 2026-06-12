@@ -1,15 +1,13 @@
 import fs from 'fs';
 import path from 'path';
-import { promisify } from 'util';
-import { execFile } from 'child_process';
 import { WorkDir } from '../../config/config.js';
+import { runAgentSlack as execAgentSlack } from '../../slack/agent-slack-exec.js';
 import { serviceLogger } from '../../services/service_logger.js';
 import { limitEventItems } from '../limit_event_items.js';
 import { createEvent } from '../../events/producer.js';
 import { knowledgeSourcesRepo } from './repo.js';
 import type { KnowledgeArtifact, KnowledgeSourceConfig, KnowledgeSourceScope } from './types.js';
 
-const execFileAsync = promisify(execFile);
 const DEFAULT_LIMIT = 100;
 const DEFAULT_SYNC_INTERVAL_MS = 5 * 60 * 1000;
 const DEFAULT_RECENT_BACKFILL_SECONDS = 6 * 60 * 60;
@@ -97,12 +95,6 @@ function compareSlackTs(a: string | undefined, b: string | undefined): number {
     return an - bn;
 }
 
-function parseJsonOutput(stdout: string): unknown {
-    const trimmed = stdout.trim();
-    if (!trimmed) return [];
-    return JSON.parse(trimmed);
-}
-
 function extractMessages(raw: unknown): SlackMessage[] {
     if (Array.isArray(raw)) return raw as SlackMessage[];
     if (raw && typeof raw === 'object') {
@@ -124,11 +116,12 @@ function getMessageAuthor(message: SlackMessage): string {
 }
 
 async function runAgentSlack(args: string[]): Promise<unknown> {
-    const { stdout } = await execFileAsync('agent-slack', args, {
-        timeout: 30_000,
-        maxBuffer: 2 * 1024 * 1024,
-    });
-    return parseJsonOutput(stdout);
+    const result = await execAgentSlack(args, { timeoutMs: 30_000, maxBuffer: 2 * 1024 * 1024 });
+    if (!result.ok) {
+        // Sync error handling stays throw-based for now; callers log per run.
+        throw new Error(`agent-slack ${result.kind}: ${result.message}`);
+    }
+    return result.data ?? [];
 }
 
 async function listMessages(source: KnowledgeSourceConfig, scope: KnowledgeSourceScope, oldest?: string): Promise<SlackMessage[]> {
