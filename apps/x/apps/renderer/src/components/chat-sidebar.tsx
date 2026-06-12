@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, Bug, MoreHorizontal } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Bug, MoreHorizontal, Pin } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
@@ -155,6 +155,13 @@ interface ChatSidebarProps {
   onDraftChangeForTab?: (tabId: string, text: string) => void
   onSelectedModelChangeForTab?: (tabId: string, model: SelectedModel | null) => void
   workDirByTab?: Record<string, string | null>
+  /** Composer locks for runs bound to Code-section sessions (cwd + agent frozen). */
+  codeSessionLocks?: Record<string, { cwd: string; agent: 'claude' | 'codex' }>
+  /**
+   * Set while a Rowboat-mode code session owns this pane: the chat is pinned to
+   * the session, so the chat switcher / new-chat / history affordances hide.
+   */
+  pinnedToCodeSession?: { title: string } | null
   onWorkDirChangeForTab?: (tabId: string, value: string | null) => void
   pendingAskHumanRequests?: ChatTabViewState['pendingAskHumanRequests']
   allPermissionRequests?: ChatTabViewState['allPermissionRequests']
@@ -216,6 +223,8 @@ export function ChatSidebar({
   onDraftChangeForTab,
   onSelectedModelChangeForTab,
   workDirByTab = {},
+  codeSessionLocks = {},
+  pinnedToCodeSession = null,
   onWorkDirChangeForTab,
   pendingAskHumanRequests = new Map(),
   allPermissionRequests = new Map(),
@@ -555,17 +564,34 @@ export function ChatSidebar({
               transition: isMaximized ? 'padding-left 200ms linear' : undefined,
             }}
           >
-            <ChatHeader
-              activeTitle={(() => {
-                const activeTab = chatTabs.find((tab) => tab.id === activeChatTabId)
-                return activeTab ? getChatTabTitle(activeTab) : 'New chat'
-              })()}
-              onNewChatTab={onNewChatTab}
-              recentRuns={recentRuns}
-              activeRunId={runId}
-              onSelectRun={onSelectRun}
-              onOpenChatHistory={onOpenChatHistory}
-            />
+            {pinnedToCodeSession ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="titlebar-no-drag flex min-w-0 flex-1 items-center gap-1.5 px-3 py-2 text-sm font-medium">
+                    <Pin className="size-3.5 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 truncate">{pinnedToCodeSession.title}</span>
+                    <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
+                      Coding session
+                    </span>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">
+                  This chat is pinned to the coding session — leave the Code view to switch chats.
+                </TooltipContent>
+              </Tooltip>
+            ) : (
+              <ChatHeader
+                activeTitle={(() => {
+                  const activeTab = chatTabs.find((tab) => tab.id === activeChatTabId)
+                  return activeTab ? getChatTabTitle(activeTab) : 'New chat'
+                })()}
+                onNewChatTab={onNewChatTab}
+                recentRuns={recentRuns}
+                activeRunId={runId}
+                onSelectRun={onSelectRun}
+                onOpenChatHistory={onOpenChatHistory}
+              />
+            )}
             <DropdownMenu>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -646,9 +672,11 @@ export function ChatSidebar({
                           {!tabHasConversation ? (
                             <ChatEmptyState
                               wide={isMaximized}
-                              recentRuns={recentRuns}
-                              onSelectRun={onSelectRun}
-                              onOpenChatHistory={onOpenChatHistory}
+                              // A pinned coding-session chat must not offer jumping
+                              // to other conversations from the empty state either.
+                              recentRuns={pinnedToCodeSession ? [] : recentRuns}
+                              onSelectRun={pinnedToCodeSession ? undefined : onSelectRun}
+                              onOpenChatHistory={pinnedToCodeSession ? undefined : onOpenChatHistory}
                               onPickPrompt={setLocalPresetMessage}
                             />
                           ) : (
@@ -779,6 +807,7 @@ export function ChatSidebar({
                           onSelectedModelChange={onSelectedModelChangeForTab ? (m) => onSelectedModelChangeForTab(tab.id, m) : undefined}
                           workDir={workDirByTab[tab.id] ?? null}
                           onWorkDirChange={onWorkDirChangeForTab ? (v) => onWorkDirChangeForTab(tab.id, v) : undefined}
+                          codeSessionLock={tabState.runId ? codeSessionLocks[tabState.runId] ?? null : null}
                           isRecording={isActive && isRecording}
                           recordingText={isActive ? recordingText : undefined}
                           recordingState={isActive ? recordingState : undefined}

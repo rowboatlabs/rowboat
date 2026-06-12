@@ -3,6 +3,7 @@ import path from "node:path";
 import {
   setupIpcHandlers,
   startRunsWatcher,
+  startCodeSessionStatusWatcher,
   startServicesWatcher,
   startLiveNoteAgentWatcher,
   startBackgroundTaskAgentWatcher,
@@ -351,6 +352,9 @@ app.whenReady().then(async () => {
 
   // start runs watcher
   startRunsWatcher();
+
+  // start code-session status tracker (derives working/needs-you/idle + notifications)
+  startCodeSessionStatusWatcher();
 
   // start services watcher
   startServicesWatcher();

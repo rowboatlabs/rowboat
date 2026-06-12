@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import {
   Bot,
   ChevronRight,
+  Code2,
   FileText,
   FilePlus,
   Folder,
@@ -168,6 +169,7 @@ type SidebarContentPanelProps = {
   knowledgeActions: KnowledgeActions
   bgTaskSummaries?: TaskSummary[]
   onOpenMeetings?: () => void
+  onOpenCode?: () => void
   onOpenBgTasks?: () => void
   onOpenAgent?: (slug: string) => void
   recentRuns?: { id: string; title?: string; createdAt: string }[]
@@ -178,7 +180,7 @@ type SidebarContentPanelProps = {
   onToggleBrowser?: () => void
   onVoiceNoteCreated?: (path: string) => void
   /** Which primary destination is currently active, for nav highlighting. */
-  activeNav?: 'home' | 'email' | 'meetings' | 'knowledge' | 'agents' | 'workspaces' | null
+  activeNav?: 'home' | 'email' | 'meetings' | 'code' | 'knowledge' | 'agents' | 'workspaces' | null
   /** Live meeting recording state, so the recording row can show its indicator/stop. */
   meetingRecordingState?: 'idle' | 'connecting' | 'recording' | 'stopping'
   recordingMeetingSource?: string | null
@@ -416,6 +418,7 @@ export function SidebarContentPanel({
   knowledgeActions,
   bgTaskSummaries = [],
   onOpenMeetings,
+  onOpenCode,
   onOpenBgTasks,
   onOpenAgent,
   recentRuns = [],
@@ -833,6 +836,12 @@ export function SidebarContentPanel({
                     )}
                   </div>
                 ) : null}
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton isActive={activeNav === 'code'} onClick={onOpenCode}>
+                  <Code2 className="size-4 shrink-0" />
+                  <span className="flex-1 truncate">Code</span>
+                </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton

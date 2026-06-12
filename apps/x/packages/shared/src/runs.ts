@@ -31,6 +31,7 @@ export const StartEvent = BaseRunEvent.extend({
         "background_task_agent",
         "meeting_note",
         "knowledge_sync",
+        "code_session",
     ]).optional(),
     subUseCase: z.string().optional(),
 });
@@ -188,6 +189,7 @@ export const UseCase = z.enum([
     "background_task_agent",
     "meeting_note",
     "knowledge_sync",
+    "code_session",
 ]);
 
 export const Run = z.object({
@@ -209,6 +211,7 @@ export const ListRunsResponse = z.object({
         title: true,
         createdAt: true,
         agentId: true,
+        useCase: true,
     })),
     nextCursor: z.string().optional(),
 });
