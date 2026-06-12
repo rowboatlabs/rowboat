@@ -20,6 +20,39 @@ const migrations: Record<string, Migration> = {
             await db.schema.dropTable("storage_metadata").ifExists().execute();
         },
     },
+    "2026-06-12_0002_agent_loop_turns": {
+        async up(db: MigrationDb): Promise<void> {
+            await db.schema
+                .createTable("agent_loop_turns")
+                .ifNotExists()
+                .addColumn("id", "text", (col) => col.primaryKey())
+                .addColumn("agent_id", "text")
+                .addColumn("provider", "text")
+                .addColumn("model", "text")
+                .addColumn("permission_mode", "text", (col) => col.notNull())
+                .addColumn("messages", "text", (col) => col.notNull())
+                .addColumn("permission_requests", "text", (col) => col.notNull())
+                .addColumn("permission_decisions", "text", (col) => col.notNull())
+                .addColumn("started_tools", "text", (col) => col.notNull())
+                .addColumn("dispatched_tools", "text", (col) => col.notNull())
+                .addColumn("error", "text")
+                .addColumn("created_at", "text", (col) => col.notNull())
+                .addColumn("updated_at", "text", (col) => col.notNull())
+                .addColumn("completed_at", "text")
+                .execute();
+
+            await db.schema
+                .createIndex("agent_loop_turns_created_at_idx")
+                .ifNotExists()
+                .on("agent_loop_turns")
+                .column("created_at")
+                .execute();
+        },
+        async down(db: MigrationDb): Promise<void> {
+            await db.schema.dropIndex("agent_loop_turns_created_at_idx").ifExists().execute();
+            await db.schema.dropTable("agent_loop_turns").ifExists().execute();
+        },
+    },
 };
 
 class InCodeMigrationProvider implements MigrationProvider {
