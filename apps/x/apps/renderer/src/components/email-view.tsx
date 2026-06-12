@@ -612,6 +612,43 @@ function ComposeToolbar({ editor, onOpenLink }: { editor: Editor; onOpenLink: ()
   )
 }
 
+type ContactSuggestion = {
+  name: string
+  email: string
+}
+
+function formatContactToken(c: ContactSuggestion): string {
+  return c.name ? `${c.name} <${c.email}>` : c.email
+}
+
+// Stable hue per email so the avatar circle keeps a consistent color.
+function contactHue(email: string): number {
+  let h = 0
+  for (let i = 0; i < email.length; i++) h = (h * 31 + email.charCodeAt(i)) >>> 0
+  return h % 360
+}
+
+function contactInitial(c: ContactSuggestion): string {
+  const src = (c.name || c.email).trim()
+  return (src[0] || '?').toUpperCase()
+}
+
+// Renders a string with the matched substring wrapped in <mark>.
+function HighlightedText({ text, query }: { text: string; query: string }) {
+  if (!query) return <>{text}</>
+  const lower = text.toLowerCase()
+  const q = query.toLowerCase()
+  const idx = lower.indexOf(q)
+  if (idx < 0) return <>{text}</>
+  return (
+    <>
+      {text.slice(0, idx)}
+      <mark className="gmail-recipient-suggestion-match">{text.slice(idx, idx + q.length)}</mark>
+      {text.slice(idx + q.length)}
+    </>
+  )
+}
+
 function RecipientField({
   label,
   value,
@@ -626,34 +663,123 @@ function RecipientField({
   trailing?: React.ReactNode
 }) {
   const [draft, setDraft] = useState('')
+  const [suggestions, setSuggestions] = useState<ContactSuggestion[]>([])
+  const [activeIndex, setActiveIndex] = useState(0)
+  const [isFocused, setIsFocused] = useState(false)
+  const [queryShown, setQueryShown] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
+  const fieldRef = useRef<HTMLDivElement>(null)
+  const listRef = useRef<HTMLUListElement>(null)
+  const queryTokenRef = useRef(0)
 
   useEffect(() => {
     if (autoFocus) inputRef.current?.focus()
   }, [autoFocus])
+
+  const excludeEmails = useMemo(
+    () => value.map((token) => extractAddress(token).toLowerCase()).filter(Boolean),
+    [value],
+  )
+
+  // Debounced contact search — only runs when the user has actually typed
+  // something. An empty draft (including the post-pick reset) closes the menu.
+  useEffect(() => {
+    const trimmed = draft.trim()
+    if (!isFocused || !trimmed) {
+      queryTokenRef.current++
+      setSuggestions([])
+      return
+    }
+    const token = ++queryTokenRef.current
+    const timer = window.setTimeout(async () => {
+      try {
+        const result = (await window.ipc.invoke('gmail:searchContacts', {
+          query: draft,
+          limit: 8,
+          excludeEmails,
+        })) as { contacts?: ContactSuggestion[] } | undefined
+        if (token !== queryTokenRef.current) return
+        setSuggestions(result?.contacts ?? [])
+        setQueryShown(trimmed)
+        setActiveIndex(0)
+      } catch {
+        if (token !== queryTokenRef.current) return
+        setSuggestions([])
+      }
+    }, 60)
+    return () => window.clearTimeout(timer)
+  }, [draft, isFocused, excludeEmails])
+
+  // Keep the active row scrolled into view during keyboard navigation.
+  useEffect(() => {
+    const list = listRef.current
+    if (!list) return
+    const node = list.children[activeIndex] as HTMLElement | undefined
+    node?.scrollIntoView({ block: 'nearest' })
+  }, [activeIndex, suggestions])
 
   const commit = (raw: string) => {
     const additions = splitAddresses(raw)
     if (additions.length === 0) return
     onChange(dedupeRecipients([...value, ...additions], new Set()))
     setDraft('')
+    setSuggestions([])
+  }
+
+  const pickSuggestion = (c: ContactSuggestion) => {
+    commit(formatContactToken(c))
+    // Keep focus in the input so the user can keep typing more recipients.
+    inputRef.current?.focus()
   }
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === 'Enter' || event.key === ',' || event.key === ';' || (event.key === 'Tab' && draft.trim())) {
+    const hasSuggestions = suggestions.length > 0
+    if (event.key === 'ArrowDown' && hasSuggestions) {
+      event.preventDefault()
+      setActiveIndex((i) => (i + 1) % suggestions.length)
+      return
+    }
+    if (event.key === 'ArrowUp' && hasSuggestions) {
+      event.preventDefault()
+      setActiveIndex((i) => (i - 1 + suggestions.length) % suggestions.length)
+      return
+    }
+    if (event.key === 'Escape' && hasSuggestions) {
+      event.preventDefault()
+      setSuggestions([])
+      return
+    }
+    if (event.key === 'Enter' || (event.key === 'Tab' && hasSuggestions)) {
+      // Prefer the highlighted suggestion when one is present.
+      if (hasSuggestions) {
+        event.preventDefault()
+        pickSuggestion(suggestions[activeIndex])
+        return
+      }
+      if (event.key === 'Enter' && draft.trim()) {
+        event.preventDefault()
+        commit(draft)
+        return
+      }
+    }
+    if (event.key === ',' || event.key === ';') {
       if (draft.trim()) {
         event.preventDefault()
         commit(draft)
       }
-    } else if (event.key === 'Backspace' && !draft && value.length > 0) {
+      return
+    }
+    if (event.key === 'Backspace' && !draft && value.length > 0) {
       onChange(value.slice(0, -1))
     }
   }
 
+  const showSuggestions = isFocused && suggestions.length > 0
+
   return (
     <div className="gmail-recipient-row">
       <span className="gmail-recipient-label">{label}</span>
-      <div className="gmail-recipient-field">
+      <div className="gmail-recipient-field" ref={fieldRef}>
         {value.map((token, index) => (
           <span key={`${token}-${index}`} className="gmail-recipient-chip" title={extractAddress(token)}>
             <span className="gmail-recipient-chip-label">{recipientLabel(token)}</span>
@@ -674,7 +800,16 @@ function RecipientField({
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={onKeyDown}
-          onBlur={() => { if (draft.trim()) commit(draft) }}
+          onFocus={() => setIsFocused(true)}
+          onBlur={() => {
+            // Defer so a mousedown on a suggestion can pick it before the menu closes.
+            window.setTimeout(() => {
+              setIsFocused(false)
+              if (inputRef.current && draft.trim() && document.activeElement !== inputRef.current) {
+                commit(draft)
+              }
+            }, 80)
+          }}
           onPaste={(event) => {
             const text = event.clipboardData.getData('text')
             if (text && /[,;\n]/.test(text)) {
@@ -683,6 +818,45 @@ function RecipientField({
             }
           }}
         />
+        {showSuggestions && (
+          <ul className="gmail-recipient-suggestions" role="listbox" ref={listRef}>
+            {suggestions.map((c, idx) => {
+              const hue = contactHue(c.email)
+              return (
+                <li
+                  key={c.email}
+                  role="option"
+                  aria-selected={idx === activeIndex}
+                  className={cn('gmail-recipient-suggestion', idx === activeIndex && 'is-active')}
+                  onMouseDown={(event) => {
+                    // Prevent input blur before click fires.
+                    event.preventDefault()
+                    pickSuggestion(c)
+                  }}
+                  onMouseEnter={() => setActiveIndex(idx)}
+                >
+                  <span
+                    className="gmail-recipient-suggestion-avatar"
+                    style={{ background: `hsl(${hue}, 60%, 42%)` }}
+                    aria-hidden="true"
+                  >
+                    {contactInitial(c)}
+                  </span>
+                  <span className="gmail-recipient-suggestion-text">
+                    <span className="gmail-recipient-suggestion-name">
+                      <HighlightedText text={c.name || c.email} query={queryShown} />
+                    </span>
+                    {c.name && (
+                      <span className="gmail-recipient-suggestion-email">
+                        <HighlightedText text={c.email} query={queryShown} />
+                      </span>
+                    )}
+                  </span>
+                </li>
+              )
+            })}
+          </ul>
+        )}
       </div>
       {trailing && <div className="gmail-recipient-trailing">{trailing}</div>}
     </div>

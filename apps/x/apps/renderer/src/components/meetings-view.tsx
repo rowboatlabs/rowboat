@@ -1058,7 +1058,7 @@ export function MeetingsView({ onOpenNote, onTakeMeetingNotes, meetingState, mee
                       <button
                         type="button"
                         onClick={() => onOpenNote(note.path)}
-                        className="min-w-0 text-left text-sm font-medium text-foreground hover:underline"
+                        className="block w-full min-w-0 text-left text-sm font-medium text-foreground hover:underline"
                       >
                         <span className="block truncate">{note.name}</span>
                       </button>

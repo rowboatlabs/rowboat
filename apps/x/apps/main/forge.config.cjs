@@ -128,14 +128,16 @@ module.exports = {
         // from trying to analyze/copy node_modules, which fails with pnpm's symlinked
         // workspaces.
         prune: false,
-        // Strip the workspace node_modules, BUT always keep everything under `.package/`
-        // — that's our staged output, which now also includes the ACP adapters + their
-        // dependency closure (staged by the generateAssets hook). Without the `.package`
-        // exemption the /node_modules/ rule would strip the staged adapters and code mode
+        // Strip the workspace src/node_modules (regexes ANCHORED to the app root), BUT
+        // always keep everything under `.package/` — that's our staged output: the
+        // bundled main process, the ACP adapters + their dependency closure (staged by
+        // the generateAssets hook), and the native node-pty module (staged into
+        // .package/node_modules by bundle.mjs). Without the `.package` exemption the
+        // node_modules rule would strip those and code mode / the embedded terminal
         // would break in packaged builds.
         ignore: (p) => {
             if (p === '/.package' || p.startsWith('/.package/')) return false;
-            return [/src\//, /node_modules\//, /\.gitignore/, /bundle\.mjs/, /tsconfig\.json/]
+            return [/^\/src\//, /^\/node_modules\//, /\.gitignore/, /bundle\.mjs/, /tsconfig\.json/]
                 .some((re) => re.test(p));
         },
     },
@@ -182,6 +184,21 @@ module.exports = {
                     icon: path.join(__dirname, 'icons/icon.png'),
                     mimeType: ['x-scheme-handler/rowboat'],
                 }
+            }
+        },
+        {
+            name: require.resolve('./makers/maker-pacman.cjs'),
+            platforms: ['linux'],
+            config: {
+                name: 'rowboat',
+                bin: 'rowboat',
+                executableName: 'rowboat',
+                description: 'AI coworker with memory',
+                maintainer: 'rowboatlabs',
+                homepage: 'https://rowboatlabs.com',
+                license: 'Apache',
+                icon: path.join(__dirname, 'icons/icon.png'),
+                mimeType: ['x-scheme-handler/rowboat'],
             }
         },
         {

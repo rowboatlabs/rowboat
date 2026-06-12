@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import {
   Bot,
   ChevronRight,
+  Code2,
   FileText,
   FilePlus,
   Folder,
@@ -168,6 +169,7 @@ type SidebarContentPanelProps = {
   knowledgeActions: KnowledgeActions
   bgTaskSummaries?: TaskSummary[]
   onOpenMeetings?: () => void
+  onOpenCode?: () => void
   onOpenBgTasks?: () => void
   onOpenAgent?: (slug: string) => void
   recentRuns?: { id: string; title?: string; createdAt: string }[]
@@ -178,7 +180,7 @@ type SidebarContentPanelProps = {
   onToggleBrowser?: () => void
   onVoiceNoteCreated?: (path: string) => void
   /** Which primary destination is currently active, for nav highlighting. */
-  activeNav?: 'home' | 'email' | 'meetings' | 'knowledge' | 'agents' | 'workspaces' | null
+  activeNav?: 'home' | 'email' | 'meetings' | 'code' | 'knowledge' | 'agents' | 'workspaces' | null
   /** Live meeting recording state, so the recording row can show its indicator/stop. */
   meetingRecordingState?: 'idle' | 'connecting' | 'recording' | 'stopping'
   recordingMeetingSource?: string | null
@@ -416,6 +418,7 @@ export function SidebarContentPanel({
   knowledgeActions,
   bgTaskSummaries = [],
   onOpenMeetings,
+  onOpenCode,
   onOpenBgTasks,
   onOpenAgent,
   recentRuns = [],
@@ -446,6 +449,21 @@ export function SidebarContentPanel({
   const [emailThreads, setEmailThreads] = useState<SidebarEmailThread[]>([])
   const [meetings, setMeetings] = useState<UpcomingMeeting[]>([])
   const [quickAccessExpanded, setQuickAccessExpanded] = useState(true)
+  // The Code section only makes sense with a coding agent available — same
+  // flag the chat composer's code chip uses (auto-on when Claude Code or
+  // Codex is installed + signed in; explicit toggle in settings wins).
+  const [codeModeEnabled, setCodeModeEnabled] = useState(false)
+
+  useEffect(() => {
+    const load = () => {
+      window.ipc.invoke('codeMode:getConfig', null)
+        .then((r) => setCodeModeEnabled(r.enabled))
+        .catch(() => setCodeModeEnabled(false))
+    }
+    load()
+    window.addEventListener('code-mode-config-changed', load)
+    return () => window.removeEventListener('code-mode-config-changed', load)
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -834,6 +852,14 @@ export function SidebarContentPanel({
                   </div>
                 ) : null}
               </SidebarMenuItem>
+              {codeModeEnabled && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton isActive={activeNav === 'code'} onClick={onOpenCode}>
+                    <Code2 className="size-4 shrink-0" />
+                    <span className="flex-1 truncate">Code</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
               <SidebarMenuItem>
                 <SidebarMenuButton
                   isActive={activeNav === 'knowledge'}

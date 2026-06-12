@@ -3,6 +3,7 @@ import path from "node:path";
 import {
   setupIpcHandlers,
   startRunsWatcher,
+  startCodeSessionStatusWatcher,
   startServicesWatcher,
   startLiveNoteAgentWatcher,
   startBackgroundTaskAgentWatcher,
@@ -11,6 +12,7 @@ import {
   stopServicesWatcher,
   stopWorkspaceWatcher
 } from "./ipc.js";
+import { disposeAllTerminals } from "./terminal.js";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname } from "node:path";
 import { updateElectronApp, UpdateSourceType } from "update-electron-app";
@@ -253,14 +255,34 @@ function createWindow() {
     return { action: "deny" };
   });
 
-  // Handle navigation to external URLs (e.g., clicking a link without target="_blank")
-  win.webContents.on("will-navigate", (event, url) => {
+  // Handle navigation to external URLs (e.g., clicking a link without target="_blank").
+  // Returns true when the URL was external and routed to the system browser.
+  const routeExternalNavigation = (url: string): boolean => {
     const isInternal =
       url.startsWith("app://") || url.startsWith("http://localhost:5173");
-    if (!isInternal) {
-      event.preventDefault();
-      shell.openExternal(url);
-    }
+    if (isInternal) return false;
+    shell.openExternal(url);
+    return true;
+  };
+
+  win.webContents.on("will-navigate", (event, url) => {
+    if (routeExternalNavigation(url)) event.preventDefault();
+  });
+
+  // Subframe navigations (e.g. links clicked inside the sandboxed iframe that
+  // renders a background-task / workspace `index.html`) fire `will-frame-navigate`,
+  // not `will-navigate`. Route their external links to the system browser too,
+  // so HTML reports behave like the markdown viewer. Main-frame navigations are
+  // already handled by `will-navigate` above — skip them here to avoid double-open.
+  //
+  // Scope this to our own HTML viewer frames (identified by their app://workspace
+  // document origin). Third-party note embeds (YouTube, Figma, Twitter via the
+  // embed/iframe blocks) load from their own origins — leave their internal
+  // navigation untouched so the embeds keep working.
+  win.webContents.on("will-frame-navigate", (event) => {
+    if (event.isMainFrame) return;
+    if (!event.frame?.url.startsWith("app://workspace/")) return;
+    if (routeExternalNavigation(event.url)) event.preventDefault();
   });
 
   // Attach the embedded browser pane manager to this window.
@@ -331,6 +353,9 @@ app.whenReady().then(async () => {
 
   // start runs watcher
   startRunsWatcher();
+
+  // start code-session status tracker (derives working/needs-you/idle + notifications)
+  startCodeSessionStatusWatcher();
 
   // start services watcher
   startServicesWatcher();
@@ -424,6 +449,8 @@ app.on("before-quit", () => {
   } catch {
     // nothing live to dispose
   }
+  // Kill embedded terminal shells.
+  disposeAllTerminals();
   shutdownLocalSites().catch((error) => {
     console.error('[LocalSites] Failed to shut down cleanly:', error);
   });

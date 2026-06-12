@@ -307,6 +307,7 @@ export class FSRunsRepo implements IRunsRepo {
                 title: metadata.title,
                 createdAt: metadata.start.ts!,
                 agentId: metadata.start.agentName,
+                ...(metadata.start.useCase ? { useCase: metadata.start.useCase } : {}),
             });
         }
 

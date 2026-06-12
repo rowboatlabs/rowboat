@@ -18,6 +18,10 @@ import { FSAgentScheduleStateRepo, IAgentScheduleStateRepo } from "../agent-sche
 import { FSSlackConfigRepo, ISlackConfigRepo } from "../slack/repo.js";
 import { CodeModeManager } from "../code-mode/acp/manager.js";
 import { CodePermissionRegistry } from "../code-mode/acp/permission-registry.js";
+import { FSCodeProjectsRepo, ICodeProjectsRepo } from "../code-mode/projects/repo.js";
+import { FSCodeSessionsRepo, ICodeSessionsRepo } from "../code-mode/sessions/repo.js";
+import { CodeSessionService } from "../code-mode/sessions/service.js";
+import { CodeSessionStatusTracker } from "../code-mode/sessions/status-tracker.js";
 import type { IBrowserControlService } from "../application/browser-control/service.js";
 import type { INotificationService } from "../application/notification/service.js";
 
@@ -51,6 +55,13 @@ container.register({
     // session/load); the registry brokers mid-run approvals.
     codeModeManager: asClass(CodeModeManager).singleton(),
     codePermissionRegistry: asClass(CodePermissionRegistry).singleton(),
+
+    // Code section: project registry, session metadata, the direct-drive
+    // session service, and the live status tracker.
+    codeProjectsRepo: asClass<ICodeProjectsRepo>(FSCodeProjectsRepo).singleton(),
+    codeSessionsRepo: asClass<ICodeSessionsRepo>(FSCodeSessionsRepo).singleton(),
+    codeSessionService: asClass(CodeSessionService).singleton(),
+    codeSessionStatusTracker: asClass(CodeSessionStatusTracker).singleton(),
 });
 
 export default container;
