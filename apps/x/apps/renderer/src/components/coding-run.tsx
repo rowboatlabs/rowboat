@@ -124,7 +124,7 @@ export function CodingRunTimeline({
       {rows.map((row) => {
         if (row.kind === 'text') {
           return (
-            <p key={row.id} className="whitespace-pre-wrap text-sm leading-relaxed text-foreground/90">
+            <p key={row.id} className="whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground/90">
               {row.text}
             </p>
           )

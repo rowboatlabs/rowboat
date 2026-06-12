@@ -648,6 +648,51 @@ const ipcSchemas = {
     }),
     res: z.null(),
   },
+  // ==========================================================================
+  // Embedded terminal (Code section): one PTY per coding session
+  // ==========================================================================
+  // Create-or-attach. Returns the scrollback backlog so a remounted view can
+  // repaint what happened while it was closed.
+  'terminal:ensure': {
+    req: z.object({
+      id: z.string(),
+      cwd: z.string(),
+      cols: z.number().int().positive(),
+      rows: z.number().int().positive(),
+    }),
+    res: z.object({
+      backlog: z.string(),
+      running: z.boolean(),
+    }),
+  },
+  'terminal:input': {
+    req: z.object({
+      id: z.string(),
+      data: z.string(),
+    }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  'terminal:resize': {
+    req: z.object({
+      id: z.string(),
+      cols: z.number().int().positive(),
+      rows: z.number().int().positive(),
+    }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  'terminal:dispose': {
+    req: z.object({ id: z.string() }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  // main → renderer streams
+  'terminal:data': {
+    req: z.object({ id: z.string(), data: z.string() }),
+    res: z.null(),
+  },
+  'terminal:exit': {
+    req: z.object({ id: z.string(), exitCode: z.number() }),
+    res: z.null(),
+  },
   'granola:setConfig': {
     req: z.object({
       enabled: z.boolean(),

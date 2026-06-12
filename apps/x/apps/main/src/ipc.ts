@@ -40,6 +40,7 @@ import { CodeSessionService } from '@x/core/dist/code-mode/sessions/service.js';
 import { CodeSessionStatusTracker } from '@x/core/dist/code-mode/sessions/status-tracker.js';
 import * as codeGit from '@x/core/dist/code-mode/git/service.js';
 import { readProjectDir, readProjectFile } from '@x/core/dist/code-mode/projects/fs.js';
+import { ensureTerminal, writeTerminal, resizeTerminal, disposeTerminal } from './terminal.js';
 import type { CodeSession } from '@x/shared/dist/code-sessions.js';
 import { invalidateCopilotInstructionsCache } from '@x/core/dist/application/assistant/instructions.js';
 import { triggerSync as triggerGranolaSync } from '@x/core/dist/knowledge/granola/sync.js';
@@ -750,6 +751,7 @@ export function setupIpcHandlers() {
     },
     'codeSession:delete': async (_event, args) => {
       const service = container.resolve<CodeSessionService>('codeSessionService');
+      disposeTerminal(args.sessionId);
       await service.delete(args.sessionId, {
         removeWorktree: args.removeWorktree,
         deleteBranch: args.deleteBranch,
@@ -959,6 +961,21 @@ export function setupIpcHandlers() {
         return { path: null };
       }
       return { path: result.filePaths[0] ?? null };
+    },
+    'terminal:ensure': async (_event, args) => {
+      return ensureTerminal(args.id, args.cwd, args.cols, args.rows);
+    },
+    'terminal:input': async (_event, args) => {
+      writeTerminal(args.id, args.data);
+      return { success: true };
+    },
+    'terminal:resize': async (_event, args) => {
+      resizeTerminal(args.id, args.cols, args.rows);
+      return { success: true };
+    },
+    'terminal:dispose': async (_event, args) => {
+      disposeTerminal(args.id);
+      return { success: true };
     },
     'dialog:openFiles': async (event, args) => {
       const win = BrowserWindow.fromWebContents(event.sender);

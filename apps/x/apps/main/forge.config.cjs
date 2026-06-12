@@ -32,10 +32,12 @@ module.exports = {
         // Since we bundle everything with esbuild, we don't need node_modules at all.
         // These settings prevent Forge's dependency walker (flora-colossus) from trying
         // to analyze/copy node_modules, which fails with pnpm's symlinked workspaces.
+        // Regexes are ANCHORED to the app root: .package/node_modules (where
+        // bundle.mjs stages the native node-pty module) must survive packaging.
         prune: false,
         ignore: [
-            /src\//,
-            /node_modules\//,
+            /^\/src\//,
+            /^\/node_modules\//,
             /.gitignore/,
             /bundle\.mjs/,
             /tsconfig.json/,
