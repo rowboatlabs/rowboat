@@ -1,14 +1,13 @@
 import crypto from "node:crypto";
 import { z } from "zod";
-import { Message, MessageList } from "@x/shared/dist/message.js";
+import { MessageList } from "@x/shared/dist/message.js";
 import type { AgentLoop, TurnHandle } from "../agent-loop/agent-loop.js";
 import { KeyedMutex } from "../agent-loop/mutex.js";
 import type { TurnStore } from "../agent-loop/turn-store.js";
 import {
     AgentLoopTurn,
-    deriveToolCallState,
+    closedTranscript,
     deriveTurnStatus,
-    unresolvedToolCalls,
 } from "../agent-loop/types.js";
 import type { SessionStore } from "./session-store.js";
 import { CreateSessionInput, SendMessageOptions, Session } from "./types.js";
@@ -113,7 +112,7 @@ export class SessionsImpl implements Sessions {
                     : {}),
                 sessionId,
                 sessionSeq: (latest?.sessionSeq ?? 0) + 1,
-                messages: [...(latest ? historyFrom(latest) : []), ...newMessages],
+                messages: [...(latest ? closedTranscript(latest) : []), ...newMessages],
             });
         });
     }
@@ -123,7 +122,7 @@ export class SessionsImpl implements Sessions {
     async getHistory(sessionId: string): Promise<z.infer<typeof MessageList>> {
         await this.mustGetSession(sessionId);
         const latest = await this.turnStore.latestForSession(sessionId);
-        return latest ? historyFrom(latest) : [];
+        return latest ? closedTranscript(latest) : [];
     }
 
     async listTurns(sessionId: string): Promise<z.infer<typeof AgentLoopTurn>[]> {
@@ -136,27 +135,4 @@ export class SessionsImpl implements Sessions {
         if (!session) throw new Error(`Session not found: ${sessionId}`);
         return session;
     }
-}
-
-// Copy-forward history: the next turn's input is the previous turn's full
-// transcript. A stopped turn can carry unresolved tool calls; they are closed
-// out with synthetic ToolMessages so the new turn never re-executes — or
-// hangs on — stale calls. This is the sessions-layer analogue of the
-// reducer's interrupted-call handling.
-function historyFrom(
-    turn: z.infer<typeof AgentLoopTurn>,
-): z.infer<typeof Message>[] {
-    const messages = [...turn.messages];
-    for (const call of unresolvedToolCalls(turn)) {
-        const interrupted = deriveToolCallState(turn, call.toolCallId) === "interrupted";
-        messages.push({
-            role: "tool",
-            content: interrupted
-                ? "Tool execution was interrupted before completing. It may or may not have taken effect; do not assume it ran."
-                : "Tool was not executed: the turn was stopped before this call ran.",
-            toolCallId: call.toolCallId,
-            toolName: call.toolName,
-        });
-    }
-    return messages;
 }

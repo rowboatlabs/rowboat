@@ -10,7 +10,7 @@ import { convertFromMessages } from "../agents/runtime.js";
 import { createProvider } from "../models/models.js";
 import { resolveProviderConfig } from "../models/defaults.js";
 import { EventStream } from "./event-stream.js";
-import type { ModelStreamEvent, ToolDefinition } from "./types.js";
+import type { ModelStreamEvent, ModelUsage, ToolDefinition } from "./types.js";
 
 export type ModelStreamRequest = {
     provider: string | null;
@@ -20,24 +20,33 @@ export type ModelStreamRequest = {
     signal: AbortSignal;
 };
 
+// Usage as reported by the provider for one model step; null when the
+// provider reported nothing (the loop then records no usage fact).
+export type ModelStepUsage = Omit<z.infer<typeof ModelUsage>, "at">;
+
+export type ModelStepResult = {
+    message: z.infer<typeof AssistantMessage>;
+    usage: ModelStepUsage | null;
+};
+
 // Streams one model step. Iterate for deltas, or just await `.result` for the
-// final complete AssistantMessage. The loop commits only the complete message;
-// deltas are never persisted.
+// final complete AssistantMessage + usage. The loop commits only the complete
+// message; deltas are never persisted.
 //
 // Contract: `.result` is authoritative — it MUST resolve with the complete
 // message or reject on failure/abort (the loop distinguishes the two via its
 // own AbortSignal). `error` events are observational only; the loop ignores
 // them.
 export interface ModelAdapter {
-    stream(req: ModelStreamRequest): EventStream<ModelStreamEvent, z.infer<typeof AssistantMessage>>;
+    stream(req: ModelStreamRequest): EventStream<ModelStreamEvent, ModelStepResult>;
 }
 
 // Thin adapter over the existing provider factory + Vercel AI SDK streamText.
 // All retry/failover policy stays out of the agent loop; if a step fails, the
 // stream emits an `error` event and the loop records a turn-level error.
 export class VercelModelAdapter implements ModelAdapter {
-    stream(req: ModelStreamRequest): EventStream<ModelStreamEvent, z.infer<typeof AssistantMessage>> {
-        const out = new EventStream<ModelStreamEvent, z.infer<typeof AssistantMessage>>();
+    stream(req: ModelStreamRequest): EventStream<ModelStreamEvent, ModelStepResult> {
+        const out = new EventStream<ModelStreamEvent, ModelStepResult>();
         void this.run(req, out).catch((error: unknown) => {
             out.push({ type: "error", error });
             out.fail(error);
@@ -47,7 +56,7 @@ export class VercelModelAdapter implements ModelAdapter {
 
     private async run(
         req: ModelStreamRequest,
-        out: EventStream<ModelStreamEvent, z.infer<typeof AssistantMessage>>,
+        out: EventStream<ModelStreamEvent, ModelStepResult>,
     ): Promise<void> {
         if (!req.provider || !req.model) {
             throw new Error("Agent loop turn has no provider/model configured");
@@ -126,8 +135,20 @@ export class VercelModelAdapter implements ModelAdapter {
             role: "assistant",
             content: parts.length > 0 ? parts : "",
         };
+        // Usage is best-effort: a provider that fails to report it must not
+        // fail the step the model itself completed.
+        const usage = await result.usage.then(
+            (u) => ({
+                inputTokens: u.inputTokens ?? null,
+                outputTokens: u.outputTokens ?? null,
+                totalTokens: u.totalTokens ?? null,
+                reasoningTokens: u.reasoningTokens ?? null,
+                cachedInputTokens: u.cachedInputTokens ?? null,
+            }),
+            () => null,
+        );
         out.push({ type: "finish", message });
-        out.end(message);
+        out.end({ message, usage });
     }
 }
 

@@ -8,13 +8,19 @@ import {
 import { AgentLoopImpl } from "./agent-loop.js";
 import { EventStream } from "./event-stream.js";
 import { InMemoryTurnStore } from "./in-memory-turn-store.js";
-import type { ModelAdapter, ModelStreamRequest } from "./model-adapter.js";
+import type {
+    ModelAdapter,
+    ModelStepResult,
+    ModelStepUsage,
+    ModelStreamRequest,
+} from "./model-adapter.js";
 import type { PermissionClassification, PermissionGate } from "./permission-gate.js";
 import type { ToolRunner, ToolRunResult } from "./tool-runner.js";
 import type { TurnStore } from "./turn-store.js";
 import {
     AgentLoopTurn,
     deriveTurnStatus,
+    totalUsage,
     type ModelStreamEvent,
 } from "./types.js";
 
@@ -39,7 +45,12 @@ function assistantToolCalls(
 }
 
 type ModelStep =
-    | { kind: "message"; message: z.infer<typeof AssistantMessage>; deltas?: string[] }
+    | {
+        kind: "message";
+        message: z.infer<typeof AssistantMessage>;
+        deltas?: string[];
+        usage?: ModelStepUsage;
+    }
     | { kind: "error"; error: unknown }
     | { kind: "hang" };
 
@@ -48,9 +59,9 @@ class FakeModelAdapter implements ModelAdapter {
 
     constructor(private steps: ModelStep[]) {}
 
-    stream(req: ModelStreamRequest): EventStream<ModelStreamEvent, z.infer<typeof AssistantMessage>> {
+    stream(req: ModelStreamRequest): EventStream<ModelStreamEvent, ModelStepResult> {
         this.calls++;
-        const out = new EventStream<ModelStreamEvent, z.infer<typeof AssistantMessage>>();
+        const out = new EventStream<ModelStreamEvent, ModelStepResult>();
         const step = this.steps.shift();
         void (async () => {
             await Promise.resolve();
@@ -86,7 +97,7 @@ class FakeModelAdapter implements ModelAdapter {
                 }
             }
             out.push({ type: "finish", message: step.message });
-            out.end(step.message);
+            out.end({ message: step.message, usage: step.usage ?? null });
         })();
         return out;
     }
@@ -203,6 +214,7 @@ function emptyTurn(
         permissionDecisions: [],
         startedTools: [],
         dispatchedTools: [],
+        modelUsage: [],
         error: null,
         completedAt: null,
         createdAt: now,
@@ -738,6 +750,49 @@ describe("AgentLoopImpl", () => {
         ]);
         const turn = await handle.result;
         expect(deriveTurnStatus(turn)).toBe("completed");
+    });
+
+    it("records one usage fact per model call and derives the turn total", async () => {
+        const usage = (inputTokens: number, outputTokens: number): ModelStepUsage => ({
+            inputTokens,
+            outputTokens,
+            totalTokens: inputTokens + outputTokens,
+            reasoningTokens: null,
+            cachedInputTokens: null,
+        });
+        const { loop } = makeLoop({
+            steps: [
+                {
+                    kind: "message",
+                    message: assistantToolCalls(toolCall("tc1", "calc")),
+                    usage: usage(100, 20),
+                },
+                { kind: "message", message: assistantText("done"), usage: usage(150, 30) },
+            ],
+        });
+
+        const turn = await (await loop.createTurn({ messages: [userMsg("go")] })).result;
+
+        expect(turn.modelUsage).toHaveLength(2);
+        expect(turn.modelUsage[0]).toMatchObject({ inputTokens: 100, outputTokens: 20 });
+        expect(turn.modelUsage[1]).toMatchObject({ inputTokens: 150, outputTokens: 30 });
+        expect(turn.modelUsage.every((u) => typeof u.at === "string")).toBe(true);
+        expect(totalUsage(turn)).toEqual({
+            inputTokens: 250,
+            outputTokens: 50,
+            totalTokens: 300,
+            reasoningTokens: null,
+            cachedInputTokens: null,
+        });
+    });
+
+    it("a model step without reported usage records no usage fact", async () => {
+        const { loop } = makeLoop({
+            steps: [{ kind: "message", message: assistantText("hi") }],
+        });
+        const turn = await (await loop.createTurn({ messages: [userMsg("go")] })).result;
+        expect(turn.modelUsage).toEqual([]);
+        expect(totalUsage(turn).totalTokens).toBeNull();
     });
 
     it("getTurn returns the persisted turn; unknown ids reject", async () => {

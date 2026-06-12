@@ -8,7 +8,11 @@ import {
 import { AgentLoopImpl } from "../agent-loop/agent-loop.js";
 import { EventStream } from "../agent-loop/event-stream.js";
 import { InMemoryTurnStore } from "../agent-loop/in-memory-turn-store.js";
-import type { ModelAdapter, ModelStreamRequest } from "../agent-loop/model-adapter.js";
+import type {
+    ModelAdapter,
+    ModelStepResult,
+    ModelStreamRequest,
+} from "../agent-loop/model-adapter.js";
 import type { PermissionGate } from "../agent-loop/permission-gate.js";
 import type { ToolRunner, ToolRunResult } from "../agent-loop/tool-runner.js";
 import {
@@ -48,9 +52,9 @@ class FakeModelAdapter implements ModelAdapter {
 
     constructor(private steps: ModelStep[]) {}
 
-    stream(req: ModelStreamRequest): EventStream<ModelStreamEvent, z.infer<typeof AssistantMessage>> {
+    stream(req: ModelStreamRequest): EventStream<ModelStreamEvent, ModelStepResult> {
         this.calls++;
-        const out = new EventStream<ModelStreamEvent, z.infer<typeof AssistantMessage>>();
+        const out = new EventStream<ModelStreamEvent, ModelStepResult>();
         const step = this.steps.shift();
         void (async () => {
             await Promise.resolve();
@@ -66,7 +70,7 @@ class FakeModelAdapter implements ModelAdapter {
                 return;
             }
             out.push({ type: "finish", message: step.message });
-            out.end(step.message);
+            out.end({ message: step.message, usage: null });
         })();
         return out;
     }
@@ -132,6 +136,7 @@ function turnFixture(
         permissionDecisions: [],
         startedTools: [],
         dispatchedTools: [],
+        modelUsage: [],
         error: null,
         completedAt: null,
         createdAt: now,
@@ -346,6 +351,37 @@ describe("SessionsImpl", () => {
             userMsg("skip it"),
             assistantText("skipped it"),
         ]);
+    });
+
+    it("a stopped turn's dispatched call is closed out as possibly completed externally", async () => {
+        const { sessions, loop, turnStore } = makeSessions({
+            steps: [{ kind: "message", message: assistantText("noted") }],
+        });
+        const session = await sessions.createSession();
+
+        // crafted waiting turn: tc1 was delegated to an external runner
+        // (pending), then the user stopped the turn before the result arrived
+        await turnStore.create(turnFixture("t1", {
+            sessionId: session.id,
+            sessionSeq: 1,
+            messages: [userMsg("run the job"), assistantToolCalls(toolCall("tc1", "background-job"))],
+            startedTools: [{ toolCallId: "tc1", startedAt: "2026-06-12T00:00:00Z" }],
+            dispatchedTools: [{ toolCallId: "tc1", dispatchedAt: "2026-06-12T00:00:01Z" }],
+        }));
+        await loop.stopTurn("t1");
+
+        const closure = {
+            role: "tool" as const,
+            content: "Tool was dispatched but its result never arrived; it may have completed externally. Do not assume it ran or that it failed.",
+            toolCallId: "tc1",
+            toolName: "background-job",
+        };
+        const history = await sessions.getHistory(session.id);
+        expect(history[history.length - 1]).toEqual(closure);
+
+        // the next turn carries the same closure forward
+        const turn2 = await (await sessions.sendMessage(session.id, [userMsg("ok")])).result;
+        expect(turn2.messages).toEqual([...history, userMsg("ok"), assistantText("noted")]);
     });
 
     it("builds on an errored turn's persisted transcript", async () => {

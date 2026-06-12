@@ -115,6 +115,7 @@ export class AgentLoopImpl implements AgentLoop {
             permissionDecisions: [],
             startedTools: [],
             dispatchedTools: [],
+            modelUsage: [],
             error: null,
             completedAt: null,
             createdAt: now,
@@ -398,8 +399,13 @@ export class AgentLoopImpl implements AgentLoop {
                 for await (const event of modelStream) {
                     stream.push(event);
                 }
-                const assistantMessage = await modelStream.result;
-                turn.messages.push(assistantMessage);
+                const step = await modelStream.result;
+                turn.messages.push(step.message);
+                // The step's usage is a fact like any other — committed in the
+                // same write as the message it paid for.
+                if (step.usage !== null) {
+                    turn.modelUsage.push({ ...step.usage, at: nowIso() });
+                }
                 await this.persist(turn);
             } catch (error) {
                 // stopped: facts stay as persisted; stopTurn's queued job

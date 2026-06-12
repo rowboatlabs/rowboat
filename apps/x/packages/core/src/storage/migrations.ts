@@ -100,6 +100,31 @@ const migrations: Record<string, Migration> = {
             await db.schema.dropTable("sessions").ifExists().execute();
         },
     },
+    "2026-06-12_0004_turn_model_usage": {
+        async up(db: MigrationDb): Promise<void> {
+            await db.schema
+                .alterTable("agent_loop_turns")
+                .addColumn("model_usage", "text", (col) => col.notNull().defaultTo("[]"))
+                .execute();
+        },
+        async down(db: MigrationDb): Promise<void> {
+            await db.schema.alterTable("agent_loop_turns").dropColumn("model_usage").execute();
+        },
+    },
+    "2026-06-12_0005_turn_transcript_dedup": {
+        async up(db: MigrationDb): Promise<void> {
+            // 0 = messages stored whole; N = the first N messages are the
+            // previous session turn's closed transcript, recomputed on read.
+            // Existing rows default to 0, so they keep reading back unchanged.
+            await db.schema
+                .alterTable("agent_loop_turns")
+                .addColumn("prefix_length", "integer", (col) => col.notNull().defaultTo(0))
+                .execute();
+        },
+        async down(db: MigrationDb): Promise<void> {
+            await db.schema.alterTable("agent_loop_turns").dropColumn("prefix_length").execute();
+        },
+    },
 };
 
 class InCodeMigrationProvider implements MigrationProvider {

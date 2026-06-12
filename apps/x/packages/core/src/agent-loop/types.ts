@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
     AssistantMessage,
+    Message,
     MessageList,
     ToolCallPart,
 } from "@x/shared/dist/message.js";
@@ -47,6 +48,17 @@ export const DispatchedTool = z.object({
     dispatchedAt: z.string(),
 });
 
+// One entry per model call. Token counts are as reported by the provider —
+// null when the provider did not report that field. Aggregate via totalUsage.
+export const ModelUsage = z.object({
+    inputTokens: z.number().nullable(),
+    outputTokens: z.number().nullable(),
+    totalTokens: z.number().nullable(),
+    reasoningTokens: z.number().nullable(),
+    cachedInputTokens: z.number().nullable(),
+    at: z.string(),
+});
+
 export const AgentLoopError = z.object({
     message: z.string(),
     code: z.string().optional(),
@@ -74,6 +86,7 @@ export const AgentLoopTurn = z.object({
     permissionDecisions: z.array(PermissionDecision),
     startedTools: z.array(StartedTool),
     dispatchedTools: z.array(DispatchedTool),
+    modelUsage: z.array(ModelUsage),
 
     // set-once scalars
     error: AgentLoopError.nullable(),
@@ -199,4 +212,58 @@ export function deriveTurnStatus(turn: z.infer<typeof AgentLoopTurn>): TurnStatu
         if (state === "awaiting-user" || state === "dispatched") return "waiting";
     }
     return "idle";
+}
+
+// The transcript as a successor turn would see it: a terminal turn's dangling
+// tool calls are closed out with synthetic ToolMessages so a follow-up never
+// re-executes — or hangs on — stale calls. Pure and deterministic over an
+// immutable (terminal) turn, which is what lets the sessions layer build the
+// next turn's input from it AND lets stores reproduce it byte-for-byte.
+export function closedTranscript(
+    turn: z.infer<typeof AgentLoopTurn>,
+): z.infer<typeof Message>[] {
+    const messages = [...turn.messages];
+    for (const call of unresolvedToolCalls(turn)) {
+        messages.push({
+            role: "tool",
+            content: closureContent(deriveToolCallState(turn, call.toolCallId)),
+            toolCallId: call.toolCallId,
+            toolName: call.toolName,
+        });
+    }
+    return messages;
+}
+
+// Honest per-state wording for a dangling call: how far did it actually get?
+function closureContent(state: ToolCallState): string {
+    switch (state) {
+        case "interrupted":
+            // execution began in-process; the side effect may have landed
+            return "Tool execution was interrupted before completing. It may or may not have taken effect; do not assume it ran.";
+        case "dispatched":
+            // delegated to an external runner; it may still finish out there
+            return "Tool was dispatched but its result never arrived; it may have completed externally. Do not assume it ran or that it failed.";
+        default:
+            // never reached execution (unevaluated / awaiting permission / cleared-but-not-started)
+            return "Tool was not executed: the turn was stopped before this call ran.";
+    }
+}
+
+// Sum of all model calls in the turn. A field is null only if no call
+// reported it; otherwise unreported entries count as 0 toward the sum.
+export function totalUsage(
+    turn: z.infer<typeof AgentLoopTurn>,
+): Omit<z.infer<typeof ModelUsage>, "at"> {
+    const sum = (field: "inputTokens" | "outputTokens" | "totalTokens" | "reasoningTokens" | "cachedInputTokens") => {
+        const reported = turn.modelUsage.map((u) => u[field]).filter((v) => v !== null);
+        if (reported.length === 0) return null;
+        return reported.reduce((a, b) => a + b, 0);
+    };
+    return {
+        inputTokens: sum("inputTokens"),
+        outputTokens: sum("outputTokens"),
+        totalTokens: sum("totalTokens"),
+        reasoningTokens: sum("reasoningTokens"),
+        cachedInputTokens: sum("cachedInputTokens"),
+    };
 }

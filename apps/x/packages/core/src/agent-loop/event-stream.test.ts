@@ -20,13 +20,27 @@ describe("EventStream", () => {
         expect(await stream.result).toBe("done");
     });
 
-    it("delivers events buffered before iteration starts", async () => {
+    it("is live: events pushed before a consumer attaches are dropped", async () => {
         const stream = new EventStream<number, string>();
-        stream.push(1);
+        stream.push(1); // nobody listening — dropped, not buffered
+
+        const collecting = collect(stream);
         stream.push(2);
         stream.end("done");
 
-        expect(await collect(stream)).toEqual([1, 2]);
+        expect(await collecting).toEqual([2]);
+    });
+
+    it("delivers to every consumer attached at push time", async () => {
+        const stream = new EventStream<number, string>();
+        const a = collect(stream);
+        stream.push(1);
+        const b = collect(stream); // late subscriber: gets only what follows
+        stream.push(2);
+        stream.end("done");
+
+        expect(await a).toEqual([1, 2]);
+        expect(await b).toEqual([2]);
     });
 
     it("resolves result without any event consumer", async () => {

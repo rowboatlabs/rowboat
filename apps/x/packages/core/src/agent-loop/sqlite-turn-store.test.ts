@@ -81,6 +81,16 @@ function sampleTurn(
         ],
         startedTools: [{ toolCallId: "tc1", startedAt: "2026-06-12T00:00:02Z" }],
         dispatchedTools: [],
+        modelUsage: [
+            {
+                inputTokens: 120,
+                outputTokens: 45,
+                totalTokens: 165,
+                reasoningTokens: null,
+                cachedInputTokens: 80,
+                at: "2026-06-12T00:00:03Z",
+            },
+        ],
         error: null,
         completedAt: null,
         createdAt: "2026-06-12T00:00:00Z",
@@ -157,6 +167,98 @@ describe("SqliteTurnStore", () => {
         // standalone turns never conflict (NULL session_id)
         await store.create(sampleTurn("t3"));
         await store.create(sampleTurn("t4"));
+    });
+
+    describe("transcript prefix dedup", () => {
+        // t1's tool call is resolved, so its closed transcript IS its messages
+        // (3 of them) — t2 extends it with a new exchange.
+        function chainTurns() {
+            const t1 = sampleTurn("t1", { sessionId: "s1", sessionSeq: 1 });
+            const t2 = sampleTurn("t2", {
+                sessionId: "s1",
+                sessionSeq: 2,
+                messages: [
+                    ...t1.messages,
+                    { role: "user", content: "second question" },
+                    { role: "assistant", content: "second answer" },
+                ],
+            });
+            return { t1, t2 };
+        }
+
+        it("stores only the delta at rest; reads materialize transparently", async () => {
+            const { store, db } = await loadStore();
+            const { t1, t2 } = chainTurns();
+            await store.create(t1);
+            await store.create(t2);
+
+            expect(await store.get("t2")).toEqual(t2);
+            expect(await store.listBySession("s1")).toEqual([t1, t2]);
+            expect(await store.latestForSession("s1")).toEqual(t2);
+
+            const raw = await db
+                .selectFrom("agent_loop_turns")
+                .select(["messages", "prefix_length"])
+                .where("id", "=", "t2")
+                .executeTakeFirstOrThrow();
+            expect(raw.prefix_length).toBe(3);
+            expect(JSON.parse(raw.messages)).toHaveLength(2); // only the new exchange
+            expect(raw.messages).not.toContain("let me check"); // t1 content not duplicated
+        });
+
+        it("updates rewrite only the delta; the prefix stays deduped", async () => {
+            const { store, db } = await loadStore();
+            const { t1, t2 } = chainTurns();
+            await store.create(t1);
+            await store.create(t2);
+
+            const updated = {
+                ...t2,
+                messages: [...t2.messages, { role: "user" as const, content: "follow-up" }],
+                updatedAt: "2026-06-12T00:01:00Z",
+            };
+            await store.update(updated);
+
+            expect(await store.get("t2")).toEqual(updated);
+            const raw = await db
+                .selectFrom("agent_loop_turns")
+                .select(["messages", "prefix_length"])
+                .where("id", "=", "t2")
+                .executeTakeFirstOrThrow();
+            expect(raw.prefix_length).toBe(3);
+            expect(JSON.parse(raw.messages)).toHaveLength(3);
+        });
+
+        it("stores the whole transcript when the input does not extend the previous turn", async () => {
+            const { store, db } = await loadStore();
+            const { t1 } = chainTurns();
+            await store.create(t1);
+            // compaction-style input: a summary instead of the prior transcript
+            const t2 = sampleTurn("t2", {
+                sessionId: "s1",
+                sessionSeq: 2,
+                messages: [{ role: "user", content: "summary of the conversation so far" }],
+            });
+            await store.create(t2);
+
+            expect(await store.get("t2")).toEqual(t2);
+            const raw = await db
+                .selectFrom("agent_loop_turns")
+                .select("prefix_length")
+                .where("id", "=", "t2")
+                .executeTakeFirstOrThrow();
+            expect(raw.prefix_length).toBe(0);
+        });
+
+        it("fails loudly when a deduped turn's predecessor is missing", async () => {
+            const { store, db } = await loadStore();
+            const { t1, t2 } = chainTurns();
+            await store.create(t1);
+            await store.create(t2);
+
+            await db.deleteFrom("agent_loop_turns").where("id", "=", "t1").execute();
+            await expect(store.get("t2")).rejects.toThrow("previous session turn");
+        });
     });
 
     it("fails loudly on a corrupted JSON column", async () => {

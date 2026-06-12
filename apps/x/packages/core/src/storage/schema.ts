@@ -16,11 +16,13 @@ export interface AgentLoopTurnsTable {
     permission_mode: string;
     session_id: string | null;
     session_seq: number | null;
-    messages: string;             // JSON: MessageList
+    messages: string;             // JSON: MessageList (delta past prefix_length)
+    prefix_length: number;        // copy-forward prefix deduped at rest; 0 = stored whole
     permission_requests: string;  // JSON: PermissionRequest[]
     permission_decisions: string; // JSON: PermissionDecision[]
     started_tools: string;        // JSON: StartedTool[]
     dispatched_tools: string;     // JSON: DispatchedTool[]
+    model_usage: string;          // JSON: ModelUsage[]
     error: string | null;         // JSON: AgentLoopError
     created_at: TimestampColumn;
     updated_at: TimestampColumn;
