@@ -158,12 +158,18 @@ export class CodeModeManager {
         if (existing) this.dispose(runId); // agent/cwd changed — start over
 
         const client = new AcpClient({ agent, cwd, broker, onEvent });
-        await client.start();
-
-        const sessionId = await this.openSession(runId, agent, cwd, client);
-        const run: ActiveRun = { client, sessionId, agent, cwd, inflight: 0 };
-        this.runs.set(runId, run);
-        return run;
+        try {
+            await client.start();
+            const sessionId = await this.openSession(runId, agent, cwd, client);
+            const run: ActiveRun = { client, sessionId, agent, cwd, inflight: 0 };
+            this.runs.set(runId, run);
+            return run;
+        } catch (e) {
+            // Startup failed (e.g. handshake timeout). The client isn't in `runs`
+            // yet, so dispose here or the spawned adapter process leaks.
+            client.dispose();
+            throw e;
+        }
     }
 
     // Resume the persisted session for this chat when possible; else start a new one
