@@ -13,7 +13,7 @@
 // Usage: node scripts/acp-smoke.mjs   (cwd: apps/x/apps/main, after npm run package)
 
 import { spawn } from 'child_process';
-import { mkdtempSync, writeFileSync, readFileSync, readdirSync, statSync, existsSync } from 'fs';
+import { mkdtempSync, writeFileSync, readFileSync, readdirSync, statSync, existsSync, chmodSync } from 'fs';
 import { tmpdir } from 'os';
 import * as path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -119,7 +119,7 @@ function initializeRoundTrip(electronBin, entry, label, fakeEngine, allowEngineE
             done = true;
             clearTimeout(deadline);
             child.kill();
-            if (err) fail(`${label}: ${err}${stderr.trim() ? `\n        stderr: ${stderr.trim().slice(-600)}` : ''}`);
+            if (err) fail(`${label}: ${err}${stderr.trim() ? `\n        stderr: ${stderr.trim().slice(-1500)}` : ''}`);
             else ok(`${label}: ACP initialize answered`);
             resolve();
         };
@@ -185,10 +185,22 @@ async function checkStartupTimeout(fakeEngine) {
 
 // ---------------------------------------------------------------------------
 async function main() {
-    // A fake engine: launches, swallows stdin, never answers — models an
+    // Two fake engines. Both need a shebang + exec bit: codex-acp spawns CODEX_PATH
+    // DIRECTLY on unix (a bare .js file fails with EACCES and crashes the adapter).
+    // The claude SDK runs .js paths via `node`, so they work for it either way.
+    const fakeDir = mkdtempSync(path.join(tmpdir(), 'fake-engine-'));
+    const writeFake = (name, body) => {
+        const p = path.join(fakeDir, name);
+        writeFileSync(p, `#!/usr/bin/env node\n${body}\n`);
+        chmodSync(p, 0o755);
+        return p;
+    };
+    // Handshake fake: exits immediately — adapters that talk to their engine during
+    // initialize (codex) get a clean "engine exited" instead of a crash.
+    const exitingEngine = writeFake('fake-exit.js', 'process.exit(0);');
+    // Timeout fake: launches, swallows stdin, never answers — models an
     // outdated/incompatible local CLI, the silent-hang failure mode.
-    const fakeEngine = path.join(mkdtempSync(path.join(tmpdir(), 'fake-engine-')), 'fake-claude.js');
-    writeFileSync(fakeEngine, 'process.stdin.resume(); /* never respond */\n');
+    const hangingEngine = writeFake('fake-hang.js', 'process.stdin.resume(); /* never respond */');
 
     const { appRoot, electronBin } = findPackagedApp();
     console.log(`packaged app: ${appRoot}`);
@@ -198,10 +210,10 @@ async function main() {
     console.log('\n[2/3] packaged adapter handshake');
     for (const pkg of ADAPTERS) {
         const allowEngineError = pkg.includes('codex');
-        await initializeRoundTrip(electronBin, adapterEntry(appRoot, pkg), pkg, fakeEngine, allowEngineError);
+        await initializeRoundTrip(electronBin, adapterEntry(appRoot, pkg), pkg, exitingEngine, allowEngineError);
     }
 
-    await checkStartupTimeout(fakeEngine);
+    await checkStartupTimeout(hangingEngine);
 
     console.log(failures ? `\n${failures} check(s) FAILED` : '\nall checks passed');
     process.exit(failures ? 1 : 0);
