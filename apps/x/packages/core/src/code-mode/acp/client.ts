@@ -33,7 +33,12 @@ export interface AcpClientOptions {
 // never answers the handshake). Without a deadline that failure mode is an infinite
 // "(pending...)" with zero feedback. Prompts are intentionally NOT time-limited:
 // turns legitimately run for many minutes and may wait on user permission asks.
-const STARTUP_TIMEOUT_MS = 60_000;
+// Overridable via ROWBOAT_ACP_STARTUP_TIMEOUT_MS — used by the CI smoke test to
+// avoid waiting the full minute, and an escape hatch for genuinely slow setups
+// (e.g. many MCP servers configured in the engine's user settings).
+const STARTUP_TIMEOUT_MS = Number(process.env.ROWBOAT_ACP_STARTUP_TIMEOUT_MS) > 0
+    ? Number(process.env.ROWBOAT_ACP_STARTUP_TIMEOUT_MS)
+    : 60_000;
 
 // Map a raw ACP session/update notification onto our small CodeRunEvent union.
 function toEvent(update: SessionUpdate): CodeRunEvent {

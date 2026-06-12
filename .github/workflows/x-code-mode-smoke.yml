@@ -1,0 +1,49 @@
+name: Code Mode Smoke
+
+# Packages the Electron app on all three OSes and smoke-tests code mode's
+# cross-platform plumbing (adapter staging, engine stripping, ACP handshake,
+# silent-hang startup timeout) — the failure class that previously only
+# surfaced on a colleague's machine. See apps/x/apps/main/scripts/acp-smoke.mjs.
+
+on:
+  pull_request:
+    paths:
+      - 'apps/x/**'
+      - '.github/workflows/x-code-mode-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.15.0
+          cache: 'pnpm'
+          cache-dependency-path: 'apps/x/pnpm-lock.yaml'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: apps/x
+
+      - name: Package app (unsigned)
+        run: npm run package
+        working-directory: apps/x/apps/main
+
+      - name: Run code-mode smoke test
+        run: node scripts/acp-smoke.mjs
+        working-directory: apps/x/apps/main
