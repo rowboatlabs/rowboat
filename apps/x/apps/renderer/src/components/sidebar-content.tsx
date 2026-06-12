@@ -449,6 +449,21 @@ export function SidebarContentPanel({
   const [emailThreads, setEmailThreads] = useState<SidebarEmailThread[]>([])
   const [meetings, setMeetings] = useState<UpcomingMeeting[]>([])
   const [quickAccessExpanded, setQuickAccessExpanded] = useState(true)
+  // The Code section only makes sense with a coding agent available — same
+  // flag the chat composer's code chip uses (auto-on when Claude Code or
+  // Codex is installed + signed in; explicit toggle in settings wins).
+  const [codeModeEnabled, setCodeModeEnabled] = useState(false)
+
+  useEffect(() => {
+    const load = () => {
+      window.ipc.invoke('codeMode:getConfig', null)
+        .then((r) => setCodeModeEnabled(r.enabled))
+        .catch(() => setCodeModeEnabled(false))
+    }
+    load()
+    window.addEventListener('code-mode-config-changed', load)
+    return () => window.removeEventListener('code-mode-config-changed', load)
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -837,12 +852,14 @@ export function SidebarContentPanel({
                   </div>
                 ) : null}
               </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton isActive={activeNav === 'code'} onClick={onOpenCode}>
-                  <Code2 className="size-4 shrink-0" />
-                  <span className="flex-1 truncate">Code</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
+              {codeModeEnabled && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton isActive={activeNav === 'code'} onClick={onOpenCode}>
+                    <Code2 className="size-4 shrink-0" />
+                    <span className="flex-1 truncate">Code</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
               <SidebarMenuItem>
                 <SidebarMenuButton
                   isActive={activeNav === 'knowledge'}

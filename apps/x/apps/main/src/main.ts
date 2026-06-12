@@ -12,6 +12,7 @@ import {
   stopServicesWatcher,
   stopWorkspaceWatcher
 } from "./ipc.js";
+import { disposeAllTerminals } from "./terminal.js";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname } from "node:path";
 import { updateElectronApp, UpdateSourceType } from "update-electron-app";
@@ -448,6 +449,8 @@ app.on("before-quit", () => {
   } catch {
     // nothing live to dispose
   }
+  // Kill embedded terminal shells.
+  disposeAllTerminals();
   shutdownLocalSites().catch((error) => {
     console.error('[LocalSites] Failed to shut down cleanly:', error);
   });

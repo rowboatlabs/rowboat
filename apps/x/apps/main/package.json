@@ -21,6 +21,7 @@
         "electron-squirrel-startup": "^1.0.1",
         "html-to-docx": "^1.8.0",
         "mammoth": "^1.11.0",
+        "node-pty": "^1.1.0",
         "papaparse": "^5.5.3",
         "pdf-parse": "^2.4.5",
         "update-electron-app": "^3.1.2",
