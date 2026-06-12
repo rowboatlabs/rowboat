@@ -28,7 +28,7 @@ type PlanRow = { kind: 'plan'; id: string; entries: { content: string; status?: 
 type PermRow = { kind: 'perm'; id: string; title: string; decision: string }
 type Row = TextRow | ToolRow | PlanRow | PermRow
 
-function reduceEvents(events: CodeRunEvent[]): Row[] {
+export function reduceEvents(events: CodeRunEvent[]): Row[] {
   const rows: Row[] = []
   const toolIdx = new Map<string, number>()
   let planIdx = -1
@@ -107,7 +107,14 @@ function planMarker(status?: string) {
 
 const basename = (p: string) => p.split(/[\\/]/).pop() || p
 
-function CodingRunTimeline({ events }: { events: CodeRunEvent[] }) {
+export function CodingRunTimeline({
+  events,
+  onOpenDiff,
+}: {
+  events: CodeRunEvent[]
+  // When set, changed-file names become clickable (the Code section opens the diff).
+  onOpenDiff?: (path: string) => void
+}) {
   const rows = useMemo(() => reduceEvents(events), [events])
   if (rows.length === 0) {
     return <div className="px-4 py-3 text-xs text-muted-foreground">Starting the agent…</div>
@@ -136,9 +143,21 @@ function CodingRunTimeline({ events }: { events: CodeRunEvent[] }) {
               {row.diffs.length > 0 && (
                 <div className="ml-7 flex flex-col gap-0.5">
                   {row.diffs.map((d) => (
-                    <span key={d} className="truncate font-mono text-xs text-muted-foreground" title={d}>
-                      {basename(d)}
-                    </span>
+                    onOpenDiff ? (
+                      <button
+                        key={d}
+                        type="button"
+                        onClick={() => onOpenDiff(d)}
+                        className="truncate text-left font-mono text-xs text-muted-foreground hover:text-foreground hover:underline"
+                        title={d}
+                      >
+                        {basename(d)}
+                      </button>
+                    ) : (
+                      <span key={d} className="truncate font-mono text-xs text-muted-foreground" title={d}>
+                        {basename(d)}
+                      </span>
+                    )
                   ))}
                 </div>
               )}
