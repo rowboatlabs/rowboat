@@ -8,14 +8,30 @@ import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { GoogleClientIdModal } from "@/components/google-client-id-modal"
 import { ComposioApiKeyModal } from "@/components/composio-api-key-modal"
-import { useConnectors } from "@/hooks/useConnectors"
+import { useConnectors, actionableSlackError } from "@/hooks/useConnectors"
 
 interface ConnectedAccountsSettingsProps {
   dialogOpen: boolean
 }
 
+function relativeTime(iso?: string): string {
+  if (!iso) return "never"
+  const then = Date.parse(iso)
+  if (!Number.isFinite(then)) return "never"
+  const diffSec = Math.round((Date.now() - then) / 1000)
+  if (diffSec < 60) return "just now"
+  const diffMin = Math.round(diffSec / 60)
+  if (diffMin < 60) return `${diffMin}m ago`
+  const diffHr = Math.round(diffMin / 60)
+  if (diffHr < 24) return `${diffHr}h ago`
+  return `${Math.round(diffHr / 24)}d ago`
+}
+
 export function ConnectedAccountsSettings({ dialogOpen }: ConnectedAccountsSettingsProps) {
   const c = useConnectors(dialogOpen)
+  // Windows exclusively locks Slack's Cookies DB while it runs, so we offer a
+  // "quit Slack first" one-click import there. mac/Linux import with Slack open.
+  const isWindows = typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('win')
 
   const renderOAuthProvider = (provider: string, displayName: string, icon: React.ReactNode, description: string) => {
     const state = c.providerStates[provider] || {
@@ -293,7 +309,66 @@ export function ConnectedAccountsSettings({ dialogOpen }: ConnectedAccountsSetti
             </div>
             {c.slackPickerOpen && (
               <div className="mt-2 ml-10 space-y-2">
-                {c.slackDiscoverError ? (
+                {c.slackNeedsAuth ? (
+                  <>
+                    <p className="text-xs text-muted-foreground">
+                      {c.slackDiscoverError ?? 'Connect your signed-in Slack desktop app to continue.'}
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2.5">
+                      <Button
+                        size="sm"
+                        onClick={c.handleSlackImportDesktop}
+                        disabled={c.slackAuthImporting}
+                        className="h-7 px-3 text-xs"
+                      >
+                        {c.slackAuthImporting ? <Loader2 className="size-3 animate-spin" /> : "Connect Slack"}
+                      </Button>
+                      {isWindows && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={c.handleSlackQuitAndImport}
+                          disabled={c.slackAuthImporting}
+                          className="h-7 px-3 text-xs"
+                          title="Closes Slack so its data unlocks, then connects"
+                        >
+                          Quit Slack &amp; connect
+                        </Button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => c.setSlackCurlOpen(!c.slackCurlOpen)}
+                        className="text-xs text-primary underline-offset-2 hover:underline"
+                      >
+                        Paste from browser instead
+                      </button>
+                    </div>
+                    {c.slackCurlOpen && (
+                      <div className="space-y-1.5">
+                        <p className="text-[11px] leading-relaxed text-muted-foreground">
+                          In a browser signed in to Slack, open DevTools → Network, click any
+                          request to <code>app.slack.com</code>, right-click → Copy → Copy as cURL,
+                          then paste it below.
+                        </p>
+                        <Textarea
+                          value={c.slackCurlValue}
+                          onChange={(event) => c.setSlackCurlValue(event.target.value)}
+                          placeholder="curl 'https://your-team.slack.com/api/...' -H 'Cookie: d=xoxd-...' ..."
+                          className="min-h-20 text-[11px] font-mono"
+                          disabled={c.slackCurlSubmitting}
+                        />
+                        <Button
+                          size="sm"
+                          onClick={c.handleSlackParseCurl}
+                          disabled={c.slackCurlSubmitting || c.slackCurlValue.trim().length === 0}
+                          className="h-7 px-3 text-xs"
+                        >
+                          {c.slackCurlSubmitting ? <Loader2 className="size-3 animate-spin" /> : "Connect with cURL"}
+                        </Button>
+                      </div>
+                    )}
+                  </>
+                ) : c.slackDiscoverError ? (
                   <p className="text-xs text-muted-foreground">{c.slackDiscoverError}</p>
                 ) : (
                   <>
@@ -379,6 +454,19 @@ export function ConnectedAccountsSettings({ dialogOpen }: ConnectedAccountsSetti
                     {c.slackKnowledgeSaving ? <Loader2 className="size-3 animate-spin" /> : "Save"}
                   </Button>
                 </div>
+                {c.slackKnowledgeEnabled && c.slackSyncStatuses.filter(s => s.enabled).map(status => (
+                  <div key={status.id} className="flex items-center gap-1.5 text-xs">
+                    {status.lastStatus === 'error' ? (
+                      <span className="text-amber-600 truncate">
+                        Sync failing — {actionableSlackError(status.lastError?.kind, status.lastError?.message)}
+                      </span>
+                    ) : status.lastSyncAt ? (
+                      <span className="text-muted-foreground">Last synced {relativeTime(status.lastSyncAt)}</span>
+                    ) : (
+                      <span className="text-muted-foreground">Not synced yet — first sync runs shortly</span>
+                    )}
+                  </div>
+                ))}
               </div>
             </div>
           </>

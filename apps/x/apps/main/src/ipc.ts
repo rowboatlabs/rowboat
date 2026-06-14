@@ -16,7 +16,11 @@ import { bus } from '@x/core/dist/runs/bus.js';
 import { serviceBus } from '@x/core/dist/services/service_bus.js';
 import type { FSWatcher } from 'chokidar';
 import fs from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import z from 'zod';
+
+const execFileAsync = promisify(execFile);
 
 import { RunEvent } from '@x/shared/dist/runs.js';
 import { ServiceEvent } from '@x/shared/dist/service-events.js';
@@ -34,10 +38,10 @@ import { checkCodeModeAgentStatus } from '@x/core/dist/code-mode/status.js';
 import { invalidateCopilotInstructionsCache } from '@x/core/dist/application/assistant/instructions.js';
 import { triggerSync as triggerGranolaSync } from '@x/core/dist/knowledge/granola/sync.js';
 import { ISlackConfigRepo } from '@x/core/dist/slack/repo.js';
-import { runAgentSlack, getAgentSlackCliStatus } from '@x/core/dist/slack/agent-slack-exec.js';
+import { runAgentSlack, getAgentSlackCliStatus, AgentSlackRunError } from '@x/core/dist/slack/agent-slack-exec.js';
 import { knowledgeSourcesRepo } from '@x/core/dist/knowledge/sources/repo.js';
 import { rankSlackHomeMessages } from '@x/core/dist/knowledge/sources/rank_slack_home.js';
-import { syncSlackKnowledgeSources, triggerSync as triggerSlackKnowledgeSync } from '@x/core/dist/knowledge/sources/sync_slack.js';
+import { syncSlackKnowledgeSources, triggerSync as triggerSlackKnowledgeSync, getSlackKnowledgeSyncStatus } from '@x/core/dist/knowledge/sources/sync_slack.js';
 import { isOnboardingComplete, markOnboardingComplete } from '@x/core/dist/config/note_creation_config.js';
 import { loadNotificationSettings, saveNotificationSettings } from '@x/core/dist/config/notification_config.js';
 import * as composioHandler from './composio-handler.js';
@@ -96,6 +100,53 @@ type SlackHomeMessage = {
   ts: string;
   url?: string;
 };
+
+function parseWhoamiWorkspaces(data: unknown): Array<{ url: string; name: string }> {
+  const parsed = (data ?? {}) as { workspaces?: Array<{ workspace_url?: string; workspace_name?: string }> };
+  return (parsed.workspaces || []).map((w) => ({
+    url: w.workspace_url || '',
+    name: w.workspace_name || '',
+  }));
+}
+
+type SlackAuthResult = {
+  ok: boolean;
+  workspaces: Array<{ url: string; name: string }>;
+  error?: string;
+  errorKind?: 'not_installed' | 'timeout' | 'parse_error' | 'not_authed' | 'rate_limited' | 'network' | 'bad_channel' | 'unknown';
+};
+
+// Run `auth import-desktop`, then read back the workspaces via `auth whoami`.
+// Shared by the plain and the quit-Slack-first import handlers.
+async function importDesktopAndReadWorkspaces(): Promise<SlackAuthResult> {
+  const imported = await runAgentSlack(['auth', 'import-desktop'], { timeoutMs: 20000, parseJson: false });
+  if (!imported.ok) {
+    return { ok: false, workspaces: [], error: imported.message, errorKind: imported.kind };
+  }
+  const whoami = await runAgentSlack(['auth', 'whoami'], { timeoutMs: 10000 });
+  if (!whoami.ok) {
+    return { ok: false, workspaces: [], error: whoami.message, errorKind: whoami.kind };
+  }
+  const workspaces = parseWhoamiWorkspaces(whoami.data);
+  if (workspaces.length === 0) {
+    return { ok: false, workspaces: [], error: 'No signed-in Slack workspaces found in the desktop app.', errorKind: 'not_authed' };
+  }
+  return { ok: true, workspaces };
+}
+
+// Windows force-quits Slack so its exclusive Cookies-DB lock releases before
+// desktop import (the EBUSY cause). No-op on mac/Linux, where import works with
+// Slack open. taskkill exits non-zero when nothing matches — that's fine.
+async function quitSlackIfWindows(): Promise<void> {
+  if (process.platform !== 'win32') return;
+  try {
+    await execFileAsync('taskkill', ['/F', '/IM', 'Slack.exe'], { timeout: 10000, windowsHide: true });
+  } catch {
+    // No running Slack process to kill — nothing to do.
+  }
+  // Give Windows a moment to release the file handles before we copy them.
+  await new Promise(resolve => setTimeout(resolve, 800));
+}
 
 function extractArrayPayload(parsed: unknown): unknown[] {
   if (Array.isArray(parsed)) return parsed;
@@ -842,17 +893,52 @@ export function setupIpcHandlers() {
     'slack:cliStatus': async () => {
       return await getAgentSlackCliStatus();
     },
+    'slack:knowledgeStatus': async () => {
+      return {
+        cli: await getAgentSlackCliStatus(),
+        sources: getSlackKnowledgeSyncStatus(),
+      };
+    },
     'slack:listWorkspaces': async () => {
       const result = await runAgentSlack(['auth', 'whoami'], { timeoutMs: 10000 });
       if (!result.ok) {
-        return { workspaces: [], error: result.message };
+        return { workspaces: [], error: result.message, errorKind: result.kind };
       }
-      const parsed = (result.data ?? {}) as { workspaces?: Array<{ workspace_url?: string; workspace_name?: string }> };
-      const workspaces = (parsed.workspaces || []).map((w) => ({
-        url: w.workspace_url || '',
-        name: w.workspace_name || '',
-      }));
+      const workspaces = parseWhoamiWorkspaces(result.data);
       return { workspaces };
+    },
+    'slack:importDesktopAuth': async () => {
+      // Pull xoxc token(s) + cookie from the running/installed Slack desktop
+      // app into agent-slack's credential store, then read back the workspaces.
+      return await importDesktopAndReadWorkspaces();
+    },
+    'slack:quitAndImportDesktop': async () => {
+      // Windows-only convenience: kill Slack (which locks its Cookies DB) then
+      // run the normal desktop import in one click.
+      await quitSlackIfWindows();
+      return await importDesktopAndReadWorkspaces();
+    },
+    'slack:parseCurlAuth': async (_event, args) => {
+      // Cross-OS fallback to desktop import: the user pastes a "Copy as cURL"
+      // request from a signed-in Slack web tab; parse-curl reads it from stdin
+      // and extracts the xoxc token + xoxd cookie. No leveldb, no OS keychain.
+      const curl = (args.curl ?? '').trim();
+      if (!curl) {
+        return { ok: false, workspaces: [], error: 'Paste the copied cURL command first.', errorKind: 'unknown' as const };
+      }
+      const imported = await runAgentSlack(['auth', 'parse-curl'], { timeoutMs: 15000, parseJson: false, input: curl });
+      if (!imported.ok) {
+        return { ok: false, workspaces: [], error: imported.message, errorKind: imported.kind };
+      }
+      const whoami = await runAgentSlack(['auth', 'whoami'], { timeoutMs: 10000 });
+      if (!whoami.ok) {
+        return { ok: false, workspaces: [], error: whoami.message, errorKind: whoami.kind };
+      }
+      const workspaces = parseWhoamiWorkspaces(whoami.data);
+      if (workspaces.length === 0) {
+        return { ok: false, workspaces: [], error: 'Tokens were saved but no workspace was found. Double-check the copied request.', errorKind: 'not_authed' as const };
+      }
+      return { ok: true, workspaces };
     },
     'slack:listChannels': async (_event, args) => {
       const result = await runAgentSlack(['channel', 'list', '--all', '--workspace', args.workspaceUrl, '--limit', '200'], { timeoutMs: 15000 });
@@ -902,7 +988,7 @@ export function setupIpcHandlers() {
           for (const workspace of config.workspaces) {
             const channelList = await runAgentSlack(['channel', 'list', '--workspace', workspace.url, '--limit', '12'], { timeoutMs: 15000 });
             if (!channelList.ok) {
-              throw new Error(channelList.message);
+              throw new AgentSlackRunError(channelList.kind, channelList.message);
             }
             const rawChannels = extractArrayPayload(channelList.data);
             for (const raw of rawChannels) {
@@ -965,7 +1051,8 @@ export function setupIpcHandlers() {
         return { enabled: true, messages: rankedMessages };
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : 'Failed to load Slack messages';
-        return { enabled: true, messages: [], error: message };
+        const errorKind = err instanceof AgentSlackRunError ? err.kind : undefined;
+        return { enabled: true, messages: [], error: message, errorKind };
       }
     },
     'knowledgeSources:getConfig': async () => {

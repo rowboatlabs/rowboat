@@ -24,6 +24,46 @@ type KnowledgeSourceConfig = {
   filters?: Record<string, unknown>
 }
 
+export type SlackSyncStatus = {
+  id: string
+  enabled: boolean
+  lastSyncAt?: string
+  lastStatus?: 'ok' | 'error'
+  lastError?: { kind: string; message: string }
+  nextDueAt?: string
+}
+
+/**
+ * Map a structured agent-slack failure to actionable user copy. The key
+ * distinction (raised by real usage): a missing Slack desktop app needs a
+ * different instruction than a signed-out one.
+ */
+export function actionableSlackError(kind?: string, message?: string): string {
+  // Windows locks Slack's Cookies/LevelDB files while it's running, so the
+  // desktop import copy fails with EBUSY. This can surface under any kind, so
+  // check the message first.
+  if (message && /EBUSY|resource busy|locked|copyfile/i.test(message)) {
+    return 'Slack is open and locking its data. Click "Quit Slack & connect" to close it automatically, or use "Paste from browser instead".'
+  }
+  switch (kind) {
+    case 'not_installed':
+      return 'The Slack helper is unavailable in this build. Please update or reinstall Rowboat.'
+    case 'network':
+      return "Couldn't reach Slack. Check your internet connection and try again."
+    case 'rate_limited':
+      return 'Slack is rate-limiting requests right now. Wait a minute and try again.'
+    case 'bad_channel':
+      return message || "A configured channel couldn't be found. Check the channel names in Settings."
+    case 'not_authed':
+      if (message && /Desktop data not found|not supported/i.test(message)) {
+        return 'No Slack desktop app was found. Install Slack, sign in to your workspace, then click Connect.'
+      }
+      return 'No signed-in Slack account found. Open the Slack desktop app, sign in, then click Connect.'
+    default:
+      return message || "Couldn't connect to Slack. Please try again."
+  }
+}
+
 export function useConnectors(active: boolean) {
   const [providers, setProviders] = useState<string[]>([])
   const [providersLoading, setProvidersLoading] = useState(true)
@@ -49,9 +89,19 @@ export function useConnectors(active: boolean) {
   const [slackPickerOpen, setSlackPickerOpen] = useState(false)
   const [slackDiscovering, setSlackDiscovering] = useState(false)
   const [slackDiscoverError, setSlackDiscoverError] = useState<string | null>(null)
+  // True when discovery succeeded but no workspaces are connected yet, so the
+  // user needs to import auth from the Slack desktop app (fixes the silent
+  // "Enable" bounce-back where the button never progressed).
+  const [slackNeedsAuth, setSlackNeedsAuth] = useState(false)
+  const [slackAuthImporting, setSlackAuthImporting] = useState(false)
+  // Cross-OS "paste cURL from a browser tab" fallback when desktop import fails.
+  const [slackCurlOpen, setSlackCurlOpen] = useState(false)
+  const [slackCurlValue, setSlackCurlValue] = useState("")
+  const [slackCurlSubmitting, setSlackCurlSubmitting] = useState(false)
   const [slackKnowledgeEnabled, setSlackKnowledgeEnabled] = useState(false)
   const [slackKnowledgeChannels, setSlackKnowledgeChannels] = useState("")
   const [slackKnowledgeSaving, setSlackKnowledgeSaving] = useState(false)
+  const [slackSyncStatuses, setSlackSyncStatuses] = useState<SlackSyncStatus[]>([])
 
   // Composio Gmail/Calendar sync was removed. These flags are seeded false
   // and never flipped — the IPC that used to set them is gone. The setters
@@ -136,25 +186,104 @@ export function useConnectors(active: boolean) {
   const handleSlackEnable = useCallback(async () => {
     setSlackDiscovering(true)
     setSlackDiscoverError(null)
+    setSlackNeedsAuth(false)
+    setSlackCurlOpen(false)
+    setSlackCurlValue("")
+    setSlackPickerOpen(true)
     try {
       const result = await window.ipc.invoke('slack:listWorkspaces', null)
-      if (result.error || result.workspaces.length === 0) {
-        setSlackDiscoverError(result.error || 'No Slack workspaces found. Set up with: agent-slack auth import-desktop')
-        setSlackAvailableWorkspaces([])
-        setSlackPickerOpen(true)
-      } else {
+      if (result.workspaces.length > 0) {
+        // Already-connected workspaces → straight to the picker.
         setSlackAvailableWorkspaces(result.workspaces)
         setSlackSelectedUrls(new Set(result.workspaces.map((w: { url: string }) => w.url)))
-        setSlackPickerOpen(true)
+      } else {
+        // CLI ran but nothing is connected yet (or it errored): offer a
+        // concrete next step instead of a dead-end message.
+        setSlackAvailableWorkspaces([])
+        setSlackNeedsAuth(true)
+        setSlackDiscoverError(result.error ? actionableSlackError(result.errorKind, result.error) : null)
       }
     } catch (error) {
       console.error('Failed to discover Slack workspaces:', error)
-      setSlackDiscoverError('Failed to discover Slack workspaces')
-      setSlackPickerOpen(true)
+      setSlackNeedsAuth(true)
+      setSlackDiscoverError("Couldn't start Slack discovery. Please try again.")
     } finally {
       setSlackDiscovering(false)
     }
   }, [])
+
+  // Shared success path for both auth methods: show the discovered workspaces
+  // in the picker, preselected. Returns true when workspaces were found.
+  const applyDiscoveredWorkspaces = useCallback((result: { ok: boolean; workspaces: Array<{ url: string; name: string }>; error?: string; errorKind?: string }) => {
+    if (result.ok && result.workspaces.length > 0) {
+      setSlackAvailableWorkspaces(result.workspaces)
+      setSlackSelectedUrls(new Set(result.workspaces.map((w) => w.url)))
+      setSlackNeedsAuth(false)
+      setSlackCurlOpen(false)
+      setSlackCurlValue("")
+      return true
+    }
+    setSlackDiscoverError(actionableSlackError(result.errorKind, result.error))
+    return false
+  }, [])
+
+  // Import xoxc token + cookie from the signed-in Slack desktop app, then show
+  // the discovered workspaces in the picker.
+  const handleSlackImportDesktop = useCallback(async () => {
+    setSlackAuthImporting(true)
+    setSlackDiscoverError(null)
+    try {
+      const result = await window.ipc.invoke('slack:importDesktopAuth', null)
+      // Desktop import is best-effort: it fails when Slack is running and locks
+      // its Cookies DB (EBUSY on Windows), or on unsupported Slack builds. On
+      // any failure, reveal the browser-paste fallback so the user is never
+      // stuck — it has no file-lock dependency and works cross-OS.
+      if (!applyDiscoveredWorkspaces(result)) {
+        setSlackCurlOpen(true)
+      }
+    } catch (error) {
+      console.error('Failed to import Slack desktop auth:', error)
+      setSlackDiscoverError("Couldn't import from the Slack desktop app. Please try again, or paste from your browser below.")
+      setSlackCurlOpen(true)
+    } finally {
+      setSlackAuthImporting(false)
+    }
+  }, [applyDiscoveredWorkspaces])
+
+  // Windows-only: force-quit Slack (releases its Cookies-DB lock) then import.
+  // One click instead of the manual taskkill dance.
+  const handleSlackQuitAndImport = useCallback(async () => {
+    setSlackAuthImporting(true)
+    setSlackDiscoverError(null)
+    try {
+      const result = await window.ipc.invoke('slack:quitAndImportDesktop', null)
+      if (!applyDiscoveredWorkspaces(result)) {
+        setSlackCurlOpen(true)
+      }
+    } catch (error) {
+      console.error('Failed to quit Slack and import:', error)
+      setSlackDiscoverError("Couldn't import after closing Slack. Please try again, or paste from your browser below.")
+      setSlackCurlOpen(true)
+    } finally {
+      setSlackAuthImporting(false)
+    }
+  }, [applyDiscoveredWorkspaces])
+
+  // Fallback: parse a "Copy as cURL" request pasted from a signed-in Slack web
+  // tab. Works on every OS — no desktop app, leveldb, or keychain needed.
+  const handleSlackParseCurl = useCallback(async () => {
+    setSlackCurlSubmitting(true)
+    setSlackDiscoverError(null)
+    try {
+      const result = await window.ipc.invoke('slack:parseCurlAuth', { curl: slackCurlValue })
+      applyDiscoveredWorkspaces(result)
+    } catch (error) {
+      console.error('Failed to parse Slack cURL:', error)
+      setSlackDiscoverError("Couldn't read that cURL command. Please try again.")
+    } finally {
+      setSlackCurlSubmitting(false)
+    }
+  }, [applyDiscoveredWorkspaces, slackCurlValue])
 
   const handleSlackSaveWorkspaces = useCallback(async () => {
     const selected = slackAvailableWorkspaces.filter(w => slackSelectedUrls.has(w.url))
@@ -164,6 +293,7 @@ export function useConnectors(active: boolean) {
       setSlackEnabled(true)
       setSlackWorkspaces(selected)
       setSlackPickerOpen(false)
+      setSlackNeedsAuth(false)
       toast.success('Slack enabled')
     } catch (error) {
       console.error('Failed to save Slack config:', error)
@@ -180,6 +310,9 @@ export function useConnectors(active: boolean) {
       setSlackEnabled(false)
       setSlackWorkspaces([])
       setSlackPickerOpen(false)
+      setSlackNeedsAuth(false)
+      setSlackCurlOpen(false)
+      setSlackCurlValue("")
       await window.ipc.invoke('knowledgeSources:upsert', {
         id: 'slack',
         provider: 'slack',
@@ -197,6 +330,16 @@ export function useConnectors(active: boolean) {
       toast.error('Failed to update Slack settings')
     } finally {
       setSlackLoading(false)
+    }
+  }, [])
+
+  const refreshSlackKnowledgeStatus = useCallback(async () => {
+    try {
+      const result = await window.ipc.invoke('slack:knowledgeStatus', null)
+      setSlackSyncStatuses(result.sources)
+    } catch (error) {
+      console.error('Failed to load Slack knowledge status:', error)
+      setSlackSyncStatuses([])
     }
   }, [])
 
@@ -515,6 +658,7 @@ export function useConnectors(active: boolean) {
     refreshGranolaConfig()
     refreshSlackConfig()
     refreshKnowledgeSources()
+    refreshSlackKnowledgeStatus()
 
     if (useComposioForGoogle) {
       refreshGmailStatus()
@@ -559,7 +703,7 @@ export function useConnectors(active: boolean) {
     }
 
     setProviderStates(newStates)
-  }, [providers, refreshGranolaConfig, refreshSlackConfig, refreshKnowledgeSources, refreshGmailStatus, useComposioForGoogle, refreshGoogleCalendarStatus, useComposioForGoogleCalendar])
+  }, [providers, refreshGranolaConfig, refreshSlackConfig, refreshKnowledgeSources, refreshSlackKnowledgeStatus, refreshGmailStatus, useComposioForGoogle, refreshGoogleCalendarStatus, useComposioForGoogleCalendar])
 
   // Refresh when active or providers change
   useEffect(() => {
@@ -685,12 +829,23 @@ export function useConnectors(active: boolean) {
     setSlackPickerOpen,
     slackDiscovering,
     slackDiscoverError,
+    slackNeedsAuth,
+    slackAuthImporting,
+    slackCurlOpen,
+    setSlackCurlOpen,
+    slackCurlValue,
+    setSlackCurlValue,
+    slackCurlSubmitting,
+    slackSyncStatuses,
     slackKnowledgeEnabled,
     setSlackKnowledgeEnabled,
     slackKnowledgeChannels,
     setSlackKnowledgeChannels,
     slackKnowledgeSaving,
     handleSlackEnable,
+    handleSlackImportDesktop,
+    handleSlackQuitAndImport,
+    handleSlackParseCurl,
     handleSlackSaveWorkspaces,
     handleSlackDisable,
     handleSlackKnowledgeSave,

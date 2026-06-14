@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { agentSlackShimEnv, resolveAgentSlackCli, runAgentSlack } from './agent-slack-exec.js';
+import { agentSlackShimEnv, classifyAgentSlackStderr, resolveAgentSlackCli, runAgentSlack } from './agent-slack-exec.js';
 
 const execAsync = promisify(exec);
 
@@ -15,6 +15,7 @@ let jsonCli: string;
 let garbageCli: string;
 let sleepCli: string;
 let failingCli: string;
+let stdinCli: string;
 
 function writeFixture(name: string, code: string): string {
     const file = path.join(fixtureDir, name);
@@ -25,6 +26,7 @@ function writeFixture(name: string, code: string): string {
 beforeAll(() => {
     fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-slack-exec-test-'));
     jsonCli = writeFixture('json.cjs', `process.stdout.write(JSON.stringify({ args: process.argv.slice(2) }));`);
+    stdinCli = writeFixture('stdin.cjs', `let s = ''; process.stdin.on('data', c => s += c); process.stdin.on('end', () => process.stdout.write(s.trim()));`);
     garbageCli = writeFixture('garbage.cjs', `process.stdout.write('definitely: not json');`);
     sleepCli = writeFixture('sleep.cjs', `setTimeout(() => {}, 60_000);`);
     failingCli = writeFixture('fail.cjs', `process.stderr.write('boom'); process.exit(2);`);
@@ -92,6 +94,12 @@ describe('runAgentSlack', () => {
         if (result.ok) expect(result.stdout).toBe('definitely: not json');
     });
 
+    it('writes opts.input to the child stdin (parse-curl path)', async () => {
+        const result = await runAgentSlack([], { resolve: via(stdinCli), parseJson: false, input: "curl 'https://team.slack.com'" });
+        expect(result.ok).toBe(true);
+        if (result.ok) expect(result.stdout).toBe("curl 'https://team.slack.com'");
+    });
+
     it('reports not_installed when no binary resolves', async () => {
         const result = await runAgentSlack(['--version'], {
             resolve: { bundledCandidates: [missing], globalCandidates: [missing], pathProbe: () => null },
@@ -109,9 +117,52 @@ describe('runAgentSlack', () => {
         expect(result).toMatchObject({ ok: false, kind: 'timeout' });
     }, 10_000);
 
-    it('reports exec_error with stderr on non-zero exit', async () => {
+    it('classifies stderr on non-zero exit (unrecognized → unknown)', async () => {
         const result = await runAgentSlack([], { resolve: via(failingCli) });
-        expect(result).toMatchObject({ ok: false, kind: 'exec_error', stderr: 'boom' });
+        expect(result).toMatchObject({ ok: false, kind: 'unknown', stderr: 'boom', message: 'boom' });
+    });
+});
+
+describe('classifyAgentSlackStderr', () => {
+    // Fixture corpus: strings marked (captured) are real stderr induced on a
+    // machine with no Slack auth; the rest are taken verbatim from the
+    // agent-slack 0.9.3 / @slack/web-api 7.17 sources.
+    const cases: Array<[string, ReturnType<typeof classifyAgentSlackStderr>]> = [
+        // not_authed — empty credential store (auth auto-import cascade)
+        ['Firefox extraction is not supported on win32.', 'not_authed'],                       // (captured)
+        ['Slack Desktop data not found. Checked:\n  - C:\\Users\\X\\AppData\\Roaming\\Slack\\Local Storage\\leveldb', 'not_authed'], // (captured)
+        // not_authed — Slack API codes, both client flavors
+        ['invalid_auth', 'not_authed'],
+        ['token_expired', 'not_authed'],
+        ['An API error occurred: invalid_auth', 'not_authed'],
+        ['account_inactive', 'not_authed'],
+        // rate_limited
+        ['ratelimited', 'rate_limited'],
+        ['A rate-limit has been reached, you may retry this request in 30 seconds', 'rate_limited'],
+        ['Slack HTTP 429 calling conversations.history', 'rate_limited'],
+        // network
+        ['A request error occurred: getaddrinfo ENOTFOUND slack.com', 'network'],
+        ['fetch failed', 'network'],
+        ['connect ECONNREFUSED 127.0.0.1:443', 'network'],
+        ['Slack HTTP 503 calling conversations.list', 'network'],
+        // bad_channel
+        ['channel_not_found', 'bad_channel'],
+        ['An API error occurred: channel_not_found', 'bad_channel'],
+        ['Could not resolve channel name: #nonexistent-channel', 'bad_channel'],
+        ['not_in_channel', 'bad_channel'],
+        // unknown
+        ['Ambiguous channel name across multiple workspaces. Pass --workspace "<url>"', 'unknown'],
+        ['', 'unknown'],
+    ];
+
+    it.each(cases)('%j → %s', (stderr, expected) => {
+        expect(classifyAgentSlackStderr(stderr)).toBe(expected);
+    });
+
+    it('does not misread substrings of longer identifiers', () => {
+        // "speedratelimitedness" style false positives guarded by boundaries
+        expect(classifyAgentSlackStderr('field xratelimitedx in payload')).toBe('unknown');
+        expect(classifyAgentSlackStderr('saved to channel_not_found_archive.txt')).toBe('unknown');
     });
 });
 

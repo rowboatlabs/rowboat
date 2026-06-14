@@ -25,11 +25,50 @@ export interface ResolvedAgentSlack {
     source: AgentSlackSource;
 }
 
-export type AgentSlackErrorKind = 'not_installed' | 'timeout' | 'parse_error' | 'exec_error';
+export type AgentSlackErrorKind =
+    // Structural failures (detected without running / from the spawn itself)
+    | 'not_installed' | 'timeout' | 'parse_error'
+    // CLI failures classified from stderr (exit code is always 1)
+    | 'not_authed' | 'rate_limited' | 'network' | 'bad_channel' | 'unknown';
+
+// agent-slack prints `err.message` to stderr and exits 1 for every failure, so
+// stderr text is the only classification signal. Patterns cover both Slack
+// client flavors the CLI uses: the browser-token client throws bare Slack
+// error codes ("invalid_auth"), @slack/web-api wraps them ("An API error
+// occurred: invalid_auth") — plus the CLI's own messages. Word-ish boundaries
+// match the CLI's own auth-detection regex.
+const SLACK_CODE = (codes: string) => new RegExp(`(?:^|[^a-z_])(?:${codes})(?:$|[^a-z_])`, 'i');
+
+const NOT_AUTHED_RE = SLACK_CODE('invalid_auth|token_expired|token_revoked|account_inactive|not_authed');
+// Empty credential store surfaces as the auth auto-import cascade failing,
+// e.g. "Slack Desktop data not found." / "Firefox extraction is not supported
+// on win32." (real stderr captured on Windows with no Slack installed).
+const AUTH_IMPORT_RE = /Slack Desktop data not found|extraction is not supported/i;
+const RATE_LIMITED_RE = /(?:^|[^a-z_])ratelimited(?:$|[^a-z_])|A rate-?limit has been reached|Slack HTTP 429/i;
+const NETWORK_RE = /A request error occurred|fetch failed|socket hang up|ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EAI_AGAIN|EPIPE|Slack HTTP 5\d\d/i;
+const BAD_CHANNEL_RE = new RegExp(
+    `${SLACK_CODE('channel_not_found|not_in_channel|is_archived').source}|Could not resolve channel name`, 'i');
+
+/** Classify an agent-slack failure from its stderr. Exported for tests. */
+export function classifyAgentSlackStderr(stderr: string): Exclude<AgentSlackErrorKind, 'not_installed' | 'timeout' | 'parse_error'> {
+    if (RATE_LIMITED_RE.test(stderr)) return 'rate_limited';
+    if (BAD_CHANNEL_RE.test(stderr)) return 'bad_channel';
+    if (NOT_AUTHED_RE.test(stderr) || AUTH_IMPORT_RE.test(stderr)) return 'not_authed';
+    if (NETWORK_RE.test(stderr)) return 'network';
+    return 'unknown';
+}
 
 export type AgentSlackResult =
     | { ok: true; stdout: string; data: unknown }
     | { ok: false; kind: AgentSlackErrorKind; message: string; stderr: string };
+
+/** Throwable wrapper for callers with throw-based control flow (sync loop). */
+export class AgentSlackRunError extends Error {
+    constructor(public readonly kind: AgentSlackErrorKind, message: string) {
+        super(message);
+        this.name = 'AgentSlackRunError';
+    }
+}
 
 export interface ResolveOptions {
     /** Re-probe even if a previous resolution succeeded. */
@@ -45,6 +84,8 @@ export interface RunAgentSlackOptions {
     maxBuffer?: number;
     /** Set false for commands with non-JSON output (e.g. --version). */
     parseJson?: boolean;
+    /** Written to the child's stdin then closed (e.g. `auth parse-curl`). */
+    input?: string;
     /** Test hook — bypass the default resolver. */
     resolve?: ResolveOptions;
 }
@@ -161,13 +202,20 @@ export async function runAgentSlack(args: string[], opts: RunAgentSlackOptions =
         // process.execPath inside Electron's main process is the Electron
         // binary, not node — ELECTRON_RUN_AS_NODE makes it behave as plain
         // node (and is ignored when we already run under real node).
-        const result = await execFileAsync(process.execPath, [resolved.entry, ...args], {
+        const promise = execFileAsync(process.execPath, [resolved.entry, ...args], {
             timeout,
             maxBuffer: opts.maxBuffer ?? DEFAULT_MAX_BUFFER,
             encoding: 'utf-8',
             windowsHide: true,
             env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
         });
+        // promisify(execFile) exposes the ChildProcess as `.child`, letting us
+        // feed stdin for commands that read it (e.g. `auth parse-curl`). Close
+        // stdin so those commands stop waiting for more input.
+        if (opts.input != null) {
+            promise.child.stdin?.end(opts.input);
+        }
+        const result = await promise;
         stdout = result.stdout;
     } catch (error) {
         const err = error as NodeJS.ErrnoException & { killed?: boolean; signal?: string; stderr?: string };
@@ -178,7 +226,7 @@ export async function runAgentSlack(args: string[], opts: RunAgentSlackOptions =
         if (err.killed || err.signal === 'SIGTERM') {
             return { ok: false, kind: 'timeout', message: `agent-slack timed out after ${timeout}ms`, stderr };
         }
-        return { ok: false, kind: 'exec_error', message: err.message ?? 'agent-slack failed', stderr };
+        return { ok: false, kind: classifyAgentSlackStderr(stderr), message: stderr.trim() || err.message || 'agent-slack failed', stderr };
     }
 
     if (opts.parseJson === false) {

@@ -33,6 +33,14 @@ const KnowledgeSourceScopeSchema = z.object({
   workspaceUrl: z.string().optional(),
 });
 
+// Mirrors AgentSlackErrorKind in @x/core/slack/agent-slack-exec. Kept as a
+// standalone enum so the renderer can branch on failure cause without
+// importing core.
+const SlackErrorKindSchema = z.enum([
+  'not_installed', 'timeout', 'parse_error',
+  'not_authed', 'rate_limited', 'network', 'bad_channel', 'unknown',
+]);
+
 const KnowledgeSourceConfigSchema = z.object({
   id: z.string(),
   provider: z.enum(['gmail', 'meeting', 'voice_memo', 'slack', 'github', 'linear']),
@@ -532,6 +540,52 @@ const ipcSchemas = {
     res: z.object({
       workspaces: z.array(z.object({ url: z.string(), name: z.string() })),
       error: z.string().optional(),
+      errorKind: SlackErrorKindSchema.optional(),
+    }),
+  },
+  'slack:importDesktopAuth': {
+    req: z.null(),
+    res: z.object({
+      ok: z.boolean(),
+      workspaces: z.array(z.object({ url: z.string(), name: z.string() })),
+      error: z.string().optional(),
+      errorKind: SlackErrorKindSchema.optional(),
+    }),
+  },
+  'slack:quitAndImportDesktop': {
+    req: z.null(),
+    res: z.object({
+      ok: z.boolean(),
+      workspaces: z.array(z.object({ url: z.string(), name: z.string() })),
+      error: z.string().optional(),
+      errorKind: SlackErrorKindSchema.optional(),
+    }),
+  },
+  'slack:parseCurlAuth': {
+    req: z.object({ curl: z.string() }),
+    res: z.object({
+      ok: z.boolean(),
+      workspaces: z.array(z.object({ url: z.string(), name: z.string() })),
+      error: z.string().optional(),
+      errorKind: SlackErrorKindSchema.optional(),
+    }),
+  },
+  'slack:knowledgeStatus': {
+    req: z.null(),
+    res: z.object({
+      cli: z.object({
+        available: z.boolean(),
+        version: z.string().optional(),
+        source: z.enum(['bundled', 'global', 'path']).optional(),
+      }),
+      sources: z.array(z.object({
+        id: z.string(),
+        enabled: z.boolean(),
+        lastSyncAt: z.string().optional(),
+        lastStatus: z.enum(['ok', 'error']).optional(),
+        lastError: z.object({ kind: z.string(), message: z.string() }).optional(),
+        nextDueAt: z.string().optional(),
+      })),
     }),
   },
   'slack:listChannels': {
@@ -566,6 +620,7 @@ const ipcSchemas = {
         url: z.string().optional(),
       })),
       error: z.string().optional(),
+      errorKind: SlackErrorKindSchema.optional(),
     }),
   },
   'knowledgeSources:getConfig': {

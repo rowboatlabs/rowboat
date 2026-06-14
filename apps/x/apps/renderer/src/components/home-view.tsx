@@ -112,6 +112,21 @@ function relativeSlackTs(ts: string): string {
   return relativeAgo(iso)
 }
 
+// Short, non-actionable copy for the home feed — the actionable fix lives in
+// Settings, so every failure routes the user there.
+function homeSlackErrorCopy(kind: string | null): string {
+  switch (kind) {
+    case 'not_authed':
+      return 'Slack needs reconnecting — open Settings → Connected accounts.'
+    case 'network':
+      return "Couldn't reach Slack. Check your connection."
+    case 'rate_limited':
+      return 'Slack is rate-limiting requests — will retry shortly.'
+    default:
+      return "Couldn't load Slack right now — see Settings."
+  }
+}
+
 function parseAllDay(s: string): Date | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s)
   if (!m) return null
@@ -239,6 +254,7 @@ export function HomeView({
   const [slackEnabled, setSlackEnabled] = useState(false)
   const [slackMessages, setSlackMessages] = useState<SlackFeedMessage[]>([])
   const [slackError, setSlackError] = useState<string | null>(null)
+  const [slackErrorKind, setSlackErrorKind] = useState<string | null>(null)
   const [toolkitPreviews, setToolkitPreviews] = useState<ToolkitPreview[]>(cachedToolkitPreviews ?? [])
   const [toolkitLogosLoaded, setToolkitLogosLoaded] = useState(cachedToolkitLogosLoaded)
   const [connectionsSettingsOpen, setConnectionsSettingsOpen] = useState(false)
@@ -287,11 +303,13 @@ export function HomeView({
       setSlackEnabled(result.enabled)
       setSlackMessages(result.messages)
       setSlackError(result.error ?? null)
+      setSlackErrorKind(result.errorKind ?? null)
     } catch (err) {
       console.error('Home: failed to load Slack messages', err)
       setSlackEnabled(false)
       setSlackMessages([])
       setSlackError(null)
+      setSlackErrorKind(null)
     }
   }, [])
 
@@ -505,9 +523,9 @@ export function HomeView({
                 <span className="text-xs text-muted-foreground">Latest messages</span>
               </div>
               {slackError ? (
-                <div className="py-1 text-[12.5px] text-muted-foreground">{slackError}</div>
+                <div className="py-1 text-[12.5px] text-muted-foreground">{homeSlackErrorCopy(slackErrorKind)}</div>
               ) : slackMessages.length === 0 ? (
-                <div className="py-1 text-[12.5px] text-muted-foreground">No recent Slack messages found.</div>
+                <div className="py-1 text-[12.5px] text-muted-foreground">No messages worth surfacing right now.</div>
               ) : slackMessages.map((message, i) => (
                 <div
                   key={message.id}

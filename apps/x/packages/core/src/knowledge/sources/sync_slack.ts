@@ -1,7 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import { WorkDir } from '../../config/config.js';
-import { runAgentSlack as execAgentSlack } from '../../slack/agent-slack-exec.js';
+import { AgentSlackRunError, runAgentSlack as execAgentSlack } from '../../slack/agent-slack-exec.js';
+import type { AgentSlackErrorKind } from '../../slack/agent-slack-exec.js';
 import { serviceLogger } from '../../services/service_logger.js';
 import { limitEventItems } from '../limit_event_items.js';
 import { createEvent } from '../../events/producer.js';
@@ -14,9 +15,18 @@ const DEFAULT_RECENT_BACKFILL_SECONDS = 6 * 60 * 60;
 const STATE_FILE = path.join(WorkDir, 'slack_knowledge_sync_state.json');
 const ARTIFACT_ROOT = path.join(WorkDir, 'knowledge_sources', 'slack');
 
+export type SlackSourceSyncState = {
+    /** Time of the last sync attempt (success or failure). */
+    lastSyncAt?: string;
+    lastStatus?: 'ok' | 'error';
+    lastError?: { kind: AgentSlackErrorKind | 'unknown'; message: string };
+    /** Rate-limit backoff: multiplies the source interval; reset on success. */
+    backoffMultiplier?: number;
+};
+
 type SlackSyncState = {
     lastSyncAt?: string;
-    sources?: Record<string, { lastSyncAt?: string }>;
+    sources?: Record<string, SlackSourceSyncState>;
     channels: Record<string, { lastSeenTs?: string }>;
 };
 
@@ -54,12 +64,20 @@ function saveState(state: SlackSyncState): void {
     fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2), 'utf-8');
 }
 
+const MAX_SOURCE_SYNC_INTERVAL_MS = 30 * 60 * 1000;
+
+/** Source interval with rate-limit backoff applied, capped at 30 minutes. */
+export function effectiveIntervalMs(source: KnowledgeSourceConfig, sourceState?: SlackSourceSyncState): number {
+    const base = source.intervalMs ?? DEFAULT_SYNC_INTERVAL_MS;
+    const multiplier = Math.max(1, sourceState?.backoffMultiplier ?? 1);
+    return Math.min(base * multiplier, MAX_SOURCE_SYNC_INTERVAL_MS);
+}
+
 function isSourceDue(source: KnowledgeSourceConfig, state: SlackSyncState): boolean {
     const sourceState = state.sources?.[source.id];
     if (!sourceState?.lastSyncAt) return true;
     const lastSyncMs = Date.parse(sourceState.lastSyncAt);
-    const intervalMs = source.intervalMs ?? DEFAULT_SYNC_INTERVAL_MS;
-    return !Number.isFinite(lastSyncMs) || Date.now() - lastSyncMs >= intervalMs;
+    return !Number.isFinite(lastSyncMs) || Date.now() - lastSyncMs >= effectiveIntervalMs(source, sourceState);
 }
 
 function safeSegment(value: string): string {
@@ -118,8 +136,7 @@ function getMessageAuthor(message: SlackMessage): string {
 async function runAgentSlack(args: string[]): Promise<unknown> {
     const result = await execAgentSlack(args, { timeoutMs: 30_000, maxBuffer: 2 * 1024 * 1024 });
     if (!result.ok) {
-        // Sync error handling stays throw-based for now; callers log per run.
-        throw new Error(`agent-slack ${result.kind}: ${result.message}`);
+        throw new AgentSlackRunError(result.kind, result.message);
     }
     return result.data ?? [];
 }
@@ -249,21 +266,15 @@ async function publishSlackSyncEvent(files: string[]): Promise<void> {
     });
 }
 
-async function syncSource(source: KnowledgeSourceConfig): Promise<string[]> {
-    if (!source.enabled || source.provider !== 'slack') return [];
+/**
+ * Sync one source's channels into artifact files. Mutates state.channels as
+ * it goes; throws AgentSlackRunError on CLI failure (status bookkeeping is
+ * the caller's job).
+ */
+async function syncSource(source: KnowledgeSourceConfig, state: SlackSyncState): Promise<string[]> {
     if (source.scopes.length === 0) {
         console.log(`[SlackKnowledge] Source ${source.id} has no channel scopes; skipping`);
         return [];
-    }
-
-    const state = loadState();
-    const sourceState = state.sources?.[source.id];
-    const intervalMs = source.intervalMs ?? DEFAULT_SYNC_INTERVAL_MS;
-    if (sourceState?.lastSyncAt) {
-        const lastSyncMs = Date.parse(sourceState.lastSyncAt);
-        if (Number.isFinite(lastSyncMs) && Date.now() - lastSyncMs < intervalMs) {
-            return [];
-        }
     }
 
     const writtenFiles: string[] = [];
@@ -294,13 +305,27 @@ async function syncSource(source: KnowledgeSourceConfig): Promise<string[]> {
         state.channels[key] = { lastSeenTs: newestTs };
     }
 
-    state.lastSyncAt = new Date().toISOString();
-    state.sources = {
-        ...(state.sources ?? {}),
-        [source.id]: { lastSyncAt: state.lastSyncAt },
-    };
-    saveState(state);
     return writtenFiles;
+}
+
+function recordSourceResult(state: SlackSyncState, sourceId: string, error?: { kind: AgentSlackErrorKind | 'unknown'; message: string }): void {
+    const previous = state.sources?.[sourceId];
+    const now = new Date().toISOString();
+    const next: SlackSourceSyncState = { lastSyncAt: now };
+    if (error) {
+        next.lastStatus = 'error';
+        next.lastError = error;
+        if (error.kind === 'rate_limited') {
+            // Doubles each consecutive rate limit; effectiveIntervalMs caps
+            // the resulting interval at 30 min, the clamp keeps the stored
+            // value sane in the state file.
+            next.backoffMultiplier = Math.min(Math.max(2, (previous?.backoffMultiplier ?? 1) * 2), 1024);
+        }
+    } else {
+        next.lastStatus = 'ok';
+    }
+    state.lastSyncAt = now;
+    state.sources = { ...(state.sources ?? {}), [sourceId]: next };
 }
 
 export async function syncSlackKnowledgeSources(): Promise<string[]> {
@@ -321,13 +346,38 @@ export async function syncSlackKnowledgeSources(): Promise<string[]> {
     const writtenFiles: string[] = [];
     let hadError = false;
 
-    try {
-        for (const source of sources) {
-            const files = await syncSource(source);
+    for (const source of sources) {
+        let rateLimited = false;
+        try {
+            const files = await syncSource(source, state);
             writtenFiles.push(...files);
+            recordSourceResult(state, source.id);
+        } catch (error) {
+            // One failing source must not abort the others.
+            hadError = true;
+            const kind = error instanceof AgentSlackRunError ? error.kind : 'unknown';
+            const message = error instanceof Error ? error.message : String(error);
+            recordSourceResult(state, source.id, { kind, message });
+            rateLimited = kind === 'rate_limited';
+            console.error(`[SlackKnowledge] Sync failed for source ${source.id} (${kind}):`, message);
+            await serviceLogger.log({
+                type: 'error',
+                service: run.service,
+                runId: run.runId,
+                level: 'error',
+                message: `Slack knowledge sync error for source ${source.id} (${kind})`,
+                error: message,
+            });
         }
+        // Persist after every source so progress and status survive a crash.
+        saveState(state);
+        // Rate limits are per-token, so the remaining sources would hit the
+        // same wall — end this run; they stay due for the next tick.
+        if (rateLimited) break;
+    }
 
-        if (writtenFiles.length > 0) {
+    if (writtenFiles.length > 0) {
+        try {
             const relativeFiles = writtenFiles.map(file => path.relative(WorkDir, file));
             const limitedFiles = limitEventItems(relativeFiles);
             await serviceLogger.log({
@@ -341,18 +391,10 @@ export async function syncSlackKnowledgeSources(): Promise<string[]> {
                 truncated: limitedFiles.truncated,
             });
             await publishSlackSyncEvent(writtenFiles);
+        } catch (error) {
+            hadError = true;
+            console.error('[SlackKnowledge] Failed to publish sync results:', error);
         }
-    } catch (error) {
-        hadError = true;
-        console.error('[SlackKnowledge] Sync failed:', error);
-        await serviceLogger.log({
-            type: 'error',
-            service: run.service,
-            runId: run.runId,
-            level: 'error',
-            message: 'Slack knowledge sync error',
-            error: error instanceof Error ? error.message : String(error),
-        });
     }
 
     await serviceLogger.log({
@@ -371,6 +413,39 @@ export async function syncSlackKnowledgeSources(): Promise<string[]> {
 
 export function getSlackKnowledgeArtifactRoot(): string {
     return ARTIFACT_ROOT;
+}
+
+export type SlackKnowledgeSourceStatus = {
+    id: string;
+    enabled: boolean;
+    lastSyncAt?: string;
+    lastStatus?: 'ok' | 'error';
+    lastError?: { kind: string; message: string };
+    /** When the source next becomes due, given interval + backoff. */
+    nextDueAt?: string;
+};
+
+/** Per-source sync status for the slack:knowledgeStatus IPC channel. */
+export function getSlackKnowledgeSyncStatus(): SlackKnowledgeSourceStatus[] {
+    const state = loadState();
+    return knowledgeSourcesRepo
+        .getConfig()
+        .sources
+        .filter(source => source.provider === 'slack')
+        .map(source => {
+            const sourceState = state.sources?.[source.id];
+            const lastMs = sourceState?.lastSyncAt ? Date.parse(sourceState.lastSyncAt) : NaN;
+            return {
+                id: source.id,
+                enabled: source.enabled,
+                lastSyncAt: sourceState?.lastSyncAt,
+                lastStatus: sourceState?.lastStatus,
+                lastError: sourceState?.lastError,
+                nextDueAt: Number.isFinite(lastMs)
+                    ? new Date(lastMs + effectiveIntervalMs(source, sourceState)).toISOString()
+                    : undefined,
+            };
+        });
 }
 
 let wakeResolve: (() => void) | null = null;
