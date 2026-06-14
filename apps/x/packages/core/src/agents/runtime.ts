@@ -448,6 +448,11 @@ export class AgentRuntime implements IAgentRuntime {
                         finalState.ingest(event);
                     }
                     if (finalState.getPendingPermissions().length === 0) {
+                        // Background tasks ping the user explicitly via the
+                        // notify-user tool; skip the automatic completion ping so
+                        // every background run doesn't fire "Response ready". (The
+                        // finally block still runs on this early return.)
+                        if (finalState.runUseCase === "background_task_agent") return;
                         void notifyIfEnabled("chat_completion", {
                             title: "Response ready",
                             message: "Your agent finished responding.",
