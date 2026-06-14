@@ -8,11 +8,10 @@ import {
   listProviders,
 } from './oauth-handler.js';
 import { watcher as watcherCore, workspace } from '@x/core';
-import { WorkDir } from '@x/core/dist/config/config.js';
 import { workspace as workspaceShared } from '@x/shared';
 import * as mcpCore from '@x/core/dist/mcp/mcp.js';
-import * as runsCore from '@x/core/dist/runs/runs.js';
-import { bus } from '@x/core/dist/runs/bus.js';
+import type { AgentRuntime } from '@x/core/dist/agent-runtime/index.js';
+import type { SessionBusEvent } from '@x/shared/dist/sessions.js';
 import { serviceBus } from '@x/core/dist/services/service_bus.js';
 import type { FSWatcher } from 'chokidar';
 import fs from 'node:fs/promises';
@@ -21,7 +20,6 @@ import { promisify } from 'node:util';
 import z from 'zod';
 
 const execAsync = promisify(exec);
-import { RunEvent } from '@x/shared/dist/runs.js';
 import { ServiceEvent } from '@x/shared/dist/service-events.js';
 import container from '@x/core/dist/di/container.js';
 import { listOnboardingModels } from '@x/core/dist/models/models-dev.js';
@@ -356,15 +354,6 @@ export function stopWorkspaceWatcher(): void {
   changeQueue.clear();
 }
 
-function emitRunEvent(event: z.infer<typeof RunEvent>): void {
-  const windows = BrowserWindow.getAllWindows();
-  for (const win of windows) {
-    if (!win.isDestroyed() && win.webContents) {
-      win.webContents.send('runs:events', event);
-    }
-  }
-}
-
 function emitServiceEvent(event: z.infer<typeof ServiceEvent>): void {
   const windows = BrowserWindow.getAllWindows();
   for (const win of windows) {
@@ -409,6 +398,18 @@ export async function startCodeSessionStatusWatcher(): Promise<void> {
   });
 }
 
+// Forward the generic event bus → renderer (runs:events). Code-mode (direct ACP
+// sessions) streams its live events (code-run-event, permission, message, …)
+// through this feed; chat + headless use the sessions:events feed below.
+function emitRunEvent(event: z.infer<typeof RunEvent>): void {
+  const windows = BrowserWindow.getAllWindows();
+  for (const win of windows) {
+    if (!win.isDestroyed() && win.webContents) {
+      win.webContents.send('runs:events', event);
+    }
+  }
+}
+
 let runsWatcher: (() => void) | null = null;
 export async function startRunsWatcher(): Promise<void> {
   if (runsWatcher) {
@@ -417,6 +418,28 @@ export async function startRunsWatcher(): Promise<void> {
   runsWatcher = await bus.subscribe('*', async (event) => {
     emitRunEvent(event);
   });
+}
+
+export function stopRunsWatcher(): void {
+  if (runsWatcher) {
+    runsWatcher();
+    runsWatcher = null;
+  }
+}
+
+function emitSessionEvent(event: SessionBusEvent): void {
+  const windows = BrowserWindow.getAllWindows();
+  for (const win of windows) {
+    if (!win.isDestroyed() && win.webContents) {
+      win.webContents.send('sessions:events', event);
+    }
+  }
+}
+
+let sessionsWatcher: (() => void) | null = null;
+export function startSessionsWatcher(agentRuntime: AgentRuntime): void {
+  if (sessionsWatcher) return;
+  sessionsWatcher = agentRuntime.bus.subscribe((event) => emitSessionEvent(event));
 }
 
 let servicesWatcher: (() => void) | null = null;
@@ -455,13 +478,6 @@ export function startBackgroundTaskAgentWatcher(): void {
   });
 }
 
-export function stopRunsWatcher(): void {
-  if (runsWatcher) {
-    runsWatcher();
-    runsWatcher = null;
-  }
-}
-
 export function stopServicesWatcher(): void {
   if (servicesWatcher) {
     servicesWatcher();
@@ -477,7 +493,7 @@ export function stopServicesWatcher(): void {
  * Register all IPC handlers
  * Add new handlers here as you add channels to IPCChannels
  */
-export function setupIpcHandlers() {
+export function setupIpcHandlers(agentRuntime: AgentRuntime) {
   // Forward knowledge commit events to renderer for panel refresh
   versionHistory.onCommit(() => emitKnowledgeCommitEvent());
 
@@ -587,67 +603,54 @@ export function setupIpcHandlers() {
     'mcp:executeTool': async (_event, args) => {
       return { result: await mcpCore.executeTool(args.serverName, args.toolName, args.input) };
     },
-    'runs:create': async (_event, args) => {
-      return runsCore.createRun(args);
+    // ── New runtime: sessions + turns ────────────────────────────────────────
+    // Turn-mutating calls return the turn id immediately; the turn advances in
+    // the background and the renderer reconciles via the sessions:events feed.
+    'sessions:create': async (_event, args) => {
+      return agentRuntime.sessions.createSession(args ?? undefined);
     },
-    'runs:createMessage': async (_event, args) => {
-      return { messageId: await runsCore.createMessage(args.runId, args.message, args.voiceInput, args.voiceOutput, args.searchEnabled, args.middlePaneContext, args.codeMode, args.codeCwd, args.codePolicy) };
+    'sessions:get': async (_event, args) => {
+      return agentRuntime.sessions.getSession(args.sessionId);
     },
-    'runs:authorizePermission': async (_event, args) => {
-      await runsCore.authorizePermission(args.runId, args.authorization);
+    'sessions:list': async (_event, args) => {
+      return { sessions: await agentRuntime.sessions.listSessions(args ?? undefined) };
+    },
+    'sessions:sendMessage': async (_event, args) => {
+      const handle = await agentRuntime.sessions.sendMessage(args.sessionId, args.messages, args.options);
+      return { turnId: handle.id };
+    },
+    'sessions:getHistory': async (_event, args) => {
+      return { messages: await agentRuntime.sessions.getHistory(args.sessionId) };
+    },
+    'sessions:listTurns': async (_event, args) => {
+      return { turns: await agentRuntime.sessions.listTurns(args.sessionId) };
+    },
+    'sessions:getTurn': async (_event, args) => {
+      return agentRuntime.agentLoop.getTurn(args.turnId);
+    },
+    'sessions:delete': async (_event, args) => {
+      await agentRuntime.sessions.deleteSession(args.sessionId);
       return { success: true };
+    },
+    'sessions:respondToPermission': async (_event, args) => {
+      const handle = agentRuntime.agentLoop.respondToPermission(args.turnId, args.toolCallId, args.decision, args.reason);
+      return { turnId: handle.id };
+    },
+    'sessions:setToolResult': async (_event, args) => {
+      const handle = agentRuntime.agentLoop.setToolResult(args.turnId, { toolCallId: args.toolCallId, result: args.result });
+      return { turnId: handle.id };
+    },
+    'sessions:resumeTurn': async (_event, args) => {
+      const handle = agentRuntime.agentLoop.resumeTurn(args.turnId);
+      return { turnId: handle.id };
+    },
+    'sessions:stopTurn': async (_event, args) => {
+      return agentRuntime.agentLoop.stopTurn(args.turnId);
     },
     'codeRun:resolvePermission': async (_event, args) => {
       const registry = container.resolve<CodePermissionRegistry>('codePermissionRegistry');
       registry.resolve(args.requestId, args.decision);
       return { success: true };
-    },
-    'runs:provideHumanInput': async (_event, args) => {
-      await runsCore.replyToHumanInputRequest(args.runId, args.reply);
-      return { success: true };
-    },
-    'runs:stop': async (_event, args) => {
-      await runsCore.stop(args.runId, args.force);
-      return { success: true };
-    },
-    'runs:fetch': async (_event, args) => {
-      return runsCore.fetchRun(args.runId);
-    },
-    'runs:list': async (_event, args) => {
-      return runsCore.listRuns(args.cursor);
-    },
-    'runs:delete': async (_event, args) => {
-      await runsCore.deleteRun(args.runId);
-      return { success: true };
-    },
-    'runs:downloadLog': async (event, args) => {
-      const runFileName = `${args.runId}.jsonl`;
-      if (path.basename(runFileName) !== runFileName) {
-        return { success: false, error: 'Invalid run id' };
-      }
-
-      const sourcePath = path.join(WorkDir, 'runs', runFileName);
-      const win = BrowserWindow.fromWebContents(event.sender);
-      const result = await dialog.showSaveDialog(win!, {
-        defaultPath: `${runFileName}.log`,
-        filters: [
-          { name: 'Chat Log', extensions: ['log'] },
-          { name: 'JSONL', extensions: ['jsonl'] },
-          { name: 'All Files', extensions: ['*'] },
-        ],
-      });
-
-      if (result.canceled || !result.filePath) {
-        return { success: false };
-      }
-
-      try {
-        await fs.copyFile(sourcePath, result.filePath);
-        return { success: true };
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Failed to download chat log';
-        return { success: false, error: message };
-      }
     },
     'models:list': async () => {
       if (await isSignedIn()) {
@@ -1171,7 +1174,7 @@ export function setupIpcHandlers() {
         if (!live?.lastRunId) {
           return { success: false, error: 'No active run for this note' };
         }
-        await runsCore.stop(live.lastRunId, false);
+        await agentRuntime.agentLoop.stopTurn(live.lastRunId);
         return { success: true };
       } catch (err) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };
@@ -1235,7 +1238,7 @@ export function setupIpcHandlers() {
         if (!task?.lastRunId) {
           return { success: false, error: 'No active run for this task' };
         }
-        await runsCore.stop(task.lastRunId, false);
+        await agentRuntime.agentLoop.stopTurn(task.lastRunId);
         return { success: true };
       } catch (err) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };

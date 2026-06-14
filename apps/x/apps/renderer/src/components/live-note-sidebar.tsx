@@ -11,11 +11,11 @@ import {
   ChevronDown, ChevronRight,
 } from 'lucide-react'
 import { LiveNoteSchema, type LiveNote, type Triggers } from '@x/shared/dist/live-note.js'
-import type { Run } from '@x/shared/dist/runs.js'
+import type { AgentLoopTurn } from '@x/shared/src/agent-turn.js'
 import type z from 'zod'
 import { useLiveNoteAgentStatus } from '@/hooks/use-live-note-agent-status'
 import { formatRelativeTime } from '@/lib/relative-time'
-import { runLogToConversation } from '@/lib/run-to-conversation'
+import { buildConversation } from '@/lib/agent-turn-view'
 import { CompactConversation } from '@/components/compact-conversation'
 
 export type OpenLiveNotePanelDetail = {
@@ -661,7 +661,7 @@ function SectionRegion({ label, children }: { label?: string; children: React.Re
 }
 
 function LastRunTab({ live }: { live: LiveNote }) {
-  const [run, setRun] = useState<z.infer<typeof Run> | null>(null)
+  const [run, setRun] = useState<z.infer<typeof AgentLoopTurn> | null>(null)
   const [loadingRun, setLoadingRun] = useState(false)
   const [fetchError, setFetchError] = useState<string | null>(null)
 
@@ -679,7 +679,7 @@ function LastRunTab({ live }: { live: LiveNote }) {
     setFetchError(null)
     void (async () => {
       try {
-        const r = await window.ipc.invoke('runs:fetch', { runId })
+        const r = await window.ipc.invoke('sessions:getTurn', { turnId: runId })
         if (cancelled) return
         setRun(r)
       } catch (err) {
@@ -704,7 +704,7 @@ function LastRunTab({ live }: { live: LiveNote }) {
   }
 
   const isError = !!live.lastRunError
-  const items = run ? runLogToConversation(run.log) : []
+  const items = run ? buildConversation(run) : []
 
   return (
     <div className="flex-1 overflow-auto px-4 py-4 space-y-4">

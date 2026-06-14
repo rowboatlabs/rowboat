@@ -7,7 +7,7 @@ import {
 } from 'lucide-react'
 import type { z } from 'zod'
 import type { BackgroundTask, BackgroundTaskSummary, Triggers } from '@x/shared/dist/background-task.js'
-import type { Run } from '@x/shared/dist/runs.js'
+import type { AgentLoopTurn } from '@x/shared/src/agent-turn.js'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { Input } from '@/components/ui/input'
@@ -16,7 +16,7 @@ import { useBackgroundTaskAgentStatus } from '@/hooks/use-bg-task-agent-status'
 import { formatRelativeTime } from '@/lib/relative-time'
 import { toast } from '@/lib/toast'
 import type { ConversationItem } from '@/lib/chat-conversation'
-import { runLogToConversation } from '@/lib/run-to-conversation'
+import { buildConversation } from '@/lib/agent-turn-view'
 import { CompactConversation } from '@/components/compact-conversation'
 import { RichMarkdownViewer } from '@/components/rich-markdown-viewer'
 import { HtmlFileViewer } from '@/components/html-file-viewer'
@@ -795,38 +795,36 @@ function SetupTab({
 // Runs history tab — list + drill-down transcript view
 //
 // Source of truth: `bg-tasks/<slug>/runs.log` — a plain-text file with one
-// runId per line (newest first). The actual transcripts live at the global
-// `$WorkDir/runs/<runId>.jsonl`, so this tab fetches runIds via the bg-task
-// IPC, then loads each Run through the standard `runs:fetch`. No bg-task-
-// specific transcript path or schema needed.
+// run id per line (newest first). Each id is a standalone turn id, so this tab
+// fetches ids via the bg-task IPC, then loads each turn through
+// `sessions:getTurn`. No bg-task-specific transcript path or schema needed.
 // ---------------------------------------------------------------------------
 
 interface RunRowSummary {
     runId: string
     createdAt?: string
-    trigger?: string
     summary?: string
     error?: string
 }
 
-// Pull the bits we want to display for a row out of a full Run's event log.
-function summarizeRun(run: z.infer<typeof Run>): RunRowSummary {
-    const out: RunRowSummary = { runId: run.id, createdAt: run.createdAt, trigger: run.subUseCase }
-    for (const event of run.log) {
-        if (event.type === 'error' && typeof event.error === 'string') {
-            out.error = event.error
-        } else if (event.type === 'message' && event.message?.role === 'assistant') {
-            const content = event.message.content
-            if (typeof content === 'string') {
-                out.summary = content
-            } else if (Array.isArray(content)) {
-                const text = content
-                    .filter((p) => p.type === 'text')
-                    .map((p) => ('text' in p ? p.text : ''))
-                    .join('')
-                if (text) out.summary = text
-            }
+// Pull the bits we want to display for a row out of a turn. Scans messages from
+// the end for the last assistant message and extracts its text.
+function summarizeTurn(turn: z.infer<typeof AgentLoopTurn>): RunRowSummary {
+    const out: RunRowSummary = { runId: turn.id, createdAt: turn.createdAt, error: turn.error?.message ?? undefined }
+    for (let i = turn.messages.length - 1; i >= 0; i--) {
+        const message = turn.messages[i]
+        if (message.role !== 'assistant') continue
+        const content = message.content
+        if (typeof content === 'string') {
+            if (content) out.summary = content
+        } else if (Array.isArray(content)) {
+            const text = content
+                .filter((p) => p.type === 'text')
+                .map((p) => ('text' in p ? p.text : ''))
+                .join('')
+            if (text) out.summary = text
         }
+        if (out.summary) break
     }
     return out
 }
@@ -841,17 +839,17 @@ function RunsHistoryTab({ slug, task }: { slug: string; task: BackgroundTask }) 
         setLoading(true)
         try {
             const { runIds } = await window.ipc.invoke('bg-task:listRunIds', { slug, limit: 100 })
-            // Fetch each Run in parallel via the canonical IPC. Runs whose
-            // jsonl no longer exists (deleted manually, never written, …) are
-            // dropped silently.
+            // A run id is now a turn id. Fetch each turn in parallel via the
+            // canonical IPC. Turns that no longer exist (deleted manually, never
+            // written, …) are dropped silently.
             const settled = await Promise.allSettled(
-                runIds.map(runId => window.ipc.invoke('runs:fetch', { runId }))
+                runIds.map(turnId => window.ipc.invoke('sessions:getTurn', { turnId }))
             )
             const next: RunRowSummary[] = []
             for (let i = 0; i < settled.length; i++) {
                 const r = settled[i]
                 if (r.status === 'fulfilled' && r.value) {
-                    next.push(summarizeRun(r.value))
+                    next.push(summarizeTurn(r.value))
                 } else {
                     // Keep the row visible with just the id so the user knows it exists.
                     next.push({ runId: runIds[i] })
@@ -924,12 +922,6 @@ function RunsHistoryTab({ slug, task }: { slug: string; task: BackgroundTask }) 
                                         <span className="font-mono text-[10.5px] text-muted-foreground">
                                             {row.createdAt ? formatRunAt(row.createdAt) : row.runId}
                                         </span>
-                                        {row.trigger && (
-                                            <>
-                                                <span className="text-[10.5px] text-muted-foreground">·</span>
-                                                <span className="text-[10.5px] text-muted-foreground">{row.trigger}</span>
-                                            </>
-                                        )}
                                         {inFlight && (
                                             <span className="text-[10.5px] text-amber-600">· running</span>
                                         )}
@@ -959,7 +951,7 @@ function RunTranscriptView({
     isInFlight: boolean
     onBack: () => void
 }) {
-    const [run, setRun] = useState<z.infer<typeof Run> | null>(null)
+    const [run, setRun] = useState<z.infer<typeof AgentLoopTurn> | null>(null)
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
 
@@ -969,9 +961,8 @@ function RunTranscriptView({
         setError(null)
         void (async () => {
             try {
-                // Bg-task transcripts now live at the global runs/ location —
-                // same path resolution as every other run, no special handling.
-                const r = await window.ipc.invoke('runs:fetch', { runId })
+                // A run id is now a turn id — fetch the turn snapshot.
+                const r = await window.ipc.invoke('sessions:getTurn', { turnId: runId })
                 if (cancelled) return
                 setRun(r)
             } catch (err) {
@@ -985,8 +976,8 @@ function RunTranscriptView({
         return () => { cancelled = true }
     }, [runId])
 
-    const summary = run ? summarizeRun(run) : undefined
-    const items: ConversationItem[] = run ? runLogToConversation(run.log) : []
+    const summary = run ? summarizeTurn(run) : undefined
+    const items: ConversationItem[] = run ? buildConversation(run) : []
 
     return (
         <div className="flex flex-1 flex-col overflow-hidden">
@@ -1002,7 +993,6 @@ function RunTranscriptView({
                 <div className="min-w-0 flex-1">
                     <div className="font-mono text-[10.5px] text-muted-foreground">
                         {summary?.createdAt ? formatRunAt(summary.createdAt) : runId}
-                        {summary?.trigger && ` · ${summary.trigger}`}
                         {isInFlight && <span className="ml-1 text-amber-600">· running</span>}
                     </div>
                 </div>

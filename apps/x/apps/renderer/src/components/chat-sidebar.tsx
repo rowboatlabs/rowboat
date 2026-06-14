@@ -1,18 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, Bug, MoreHorizontal, Pin } from 'lucide-react'
-import { toast } from 'sonner'
+import { ArrowLeft, ArrowRight } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { ChatHeader } from '@/components/chat-header'
 import { ChatEmptyState } from '@/components/chat-empty-state'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
 import {
   Conversation,
   ConversationContent,
@@ -23,14 +16,10 @@ import {
   MessageContent,
   MessageResponse,
 } from '@/components/ai-elements/message'
-import { Shimmer } from '@/components/ai-elements/shimmer'
-import { Tool, ToolContent, ToolGroupComponent, ToolHeader, ToolTabbedContent } from '@/components/ai-elements/tool'
+import { Tool, ToolContent, ToolHeader, ToolTabbedContent } from '@/components/ai-elements/tool'
 import { WebSearchResult } from '@/components/ai-elements/web-search-result'
 import { ComposioConnectCard } from '@/components/ai-elements/composio-connect-card'
-import { PermissionRequest } from '@/components/ai-elements/permission-request'
-import { AutoPermissionDecision } from '@/components/ai-elements/auto-permission-decision'
 import { TerminalOutput } from '@/components/terminal-output'
-import { AskHumanRequest } from '@/components/ai-elements/ask-human-request'
 import { type PromptInputMessage, type FileMention } from '@/components/ai-elements/prompt-input'
 import { FileCardProvider } from '@/contexts/file-card-context'
 import { MarkdownPreOverride } from '@/components/ai-elements/markdown-code-override'
@@ -38,6 +27,7 @@ import { defaultRemarkPlugins } from 'streamdown'
 import remarkBreaks from 'remark-breaks'
 import { type ChatTab } from '@/components/tab-bar'
 import { ChatInputWithMentions, type PermissionMode, type StagedAttachment, type SelectedModel } from '@/components/chat-input-with-mentions'
+import { ChatConversation } from '@/components/chat-conversation'
 import { ChatMessageAttachments } from '@/components/chat-message-attachments'
 import { useSidebar } from '@/components/ui/sidebar'
 import { wikiLabel } from '@/lib/wiki-links'
@@ -51,11 +41,9 @@ import {
   getWebSearchCardData,
   getComposioConnectCardData,
   getToolDisplayName,
-  groupConversationItems,
   isChatMessage,
   isErrorMessage,
   isToolCall,
-  isToolGroup,
   normalizeToolInput,
   normalizeToolOutput,
   parseAttachedFiles,
@@ -142,6 +130,7 @@ interface ChatSidebarProps {
   chatTabStates?: Record<string, ChatTabViewState>
   viewportAnchors?: Record<string, ChatViewportAnchorState>
   isProcessing: boolean
+  isThinking?: boolean
   isStopping?: boolean
   onStop?: () => void
   onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => void
@@ -210,6 +199,7 @@ export function ChatSidebar({
   chatTabStates = {},
   viewportAnchors = {},
   isProcessing,
+  isThinking,
   isStopping,
   onStop,
   onSubmit,
@@ -363,26 +353,6 @@ export function ChatSidebar({
     if (tabId === activeChatTabId) return activeTabState
     return chatTabStates[tabId] ?? emptyTabState
   }, [activeChatTabId, activeTabState, chatTabStates, emptyTabState])
-  const activeRunId = activeTabState.runId
-  const handleDownloadChatLog = useCallback(async () => {
-    if (!activeRunId) {
-      toast.error('No chat log available yet')
-      return
-    }
-
-    try {
-      const result = await window.ipc.invoke('runs:downloadLog', { runId: activeRunId })
-      if (result.success) {
-        toast.success('Chat log saved')
-      } else if (result.error) {
-        toast.error(result.error)
-      }
-    } catch (err) {
-      console.error('Download chat log failed:', err)
-      toast.error('Failed to download chat log')
-    }
-  }, [activeRunId])
-
   const renderConversationItem = (
     item: ConversationItem,
     tabId: string,
@@ -564,62 +534,17 @@ export function ChatSidebar({
               transition: isMaximized ? 'padding-left 200ms linear' : undefined,
             }}
           >
-            {pinnedToCodeSession ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <div className="titlebar-no-drag flex min-w-0 flex-1 items-center gap-1.5 px-3 py-2 text-sm font-medium">
-                    <Pin className="size-3.5 shrink-0 text-muted-foreground" />
-                    <span className="min-w-0 truncate">{pinnedToCodeSession.title}</span>
-                    <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
-                      Coding session
-                    </span>
-                  </div>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">
-                  This chat is pinned to the coding session — leave the Code view to switch chats.
-                </TooltipContent>
-              </Tooltip>
-            ) : (
-              <ChatHeader
-                activeTitle={(() => {
-                  const activeTab = chatTabs.find((tab) => tab.id === activeChatTabId)
-                  return activeTab ? getChatTabTitle(activeTab) : 'New chat'
-                })()}
-                onNewChatTab={onNewChatTab}
-                recentRuns={recentRuns}
-                activeRunId={runId}
-                onSelectRun={onSelectRun}
-                onOpenChatHistory={onOpenChatHistory}
-              />
-            )}
-            <DropdownMenu>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="titlebar-no-drag my-1 h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
-                      aria-label="Chat options"
-                    >
-                      <MoreHorizontal className="size-5" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">Chat options</TooltipContent>
-              </Tooltip>
-              <DropdownMenuContent align="end" className="min-w-48">
-                <DropdownMenuItem
-                  disabled={!activeRunId}
-                  onSelect={() => {
-                    void handleDownloadChatLog()
-                  }}
-                >
-                  <Bug className="size-4" />
-                  Download chat log
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <ChatHeader
+              activeTitle={(() => {
+                const activeTab = chatTabs.find((tab) => tab.id === activeChatTabId)
+                return activeTab ? getChatTabTitle(activeTab) : 'New chat'
+              })()}
+              onNewChatTab={onNewChatTab}
+              recentRuns={recentRuns}
+              activeRunId={runId}
+              onSelectRun={onSelectRun}
+              onOpenChatHistory={onOpenChatHistory}
+            />
             {onOpenFullScreen && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -680,91 +605,17 @@ export function ChatSidebar({
                               onPickPrompt={setLocalPresetMessage}
                             />
                           ) : (
-                            <>
-                              {groupConversationItems(
-                                tabState.conversation,
-                                (id) => !!tabState.allPermissionRequests.get(id) || !!tabState.autoPermissionDecisions.get(id)
-                              ).map((item) => {
-                                if (isToolGroup(item)) {
-                                  return (
-                                    <ToolGroupComponent
-                                      key={item.groupId}
-                                      group={item}
-                                      isToolOpen={(toolId) => isToolOpenForTab?.(tab.id, toolId) ?? false}
-                                      onToolOpenChange={(toolId, open) => onToolOpenChangeForTab?.(tab.id, toolId, open)}
-                                    />
-                                  )
-                                }
-                                const autoDecision = isToolCall(item)
-                                  ? tabState.autoPermissionDecisions.get(item.id)
-                                  : undefined
-                                const rendered = renderConversationItem(
-                                  item,
-                                  tab.id,
-                                  autoDecision?.decision === 'allow'
-                                    ? { autoPermissionDetail: { decision: 'allow', reason: autoDecision.reason } }
-                                    : undefined,
-                                )
-                                if (isToolCall(item)) {
-                                  const deniedAutoDecision = autoDecision?.decision === 'deny' ? autoDecision : null
-                                  const permRequest = tabState.allPermissionRequests.get(item.id)
-                                  if (deniedAutoDecision || (permRequest && onPermissionResponse)) {
-                                    const response = tabState.permissionResponses.get(item.id) || null
-                                    return (
-                                      <React.Fragment key={item.id}>
-                                        {deniedAutoDecision && (
-                                          <AutoPermissionDecision
-                                            toolCall={deniedAutoDecision.toolCall}
-                                            permission={deniedAutoDecision.permission}
-                                            decision={deniedAutoDecision.decision}
-                                            reason={deniedAutoDecision.reason}
-                                          />
-                                        )}
-                                        {permRequest && onPermissionResponse && (
-                                          <PermissionRequest
-                                            toolCall={permRequest.toolCall}
-                                            permission={permRequest.permission}
-                                            onApprove={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
-                                            onApproveSession={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'session')}
-                                            onApproveAlways={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'always')}
-                                            onDeny={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
-                                            isProcessing={isActive && isProcessing}
-                                            response={response}
-                                          />
-                                        )}
-                                        {rendered}
-                                      </React.Fragment>
-                                    )
-                                  }
-                                }
-                                return rendered
-                              })}
-
-                              {onAskHumanResponse && Array.from(tabState.pendingAskHumanRequests.values()).map((request) => (
-                                <AskHumanRequest
-                                  key={request.toolCallId}
-                                  query={request.query}
-                                  onResponse={(response) => onAskHumanResponse(request.toolCallId, request.subflow, response)}
-                                  isProcessing={isActive && isProcessing}
-                                />
-                              ))}
-
-                              {tabState.currentAssistantMessage && (
-                                <Message from="assistant">
-                                  <MessageContent>
-                                    <MessageResponse components={streamdownComponents}>{tabState.currentAssistantMessage}</MessageResponse>
-                                  </MessageContent>
-                                </Message>
-                              )}
-
-                              {isActive && isProcessing && !tabState.currentAssistantMessage && (
-                                <Message from="assistant">
-                                  <MessageContent>
-                                    <Shimmer duration={1}>Thinking...</Shimmer>
-                                  </MessageContent>
-                                </Message>
-                              )}
-                            </>
+                            <ChatConversation
+                              tabState={tabState}
+                              tabId={tab.id}
+                              isThinking={isActive && Boolean(isThinking)}
+                              isToolOpenForTab={(tid, toolId) => isToolOpenForTab?.(tid, toolId) ?? false}
+                              setToolOpenForTab={(tid, toolId, open) => onToolOpenChangeForTab?.(tid, toolId, open)}
+                              renderItem={renderConversationItem}
+                              onPermissionResponse={(toolCallId, subflow, response) => onPermissionResponse?.(toolCallId, subflow, response)}
+                              onAskHumanResponse={(toolCallId, subflow, response) => onAskHumanResponse?.(toolCallId, subflow, response)}
+                              streamdownComponents={streamdownComponents}
+                            />
                             )}
                           </ConversationContent>
                           <ConversationScrollButton />

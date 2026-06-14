@@ -4,15 +4,16 @@ import {
   setupIpcHandlers,
   startRunsWatcher,
   startCodeSessionStatusWatcher,
+  startSessionsWatcher,
   startServicesWatcher,
   startLiveNoteAgentWatcher,
   startBackgroundTaskAgentWatcher,
   startWorkspaceWatcher,
-  stopRunsWatcher,
   stopServicesWatcher,
   stopWorkspaceWatcher
 } from "./ipc.js";
 import { disposeAllTerminals } from "./terminal.js";
+import { getAgentRuntime } from "@x/core/dist/agent-runtime/index.js";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname } from "node:path";
 import { updateElectronApp, UpdateSourceType } from "update-electron-app";
@@ -343,7 +344,11 @@ app.whenReady().then(async () => {
   registerBrowserControlService(new ElectronBrowserControlService());
   registerNotificationService(new ElectronNotificationService());
 
-  setupIpcHandlers();
+  // The new agent runtime (sessions + agent loop + bridges). One instance for
+  // the app; its event bus is forwarded to renderer windows below.
+  const agentRuntime = await getAgentRuntime();
+
+  setupIpcHandlers(agentRuntime);
   setupBrowserEventForwarding();
 
   createWindow();
@@ -355,7 +360,11 @@ app.whenReady().then(async () => {
   // Only starts once (guarded in startWorkspaceWatcher)
   startWorkspaceWatcher();
 
-  // start runs watcher
+  // start sessions watcher (new runtime event feed → renderer)
+  startSessionsWatcher(agentRuntime);
+
+  // start runs watcher — forwards the generic event bus → renderer (runs:events).
+  // Code-mode (direct ACP sessions) streams its live events through this feed.
   startRunsWatcher();
 
   // start code-session status tracker (derives working/needs-you/idle + notifications)
@@ -445,7 +454,6 @@ app.on("window-all-closed", () => {
 app.on("before-quit", () => {
   // Clean up watcher on app quit
   stopWorkspaceWatcher();
-  stopRunsWatcher();
   stopServicesWatcher();
   // Tear down any live ACP coding-agent adapter processes so they don't outlive the app.
   try {

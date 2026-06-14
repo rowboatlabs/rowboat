@@ -1,7 +1,6 @@
 import { z } from 'zod';
 import { RelPath, Encoding, Stat, DirEntry, ReaddirOptions, ReadFileResult, WorkspaceChangeEvent, WriteFileOptions, WriteFileResult, RemoveOptions } from './workspace.js';
 import { ListToolsResponse } from './mcp.js';
-import { AskHumanResponsePayload, CreateRunOptions, Run, ListRunsResponse, ToolPermissionAuthorizePayload } from './runs.js';
 import { LlmModelConfig } from './models.js';
 import { AgentScheduleConfig, AgentScheduleEntry } from './agent-schedule.js';
 import { AgentScheduleState } from './agent-schedule-state.js';
@@ -13,13 +12,16 @@ import {
     BackgroundTaskSummarySchema,
     TriggersSchema,
 } from './background-task.js';
-import { UserMessageContent } from './message.js';
+import { MessageList } from './message.js';
+import { AgentLoopTurn } from './agent-turn.js';
+import { CreateSessionInput, SendMessageOptions, Session, type SessionBusEvent } from './sessions.js';
 import { RowboatApiConfig } from './rowboat-account.js';
 import { ZListToolkitsResponse } from './composio.js';
 import { BrowserStateSchema } from './browser-control.js';
 import { BillingInfoSchema } from './billing.js';
 import { EmailBlockSchema, GmailThreadSchema } from './blocks.js';
 import { PermissionDecision, ApprovalPolicy, CodingAgent } from './code-mode.js';
+import { Run } from './runs.js';
 import { NotificationSettingsSchema } from './notification-settings.js';
 import { CodeProject, CodeSession, CodeSessionMode, CodeSessionStatus, GitRepoInfo, GitStatusFile } from './code-sessions.js';
 
@@ -236,92 +238,14 @@ const ipcSchemas = {
       result: z.unknown(),
     }),
   },
-  'runs:create': {
-    req: CreateRunOptions,
-    res: Run,
-  },
-  'runs:createMessage': {
-    req: z.object({
-      runId: z.string(),
-      message: UserMessageContent,
-      voiceInput: z.boolean().optional(),
-      voiceOutput: z.enum(['summary', 'full']).optional(),
-      searchEnabled: z.boolean().optional(),
-      codeMode: z.enum(['claude', 'codex']).optional(),
-      // Code-section sessions pin the coding agent's working directory and
-      // approval policy for the whole turn (see code_agent_run overrides).
-      codeCwd: z.string().optional(),
-      codePolicy: ApprovalPolicy.optional(),
-      middlePaneContext: z.discriminatedUnion('kind', [
-        z.object({
-          kind: z.literal('note'),
-          path: z.string(),
-          content: z.string(),
-        }),
-        z.object({
-          kind: z.literal('browser'),
-          url: z.string(),
-          title: z.string(),
-        }),
-      ]).optional(),
-    }),
-    res: z.object({
-      messageId: z.string(),
-    }),
-  },
-  'runs:authorizePermission': {
-    req: z.object({
-      runId: z.string(),
-      authorization: ToolPermissionAuthorizePayload,
-    }),
-    res: z.object({
-      success: z.literal(true),
-    }),
-  },
-  'runs:provideHumanInput': {
-    req: z.object({
-      runId: z.string(),
-      reply: AskHumanResponsePayload,
-    }),
-    res: z.object({
-      success: z.literal(true),
-    }),
-  },
-  'runs:stop': {
-    req: z.object({
-      runId: z.string(),
-      force: z.boolean().optional().default(false),
-    }),
-    res: z.object({
-      success: z.literal(true),
-    }),
-  },
+  // Code-mode reuses the generic runs event-log + bus (decoupled from the
+  // retired LLM agent runtime): fetch a session's transcript and stream its
+  // live events. Chat + headless use the sessions:* channels instead.
   'runs:fetch': {
     req: z.object({
       runId: z.string(),
     }),
     res: Run,
-  },
-  'runs:list': {
-    req: z.object({
-      cursor: z.string().optional(),
-    }),
-    res: ListRunsResponse,
-  },
-  'runs:delete': {
-    req: z.object({
-      runId: z.string(),
-    }),
-    res: z.object({ success: z.boolean() }),
-  },
-  'runs:downloadLog': {
-    req: z.object({
-      runId: z.string().min(1),
-    }),
-    res: z.object({
-      success: z.boolean(),
-      error: z.string().optional(),
-    }),
   },
   'runs:events': {
     req: z.null(),
@@ -1158,8 +1082,8 @@ const ipcSchemas = {
     }),
   },
   // Returns the runIds recorded in `bg-tasks/<slug>/runs.log` (newest first).
-  // The renderer turns each id into a full Run via the existing `runs:fetch`
-  // channel — bg-task transcripts now live at the global $WorkDir/runs/.
+  // Each id is a turn id; the renderer loads the transcript via the
+  // `sessions:getTurn` channel (headless runs are standalone turns).
   'bg-task:listRunIds': {
     req: z.object({
       slug: z.string(),
@@ -1265,6 +1189,75 @@ const ipcSchemas = {
     res: z.object({
       success: z.literal(true),
     }),
+  },
+  // ── New runtime: sessions + turns ──────────────────────────────────────────
+  'sessions:create': {
+    req: CreateSessionInput,
+    res: Session,
+  },
+  'sessions:get': {
+    req: z.object({ sessionId: z.string() }),
+    res: Session,
+  },
+  'sessions:list': {
+    req: z.object({ agentId: z.string().optional() }).optional().nullable(),
+    res: z.object({ sessions: z.array(Session) }),
+  },
+  'sessions:sendMessage': {
+    req: z.object({
+      sessionId: z.string(),
+      messages: MessageList,
+      options: SendMessageOptions.optional(),
+    }),
+    res: z.object({ turnId: z.string() }),
+  },
+  'sessions:getHistory': {
+    req: z.object({ sessionId: z.string() }),
+    res: z.object({ messages: MessageList }),
+  },
+  'sessions:listTurns': {
+    req: z.object({ sessionId: z.string() }),
+    res: z.object({ turns: z.array(AgentLoopTurn) }),
+  },
+  'sessions:getTurn': {
+    req: z.object({ turnId: z.string() }),
+    res: AgentLoopTurn,
+  },
+  'sessions:delete': {
+    req: z.object({ sessionId: z.string() }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  'sessions:respondToPermission': {
+    req: z.object({
+      turnId: z.string(),
+      toolCallId: z.string(),
+      decision: z.enum(['granted', 'denied']),
+      reason: z.string().optional(),
+    }),
+    res: z.object({ turnId: z.string() }),
+  },
+  'sessions:setToolResult': {
+    req: z.object({
+      turnId: z.string(),
+      toolCallId: z.string(),
+      result: z.unknown(),
+    }),
+    res: z.object({ turnId: z.string() }),
+  },
+  'sessions:resumeTurn': {
+    req: z.object({ turnId: z.string() }),
+    res: z.object({ turnId: z.string() }),
+  },
+  'sessions:stopTurn': {
+    req: z.object({ turnId: z.string() }),
+    res: AgentLoopTurn,
+  },
+  // Broadcast feed (main → renderer): live deltas + state snapshots. Typed via
+  // z.custom so the renderer's `on` handler is typed without runtime validation
+  // (the broadcast path bypasses preload validation, like runs:events).
+  'sessions:events': {
+    req: z.custom<SessionBusEvent>(),
+    res: z.null(),
   },
 } as const;
 

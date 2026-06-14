@@ -338,22 +338,14 @@ function ChatInputInner({
     }
   })
 
-  // When a run exists, freeze the dropdown to the run's resolved model+provider.
+  // New runtime: model + permission mode are per-TURN (sent with each message
+  // and recorded on the turn), so the dropdowns stay editable for the life of a
+  // chat. Just reset to defaults when starting a brand-new chat.
   useEffect(() => {
     if (!runId) {
       setLockedModel(null)
       setPermissionMode('auto')
-      return
     }
-    let cancelled = false
-    window.ipc.invoke('runs:fetch', { runId }).then((run) => {
-      if (cancelled) return
-      if (run.provider && run.model) {
-        setLockedModel({ provider: run.provider, model: run.model })
-      }
-      setPermissionMode(run.permissionMode ?? 'manual')
-    }).catch(() => { /* legacy run or fetch failure — leave unlocked */ })
-    return () => { cancelled = true }
   }, [runId])
 
   useEffect(() => {
@@ -1012,17 +1004,14 @@ function ChatInputInner({
             <button
               type="button"
               onClick={() => {
-                if (runId) return
                 setPermissionMode((mode) => mode === 'auto' ? 'manual' : 'auto')
               }}
-              disabled={Boolean(runId)}
               className={cn(
                 "flex h-7 shrink-0 items-center gap-1.5 rounded-full text-xs font-medium transition-colors",
                 collapseLevel >= 2 ? "w-7 justify-center" : "px-2.5",
                 permissionMode === 'auto'
                   ? "bg-secondary text-foreground hover:bg-secondary/70"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                runId && "cursor-not-allowed opacity-70 hover:bg-secondary"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
               )}
               aria-label="Permission mode"
             >
@@ -1031,11 +1020,9 @@ function ChatInputInner({
             </button>
           </TooltipTrigger>
           <TooltipContent side="top">
-            {runId
-              ? `Permission mode is fixed for this run: ${permissionMode === 'auto' ? 'Auto' : 'Manual'}`
-              : permissionMode === 'auto'
-                ? 'Auto-permission on — click for manual approval prompts'
-                : 'Manual approval prompts — click for auto-permission'}
+            {permissionMode === 'auto'
+              ? 'Auto-permission on — click for manual approval prompts'
+              : 'Manual approval prompts — click for auto-permission'}
           </TooltipContent>
         </Tooltip>
         )}
@@ -1157,7 +1144,6 @@ function ChatInputInner({
               {collapseLevel >= 6 && (
                 <DropdownMenuCheckboxItem
                   checked={permissionMode === 'auto'}
-                  disabled={Boolean(runId)}
                   onSelect={(e) => e.preventDefault()}
                   onCheckedChange={(c) => setPermissionMode(c ? 'auto' : 'manual')}
                 >
