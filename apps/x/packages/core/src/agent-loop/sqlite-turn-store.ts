@@ -7,6 +7,7 @@ import type { TurnStore } from "./turn-store.js";
 import {
     AgentLoopError,
     AgentLoopTurn,
+    ComposeContext,
     DispatchedTool,
     ModelUsage,
     PermissionDecision,
@@ -81,6 +82,13 @@ export class SqliteTurnStore implements TurnStore {
         }
     }
 
+    async deleteBySession(sessionId: string): Promise<void> {
+        await this.db
+            .deleteFrom("agent_loop_turns")
+            .where("session_id", "=", sessionId)
+            .execute();
+    }
+
     async latestForSession(sessionId: string): Promise<z.infer<typeof AgentLoopTurn> | null> {
         const turns = await this.foldSession(sessionId, null);
         return turns.length > 0 ? turns[turns.length - 1] : null;
@@ -140,8 +148,11 @@ function toRow(
         provider: turn.provider,
         model: turn.model,
         permission_mode: turn.permissionMode,
+        use_case: turn.useCase,
+        sub_use_case: turn.subUseCase,
         session_id: turn.sessionId,
         session_seq: turn.sessionSeq,
+        compose_context: turn.composeContext === null ? null : JSON.stringify(turn.composeContext),
         messages: JSON.stringify(delta),
         prefix_length: prefixLength,
         permission_requests: JSON.stringify(turn.permissionRequests),
@@ -165,8 +176,13 @@ function fromRow(row: Selectable<AgentLoopTurnsTable>): z.infer<typeof AgentLoop
         provider: row.provider,
         model: row.model,
         permissionMode: PermissionMode.parse(row.permission_mode),
+        useCase: row.use_case,
+        subUseCase: row.sub_use_case,
         sessionId: row.session_id,
         sessionSeq: row.session_seq,
+        composeContext: row.compose_context === null
+            ? null
+            : ComposeContext.parse(JSON.parse(row.compose_context)),
         messages: MessageList.parse(JSON.parse(row.messages)),
         permissionRequests: z.array(PermissionRequest).parse(JSON.parse(row.permission_requests)),
         permissionDecisions: z.array(PermissionDecision).parse(JSON.parse(row.permission_decisions)),

@@ -1,9 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import { WorkDir } from '../config/config.js';
-import { createRun, createMessage } from '../runs/runs.js';
+import { runHeadlessAgent } from '../agent-runtime/headless.js';
 import { getKgModel } from '../models/defaults.js';
-import { waitForRunCompletion } from '../agents/utils.js';
 import {
     loadConfig,
     loadState,
@@ -38,16 +37,8 @@ async function runAgent(agentName: string): Promise<void> {
     }
 
     try {
-        // Create a run for the agent
-        // The agent file is expected to be in the agents directory with the same name
-        const run = await createRun({
-            agentId: agentName,
-            model: await getKgModel(),
-            useCase: 'knowledge_sync',
-            subUseCase: 'pre_built',
-        });
-
-        // Build trigger message with user context
+        // Build trigger message with user context. The agent file is expected
+        // to be in the agents directory with the same name as `agentName`.
         const message = `Run your scheduled task.
 
 **Current time:** ${new Date().toISOString()}
@@ -59,10 +50,14 @@ async function runAgent(agentName: string): Promise<void> {
 
 Process new items and use the user context above to identify yourself when drafting responses.`;
 
-        await createMessage(run.id, message);
-
-        // Wait for completion
-        await waitForRunCompletion(run.id);
+        const result = await runHeadlessAgent({
+            agentId: agentName,
+            message,
+            model: await getKgModel(),
+            useCase: 'knowledge_sync',
+            subUseCase: 'pre_built',
+        });
+        if (result.error) throw new Error(result.error);
 
         // Update last run time
         setLastRunTime(agentName, new Date());
@@ -79,8 +74,6 @@ Process new items and use the user context above to identify yourself when draft
  * Check all agents and run those that are due
  */
 async function checkAndRunAgents(): Promise<void> {
-    const config = loadConfig();
-
     for (const agentName of PREBUILT_AGENTS) {
         try {
             if (shouldRunAgent(agentName)) {

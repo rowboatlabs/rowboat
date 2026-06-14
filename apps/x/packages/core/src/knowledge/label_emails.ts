@@ -1,10 +1,9 @@
 import fs from 'fs';
 import path from 'path';
 import { WorkDir } from '../config/config.js';
-import { createRun, createMessage } from '../runs/runs.js';
+import { editedPaths, runHeadlessAgent } from '../agent-runtime/headless.js';
 import { getKgModel } from '../models/defaults.js';
-import { bus } from '../runs/bus.js';
-import { getErrorDetails, waitForRunCompletion } from '../agents/utils.js';
+import { getErrorDetails } from '../agents/utils.js';
 import { serviceLogger } from '../services/service_logger.js';
 import { limitEventItems } from './limit_event_items.js';
 import {
@@ -70,13 +69,6 @@ function getUnlabeledEmails(state: LabelingState): string[] {
 async function labelEmailBatch(
     files: { path: string; content: string }[]
 ): Promise<{ runId: string; filesEdited: Set<string> }> {
-    const run = await createRun({
-        agentId: LABELING_AGENT,
-        model: await getKgModel(),
-        useCase: 'knowledge_sync',
-        subUseCase: 'label_emails',
-    });
-
     let message = `Label the following ${files.length} email files by prepending YAML frontmatter.\n\n`;
     message += `**Important:** Use workspace-relative paths with file-editText (e.g. "gmail_sync/email.md", NOT absolute paths).\n\n`;
 
@@ -92,33 +84,19 @@ async function labelEmailBatch(
         message += `\n\n---\n\n`;
     }
 
-    const filesEdited = new Set<string>();
-
-    const unsubscribe = await bus.subscribe(run.id, async (event) => {
-        if (event.type !== 'tool-invocation') {
-            return;
-        }
-        if (event.toolName !== 'file-editText') {
-            return;
-        }
-        try {
-            const parsed = JSON.parse(event.input) as { path?: string };
-            if (typeof parsed.path === 'string') {
-                filesEdited.add(parsed.path);
-            }
-        } catch {
-            // ignore parse errors
-        }
+    const result = await runHeadlessAgent({
+        agentId: LABELING_AGENT,
+        message,
+        model: await getKgModel(),
+        useCase: 'knowledge_sync',
+        subUseCase: 'label_emails',
     });
+    if (result.error) throw new Error(result.error);
 
-    await createMessage(run.id, message);
-    try {
-        await waitForRunCompletion(run.id, { throwOnError: true });
-    } finally {
-        unsubscribe();
-    }
+    // Files the agent edited, read from the completed turn's tool calls.
+    const filesEdited = new Set<string>(editedPaths(result.turn, ['file-editText']));
 
-    return { runId: run.id, filesEdited };
+    return { runId: result.turnId, filesEdited };
 }
 
 /**

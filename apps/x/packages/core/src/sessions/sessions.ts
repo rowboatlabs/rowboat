@@ -6,9 +6,14 @@ import { KeyedMutex } from "../agent-loop/mutex.js";
 import type { TurnStore } from "../agent-loop/turn-store.js";
 import {
     AgentLoopTurn,
+    ComposeContext,
     closedTranscript,
     deriveTurnStatus,
 } from "../agent-loop/types.js";
+import {
+    NoopUserMessageContextComposer,
+    type UserMessageContextComposer,
+} from "./user-message-context-composer.js";
 import type { SessionStore } from "./session-store.js";
 import { CreateSessionInput, SendMessageOptions, Session } from "./types.js";
 
@@ -27,26 +32,44 @@ export interface Sessions {
     ): Promise<TurnHandle>;
     getHistory(sessionId: string): Promise<z.infer<typeof MessageList>>;
     listTurns(sessionId: string): Promise<z.infer<typeof AgentLoopTurn>[]>;
+    // Permanently remove a session and all of its turns.
+    deleteSession(sessionId: string): Promise<void>;
 }
 
 function nowIso(): string {
     return new Date().toISOString();
 }
 
+// Distill the compose chips from send options into the turn's composeContext —
+// null when none are set, so a plain message stores nothing.
+function composeContextFromOptions(
+    options: z.infer<typeof SendMessageOptions>,
+): z.infer<typeof ComposeContext> | null {
+    const compose: z.infer<typeof ComposeContext> = {};
+    if (options.voiceInput !== undefined) compose.voiceInput = options.voiceInput;
+    if (options.voiceOutput !== undefined) compose.voiceOutput = options.voiceOutput;
+    if (options.searchEnabled !== undefined) compose.searchEnabled = options.searchEnabled;
+    if (options.codeMode !== undefined) compose.codeMode = options.codeMode;
+    return Object.keys(compose).length > 0 ? compose : null;
+}
+
 export class SessionsImpl implements Sessions {
     private sessionStore: SessionStore;
     private turnStore: TurnStore;
     private agentLoop: AgentLoop;
+    private userMessageContext: UserMessageContextComposer;
     private mutex = new KeyedMutex();
 
     constructor(deps: {
         sessionStore: SessionStore;
         turnStore: TurnStore;
         agentLoop: AgentLoop;
+        userMessageContext?: UserMessageContextComposer;
     }) {
         this.sessionStore = deps.sessionStore;
         this.turnStore = deps.turnStore;
         this.agentLoop = deps.agentLoop;
+        this.userMessageContext = deps.userMessageContext ?? new NoopUserMessageContextComposer();
     }
 
     async createSession(
@@ -71,6 +94,16 @@ export class SessionsImpl implements Sessions {
 
     async listSessions(filter?: { agentId?: string }): Promise<z.infer<typeof Session>[]> {
         return this.sessionStore.list(filter);
+    }
+
+    async deleteSession(sessionId: string): Promise<void> {
+        // Serialize against in-flight sends for this session, then drop its
+        // turns before the session row so a crash mid-delete never strands a
+        // session pointing at half-removed turns.
+        await this.mutex.run(sessionId, async () => {
+            await this.turnStore.deleteBySession(sessionId);
+            await this.sessionStore.delete(sessionId);
+        });
     }
 
     async sendMessage(
@@ -99,6 +132,15 @@ export class SessionsImpl implements Sessions {
                     );
                 }
             }
+            // Attach per-message context (fresh datetime + middle pane) to the
+            // new user messages only — history already carries its own. Delegated
+            // to the injected composer (no-op by default; copilot-aware in the
+            // real runtime), keeping this layer agent-agnostic.
+            const withContext = this.userMessageContext.attach(newMessages, {
+                agentId: session.agentId,
+                middlePaneContext: parsedOptions.middlePaneContext ?? null,
+            });
+            const composeContext = composeContextFromOptions(parsedOptions);
             // Bump recency BEFORE creating the turn: if this write fails, no
             // orphan turn is left running with its handle lost to the caller.
             session.updatedAt = nowIso();
@@ -110,9 +152,13 @@ export class SessionsImpl implements Sessions {
                 ...(parsedOptions.permissionMode !== undefined
                     ? { permissionMode: parsedOptions.permissionMode }
                     : {}),
+                // Sessions are the chat surface — default attribution to chat.
+                useCase: parsedOptions.useCase ?? "copilot_chat",
+                subUseCase: parsedOptions.subUseCase ?? null,
+                composeContext,
                 sessionId,
                 sessionSeq: (latest?.sessionSeq ?? 0) + 1,
-                messages: [...(latest ? closedTranscript(latest) : []), ...newMessages],
+                messages: [...(latest ? closedTranscript(latest) : []), ...withContext],
             });
         });
     }

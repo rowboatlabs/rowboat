@@ -69,6 +69,17 @@ export const UserMessageContext = z.object({
     ]).optional(),
 });
 
+// What the user had open in the middle pane when a message was sent. Captured
+// per message and surfaced to the agent via UserMessageContext.middlePane.
+export const MiddlePaneContext = z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("note"), path: z.string(), content: z.string() }),
+    z.object({ kind: z.literal("browser"), url: z.string(), title: z.string() }),
+]);
+
+// Per-message compose chips (voice transcription / read-aloud, coding agent).
+export const VoiceOutputMode = z.enum(["summary", "full"]);
+export const CodeMode = z.enum(["claude", "codex"]);
+
 export const UserMessage = z.object({
     role: z.literal("user"),
     content: UserMessageContent,

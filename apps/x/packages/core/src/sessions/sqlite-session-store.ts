@@ -48,6 +48,13 @@ export class SqliteSessionStore implements SessionStore {
             throw new Error(`Session not found: ${id}`);
         }
     }
+
+    async delete(id: string): Promise<void> {
+        await this.db
+            .deleteFrom("sessions")
+            .where("id", "=", id)
+            .execute();
+    }
 }
 
 function toRow(session: z.infer<typeof Session>): Insertable<SessionsTable> {

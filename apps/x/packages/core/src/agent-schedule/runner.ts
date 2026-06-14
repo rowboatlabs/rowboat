@@ -2,13 +2,9 @@ import { CronExpressionParser } from "cron-parser";
 import container from "../di/container.js";
 import { IAgentScheduleRepo } from "./repo.js";
 import { IAgentScheduleStateRepo } from "./state-repo.js";
-import { IRunsRepo } from "../runs/repo.js";
-import { IAgentRuntime } from "../agents/runtime.js";
-import { IMonotonicallyIncreasingIdGenerator } from "../application/lib/id-gen.js";
 import { AgentScheduleConfig, AgentScheduleEntry } from "@x/shared/dist/agent-schedule.js";
 import { AgentScheduleState, AgentScheduleStateEntry } from "@x/shared/dist/agent-schedule-state.js";
-import { MessageEvent } from "@x/shared/dist/runs.js";
-import { createRun } from "../runs/runs.js";
+import { runHeadlessAgent } from "../agent-runtime/headless.js";
 import z from "zod";
 
 const DEFAULT_STARTING_MESSAGE = "go";
@@ -147,10 +143,7 @@ function shouldRunNow(
 async function runAgent(
     agentName: string,
     entry: z.infer<typeof AgentScheduleEntry>,
-    stateRepo: IAgentScheduleStateRepo,
-    runsRepo: IRunsRepo,
-    agentRuntime: IAgentRuntime,
-    idGenerator: IMonotonicallyIncreasingIdGenerator
+    stateRepo: IAgentScheduleStateRepo
 ): Promise<void> {
     console.log(`[AgentRunner] Starting agent: ${agentName}`);
 
@@ -163,31 +156,17 @@ async function runAgent(
     });
 
     try {
-        // Create a new run via core (resolves agent + default model+provider).
-        const run = await createRun({
+        // One standalone turn per run (default model+provider resolved by the
+        // adapter): a scheduled agent run is one-shot, not a conversation.
+        const startingMessage = entry.startingMessage ?? DEFAULT_STARTING_MESSAGE;
+        const result = await runHeadlessAgent({
             agentId: agentName,
+            message: startingMessage,
             useCase: 'copilot_chat',
             subUseCase: 'scheduled',
         });
-        console.log(`[AgentRunner] Created run ${run.id} for agent ${agentName}`);
-
-        // Add the starting message as a user message
-        const startingMessage = entry.startingMessage ?? DEFAULT_STARTING_MESSAGE;
-        const messageEvent: z.infer<typeof MessageEvent> = {
-            runId: run.id,
-            type: "message",
-            messageId: await idGenerator.next(),
-            message: {
-                role: "user",
-                content: startingMessage,
-            },
-            subflow: [],
-        };
-        await runsRepo.appendEvents(run.id, [messageEvent]);
-        console.log(`[AgentRunner] Sent starting message to agent ${agentName}: "${startingMessage}"`);
-
-        // Trigger the run
-        await agentRuntime.trigger(run.id);
+        if (result.error) throw new Error(result.error);
+        console.log(`[AgentRunner] Run ${result.turnId} completed for agent ${agentName}`);
 
         // Calculate next run time
         const nextRunAt = calculateNextRunAt(entry.schedule);
@@ -264,9 +243,6 @@ async function checkForTimeouts(
 async function pollAndRun(): Promise<void> {
     const scheduleRepo = container.resolve<IAgentScheduleRepo>("agentScheduleRepo");
     const stateRepo = container.resolve<IAgentScheduleStateRepo>("agentScheduleStateRepo");
-    const runsRepo = container.resolve<IRunsRepo>("runsRepo");
-    const agentRuntime = container.resolve<IAgentRuntime>("agentRuntime");
-    const idGenerator = container.resolve<IMonotonicallyIncreasingIdGenerator>("idGenerator");
 
     // Load config and state
     let config: z.infer<typeof AgentScheduleConfig>;
@@ -314,7 +290,7 @@ async function pollAndRun(): Promise<void> {
 
         if (shouldRunNow(entry, agentState)) {
             // Run agent (don't await - let it run in background)
-            runAgent(agentName, entry, stateRepo, runsRepo, agentRuntime, idGenerator).catch((error) => {
+            runAgent(agentName, entry, stateRepo).catch((error) => {
                 console.error(`[AgentRunner] Unhandled error in runAgent for ${agentName}:`, error);
             });
         }

@@ -1,10 +1,13 @@
 import crypto from "node:crypto";
 import { z } from "zod";
 import { ToolCallPart, ToolMessage } from "@x/shared/dist/message.js";
+import { enterUseCase, type UseCase } from "../analytics/use_case.js";
 import { EventStream } from "./event-stream.js";
 import type { ModelAdapter } from "./model-adapter.js";
 import { KeyedMutex } from "./mutex.js";
 import type { PermissionGate } from "./permission-gate.js";
+import { NullSystemComposer, type SystemComposer } from "./system-composer.js";
+import { NullTurnObserver, type TurnEventMeta, type TurnObserver } from "./turn-observer.js";
 import type { ToolRunner, ToolRunResult } from "./tool-runner.js";
 import type { TurnStore } from "./turn-store.js";
 import {
@@ -72,6 +75,8 @@ export class AgentLoopImpl implements AgentLoop {
     private modelAdapter: ModelAdapter;
     private toolRunner: ToolRunner;
     private permissionGate: PermissionGate;
+    private systemComposer: SystemComposer;
+    private observer: TurnObserver;
     private maxIterations: number;
     private mutex = new KeyedMutex();
     // All not-yet-finished entries per turn (running AND queued behind the
@@ -83,12 +88,16 @@ export class AgentLoopImpl implements AgentLoop {
         modelAdapter: ModelAdapter;
         toolRunner: ToolRunner;
         permissionGate: PermissionGate;
+        systemComposer?: SystemComposer;
+        observer?: TurnObserver;
         maxIterations?: number;
     }) {
         this.store = deps.store;
         this.modelAdapter = deps.modelAdapter;
         this.toolRunner = deps.toolRunner;
         this.permissionGate = deps.permissionGate;
+        this.systemComposer = deps.systemComposer ?? new NullSystemComposer();
+        this.observer = deps.observer ?? new NullTurnObserver();
         this.maxIterations = deps.maxIterations ?? DEFAULT_MAX_ITERATIONS;
     }
 
@@ -102,14 +111,17 @@ export class AgentLoopImpl implements AgentLoop {
         // Between this write and enter() below the turn is store-visible but
         // not yet stoppable; acceptable while turn ids only reach callers via
         // the returned handle, not via store polling.
-        await this.store.create({
+        const turn: z.infer<typeof AgentLoopTurn> = {
             id: turnId,
             agentId: parsed.agentId ?? null,
             provider: parsed.provider ?? null,
             model: parsed.model ?? null,
             permissionMode: parsed.permissionMode ?? "manual",
+            useCase: parsed.useCase ?? null,
+            subUseCase: parsed.subUseCase ?? null,
             sessionId: parsed.sessionId ?? null,
             sessionSeq: parsed.sessionSeq ?? null,
+            composeContext: parsed.composeContext ?? null,
             messages: parsed.messages,
             permissionRequests: [],
             permissionDecisions: [],
@@ -120,7 +132,13 @@ export class AgentLoopImpl implements AgentLoop {
             completedAt: null,
             createdAt: now,
             updatedAt: now,
-        });
+        };
+        await this.store.create(turn);
+        // The created turn is a committed fact — surface it to observers (the
+        // bus) immediately so the session UI shows the new turn and its user
+        // message right away, and a per-turn consumer can attach before the
+        // first model step streams.
+        this.observer.onState(turn);
         return this.enter(turnId, async () => {});
     }
 
@@ -243,9 +261,22 @@ export class AgentLoopImpl implements AgentLoop {
             if (signal.aborted) return;
             const turn = await this.mustGet(turnId);
 
+            // Install the turn's use-case for this async chain so nested LLM
+            // calls (the permission classifier, builtin tools that call a model)
+            // inherit it for analytics — parity with the old runtime's
+            // enterUseCase. Set once per advance() entry.
+            if (iteration === 0 && turn.useCase) {
+                enterUseCase({
+                    useCase: turn.useCase as UseCase,
+                    ...(turn.subUseCase ? { subUseCase: turn.subUseCase } : {}),
+                    ...(turn.agentId ? { agentName: turn.agentId } : {}),
+                });
+            }
+
             // 1. terminal states
             if (turn.error !== null || turn.completedAt !== null) return;
 
+            const meta: TurnEventMeta = { turnId, sessionId: turn.sessionId };
             const unresolved = unresolvedToolCalls(turn);
             const stateOf = new Map(unresolved.map((call) => [
                 call.toolCallId,
@@ -267,7 +298,7 @@ export class AgentLoopImpl implements AgentLoop {
                     for (const call of needsClassifier) {
                         const request = turn.permissionRequests
                             .find((r) => r.toolCallId === call.toolCallId)?.request;
-                        const verdict = await this.permissionGate.classify(call, request);
+                        const verdict = await this.permissionGate.classify(call, request, turn);
                         turn.permissionDecisions.push({
                             toolCallId: call.toolCallId,
                             decidedBy: "classifier",
@@ -298,7 +329,7 @@ export class AgentLoopImpl implements AgentLoop {
                 if (unevaluated.length > 0) {
                     const requested: string[] = [];
                     for (const call of unevaluated) {
-                        const check = await this.permissionGate.check(call);
+                        const check = await this.permissionGate.check(call, turn);
                         if (check.required) {
                             turn.permissionRequests.push({
                                 toolCallId: call.toolCallId,
@@ -313,7 +344,7 @@ export class AgentLoopImpl implements AgentLoop {
                     if (requested.length > 0) {
                         await this.persist(turn);
                         for (const toolCallId of requested) {
-                            stream.push({ type: "permission-requested", toolCallId });
+                            this.emit(stream, meta, { type: "permission-requested", toolCallId });
                         }
                         continue; // re-derive: waiting (manual) or classifier (auto)
                     }
@@ -346,13 +377,19 @@ export class AgentLoopImpl implements AgentLoop {
                             startedAt: nowIso(),
                         });
                         await this.persist(turn);
-                        stream.push({ type: "tool-execution-start", toolCallId: call.toolCallId });
+                        this.emit(stream, meta, { type: "tool-execution-start", toolCallId: call.toolCallId });
 
                         // Tool failures are conversational: a throwing runner
                         // becomes an error ToolMessage the model can react to,
                         // never a terminal turn error. Aborts still propagate.
                         const outcome = await this.toolRunner
-                            .run(call, { turnId, signal })
+                            .run(call, {
+                                turnId,
+                                agentId: turn.agentId,
+                                codeMode: turn.composeContext?.codeMode ?? null,
+                                signal,
+                                emit: (event) => this.emit(stream, meta, event),
+                            })
                             .catch((error: unknown): ToolRunResult => {
                                 signal.throwIfAborted();
                                 return {
@@ -370,7 +407,7 @@ export class AgentLoopImpl implements AgentLoop {
                         }
                         await this.persist(turn);
                         if (outcome.type !== "pending") {
-                            stream.push({ type: "tool-result", toolCallId: call.toolCallId });
+                            this.emit(stream, meta, { type: "tool-result", toolCallId: call.toolCallId });
                         }
                     }
                     continue;
@@ -389,15 +426,23 @@ export class AgentLoopImpl implements AgentLoop {
                 // The stream's result promise is the single source of failure:
                 // it rejects on model error AND on abort, and the catch below
                 // tells those apart via signal.aborted.
+                const [tools, system] = await Promise.all([
+                    this.toolRunner.definitions(turn.agentId),
+                    this.systemComposer.system(turn),
+                ]);
                 const modelStream = this.modelAdapter.stream({
                     provider: turn.provider,
                     model: turn.model,
+                    system,
                     messages: turn.messages,
-                    tools: this.toolRunner.definitions(),
+                    tools,
                     signal,
+                    useCase: turn.useCase,
+                    subUseCase: turn.subUseCase,
+                    agentId: turn.agentId,
                 });
                 for await (const event of modelStream) {
-                    stream.push(event);
+                    this.emit(stream, meta, event);
                 }
                 const step = await modelStream.result;
                 turn.messages.push(step.message);
@@ -437,6 +482,18 @@ export class AgentLoopImpl implements AgentLoop {
     private async persist(turn: z.infer<typeof AgentLoopTurn>): Promise<void> {
         turn.updatedAt = nowIso();
         await this.store.update(turn);
+        // Every committed fact is a state snapshot for observers (the bus).
+        this.observer.onState(turn);
+    }
+
+    // Push a live event to the turn's handle AND the observer (the bus).
+    private emit(
+        stream: EventStream<TurnEvent, z.infer<typeof AgentLoopTurn>>,
+        meta: TurnEventMeta,
+        event: TurnEvent,
+    ): void {
+        stream.push(event);
+        this.observer.onEvent(meta, event);
     }
 
     private async mustGet(turnId: string): Promise<z.infer<typeof AgentLoopTurn>> {

@@ -30,4 +30,8 @@ export class InMemorySessionStore implements SessionStore {
         }
         this.sessions.set(session.id, structuredClone(session));
     }
+
+    async delete(id: string): Promise<void> {
+        this.sessions.delete(id);
+    }
 }

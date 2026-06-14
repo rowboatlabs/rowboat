@@ -1,8 +1,7 @@
 import type { LiveNote, LiveNoteTriggerType } from '@x/shared/dist/live-note.js';
 import { fetchLiveNote, patchLiveNote, readNoteBody } from './fileops.js';
-import { createRun, createMessage } from '../../runs/runs.js';
+import { runHeadlessAgent } from '../../agent-runtime/headless.js';
 import { getLiveNoteAgentModel } from '../../models/defaults.js';
-import { extractAgentResponse, waitForRunCompletion } from '../../agents/utils.js';
 import { buildTriggerBlock } from '../../agents/build-trigger-block.js';
 import { liveNoteBus } from './bus.js';
 import { PrefixLogger } from '@x/shared/dist/prefix-logger.js';
@@ -109,98 +108,90 @@ export async function runLiveNoteAgent(
         const bodyBefore = await readNoteBody(filePath);
 
         const model = live.model ?? await getLiveNoteAgentModel();
-        const agentRun = await createRun({
+
+        // One standalone turn per run (sessionId null): a live-note run is
+        // one-shot, not a conversation — the note file is the durable memory.
+        const result = await runHeadlessAgent({
             agentId: 'live-note-agent',
+            message: buildMessage(filePath, live, trigger, context),
             model,
-            ...(live.provider ? { provider: live.provider } : {}),
+            // Granular trigger as the analytics sub-use-case (manual / cron /
+            // window / event) so dashboards can break runs down by what woke them.
             useCase: 'live_note_agent',
-            // Use the granular trigger as the analytics sub-use-case so
-            // dashboards can break down agent runs by what woke them up
-            // (manual / cron / window / event). Pass 1 routing emits the
-            // separate `routing` sub-use-case from routing.ts.
             subUseCase: trigger,
+            ...(live.provider ? { provider: live.provider } : {}),
+            onStart: async (turnId) => {
+                log.log(`${filePath} — start trigger=${trigger} runId=${turnId}`);
+                // Bump `lastAttemptAt` immediately (before the agent executes)
+                // so the scheduler's next poll suppresses duplicate firings
+                // during a slow run and applies a backoff after a failure.
+                // `lastRunAt` is only bumped on *success* below — that way
+                // failures don't lock the cycle anchor for cron / window.
+                await patchLiveNote(filePath, {
+                    lastAttemptAt: new Date().toISOString(),
+                    lastRunId: turnId,
+                });
+                await liveNoteBus.publish({
+                    type: 'live_note_agent_start',
+                    filePath,
+                    trigger,
+                    runId: turnId,
+                });
+            },
         });
+        const runId = result.turnId;
 
-        log.log(`${filePath} — start trigger=${trigger} runId=${agentRun.id}`);
-
-        // Bump `lastAttemptAt` immediately (before the agent executes) so the
-        // scheduler's next poll suppresses duplicate firings during a slow run
-        // and applies a backoff after a failure. `lastRunAt` is only bumped on
-        // *success* below — that way failures don't lock the cycle anchor for
-        // cron / window triggers.
-        await patchLiveNote(filePath, {
-            lastAttemptAt: new Date().toISOString(),
-            lastRunId: agentRun.id,
-        });
-
-        await liveNoteBus.publish({
-            type: 'live_note_agent_start',
-            filePath,
-            trigger,
-            runId: agentRun.id,
-        });
-
-        try {
-            await createMessage(agentRun.id, buildMessage(filePath, live, trigger, context));
-            // throwOnError: surface any error event in the run's log (LLM API
-            // failures, tool errors, billing/credit issues) as a rejection so
-            // the failure branch records lastRunError. Without this the run
-            // can "complete" with errors silently and we'd hit the success
-            // branch with an empty summary, clobbering any prior lastRunError.
-            await waitForRunCompletion(agentRun.id, { throwOnError: true });
-            const summary = await extractAgentResponse(agentRun.id);
-
-            const bodyAfter = await readNoteBody(filePath);
-            const didUpdate = bodyAfter !== bodyBefore;
-
-            // Success — bump the cycle anchor, refresh the summary, clear any
-            // prior error.
-            await patchLiveNote(filePath, {
-                lastRunAt: new Date().toISOString(),
-                lastRunSummary: summary ?? undefined,
-                lastRunError: undefined,
-            });
-
-            log.log(`${filePath} — done action=${didUpdate ? 'replace' : 'no_update'} summary="${truncate(summary)}"`);
-
-            await liveNoteBus.publish({
-                type: 'live_note_agent_complete',
-                filePath,
-                runId: agentRun.id,
-                summary: summary ?? undefined,
-            });
-
-            return {
-                filePath,
-                runId: agentRun.id,
-                action: didUpdate ? 'replace' : 'no_update',
-                contentBefore: bodyBefore,
-                contentAfter: bodyAfter,
-                summary,
-            };
-        } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-
+        if (result.error) {
             // Failure — keep `lastRunAt` and `lastRunSummary` intact so the
             // user keeps seeing the last good state. Just record the error;
             // the scheduler's backoff (lastAttemptAt + 5min) prevents storming.
             try {
-                await patchLiveNote(filePath, { lastRunError: msg });
+                await patchLiveNote(filePath, { lastRunError: result.error });
             } catch {
                 // Don't mask the original error if the patch itself fails.
             }
 
-            log.log(`${filePath} — failed: ${truncate(msg)}`);
+            log.log(`${filePath} — failed: ${truncate(result.error)}`);
 
             await liveNoteBus.publish({
                 type: 'live_note_agent_complete',
                 filePath,
-                runId: agentRun.id,
-                error: msg,
+                runId,
+                error: result.error,
             });
 
-            return { filePath, runId: agentRun.id, action: 'no_update', contentBefore: bodyBefore, contentAfter: null, summary: null, error: msg };
+            return { filePath, runId, action: 'no_update', contentBefore: bodyBefore, contentAfter: null, summary: null, error: result.error };
         }
+
+        const summary = result.summary;
+        const bodyAfter = await readNoteBody(filePath);
+        const didUpdate = bodyAfter !== bodyBefore;
+
+        // Success — bump the cycle anchor, refresh the summary, clear any
+        // prior error.
+        await patchLiveNote(filePath, {
+            lastRunAt: new Date().toISOString(),
+            lastRunSummary: summary ?? undefined,
+            lastRunError: undefined,
+        });
+
+        log.log(`${filePath} — done action=${didUpdate ? 'replace' : 'no_update'} summary="${truncate(summary)}"`);
+
+        await liveNoteBus.publish({
+            type: 'live_note_agent_complete',
+            filePath,
+            runId,
+            summary: summary ?? undefined,
+        });
+
+        return {
+            filePath,
+            runId,
+            action: didUpdate ? 'replace' : 'no_update',
+            contentBefore: bodyBefore,
+            contentAfter: bodyAfter,
+            summary,
+        };
     } finally {
         runningLiveNotes.delete(filePath);
     }

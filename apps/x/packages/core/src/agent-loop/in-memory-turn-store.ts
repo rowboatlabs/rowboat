@@ -56,6 +56,12 @@ export class InMemoryTurnStore implements TurnStore {
         });
     }
 
+    async deleteBySession(sessionId: string): Promise<void> {
+        for (const [id, { turn }] of this.rows) {
+            if (turn.sessionId === sessionId) this.rows.delete(id);
+        }
+    }
+
     async latestForSession(sessionId: string): Promise<z.infer<typeof AgentLoopTurn> | null> {
         const turns = await this.listBySession(sessionId);
         return turns.length > 0 ? turns[turns.length - 1] : null;

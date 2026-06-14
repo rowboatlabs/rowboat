@@ -2,9 +2,9 @@ import fs from 'fs';
 import path from 'path';
 import { google } from 'googleapis';
 import { WorkDir } from '../config/config.js';
-import { createRun, createMessage } from '../runs/runs.js';
+import { runHeadlessAgent } from '../agent-runtime/headless.js';
 import { getKgModel } from '../models/defaults.js';
-import { getErrorDetails, waitForRunCompletion } from '../agents/utils.js';
+import { getErrorDetails } from '../agents/utils.js';
 import { serviceLogger } from '../services/service_logger.js';
 import { loadUserConfig, updateUserEmail } from '../config/user_config.js';
 import { GoogleClientFactory } from './google-client-factory.js';
@@ -281,14 +281,14 @@ async function processAgentNotes(): Promise<void> {
         const timestamp = new Date().toISOString();
         const message = `Current timestamp: ${timestamp}\n\nProcess the following source material and update the Agent Notes folder accordingly.\n\n${messageParts.join('\n\n')}`;
 
-        const agentRun = await createRun({
+        const result = await runHeadlessAgent({
             agentId: AGENT_ID,
+            message,
             model: await getKgModel(),
             useCase: 'knowledge_sync',
             subUseCase: 'agent_notes',
         });
-        await createMessage(agentRun.id, message);
-        await waitForRunCompletion(agentRun.id, { throwOnError: true });
+        if (result.error) throw new Error(result.error);
 
         // Mark everything as processed
         for (const p of emailPaths) {

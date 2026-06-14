@@ -79,7 +79,7 @@ class FakeModelAdapter implements ModelAdapter {
 class FakeToolRunner implements ToolRunner {
     ran: string[] = [];
 
-    definitions() {
+    async definitions() {
         return [];
     }
 
@@ -129,8 +129,11 @@ function turnFixture(
         provider: null,
         model: null,
         permissionMode: "manual",
+        useCase: null,
+        subUseCase: null,
         sessionId: null,
         sessionSeq: null,
+        composeContext: null,
         messages: [],
         permissionRequests: [],
         permissionDecisions: [],

@@ -10,4 +10,6 @@ export interface TurnStore {
     // Session linkage queries (used by the sessions layer); ordered by sessionSeq.
     latestForSession(sessionId: string): Promise<z.infer<typeof AgentLoopTurn> | null>;
     listBySession(sessionId: string): Promise<z.infer<typeof AgentLoopTurn>[]>;
+    // Remove every turn belonging to a session (used when a session is deleted).
+    deleteBySession(sessionId: string): Promise<void>;
 }

@@ -14,8 +14,11 @@ export interface AgentLoopTurnsTable {
     provider: string | null;
     model: string | null;
     permission_mode: string;
+    use_case: string | null;
+    sub_use_case: string | null;
     session_id: string | null;
     session_seq: number | null;
+    compose_context: string | null;  // JSON: ComposeContext | null
     messages: string;             // JSON: MessageList (delta past prefix_length)
     prefix_length: number;        // copy-forward prefix deduped at rest; 0 = stored whole
     permission_requests: string;  // JSON: PermissionRequest[]

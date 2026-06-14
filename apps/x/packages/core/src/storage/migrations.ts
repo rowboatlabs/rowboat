@@ -125,6 +125,37 @@ const migrations: Record<string, Migration> = {
             await db.schema.alterTable("agent_loop_turns").dropColumn("prefix_length").execute();
         },
     },
+    "2026-06-14_0006_turn_compose_context": {
+        async up(db: MigrationDb): Promise<void> {
+            // Per-turn compose chips (voice / search / code-mode) as JSON, or
+            // null when the turn had none. Existing rows default to null.
+            await db.schema
+                .alterTable("agent_loop_turns")
+                .addColumn("compose_context", "text")
+                .execute();
+        },
+        async down(db: MigrationDb): Promise<void> {
+            await db.schema.alterTable("agent_loop_turns").dropColumn("compose_context").execute();
+        },
+    },
+    "2026-06-14_0007_turn_use_case": {
+        async up(db: MigrationDb): Promise<void> {
+            // Analytics attribution (use case / sub use case) for the turn's LLM
+            // usage. Existing rows default to null (untagged).
+            await db.schema
+                .alterTable("agent_loop_turns")
+                .addColumn("use_case", "text")
+                .execute();
+            await db.schema
+                .alterTable("agent_loop_turns")
+                .addColumn("sub_use_case", "text")
+                .execute();
+        },
+        async down(db: MigrationDb): Promise<void> {
+            await db.schema.alterTable("agent_loop_turns").dropColumn("sub_use_case").execute();
+            await db.schema.alterTable("agent_loop_turns").dropColumn("use_case").execute();
+        },
+    },
 };
 
 class InCodeMigrationProvider implements MigrationProvider {

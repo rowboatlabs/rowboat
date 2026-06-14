@@ -219,10 +219,10 @@ export async function listTasks(opts: ListTasksOptions = {}): Promise<ListTasksR
 // ---------------------------------------------------------------------------
 // Runs pointer file (`runs.log`)
 //
-// One line per run, runId only. Prepended on each start so the newest is at
-// the top — no sorting needed on read. The actual transcript jsonl lives in
-// the global `$WorkDir/runs/<runId>.jsonl`; readers fetch via the standard
-// runs:fetch IPC. Read concurrency is unconstrained; write is serialized via
+// One line per run, run id only. Prepended on each start so the newest is at
+// the top — no sorting needed on read. Each id is a standalone turn id; readers
+// load the transcript via the `sessions:getTurn` IPC. Read concurrency is
+// unconstrained; write is serialized via
 // `withFileLock` on the task.yaml path (same lock as patches, so a run-start
 // patch and a prepend don't race).
 // ---------------------------------------------------------------------------

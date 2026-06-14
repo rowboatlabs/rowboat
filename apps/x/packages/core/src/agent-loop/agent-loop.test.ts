@@ -56,11 +56,13 @@ type ModelStep =
 
 class FakeModelAdapter implements ModelAdapter {
     calls = 0;
+    lastSystem: string | null = null;
 
     constructor(private steps: ModelStep[]) {}
 
     stream(req: ModelStreamRequest): EventStream<ModelStreamEvent, ModelStepResult> {
         this.calls++;
+        this.lastSystem = req.system;
         const out = new EventStream<ModelStreamEvent, ModelStepResult>();
         const step = this.steps.shift();
         void (async () => {
@@ -110,7 +112,7 @@ class FakeToolRunner implements ToolRunner {
         private behaviors: Record<string, (call: z.infer<typeof ToolCallPart>) => ToolRunResult> = {},
     ) {}
 
-    definitions() {
+    async definitions() {
         return [];
     }
 
@@ -180,6 +182,7 @@ function makeLoop(opts: {
     runner?: FakeToolRunner;
     gate?: FakePermissionGate;
     store?: TurnStore;
+    systemComposer?: { system(): Promise<string | null> };
     maxIterations?: number;
 } = {}) {
     const store = opts.store ?? new InMemoryTurnStore();
@@ -191,6 +194,7 @@ function makeLoop(opts: {
         modelAdapter: adapter,
         toolRunner: runner,
         permissionGate: gate,
+        ...(opts.systemComposer ? { systemComposer: opts.systemComposer } : {}),
         ...(opts.maxIterations !== undefined ? { maxIterations: opts.maxIterations } : {}),
     });
     return { loop, store, adapter, runner, gate };
@@ -207,8 +211,11 @@ function emptyTurn(
         provider: null,
         model: null,
         permissionMode: "manual",
+        useCase: null,
+        subUseCase: null,
         sessionId: null,
         sessionSeq: null,
+        composeContext: null,
         messages: [],
         permissionRequests: [],
         permissionDecisions: [],
@@ -793,6 +800,23 @@ describe("AgentLoopImpl", () => {
         const turn = await (await loop.createTurn({ messages: [userMsg("go")] })).result;
         expect(turn.modelUsage).toEqual([]);
         expect(totalUsage(turn).totalTokens).toBeNull();
+    });
+
+    it("passes the composed system prompt to the model adapter", async () => {
+        const { loop, adapter } = makeLoop({
+            steps: [{ kind: "message", message: assistantText("ok") }],
+            systemComposer: { async system() { return "SYSTEM PROMPT HERE"; } },
+        });
+        await (await loop.createTurn({ messages: [userMsg("go")] })).result;
+        expect(adapter.lastSystem).toBe("SYSTEM PROMPT HERE");
+    });
+
+    it("defaults to no system prompt when no composer is configured", async () => {
+        const { loop, adapter } = makeLoop({
+            steps: [{ kind: "message", message: assistantText("ok") }],
+        });
+        await (await loop.createTurn({ messages: [userMsg("go")] })).result;
+        expect(adapter.lastSystem).toBeNull();
     });
 
     it("getTurn returns the persisted turn; unknown ids reject", async () => {

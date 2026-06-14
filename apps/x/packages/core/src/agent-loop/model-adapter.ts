@@ -8,16 +8,25 @@ import {
 } from "@x/shared/dist/message.js";
 import { convertFromMessages } from "../agents/runtime.js";
 import { createProvider } from "../models/models.js";
-import { resolveProviderConfig } from "../models/defaults.js";
+import { getDefaultModelAndProvider, resolveProviderConfig } from "../models/defaults.js";
+import { captureLlmUsage } from "../analytics/usage.js";
+import type { UseCase } from "../analytics/use_case.js";
 import { EventStream } from "./event-stream.js";
 import type { ModelStreamEvent, ModelUsage, ToolDefinition } from "./types.js";
 
 export type ModelStreamRequest = {
     provider: string | null;
     model: string | null;
+    // The system prompt for this call, composed fresh per step (agent
+    // instructions + context). null = no system prompt.
+    system: string | null;
     messages: z.infer<typeof MessageList>;
     tools: ToolDefinition[];
     signal: AbortSignal;
+    // Analytics attribution for the `llm_usage` event; null = don't capture.
+    useCase: string | null;
+    subUseCase: string | null;
+    agentId: string | null;
 };
 
 // Usage as reported by the provider for one model step; null when the
@@ -58,12 +67,18 @@ export class VercelModelAdapter implements ModelAdapter {
         req: ModelStreamRequest,
         out: EventStream<ModelStreamEvent, ModelStepResult>,
     ): Promise<void> {
-        if (!req.provider || !req.model) {
-            throw new Error("Agent loop turn has no provider/model configured");
+        // A turn may leave provider/model unset (null = "use the configured
+        // default"), exactly like the old runtime resolved them at run creation.
+        let providerName = req.provider;
+        let modelId = req.model;
+        if (!providerName || !modelId) {
+            const def = await getDefaultModelAndProvider();
+            providerName = providerName ?? def.provider;
+            modelId = modelId ?? def.model;
         }
-        const providerConfig = await resolveProviderConfig(req.provider);
+        const providerConfig = await resolveProviderConfig(providerName);
         const provider = createProvider(providerConfig);
-        const model = provider.languageModel(req.model);
+        const model = provider.languageModel(modelId);
 
         const tools: ToolSet = {};
         for (const def of req.tools) {
@@ -77,6 +92,7 @@ export class VercelModelAdapter implements ModelAdapter {
 
         const result = streamText({
             model,
+            ...(req.system ? { system: req.system } : {}),
             messages: convertFromMessages(req.messages),
             tools,
             stopWhen: stepCountIs(1),
@@ -147,6 +163,27 @@ export class VercelModelAdapter implements ModelAdapter {
             }),
             () => null,
         );
+        // Tag this model step's usage for analytics — parity with the old
+        // runtime, which wrapped each streamText in withUseCase + captureLlmUsage.
+        if (req.useCase) {
+            captureLlmUsage({
+                useCase: req.useCase as UseCase,
+                ...(req.subUseCase ? { subUseCase: req.subUseCase } : {}),
+                ...(req.agentId ? { agentName: req.agentId } : {}),
+                model: modelId,
+                provider: providerName,
+                usage: usage
+                    ? {
+                        ...(usage.inputTokens !== null ? { inputTokens: usage.inputTokens } : {}),
+                        ...(usage.outputTokens !== null ? { outputTokens: usage.outputTokens } : {}),
+                        ...(usage.totalTokens !== null ? { totalTokens: usage.totalTokens } : {}),
+                        ...(usage.reasoningTokens !== null ? { reasoningTokens: usage.reasoningTokens } : {}),
+                        ...(usage.cachedInputTokens !== null ? { cachedInputTokens: usage.cachedInputTokens } : {}),
+                    }
+                    : undefined,
+            });
+        }
+
         out.push({ type: "finish", message });
         out.end({ message, usage });
     }

@@ -9,4 +9,5 @@ export interface SessionStore {
     // Most recently active first (updatedAt descending).
     list(filter?: { agentId?: string }): Promise<z.infer<typeof Session>[]>;
     update(session: z.infer<typeof Session>): Promise<void>;
+    delete(id: string): Promise<void>;
 }

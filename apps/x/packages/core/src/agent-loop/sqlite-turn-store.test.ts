@@ -54,8 +54,11 @@ function sampleTurn(
         provider: "openai",
         model: "gpt-x",
         permissionMode: "auto",
+        useCase: null,
+        subUseCase: null,
         sessionId: null,
         sessionSeq: null,
+        composeContext: null,
         messages: [
             { role: "user", content: "hello" },
             {
@@ -132,6 +135,20 @@ describe("SqliteTurnStore", () => {
         };
         await store.update(updated);
         expect(await store.get("t1")).toEqual(updated);
+    });
+
+    it("round-trips a populated compose context", async () => {
+        const { store } = await loadStore();
+        const turn = sampleTurn("t1", {
+            composeContext: { voiceInput: true, voiceOutput: "summary", searchEnabled: false, codeMode: "claude" },
+        });
+        await store.create(turn);
+        expect((await store.get("t1"))?.composeContext).toEqual({
+            voiceInput: true,
+            voiceOutput: "summary",
+            searchEnabled: false,
+            codeMode: "claude",
+        });
     });
 
     it("returns null for unknown ids and rejects updates to missing turns", async () => {
