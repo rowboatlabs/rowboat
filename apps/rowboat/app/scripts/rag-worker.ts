@@ -174,7 +174,7 @@ async function runProcessFilePipeline(_logger: PrefixLogger, usageTracker: Usage
     // store embeddings in qdrant
     logger.log("Storing embeddings in Qdrant");
     const points: z.infer<typeof EmbeddingRecord>[] = embeddings.map((embedding, i) => ({
-        id: crypto.randomUUID(),
+        id: embeddingPointId(doc.id, i),
         vector: embedding,
         payload: {
             projectId: job.projectId,
@@ -243,7 +243,7 @@ async function runScrapePipeline(_logger: PrefixLogger, usageTracker: UsageTrack
     // store embeddings in qdrant
     logger.log("Storing embeddings in Qdrant");
     const points: z.infer<typeof EmbeddingRecord>[] = embeddings.map((embedding, i) => ({
-        id: crypto.randomUUID(),
+        id: embeddingPointId(doc.id, i),
         vector: embedding,
         payload: {
             projectId: job.projectId,
@@ -295,7 +295,7 @@ async function runProcessTextPipeline(_logger: PrefixLogger, usageTracker: Usage
     // store embeddings in qdrant
     logger.log("Storing embeddings in Qdrant");
     const points: z.infer<typeof EmbeddingRecord>[] = embeddings.map((embedding, i) => ({
-        id: crypto.randomUUID(),
+        id: embeddingPointId(doc.id, i),
         vector: embedding,
         payload: {
             projectId: job.projectId,
