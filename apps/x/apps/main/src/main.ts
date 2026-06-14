@@ -58,6 +58,11 @@ import { disconnectGoogleIfScopesStale } from "./oauth-handler.js";
 
 const execAsync = promisify(exec);
 
+// Captured as early as possible so it reflects actual process start. Used to
+// gate grace-eligible notifications (e.g. the burst of background-task
+// completions a reopen replays) — see ElectronNotificationService.
+const APP_LAUNCHED_AT = Date.now();
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
@@ -337,7 +342,7 @@ app.whenReady().then(async () => {
   });
 
   registerBrowserControlService(new ElectronBrowserControlService());
-  registerNotificationService(new ElectronNotificationService());
+  registerNotificationService(new ElectronNotificationService(APP_LAUNCHED_AT));
 
   setupIpcHandlers();
   setupBrowserEventForwarding();

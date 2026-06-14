@@ -56,6 +56,7 @@ import { getAccessToken } from "../../auth/tokens.js";
 import { API_URL } from "../../config/env.js";
 import type { IBrowserControlService } from "../browser-control/service.js";
 import type { INotificationService } from "../notification/service.js";
+import { notifyIfEnabled } from "../notification/notifier.js";
 // Parser libraries are loaded dynamically inside parseFile.execute()
 // to avoid pulling pdfjs-dist's DOM polyfills into the main bundle.
 // Import paths are computed so esbuild cannot statically resolve them.
@@ -1573,7 +1574,18 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 if (!service.isSupported()) {
                     return { success: false, error: 'Notifications are not supported on this system' };
                 }
-                service.notify({ title, message, link, actionLabel, secondaryActions });
+                // Route through the category gate so the user can toggle these
+                // off, and flag for startup-grace suppression so a reopen doesn't
+                // flood the user with every background task that completed at once
+                // while the app was closed.
+                await notifyIfEnabled('background_task', {
+                    title,
+                    message,
+                    link,
+                    actionLabel,
+                    secondaryActions,
+                    suppressDuringStartupGrace: true,
+                });
                 return { success: true };
             } catch (error) {
                 return {
