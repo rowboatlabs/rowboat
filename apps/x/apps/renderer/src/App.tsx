@@ -589,7 +589,7 @@ type ViewState =
   | { type: 'suggested-topics' }
   | { type: 'meetings' }
   | { type: 'live-notes' }
-  | { type: 'email' }
+  | { type: 'email'; threadId?: string }
   | { type: 'workspace'; path?: string }
   | { type: 'knowledge-view'; folderPath?: string }
   | { type: 'chat-history' }
@@ -603,6 +603,7 @@ function viewStatesEqual(a: ViewState, b: ViewState): boolean {
   if (a.type === 'task' && b.type === 'task') return a.name === b.name
   if (a.type === 'workspace' && b.type === 'workspace') return (a.path ?? '') === (b.path ?? '')
   if (a.type === 'knowledge-view' && b.type === 'knowledge-view') return (a.folderPath ?? '') === (b.folderPath ?? '')
+  if (a.type === 'email' && b.type === 'email') return (a.threadId ?? '') === (b.threadId ?? '')
   return true // both graph
 }
 
@@ -610,7 +611,7 @@ function viewStatesEqual(a: ViewState, b: ViewState): boolean {
  * Parse a rowboat:// deep link into a ViewState. Returns null if the URL is
  * malformed or names an unknown target.
  *
- * Shape: rowboat://open?type=<file|chat|graph|task|suggested-topics|meetings|live-notes>&...
+ * Shape: rowboat://open?type=<file|chat|graph|task|suggested-topics|meetings|live-notes|email>&...
  *   file:             ?type=file&path=knowledge/foo.md
  *   chat:             ?type=chat&runId=abc123        (runId optional)
  *   graph:            ?type=graph
@@ -618,6 +619,7 @@ function viewStatesEqual(a: ViewState, b: ViewState): boolean {
  *   suggested-topics: ?type=suggested-topics
  *   meetings:         ?type=meetings
  *   live-notes:       ?type=live-notes
+ *   email:            ?type=email
  */
 function parseDeepLink(input: string): ViewState | null {
   const SCHEME = 'rowboat://'
@@ -646,6 +648,10 @@ function parseDeepLink(input: string): ViewState | null {
       return { type: 'meetings' }
     case 'live-notes':
       return { type: 'live-notes' }
+    case 'email': {
+      const threadId = params.get('threadId')
+      return { type: 'email', threadId: threadId || undefined }
+    }
     case 'workspace': {
       const path = params.get('path')
       return { type: 'workspace', path: path ?? undefined }
@@ -3960,6 +3966,12 @@ function App() {
         setIsKnowledgeViewOpen(false)
         setIsChatHistoryOpen(false)
       setIsHomeOpen(false)
+        // Deep links (e.g. a new-email notification) carry the thread to open;
+        // bump the version so EmailView re-selects it even if email is already open.
+        if (view.threadId) {
+          setEmailInitialThreadId(view.threadId)
+          setEmailThreadIdVersion((v) => v + 1)
+        }
         ensureEmailFileTab()
         return
       case 'workspace':
