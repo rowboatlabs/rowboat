@@ -30,6 +30,8 @@
 
 </h5>
 
+English | [简体中文](./README.zh-CN.md)
+
 Rowboat connects to your email and meeting notes, builds a long-lived knowledge graph, and uses that context to help you get work done - privately, on your machine.
 
 You can do things like:
