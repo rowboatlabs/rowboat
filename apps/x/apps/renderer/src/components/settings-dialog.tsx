@@ -2015,8 +2015,8 @@ const NOTIFICATION_CATEGORIES: { key: NotificationCategoryKey; label: string; de
   },
   {
     key: "background_task",
-    label: "Background tasks",
-    description: "When a background task finishes and pings you. Bursts right after the app reopens are held back briefly.",
+    label: "Background agents",
+    description: "When a background agent you've set up has something to surface. Click to open it on the background tasks page.",
   },
 ]
 

@@ -1574,18 +1574,25 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 if (!service.isSupported()) {
                     return { success: false, error: 'Notifications are not supported on this system' };
                 }
-                // Route through the category gate so the user can toggle these
-                // off, and flag for startup-grace suppression so a reopen doesn't
-                // flood the user with every background task that completed at once
-                // while the app was closed.
-                await notifyIfEnabled('background_task', {
-                    title,
-                    message,
-                    link,
-                    actionLabel,
-                    secondaryActions,
-                    suppressDuringStartupGrace: true,
-                });
+                const uc = getCurrentUseCase()?.useCase;
+                if (uc === 'background_task_agent') {
+                    // User-configured background agent: gate behind the
+                    // background_task category (toggleable), suppress the reopen
+                    // flood, and default the deep-link to the background tasks
+                    // page if the agent didn't supply its own link.
+                    await notifyIfEnabled('background_task', {
+                        title,
+                        message,
+                        link: link ?? 'rowboat://open?type=bg-tasks',
+                        actionLabel,
+                        secondaryActions,
+                        suppressDuringStartupGrace: true,
+                    });
+                } else {
+                    // Regular chat (or any other) agent calling notify-user:
+                    // notify directly as before.
+                    service.notify({ title, message, link, actionLabel, secondaryActions });
+                }
                 return { success: true };
             } catch (error) {
                 return {

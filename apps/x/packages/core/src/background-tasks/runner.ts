@@ -6,6 +6,7 @@ import { getBackgroundTaskAgentModel } from '../models/defaults.js';
 import { extractAgentResponse, waitForRunCompletion } from '../agents/utils.js';
 import { buildTriggerBlock } from '../agents/build-trigger-block.js';
 import { backgroundTaskBus } from './bus.js';
+import { withUseCase } from '../analytics/use_case.js';
 
 const log = new PrefixLogger('BgTask:Agent');
 
@@ -142,7 +143,18 @@ export async function runBackgroundTask(
         });
 
         try {
-            await createMessage(runId, buildMessage(slug, task, trigger, context));
+            // Establish the use-case context for the whole run so every tool the
+            // agent calls (notably notify-user) reads `background_task_agent` via
+            // getCurrentUseCase(). createMessage synchronously fires
+            // agentRuntime.trigger(), so the detached run loop — and the tool
+            // calls within it — inherit this AsyncLocalStorage context. (The
+            // runtime's own enterUseCase runs inside an async generator and
+            // doesn't reliably propagate to tool execution, so we set it here at
+            // the trigger point instead.)
+            await withUseCase(
+                { useCase: 'background_task_agent', subUseCase: trigger },
+                () => createMessage(runId, buildMessage(slug, task, trigger, context)),
+            );
             await waitForRunCompletion(runId, { throwOnError: true });
             const summary = await extractAgentResponse(runId);
 
