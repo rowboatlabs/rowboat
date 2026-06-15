@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CodeMode, MiddlePaneContext, VoiceOutputMode } from "./message.js";
+import { ApprovalPolicy } from "./code-mode.js";
 import { AgentLoopTurn, PermissionMode, type TurnEvent } from "./agent-turn.js";
 
 // A session is a grouping label plus a title — an ordered chain of turns,
@@ -36,6 +37,9 @@ export const SendMessageOptions = z.object({
     voiceOutput: VoiceOutputMode.optional(),
     searchEnabled: z.boolean().optional(),
     codeMode: CodeMode.optional(),
+    // Rowboat code sessions pin the coding agent's cwd + approval policy.
+    codeCwd: z.string().optional(),
+    codePolicy: ApprovalPolicy.optional(),
     middlePaneContext: MiddlePaneContext.optional(),
 });
 

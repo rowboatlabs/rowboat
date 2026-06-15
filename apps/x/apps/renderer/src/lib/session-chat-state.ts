@@ -45,11 +45,18 @@ export function turnToChatState(turn: Turn, overlay: LiveOverlay): SessionChatSt
   const status = deriveTurnStatus(turn)
   const parts = toolCallParts(turn)
 
-  const conversation = buildConversation(turn).map((item) =>
-    isToolCall(item) && overlay.toolOutput[item.id]
-      ? { ...item, streamingOutput: overlay.toolOutput[item.id] }
-      : item,
-  )
+  const conversation = buildConversation(turn).map((item) => {
+    if (!isToolCall(item)) return item
+    const codeRunEvents = overlay.codeRunEvents[item.id]
+    const codePermission = overlay.codePermission[item.id]
+    if (!overlay.toolOutput[item.id] && !codeRunEvents && codePermission === undefined) return item
+    return {
+      ...item,
+      ...(overlay.toolOutput[item.id] ? { streamingOutput: overlay.toolOutput[item.id] } : {}),
+      ...(codeRunEvents ? { codeRunEvents } : {}),
+      ...(codePermission !== undefined ? { pendingCodePermission: codePermission } : {}),
+    }
+  })
 
   const allPermissionRequests = new Map<string, z.infer<typeof ToolPermissionRequestEvent>>()
   for (const { toolCall, request } of pendingPermissions(turn)) {

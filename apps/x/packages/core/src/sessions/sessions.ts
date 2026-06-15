@@ -50,6 +50,8 @@ function composeContextFromOptions(
     if (options.voiceOutput !== undefined) compose.voiceOutput = options.voiceOutput;
     if (options.searchEnabled !== undefined) compose.searchEnabled = options.searchEnabled;
     if (options.codeMode !== undefined) compose.codeMode = options.codeMode;
+    if (options.codeCwd !== undefined) compose.codeCwd = options.codeCwd;
+    if (options.codePolicy !== undefined) compose.codePolicy = options.codePolicy;
     return Object.keys(compose).length > 0 ? compose : null;
 }
 

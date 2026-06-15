@@ -54,7 +54,7 @@ describe('turnToChatState', () => {
           { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'tc1', toolName: 'executeCommand', arguments: {} }] },
         ],
       }),
-      { text: '', toolOutput: { tc1: 'line1\nline2' } },
+      { ...emptyOverlay(), toolOutput: { tc1: 'line1\nline2' } },
     )
     const tool = state.conversation.find(isToolCall)
     expect(tool?.streamingOutput).toBe('line1\nline2')

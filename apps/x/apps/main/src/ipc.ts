@@ -635,7 +635,23 @@ export function setupIpcHandlers(agentRuntime: AgentRuntime) {
       return { sessions: await agentRuntime.sessions.listSessions(args ?? undefined) };
     },
     'sessions:sendMessage': async (_event, args) => {
-      const handle = await agentRuntime.sessions.sendMessage(args.sessionId, args.messages, args.options);
+      // Rowboat code sessions pin the coding agent's agent/cwd/policy from the
+      // session meta (the single source of truth), so EVERY send drives
+      // code_agent_run in the right place regardless of the composer chip.
+      let options = args.options;
+      const codeMeta = await container
+        .resolve<ICodeSessionsRepo>('codeSessionsRepo')
+        .get(args.sessionId)
+        .catch(() => null);
+      if (codeMeta) {
+        options = {
+          ...options,
+          codeMode: codeMeta.agent,
+          codeCwd: codeMeta.cwd,
+          codePolicy: codeMeta.policy,
+        };
+      }
+      const handle = await agentRuntime.sessions.sendMessage(args.sessionId, args.messages, options);
       return { turnId: handle.id };
     },
     'sessions:getHistory': async (_event, args) => {

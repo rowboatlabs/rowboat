@@ -7,6 +7,7 @@ import {
     ToolCallPart,
     VoiceOutputMode,
 } from "./message.js";
+import { ApprovalPolicy, CodeRunEvent, PermissionAsk } from "./code-mode.js";
 
 // ─── Persisted fact schemas ─────────────────────────────────────────────────
 //
@@ -83,6 +84,10 @@ export const ComposeContext = z.object({
     voiceOutput: VoiceOutputMode.optional(),
     searchEnabled: z.boolean().optional(),
     codeMode: CodeMode.optional(),
+    // Code-section (rowboat) turns pin the coding agent's working directory and
+    // approval policy; code_agent_run honors these over the model's args.
+    codeCwd: z.string().optional(),
+    codePolicy: ApprovalPolicy.optional(),
 });
 
 export const AgentLoopTurn = z.object({
@@ -168,7 +173,12 @@ export type TurnEvent =
     // recorded as a ToolMessage; this is purely for the UI to watch in real time.
     | { type: "tool-output"; toolCallId: string; chunk: string }
     | { type: "tool-result"; toolCallId: string }
-    | { type: "permission-requested"; toolCallId: string };
+    | { type: "permission-requested"; toolCallId: string }
+    // Rich code-agent activity streamed by code_agent_run (rowboat mode): the
+    // ACP agent's tool calls / plan / diffs, and its mid-run approval asks. Both
+    // carry the owning tool call id so the UI nests them under that tool card.
+    | { type: "code-run-event"; toolCallId: string; event: z.infer<typeof CodeRunEvent> }
+    | { type: "code-run-permission-request"; toolCallId: string; requestId: string; ask: z.infer<typeof PermissionAsk> };
 
 // ─── Derived state ──────────────────────────────────────────────────────────
 

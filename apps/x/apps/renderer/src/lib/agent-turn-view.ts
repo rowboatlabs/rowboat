@@ -2,6 +2,7 @@ import { z } from 'zod'
 import type { AgentLoopTurn, TurnEvent } from '@x/shared/src/agent-turn.js'
 import { deriveToolCallState, deriveTurnStatus, toolCallParts } from '@x/shared/src/agent-turn.js'
 import type { Message, ToolCallPart } from '@x/shared/src/message.js'
+import type { CodeRunEvent, PermissionAsk } from '@x/shared/src/code-mode.js'
 import type { ChatMessage, ConversationItem, ToolCall } from './chat-conversation.js'
 
 // Pure derivation of the chat view model from a turn. A turn snapshot →
@@ -165,9 +166,18 @@ export function turnStatus(turn: Turn): ReturnType<typeof deriveTurnStatus> {
 export type LiveOverlay = {
   text: string
   toolOutput: Record<string, string>
+  // code_agent_run (rowboat) live activity, keyed by the owning tool call id.
+  // These are live-only: a completed turn collapses to the tool's final result.
+  codeRunEvents: Record<string, CodeRunEvent[]>
+  codePermission: Record<string, { requestId: string; ask: PermissionAsk } | null>
 }
 
-export const emptyOverlay = (): LiveOverlay => ({ text: '', toolOutput: {} })
+export const emptyOverlay = (): LiveOverlay => ({
+  text: '',
+  toolOutput: {},
+  codeRunEvents: {},
+  codePermission: {},
+})
 
 // Accumulate a live event onto the overlay. A fresh state snapshot supersedes
 // the overlay (the committed transcript now includes what was streaming), so
@@ -184,6 +194,31 @@ export function applyOverlay(overlay: LiveOverlay, event: TurnEvent): LiveOverla
           [event.toolCallId]: (overlay.toolOutput[event.toolCallId] ?? '') + event.chunk,
         },
       }
+    case 'code-run-event':
+      return {
+        ...overlay,
+        codeRunEvents: {
+          ...overlay.codeRunEvents,
+          [event.toolCallId]: [...(overlay.codeRunEvents[event.toolCallId] ?? []), event.event],
+        },
+      }
+    case 'code-run-permission-request':
+      return {
+        ...overlay,
+        codePermission: {
+          ...overlay.codePermission,
+          [event.toolCallId]: { requestId: event.requestId, ask: event.ask },
+        },
+      }
+    case 'tool-result':
+      // The ACP call resolved — drop any lingering code permission card for it.
+      if (overlay.codePermission[event.toolCallId]) {
+        return {
+          ...overlay,
+          codePermission: { ...overlay.codePermission, [event.toolCallId]: null },
+        }
+      }
+      return overlay
     default:
       return overlay
   }

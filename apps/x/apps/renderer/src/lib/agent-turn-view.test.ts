@@ -157,6 +157,17 @@ describe('applyOverlay', () => {
     overlay = applyOverlay(overlay, { type: 'tool-output', toolCallId: 'tc1', chunk: 'line1\n' })
     overlay = applyOverlay(overlay, { type: 'tool-output', toolCallId: 'tc1', chunk: 'line2' })
     overlay = applyOverlay(overlay, { type: 'tool-result', toolCallId: 'tc1' })
-    expect(overlay).toEqual({ text: 'Hello', toolOutput: { tc1: 'line1\nline2' } })
+    expect(overlay).toEqual({ text: 'Hello', toolOutput: { tc1: 'line1\nline2' }, codeRunEvents: {}, codePermission: {} })
+  })
+
+  it('accumulates code-run events + pending permission per tool call, clears permission on result', () => {
+    let overlay = emptyOverlay()
+    overlay = applyOverlay(overlay, { type: 'code-run-event', toolCallId: 'tc1', event: { type: 'plan', entries: [] } })
+    overlay = applyOverlay(overlay, { type: 'code-run-permission-request', toolCallId: 'tc1', requestId: 'r1', ask: { title: 'Run?', isRead: false } })
+    expect(overlay.codeRunEvents.tc1).toHaveLength(1)
+    expect(overlay.codePermission.tc1).toEqual({ requestId: 'r1', ask: { title: 'Run?', isRead: false } })
+    overlay = applyOverlay(overlay, { type: 'tool-result', toolCallId: 'tc1' })
+    expect(overlay.codePermission.tc1).toBeNull()
+    expect(overlay.codeRunEvents.tc1).toHaveLength(1)
   })
 })

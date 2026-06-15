@@ -68,12 +68,27 @@ export class RealToolRunner implements ToolRunner {
                             toolCallId: event.toolCallId,
                             chunk: event.output,
                         });
+                    } else if (event.type === "code-run-event") {
+                        // code_agent_run's rich ACP activity (rowboat mode): nest
+                        // it under the owning tool call so the UI renders it.
+                        ctx.emit({
+                            type: "code-run-event",
+                            toolCallId: event.toolCallId,
+                            event: event.event,
+                        });
+                    } else if (event.type === "code-run-permission-request") {
+                        ctx.emit({
+                            type: "code-run-permission-request",
+                            toolCallId: event.toolCallId,
+                            requestId: event.requestId,
+                            ask: event.ask,
+                        });
                     }
-                    // Other run events (code-run-*) are deferred — the channel
-                    // exists; deeper plumbing lands with code_agent_run.
                     return Promise.resolve();
                 },
                 codeMode: ctx.codeMode,
+                codeCwd: ctx.codeCwd,
+                codePolicy: ctx.codePolicy,
             };
             // A thrown error propagates: the loop catches it (re-checking abort)
             // and records it as an error ToolMessage, never a turn error.

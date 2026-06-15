@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CodeMode, ToolCallPart } from "@x/shared/dist/message.js";
+import { ApprovalPolicy } from "@x/shared/dist/code-mode.js";
 import type { ToolDefinition, TurnEvent } from "./types.js";
 
 export type ToolRunResult =
@@ -15,6 +16,10 @@ export type ToolRunContext = {
     // The turn's code-mode chip (null = off). The code_agent_run tool honors
     // this over the model's argument so toggling the chip switches agents.
     codeMode: z.infer<typeof CodeMode> | null;
+    // Rowboat code sessions pin the coding agent's cwd + approval policy;
+    // code_agent_run honors these over the model's args. null = unset.
+    codeCwd: string | null;
+    codePolicy: z.infer<typeof ApprovalPolicy> | null;
     signal: AbortSignal;
     // Forward a live event onto the turn's stream while the tool runs (e.g. a
     // `tool-output` chunk). Best-effort and never persisted — drop it and the

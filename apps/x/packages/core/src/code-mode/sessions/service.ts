@@ -109,11 +109,21 @@ export class CodeSessionService {
         const project = await this.codeProjectsRepo.get(args.projectId);
         if (!project) throw new Error(`Unknown project: ${args.projectId}`);
 
-        // The session id is its own opaque key — code-mode owns its event log
-        // (codeEventStore) and metadata (codeSessionsRepo) under this id; no run
-        // record is minted. Rowboat mode reuses this id as a sessions-runtime
-        // session id (wired in a later step).
-        const sessionId = crypto.randomUUID();
+        const title = args.title?.trim() || `${project.name} session`;
+
+        // Direct mode owns its id outright (code-mode's own event store/bus).
+        // Rowboat mode is driven by the copilot on the new sessions runtime, so
+        // the session must exist there — create it and adopt its id, so the
+        // renderer can sessions:sendMessage against this same id.
+        let sessionId: string;
+        if (args.mode === 'rowboat') {
+            const { getAgentRuntime } = await import('../../agent-runtime/index.js');
+            const { sessions } = await getAgentRuntime();
+            const created = await sessions.createSession({ agentId: 'copilot', title });
+            sessionId = created.id;
+        } else {
+            sessionId = crypto.randomUUID();
+        }
 
         let cwd = project.path;
         let worktree: CodeSession['worktree'];
@@ -132,7 +142,7 @@ export class CodeSessionService {
         const session: CodeSession = {
             id: sessionId,
             projectId: project.id,
-            title: args.title?.trim() || `${project.name} session`,
+            title,
             agent: args.agent,
             mode: args.mode,
             policy: args.policy,
@@ -346,6 +356,13 @@ export class CodeSessionService {
         await clearStoredSession(sessionId);
         await this.codeSessionsRepo.remove(sessionId);
         await this.codeEventStore.delete(sessionId).catch(() => {});
+        // Rowboat sessions also have a sessions-runtime row + turns — drop them.
+        if (session?.mode === 'rowboat') {
+            const { getAgentRuntime } = await import('../../agent-runtime/index.js');
+            await getAgentRuntime()
+                .then(({ sessions }) => sessions.deleteSession(sessionId))
+                .catch(() => {});
+        }
         await fs.rm(path.join(WorkDir, 'config', `workdir-${sessionId}.json`), { force: true }).catch(() => {});
     }
 

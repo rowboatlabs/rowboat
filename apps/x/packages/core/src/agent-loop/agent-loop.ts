@@ -387,6 +387,8 @@ export class AgentLoopImpl implements AgentLoop {
                                 turnId,
                                 agentId: turn.agentId,
                                 codeMode: turn.composeContext?.codeMode ?? null,
+                                codeCwd: turn.composeContext?.codeCwd ?? null,
+                                codePolicy: turn.composeContext?.codePolicy ?? null,
                                 signal,
                                 emit: (event) => this.emit(stream, meta, event),
                             })
