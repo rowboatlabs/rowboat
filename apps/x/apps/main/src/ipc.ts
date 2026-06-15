@@ -10,9 +10,6 @@ import {
 import { watcher as watcherCore, workspace } from '@x/core';
 import { workspace as workspaceShared } from '@x/shared';
 import * as mcpCore from '@x/core/dist/mcp/mcp.js';
-import * as runsCore from '@x/core/dist/runs/runs.js';
-import { bus } from '@x/core/dist/runs/bus.js';
-import { RunEvent } from '@x/shared/dist/runs.js';
 import type { AgentRuntime } from '@x/core/dist/agent-runtime/index.js';
 import type { SessionBusEvent } from '@x/shared/dist/sessions.js';
 import { serviceBus } from '@x/core/dist/services/service_bus.js';
@@ -417,35 +414,6 @@ export async function startCodeEventWatcher(): Promise<void> {
   });
 }
 
-// Forward the generic event bus → renderer (runs:events). Code-mode (direct ACP
-// sessions) streams its live events (code-run-event, permission, message, …)
-// through this feed; chat + headless use the sessions:events feed below.
-function emitRunEvent(event: z.infer<typeof RunEvent>): void {
-  const windows = BrowserWindow.getAllWindows();
-  for (const win of windows) {
-    if (!win.isDestroyed() && win.webContents) {
-      win.webContents.send('runs:events', event);
-    }
-  }
-}
-
-let runsWatcher: (() => void) | null = null;
-export async function startRunsWatcher(): Promise<void> {
-  if (runsWatcher) {
-    return;
-  }
-  runsWatcher = await bus.subscribe('*', async (event) => {
-    emitRunEvent(event);
-  });
-}
-
-export function stopRunsWatcher(): void {
-  if (runsWatcher) {
-    runsWatcher();
-    runsWatcher = null;
-  }
-}
-
 function emitSessionEvent(event: SessionBusEvent): void {
   const windows = BrowserWindow.getAllWindows();
   for (const win of windows) {
@@ -686,10 +654,6 @@ export function setupIpcHandlers(agentRuntime: AgentRuntime) {
       const registry = container.resolve<CodePermissionRegistry>('codePermissionRegistry');
       registry.resolve(args.requestId, args.decision);
       return { success: true };
-    },
-    // Code-mode reads a session's transcript from the generic run event-log.
-    'runs:fetch': async (_event, args) => {
-      return runsCore.fetchRun(args.runId);
     },
     // Code-mode's own transcript history (its dedicated SQLite event store).
     'codeSession:getEvents': async (_event, args) => {

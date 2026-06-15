@@ -21,7 +21,7 @@ import { BrowserStateSchema } from './browser-control.js';
 import { BillingInfoSchema } from './billing.js';
 import { GmailThreadSchema } from './blocks.js';
 import { PermissionDecision, ApprovalPolicy, CodingAgent } from './code-mode.js';
-import { Run, RunEvent } from './runs.js';
+import { RunEvent } from './runs.js';
 import { NotificationSettingsSchema } from './notification-settings.js';
 import { CodeProject, CodeSession, CodeSessionMode, CodeSessionStatus, GitRepoInfo, GitStatusFile } from './code-sessions.js';
 
@@ -237,19 +237,6 @@ const ipcSchemas = {
     res: z.object({
       result: z.unknown(),
     }),
-  },
-  // Code-mode reuses the generic runs event-log + bus (decoupled from the
-  // retired LLM agent runtime): fetch a session's transcript and stream its
-  // live events. Chat + headless use the sessions:* channels instead.
-  'runs:fetch': {
-    req: z.object({
-      runId: z.string(),
-    }),
-    res: Run,
-  },
-  'runs:events': {
-    req: z.null(),
-    res: z.null(),
   },
   'services:events': {
     req: ServiceEvent,

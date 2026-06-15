@@ -2,7 +2,6 @@ import { asClass, asValue, createContainer, InjectionMode } from "awilix";
 import { FSModelConfigRepo, IModelConfigRepo } from "../models/repo.js";
 import { FSMcpConfigRepo, IMcpConfigRepo } from "../mcp/repo.js";
 import { FSAgentsRepo, IAgentsRepo } from "../agents/repo.js";
-import { FSRunsRepo, IRunsRepo } from "../runs/repo.js";
 import { IMonotonicallyIncreasingIdGenerator, IdGen } from "../application/lib/id-gen.js";
 import { IBus, InMemoryBus } from "../application/lib/bus.js";
 import { IRunsLock, InMemoryRunsLock } from "../runs/lock.js";
@@ -31,16 +30,12 @@ const container = createContainer({
 
 container.register({
     idGenerator: asClass<IMonotonicallyIncreasingIdGenerator>(IdGen).singleton(),
-    bus: asClass<IBus>(InMemoryBus).singleton(),
     runsLock: asClass<IRunsLock>(InMemoryRunsLock).singleton(),
     abortRegistry: asClass<IAbortRegistry>(InMemoryAbortRegistry).singleton(),
 
     mcpConfigRepo: asClass<IMcpConfigRepo>(FSMcpConfigRepo).singleton(),
     modelConfigRepo: asClass<IModelConfigRepo>(FSModelConfigRepo).singleton(),
     agentsRepo: asClass<IAgentsRepo>(FSAgentsRepo).singleton(),
-    // Generic run event-log store (JSONL). The LLM agent runtime that once drove
-    // it is retired; code-mode now uses it as its session event store.
-    runsRepo: asClass<IRunsRepo>(FSRunsRepo).singleton(),
     oauthRepo: asClass<IOAuthRepo>(FSOAuthRepo).singleton(),
     clientRegistrationRepo: asClass<IClientRegistrationRepo>(FSClientRegistrationRepo).singleton(),
     granolaConfigRepo: asClass<IGranolaConfigRepo>(FSGranolaConfigRepo).singleton(),

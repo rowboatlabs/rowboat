@@ -2,7 +2,6 @@ import { app, BrowserWindow, desktopCapturer, protocol, net, shell, session, typ
 import path from "node:path";
 import {
   setupIpcHandlers,
-  startRunsWatcher,
   startCodeSessionStatusWatcher,
   startCodeEventWatcher,
   startSessionsWatcher,
@@ -363,10 +362,6 @@ app.whenReady().then(async () => {
 
   // start sessions watcher (new runtime event feed → renderer)
   startSessionsWatcher(agentRuntime);
-
-  // start runs watcher — forwards the generic event bus → renderer (runs:events).
-  // Code-mode (direct ACP sessions) streams its live events through this feed.
-  startRunsWatcher();
 
   // start code-session status tracker (derives working/needs-you/idle + notifications)
   startCodeSessionStatusWatcher();

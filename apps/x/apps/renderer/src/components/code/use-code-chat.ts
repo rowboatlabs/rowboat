@@ -53,10 +53,10 @@ function messageText(content: unknown): string {
   return ''
 }
 
-// Conversation state for one coding session, fed by the run JSONL (history)
-// and the live runs:events stream. Handles both modes: direct turns arrive as
-// code-run-events with a `direct-` toolCallId; Rowboat turns arrive as the
-// usual LLM message/tool events (incl. code_agent_run blocks).
+// Conversation state for a DIRECT coding session, fed by code-mode's own event
+// store (codeSession:getEvents) and live feed (codeSession:events). Rowboat
+// sessions render in the main chat on the new sessions runtime instead, so this
+// hook is only mounted for direct mode.
 export function useCodeChat(session: CodeSession | null) {
   const sessionId = session?.id ?? null
   const [items, setItems] = useState<CodeChatItem[]>([])
