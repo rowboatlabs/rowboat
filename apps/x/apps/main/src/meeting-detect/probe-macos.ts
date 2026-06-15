@@ -1,8 +1,5 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { spawn } from "node:child_process";
 import type { MicProbe, MicUser } from "./types.js";
-
-const execFileAsync = promisify(execFile);
 
 // macOS doesn't expose a public "who is using the mic right now" API. Two
 // pragmatic signals we can read from a shell without a native helper:
@@ -30,14 +27,64 @@ const execFileAsync = promisify(execFile);
 //     YouTube tab) are filtered downstream by browser-match's tab-title check.
 const ASSERTION_LINE = /^\s*pid\s+(\d+)\((.+?)\):\s+\[[^\]]+\]\s+\S+\s+(PreventUserIdleDisplaySleep|NoIdleSleepAssertion)/;
 
+const PMSET_TIMEOUT_MS = 10_000;
+
+// Run `pmset -g assertions` and resolve its stdout.
+//
+// We use spawn (not execFile) with stdin explicitly set to "ignore" because in
+// a packaged .app launched from Finder — rather than a terminal — the main
+// process has no valid stdin file descriptor. execFile would try to wire the
+// child's stdio to that invalid fd, and since this runs repeatedly from the
+// detector's background poll loop, the spawn fails with `EBADF` (errno -9).
+// Setting stdio to ['ignore', 'pipe', 'pipe'] points the child's stdin at
+// /dev/null, so no invalid descriptor is ever inherited. (This never surfaces
+// in dev because launching from a terminal provides a valid stdin.)
+function runPmsetAssertions(): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const child = spawn("/usr/bin/pmset", ["-g", "assertions"], {
+            stdio: ["ignore", "pipe", "pipe"],
+            windowsHide: true,
+        });
+
+        let stdout = "";
+        let stderr = "";
+        let settled = false;
+
+        const timer = setTimeout(() => {
+            if (settled) return;
+            settled = true;
+            child.kill("SIGKILL");
+            reject(new Error(`pmset timed out after ${PMSET_TIMEOUT_MS}ms`));
+        }, PMSET_TIMEOUT_MS);
+
+        child.stdout?.on("data", (chunk) => { stdout += chunk; });
+        child.stderr?.on("data", (chunk) => { stderr += chunk; });
+
+        child.on("error", (err) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            reject(err);
+        });
+
+        child.on("close", (code) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            if (code === 0) {
+                resolve(stdout);
+            } else {
+                reject(new Error(`pmset exited with code ${code}: ${stderr.trim()}`));
+            }
+        });
+    });
+}
+
 export class MacOsMicProbe implements MicProbe {
     async probe(): Promise<MicUser[]> {
         let stdout: string;
         try {
-            const result = await execFileAsync("/usr/bin/pmset", ["-g", "assertions"], {
-                timeout: 10_000,
-            });
-            stdout = result.stdout;
+            stdout = await runPmsetAssertions();
         } catch (err) {
             console.error("[MeetingDetect] macOS probe failed:", err);
             return [];
