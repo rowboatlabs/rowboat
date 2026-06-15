@@ -15,13 +15,14 @@ catalog:
   vitest: 4.1.7
 
 onlyBuiltDependencies:
+  - better-sqlite3
   - core-js
   - electron
   - electron-winstaller
   - esbuild
-  - better-sqlite3
   - fs-xattr
   - macos-alias
+  - node-pty
   - protobufjs
 
 patchedDependencies:
