@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import path from 'path';
 import fs from 'fs/promises';
 import z from 'zod';
@@ -5,7 +6,7 @@ import { WorkDir } from '../../config/config.js';
 import type { CodeSession, CodeSessionMode } from '@x/shared/dist/code-sessions.js';
 import type { CodingAgent, ApprovalPolicy } from '@x/shared/dist/code-mode.js';
 import { RunEvent, MessageEvent } from '@x/shared/dist/runs.js';
-import type { IRunsRepo } from '../../runs/repo.js';
+import type { CodeEventStore } from './event-store.js';
 import type { IRunsLock } from '../../runs/lock.js';
 import type { IBus } from '../../application/lib/bus.js';
 import type { IMonotonicallyIncreasingIdGenerator } from '../../application/lib/id-gen.js';
@@ -59,9 +60,9 @@ async function persistRunWorkDir(runId: string, cwd: string): Promise<void> {
 // of the app (stop IPC, status tracking, event forwarding) needs no special
 // casing.
 export class CodeSessionService {
-    private readonly runsRepo: IRunsRepo;
+    private readonly codeEventStore: CodeEventStore;
     private readonly runsLock: IRunsLock;
-    private readonly bus: IBus;
+    private readonly codeEventBus: IBus;
     private readonly idGenerator: IMonotonicallyIncreasingIdGenerator;
     private readonly abortRegistry: IAbortRegistry;
     private readonly codeModeManager: CodeModeManager;
@@ -73,9 +74,9 @@ export class CodeSessionService {
     private readonly inflight = new Set<string>();
 
     constructor({
-        runsRepo,
+        codeEventStore,
         runsLock,
-        bus,
+        codeEventBus,
         idGenerator,
         abortRegistry,
         codeModeManager,
@@ -83,9 +84,9 @@ export class CodeSessionService {
         codeSessionsRepo,
         codeProjectsRepo,
     }: {
-        runsRepo: IRunsRepo;
+        codeEventStore: CodeEventStore;
         runsLock: IRunsLock;
-        bus: IBus;
+        codeEventBus: IBus;
         idGenerator: IMonotonicallyIncreasingIdGenerator;
         abortRegistry: IAbortRegistry;
         codeModeManager: CodeModeManager;
@@ -93,9 +94,9 @@ export class CodeSessionService {
         codeSessionsRepo: ICodeSessionsRepo;
         codeProjectsRepo: ICodeProjectsRepo;
     }) {
-        this.runsRepo = runsRepo;
+        this.codeEventStore = codeEventStore;
         this.runsLock = runsLock;
-        this.bus = bus;
+        this.codeEventBus = codeEventBus;
         this.idGenerator = idGenerator;
         this.abortRegistry = abortRegistry;
         this.codeModeManager = codeModeManager;
@@ -108,16 +109,11 @@ export class CodeSessionService {
         const project = await this.codeProjectsRepo.get(args.projectId);
         if (!project) throw new Error(`Unknown project: ${args.projectId}`);
 
-        // The session is a real run so Rowboat mode (agent runtime) works on it
-        // directly and the existing runs plumbing (fetch/events/stop) applies.
-        const { createRun } = await import('../../runs/runs.js');
-        const run = await createRun({
-            agentId: 'copilot',
-            useCase: 'code_session',
-            ...(args.model ? { model: args.model } : {}),
-            ...(args.provider ? { provider: args.provider } : {}),
-        });
-        const sessionId = run.id;
+        // The session id is its own opaque key — code-mode owns its event log
+        // (codeEventStore) and metadata (codeSessionsRepo) under this id; no run
+        // record is minted. Rowboat mode reuses this id as a sessions-runtime
+        // session id (wired in a later step).
+        const sessionId = crypto.randomUUID();
 
         let cwd = project.path;
         let worktree: CodeSession['worktree'];
@@ -181,12 +177,12 @@ export class CodeSessionService {
         const toolCallId = `direct-${turnId}`;
 
         const appendAndPublish = async (event: z.infer<typeof RunEvent>) => {
-            await this.runsRepo.appendEvents(sessionId, [event]);
-            await this.bus.publish(event);
+            await this.codeEventStore.append(sessionId, [event]);
+            await this.codeEventBus.publish(event);
         };
 
         try {
-            await this.bus.publish({ runId: sessionId, type: 'run-processing-start', subflow: [] });
+            await this.codeEventBus.publish({ runId: sessionId, type: 'run-processing-start', subflow: [] });
 
             const userEvent: z.infer<typeof MessageEvent> = {
                 runId: sessionId,
@@ -228,14 +224,14 @@ export class CodeSessionService {
                             event,
                             subflow: [],
                         };
-                        void this.bus.publish(streamEvent);
+                        void this.codeEventBus.publish(streamEvent);
                         if (event.type === 'tool_call' || event.type === 'tool_call_update'
                             || event.type === 'plan' || event.type === 'permission') {
                             persistQueue.push({ ...streamEvent, ts: new Date().toISOString() });
                         }
                     },
                     ask: (permAsk) => this.codePermissionRegistry.request(sessionId, (requestId) => {
-                        void this.bus.publish({
+                        void this.codeEventBus.publish({
                             runId: sessionId,
                             type: 'code-run-permission-request',
                             toolCallId,
@@ -256,7 +252,7 @@ export class CodeSessionService {
             }
 
             if (persistQueue.length > 0) {
-                await this.runsRepo.appendEvents(sessionId, persistQueue);
+                await this.codeEventStore.append(sessionId, persistQueue);
             }
             if (finalText.trim()) {
                 await appendAndPublish({
@@ -282,7 +278,7 @@ export class CodeSessionService {
             this.inflight.delete(sessionId);
             this.abortRegistry.cleanup(sessionId);
             await this.runsLock.release(sessionId);
-            await this.bus.publish({ runId: sessionId, type: 'run-processing-end', subflow: [] });
+            await this.codeEventBus.publish({ runId: sessionId, type: 'run-processing-end', subflow: [] });
         }
     }
 
@@ -349,7 +345,7 @@ export class CodeSessionService {
         }
         await clearStoredSession(sessionId);
         await this.codeSessionsRepo.remove(sessionId);
-        await this.runsRepo.delete(sessionId).catch(() => {});
+        await this.codeEventStore.delete(sessionId).catch(() => {});
         await fs.rm(path.join(WorkDir, 'config', `workdir-${sessionId}.json`), { force: true }).catch(() => {});
     }
 

@@ -156,6 +156,31 @@ const migrations: Record<string, Migration> = {
             await db.schema.alterTable("agent_loop_turns").dropColumn("use_case").execute();
         },
     },
+    "2026-06-15_0008_code_session_events": {
+        async up(db: MigrationDb): Promise<void> {
+            // Code-mode's own append-only event log (direct ACP sessions),
+            // replacing the generic runs/ JSONL store.
+            await db.schema
+                .createTable("code_session_events")
+                .ifNotExists()
+                .addColumn("id", "integer", (col) => col.primaryKey().autoIncrement())
+                .addColumn("session_id", "text", (col) => col.notNull())
+                .addColumn("event", "text", (col) => col.notNull())
+                .addColumn("created_at", "text", (col) => col.notNull())
+                .execute();
+
+            await db.schema
+                .createIndex("code_session_events_session_id_idx")
+                .ifNotExists()
+                .on("code_session_events")
+                .column("session_id")
+                .execute();
+        },
+        async down(db: MigrationDb): Promise<void> {
+            await db.schema.dropIndex("code_session_events_session_id_idx").ifExists().execute();
+            await db.schema.dropTable("code_session_events").ifExists().execute();
+        },
+    },
 };
 
 class InCodeMigrationProvider implements MigrationProvider {

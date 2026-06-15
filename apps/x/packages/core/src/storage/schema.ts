@@ -1,4 +1,4 @@
-import type { ColumnType } from "kysely";
+import type { ColumnType, Generated } from "kysely";
 
 export type TimestampColumn = ColumnType<string, string, string>;
 
@@ -40,8 +40,19 @@ export interface SessionsTable {
     updated_at: TimestampColumn;
 }
 
+// Append-only event log for code-mode (direct ACP) sessions. This is code-mode's
+// own dedicated event store — it replaces the generic runs/ JSONL log the old
+// agent runtime shared. One row per RunEvent; ordered by the autoincrement id.
+export interface CodeSessionEventsTable {
+    id: Generated<number>;
+    session_id: string;
+    event: string;        // JSON: RunEvent
+    created_at: TimestampColumn;
+}
+
 export interface Database {
     storage_metadata: StorageMetadataTable;
     agent_loop_turns: AgentLoopTurnsTable;
     sessions: SessionsTable;
+    code_session_events: CodeSessionEventsTable;
 }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type z from 'zod'
-import type { RunEvent, ToolPermissionRequestEvent, AskHumanRequestEvent } from '@x/shared/src/runs.js'
+import type { ToolPermissionRequestEvent, AskHumanRequestEvent } from '@x/shared/src/runs.js'
 import type { CodeRunEvent, PermissionAsk, PermissionDecision } from '@x/shared/src/code-mode.js'
 import type { CodeSession } from '@x/shared/src/code-sessions.js'
 import {
@@ -111,7 +111,7 @@ export function useCodeChat(session: CodeSession | null) {
     setPendingAskHumans(new Map())
     seenMessageIdsRef.current = new Set()
 
-    void window.ipc.invoke('runs:fetch', { runId: sessionId }).then((run) => {
+    void window.ipc.invoke('codeSession:getEvents', { sessionId }).then(({ events }) => {
       if (cancelled) return
       const loaded: CodeChatItem[] = []
       const toolCallMap = new Map<string, ToolCall>()
@@ -121,7 +121,7 @@ export function useCodeChat(session: CodeSession | null) {
       const toolPerms = new Map<string, z.infer<typeof ToolPermissionRequestEvent>>()
       const askHumans = new Map<string, z.infer<typeof AskHumanRequestEvent>>()
 
-      for (const event of run.log as z.infer<typeof RunEvent>[]) {
+      for (const event of events) {
         const ts = event.ts ? new Date(event.ts).getTime() : Date.now()
         switch (event.type) {
           case 'message': {
@@ -209,7 +209,7 @@ export function useCodeChat(session: CodeSession | null) {
       setPendingToolPermissions(toolPerms)
       setPendingAskHumans(askHumans)
     }).catch(() => {
-      // Run log unreadable — show an empty conversation rather than crashing.
+      // Transcript unreadable — show an empty conversation rather than crashing.
     }).finally(() => {
       if (!cancelled) setLoading(false)
     })
@@ -217,12 +217,10 @@ export function useCodeChat(session: CodeSession | null) {
     return () => { cancelled = true }
   }, [sessionId])
 
-  // Live event stream.
+  // Live event stream — code-mode's own dedicated feed (direct ACP sessions).
   useEffect(() => {
     if (!sessionId) return
-    // runs:events is schema-less on the wire (req: z.null()) — cast like App.tsx does.
-    return window.ipc.on('runs:events', ((raw: unknown) => {
-      const event = raw as z.infer<typeof RunEvent>
+    return window.ipc.on('codeSession:events', (event) => {
       if (event.runId !== sessionId) return
       switch (event.type) {
         case 'run-processing-start':
@@ -372,7 +370,7 @@ export function useCodeChat(session: CodeSession | null) {
         default:
           break
       }
-    }) as unknown as (event: null) => void)
+    })
   }, [sessionId, applyCodeRunEvent])
 
   const send = useCallback(async (text: string): Promise<{ ok: boolean; error?: string }> => {
@@ -395,13 +393,11 @@ export function useCodeChat(session: CodeSession | null) {
           return { ok: false, error: res.error ?? 'The session is busy.' }
         }
       } else {
-        await window.ipc.invoke('runs:createMessage', {
-          runId: session.id,
-          message: trimmed,
-          codeMode: session.agent,
-          codeCwd: session.cwd,
-          codePolicy: session.policy,
-        })
+        // Rowboat mode (copilot-orchestrated) is being migrated onto the new
+        // sessions runtime; the old run-based path is retired. Temporarily
+        // unavailable until that lands.
+        setIsProcessing(false)
+        return { ok: false, error: 'Rowboat mode is temporarily unavailable while it migrates to the new runtime.' }
       }
       return { ok: true }
     } catch (err) {
@@ -437,10 +433,10 @@ export function useCodeChat(session: CodeSession | null) {
       next.delete(toolCallId)
       return next
     })
-    await window.ipc.invoke('runs:authorizePermission', {
-      runId: sessionId,
-      authorization: { subflow, toolCallId, response, scope },
-    })
+    // Rowboat copilot gates are disabled while rowboat migrates to the new
+    // sessions runtime (these will use sessions:respondToPermission).
+    void subflow; void response; void scope
+    console.warn('Rowboat tool-permission response ignored (rowboat migrating to the new runtime).')
   }, [sessionId])
 
   const respondToAskHuman = useCallback(async (toolCallId: string, subflow: string[], response: string) => {
@@ -450,10 +446,8 @@ export function useCodeChat(session: CodeSession | null) {
       next.delete(toolCallId)
       return next
     })
-    await window.ipc.invoke('runs:provideHumanInput', {
-      runId: sessionId,
-      reply: { subflow, toolCallId, response },
-    })
+    void subflow; void response
+    console.warn('Rowboat ask-human response ignored (rowboat migrating to the new runtime).')
   }, [sessionId])
 
   return {

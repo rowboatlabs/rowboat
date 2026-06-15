@@ -13,7 +13,7 @@ export type StatusListener = (sessionId: string, status: CodeSessionStatus) => v
 // direct turns and Rowboat-mode code_agent_run turns publish the same event
 // types on the bus. The renderer just renders what this pushes.
 export class CodeSessionStatusTracker {
-    private readonly bus: IBus;
+    private readonly codeEventBus: IBus;
     private readonly codeSessionsRepo: ICodeSessionsRepo;
     private readonly statuses = new Map<string, CodeSessionStatus>();
     private readonly busySince = new Map<string, number>();
@@ -27,15 +27,15 @@ export class CodeSessionStatusTracker {
     // an id that misses the refresh can never become a session later.
     private readonly knownNonSessions = new Set<string>();
 
-    constructor({ bus, codeSessionsRepo }: { bus: IBus; codeSessionsRepo: ICodeSessionsRepo }) {
-        this.bus = bus;
+    constructor({ codeEventBus, codeSessionsRepo }: { codeEventBus: IBus; codeSessionsRepo: ICodeSessionsRepo }) {
+        this.codeEventBus = codeEventBus;
         this.codeSessionsRepo = codeSessionsRepo;
     }
 
     async start(): Promise<void> {
         if (this.unsubscribe) return;
         await this.refreshKnownSessions();
-        this.unsubscribe = await this.bus.subscribe('*', async (event) => {
+        this.unsubscribe = await this.codeEventBus.subscribe('*', async (event) => {
             await this.handle(event);
         });
     }

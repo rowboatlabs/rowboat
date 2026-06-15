@@ -10,6 +10,9 @@ import {
 import { watcher as watcherCore, workspace } from '@x/core';
 import { workspace as workspaceShared } from '@x/shared';
 import * as mcpCore from '@x/core/dist/mcp/mcp.js';
+import * as runsCore from '@x/core/dist/runs/runs.js';
+import { bus } from '@x/core/dist/runs/bus.js';
+import { RunEvent } from '@x/shared/dist/runs.js';
 import type { AgentRuntime } from '@x/core/dist/agent-runtime/index.js';
 import type { SessionBusEvent } from '@x/shared/dist/sessions.js';
 import { serviceBus } from '@x/core/dist/services/service_bus.js';
@@ -36,6 +39,8 @@ import type { ICodeProjectsRepo } from '@x/core/dist/code-mode/projects/repo.js'
 import type { ICodeSessionsRepo } from '@x/core/dist/code-mode/sessions/repo.js';
 import { CodeSessionService } from '@x/core/dist/code-mode/sessions/service.js';
 import { CodeSessionStatusTracker } from '@x/core/dist/code-mode/sessions/status-tracker.js';
+import { CodeEventStore } from '@x/core/dist/code-mode/sessions/event-store.js';
+import type { IBus } from '@x/core/dist/application/lib/bus.js';
 import * as codeGit from '@x/core/dist/code-mode/git/service.js';
 import { readProjectDir, readProjectFile } from '@x/core/dist/code-mode/projects/fs.js';
 import { ensureTerminal, writeTerminal, resizeTerminal, disposeTerminal } from './terminal.js';
@@ -398,6 +403,20 @@ export async function startCodeSessionStatusWatcher(): Promise<void> {
   });
 }
 
+let codeEventWatcher: (() => void) | null = null;
+export async function startCodeEventWatcher(): Promise<void> {
+  if (codeEventWatcher) return;
+  const codeEventBus = container.resolve<IBus>('codeEventBus');
+  codeEventWatcher = await codeEventBus.subscribe('*', async (event) => {
+    const windows = BrowserWindow.getAllWindows();
+    for (const win of windows) {
+      if (!win.isDestroyed() && win.webContents) {
+        win.webContents.send('codeSession:events', event);
+      }
+    }
+  });
+}
+
 // Forward the generic event bus → renderer (runs:events). Code-mode (direct ACP
 // sessions) streams its live events (code-run-event, permission, message, …)
 // through this feed; chat + headless use the sessions:events feed below.
@@ -651,6 +670,15 @@ export function setupIpcHandlers(agentRuntime: AgentRuntime) {
       const registry = container.resolve<CodePermissionRegistry>('codePermissionRegistry');
       registry.resolve(args.requestId, args.decision);
       return { success: true };
+    },
+    // Code-mode reads a session's transcript from the generic run event-log.
+    'runs:fetch': async (_event, args) => {
+      return runsCore.fetchRun(args.runId);
+    },
+    // Code-mode's own transcript history (its dedicated SQLite event store).
+    'codeSession:getEvents': async (_event, args) => {
+      const store = container.resolve<CodeEventStore>('codeEventStore');
+      return { events: await store.list(args.sessionId) };
     },
     'models:list': async () => {
       if (await isSignedIn()) {

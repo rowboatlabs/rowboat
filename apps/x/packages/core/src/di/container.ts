@@ -2,6 +2,7 @@ import { asClass, asValue, createContainer, InjectionMode } from "awilix";
 import { FSModelConfigRepo, IModelConfigRepo } from "../models/repo.js";
 import { FSMcpConfigRepo, IMcpConfigRepo } from "../mcp/repo.js";
 import { FSAgentsRepo, IAgentsRepo } from "../agents/repo.js";
+import { FSRunsRepo, IRunsRepo } from "../runs/repo.js";
 import { IMonotonicallyIncreasingIdGenerator, IdGen } from "../application/lib/id-gen.js";
 import { IBus, InMemoryBus } from "../application/lib/bus.js";
 import { IRunsLock, InMemoryRunsLock } from "../runs/lock.js";
@@ -17,6 +18,7 @@ import { CodeModeManager } from "../code-mode/acp/manager.js";
 import { CodePermissionRegistry } from "../code-mode/acp/permission-registry.js";
 import { FSCodeProjectsRepo, ICodeProjectsRepo } from "../code-mode/projects/repo.js";
 import { FSCodeSessionsRepo, ICodeSessionsRepo } from "../code-mode/sessions/repo.js";
+import { CodeEventStore } from "../code-mode/sessions/event-store.js";
 import { CodeSessionService } from "../code-mode/sessions/service.js";
 import { CodeSessionStatusTracker } from "../code-mode/sessions/status-tracker.js";
 import type { IBrowserControlService } from "../application/browser-control/service.js";
@@ -36,6 +38,9 @@ container.register({
     mcpConfigRepo: asClass<IMcpConfigRepo>(FSMcpConfigRepo).singleton(),
     modelConfigRepo: asClass<IModelConfigRepo>(FSModelConfigRepo).singleton(),
     agentsRepo: asClass<IAgentsRepo>(FSAgentsRepo).singleton(),
+    // Generic run event-log store (JSONL). The LLM agent runtime that once drove
+    // it is retired; code-mode now uses it as its session event store.
+    runsRepo: asClass<IRunsRepo>(FSRunsRepo).singleton(),
     oauthRepo: asClass<IOAuthRepo>(FSOAuthRepo).singleton(),
     clientRegistrationRepo: asClass<IClientRegistrationRepo>(FSClientRegistrationRepo).singleton(),
     granolaConfigRepo: asClass<IGranolaConfigRepo>(FSGranolaConfigRepo).singleton(),
@@ -51,9 +56,13 @@ container.register({
     codePermissionRegistry: asClass(CodePermissionRegistry).singleton(),
 
     // Code section: project registry, session metadata, the direct-drive
-    // session service, and the live status tracker.
+    // session service, and the live status tracker. Code-mode owns its own
+    // event store + event bus (dedicated runtime, decoupled from the retired
+    // LLM agent runtime's runs/ infra).
     codeProjectsRepo: asClass<ICodeProjectsRepo>(FSCodeProjectsRepo).singleton(),
     codeSessionsRepo: asClass<ICodeSessionsRepo>(FSCodeSessionsRepo).singleton(),
+    codeEventStore: asClass(CodeEventStore).singleton(),
+    codeEventBus: asClass<IBus>(InMemoryBus).singleton(),
     codeSessionService: asClass(CodeSessionService).singleton(),
     codeSessionStatusTracker: asClass(CodeSessionStatusTracker).singleton(),
 });

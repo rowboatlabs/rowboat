@@ -19,9 +19,9 @@ import { RowboatApiConfig } from './rowboat-account.js';
 import { ZListToolkitsResponse } from './composio.js';
 import { BrowserStateSchema } from './browser-control.js';
 import { BillingInfoSchema } from './billing.js';
-import { EmailBlockSchema, GmailThreadSchema } from './blocks.js';
+import { GmailThreadSchema } from './blocks.js';
 import { PermissionDecision, ApprovalPolicy, CodingAgent } from './code-mode.js';
-import { Run } from './runs.js';
+import { Run, RunEvent } from './runs.js';
 import { NotificationSettingsSchema } from './notification-settings.js';
 import { CodeProject, CodeSession, CodeSessionMode, CodeSessionStatus, GitRepoInfo, GitStatusFile } from './code-sessions.js';
 
@@ -570,6 +570,17 @@ const ipcSchemas = {
       sessionId: z.string(),
       status: CodeSessionStatus,
     }),
+    res: z.null(),
+  },
+  // Code-mode's own transcript history (replaces the generic runs:fetch).
+  'codeSession:getEvents': {
+    req: z.object({ sessionId: z.string() }),
+    res: z.object({ events: z.array(RunEvent) }),
+  },
+  // main → renderer: code-mode's live event feed (replaces runs:events). Carries
+  // the session's RunEvents (code-run-event, message, processing, …).
+  'codeSession:events': {
+    req: RunEvent,
     res: z.null(),
   },
   // ==========================================================================

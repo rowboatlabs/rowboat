@@ -4,6 +4,7 @@ import {
   setupIpcHandlers,
   startRunsWatcher,
   startCodeSessionStatusWatcher,
+  startCodeEventWatcher,
   startSessionsWatcher,
   startServicesWatcher,
   startLiveNoteAgentWatcher,
@@ -369,6 +370,10 @@ app.whenReady().then(async () => {
 
   // start code-session status tracker (derives working/needs-you/idle + notifications)
   startCodeSessionStatusWatcher();
+
+  // start code-mode event watcher — forwards code-mode's own event bus to the
+  // renderer (codeSession:events feed for direct ACP sessions).
+  startCodeEventWatcher();
 
   // start services watcher
   startServicesWatcher();
