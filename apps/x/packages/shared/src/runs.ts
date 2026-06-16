@@ -212,6 +212,10 @@ export const ListRunsResponse = z.object({
         createdAt: true,
         agentId: true,
         useCase: true,
+    }).extend({
+        // Last-modified time of the run's log file (mtime), used to order the
+        // chat history by recent activity rather than creation time.
+        modifiedAt: z.iso.datetime(),
     })),
     nextCursor: z.string().optional(),
 });
