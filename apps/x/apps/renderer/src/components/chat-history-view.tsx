@@ -93,7 +93,7 @@ export function ChatHistoryView({
         <div className="min-w-[480px]">
           <div className="sticky top-0 z-10 flex items-center border-b border-border bg-background px-6 py-2 text-xs font-medium text-muted-foreground">
             <div className="flex-1">Title</div>
-            <div className="w-32 shrink-0">Last modified</div>
+            <div className="w-32 shrink-0 text-right">Last modified</div>
           </div>
 
           {sortedRuns.length === 0 ? (
@@ -123,7 +123,7 @@ export function ChatHistoryView({
                         <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
                         <span className="min-w-0 truncate">{run.title || '(Untitled chat)'}</span>
                       </div>
-                      <div className="w-32 shrink-0 text-xs text-muted-foreground tabular-nums">
+                      <div className="w-32 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
                         {formatRelativeTime(run.modifiedAt)}
                       </div>
                     </button>

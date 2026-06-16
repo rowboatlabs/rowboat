@@ -5498,6 +5498,7 @@ function App() {
               onOpenAgent={(slug) => { setBgTaskInitialSlug(slug); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
               recentRuns={runs}
               onOpenRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
+              onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
               onOpenEmail={(threadId) => openEmailView(threadId)}
               onOpenHome={() => void navigateToView({ type: 'home' })}
               onNewChat={handleNewChatTab}

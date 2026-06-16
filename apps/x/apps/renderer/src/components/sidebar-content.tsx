@@ -3,6 +3,7 @@
 import * as React from "react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
+  ArrowUpRight,
   Bot,
   ChevronRight,
   Code2,
@@ -90,13 +91,6 @@ type KnowledgeActions = {
   onOpenInNewTab?: (path: string) => void
 }
 
-function displayNoteName(node: TreeNode): string {
-  if (node.kind === 'file' && node.name.toLowerCase().endsWith('.md')) {
-    return node.name.slice(0, -3)
-  }
-  return node.name
-}
-
 function formatBillingPlanName(plan: string | null | undefined) {
   if (!plan) return 'No plan'
   return `${plan.charAt(0).toUpperCase()}${plan.slice(1)} plan`
@@ -172,8 +166,9 @@ type SidebarContentPanelProps = {
   onOpenCode?: () => void
   onOpenBgTasks?: () => void
   onOpenAgent?: (slug: string) => void
-  recentRuns?: { id: string; title?: string; createdAt: string }[]
+  recentRuns?: { id: string; title?: string; createdAt: string; modifiedAt?: string }[]
   onOpenRun?: (runId: string) => void
+  onOpenChatHistory?: () => void
   onOpenEmail?: (threadId?: string) => void
   onOpenHome?: () => void
   onNewChat?: () => void
@@ -414,15 +409,14 @@ function SyncStatusBar() {
 
 export function SidebarContentPanel({
   tree,
-  onSelectFile,
   knowledgeActions,
   bgTaskSummaries = [],
   onOpenMeetings,
   onOpenCode,
   onOpenBgTasks,
-  onOpenAgent,
   recentRuns = [],
   onOpenRun,
+  onOpenChatHistory,
   onOpenEmail,
   onOpenHome,
   onNewChat,
@@ -448,7 +442,7 @@ export function SidebarContentPanel({
   const [unreadEmailCount, setUnreadEmailCount] = useState(0)
   const [emailThreads, setEmailThreads] = useState<SidebarEmailThread[]>([])
   const [meetings, setMeetings] = useState<UpcomingMeeting[]>([])
-  const [quickAccessExpanded, setQuickAccessExpanded] = useState(true)
+  const [chatsExpanded, setChatsExpanded] = useState(true)
   // The Code section only makes sense with a coding agent available — same
   // flag the chat composer's code chip uses (auto-on when Claude Code or
   // Codex is installed + signed in; explicit toggle in settings wins).
@@ -542,59 +536,16 @@ export function SidebarContentPanel({
       .slice(0, 10)
   }, [tree])
 
-  // Recents: most recently touched notes / agents / chats, interleaved by
-  // recency. Capped per type (4 notes, 4 agents, 4 chats) and 12 overall.
-  type QuickAccessItem = {
-    key: string
-    label: string
-    recency: number
-    type: 'note' | 'agent' | 'chat'
-    onClick: () => void
-  }
-  const quickAccessItems = React.useMemo<QuickAccessItem[]>(() => {
-    const items: QuickAccessItem[] = []
-
-    for (const note of recentNotes.slice(0, 4)) {
-      items.push({
-        key: `note:${note.path}`,
-        label: displayNoteName(note),
-        recency: note.stat?.mtimeMs ?? 0,
-        type: 'note',
-        onClick: () => onSelectFile(note.path, 'file'),
-      })
-    }
-
-    const agentRecency = (t: TaskSummary) => {
-      const ts = t.lastRunAt ?? t.lastAttemptAt ?? t.createdAt
-      const ms = ts ? new Date(ts).getTime() : 0
+  // Chats: the 5 most recently modified chats, newest first.
+  const recentChats = React.useMemo(() => {
+    const chatRecency = (r: { createdAt: string; modifiedAt?: string }) => {
+      const ms = new Date(r.modifiedAt ?? r.createdAt).getTime()
       return Number.isFinite(ms) ? ms : 0
     }
-    for (const t of [...bgTaskSummaries].sort((a, b) => agentRecency(b) - agentRecency(a)).slice(0, 4)) {
-      items.push({
-        key: `agent:${t.slug}`,
-        label: t.name,
-        recency: agentRecency(t),
-        type: 'agent',
-        onClick: () => onOpenAgent?.(t.slug),
-      })
-    }
-
-    const chatRecency = (r: { createdAt: string }) => {
-      const ms = new Date(r.createdAt).getTime()
-      return Number.isFinite(ms) ? ms : 0
-    }
-    for (const r of [...recentRuns].sort((a, b) => chatRecency(b) - chatRecency(a)).slice(0, 4)) {
-      items.push({
-        key: `chat:${r.id}`,
-        label: r.title || '(Untitled chat)',
-        recency: chatRecency(r),
-        type: 'chat',
-        onClick: () => onOpenRun?.(r.id),
-      })
-    }
-
-    return items.sort((a, b) => b.recency - a.recency).slice(0, 12)
-  }, [recentNotes, bgTaskSummaries, recentRuns, onSelectFile, onOpenAgent, onOpenRun])
+    return [...recentRuns]
+      .sort((a, b) => chatRecency(b) - chatRecency(a))
+      .slice(0, 10)
+  }, [recentRuns])
 
   // Workspace count for the Workspaces sublabel — top-level dir children of
   // knowledge/Workspace (matches WorkspaceView's root listing).
@@ -921,38 +872,43 @@ export function SidebarContentPanel({
 
         <div className="mx-3 border-t border-sidebar-border" />
 
-        {/* Recents */}
+        {/* Chats */}
         <SidebarGroup className="flex flex-col">
           <SidebarGroupContent>
             <button
               type="button"
-              onClick={() => setQuickAccessExpanded((v) => !v)}
+              onClick={() => setChatsExpanded((v) => !v)}
               className="flex w-full items-center gap-1.5 px-3 py-1 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground"
             >
-              <ChevronRight className={cn('size-3 transition-transform', quickAccessExpanded && 'rotate-90')} />
-              <span className="flex-1 text-left">Recents</span>
+              <ChevronRight className={cn('size-3 transition-transform', chatsExpanded && 'rotate-90')} />
+              <span className="flex-1 text-left">Chats</span>
             </button>
-            {quickAccessExpanded && (
-              quickAccessItems.length === 0 ? (
+            {chatsExpanded && (
+              recentChats.length === 0 ? (
                 <div className="px-4 pb-2 text-[11.5px] italic text-muted-foreground">
-                  Recent notes and agents show up here.
+                  Your recent chats show up here.
                 </div>
               ) : (
                 <SidebarMenu>
-                  {quickAccessItems.map((item) => (
-                    <SidebarMenuItem key={item.key}>
-                      <SidebarMenuButton onClick={item.onClick}>
-                        {item.type === 'agent' ? (
-                          <Bot className="size-4 shrink-0 text-muted-foreground" />
-                        ) : item.type === 'chat' ? (
-                          <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
-                        ) : (
-                          <FileText className="size-4 shrink-0 text-muted-foreground" />
-                        )}
-                        <span className="flex-1 truncate">{item.label}</span>
+                  {recentChats.map((chat) => (
+                    <SidebarMenuItem key={chat.id}>
+                      <SidebarMenuButton onClick={() => onOpenRun?.(chat.id)}>
+                        <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
+                        <span className="flex-1 truncate">{chat.title || '(Untitled chat)'}</span>
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   ))}
+                  {onOpenChatHistory && (
+                    <SidebarMenuItem>
+                      <SidebarMenuButton
+                        onClick={() => onOpenChatHistory()}
+                        className="text-muted-foreground"
+                      >
+                        <ArrowUpRight className="size-4 shrink-0 text-muted-foreground" />
+                        <span className="flex-1 truncate">View all</span>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  )}
                 </SidebarMenu>
               )
             )}
