@@ -27,6 +27,19 @@ export interface AcpClientOptions {
     onEvent: (event: CodeRunEvent) => void;
 }
 
+// Deadline for the startup phases (initialize / session create+load). A healthy cold
+// start — adapter boot, engine spawn, SDK handshake, MCP connects — takes seconds;
+// only a wedged engine takes this long (e.g. an outdated local CLI that launches but
+// never answers the handshake). Without a deadline that failure mode is an infinite
+// "(pending...)" with zero feedback. Prompts are intentionally NOT time-limited:
+// turns legitimately run for many minutes and may wait on user permission asks.
+// Overridable via ROWBOAT_ACP_STARTUP_TIMEOUT_MS — used by the CI smoke test to
+// avoid waiting the full minute, and an escape hatch for genuinely slow setups
+// (e.g. many MCP servers configured in the engine's user settings).
+const STARTUP_TIMEOUT_MS = Number(process.env.ROWBOAT_ACP_STARTUP_TIMEOUT_MS) > 0
+    ? Number(process.env.ROWBOAT_ACP_STARTUP_TIMEOUT_MS)
+    : 60_000;
+
 // Map a raw ACP session/update notification onto our small CodeRunEvent union.
 function toEvent(update: SessionUpdate): CodeRunEvent {
     switch (update.sessionUpdate) {
@@ -130,10 +143,10 @@ export class AcpClient {
         this.connection = new ClientSideConnection(() => client, stream);
 
         try {
-            const init = await this.connection.initialize({
+            const init = await this.withStartupTimeout(this.connection.initialize({
                 protocolVersion: PROTOCOL_VERSION,
                 clientCapabilities: { fs: { readTextFile: true, writeTextFile: true } },
-            });
+            }));
             this.loadSession_ = init.agentCapabilities?.loadSession === true;
         } catch (e) {
             throw this.enrich(e, 'initialize');
@@ -142,7 +155,7 @@ export class AcpClient {
 
     async newSession(): Promise<string> {
         try {
-            const res = await this.conn().newSession({ cwd: this.cwd, mcpServers: [] });
+            const res = await this.withStartupTimeout(this.conn().newSession({ cwd: this.cwd, mcpServers: [] }));
             return res.sessionId;
         } catch (e) {
             throw this.enrich(e, 'newSession');
@@ -151,9 +164,32 @@ export class AcpClient {
 
     async loadSession(sessionId: string): Promise<void> {
         try {
-            await this.conn().loadSession({ sessionId, cwd: this.cwd, mcpServers: [] });
+            await this.withStartupTimeout(this.conn().loadSession({ sessionId, cwd: this.cwd, mcpServers: [] }));
         } catch (e) {
             throw this.enrich(e, 'loadSession');
+        }
+    }
+
+    // Race a startup-phase request against the deadline. The timeout error flows
+    // through enrich(), which appends the adapter's exit info / stderr tail — so a
+    // hung startup reports WHY (including the "SDK debug logs: <path>" pointer)
+    // instead of pending forever. Callers dispose the client on failure, which
+    // kills the spawned adapter.
+    private async withStartupTimeout<T>(work: Promise<T>): Promise<T> {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const timeout = new Promise<never>((_, reject) => {
+            timer = setTimeout(() => {
+                reject(new Error(
+                    `timed out after ${STARTUP_TIMEOUT_MS / 1000}s — the local ${this.agent} CLI may be ` +
+                    `outdated or failing to launch (check \`${this.agent} --version\`)`,
+                ));
+            }, STARTUP_TIMEOUT_MS);
+            timer.unref?.();
+        });
+        try {
+            return await Promise.race([work, timeout]);
+        } finally {
+            if (timer) clearTimeout(timer);
         }
     }
 

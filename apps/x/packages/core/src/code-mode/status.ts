@@ -3,7 +3,7 @@ import { promisify } from 'util';
 import os from 'os';
 import path from 'path';
 import fs from 'fs/promises';
-import { existsSync } from 'fs';
+import { existsSync, readdirSync } from 'fs';
 import { CodeModeAgentStatus } from './types.js';
 
 const execAsync = promisify(exec);
@@ -28,16 +28,54 @@ export function commonInstallPaths(binary: string): string[] {
             path.join(home, '.volta', 'bin', `${binary}.cmd`),
         ];
     }
-    return [
+    const dirs = [
         '/usr/local/bin',
         '/opt/homebrew/bin',          // Apple Silicon Homebrew
         '/usr/bin',
         path.join(home, '.npm-global', 'bin'),
         path.join(home, '.local', 'bin'),
         path.join(home, '.volta', 'bin'),
-        path.join(home, '.nvm', 'versions', 'node'),  // partial; nvm has versioned subdirs
         path.join(home, 'bin'),
-    ].map(dir => path.join(dir, binary));
+        // Claude Code's legacy local installer / `claude migrate-installer` target.
+        path.join(home, '.claude', 'local'),
+        // pnpm global bin: PNPM_HOME if set, else the platform default
+        // (~/Library/pnpm on macOS, ~/.local/share/pnpm on Linux).
+        process.env.PNPM_HOME ||
+            (process.platform === 'darwin'
+                ? path.join(home, 'Library', 'pnpm')
+                : path.join(home, '.local', 'share', 'pnpm')),
+        // Node version managers install into versioned subdirs (e.g.
+        // ~/.nvm/versions/node/v24.16.0/bin) — enumerate each version's bin dir.
+        ...versionManagerBinDirs(home),
+    ];
+    return dirs.map(dir => path.join(dir, binary));
+}
+
+// nvm/fnm/asdf keep a `bin` dir per installed Node version. A static path can't
+// match (the version segment is unknown), so list the version dirs and append
+// `bin`. Returns [] when a manager isn't present — readdir failures are ignored.
+function versionManagerBinDirs(home: string): string[] {
+    const versionRoots = [
+        path.join(home, '.nvm', 'versions', 'node'),                              // nvm
+        path.join(home, '.local', 'share', 'fnm', 'node-versions'),               // fnm (Linux)
+        path.join(home, 'Library', 'Application Support', 'fnm', 'node-versions'),// fnm (macOS)
+        path.join(home, '.asdf', 'installs', 'nodejs'),                           // asdf
+    ];
+    const dirs: string[] = [];
+    for (const root of versionRoots) {
+        let versions: string[];
+        try {
+            versions = readdirSync(root);
+        } catch {
+            continue; // manager not installed
+        }
+        for (const version of versions) {
+            // fnm nests another `installation` dir; nvm/asdf put bin directly under the version.
+            dirs.push(path.join(root, version, 'bin'));
+            dirs.push(path.join(root, version, 'installation', 'bin'));
+        }
+    }
+    return dirs;
 }
 
 async function probeShell(binary: string): Promise<boolean> {
