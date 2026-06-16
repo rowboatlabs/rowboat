@@ -6,6 +6,7 @@ import {
   startServicesWatcher,
   startLiveNoteAgentWatcher,
   startBackgroundTaskAgentWatcher,
+  startApprovalsWatcher,
   startWorkspaceWatcher,
   stopRunsWatcher,
   stopServicesWatcher,
@@ -29,6 +30,7 @@ import { init as initLiveNoteScheduler } from "@x/core/dist/knowledge/live-note/
 import { init as initEventProcessor, registerConsumer } from "@x/core/dist/events/init.js";
 import { liveNoteEventConsumer } from "@x/core/dist/knowledge/live-note/event-consumer.js";
 import { init as initBackgroundTaskScheduler } from "@x/core/dist/background-tasks/scheduler.js";
+import { initBackgroundApprovals } from "@x/core/dist/background-tasks/approvals.js";
 import { backgroundTaskEventConsumer } from "@x/core/dist/background-tasks/event-consumer.js";
 import { init as initLocalSites, shutdown as shutdownLocalSites } from "@x/core/dist/local-sites/server.js";
 import { shutdown as shutdownAnalytics } from "@x/core/dist/analytics/posthog.js";
@@ -360,6 +362,10 @@ app.whenReady().then(async () => {
 
   // start bg-task agent event watcher (forwards bus → renderer)
   startBackgroundTaskAgentWatcher();
+
+  // track bg-run permission asks waiting on the user, forward snapshots → renderer
+  initBackgroundApprovals();
+  startApprovalsWatcher();
 
   // start live-note scheduler (cron / window)
   initLiveNoteScheduler();

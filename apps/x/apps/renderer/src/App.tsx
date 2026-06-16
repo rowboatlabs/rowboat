@@ -584,6 +584,7 @@ type ViewState =
   | { type: 'suggested-topics' }
   | { type: 'meetings' }
   | { type: 'live-notes' }
+  | { type: 'bg-tasks' }
   | { type: 'email' }
   | { type: 'workspace'; path?: string }
   | { type: 'knowledge-view'; folderPath?: string }
@@ -640,6 +641,8 @@ function parseDeepLink(input: string): ViewState | null {
       return { type: 'meetings' }
     case 'live-notes':
       return { type: 'live-notes' }
+    case 'bg-tasks':
+      return { type: 'bg-tasks' }
     case 'workspace': {
       const path = params.get('path')
       return { type: 'workspace', path: path ?? undefined }
@@ -3543,6 +3546,7 @@ function App() {
     if (isEmailOpen) return { type: 'email' }
     if (isMeetingsOpen) return { type: 'meetings' }
     if (isLiveNotesOpen) return { type: 'live-notes' }
+    if (isBgTasksOpen) return { type: 'bg-tasks' }
     if (isSuggestedTopicsOpen) return { type: 'suggested-topics' }
     if (isWorkspaceOpen) return { type: 'workspace', path: workspaceInitialPath ?? undefined }
     if (isKnowledgeViewOpen) return { type: 'knowledge-view', folderPath: knowledgeViewFolderPath ?? undefined }
@@ -3840,6 +3844,18 @@ function App() {
         setIsLiveNotesOpen(true)
         ensureLiveNotesFileTab()
         return
+      case 'bg-tasks':
+        setSelectedPath(null)
+        setIsGraphOpen(false)
+        setIsBrowserOpen(false)
+        setExpandedFrom(null)
+        setIsRightPaneMaximized(false)
+        setSelectedBackgroundTask(null)
+        setIsSuggestedTopicsOpen(false)
+        setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false)
+        setIsBgTasksOpen(true)
+        ensureBgTasksFileTab()
+        return
       case 'email':
         setSelectedPath(null)
         setIsGraphOpen(false)
@@ -3959,7 +3975,7 @@ function App() {
         }
         return
     }
-  }, [ensureEmailFileTab, ensureMeetingsFileTab, ensureLiveNotesFileTab, ensureFileTabForPath, ensureGraphFileTab, ensureSuggestedTopicsFileTab, ensureWorkspaceFileTab, ensureKnowledgeViewFileTab, ensureChatHistoryFileTab, ensureHomeFileTab, handleNewChat, isRightPaneMaximized, loadRun])
+  }, [ensureEmailFileTab, ensureMeetingsFileTab, ensureLiveNotesFileTab, ensureBgTasksFileTab, ensureFileTabForPath, ensureGraphFileTab, ensureSuggestedTopicsFileTab, ensureWorkspaceFileTab, ensureKnowledgeViewFileTab, ensureChatHistoryFileTab, ensureHomeFileTab, handleNewChat, isRightPaneMaximized, loadRun])
 
   const navigateToView = useCallback(async (nextView: ViewState) => {
     const current = currentViewState

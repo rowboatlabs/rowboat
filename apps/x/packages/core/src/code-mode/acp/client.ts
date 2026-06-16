@@ -102,15 +102,41 @@ export class AcpClient {
         this.onEvent = onEvent;
     }
 
-    // Spawn the adapter and negotiate the protocol. Returns once initialized.
-    async start(): Promise<void> {
-        const spec = getAgentLaunchSpec(this.agent);
-        const child = spawn(spec.command, spec.args, {
+    // Spawn the adapter process. Node throws SYNCHRONOUSLY for spawn errnos
+    // outside its deferred list (EACCES/EAGAIN/EMFILE/ENFILE/ENOENT) — notably
+    // the macOS "spawn EBADF" (libuv posix_spawn, seen on Node 22+, sometimes
+    // transient under fd churn in a busy Electron main process). Retry once
+    // after a tick, and if it still fails, throw with enough context to debug.
+    private spawnAdapter(spec: ReturnType<typeof getAgentLaunchSpec>): Promise<ChildProcess> {
+        const doSpawn = () => spawn(spec.command, spec.args, {
             cwd: this.cwd,
             env: spec.env,
             // Capture stderr (not inherit) so we can attribute a dropped connection.
             stdio: ['pipe', 'pipe', 'pipe'],
         });
+        try {
+            return Promise.resolve(doSpawn());
+        } catch (first) {
+            return new Promise((resolve, reject) => {
+                setTimeout(() => {
+                    try {
+                        resolve(doSpawn());
+                    } catch {
+                        const msg = first instanceof Error ? first.message : String(first);
+                        reject(new Error(
+                            `Failed to spawn the ${this.agent} ACP adapter: ${msg} `
+                            + `(command: ${spec.command}, entry: ${spec.args[0] ?? '?'}, cwd: ${this.cwd}, retried once)`,
+                        ));
+                    }
+                }, 250);
+            });
+        }
+    }
+
+    // Spawn the adapter and negotiate the protocol. Returns once initialized.
+    async start(): Promise<void> {
+        const spec = getAgentLaunchSpec(this.agent);
+        const child = await this.spawnAdapter(spec);
         this.child = child;
         child.stderr?.on('data', (d: Buffer) => {
             this.stderrTail = (this.stderrTail + d.toString()).slice(-4000);

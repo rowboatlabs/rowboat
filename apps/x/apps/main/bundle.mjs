@@ -24,7 +24,12 @@ await esbuild.build({
   platform: 'node',
   target: 'node20',
   outfile: './.package/dist/main.cjs',
-  external: ['electron'],  // Provided by Electron runtime
+  // electron: provided by the Electron runtime.
+  // fsevents: native .node binary (can't be bundled); chokidar requires it
+  // optionally on macOS. Without it chokidar falls back to kqueue watching —
+  // one open fd PER WATCHED FILE — which exhausts the fd table on a large
+  // workspace and makes every child_process spawn fail with EBADF.
+  external: ['electron', 'fsevents'],
   // Use CommonJS format - many dependencies use require() which doesn't work
   // well with esbuild's ESM shim. CJS handles dynamic requires natively.
   format: 'cjs',

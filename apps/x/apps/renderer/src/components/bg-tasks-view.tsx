@@ -13,6 +13,7 @@ import { Switch } from '@/components/ui/switch'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { useBackgroundTaskAgentStatus } from '@/hooks/use-bg-task-agent-status'
+import { useWaitingTaskSlugs } from '@/hooks/use-pending-approvals'
 import { formatRelativeTime } from '@/lib/relative-time'
 import { toast } from '@/lib/toast'
 import type { ConversationItem } from '@/lib/chat-conversation'
@@ -836,6 +837,7 @@ function RunsHistoryTab({ slug, task }: { slug: string; task: BackgroundTask }) 
     const [loading, setLoading] = useState(true)
     const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
     const agentStatus = useBackgroundTaskAgentStatus()
+    const waitingSlugs = useWaitingTaskSlugs()
 
     const load = useCallback(async () => {
         setLoading(true)
@@ -931,7 +933,9 @@ function RunsHistoryTab({ slug, task }: { slug: string; task: BackgroundTask }) 
                                             </>
                                         )}
                                         {inFlight && (
-                                            <span className="text-[10.5px] text-amber-600">· running</span>
+                                            <span className="text-[10.5px] text-amber-600">
+                                                {waitingSlugs.has(slug) ? '· waiting on you' : '· running'}
+                                            </span>
                                         )}
                                     </div>
                                     {(row.error || row.summary) && (
@@ -1071,6 +1075,7 @@ function ControlSidebar({
     draft,
     setDraft,
     isRunning,
+    isWaiting,
     paused,
     saving,
     dirty,
@@ -1094,6 +1099,7 @@ function ControlSidebar({
     draft: BackgroundTask
     setDraft: (next: BackgroundTask) => void
     isRunning: boolean
+    isWaiting?: boolean
     paused: boolean
     saving: boolean
     dirty: boolean
@@ -1208,9 +1214,16 @@ function ControlSidebar({
             <div className="flex shrink-0 items-center gap-2 border-t border-sidebar-border bg-sidebar-accent/20 px-4 py-2.5">
                 {isRunning ? (
                     <>
-                        <span className="inline-flex items-center gap-1.5 text-xs text-sidebar-foreground">
-                            <Loader2 className="size-3 animate-spin" /> Running
-                        </span>
+                        {isWaiting ? (
+                            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-600 dark:text-amber-500">
+                                <span className="size-2 rounded-full bg-amber-500 animate-pulse" aria-hidden />
+                                Waiting on you — approve from the sidebar
+                            </span>
+                        ) : (
+                            <span className="inline-flex items-center gap-1.5 text-xs text-sidebar-foreground">
+                                <Loader2 className="size-3 animate-spin" /> Running
+                            </span>
+                        )}
                         <span className="ml-auto" />
                         <Button variant="destructive" size="sm" onClick={onStop} disabled={saving}>
                             <Square className="size-3" /> Stop
@@ -1268,9 +1281,13 @@ function TaskDetail({
 
     const agentStatus = useBackgroundTaskAgentStatus()
     const liveStatus = agentStatus.get(slug)
+    const waitingSlugs = useWaitingTaskSlugs()
+    const isWaiting = waitingSlugs.has(slug)
     // Bus events are the only source of truth for "is this task currently
-    // running" — see RunsHistoryTab for the rationale.
-    const isRunning = liveStatus?.status === 'running'
+    // running" — see RunsHistoryTab for the rationale. A pending approval also
+    // implies in-flight (and survives a renderer reload, which the event-derived
+    // status does not).
+    const isRunning = liveStatus?.status === 'running' || isWaiting
     const paused = task ? !task.active : false
 
     const load = useCallback(async () => {
@@ -1422,6 +1439,7 @@ function TaskDetail({
                         draft={draft}
                         setDraft={setDraft}
                         isRunning={isRunning}
+                        isWaiting={isWaiting}
                         paused={paused}
                         saving={saving}
                         dirty={isDirty}
@@ -1496,6 +1514,7 @@ export function BgTasksView({ onCreateWithCopilot, onEditWithCopilot, initialSlu
     const [updatingSlugs, setUpdatingSlugs] = useState<Set<string>>(new Set())
     const [stoppingSlugs, setStoppingSlugs] = useState<Set<string>>(new Set())
     const agentStatus = useBackgroundTaskAgentStatus()
+    const waitingSlugs = useWaitingTaskSlugs()
 
     const load = useCallback(async () => {
         setLoading(true)
@@ -1637,7 +1656,8 @@ export function BgTasksView({ onCreateWithCopilot, onEditWithCopilot, initialSlu
                             <tbody>
                                 {items.map(task => {
                                     const live = agentStatus.get(task.slug)
-                                    const isRunning = live?.status === 'running'
+                                    const isWaiting = waitingSlugs.has(task.slug)
+                                    const isRunning = live?.status === 'running' || isWaiting
                                     const isUpdating = updatingSlugs.has(task.slug)
                                     const isStopping = stoppingSlugs.has(task.slug)
                                     const hasError = !isRunning && !!task.lastRunError
@@ -1691,10 +1711,17 @@ export function BgTasksView({ onCreateWithCopilot, onEditWithCopilot, initialSlu
                                             <td className="px-4 py-3">
                                                 {isRunning ? (
                                                     <div className="flex items-center gap-2">
-                                                        <span className="inline-flex items-center gap-1.5 rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-foreground animate-pulse">
-                                                            <Loader2 className="size-3 animate-spin" />
-                                                            Updating…
-                                                        </span>
+                                                        {isWaiting ? (
+                                                            <span className="inline-flex items-center gap-1.5 rounded-md bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-600 dark:text-amber-500">
+                                                                <span className="size-2 rounded-full bg-amber-500 animate-pulse" aria-hidden />
+                                                                Waiting on you
+                                                            </span>
+                                                        ) : (
+                                                            <span className="inline-flex items-center gap-1.5 rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-foreground animate-pulse">
+                                                                <Loader2 className="size-3 animate-spin" />
+                                                                Updating…
+                                                            </span>
+                                                        )}
                                                         <Button
                                                             variant="destructive"
                                                             size="sm"

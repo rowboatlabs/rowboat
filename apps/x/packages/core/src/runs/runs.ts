@@ -10,7 +10,7 @@ import { IRunsLock } from "./lock.js";
 import { forceCloseAllMcpClients } from "../mcp/mcp.js";
 import { extractCommandNames } from "../application/lib/command-executor.js";
 import { addFileAccessGrant, addToSecurityConfig } from "../config/security.js";
-import { loadAgent } from "../agents/runtime.js";
+import { loadAgent, AgentState } from "../agents/runtime.js";
 import { getDefaultModelAndProvider } from "../models/defaults.js";
 
 export async function createRun(opts: z.infer<typeof CreateRunOptions>): Promise<z.infer<typeof Run>> {
@@ -82,6 +82,11 @@ export async function authorizePermission(runId: string, ev: z.infer<typeof Tool
         scope,
     };
     await repo.appendEvents(runId, [event]);
+    // Also publish on the bus: appendEvents is pure file I/O, and bus observers
+    // (e.g. the background-task pending-approvals store) need to see responses
+    // that arrive while the run is paused outside trigger().
+    const bus = container.resolve<IBus>('bus');
+    await bus.publish(event);
     const runtime = container.resolve<IAgentRuntime>('agentRuntime');
     runtime.trigger(runId);
 }
@@ -100,6 +105,37 @@ export async function replyToHumanInputRequest(runId: string, ev: z.infer<typeof
 
 export async function stop(runId: string, force: boolean = false): Promise<void> {
     const abortRegistry = container.resolve<IAbortRegistry>('abortRegistry');
+
+    // A run paused on a pending permission isn't processing: trigger() isn't
+    // running, so there's no abort state and abort() would be a no-op. The lock
+    // is only held while trigger() is active — acquiring it means the run is
+    // idle or paused. Settle it with a run-stopped event, but only when it's
+    // genuinely waiting on a permission; stopping an idle run stays a no-op.
+    const runsLock = container.resolve<IRunsLock>('runsLock');
+    if (await runsLock.lock(runId)) {
+        try {
+            const repo = container.resolve<IRunsRepo>('runsRepo');
+            const run = await repo.fetch(runId);
+            const state = new AgentState();
+            for (const e of run.log) {
+                state.ingest(e);
+            }
+            if (state.getPendingPermissions().length > 0) {
+                const event = {
+                    runId,
+                    type: "run-stopped" as const,
+                    reason: "user-requested" as const,
+                    subflow: [],
+                };
+                await repo.appendEvents(runId, [event]);
+                const bus = container.resolve<IBus>('bus');
+                await bus.publish(event);
+            }
+        } finally {
+            await runsLock.release(runId);
+        }
+        return;
+    }
 
     if (force && abortRegistry.isAborted(runId)) {
         // Second click: aggressive cleanup — SIGKILL + force close MCP clients

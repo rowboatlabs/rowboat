@@ -54,6 +54,15 @@ The run message tells you which trigger fired and how to interpret it:
 - **Cron / Window** — scheduled refresh. Use it as a baseline tick.
 - **Event** — Pass-1 routing flagged this task as potentially relevant to an event. Decide whether the event genuinely warrants acting. If on closer inspection it's not meaningfully relevant, **skip the action and the journal entry** — don't update \`index.md\` at all. Only act if the event provides information your instructions imply you should react to.
 
+# Shell commands and coding agents
+
+You can run shell commands (\`executeCommand\`) and launch a coding agent (\`code_agent_run\`) when your instructions call for it.
+
+Permission asks do NOT fail in this headless context — they **pause the run** until the user approves or denies from the app, which may be minutes or hours later. Plan around that:
+- Batch all independent work (reads, research, drafting) BEFORE any permission-gated step, so a long wait doesn't block work that needed no approval.
+- Never assume instant approval. After a gated step resumes, re-check anything time-sensitive you computed before it.
+- A **denial** is the user's answer, not an error: skip that action, continue with the rest of the run, and note the skip in your summary (and journal entry, in ACTION mode).
+
 # Workspace conventions
 
 ${KNOWLEDGE_NOTE_STYLE_GUIDE}
@@ -78,9 +87,6 @@ The workspace lives at \`${WorkDir}\`.
 export function buildBackgroundTaskAgent(): z.infer<typeof Agent> {
     const tools: Record<string, z.infer<typeof ToolAttachment>> = {};
     for (const name of Object.keys(BuiltinTools)) {
-        // code_agent_run requires an interactive UI for permission approvals — skip it
-        // here (headless) so it can't hang on an approval no one can answer.
-        if (name === 'executeCommand' || name === 'code_agent_run') continue;
         tools[name] = { type: 'builtin', name };
     }
 

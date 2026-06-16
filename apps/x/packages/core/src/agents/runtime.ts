@@ -1572,10 +1572,15 @@ If the user's message is clearly NOT a coding request (small talk, an unrelated 
                 // Permission prompts block the run, so they surface even when the
                 // app is focused (no onlyWhenBackground gate).
                 const notifyPermissionPrompt = (toolCall: typeof permissionCandidates[number]["toolCall"]) => {
+                    // Background-task runs have no chat view — send the user to the
+                    // bg-tasks view, where the pending-approvals UI lives.
+                    const link = state.runUseCase === "background_task_agent"
+                        ? `rowboat://open?type=bg-tasks`
+                        : `rowboat://open?type=chat&runId=${runId}`;
                     void notifyIfEnabled("agent_permission", {
                         title: "Permission needed",
                         message: `${agent.name} wants to run "${toolCall.toolName}". Review to continue.`,
-                        link: `rowboat://open?type=chat&runId=${runId}`,
+                        link,
                         actionLabel: "Review",
                     });
                 };

@@ -17,7 +17,7 @@
         "@agentclientprotocol/codex-acp": "^0.0.44",
         "@x/core": "workspace:*",
         "@x/shared": "workspace:*",
-        "chokidar": "^4.0.3",
+        "chokidar": "^3.6.0",
         "electron-squirrel-startup": "^1.0.1",
         "html-to-docx": "^1.8.0",
         "mammoth": "^1.11.0",

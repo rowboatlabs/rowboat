@@ -12,6 +12,7 @@ export * as blocks from './blocks.js';
 export * as liveNote from './live-note.js';
 export * as events from './events.js';
 export * as backgroundTask from './background-task.js';
+export * as approvals from './approvals.js';
 export * as promptBlock from './prompt-block.js';
 export * as frontmatter from './frontmatter.js';
 export * as bases from './bases.js';

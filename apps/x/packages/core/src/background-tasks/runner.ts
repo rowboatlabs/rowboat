@@ -112,6 +112,10 @@ export async function runBackgroundTask(
             // Granular trigger as analytics sub-use-case — matches live-note's
             // pattern at runner.ts:149.
             subUseCase: trigger,
+            // Headless: let the classifier auto-allow clear-cut permission asks;
+            // anything it denies falls back to a real tool-permission-request,
+            // which surfaces in the pending-approvals UI.
+            permissionMode: 'auto',
         });
 
         const runId = agentRun.id;
@@ -143,7 +147,9 @@ export async function runBackgroundTask(
 
         try {
             await createMessage(runId, buildMessage(slug, task, trigger, context));
-            await waitForRunCompletion(runId, { throwOnError: true });
+            // waitWhilePaused: a pending permission ask pauses the run until the
+            // user answers from the approvals UI — that's a wait, not completion.
+            await waitForRunCompletion(runId, { throwOnError: true, waitWhilePaused: true });
             const summary = await extractAgentResponse(runId);
 
             // Success — bump cycle anchor, refresh summary, clear any prior error.

@@ -68,6 +68,7 @@ import {
 } from '@x/core/dist/knowledge/live-note/fileops.js';
 import { runBackgroundTask } from '@x/core/dist/background-tasks/runner.js';
 import { backgroundTaskBus } from '@x/core/dist/background-tasks/bus.js';
+import { getPendingApprovals, subscribePendingApprovals } from '@x/core/dist/background-tasks/approvals.js';
 import {
   fetchTask,
   patchTask,
@@ -416,6 +417,19 @@ export function startBackgroundTaskAgentWatcher(): void {
     for (const win of windows) {
       if (!win.isDestroyed() && win.webContents) {
         win.webContents.send('bg-task-agent:events', event);
+      }
+    }
+  });
+}
+
+let approvalsWatcher: (() => void) | null = null;
+export function startApprovalsWatcher(): void {
+  if (approvalsWatcher) return;
+  approvalsWatcher = subscribePendingApprovals((approvals) => {
+    const windows = BrowserWindow.getAllWindows();
+    for (const win of windows) {
+      if (!win.isDestroyed() && win.webContents) {
+        win.webContents.send('approvals:events', { approvals });
       }
     }
   });
@@ -1091,6 +1105,9 @@ export function setupIpcHandlers() {
     'bg-task:listRunIds': async (_event, args) => {
       const runIds = await readTaskRunIds(args.slug, args.limit);
       return { runIds };
+    },
+    'approvals:list': async () => {
+      return { approvals: getPendingApprovals() };
     },
     // Billing handler
     'billing:getInfo': async () => {

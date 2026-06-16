@@ -57,6 +57,8 @@ import {
 } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { SettingsDialog } from "@/components/settings-dialog"
+import { PendingApprovalsPopover } from "@/components/pending-approvals-popover"
+import { usePendingApprovals } from "@/hooks/use-pending-approvals"
 import { extractConferenceLink } from "@/lib/calendar-event"
 import { useBilling } from "@/hooks/useBilling"
 import { toast } from "@/lib/toast"
@@ -608,6 +610,10 @@ export function SidebarContentPanel({
     return () => clearInterval(tick)
   }, [latestNoteMtime])
 
+  // Permission asks from background runs waiting on the user. Takes top
+  // precedence in the sublabel and renders the amber badge + popover.
+  const pendingApprovals = usePendingApprovals()
+
   // "2 active · Last run 3m ago" sublabel under Background agents, overridden by
   // "N failed · Needs review" when any task's last run errored.
   const [bgAgentsLabel, setBgAgentsLabel] = useState<string | null>(null)
@@ -858,12 +864,16 @@ export function SidebarContentPanel({
                 <SidebarMenuButton
                   isActive={activeNav === 'agents'}
                   onClick={onOpenBgTasks}
-                  className={bgAgentsLabel ? 'h-auto py-1.5' : undefined}
+                  className={(bgAgentsLabel || pendingApprovals.length > 0) ? 'h-auto py-1.5' : undefined}
                 >
                   <Bot className="size-4 shrink-0 text-muted-foreground" />
                   <div className="flex min-w-0 flex-1 flex-col">
                     <span className="truncate text-muted-foreground">Background agents</span>
-                    {bgAgentsLabel && (
+                    {pendingApprovals.length > 0 ? (
+                      <span className="truncate text-[11px] text-amber-600 dark:text-amber-500">
+                        {pendingApprovals.length} waiting on you
+                      </span>
+                    ) : bgAgentsLabel && (
                       <span className={cn(
                         'truncate text-[11px]',
                         bgTaskSummaries.some((t) => t.lastRunError) ? 'text-destructive' : 'text-muted-foreground',
@@ -872,6 +882,22 @@ export function SidebarContentPanel({
                       </span>
                     )}
                   </div>
+                  {pendingApprovals.length > 0 && (
+                    <PendingApprovalsPopover
+                      onOpenTask={onOpenAgent}
+                      trigger={
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onClick={(e) => e.stopPropagation()}
+                          className="ml-auto flex size-5 shrink-0 items-center justify-center rounded-full bg-amber-500 text-[11px] font-semibold text-white hover:bg-amber-600"
+                          title={`${pendingApprovals.length} approval${pendingApprovals.length === 1 ? '' : 's'} waiting on you`}
+                        >
+                          {pendingApprovals.length}
+                        </span>
+                      }
+                    />
+                  )}
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>

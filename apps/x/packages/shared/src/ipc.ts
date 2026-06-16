@@ -21,6 +21,7 @@ import { BillingInfoSchema } from './billing.js';
 import { EmailBlockSchema, GmailThreadSchema } from './blocks.js';
 import { PermissionDecision, ApprovalPolicy } from './code-mode.js';
 import { NotificationSettingsSchema } from './notification-settings.js';
+import { PendingApproval } from './approvals.js';
 
 // ============================================================================
 // Runtime Validation Schemas (Single Source of Truth)
@@ -333,6 +334,20 @@ const ipcSchemas = {
   'bg-task-agent:events': {
     req: BackgroundTaskAgentEvent,
     res: z.null(),
+  },
+  // Full snapshot of background-run permission asks waiting on the user,
+  // re-broadcast on every change (small data, no delta bugs).
+  'approvals:events': {
+    req: z.object({
+      approvals: z.array(PendingApproval),
+    }),
+    res: z.null(),
+  },
+  'approvals:list': {
+    req: z.null(),
+    res: z.object({
+      approvals: z.array(PendingApproval),
+    }),
   },
   'models:list': {
     req: z.null(),
