@@ -161,6 +161,15 @@ const ipcSchemas = {
       bodyText: z.string(),
       inReplyTo: z.string().optional(),
       references: z.string().optional(),
+      attachments: z
+        .array(
+          z.object({
+            filename: z.string(),
+            mimeType: z.string(),
+            contentBase64: z.string(),
+          }),
+        )
+        .optional(),
     }),
     res: z.object({
       messageId: z.string().optional(),

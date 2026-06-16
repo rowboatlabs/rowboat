@@ -757,38 +757,6 @@
   flex: 1;
 }
 
-.gmail-compose-model-picker {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 8px;
-  height: 26px;
-  border: 1px solid var(--gm-border-strong);
-  border-radius: 6px;
-  background: var(--gm-bg-pill);
-  color: var(--gm-text-muted);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 500;
-  text-transform: none;
-  cursor: pointer;
-  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
-}
-
-.gmail-compose-model-picker:hover {
-  background: var(--gm-bg-pill-hover);
-  border-color: var(--gm-accent);
-  color: var(--gm-text);
-}
-
-.gmail-compose-model-name {
-  max-width: 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--gm-text);
-}
-
 .gmail-compose-modal .gmail-compose-editor {
   flex: 1;
   min-height: 160px;
@@ -1207,9 +1175,14 @@
   transition: background 120ms ease, color 120ms ease;
 }
 
-.gmail-compose-tool:hover {
+.gmail-compose-tool:hover:not(:disabled) {
   background: var(--gm-bg-pill-hover);
   color: var(--gm-text);
+}
+
+.gmail-compose-tool:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .gmail-compose-tool.is-active {
@@ -1300,6 +1273,52 @@
   float: left;
   height: 0;
   pointer-events: none;
+}
+
+.gmail-compose-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px 0;
+}
+
+.gmail-compose-attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 240px;
+  padding: 4px 8px;
+  border: 1px solid var(--gm-border);
+  border-radius: 6px;
+  background: var(--gm-bg-pill);
+  font-size: 12px;
+  color: var(--gm-text);
+}
+
+.gmail-compose-attachment-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gmail-compose-attachment-size {
+  color: var(--gm-text-muted);
+  flex-shrink: 0;
+}
+
+.gmail-compose-attachment-remove {
+  border: none;
+  background: transparent;
+  color: var(--gm-text-muted);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 0 0 2px;
+  flex-shrink: 0;
+}
+
+.gmail-compose-attachment-remove:hover {
+  color: var(--gm-text);
 }
 
 .gmail-compose-actions {

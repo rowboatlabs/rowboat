@@ -631,7 +631,10 @@ export function setupIpcHandlers() {
       return await getDefaultModelAndProvider();
     },
     'llm:generate': async (_event, args) => {
-      return await generateOneShot(args);
+      console.log(`[llm:generate] requested provider=${args.provider ?? '(default)'} model=${args.model ?? '(default)'}`);
+      const result = await generateOneShot(args);
+      console.log(`[llm:generate] -> provider=${result.provider ?? '?'} model=${result.model ?? '?'} chars=${result.text?.length ?? 0}${result.error ? ` error=${result.error}` : ''}`);
+      return result;
     },
     'models:saveConfig': async (_event, args) => {
       const repo = container.resolve<IModelConfigRepo>('modelConfigRepo');
