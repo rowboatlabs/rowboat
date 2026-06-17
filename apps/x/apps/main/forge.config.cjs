@@ -103,24 +103,21 @@ module.exports = {
         extendInfo: {
             NSAudioCaptureUsageDescription: 'Rowboat needs access to system audio to transcribe meetings from other apps (Zoom, Meet, etc.)',
         },
-        // Sign/notarize only when release credentials are present (the release
-        // workflow sets APPLE_ID). Local mac dev builds and the CI smoke matrix
-        // have no signing identity — leaving these unconditional makes
-        // `npm run package` fail there.
-        ...(process.env.APPLE_ID ? {
-            osxSign: {
-                batchCodesignCalls: true,
-                optionsForFile: () => ({
-                    entitlements: path.join(__dirname, 'entitlements.plist'),
-                    'entitlements-inherit': path.join(__dirname, 'entitlements.plist'),
-                }),
-            },
-            osxNotarize: {
-                appleId: process.env.APPLE_ID,
-                appleIdPassword: process.env.APPLE_PASSWORD,
-                teamId: process.env.APPLE_TEAM_ID
-            },
-        } : {}),
+        // Signing/notarization: commented out for local/unsigned builds. Uncomment
+        // these (and provide APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID) for a signed
+        // release build.
+        // osxSign: {
+        //     batchCodesignCalls: true,
+        //     optionsForFile: () => ({
+        //         entitlements: path.join(__dirname, 'entitlements.plist'),
+        //         'entitlements-inherit': path.join(__dirname, 'entitlements.plist'),
+        //     }),
+        // },
+        // osxNotarize: {
+        //     appleId: process.env.APPLE_ID,
+        //     appleIdPassword: process.env.APPLE_PASSWORD,
+        //     teamId: process.env.APPLE_TEAM_ID
+        // },
         // Since we bundle the main process with esbuild, we don't need the workspace
         // node_modules. These settings prevent Forge's dependency walker (flora-colossus)
         // from trying to analyze/copy node_modules, which fails with pnpm's symlinked
