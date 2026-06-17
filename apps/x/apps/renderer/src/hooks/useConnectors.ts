@@ -101,6 +101,10 @@ export function useConnectors(active: boolean) {
   const [slackKnowledgeEnabled, setSlackKnowledgeEnabled] = useState(false)
   const [slackKnowledgeChannels, setSlackKnowledgeChannels] = useState("")
   const [slackKnowledgeSaving, setSlackKnowledgeSaving] = useState(false)
+  // Snapshot of the last-persisted knowledge config, used to detect unsaved
+  // edits so the Save button only appears when there's something to save.
+  const [slackKnowledgeSavedEnabled, setSlackKnowledgeSavedEnabled] = useState(false)
+  const [slackKnowledgeSavedChannels, setSlackKnowledgeSavedChannels] = useState("")
   const [slackSyncStatuses, setSlackSyncStatuses] = useState<SlackSyncStatus[]>([])
 
   // Composio Gmail/Calendar sync was removed. These flags are seeded false
@@ -324,6 +328,8 @@ export function useConnectors(active: boolean) {
       })
       setSlackKnowledgeEnabled(false)
       setSlackKnowledgeChannels("")
+      setSlackKnowledgeSavedEnabled(false)
+      setSlackKnowledgeSavedChannels("")
       toast.success('Slack disabled')
     } catch (error) {
       console.error('Failed to update Slack config:', error)
@@ -347,18 +353,24 @@ export function useConnectors(active: boolean) {
     try {
       const result = await window.ipc.invoke('knowledgeSources:getConfig', null)
       const slackSource = (result.sources as KnowledgeSourceConfig[]).find(source => source.id === 'slack')
-      setSlackKnowledgeEnabled(Boolean(slackSource?.enabled))
-      setSlackKnowledgeChannels((slackSource?.scopes ?? [])
+      const enabled = Boolean(slackSource?.enabled)
+      const channels = (slackSource?.scopes ?? [])
         .filter(scope => scope.type === 'channel')
         .map(scope => {
           const channel = scope.name || scope.id
           return scope.workspaceUrl ? `${scope.workspaceUrl} ${channel}` : channel
         })
-        .join('\n'))
+        .join('\n')
+      setSlackKnowledgeEnabled(enabled)
+      setSlackKnowledgeChannels(channels)
+      setSlackKnowledgeSavedEnabled(enabled)
+      setSlackKnowledgeSavedChannels(channels)
     } catch (error) {
       console.error('Failed to load knowledge sources:', error)
       setSlackKnowledgeEnabled(false)
       setSlackKnowledgeChannels("")
+      setSlackKnowledgeSavedEnabled(false)
+      setSlackKnowledgeSavedChannels("")
     }
   }, [])
 
@@ -787,6 +799,11 @@ export function useConnectors(active: boolean) {
     (status) => Boolean(status?.error)
   )
 
+  // Whether the knowledge config has unsaved edits — drives Save button visibility.
+  const slackKnowledgeDirty =
+    slackKnowledgeEnabled !== slackKnowledgeSavedEnabled ||
+    slackKnowledgeChannels !== slackKnowledgeSavedChannels
+
   return {
     // OAuth providers
     providers,
@@ -842,6 +859,7 @@ export function useConnectors(active: boolean) {
     slackKnowledgeChannels,
     setSlackKnowledgeChannels,
     slackKnowledgeSaving,
+    slackKnowledgeDirty,
     handleSlackEnable,
     handleSlackImportDesktop,
     handleSlackQuitAndImport,

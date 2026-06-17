@@ -445,14 +445,16 @@ export function ConnectedAccountsSettings({ dialogOpen }: ConnectedAccountsSetti
                   <span className="text-xs text-muted-foreground">
                     One channel per line. Use channel names or IDs.
                   </span>
-                  <Button
-                    size="sm"
-                    onClick={c.handleSlackKnowledgeSave}
-                    disabled={c.slackKnowledgeSaving || (c.slackKnowledgeEnabled && c.slackKnowledgeChannels.trim().length === 0)}
-                    className="h-7 px-3 text-xs"
-                  >
-                    {c.slackKnowledgeSaving ? <Loader2 className="size-3 animate-spin" /> : "Save"}
-                  </Button>
+                  {(c.slackKnowledgeDirty || c.slackKnowledgeSaving) && (
+                    <Button
+                      size="sm"
+                      onClick={c.handleSlackKnowledgeSave}
+                      disabled={c.slackKnowledgeSaving || (c.slackKnowledgeEnabled && c.slackKnowledgeChannels.trim().length === 0)}
+                      className="h-7 px-3 text-xs"
+                    >
+                      {c.slackKnowledgeSaving ? <Loader2 className="size-3 animate-spin" /> : "Save"}
+                    </Button>
+                  )}
                 </div>
                 {c.slackKnowledgeEnabled && c.slackSyncStatuses.filter(s => s.enabled).map(status => (
                   <div key={status.id} className="flex items-center gap-1.5 text-xs">
