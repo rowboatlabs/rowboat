@@ -2,6 +2,7 @@ import { z, ZodType } from "zod";
 import * as path from "path";
 import * as fs from "fs/promises";
 import { executeCommand, executeCommandAbortable } from "./command-executor.js";
+import { agentSlackShimEnv } from "../../slack/agent-slack-exec.js";
 import { resolveSkill, availableSkills } from "../assistant/skills/index.js";
 import { executeTool, listServers, listTools } from "../../mcp/mcp.js";
 import container from "../../di/container.js";
@@ -740,6 +741,9 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
             try {
                 const rootDir = path.resolve(WorkDir);
                 const workingDir = cwd ? path.resolve(rootDir, cwd) : rootDir;
+                // Make `agent-slack` resolvable for skill-authored shell
+                // commands; the shim forwards to the bundled CLI.
+                const env = agentSlackShimEnv(path.join(rootDir, 'bin'));
 
                 // TODO: Re-enable this check
                 // const rootPrefix = rootDir.endsWith(path.sep)
@@ -758,6 +762,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 if (ctx?.signal) {
                     const { promise, process: proc } = executeCommandAbortable(command, {
                         cwd: workingDir,
+                        env,
                         signal: ctx.signal,
                         onData: (chunk: string) => {
                             ctx.publish({
@@ -788,7 +793,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 }
 
                 // Fallback to original for backward compatibility
-                const result = await executeCommand(command, { cwd: workingDir });
+                const result = await executeCommand(command, { cwd: workingDir, env });
 
                 return {
                     success: result.exitCode === 0,

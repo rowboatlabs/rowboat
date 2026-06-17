@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowRight, Bot, Calendar, Clock, FileText, Mail, MessageSquare, Mic, Plug, Plus, Video } from 'lucide-react'
+import { ArrowRight, Bot, Calendar, Clock, ExternalLink, FileText, Mail, MessageSquare, Mic, Plug, Plus, Video } from 'lucide-react'
 import { extractConferenceLink } from '@/lib/calendar-event'
 import { SettingsDialog } from '@/components/settings-dialog'
 
@@ -54,6 +54,17 @@ type RawCalEvent = {
 }
 
 type EmailThread = { threadId: string; subject: string; from: string }
+type SlackFeedMessage = {
+  id: string
+  workspaceName?: string
+  workspaceUrl?: string
+  channelId?: string
+  channelName?: string
+  author?: string
+  text: string
+  ts: string
+  url?: string
+}
 type ToolkitPreview = { slug: string; logo: string; name: string; description: string }
 
 function greeting(): string {
@@ -92,6 +103,28 @@ function relativeAgo(iso?: string): string {
   if (hr < 24) return `${hr}h ago`
   const d = Math.round(hr / 24)
   return `${d}d ago`
+}
+
+function relativeSlackTs(ts: string): string {
+  const seconds = Number(ts.split('.')[0])
+  if (!Number.isFinite(seconds)) return ''
+  const iso = new Date(seconds * 1000).toISOString()
+  return relativeAgo(iso)
+}
+
+// Short, non-actionable copy for the home feed — the actionable fix lives in
+// Settings, so every failure routes the user there.
+function homeSlackErrorCopy(kind: string | null): string {
+  switch (kind) {
+    case 'not_authed':
+      return 'Slack needs reconnecting — open Settings → Connected accounts.'
+    case 'network':
+      return "Couldn't reach Slack. Check your connection."
+    case 'rate_limited':
+      return 'Slack is rate-limiting requests — will retry shortly.'
+    default:
+      return "Couldn't load Slack right now — see Settings."
+  }
 }
 
 function parseAllDay(s: string): Date | null {
@@ -218,6 +251,10 @@ export function HomeView({
 }: HomeViewProps) {
   const [events, setEvents] = useState<CalEvent[]>([])
   const [emails, setEmails] = useState<EmailThread[]>([])
+  const [slackEnabled, setSlackEnabled] = useState(false)
+  const [slackMessages, setSlackMessages] = useState<SlackFeedMessage[]>([])
+  const [slackError, setSlackError] = useState<string | null>(null)
+  const [slackErrorKind, setSlackErrorKind] = useState<string | null>(null)
   const [toolkitPreviews, setToolkitPreviews] = useState<ToolkitPreview[]>(cachedToolkitPreviews ?? [])
   const [toolkitLogosLoaded, setToolkitLogosLoaded] = useState(cachedToolkitLogosLoaded)
   const [connectionsSettingsOpen, setConnectionsSettingsOpen] = useState(false)
@@ -260,6 +297,22 @@ export function HomeView({
     }
   }, [])
 
+  const loadSlackMessages = useCallback(async () => {
+    try {
+      const result = await window.ipc.invoke('slack:getRecentMessages', { limit: 5 })
+      setSlackEnabled(result.enabled)
+      setSlackMessages(result.messages)
+      setSlackError(result.error ?? null)
+      setSlackErrorKind(result.errorKind ?? null)
+    } catch (err) {
+      console.error('Home: failed to load Slack messages', err)
+      setSlackEnabled(false)
+      setSlackMessages([])
+      setSlackError(null)
+      setSlackErrorKind(null)
+    }
+  }, [])
+
   const loadConnectorLogos = useCallback(async () => {
     if (cachedToolkitLogosLoaded) return
     try {
@@ -293,7 +346,7 @@ export function HomeView({
     })
   }, [])
 
-  useEffect(() => { void loadEvents(); void loadEmails(); void loadConnectorLogos() }, [loadEvents, loadEmails, loadConnectorLogos])
+  useEffect(() => { void loadEvents(); void loadEmails(); void loadSlackMessages(); void loadConnectorLogos() }, [loadEvents, loadEmails, loadSlackMessages, loadConnectorLogos])
 
   // Upcoming (not-yet-ended) events, soonest first.
   const upcoming = useMemo(() => {
@@ -459,6 +512,53 @@ export function HomeView({
               </button>
             </div>
           </div>
+
+          {/* Slack */}
+          {slackEnabled && (
+            <div className={CARD}>
+              <div className="mb-3 flex items-center gap-2">
+                <MessageSquare className="size-[15px]" />
+                <span className="text-sm font-medium">Slack</span>
+                <span className="flex-1" />
+                <span className="text-xs text-muted-foreground">Latest messages</span>
+              </div>
+              {slackError ? (
+                <div className="py-1 text-[12.5px] text-muted-foreground">{homeSlackErrorCopy(slackErrorKind)}</div>
+              ) : slackMessages.length === 0 ? (
+                <div className="py-1 text-[12.5px] text-muted-foreground">No messages worth surfacing right now.</div>
+              ) : slackMessages.map((message, i) => (
+                <div
+                  key={message.id}
+                  className={`flex items-start gap-3 py-2 text-[12.5px] ${i ? 'border-t border-border' : ''}`}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="mb-0.5 flex min-w-0 items-center gap-1.5 text-[11.5px] text-muted-foreground">
+                      <span className="truncate">{message.channelName ?? 'Slack'}</span>
+                      {message.author && (
+                        <>
+                          <span className="shrink-0">·</span>
+                          <span className="truncate">{message.author}</span>
+                        </>
+                      )}
+                      <span className="shrink-0">·</span>
+                      <span className="shrink-0">{relativeSlackTs(message.ts)}</span>
+                    </div>
+                    <div className="line-clamp-2 text-foreground">{message.text}</div>
+                  </div>
+                  {message.url && (
+                    <button
+                      type="button"
+                      onClick={() => window.open(message.url, '_blank')}
+                      className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-1 text-[11.5px] text-primary transition-colors hover:bg-accent"
+                    >
+                      Open
+                      <ExternalLink className="size-3" />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* Today's schedule */}
           <div className={CARD}>
