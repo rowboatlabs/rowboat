@@ -1042,7 +1042,7 @@ function App() {
   }, [])
 
   // Runs history state
-  type RunListItem = { id: string; title?: string; createdAt: string; agentId: string; useCase?: string }
+  type RunListItem = { id: string; title?: string; createdAt: string; modifiedAt: string; agentId: string; useCase?: string }
   const [runs, setRuns] = useState<RunListItem[]>([])
 
   // Chat tab state
@@ -2716,10 +2716,12 @@ function App() {
         const inferredTitle = inferRunTitleFromMessage(titleSource)
         setRuns((prev) => {
           const withoutCurrent = prev.filter((run) => run.id !== currentRunId)
+          const createdAt = newRunCreatedAt ?? new Date().toISOString()
           return [{
             id: currentRunId!,
             title: inferredTitle,
-            createdAt: newRunCreatedAt ?? new Date().toISOString(),
+            createdAt,
+            modifiedAt: createdAt,
             agentId,
           }, ...withoutCurrent]
         })
@@ -5496,6 +5498,7 @@ function App() {
               onOpenAgent={(slug) => { setBgTaskInitialSlug(slug); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
               recentRuns={runs}
               onOpenRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
+              onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
               onOpenEmail={(threadId) => openEmailView(threadId)}
               onOpenHome={() => void navigateToView({ type: 'home' })}
               onNewChat={handleNewChatTab}
