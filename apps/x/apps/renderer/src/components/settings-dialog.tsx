@@ -1770,7 +1770,7 @@ let provChannelHooked = false
 
 function notifyProv() { provListeners.forEach((l) => l()) }
 
-function startProvisioning(agent: 'claude' | 'codex', onDone: () => void): void {
+function startProvisioning(agent: 'claude' | 'codex', onDone: () => void | Promise<void>): void {
   if (provStore[agent] && !provStore[agent]!.error) return // already in flight
   provStore[agent] = { pct: null }
   notifyProv()
@@ -1785,9 +1785,15 @@ function startProvisioning(agent: 'claude' | 'codex', onDone: () => void): void 
     })
   }
   window.ipc.invoke('codeMode:provisionEngine', { agent })
-    .then((res) => {
-      if (res.success) { provStore[agent] = undefined; onDone() }
-      else provStore[agent] = { pct: null, error: res.error ?? 'Failed to enable' }
+    .then(async (res) => {
+      if (res.success) {
+        // Refresh status to installed=true BEFORE clearing the in-flight flag, so the
+        // row flips straight to "Ready" instead of flashing the Enable button.
+        await onDone()
+        provStore[agent] = undefined
+      } else {
+        provStore[agent] = { pct: null, error: res.error ?? 'Failed to enable' }
+      }
     })
     .catch((e) => { provStore[agent] = { pct: null, error: e instanceof Error ? e.message : 'Failed to enable' } })
     .finally(notifyProv)
