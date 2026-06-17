@@ -189,7 +189,29 @@ function verifyIntegrity(file: string, integrity: string): void {
 // contents land directly in destDir. Uses the system tar (bsdtar on macOS/Windows 10+,
 // GNU tar on Linux) — all support -xzf and --strip-components.
 function extractTarball(tarPath: string, destDir: string): void {
-    const r = spawnSync('tar', ['-xzf', tarPath, '-C', destDir, '--strip-components=1'], { stdio: 'pipe' });
+    let tarCmd = 'tar';
+    let tarArgs = ['-xzf', tarPath, '-C', destDir, '--strip-components=1'];
+    let spawnOpts: Parameters<typeof spawnSync>[2] = { stdio: 'pipe' };
+
+    // Windows: PATH `tar` may resolve to a GNU tar from Git/MSYS2, which misreads the
+    // absolute archive path "C:\...\engine.tgz" as a remote "host:path" spec and fails with
+    // "tar (child): Cannot connect to C: resolve failed" (then "gzip: stdin: unexpected end
+    // of file"). Pin to the bsdtar shipped in System32, which handles drive-letter paths
+    // natively — this is the tar this code was always meant to use on Windows 10+.
+    if (process.platform === 'win32') {
+        const sysTar = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe');
+        if (fs.existsSync(sysTar)) {
+            tarCmd = sysTar;
+        } else {
+            // No system bsdtar (very old/stripped Windows): fall back to PATH tar, but run
+            // from the archive's own directory and pass the bare filename so no drive-letter
+            // colon reaches tar's -f argument — works for both GNU tar and bsdtar.
+            tarArgs = ['-xzf', path.basename(tarPath), '-C', destDir, '--strip-components=1'];
+            spawnOpts = { stdio: 'pipe', cwd: path.dirname(tarPath) };
+        }
+    }
+
+    const r = spawnSync(tarCmd, tarArgs, spawnOpts);
     if (r.status !== 0) {
         const err = r.stderr?.toString().trim() || r.error?.message || `tar exited ${r.status}`;
         throw new Error(`Code mode: failed to extract engine — ${err}`);
