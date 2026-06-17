@@ -101,6 +101,38 @@ function locateExecutable(agent: CodingAgent, root: string): string | null {
     return null;
 }
 
+// True when this OS/arch has a published engine for `agent` — i.e. we can provision it.
+// (Used for status: code mode no longer requires a user-installed CLI.)
+export function isEngineSupported(agent: CodingAgent): boolean {
+    return platformKey(agent) !== null;
+}
+
+// True when the pinned engine for `agent` is already downloaded and intact locally.
+export function isEngineProvisioned(agent: CodingAgent): boolean {
+    const version = ENGINE_MANIFEST[agent].version;
+    const versionDir = path.join(ENGINES_ROOT, agent, version);
+    const metaPath = path.join(ENGINES_ROOT, agent, '.meta', `${agent}-${version}.json`);
+    return locateExecutable(agent, versionDir) !== null && fs.existsSync(metaPath);
+}
+
+const AGENT_LABEL: Record<CodingAgent, string> = { claude: 'Claude Code', codex: 'Codex' };
+
+// Return the provisioned engine's executable path, or throw a clear, user-facing error.
+// The chat/run path uses this — we deliberately do NOT download here: the engine must be
+// enabled up front in Settings → Code Mode, so the user never eats a surprise ~200 MB
+// download mid-conversation. ensureEngine() (the downloading path) is driven only by the
+// Settings "Enable" action.
+export function getProvisionedEnginePath(agent: CodingAgent): string {
+    const version = ENGINE_MANIFEST[agent].version;
+    const exe = locateExecutable(agent, path.join(ENGINES_ROOT, agent, version));
+    if (!exe) {
+        throw new Error(
+            `${AGENT_LABEL[agent]} isn't enabled yet. Open Settings → Code Mode and click Enable to download it.`,
+        );
+    }
+    return exe;
+}
+
 async function downloadTo(url: string, dest: string, opts: EnsureEngineOptions): Promise<void> {
     opts.onProgress?.({ phase: 'download', receivedBytes: 0 });
     const res = await fetch(url, { signal: opts.signal });

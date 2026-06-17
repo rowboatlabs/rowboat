@@ -2,7 +2,7 @@ import { createRequire } from 'module';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import type { CodingAgent } from './types.js';
-import { ensureEngine, type EnsureEngineOptions } from './engine-provisioner.js';
+import { getProvisionedEnginePath } from './engine-provisioner.js';
 
 const require = createRequire(import.meta.url);
 
@@ -59,28 +59,25 @@ function resolveAdapterEntry(pkg: string): string {
     return path.join(pkgDir, rel);
 }
 
-export async function getAgentLaunchSpec(
-    agent: CodingAgent,
-    opts: EnsureEngineOptions = {},
-): Promise<AgentLaunchSpec> {
+export function getAgentLaunchSpec(agent: CodingAgent): AgentLaunchSpec {
     const entry = resolveAdapterEntry(ADAPTER_PACKAGE[agent]);
     const env: NodeJS.ProcessEnv = { ...process.env };
 
-    // Provision the pinned native engine on demand (downloaded on first use, cached
-    // thereafter) and point the adapter at it. We never depend on a user's global
-    // install — the engine version is locked to what the adapter was built against, so
+    // Point the adapter at the engine the user already enabled in Settings. We do NOT
+    // download here — getProvisionedEnginePath throws a clear "enable it in Settings"
+    // error if the engine isn't present, so code mode never triggers a surprise
+    // mid-chat download. The version is locked to what the adapter was built against, so
     // the ACP handshake is always compatible. The adapters honor these env vars
-    // (claude: CLAUDE_CODE_EXECUTABLE, codex: CODEX_PATH) and fall back to their own
-    // bundled engine only when unset — which we never leave unset.
-    const engine = await ensureEngine(agent, opts);
+    // (claude: CLAUDE_CODE_EXECUTABLE, codex: CODEX_PATH).
+    const executablePath = getProvisionedEnginePath(agent);
     if (agent === 'claude') {
-        env.CLAUDE_CODE_EXECUTABLE = engine.executablePath;
+        env.CLAUDE_CODE_EXECUTABLE = executablePath;
         // Make the claude-agent-sdk log the exact spawn command + claude's stderr to
         // ~/.claude/debug/sdk-*.txt, so a failed/hung launch has a diagnosable trail
         // instead of a silently dropped connection.
         env.DEBUG_CLAUDE_AGENT_SDK = '1';
     } else {
-        env.CODEX_PATH = engine.executablePath;
+        env.CODEX_PATH = executablePath;
     }
 
     // We spawn the adapter with process.execPath. Inside Electron's main process

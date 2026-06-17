@@ -1761,17 +1761,42 @@ type CodeModeAgentStatus = { claude: AgentStatus; codex: AgentStatus }
 
 function AgentStatusRow({
   name,
-  installLink,
+  agent,
   signInCommand,
   status,
+  onProvisioned,
 }: {
   name: string
-  installLink: string
+  agent: 'claude' | 'codex'
   signInCommand: string
   status: AgentStatus | null
+  onProvisioned: () => void
 }) {
+  const [progress, setProgress] = useState<{ phase: string; pct: number | null } | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const provisioning = progress !== null
+
+  const enable = useCallback(async () => {
+    setError(null)
+    setProgress({ phase: 'download', pct: null })
+    const off = window.ipc.on('codeMode:engineProgress', (p) => {
+      if (p.agent !== agent) return
+      const pct = p.totalBytes ? Math.floor(((p.receivedBytes ?? 0) / p.totalBytes) * 100) : null
+      setProgress({ phase: p.phase, pct })
+    })
+    try {
+      const res = await window.ipc.invoke('codeMode:provisionEngine', { agent })
+      if (!res.success) setError(res.error ?? 'Failed to enable')
+      else onProvisioned()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to enable')
+    } finally {
+      off()
+      setProgress(null)
+    }
+  }, [agent, onProvisioned])
+
   const ready = status?.installed && status?.signedIn
-  const needsSignInOnly = status?.installed && !status?.signedIn
   return (
     <div className="rounded-md border px-3 py-2.5 flex items-center gap-3">
       <Terminal className="size-4 text-muted-foreground shrink-0" />
@@ -1780,31 +1805,39 @@ function AgentStatusRow({
         <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-3">
           <span className={cn("inline-flex items-center gap-1", status?.installed ? "text-green-600" : "text-muted-foreground")}>
             {status?.installed ? <CheckCircle2 className="size-3" /> : <X className="size-3" />}
-            Installed
+            {status?.installed ? 'Engine ready' : 'Not enabled'}
           </span>
           <span className={cn("inline-flex items-center gap-1", status?.signedIn ? "text-green-600" : "text-muted-foreground")}>
             {status?.signedIn ? <CheckCircle2 className="size-3" /> : <X className="size-3" />}
             Signed in
           </span>
         </div>
+        {error && <div className="text-xs text-red-600 mt-1 break-words">{error}</div>}
       </div>
-      {ready ? (
+      {provisioning ? (
+        <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground shrink-0">
+          <Loader2 className="size-3 animate-spin" />
+          {progress?.phase === 'download'
+            ? `Downloading${progress.pct != null ? ` ${progress.pct}%` : '…'}`
+            : progress?.phase === 'verify' ? 'Verifying…'
+              : progress?.phase === 'extract' ? 'Installing…' : 'Finishing…'}
+        </span>
+      ) : ready ? (
         <span className="rounded-full bg-green-500/10 px-2 py-0.5 text-[10px] font-medium leading-none text-green-600">
           Ready
         </span>
-      ) : needsSignInOnly ? (
+      ) : !status?.installed ? (
+        <button
+          type="button"
+          onClick={enable}
+          className="rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:opacity-90 shrink-0"
+        >
+          Enable
+        </button>
+      ) : (
         <span className="text-xs text-muted-foreground shrink-0">
           Run <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">{signInCommand}</code>
         </span>
-      ) : (
-        <a
-          href={installLink}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-xs text-primary hover:underline shrink-0"
-        >
-          Install &amp; sign in
-        </a>
       )}
     </div>
   )
@@ -1907,6 +1940,14 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
           Requires an active <strong className="text-foreground">Claude Code</strong> subscription or
           a <strong className="text-foreground">ChatGPT/Codex</strong> subscription. You can have one or both.
         </p>
+        <p>
+          For each agent you want to use, you must have it{' '}
+          <strong className="text-foreground">installed and logged in</strong> on this machine: click{' '}
+          <strong className="text-foreground">Enable</strong> below to download its engine, and sign in by
+          running <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">claude login</code>{' '}
+          or <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">codex login</code>{' '}
+          in your terminal. Code mode uses that saved login.
+        </p>
       </div>
 
       <div className="space-y-2">
@@ -1924,15 +1965,17 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
         <div className="space-y-2">
           <AgentStatusRow
             name="Claude Code"
-            installLink="https://claude.ai/code"
+            agent="claude"
             signInCommand="claude login"
             status={status?.claude ?? null}
+            onProvisioned={loadStatus}
           />
           <AgentStatusRow
             name="Codex"
-            installLink="https://developers.openai.com/codex/cli"
+            agent="codex"
             signInCommand="codex login"
             status={status?.codex ?? null}
+            onProvisioned={loadStatus}
           />
         </div>
       </div>
@@ -1984,8 +2027,8 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
         <div className="rounded-md border border-amber-500/40 bg-amber-50/60 dark:bg-amber-950/20 px-3 py-2.5 flex items-start gap-2 text-xs">
           <AlertTriangle className="size-4 text-amber-600 dark:text-amber-500 shrink-0 mt-0.5" />
           <div className="text-amber-900 dark:text-amber-200">
-            Neither Claude Code nor Codex is ready. Install at least one and sign in with a subscription
-            account, then click Re-check.
+            Neither Claude Code nor Codex is ready. Click Enable above to download an engine, sign in with a
+            subscription account, then click Re-check.
           </div>
         </div>
       )}
