@@ -1815,12 +1815,9 @@ function AgentStatusRow({
         {error && <div className="text-xs text-red-600 mt-1 break-words">{error}</div>}
       </div>
       {provisioning ? (
-        <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground shrink-0">
+        <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground shrink-0 tabular-nums">
           <Loader2 className="size-3 animate-spin" />
-          {progress?.phase === 'download'
-            ? `Downloading${progress.pct != null ? ` ${progress.pct}%` : '…'}`
-            : progress?.phase === 'verify' ? 'Verifying…'
-              : progress?.phase === 'extract' ? 'Installing…' : 'Finishing…'}
+          {progress?.pct != null ? `${progress.pct}%` : null}
         </span>
       ) : ready ? (
         <span className="rounded-full bg-green-500/10 px-2 py-0.5 text-[10px] font-medium leading-none text-green-600">
