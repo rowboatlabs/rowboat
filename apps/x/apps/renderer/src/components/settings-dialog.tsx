@@ -1765,6 +1765,10 @@ type CodeModeAgentStatus = { claude: AgentStatus; codex: AgentStatus }
 // button. A single persistent listener on the progress channel feeds this store.
 type ProvState = { pct: number | null; error?: string }
 const provStore: Record<string, ProvState | undefined> = {}
+// Agents we provisioned this session — used to show "Ready" immediately on success
+// without waiting for the async status refresh to round-trip (which caused the row to
+// briefly flash the Enable button again).
+const enabledOptimistic = new Set<string>()
 const provListeners = new Set<() => void>()
 let provChannelHooked = false
 
@@ -1785,12 +1789,15 @@ function startProvisioning(agent: 'claude' | 'codex', onDone: () => void | Promi
     })
   }
   window.ipc.invoke('codeMode:provisionEngine', { agent })
-    .then(async (res) => {
+    .then((res) => {
       if (res.success) {
-        // Refresh status to installed=true BEFORE clearing the in-flight flag, so the
-        // row flips straight to "Ready" instead of flashing the Enable button.
-        await onDone()
+        // Mark installed optimistically so the row shows "Ready" the instant the flag
+        // clears — don't depend on the async status refresh (which re-renders the parent
+        // separately and left a window showing the Enable button). loadStatus still runs
+        // in the background to sync the real status.
+        enabledOptimistic.add(agent)
         provStore[agent] = undefined
+        void onDone()
       } else {
         provStore[agent] = { pct: null, error: res.error ?? 'Failed to enable' }
       }
@@ -1827,16 +1834,18 @@ function AgentStatusRow({
   const error = prov?.error ?? null
   const enable = useCallback(() => startProvisioning(agent, onProvisioned), [agent, onProvisioned])
 
-  const ready = status?.installed && status?.signedIn
+  // Treat a just-enabled engine as installed even before the status refresh lands.
+  const installed = (status?.installed ?? false) || enabledOptimistic.has(agent)
+  const ready = installed && status?.signedIn
   return (
     <div className="rounded-md border px-3 py-2.5 flex items-center gap-3">
       <Terminal className="size-4 text-muted-foreground shrink-0" />
       <div className="flex-1 min-w-0">
         <div className="text-sm font-medium">{name}</div>
         <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-3">
-          <span className={cn("inline-flex items-center gap-1", status?.installed ? "text-green-600" : "text-muted-foreground")}>
-            {status?.installed ? <CheckCircle2 className="size-3" /> : <X className="size-3" />}
-            {status?.installed ? 'Engine ready' : 'Not enabled'}
+          <span className={cn("inline-flex items-center gap-1", installed ? "text-green-600" : "text-muted-foreground")}>
+            {installed ? <CheckCircle2 className="size-3" /> : <X className="size-3" />}
+            {installed ? 'Engine ready' : 'Not enabled'}
           </span>
           <span className={cn("inline-flex items-center gap-1", status?.signedIn ? "text-green-600" : "text-muted-foreground")}>
             {status?.signedIn ? <CheckCircle2 className="size-3" /> : <X className="size-3" />}
@@ -1854,7 +1863,7 @@ function AgentStatusRow({
         <span className="rounded-full bg-green-500/10 px-2 py-0.5 text-[10px] font-medium leading-none text-green-600">
           Ready
         </span>
-      ) : !status?.installed ? (
+      ) : !installed ? (
         <button
           type="button"
           onClick={enable}
