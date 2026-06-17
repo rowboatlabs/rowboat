@@ -1568,13 +1568,25 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 return false;
             }
         },
-        execute: async ({ title, message, link, actionLabel, secondaryActions }: { title?: string; message: string; link?: string; actionLabel?: string; secondaryActions?: Array<{ label: string; link: string }> }) => {
+        execute: async ({ title, message, link, actionLabel, secondaryActions }: { title?: string; message: string; link?: string; actionLabel?: string; secondaryActions?: Array<{ label: string; link: string }> }, ctx?: ToolContext) => {
             try {
                 const service = container.resolve<INotificationService>('notificationService');
                 if (!service.isSupported()) {
                     return { success: false, error: 'Notifications are not supported on this system' };
                 }
-                const uc = getCurrentUseCase()?.useCase;
+                let uc = getCurrentUseCase()?.useCase;
+                // ALS doesn't reliably propagate across the run's async generator,
+                // so when the in-context use-case is missing, fall back to the
+                // persisted use case on the run record via ctx.runId.
+                if (!uc && ctx?.runId) {
+                    try {
+                        const { fetchRun } = await import("../../runs/runs.js");
+                        const run = await fetchRun(ctx.runId);
+                        uc = run.useCase;
+                    } catch {
+                        // best effort — fall through to the default branch
+                    }
+                }
                 if (uc === 'background_task_agent') {
                     // User-configured background agent: gate behind the
                     // background_task category (toggleable), suppress the reopen
@@ -1587,6 +1599,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                         actionLabel,
                         secondaryActions,
                         suppressDuringStartupGrace: true,
+                        onlyWhenBackground: true,
                     });
                 } else {
                     // Regular chat (or any other) agent calling notify-user:
