@@ -133,6 +133,31 @@ export function getProvisionedEnginePath(agent: CodingAgent): string {
     return exe;
 }
 
+// Remove every provisioned version of `agent` except `keepVersion`, plus its stale
+// .meta entries. Called after a successful install so old engines don't pile up across
+// version bumps. Best-effort — never throws (cleanup must not fail a good install).
+function pruneOldVersions(agent: CodingAgent, keepVersion: string): void {
+    const agentRoot = path.join(ENGINES_ROOT, agent);
+    try {
+        for (const name of fs.readdirSync(agentRoot)) {
+            // Keep the active version, the meta dir, and any in-flight temp dirs.
+            if (name === keepVersion || name === '.meta' || name.startsWith('.tmp-')) continue;
+            const full = path.join(agentRoot, name);
+            try {
+                if (fs.statSync(full).isDirectory()) fs.rmSync(full, { recursive: true, force: true });
+            } catch { /* ignore a single stubborn entry */ }
+        }
+        const metaDir = path.join(agentRoot, '.meta');
+        if (fs.existsSync(metaDir)) {
+            for (const f of fs.readdirSync(metaDir)) {
+                if (f !== `${agent}-${keepVersion}.json`) {
+                    try { fs.rmSync(path.join(metaDir, f), { force: true }); } catch { /* ignore */ }
+                }
+            }
+        }
+    } catch { /* agentRoot unreadable — nothing to prune */ }
+}
+
 async function downloadTo(url: string, dest: string, opts: EnsureEngineOptions): Promise<void> {
     opts.onProgress?.({ phase: 'download', receivedBytes: 0 });
     const res = await fetch(url, { signal: opts.signal });
@@ -246,6 +271,10 @@ export async function ensureEngine(agent: CodingAgent, opts: EnsureEngineOptions
             integrity: plat.integrity,
             binRelPath: path.relative(versionDir, finalExe),
         }, null, 2));
+
+        // A new version is in place — remove superseded versions so old engines
+        // (~200 MB each) don't accumulate after a bump. Best-effort.
+        pruneOldVersions(agent, version);
 
         opts.onProgress?.({ phase: 'done' });
         return { executablePath: finalExe, version };
