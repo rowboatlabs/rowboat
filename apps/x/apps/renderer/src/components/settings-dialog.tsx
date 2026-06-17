@@ -1759,6 +1759,50 @@ function NoteTaggingSettings({ dialogOpen }: { dialogOpen: boolean }) {
 type AgentStatus = { installed: boolean; signedIn: boolean }
 type CodeModeAgentStatus = { claude: AgentStatus; codex: AgentStatus }
 
+// Engine provisioning runs in the main process and keeps going even if the Settings
+// dialog is closed. Track its state at MODULE level (not in the row component, which
+// unmounts on close) so reopening Settings still shows the live % instead of the Enable
+// button. A single persistent listener on the progress channel feeds this store.
+type ProvState = { pct: number | null; error?: string }
+const provStore: Record<string, ProvState | undefined> = {}
+const provListeners = new Set<() => void>()
+let provChannelHooked = false
+
+function notifyProv() { provListeners.forEach((l) => l()) }
+
+function startProvisioning(agent: 'claude' | 'codex', onDone: () => void): void {
+  if (provStore[agent] && !provStore[agent]!.error) return // already in flight
+  provStore[agent] = { pct: null }
+  notifyProv()
+  if (!provChannelHooked) {
+    provChannelHooked = true
+    window.ipc.on('codeMode:engineProgress', (p) => {
+      const cur = provStore[p.agent]
+      if (!cur) return
+      const pct = p.totalBytes ? Math.floor(((p.receivedBytes ?? 0) / p.totalBytes) * 100) : cur.pct
+      provStore[p.agent] = { pct }
+      notifyProv()
+    })
+  }
+  window.ipc.invoke('codeMode:provisionEngine', { agent })
+    .then((res) => {
+      if (res.success) { provStore[agent] = undefined; onDone() }
+      else provStore[agent] = { pct: null, error: res.error ?? 'Failed to enable' }
+    })
+    .catch((e) => { provStore[agent] = { pct: null, error: e instanceof Error ? e.message : 'Failed to enable' } })
+    .finally(notifyProv)
+}
+
+function useProvisioning(agent: string): ProvState | undefined {
+  const [, force] = useState(0)
+  useEffect(() => {
+    const l = () => force((n) => n + 1)
+    provListeners.add(l)
+    return () => { provListeners.delete(l) }
+  }, [])
+  return provStore[agent]
+}
+
 function AgentStatusRow({
   name,
   agent,
@@ -1772,29 +1816,10 @@ function AgentStatusRow({
   status: AgentStatus | null
   onProvisioned: () => void
 }) {
-  const [progress, setProgress] = useState<{ phase: string; pct: number | null } | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const provisioning = progress !== null
-
-  const enable = useCallback(async () => {
-    setError(null)
-    setProgress({ phase: 'download', pct: null })
-    const off = window.ipc.on('codeMode:engineProgress', (p) => {
-      if (p.agent !== agent) return
-      const pct = p.totalBytes ? Math.floor(((p.receivedBytes ?? 0) / p.totalBytes) * 100) : null
-      setProgress({ phase: p.phase, pct })
-    })
-    try {
-      const res = await window.ipc.invoke('codeMode:provisionEngine', { agent })
-      if (!res.success) setError(res.error ?? 'Failed to enable')
-      else onProvisioned()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to enable')
-    } finally {
-      off()
-      setProgress(null)
-    }
-  }, [agent, onProvisioned])
+  const prov = useProvisioning(agent)
+  const provisioning = prov !== undefined && prov.error === undefined
+  const error = prov?.error ?? null
+  const enable = useCallback(() => startProvisioning(agent, onProvisioned), [agent, onProvisioned])
 
   const ready = status?.installed && status?.signedIn
   return (
@@ -1817,7 +1842,7 @@ function AgentStatusRow({
       {provisioning ? (
         <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground shrink-0 tabular-nums">
           <Loader2 className="size-3 animate-spin" />
-          {progress?.pct != null ? `${progress.pct}%` : null}
+          {prov?.pct != null ? `${prov.pct}%` : null}
         </span>
       ) : ready ? (
         <span className="rounded-full bg-green-500/10 px-2 py-0.5 text-[10px] font-medium leading-none text-green-600">
