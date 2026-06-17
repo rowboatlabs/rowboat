@@ -3,6 +3,7 @@ import * as path from 'path';
 import { fileURLToPath } from 'url';
 import type { CodingAgent } from './types.js';
 import { getProvisionedEnginePath } from './engine-provisioner.js';
+import { loginShellPath } from './shell-env.js';
 
 const require = createRequire(import.meta.url);
 
@@ -62,6 +63,16 @@ function resolveAdapterEntry(pkg: string): string {
 export function getAgentLaunchSpec(agent: CodingAgent): AgentLaunchSpec {
     const entry = resolveAdapterEntry(ADAPTER_PACKAGE[agent]);
     const env: NodeJS.ProcessEnv = { ...process.env };
+
+    // Graft the user's login-shell PATH onto the engine's env. GUI (Finder) launches
+    // inherit launchd's stripped PATH, so tools the engine spawns — git, gh, rg, bash —
+    // would otherwise fail with "command not found" even though they work from a
+    // terminal. No-op on Windows / when the probe fails.
+    const shellPath = loginShellPath();
+    if (shellPath && shellPath !== env.PATH) {
+        const dirs = [...shellPath.split(path.delimiter), ...(env.PATH ?? '').split(path.delimiter)];
+        env.PATH = [...new Set(dirs.filter(Boolean))].join(path.delimiter);
+    }
 
     // Point the adapter at the engine the user already enabled in Settings. We do NOT
     // download here — getProvisionedEnginePath throws a clear "enable it in Settings"
