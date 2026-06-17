@@ -2,9 +2,8 @@ import z from 'zod';
 import { RunEvent } from '@x/shared/dist/runs.js';
 import type { IBus } from '../../application/lib/bus.js';
 import type { ICodeSessionsRepo } from './repo.js';
-import type { INotificationService } from '../../application/notification/service.js';
+import { notifyIfEnabled } from '../../application/notification/notifier.js';
 import type { CodeSessionStatus, CodeSession } from '@x/shared/dist/code-sessions.js';
-import container from '../../di/container.js';
 
 export type StatusListener = (sessionId: string, status: CodeSessionStatus) => void;
 
@@ -107,17 +106,16 @@ export class CodeSessionStatusTracker {
     }
 
     private async notify(sessionId: string, previous: CodeSessionStatus, next: CodeSessionStatus): Promise<void> {
-        let notificationService: INotificationService;
-        try {
-            notificationService = container.resolve<INotificationService>('notificationService');
-        } catch {
-            return; // not registered (e.g. tests)
-        }
-        if (!notificationService.isSupported()) return;
+        // Route through notifyIfEnabled so the user's notification-category
+        // toggles are honoured — a coding agent asking for approval maps to
+        // `agent_permission`, and one finishing its turn maps to
+        // `chat_completion`. notifyIfEnabled also resolves the service, checks
+        // platform support, and swallows errors, so a disabled toggle, missing
+        // service (e.g. tests), or unsupported platform all no-op safely.
         const session = await this.codeSessionsRepo.get(sessionId);
         const title = session?.title ?? 'Coding session';
         if (next === 'needs-you') {
-            notificationService.notify({
+            await notifyIfEnabled('agent_permission', {
                 title,
                 message: 'The coding agent needs your approval.',
             });
@@ -126,7 +124,7 @@ export class CodeSessionStatusTracker {
             // the user has plausibly moved on to something else.
             const since = this.busySince.get(sessionId);
             if (since !== undefined && Date.now() - since > 30_000) {
-                notificationService.notify({
+                await notifyIfEnabled('chat_completion', {
                     title,
                     message: 'The coding agent finished its turn.',
                 });
