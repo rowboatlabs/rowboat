@@ -1205,6 +1205,8 @@ export async function* streamAgent({
     let voiceOutput: 'summary' | 'full' | null = null;
     let searchEnabled = false;
     let codeMode: 'claude' | 'codex' | null = null;
+    let codeCwd: string | null = null;
+    let codePolicy: 'ask' | 'auto-approve-reads' | 'yolo' | null = null;
     let middlePaneContext:
         | { kind: 'note'; path: string; content: string }
         | { kind: 'browser'; url: string; title: string }
@@ -1304,6 +1306,8 @@ export async function* streamAgent({
                     abortRegistry,
                     publish: (event) => bus.publish(event),
                     codeMode,
+                    codeCwd,
+                    codePolicy,
                 });
             }
             } catch (error) {
@@ -1363,6 +1367,8 @@ export async function* streamAgent({
             // Code mode is per-message: latest message decides whether the assistant
             // should route coding work through the code-with-agents skill / chosen agent.
             codeMode = msg.codeMode ?? null;
+            codeCwd = msg.codeCwd ?? null;
+            codePolicy = msg.codePolicy ?? null;
             if (msg.voiceOutput) {
                 voiceOutput = msg.voiceOutput;
             }
@@ -1460,7 +1466,7 @@ The chip is the single source of truth for which agent runs:
 
 **How to run coding work — call the \`code_agent_run\` tool** with:
 - \`agent\`: \`${codeMode}\` (always — match the chip).
-- \`cwd\`: the absolute project/working directory (resolve it per the code-with-agents skill — a path the user named, the "# User Work Directory" block, or ask once).
+- \`cwd\`: ${codeCwd ? `\`${codeCwd}\` (always — this coding session is pinned to that directory; never use another path)` : `the absolute project/working directory (resolve it per the code-with-agents skill — a path the user named, the "# User Work Directory" block, or ask once)`}.
 - \`prompt\`: a clear, self-contained coding instruction.
 
 The tool runs the agent on-device and streams its tool calls, file diffs, and plan into the chat; any action needing approval surfaces as an inline permission card, so you do NOT pre-confirm with an in-chat "reply yes". This chat keeps ONE persistent agent session, so follow-up coding requests automatically resume with full context — just call \`code_agent_run\` again. Do NOT shell out to \`acpx\` or \`executeCommand\` for coding, and do NOT fall back to your own file tools.

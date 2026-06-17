@@ -829,16 +829,24 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
             // chip set) — otherwise it can anchor on the thread's earlier agent and ignore a
             // chip change. Honor the chip so switching it deterministically switches agents.
             const effectiveAgent = ctx.codeMode ?? agent;
+            // Code-section sessions pin the working directory — never trust the model's
+            // cwd argument over the session's.
+            const effectiveCwd = ctx.codeCwd ?? cwd;
             const manager = container.resolve<CodeModeManager>('codeModeManager');
             const registry = container.resolve<CodePermissionRegistry>('codePermissionRegistry');
 
-            // Approval policy from settings; default to asking the user.
+            // Approval policy: the session's (Code section) wins, else global settings,
+            // else default to asking the user.
             let policy: ApprovalPolicy = 'ask';
-            try {
-                const cfg = await container.resolve<ICodeModeConfigRepo>('codeModeConfigRepo').getConfig();
-                if (cfg.approvalPolicy) policy = cfg.approvalPolicy;
-            } catch {
-                // fall back to 'ask'
+            if (ctx.codePolicy) {
+                policy = ctx.codePolicy;
+            } else {
+                try {
+                    const cfg = await container.resolve<ICodeModeConfigRepo>('codeModeConfigRepo').getConfig();
+                    if (cfg.approvalPolicy) policy = cfg.approvalPolicy;
+                } catch {
+                    // fall back to 'ask'
+                }
             }
 
             // On stop, unblock any pending approval card so the broker stops waiting for
@@ -855,7 +863,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 const result = await manager.runPrompt({
                     runId: ctx.runId,
                     agent: effectiveAgent,
-                    cwd,
+                    cwd: effectiveCwd,
                     prompt,
                     policy,
                     signal: ctx.signal,

@@ -3,6 +3,7 @@ import path from "node:path";
 import {
   setupIpcHandlers,
   startRunsWatcher,
+  startCodeSessionStatusWatcher,
   startServicesWatcher,
   startLiveNoteAgentWatcher,
   startBackgroundTaskAgentWatcher,
@@ -11,6 +12,7 @@ import {
   stopServicesWatcher,
   stopWorkspaceWatcher
 } from "./ipc.js";
+import { disposeAllTerminals } from "./terminal.js";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname } from "node:path";
 import { updateElectronApp, UpdateSourceType } from "update-electron-app";
@@ -345,6 +347,9 @@ app.whenReady().then(async () => {
   // start runs watcher
   startRunsWatcher();
 
+  // start code-session status tracker (derives working/needs-you/idle + notifications)
+  startCodeSessionStatusWatcher();
+
   // start services watcher
   startServicesWatcher();
 
@@ -437,6 +442,8 @@ app.on("before-quit", () => {
   } catch {
     // nothing live to dispose
   }
+  // Kill embedded terminal shells.
+  disposeAllTerminals();
   shutdownLocalSites().catch((error) => {
     console.error('[LocalSites] Failed to shut down cleanly:', error);
   });

@@ -35,6 +35,15 @@ import { IGranolaConfigRepo } from '@x/core/dist/knowledge/granola/repo.js';
 import { ICodeModeConfigRepo } from '@x/core/dist/code-mode/repo.js';
 import { CodePermissionRegistry } from '@x/core/dist/code-mode/acp/permission-registry.js';
 import { checkCodeModeAgentStatus } from '@x/core/dist/code-mode/status.js';
+import { ensureEngine } from '@x/core/dist/code-mode/acp/engine-provisioner.js';
+import type { ICodeProjectsRepo } from '@x/core/dist/code-mode/projects/repo.js';
+import type { ICodeSessionsRepo } from '@x/core/dist/code-mode/sessions/repo.js';
+import { CodeSessionService } from '@x/core/dist/code-mode/sessions/service.js';
+import { CodeSessionStatusTracker } from '@x/core/dist/code-mode/sessions/status-tracker.js';
+import * as codeGit from '@x/core/dist/code-mode/git/service.js';
+import { readProjectDir, readProjectFile } from '@x/core/dist/code-mode/projects/fs.js';
+import { ensureTerminal, writeTerminal, resizeTerminal, disposeTerminal } from './terminal.js';
+import type { CodeSession } from '@x/shared/dist/code-sessions.js';
 import { invalidateCopilotInstructionsCache } from '@x/core/dist/application/assistant/instructions.js';
 import { triggerSync as triggerGranolaSync } from '@x/core/dist/knowledge/granola/sync.js';
 import { ISlackConfigRepo } from '@x/core/dist/slack/repo.js';
@@ -564,6 +573,32 @@ export function emitOAuthEvent(event: { provider: string; success: boolean; erro
   }
 }
 
+async function requireCodeSession(sessionId: string): Promise<CodeSession> {
+  const repo = container.resolve<ICodeSessionsRepo>('codeSessionsRepo');
+  const session = await repo.get(sessionId);
+  if (!session) {
+    throw new Error(`Unknown code session: ${sessionId}`);
+  }
+  return session;
+}
+
+let codeSessionStatusWatcher: (() => void) | null = null;
+export async function startCodeSessionStatusWatcher(): Promise<void> {
+  if (codeSessionStatusWatcher) {
+    return;
+  }
+  const tracker = container.resolve<CodeSessionStatusTracker>('codeSessionStatusTracker');
+  await tracker.start();
+  codeSessionStatusWatcher = tracker.onTransition((sessionId, status) => {
+    const windows = BrowserWindow.getAllWindows();
+    for (const win of windows) {
+      if (!win.isDestroyed() && win.webContents) {
+        win.webContents.send('codeSession:status', { sessionId, status });
+      }
+    }
+  });
+}
+
 let runsWatcher: (() => void) | null = null;
 export async function startRunsWatcher(): Promise<void> {
   if (runsWatcher) {
@@ -746,7 +781,7 @@ export function setupIpcHandlers() {
       return runsCore.createRun(args);
     },
     'runs:createMessage': async (_event, args) => {
-      return { messageId: await runsCore.createMessage(args.runId, args.message, args.voiceInput, args.voiceOutput, args.searchEnabled, args.middlePaneContext, args.codeMode) };
+      return { messageId: await runsCore.createMessage(args.runId, args.message, args.voiceInput, args.voiceOutput, args.searchEnabled, args.middlePaneContext, args.codeMode, args.codeCwd, args.codePolicy) };
     },
     'runs:authorizePermission': async (_event, args) => {
       await runsCore.authorizePermission(args.runId, args.authorization);
@@ -868,6 +903,124 @@ export function setupIpcHandlers() {
     },
     'codeMode:checkAgentStatus': async () => {
       return await checkCodeModeAgentStatus();
+    },
+    'codeMode:provisionEngine': async (_event, args) => {
+      // Download + install the agent's engine, streaming progress back to the
+      // requesting window so Settings can show a live bar. 'check' is instant — skip it.
+      try {
+        await ensureEngine(args.agent, {
+          onProgress: (p) => {
+            if (p.phase === 'check') return;
+            _event.sender.send('codeMode:engineProgress', {
+              agent: args.agent,
+              phase: p.phase,
+              receivedBytes: p.receivedBytes,
+              totalBytes: p.totalBytes,
+            });
+          },
+        });
+        return { success: true };
+      } catch (e) {
+        return { success: false, error: e instanceof Error ? e.message : String(e) };
+      }
+    },
+    'codeProject:add': async (_event, args) => {
+      const repo = container.resolve<ICodeProjectsRepo>('codeProjectsRepo');
+      const project = await repo.add(args.path);
+      const git = await codeGit.repoInfo(project.path);
+      return { project, git };
+    },
+    'codeProject:remove': async (_event, args) => {
+      const repo = container.resolve<ICodeProjectsRepo>('codeProjectsRepo');
+      await repo.remove(args.projectId);
+      return { success: true };
+    },
+    'codeProject:list': async () => {
+      const repo = container.resolve<ICodeProjectsRepo>('codeProjectsRepo');
+      const projects = await repo.list();
+      return {
+        projects: await Promise.all(projects.map(async (project) => ({
+          project,
+          git: await codeGit.repoInfo(project.path),
+        }))),
+      };
+    },
+    'codeSession:create': async (_event, args) => {
+      const service = container.resolve<CodeSessionService>('codeSessionService');
+      const session = await service.create(args);
+      return { session };
+    },
+    'codeSession:list': async () => {
+      const repo = container.resolve<ICodeSessionsRepo>('codeSessionsRepo');
+      const tracker = container.resolve<CodeSessionStatusTracker>('codeSessionStatusTracker');
+      return { sessions: await repo.list(), statuses: tracker.getStatuses() };
+    },
+    'codeSession:update': async (_event, args) => {
+      const service = container.resolve<CodeSessionService>('codeSessionService');
+      return { session: await service.update(args.sessionId, args.patch) };
+    },
+    'codeSession:delete': async (_event, args) => {
+      const service = container.resolve<CodeSessionService>('codeSessionService');
+      disposeTerminal(args.sessionId);
+      await service.delete(args.sessionId, {
+        removeWorktree: args.removeWorktree,
+        deleteBranch: args.deleteBranch,
+      });
+      return { success: true };
+    },
+    'codeSession:sendMessage': async (_event, args) => {
+      const service = container.resolve<CodeSessionService>('codeSessionService');
+      // Intentionally not awaited: the turn can run for minutes and streams over
+      // runs:events. sendMessage validates synchronously enough that busy/unknown
+      // errors are reported via the run's error events instead.
+      const resultPromise = service.sendMessage(args.sessionId, args.text);
+      // Surface immediate rejections (busy session, unknown id) to the caller.
+      const result = await Promise.race([
+        resultPromise,
+        new Promise<{ accepted: true }>((resolve) => setTimeout(() => resolve({ accepted: true }), 300)),
+      ]);
+      resultPromise.catch((err) => console.error('codeSession:sendMessage failed', err));
+      return result;
+    },
+    'codeSession:stop': async (_event, args) => {
+      const service = container.resolve<CodeSessionService>('codeSessionService');
+      await service.stop(args.sessionId);
+      return { success: true };
+    },
+    'codeSession:gitStatus': async (_event, args) => {
+      const session = await requireCodeSession(args.sessionId);
+      const info = await codeGit.repoInfo(session.cwd);
+      if (!info.isGitRepo) {
+        return { isRepo: false, branch: null, hasCommits: false, files: [] };
+      }
+      const files = await codeGit.status(session.cwd);
+      return { isRepo: true, branch: info.branch, hasCommits: info.hasCommits, files };
+    },
+    'codeSession:fileDiff': async (_event, args) => {
+      const session = await requireCodeSession(args.sessionId);
+      return codeGit.fileDiff(session.cwd, args.path);
+    },
+    'codeSession:readdir': async (_event, args) => {
+      const session = await requireCodeSession(args.sessionId);
+      return { entries: await readProjectDir(session.cwd, args.relPath) };
+    },
+    'codeSession:readFile': async (_event, args) => {
+      const session = await requireCodeSession(args.sessionId);
+      return readProjectFile(session.cwd, args.relPath);
+    },
+    'codeSession:mergeBack': async (_event, args) => {
+      const service = container.resolve<CodeSessionService>('codeSessionService');
+      return service.mergeBack(args.sessionId);
+    },
+    'codeSession:cleanupWorktree': async (_event, args) => {
+      const service = container.resolve<CodeSessionService>('codeSessionService');
+      try {
+        await service.cleanupWorktree(args.sessionId, args.deleteBranch);
+        return { success: true };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to clean up worktree';
+        return { success: false, error: message };
+      }
     },
     'granola:setConfig': async (_event, args) => {
       const repo = container.resolve<IGranolaConfigRepo>('granolaConfigRepo');
@@ -1182,6 +1335,30 @@ export function setupIpcHandlers() {
         return { path: null };
       }
       return { path: result.filePaths[0] ?? null };
+    },
+    'terminal:ensure': async (_event, args) => {
+      return ensureTerminal(args.id, args.cwd, args.cols, args.rows);
+    },
+    'terminal:input': async (_event, args) => {
+      writeTerminal(args.id, args.data);
+      return { success: true };
+    },
+    'terminal:resize': async (_event, args) => {
+      resizeTerminal(args.id, args.cols, args.rows);
+      return { success: true };
+    },
+    'terminal:dispose': async (_event, args) => {
+      disposeTerminal(args.id);
+      return { success: true };
+    },
+    'dialog:openFiles': async (event, args) => {
+      const win = BrowserWindow.fromWebContents(event.sender);
+      const result = await dialog.showOpenDialog(win!, {
+        title: args.title ?? 'Attach files',
+        ...(args.defaultPath ? { defaultPath: resolveShellPath(args.defaultPath) } : {}),
+        properties: ['openFile', 'multiSelections'],
+      });
+      return { paths: result.canceled ? [] : result.filePaths };
     },
     // Knowledge version history handlers
     'knowledge:history': async (_event, args) => {

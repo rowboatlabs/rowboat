@@ -18,4 +18,5 @@ export * as bases from './bases.js';
 export * as browserControl from './browser-control.js';
 export * as billing from './billing.js';
 export * as notificationSettings from './notification-settings.js';
+export * as codeSessions from './code-sessions.js';
 export { PrefixLogger };

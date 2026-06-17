@@ -1,5 +1,6 @@
 import chokidar, { type FSWatcher } from 'chokidar';
 import fs from 'node:fs/promises';
+import path from 'node:path';
 import { ensureWorkspaceRoot, absToRelPosix } from './workspace.js';
 import { WorkDir } from '../config/config.js';
 import { WorkspaceChangeEvent } from 'packages/shared/dist/workspace.js';
@@ -21,8 +22,15 @@ export async function createWorkspaceWatcher(
 ): Promise<FSWatcher> {
   await ensureWorkspaceRoot();
 
+  // Code-section session worktrees are full repo checkouts (thousands of files,
+  // possibly node_modules) living under WorkDir — watching them would flood the
+  // event stream and burn file handles, and nothing in the app renders them
+  // from workspace events.
+  const codeModeDir = path.join(WorkDir, 'code-mode');
   const watcher = chokidar.watch(WorkDir, {
     ignoreInitial: true,
+    ignored: (watchedPath: string) =>
+      watchedPath === codeModeDir || watchedPath.startsWith(codeModeDir + path.sep),
     awaitWriteFinish: {
       stabilityThreshold: 150,
       pollInterval: 50,

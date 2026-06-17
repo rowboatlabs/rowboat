@@ -11,6 +11,9 @@
 
 import * as esbuild from 'esbuild';
 import { readFile } from 'node:fs/promises';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // In CommonJS, import.meta.url doesn't exist. We need to polyfill it.
 // The banner defines __import_meta_url at the top of the bundle,
@@ -24,7 +27,11 @@ await esbuild.build({
   platform: 'node',
   target: 'node20',
   outfile: './.package/dist/main.cjs',
-  external: ['electron'],  // Provided by Electron runtime
+  // electron is provided by the runtime. node-pty is a NATIVE module: it can't
+  // be inlined (its loader requires .node binaries + a spawn-helper relative to
+  // its own package dir), so it stays external and is copied into
+  // .package/node_modules below, where require() from dist/main.cjs finds it.
+  external: ['electron', 'node-pty'],
   // Use CommonJS format - many dependencies use require() which doesn't work
   // well with esbuild's ESM shim. CJS handles dynamic requires natively.
   format: 'cjs',
@@ -41,6 +48,25 @@ await esbuild.build({
     'process.env.ROWBOAT_APP_VERSION': JSON.stringify(pkg.version ?? ''),
   },
 });
+
+// Ship node-pty next to the bundle. Resolve through pnpm's symlink to the real
+// package dir and copy only what's needed at runtime (compiled JS + prebuilt
+// binaries). The macOS spawn-helper must be executable — pnpm extraction drops
+// the bit, and a non-executable helper makes every PTY spawn fail.
+const here = path.dirname(fileURLToPath(import.meta.url));
+const ptySrc = fs.realpathSync(path.join(here, 'node_modules', 'node-pty'));
+const ptyDest = path.join(here, '.package', 'node_modules', 'node-pty');
+fs.rmSync(ptyDest, { recursive: true, force: true });
+fs.mkdirSync(ptyDest, { recursive: true });
+for (const item of ['package.json', 'lib', 'prebuilds']) {
+  fs.cpSync(path.join(ptySrc, item), path.join(ptyDest, item), { recursive: true, dereference: true });
+}
+const prebuildsDir = path.join(ptyDest, 'prebuilds');
+for (const dir of fs.readdirSync(prebuildsDir)) {
+  const helper = path.join(prebuildsDir, dir, 'spawn-helper');
+  if (fs.existsSync(helper)) fs.chmodSync(helper, 0o755);
+}
+console.log('✅ node-pty staged in .package/node_modules');
 
 // Bundle the vendored agent-slack CLI into a single self-contained script next
 // to main.cjs. It runs as a child process (process.execPath with

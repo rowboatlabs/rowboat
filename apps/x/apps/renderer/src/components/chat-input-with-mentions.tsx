@@ -18,6 +18,7 @@ import {
   Headphones,
   ImagePlus,
   LoaderIcon,
+  Lock,
   Mic,
   MoreHorizontal,
   Plus,
@@ -71,6 +72,7 @@ export type StagedAttachment = {
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024 // 10MB
 const MAX_VISIBLE_RECENT_WORK_DIRS = 3
 const MAX_STORED_RECENT_WORK_DIRS = 8
+const CHAT_INPUT_TOOLTIP_DELAY_MS = 1000
 // Stored in the workspace (~/.rowboat/config) so it travels with the workspace and
 // stays consistent with the other config/*.json files (e.g. coding-agents.json).
 const RECENT_WORK_DIRS_CONFIG_PATH = 'config/recent-work-dirs.json'
@@ -237,6 +239,12 @@ interface ChatInputInnerProps {
   workDir?: string | null
   /** Fired when the user sets/changes/clears the work directory for this chat. */
   onWorkDirChange?: (value: string | null) => void
+  /**
+   * Set when this chat is bound to a Code-section session: the work directory
+   * and coding agent come from the session and are FROZEN — the backend pins
+   * them server-side regardless, so the composer must not pretend otherwise.
+   */
+  codeSessionLock?: { cwd: string; agent: 'claude' | 'codex' } | null
 }
 
 function ChatInputInner({
@@ -265,6 +273,7 @@ function ChatInputInner({
   onSelectedModelChange,
   workDir = null,
   onWorkDirChange,
+  codeSessionLock = null,
 }: ChatInputInnerProps) {
   const controller = usePromptInputController()
   const message = controller.textInput.value
@@ -491,22 +500,33 @@ function ChatInputInner({
     })
   }, [])
 
+  // A chat bound to a Code-section session has its work directory and coding
+  // agent frozen to the session's — the backend pins them server-side, so the
+  // composer reflects that instead of offering controls that wouldn't apply.
+  const isCodeLocked = Boolean(codeSessionLock)
+  const effectiveWorkDir = codeSessionLock?.cwd ?? workDir
+
   // Work directory is owned per-chat by the parent (App). This component only
   // drives the picker dialog and reports changes up via onWorkDirChange. Whenever
   // the work directory changes, load its persisted coding-agent preference.
   useEffect(() => {
+    if (codeSessionLock) {
+      setCodingAgent(codeSessionLock.agent)
+      return
+    }
     let cancelled = false
     loadCodingAgentFor(workDir).then((agent) => {
       if (!cancelled) setCodingAgent(agent)
     })
     return () => { cancelled = true }
-  }, [workDir, loadCodingAgentFor])
+  }, [workDir, loadCodingAgentFor, codeSessionLock])
 
   useEffect(() => {
-    if (isActive && workDir) void rememberWorkDir(workDir)
-  }, [isActive, workDir, rememberWorkDir])
+    if (isActive && workDir && !isCodeLocked) void rememberWorkDir(workDir)
+  }, [isActive, workDir, rememberWorkDir, isCodeLocked])
 
   const handleSetWorkDir = useCallback(async () => {
+    if (isCodeLocked) return
     try {
       let defaultPath: string | undefined = workDir ?? undefined
       try {
@@ -533,7 +553,7 @@ function ChatInputInner({
       console.error('Failed to set work directory', err)
       toast.error('Failed to set work directory')
     }
-  }, [workDir, onWorkDirChange, rememberWorkDir, loadCodingAgentFor])
+  }, [workDir, onWorkDirChange, rememberWorkDir, loadCodingAgentFor, isCodeLocked])
 
   const handleSelectRecentWorkDir = useCallback(async (dir: string) => {
     onWorkDirChange?.(dir)
@@ -543,12 +563,14 @@ function ChatInputInner({
   }, [onWorkDirChange, rememberWorkDir, loadCodingAgentFor])
 
   const handleClearWorkDir = useCallback(() => {
+    if (isCodeLocked) return
     onWorkDirChange?.(null)
     setCodingAgent('claude')
     toast.success('Work directory cleared')
-  }, [onWorkDirChange])
+  }, [onWorkDirChange, isCodeLocked])
 
   const handleToggleCodingAgent = useCallback(async () => {
+    if (isCodeLocked) return
     const next: 'claude' | 'codex' = codingAgent === 'claude' ? 'codex' : 'claude'
     setCodingAgent(next)
     // Persist only when scoped to a workdir; without one there's nothing to key on.
@@ -561,7 +583,7 @@ function ChatInputInner({
       // revert on failure
       setCodingAgent(codingAgent)
     }
-  }, [workDir, codingAgent, persistCodingAgent])
+  }, [workDir, codingAgent, persistCodingAgent, isCodeLocked])
 
   // Check search tool availability (exa or signed-in via gateway)
   useEffect(() => {
@@ -647,15 +669,16 @@ function ChatInputInner({
 
   const handleSubmit = useCallback(() => {
     if (!canSubmit) return
-    // codeMode is sticky per conversation — don't reset after send.
-    const effectiveCodeMode = codeModeEnabled ? codingAgent : undefined
+    // codeMode is sticky per conversation — don't reset after send. A code
+    // session forces it (the backend pins the agent anyway).
+    const effectiveCodeMode = codeSessionLock ? codeSessionLock.agent : (codeModeEnabled ? codingAgent : undefined)
     onSubmit({ text: message.trim(), files: [] }, controller.mentions.mentions, attachments, searchEnabled || undefined, effectiveCodeMode, permissionMode)
     controller.textInput.clear()
     controller.mentions.clearMentions()
     setAttachments([])
     // Web search toggle stays on for the rest of the chat session; the user
     // turns it off explicitly. (Not persisted across app restarts.)
-  }, [attachments, canSubmit, controller, message, onSubmit, searchEnabled, codeModeEnabled, codingAgent, permissionMode, workDir])
+  }, [attachments, canSubmit, controller, message, onSubmit, searchEnabled, codeModeEnabled, codingAgent, permissionMode, workDir, codeSessionLock])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -697,8 +720,8 @@ function ChatInputInner({
   const visibleRecentWorkDirs = recentWorkDirs
     .filter((entry) => entry.path !== workDir)
     .slice(0, MAX_VISIBLE_RECENT_WORK_DIRS)
-  const currentWorkDirLabel = workDir ? basename(workDir) || workDir : 'Not set'
-  const currentWorkDirPath = workDir ? compactWorkDirPath(workDir) : ''
+  const currentWorkDirLabel = effectiveWorkDir ? basename(effectiveWorkDir) || effectiveWorkDir : 'Not set'
+  const currentWorkDirPath = effectiveWorkDir ? compactWorkDirPath(effectiveWorkDir) : ''
 
   return (
     <div className="rowboat-chat-input rounded-lg border border-border bg-background shadow-none">
@@ -807,7 +830,7 @@ function ChatInputInner({
       <div ref={toolbarRef} className="flex items-center gap-2 px-4 pb-3">
         <div ref={leftGroupRef} className="flex min-w-0 items-center gap-2 overflow-hidden">
         <DropdownMenu>
-          <Tooltip>
+          <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
             <TooltipTrigger asChild>
               <DropdownMenuTrigger asChild>
                 <button
@@ -820,7 +843,7 @@ function ChatInputInner({
               </DropdownMenuTrigger>
             </TooltipTrigger>
             <TooltipContent side="top">
-              {workDir ? 'Add files or change work directory' : 'Add files or set work directory'}
+              {isCodeLocked ? 'Add files' : workDir ? 'Add files or change work directory' : 'Add files or set work directory'}
             </TooltipContent>
           </Tooltip>
           <DropdownMenuContent align="start" className="w-72 max-w-[calc(100vw-2rem)] p-2">
@@ -830,8 +853,23 @@ function ChatInputInner({
                 <span>Add files or photos</span>
               </DropdownMenuItem>
 
-              {/* Working directory lives behind a submenu so the main menu stays to two
-                  items. One hover/click away for power users; out of the way otherwise. */}
+              {/* A bound code session pins the directory — show it, no controls. */}
+              {isCodeLocked ? (
+                <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
+                  <TooltipTrigger asChild>
+                    <div className="flex h-auto items-center gap-2 rounded-[9px] px-2.5 py-2 text-muted-foreground">
+                      <FolderCheck className="size-4 shrink-0" />
+                      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                        <span className="truncate text-sm">{currentWorkDirLabel}</span>
+                        <span className="truncate text-xs">Pinned by the coding session</span>
+                      </span>
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">{effectiveWorkDir}</TooltipContent>
+                </Tooltip>
+              ) : (
+              /* Working directory lives behind a submenu so the main menu stays to two
+                 items. One hover/click away for power users; out of the way otherwise. */
               <DropdownMenuSub>
                 <DropdownMenuSubTrigger className="h-9 rounded-[9px] px-2.5">
                   <FolderCog className="size-4" />
@@ -845,18 +883,20 @@ function ChatInputInner({
                 <DropdownMenuSubContent className="w-72 max-w-[calc(100vw-2rem)] p-1">
                   {/* Current selection — shown for context only when one is set. */}
                   {workDir && (
-                    <div
-                      title={workDir}
-                      className="mb-1 flex items-center gap-2 rounded-[9px] bg-blue-50/80 px-2.5 py-2 text-blue-700 dark:bg-blue-950/30 dark:text-blue-300"
-                    >
-                      <FolderCheck className="size-4 shrink-0 text-blue-600 dark:text-blue-300" />
-                      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                        <span className="truncate text-sm font-medium">{currentWorkDirLabel}</span>
-                        <span className="truncate text-xs text-blue-700/70 dark:text-blue-300/70">
-                          {currentWorkDirPath}
-                        </span>
-                      </span>
-                    </div>
+                    <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
+                      <TooltipTrigger asChild>
+                        <div className="mb-1 flex items-center gap-2 rounded-[9px] bg-blue-50/80 px-2.5 py-2 text-blue-700 dark:bg-blue-950/30 dark:text-blue-300">
+                          <FolderCheck className="size-4 shrink-0 text-blue-600 dark:text-blue-300" />
+                          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                            <span className="truncate text-sm font-medium">{currentWorkDirLabel}</span>
+                            <span className="truncate text-xs text-blue-700/70 dark:text-blue-300/70">
+                              {currentWorkDirPath}
+                            </span>
+                          </span>
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent side="right">{workDir}</TooltipContent>
+                    </Tooltip>
                   )}
 
                   {/* Primary action: choose when unset, change when set. Always on top. */}
@@ -877,16 +917,19 @@ function ChatInputInner({
                         const name = basename(entry.path) || entry.path
                         const when = formatRecentWorkDirTime(entry.lastUsedAt)
                         return (
-                          <DropdownMenuItem
-                            key={entry.path}
-                            title={entry.path}
-                            onSelect={() => { void handleSelectRecentWorkDir(entry.path) }}
-                            className="h-8 rounded-[9px] px-2.5"
-                          >
-                            <FolderClock className="size-4" />
-                            <span className="min-w-0 flex-1 truncate">{name}</span>
-                            {when && <span className="shrink-0 text-xs text-muted-foreground">{when}</span>}
-                          </DropdownMenuItem>
+                          <Tooltip key={entry.path} delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
+                            <TooltipTrigger asChild>
+                              <DropdownMenuItem
+                                onSelect={() => { void handleSelectRecentWorkDir(entry.path) }}
+                                className="h-8 rounded-[9px] px-2.5"
+                              >
+                                <FolderClock className="size-4" />
+                                <span className="min-w-0 flex-1 truncate">{name}</span>
+                                {when && <span className="shrink-0 text-xs text-muted-foreground">{when}</span>}
+                              </DropdownMenuItem>
+                            </TooltipTrigger>
+                            <TooltipContent side="right">{entry.path}</TooltipContent>
+                          </Tooltip>
                         )
                       })}
                     </>
@@ -907,26 +950,31 @@ function ChatInputInner({
                   )}
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
+              )}
             </div>
           </DropdownMenuContent>
         </DropdownMenu>
-        {workDir && collapseLevel < 8 && (
-          <Tooltip>
+        {effectiveWorkDir && collapseLevel < 8 && (
+          <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
             <TooltipTrigger asChild>
               {/* Level 4: collapse to a square icon */}
               <div className={cn(
-                "group flex h-7 shrink-0 items-center rounded-full border border-border bg-muted/40 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+                "group flex h-7 shrink-0 items-center rounded-full border border-border bg-muted/40 text-xs text-muted-foreground transition-colors",
+                !isCodeLocked && "hover:bg-muted hover:text-foreground",
                 collapseLevel >= 4 ? "w-7 justify-center" : "max-w-[180px] pl-2.5 pr-2"
               )}>
                 <button
                   type="button"
                   onClick={handleSetWorkDir}
-                  className="flex min-w-0 items-center gap-1.5"
+                  disabled={isCodeLocked}
+                  className={cn("flex min-w-0 items-center gap-1.5", isCodeLocked && "cursor-default")}
                 >
-                  <FolderCog className="h-3.5 w-3.5 shrink-0" />
-                  {collapseLevel < 4 && <span className="truncate">{basename(workDir) || workDir}</span>}
+                  {isCodeLocked
+                    ? <Lock className="h-3 w-3 shrink-0" />
+                    : <FolderCog className="h-3.5 w-3.5 shrink-0" />}
+                  {collapseLevel < 4 && <span className="truncate">{basename(effectiveWorkDir) || effectiveWorkDir}</span>}
                 </button>
-                {collapseLevel < 4 && (
+                {collapseLevel < 4 && !isCodeLocked && (
                   <button
                     type="button"
                     onClick={handleClearWorkDir}
@@ -939,7 +987,9 @@ function ChatInputInner({
               </div>
             </TooltipTrigger>
             <TooltipContent side="top">
-              Work directory: {workDir}
+              {isCodeLocked
+                ? `Pinned by the coding session: ${effectiveWorkDir}`
+                : `Work directory: ${effectiveWorkDir}`}
             </TooltipContent>
           </Tooltip>
         )}
@@ -965,7 +1015,7 @@ function ChatInputInner({
           </button>
         )}
         {collapseLevel < 6 && (
-        <Tooltip>
+        <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
           <TooltipTrigger asChild>
             <button
               type="button"
@@ -997,55 +1047,75 @@ function ChatInputInner({
           </TooltipContent>
         </Tooltip>
         )}
-        {codeModeFeatureEnabled && collapseLevel < 5 && (codeModeEnabled ? (
+        {codeModeFeatureEnabled && collapseLevel < 5 && ((isCodeLocked || codeModeEnabled) ? (
           collapseLevel >= 1 ? (
             /* Level 1: collapse the pill to a single icon */
-            <Tooltip>
+            <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  onClick={() => setCodeModeEnabled(false)}
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-secondary text-foreground transition-colors hover:bg-secondary/70"
+                  onClick={() => { if (!isCodeLocked) setCodeModeEnabled(false) }}
+                  disabled={isCodeLocked}
+                  className={cn(
+                    "flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-secondary text-foreground transition-colors",
+                    isCodeLocked ? "cursor-default" : "hover:bg-secondary/70",
+                  )}
                 >
                   <Terminal className="h-3.5 w-3.5" />
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="top">Code mode on ({codingAgent === 'claude' ? 'Claude Code' : 'Codex'}) — click to disable</TooltipContent>
+              <TooltipContent side="top">
+                {isCodeLocked
+                  ? `Coding session — ${codingAgent === 'claude' ? 'Claude Code' : 'Codex'}`
+                  : `Code mode on (${codingAgent === 'claude' ? 'Claude Code' : 'Codex'}) — click to disable`}
+              </TooltipContent>
             </Tooltip>
           ) : (
             <div className="flex h-7 shrink-0 items-center rounded-full bg-secondary text-xs font-medium text-foreground">
-              <Tooltip>
+              <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
                 <TooltipTrigger asChild>
                   <button
                     type="button"
-                    onClick={() => setCodeModeEnabled(false)}
-                    className="flex h-full items-center gap-1.5 rounded-l-full pl-2.5 pr-2 transition-colors hover:bg-secondary/70"
+                    onClick={() => { if (!isCodeLocked) setCodeModeEnabled(false) }}
+                    disabled={isCodeLocked}
+                    className={cn(
+                      "flex h-full items-center gap-1.5 rounded-l-full pl-2.5 pr-2 transition-colors",
+                      isCodeLocked ? "cursor-default" : "hover:bg-secondary/70",
+                    )}
                   >
-                    <Terminal className="h-3.5 w-3.5" />
+                    {isCodeLocked ? <Lock className="h-3 w-3" /> : <Terminal className="h-3.5 w-3.5" />}
                     <span>Code</span>
                   </button>
                 </TooltipTrigger>
-                <TooltipContent side="top">Code mode on — click to disable</TooltipContent>
+                <TooltipContent side="top">
+                  {isCodeLocked ? 'Pinned by the coding session' : 'Code mode on — click to disable'}
+                </TooltipContent>
               </Tooltip>
               <span className="text-foreground/30">·</span>
-              <Tooltip>
+              <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
                 <TooltipTrigger asChild>
                   <button
                     type="button"
                     onClick={handleToggleCodingAgent}
-                    className="flex h-full items-center rounded-r-full pl-2 pr-2.5 transition-colors hover:bg-secondary/70"
+                    disabled={isCodeLocked}
+                    className={cn(
+                      "flex h-full items-center rounded-r-full pl-2 pr-2.5 transition-colors",
+                      isCodeLocked ? "cursor-default" : "hover:bg-secondary/70",
+                    )}
                   >
                     <span>{codingAgent === 'claude' ? 'Claude' : 'Codex'}</span>
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="top">
-                  Coding agent: {codingAgent === 'claude' ? 'Claude Code' : 'Codex'} — click to swap
+                  {isCodeLocked
+                    ? `Coding agent fixed by the session: ${codingAgent === 'claude' ? 'Claude Code' : 'Codex'}`
+                    : `Coding agent: ${codingAgent === 'claude' ? 'Claude Code' : 'Codex'} — click to swap`}
                 </TooltipContent>
               </Tooltip>
             </div>
           )
         ) : (
-          <Tooltip>
+          <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
             <TooltipTrigger asChild>
               <button
                 type="button"
@@ -1062,7 +1132,7 @@ function ChatInputInner({
         </div>
         {collapseLevel >= 5 && (
           <DropdownMenu>
-            <Tooltip>
+            <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
               <TooltipTrigger asChild>
                 <DropdownMenuTrigger asChild>
                   <button
@@ -1077,10 +1147,10 @@ function ChatInputInner({
               <TooltipContent side="top">More options</TooltipContent>
             </Tooltip>
             <DropdownMenuContent align="start" side="top" className="min-w-52">
-              {workDir && collapseLevel >= 8 && (
-                <DropdownMenuItem onSelect={() => { void handleSetWorkDir() }}>
-                  <FolderCog className="size-4" />
-                  <span className="min-w-0 flex-1 truncate">{basename(workDir) || workDir}</span>
+              {effectiveWorkDir && collapseLevel >= 8 && (
+                <DropdownMenuItem disabled={isCodeLocked} onSelect={() => { void handleSetWorkDir() }}>
+                  {isCodeLocked ? <Lock className="size-4" /> : <FolderCog className="size-4" />}
+                  <span className="min-w-0 flex-1 truncate">{basename(effectiveWorkDir) || effectiveWorkDir}</span>
                 </DropdownMenuItem>
               )}
               {searchAvailable && collapseLevel >= 7 && (
@@ -1105,14 +1175,15 @@ function ChatInputInner({
               {codeModeFeatureEnabled && collapseLevel >= 5 && (
                 <>
                   <DropdownMenuCheckboxItem
-                    checked={codeModeEnabled}
+                    checked={isCodeLocked || codeModeEnabled}
+                    disabled={isCodeLocked}
                     onSelect={(e) => e.preventDefault()}
                     onCheckedChange={(c) => setCodeModeEnabled(Boolean(c))}
                   >
                     Code mode
                   </DropdownMenuCheckboxItem>
-                  {codeModeEnabled && (
-                    <DropdownMenuItem onSelect={(e) => { e.preventDefault(); handleToggleCodingAgent() }}>
+                  {(isCodeLocked || codeModeEnabled) && (
+                    <DropdownMenuItem disabled={isCodeLocked} onSelect={(e) => { e.preventDefault(); handleToggleCodingAgent() }}>
                       <Terminal className="size-4" />
                       <span className="min-w-0 flex-1">Coding agent</span>
                       <span className="text-xs text-muted-foreground">{codingAgent === 'claude' ? 'Claude' : 'Codex'}</span>
@@ -1125,12 +1196,16 @@ function ChatInputInner({
         )}
         <div className="flex-1" />
         {lockedModel ? (
-          <span
-            className="flex h-7 min-w-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground"
-            title={`${providerDisplayNames[lockedModel.provider] || lockedModel.provider} — fixed for this chat`}
-          >
-            <span className="min-w-0 truncate">{getSelectedModelDisplayName(lockedModel.model)}</span>
-          </span>
+          <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
+            <TooltipTrigger asChild>
+              <span className="flex h-7 min-w-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground">
+                <span className="min-w-0 truncate">{getSelectedModelDisplayName(lockedModel.model)}</span>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              {providerDisplayNames[lockedModel.provider] || lockedModel.provider} — fixed for this chat
+            </TooltipContent>
+          </Tooltip>
         ) : configuredModels.length > 0 ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -1161,7 +1236,7 @@ function ChatInputInner({
         ) : null}
         {onToggleTts && ttsAvailable && (
           <div className="flex shrink-0 items-center">
-            <Tooltip>
+            <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
               <TooltipTrigger asChild>
                 <button
                   type="button"
@@ -1217,23 +1292,30 @@ function ChatInputInner({
           </button>
         )}
         {isProcessing ? (
-          <Button
-            size="icon"
-            onClick={onStop}
-            title={isStopping ? 'Click again to force stop' : 'Stop generation'}
-            className={cn(
-              'h-7 w-7 shrink-0 rounded-full transition-all',
-              isStopping
-                ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
-                : 'bg-primary text-primary-foreground hover:bg-primary/90'
-            )}
-          >
-            {isStopping ? (
-              <LoaderIcon className="h-4 w-4 animate-spin" />
-            ) : (
-              <Square className="h-3 w-3 fill-current" />
-            )}
-          </Button>
+          <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
+            <TooltipTrigger asChild>
+              <Button
+                size="icon"
+                onClick={onStop}
+                aria-label={isStopping ? 'Force stop generation' : 'Stop generation'}
+                className={cn(
+                  'h-7 w-7 shrink-0 rounded-full transition-all',
+                  isStopping
+                    ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
+                    : 'bg-primary text-primary-foreground hover:bg-primary/90'
+                )}
+              >
+                {isStopping ? (
+                  <LoaderIcon className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Square className="h-3 w-3 fill-current" />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              {isStopping ? 'Click again to force stop' : 'Stop generation'}
+            </TooltipContent>
+          </Tooltip>
         ) : (
           <Button
             size="icon"
@@ -1308,6 +1390,8 @@ export interface ChatInputWithMentionsProps {
   onSelectedModelChange?: (model: SelectedModel | null) => void
   workDir?: string | null
   onWorkDirChange?: (value: string | null) => void
+  /** Set when this chat is bound to a Code-section session — freezes workdir + agent. */
+  codeSessionLock?: { cwd: string; agent: 'claude' | 'codex' } | null
 }
 
 export function ChatInputWithMentions({
@@ -1339,6 +1423,7 @@ export function ChatInputWithMentions({
   onSelectedModelChange,
   workDir,
   onWorkDirChange,
+  codeSessionLock,
 }: ChatInputWithMentionsProps) {
   return (
     <PromptInputProvider knowledgeFiles={knowledgeFiles} recentFiles={recentFiles} visibleFiles={visibleFiles}>
@@ -1368,6 +1453,7 @@ export function ChatInputWithMentions({
         onSelectedModelChange={onSelectedModelChange}
         workDir={workDir}
         onWorkDirChange={onWorkDirChange}
+        codeSessionLock={codeSessionLock}
       />
     </PromptInputProvider>
   )

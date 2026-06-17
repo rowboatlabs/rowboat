@@ -300,7 +300,10 @@ function buildEmailDocument(
   opts: { theme: 'light' | 'dark'; adaptToTheme: boolean },
 ): string {
   const useDark = opts.theme === 'dark' && opts.adaptToTheme
-  const colorScheme = opts.theme === 'dark' ? 'light dark' : 'light'
+  // Only opt into the dark color scheme when the email actually adapts to the
+  // theme — otherwise Chromium paints the canvas dark under emails that
+  // assume a white background.
+  const colorScheme = useDark ? 'light dark' : 'light'
   const bodyColor = useDark ? '#d4d4d8' : '#202124'
   const linkColor = useDark ? '#a78bfa' : '#1a73e8'
   const quoteBorder = useDark ? '#2e2e35' : '#dadce0'
