@@ -104,7 +104,7 @@ export class AcpClient {
 
     // Spawn the adapter and negotiate the protocol. Returns once initialized.
     async start(): Promise<void> {
-        const spec = getAgentLaunchSpec(this.agent);
+        const spec = await getAgentLaunchSpec(this.agent);
         const child = spawn(spec.command, spec.args, {
             cwd: this.cwd,
             env: spec.env,
