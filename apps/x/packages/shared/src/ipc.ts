@@ -481,6 +481,22 @@ const ipcSchemas = {
       codex: z.object({ installed: z.boolean(), signedIn: z.boolean() }),
     }),
   },
+  // Download + install an agent's native engine (the Settings "Enable" action).
+  // Streams progress over the 'codeMode:engineProgress' push channel while it runs.
+  'codeMode:provisionEngine': {
+    req: z.object({ agent: z.enum(['claude', 'codex']) }),
+    res: z.object({ success: z.boolean(), error: z.string().optional() }),
+  },
+  // Push (main -> renderer): engine provisioning progress for the Settings UI.
+  'codeMode:engineProgress': {
+    req: z.object({
+      agent: z.enum(['claude', 'codex']),
+      phase: z.enum(['download', 'verify', 'extract', 'done']),
+      receivedBytes: z.number().optional(),
+      totalBytes: z.number().optional(),
+    }),
+    res: z.null(),
+  },
   // ==========================================================================
   // Code section: project registry + coding sessions
   // ==========================================================================

@@ -34,6 +34,7 @@ import { IGranolaConfigRepo } from '@x/core/dist/knowledge/granola/repo.js';
 import { ICodeModeConfigRepo } from '@x/core/dist/code-mode/repo.js';
 import { CodePermissionRegistry } from '@x/core/dist/code-mode/acp/permission-registry.js';
 import { checkCodeModeAgentStatus } from '@x/core/dist/code-mode/status.js';
+import { ensureEngine } from '@x/core/dist/code-mode/acp/engine-provisioner.js';
 import type { ICodeProjectsRepo } from '@x/core/dist/code-mode/projects/repo.js';
 import type { ICodeSessionsRepo } from '@x/core/dist/code-mode/sessions/repo.js';
 import { CodeSessionService } from '@x/core/dist/code-mode/sessions/service.js';
@@ -713,6 +714,26 @@ export function setupIpcHandlers() {
     },
     'codeMode:checkAgentStatus': async () => {
       return await checkCodeModeAgentStatus();
+    },
+    'codeMode:provisionEngine': async (_event, args) => {
+      // Download + install the agent's engine, streaming progress back to the
+      // requesting window so Settings can show a live bar. 'check' is instant — skip it.
+      try {
+        await ensureEngine(args.agent, {
+          onProgress: (p) => {
+            if (p.phase === 'check') return;
+            _event.sender.send('codeMode:engineProgress', {
+              agent: args.agent,
+              phase: p.phase,
+              receivedBytes: p.receivedBytes,
+              totalBytes: p.totalBytes,
+            });
+          },
+        });
+        return { success: true };
+      } catch (e) {
+        return { success: false, error: e instanceof Error ? e.message : String(e) };
+      }
     },
     'codeProject:add': async (_event, args) => {
       const repo = container.resolve<ICodeProjectsRepo>('codeProjectsRepo');

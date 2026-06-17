@@ -174,13 +174,19 @@ export class CodeModeManager {
             broker,
             onEvent: suppressReplay ? () => {} : onEvent,
         });
-        await client.start();
-
-        const sessionId = await this.openSession(runId, agent, cwd, client);
-        if (suppressReplay) client.setHandlers(broker, onEvent);
-        const run: ActiveRun = { client, sessionId, agent, cwd, inflight: 0 };
-        this.runs.set(runId, run);
-        return run;
+        // Dispose the client if startup fails (e.g. the startup-timeout fires) so the
+        // spawned adapter process doesn't leak.
+        try {
+            await client.start();
+            const sessionId = await this.openSession(runId, agent, cwd, client);
+            if (suppressReplay) client.setHandlers(broker, onEvent);
+            const run: ActiveRun = { client, sessionId, agent, cwd, inflight: 0 };
+            this.runs.set(runId, run);
+            return run;
+        } catch (e) {
+            client.dispose();
+            throw e;
+        }
     }
 
     // Resume the persisted session for this chat when possible; else start a new one

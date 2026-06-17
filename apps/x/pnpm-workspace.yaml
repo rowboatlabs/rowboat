@@ -3,13 +3,14 @@ packages:
   - packages/*
 
 allowBuilds:
-  core-js: set this to true or false
-  electron: set this to true or false
-  electron-winstaller: set this to true or false
-  esbuild: set this to true or false
-  fs-xattr: set this to true or false
-  macos-alias: set this to true or false
-  protobufjs: set this to true or false
+  core-js: true
+  electron: true
+  electron-winstaller: true
+  esbuild: true
+  fs-xattr: true
+  macos-alias: true
+  node-pty: true
+  protobufjs: true
 
 catalog:
   vitest: 4.1.7
