@@ -9,6 +9,8 @@ import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { LlmModelConfig, LlmProvider } from "@x/shared/dist/models.js";
 import z from "zod";
 import { getGatewayProvider } from "./gateway.js";
+import { getDefaultModelAndProvider, resolveProviderConfig } from "./defaults.js";
+import { withUseCase } from "../analytics/use_case.js";
 
 export const Provider = LlmProvider;
 export const ModelConfig = LlmModelConfig;
@@ -159,5 +161,49 @@ export async function listModelsForProvider(
         return ids.filter((id: string) => typeof id === "string" && id.length > 0);
     } finally {
         clearTimeout(timeout);
+    }
+}
+
+export interface GenerateTextOptions {
+    prompt: string;
+    system?: string;
+    /** Model id. Falls back to the active default when omitted. */
+    model?: string;
+    /** Provider name (e.g. "rowboat", "openai"). Falls back to the active default. */
+    provider?: string;
+}
+
+export interface GenerateTextResult {
+    text?: string;
+    /** The model/provider actually used (after resolving defaults). */
+    model?: string;
+    provider?: string;
+    error?: string;
+}
+
+/**
+ * One-shot text generation for lightweight UI features (e.g. the email
+ * composer's "write with AI"). Resolves the requested model+provider, falling
+ * back to the active default, and returns the generated text. Never throws —
+ * errors are returned in the result so the renderer can surface them.
+ */
+export async function generateOneShot(opts: GenerateTextOptions): Promise<GenerateTextResult> {
+    try {
+        const def = await getDefaultModelAndProvider();
+        const modelId = opts.model || def.model;
+        const providerName = opts.provider || def.provider;
+        const providerConfig = await resolveProviderConfig(providerName);
+        const languageModel = createProvider(providerConfig).languageModel(modelId);
+        const result = await withUseCase(
+            { useCase: "copilot_chat", subUseCase: "email_compose" },
+            () => generateText({
+                model: languageModel,
+                ...(opts.system ? { system: opts.system } : {}),
+                prompt: opts.prompt,
+            }),
+        );
+        return { text: result.text.trim(), model: modelId, provider: providerName };
+    } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) };
     }
 }

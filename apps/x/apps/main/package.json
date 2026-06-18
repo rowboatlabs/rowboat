@@ -17,6 +17,7 @@
         "@agentclientprotocol/codex-acp": "^0.0.44",
         "@x/core": "workspace:*",
         "@x/shared": "workspace:*",
+        "agent-slack": "0.9.3",
         "chokidar": "^4.0.3",
         "electron-squirrel-startup": "^1.0.1",
         "html-to-docx": "^1.8.0",

@@ -27,6 +27,33 @@ import { CodeProject, CodeSession, CodeSessionMode, CodeSessionStatus, GitRepoIn
 // Runtime Validation Schemas (Single Source of Truth)
 // ============================================================================
 
+const KnowledgeSourceScopeSchema = z.object({
+  type: z.string(),
+  id: z.string(),
+  name: z.string().optional(),
+  workspaceUrl: z.string().optional(),
+});
+
+// Mirrors AgentSlackErrorKind in @x/core/slack/agent-slack-exec. Kept as a
+// standalone enum so the renderer can branch on failure cause without
+// importing core.
+const SlackErrorKindSchema = z.enum([
+  'not_installed', 'timeout', 'parse_error',
+  'not_authed', 'rate_limited', 'network', 'bad_channel', 'unknown',
+]);
+
+const KnowledgeSourceConfigSchema = z.object({
+  id: z.string(),
+  provider: z.enum(['gmail', 'meeting', 'voice_memo', 'slack', 'github', 'linear']),
+  enabled: z.boolean(),
+  artifactDir: z.string(),
+  syncMode: z.enum(['file', 'poll', 'event', 'manual']).default('file'),
+  intervalMs: z.number().int().positive().optional(),
+  scopes: z.array(KnowledgeSourceScopeSchema).default([]),
+  instructions: z.string().optional(),
+  filters: z.record(z.string(), z.unknown()).optional(),
+});
+
 const ipcSchemas = {
   'app:getVersions': {
     req: z.null(),
@@ -163,6 +190,15 @@ const ipcSchemas = {
       bodyText: z.string(),
       inReplyTo: z.string().optional(),
       references: z.string().optional(),
+      attachments: z
+        .array(
+          z.object({
+            filename: z.string(),
+            mimeType: z.string(),
+            contentBase64: z.string(),
+          }),
+        )
+        .optional(),
     }),
     res: z.object({
       messageId: z.string().optional(),
@@ -182,6 +218,12 @@ const ipcSchemas = {
     req: z.object({}),
     res: z.object({
       email: z.string().nullable(),
+    }),
+  },
+  'gmail:getAccountName': {
+    req: z.object({}),
+    res: z.object({
+      name: z.string().nullable(),
     }),
   },
   'gmail:archiveThread': {
@@ -368,6 +410,27 @@ const ipcSchemas = {
     res: z.object({
       success: z.boolean(),
       models: z.array(z.string()).optional(),
+      error: z.string().optional(),
+    }),
+  },
+  'llm:getDefaultModel': {
+    req: z.null(),
+    res: z.object({
+      model: z.string(),
+      provider: z.string(),
+    }),
+  },
+  'llm:generate': {
+    req: z.object({
+      prompt: z.string().min(1),
+      system: z.string().optional(),
+      model: z.string().optional(),
+      provider: z.string().optional(),
+    }),
+    res: z.object({
+      text: z.string().optional(),
+      model: z.string().optional(),
+      provider: z.string().optional(),
       error: z.string().optional(),
     }),
   },
@@ -743,11 +806,112 @@ const ipcSchemas = {
       success: z.literal(true),
     }),
   },
+  'slack:cliStatus': {
+    req: z.null(),
+    res: z.object({
+      available: z.boolean(),
+      version: z.string().optional(),
+      source: z.enum(['bundled', 'global', 'path']).optional(),
+    }),
+  },
   'slack:listWorkspaces': {
     req: z.null(),
     res: z.object({
       workspaces: z.array(z.object({ url: z.string(), name: z.string() })),
       error: z.string().optional(),
+      errorKind: SlackErrorKindSchema.optional(),
+    }),
+  },
+  'slack:importDesktopAuth': {
+    req: z.null(),
+    res: z.object({
+      ok: z.boolean(),
+      workspaces: z.array(z.object({ url: z.string(), name: z.string() })),
+      error: z.string().optional(),
+      errorKind: SlackErrorKindSchema.optional(),
+    }),
+  },
+  'slack:quitAndImportDesktop': {
+    req: z.null(),
+    res: z.object({
+      ok: z.boolean(),
+      workspaces: z.array(z.object({ url: z.string(), name: z.string() })),
+      error: z.string().optional(),
+      errorKind: SlackErrorKindSchema.optional(),
+    }),
+  },
+  'slack:parseCurlAuth': {
+    req: z.object({ curl: z.string() }),
+    res: z.object({
+      ok: z.boolean(),
+      workspaces: z.array(z.object({ url: z.string(), name: z.string() })),
+      error: z.string().optional(),
+      errorKind: SlackErrorKindSchema.optional(),
+    }),
+  },
+  'slack:knowledgeStatus': {
+    req: z.null(),
+    res: z.object({
+      cli: z.object({
+        available: z.boolean(),
+        version: z.string().optional(),
+        source: z.enum(['bundled', 'global', 'path']).optional(),
+      }),
+      sources: z.array(z.object({
+        id: z.string(),
+        enabled: z.boolean(),
+        lastSyncAt: z.string().optional(),
+        lastStatus: z.enum(['ok', 'error']).optional(),
+        lastError: z.object({ kind: z.string(), message: z.string() }).optional(),
+        nextDueAt: z.string().optional(),
+      })),
+    }),
+  },
+  'slack:listChannels': {
+    req: z.object({
+      workspaceUrl: z.string(),
+    }),
+    res: z.object({
+      channels: z.array(z.object({
+        id: z.string(),
+        name: z.string(),
+        isPrivate: z.boolean().optional(),
+        isMember: z.boolean().optional(),
+      })),
+      error: z.string().optional(),
+    }),
+  },
+  'slack:getRecentMessages': {
+    req: z.object({
+      limit: z.number().int().positive().max(20).optional(),
+    }),
+    res: z.object({
+      enabled: z.boolean(),
+      messages: z.array(z.object({
+        id: z.string(),
+        workspaceName: z.string().optional(),
+        workspaceUrl: z.string().optional(),
+        channelId: z.string().optional(),
+        channelName: z.string().optional(),
+        author: z.string().optional(),
+        text: z.string(),
+        ts: z.string(),
+        url: z.string().optional(),
+      })),
+      error: z.string().optional(),
+      errorKind: SlackErrorKindSchema.optional(),
+    }),
+  },
+  'knowledgeSources:getConfig': {
+    req: z.null(),
+    res: z.object({
+      sources: z.array(KnowledgeSourceConfigSchema),
+    }),
+  },
+  'knowledgeSources:upsert': {
+    req: KnowledgeSourceConfigSchema,
+    res: z.object({
+      sources: z.array(KnowledgeSourceConfigSchema),
     }),
   },
   'onboarding:getStatus': {

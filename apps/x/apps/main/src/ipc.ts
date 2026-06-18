@@ -16,16 +16,18 @@ import { bus } from '@x/core/dist/runs/bus.js';
 import { serviceBus } from '@x/core/dist/services/service_bus.js';
 import type { FSWatcher } from 'chokidar';
 import fs from 'node:fs/promises';
-import { exec } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import z from 'zod';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
+
 import { RunEvent } from '@x/shared/dist/runs.js';
 import { ServiceEvent } from '@x/shared/dist/service-events.js';
 import container from '@x/core/dist/di/container.js';
 import { listOnboardingModels } from '@x/core/dist/models/models-dev.js';
-import { testModelConnection, listModelsForProvider } from '@x/core/dist/models/models.js';
+import { testModelConnection, listModelsForProvider, generateOneShot } from '@x/core/dist/models/models.js';
+import { getDefaultModelAndProvider } from '@x/core/dist/models/defaults.js';
 import { isSignedIn } from '@x/core/dist/account/account.js';
 import { listGatewayModels } from '@x/core/dist/models/gateway.js';
 import type { IModelConfigRepo } from '@x/core/dist/models/repo.js';
@@ -46,6 +48,10 @@ import type { CodeSession } from '@x/shared/dist/code-sessions.js';
 import { invalidateCopilotInstructionsCache } from '@x/core/dist/application/assistant/instructions.js';
 import { triggerSync as triggerGranolaSync } from '@x/core/dist/knowledge/granola/sync.js';
 import { ISlackConfigRepo } from '@x/core/dist/slack/repo.js';
+import { runAgentSlack, getAgentSlackCliStatus, AgentSlackRunError } from '@x/core/dist/slack/agent-slack-exec.js';
+import { knowledgeSourcesRepo } from '@x/core/dist/knowledge/sources/repo.js';
+import { rankSlackHomeMessages } from '@x/core/dist/knowledge/sources/rank_slack_home.js';
+import { syncSlackKnowledgeSources, triggerSync as triggerSlackKnowledgeSync, getSlackKnowledgeSyncStatus } from '@x/core/dist/knowledge/sources/sync_slack.js';
 import { isOnboardingComplete, markOnboardingComplete } from '@x/core/dist/config/note_creation_config.js';
 import { loadNotificationSettings, saveNotificationSettings } from '@x/core/dist/config/notification_config.js';
 import * as composioHandler from './composio-handler.js';
@@ -62,7 +68,7 @@ import { summarizeMeeting } from '@x/core/dist/knowledge/summarize_meeting.js';
 import { getAccessToken } from '@x/core/dist/auth/tokens.js';
 import { getRowboatConfig } from '@x/core/dist/config/rowboat.js';
 import { runLiveNoteAgent } from '@x/core/dist/knowledge/live-note/runner.js';
-import { listImportantThreads, listEverythingElseThreads, saveMessageBodyHeight, triggerSync as triggerGmailSync, sendThreadReply, archiveThread, trashThread, markThreadRead, getAccountEmail, getConnectionStatus as getGmailConnectionStatus } from '@x/core/dist/knowledge/sync_gmail.js';
+import { listImportantThreads, listEverythingElseThreads, saveMessageBodyHeight, triggerSync as triggerGmailSync, sendThreadReply, archiveThread, trashThread, markThreadRead, getAccountEmail, getAccountName, getConnectionStatus as getGmailConnectionStatus } from '@x/core/dist/knowledge/sync_gmail.js';
 import { searchContacts as searchGmailContacts, warmContactIndex } from '@x/core/dist/knowledge/gmail_contacts.js';
 import { searchSentContacts, warmSentContacts } from '@x/core/dist/knowledge/gmail_sent_contacts.js';
 import { liveNoteBus } from '@x/core/dist/knowledge/live-note/bus.js';
@@ -85,6 +91,190 @@ import {
   listTasks,
   readRunIds as readTaskRunIds,
 } from '@x/core/dist/background-tasks/fileops.js';
+
+type SlackHomeChannel = {
+  id: string;
+  name: string;
+  workspaceUrl?: string;
+  workspaceName?: string;
+};
+
+type SlackHomeMessage = {
+  id: string;
+  workspaceName?: string;
+  workspaceUrl?: string;
+  channelId?: string;
+  channelName?: string;
+  author?: string;
+  text: string;
+  ts: string;
+  url?: string;
+};
+
+function parseWhoamiWorkspaces(data: unknown): Array<{ url: string; name: string }> {
+  const parsed = (data ?? {}) as { workspaces?: Array<{ workspace_url?: string; workspace_name?: string }> };
+  return (parsed.workspaces || []).map((w) => ({
+    url: w.workspace_url || '',
+    name: w.workspace_name || '',
+  }));
+}
+
+type SlackAuthResult = {
+  ok: boolean;
+  workspaces: Array<{ url: string; name: string }>;
+  error?: string;
+  errorKind?: 'not_installed' | 'timeout' | 'parse_error' | 'not_authed' | 'rate_limited' | 'network' | 'bad_channel' | 'unknown';
+};
+
+// Run `auth import-desktop`, then read back the workspaces via `auth whoami`.
+// Shared by the plain and the quit-Slack-first import handlers.
+async function importDesktopAndReadWorkspaces(): Promise<SlackAuthResult> {
+  const imported = await runAgentSlack(['auth', 'import-desktop'], { timeoutMs: 20000, parseJson: false });
+  if (!imported.ok) {
+    return { ok: false, workspaces: [], error: imported.message, errorKind: imported.kind };
+  }
+  const whoami = await runAgentSlack(['auth', 'whoami'], { timeoutMs: 10000 });
+  if (!whoami.ok) {
+    return { ok: false, workspaces: [], error: whoami.message, errorKind: whoami.kind };
+  }
+  const workspaces = parseWhoamiWorkspaces(whoami.data);
+  if (workspaces.length === 0) {
+    return { ok: false, workspaces: [], error: 'No signed-in Slack workspaces found in the desktop app.', errorKind: 'not_authed' };
+  }
+  return { ok: true, workspaces };
+}
+
+// Windows force-quits Slack so its exclusive Cookies-DB lock releases before
+// desktop import (the EBUSY cause). No-op on mac/Linux, where import works with
+// Slack open. taskkill exits non-zero when nothing matches — that's fine.
+async function quitSlackIfWindows(): Promise<void> {
+  if (process.platform !== 'win32') return;
+  try {
+    await execFileAsync('taskkill', ['/F', '/IM', 'Slack.exe'], { timeout: 10000, windowsHide: true });
+  } catch {
+    // No running Slack process to kill — nothing to do.
+  }
+  // Give Windows a moment to release the file handles before we copy them.
+  await new Promise(resolve => setTimeout(resolve, 800));
+}
+
+function extractArrayPayload(parsed: unknown): unknown[] {
+  if (Array.isArray(parsed)) return parsed;
+  if (parsed && typeof parsed === 'object') {
+    const obj = parsed as Record<string, unknown>;
+    for (const key of ['messages', 'channels', 'items', 'results', 'data']) {
+      if (Array.isArray(obj[key])) return obj[key] as unknown[];
+    }
+  }
+  return [];
+}
+
+function slackMessageText(message: Record<string, unknown>): string {
+  const value = message.text ?? message.body ?? message.content;
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function slackMessageAuthor(message: Record<string, unknown>): string | undefined {
+  const value = message.username ?? message.user ?? message.author;
+  return typeof value === 'string' ? value : undefined;
+}
+
+function extractSlackUserName(raw: unknown): string | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const obj = raw as Record<string, unknown>;
+  const profile = obj.profile && typeof obj.profile === 'object' ? obj.profile as Record<string, unknown> : undefined;
+  const user = obj.user && typeof obj.user === 'object' ? obj.user as Record<string, unknown> : undefined;
+  const userProfile = user?.profile && typeof user.profile === 'object' ? user.profile as Record<string, unknown> : undefined;
+
+  const candidates = [
+    profile?.display_name,
+    profile?.real_name,
+    userProfile?.display_name,
+    userProfile?.real_name,
+    obj.display_name,
+    obj.displayName,
+    obj.real_name,
+    obj.realName,
+    user?.display_name,
+    user?.displayName,
+    user?.real_name,
+    user?.realName,
+    obj.name,
+    user?.name,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+
+  return null;
+}
+
+async function resolveSlackUserName(
+  userId: string,
+  workspaceUrl: string | undefined,
+  cache: Map<string, string>,
+): Promise<string | null> {
+  const key = `${workspaceUrl ?? ''}:${userId}`;
+  if (cache.has(key)) return cache.get(key) ?? null;
+
+  const args = ['user', 'get', userId];
+  if (workspaceUrl) {
+    args.push('--workspace', workspaceUrl);
+  }
+
+  const result = await runAgentSlack(args, { timeoutMs: 10000, maxBuffer: 512 * 1024 });
+  if (result.ok) {
+    const name = extractSlackUserName(result.data ?? {});
+    if (name) {
+      cache.set(key, name);
+      return name;
+    }
+  } else {
+    console.warn(`[Slack] Failed to resolve user ${userId}: ${result.message}`);
+  }
+
+  cache.set(key, userId);
+  return null;
+}
+
+async function resolveSlackMessageText(
+  text: string,
+  workspaceUrl: string | undefined,
+  cache: Map<string, string>,
+): Promise<string> {
+  const matches = Array.from(text.matchAll(/<@([UW][A-Z0-9]+)(?:\|([^>]+))?>|@([UW][A-Z0-9]{6,})\b/g));
+  if (matches.length === 0) return text;
+
+  let resolved = text;
+  for (const match of matches) {
+    const userId = match[1] ?? match[3];
+    if (!userId) continue;
+    const fallback = match[2] ?? match[0];
+    const name = await resolveSlackUserName(userId, workspaceUrl, cache);
+    resolved = resolved.replaceAll(match[0], name ?? fallback);
+  }
+  return resolved;
+}
+
+async function resolveSlackAuthor(
+  author: string | undefined,
+  workspaceUrl: string | undefined,
+  cache: Map<string, string>,
+): Promise<string | undefined> {
+  if (!author) return undefined;
+  if (!/^[UW][A-Z0-9]{6,}$/.test(author)) return author;
+  return await resolveSlackUserName(author, workspaceUrl, cache) ?? author;
+}
+
+function slackMessageUrl(message: Record<string, unknown>, workspaceUrl: string | undefined, channelId: string | undefined, ts: string): string | undefined {
+  const direct = message.permalink ?? message.url;
+  if (typeof direct === 'string' && direct) return direct;
+  if (!workspaceUrl || !channelId) return undefined;
+  return `${workspaceUrl.replace(/\/$/, '')}/archives/${channelId}/p${ts.replace('.', '')}`;
+}
 import { browserIpcHandlers } from './browser/ipc.js';
 
 /**
@@ -553,6 +743,9 @@ export function setupIpcHandlers() {
     'gmail:getAccountEmail': async () => {
       return { email: await getAccountEmail() };
     },
+    'gmail:getAccountName': async () => {
+      return { name: await getAccountName() };
+    },
     'gmail:archiveThread': async (_event, args) => {
       return archiveThread(args.threadId);
     },
@@ -667,6 +860,15 @@ export function setupIpcHandlers() {
         const message = err instanceof Error ? err.message : 'Failed to list models';
         return { success: false, error: message };
       }
+    },
+    'llm:getDefaultModel': async () => {
+      return await getDefaultModelAndProvider();
+    },
+    'llm:generate': async (_event, args) => {
+      console.log(`[llm:generate] requested provider=${args.provider ?? '(default)'} model=${args.model ?? '(default)'}`);
+      const result = await generateOneShot(args);
+      console.log(`[llm:generate] -> provider=${result.provider ?? '?'} model=${result.model ?? '?'} chars=${result.text?.length ?? 0}${result.error ? ` error=${result.error}` : ''}`);
+      return result;
     },
     'models:saveConfig': async (_event, args) => {
       const repo = container.resolve<IModelConfigRepo>('modelConfigRepo');
@@ -861,21 +1063,191 @@ export function setupIpcHandlers() {
     'slack:setConfig': async (_event, args) => {
       const repo = container.resolve<ISlackConfigRepo>('slackConfigRepo');
       await repo.setConfig({ enabled: args.enabled, workspaces: args.workspaces });
+      // Connecting/disconnecting Slack changes the Copilot's routing (native
+      // `slack` skill vs. Composio), so rebuild its cached instructions.
+      invalidateCopilotInstructionsCache();
       return { success: true };
     },
+    'slack:cliStatus': async () => {
+      return await getAgentSlackCliStatus();
+    },
+    'slack:knowledgeStatus': async () => {
+      return {
+        cli: await getAgentSlackCliStatus(),
+        sources: getSlackKnowledgeSyncStatus(),
+      };
+    },
     'slack:listWorkspaces': async () => {
-      try {
-        const { stdout } = await execAsync('agent-slack auth whoami', { timeout: 10000 });
-        const parsed = JSON.parse(stdout);
-        const workspaces = (parsed.workspaces || []).map((w: { workspace_url?: string; workspace_name?: string }) => ({
-          url: w.workspace_url || '',
-          name: w.workspace_name || '',
-        }));
-        return { workspaces };
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : 'Failed to list Slack workspaces';
-        return { workspaces: [], error: message };
+      const result = await runAgentSlack(['auth', 'whoami'], { timeoutMs: 10000 });
+      if (!result.ok) {
+        return { workspaces: [], error: result.message, errorKind: result.kind };
       }
+      const workspaces = parseWhoamiWorkspaces(result.data);
+      return { workspaces };
+    },
+    'slack:importDesktopAuth': async () => {
+      // Pull xoxc token(s) + cookie from the running/installed Slack desktop
+      // app into agent-slack's credential store, then read back the workspaces.
+      return await importDesktopAndReadWorkspaces();
+    },
+    'slack:quitAndImportDesktop': async () => {
+      // Windows-only convenience: kill Slack (which locks its Cookies DB) then
+      // run the normal desktop import in one click.
+      await quitSlackIfWindows();
+      return await importDesktopAndReadWorkspaces();
+    },
+    'slack:parseCurlAuth': async (_event, args) => {
+      // Cross-OS fallback to desktop import: the user pastes a "Copy as cURL"
+      // request from a signed-in Slack web tab; parse-curl reads it from stdin
+      // and extracts the xoxc token + xoxd cookie. No leveldb, no OS keychain.
+      const curl = (args.curl ?? '').trim();
+      if (!curl) {
+        return { ok: false, workspaces: [], error: 'Paste the copied cURL command first.', errorKind: 'unknown' as const };
+      }
+      const imported = await runAgentSlack(['auth', 'parse-curl'], { timeoutMs: 15000, parseJson: false, input: curl });
+      if (!imported.ok) {
+        return { ok: false, workspaces: [], error: imported.message, errorKind: imported.kind };
+      }
+      const whoami = await runAgentSlack(['auth', 'whoami'], { timeoutMs: 10000 });
+      if (!whoami.ok) {
+        return { ok: false, workspaces: [], error: whoami.message, errorKind: whoami.kind };
+      }
+      const workspaces = parseWhoamiWorkspaces(whoami.data);
+      if (workspaces.length === 0) {
+        return { ok: false, workspaces: [], error: 'Tokens were saved but no workspace was found. Double-check the copied request.', errorKind: 'not_authed' as const };
+      }
+      return { ok: true, workspaces };
+    },
+    'slack:listChannels': async (_event, args) => {
+      const result = await runAgentSlack(['channel', 'list', '--all', '--workspace', args.workspaceUrl, '--limit', '200'], { timeoutMs: 15000 });
+      if (!result.ok) {
+        return { channels: [], error: result.message };
+      }
+      const rawChannels = extractArrayPayload(result.data) as Array<{
+        id?: string;
+        name?: string;
+        is_private?: boolean;
+        isPrivate?: boolean;
+        is_member?: boolean;
+        isMember?: boolean;
+      }>;
+      const channels = rawChannels.map((ch) => ({
+        id: ch.id || ch.name || '',
+        name: ch.name || ch.id || '',
+        isPrivate: ch.is_private ?? ch.isPrivate,
+        isMember: ch.is_member ?? ch.isMember,
+      })).filter((ch) => ch.id && ch.name);
+      return { channels };
+    },
+    'slack:getRecentMessages': async (_event, args) => {
+      const repo = container.resolve<ISlackConfigRepo>('slackConfigRepo');
+      const config = await repo.getConfig();
+      if (!config.enabled || config.workspaces.length === 0) {
+        return { enabled: false, messages: [] };
+      }
+
+      const limit = Math.min(Math.max(args.limit ?? 5, 1), 20);
+      const messages: SlackHomeMessage[] = [];
+      const userNameCache = new Map<string, string>();
+
+      try {
+        const knowledgeConfig = knowledgeSourcesRepo.getConfig();
+        const slackSource = knowledgeConfig.sources.find(source => source.id === 'slack' && source.provider === 'slack' && source.enabled);
+        let channels: SlackHomeChannel[] = (slackSource?.scopes ?? [])
+          .filter(scope => scope.type === 'channel')
+          .map(scope => ({
+            id: scope.id,
+            name: scope.name ?? scope.id,
+            workspaceUrl: scope.workspaceUrl,
+            workspaceName: config.workspaces.find(workspace => workspace.url === scope.workspaceUrl)?.name,
+          }));
+
+        if (channels.length === 0) {
+          for (const workspace of config.workspaces) {
+            const channelList = await runAgentSlack(['channel', 'list', '--workspace', workspace.url, '--limit', '12'], { timeoutMs: 15000 });
+            if (!channelList.ok) {
+              throw new AgentSlackRunError(channelList.kind, channelList.message);
+            }
+            const rawChannels = extractArrayPayload(channelList.data);
+            for (const raw of rawChannels) {
+              if (!raw || typeof raw !== 'object') continue;
+              const channel = raw as Record<string, unknown>;
+              const id = typeof channel.id === 'string' ? channel.id : undefined;
+              const name = typeof channel.name === 'string' ? channel.name : id;
+              const isMember = channel.is_member ?? channel.isMember;
+              if (!id || !name || isMember === false) continue;
+              channels.push({ id, name, workspaceUrl: workspace.url, workspaceName: workspace.name });
+            }
+          }
+        }
+
+        channels = channels.slice(0, 8);
+
+        for (const channel of channels) {
+          const commandArgs = ['message', 'list', channel.id, '--limit', '5', '--max-body-chars', '500'];
+          if (channel.workspaceUrl) {
+            commandArgs.push('--workspace', channel.workspaceUrl);
+          }
+          const messageList = await runAgentSlack(commandArgs, { timeoutMs: 15000, maxBuffer: 1024 * 1024 });
+          if (!messageList.ok) {
+            console.warn(`[Slack] Failed to load messages for ${channel.name}: ${messageList.message}`);
+            continue;
+          }
+          const rawMessages = extractArrayPayload(messageList.data);
+          for (const raw of rawMessages) {
+            if (!raw || typeof raw !== 'object') continue;
+            const message = raw as Record<string, unknown>;
+            const ts = typeof message.ts === 'string' ? message.ts : undefined;
+            const text = slackMessageText(message);
+            if (!ts || !text) continue;
+            const channelId = typeof message.channel_id === 'string'
+              ? message.channel_id
+              : typeof message.channel === 'string'
+                ? message.channel
+                : channel.id;
+            const resolvedAuthor = await resolveSlackAuthor(slackMessageAuthor(message), channel.workspaceUrl, userNameCache);
+            const resolvedText = await resolveSlackMessageText(text, channel.workspaceUrl, userNameCache);
+            messages.push({
+              id: `${channel.workspaceUrl ?? 'workspace'}:${channelId}:${ts}`,
+              workspaceName: channel.workspaceName,
+              workspaceUrl: channel.workspaceUrl,
+              channelId,
+              channelName: channel.name,
+              author: resolvedAuthor,
+              text: resolvedText,
+              ts,
+              url: slackMessageUrl(message, channel.workspaceUrl, channelId, ts),
+            });
+          }
+        }
+
+        const rankedIds = await rankSlackHomeMessages(messages, limit);
+        const byId = new Map(messages.map(message => [message.id, message]));
+        const rankedMessages = rankedIds
+          .map(id => byId.get(id))
+          .filter((message): message is SlackHomeMessage => Boolean(message));
+        return { enabled: true, messages: rankedMessages };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Failed to load Slack messages';
+        const errorKind = err instanceof AgentSlackRunError ? err.kind : undefined;
+        return { enabled: true, messages: [], error: message, errorKind };
+      }
+    },
+    'knowledgeSources:getConfig': async () => {
+      return knowledgeSourcesRepo.getConfig();
+    },
+    'knowledgeSources:upsert': async (_event, args) => {
+      const config = knowledgeSourcesRepo.upsertSource(args);
+      if (args.provider === 'slack') {
+        // The Copilot prompt lists the selected Slack channels, so refresh it
+        // whenever the channel selection changes.
+        invalidateCopilotInstructionsCache();
+        triggerSlackKnowledgeSync();
+        void syncSlackKnowledgeSources().catch(error => {
+          console.error('[SlackKnowledge] Immediate sync after settings update failed:', error);
+        });
+      }
+      return config;
     },
     'onboarding:getStatus': async () => {
       // Show onboarding if it hasn't been completed yet
