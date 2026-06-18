@@ -1366,7 +1366,6 @@ const ComposeBox = memo(function ComposeBox({
             className="gmail-compose-subject-input"
             value={subject}
             onChange={(event) => setSubject(event.target.value)}
-            placeholder="Subject"
           />
         </div>
       )}
