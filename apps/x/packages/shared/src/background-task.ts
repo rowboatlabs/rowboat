@@ -27,6 +27,10 @@ export type BackgroundTask = {
     instructions: string;
     active: boolean;
     triggers?: Triggers;
+    // When set, this is a *coding* task: it implements code in the pinned code
+    // project (a registered repo) via the `launch-code-task` tool, each launch
+    // running in its own isolated worktree. Omit for ordinary OUTPUT/ACTION tasks.
+    projectId?: string;
     model?: string;
     provider?: string;
     createdAt: string;
@@ -48,6 +52,7 @@ export type BackgroundTaskSummary = {
     instructions: string;
     active: boolean;
     triggers?: Triggers;
+    projectId?: string;
     createdAt: string;
     lastAttemptAt?: string;
     lastRunId?: string;
@@ -56,11 +61,14 @@ export type BackgroundTaskSummary = {
     lastRunError?: string;
 };
 
+// NOTE: keep `BackgroundTaskSummary` (above) and `BackgroundTask` (top) in sync.
+
 export const BackgroundTaskSchema = z.object({
     name: z.string().min(1).describe('User-facing display name.'),
     instructions: z.string().min(1).describe('A persistent instruction in the user\'s words — what should this task keep doing? E.g. "Summarize my unread emails every morning into a brief digest." The agent re-reads instructions on every run and decides whether to rewrite index.md (OUTPUT mode) or perform a side-effect and journal it (ACTION mode) based on the verbs.'),
     active: z.boolean().default(true).describe('Set false to pause without deleting.'),
     triggers: TriggersSchema.optional().describe('When the agent fires. Omit for manual-only.'),
+    projectId: z.string().optional().describe('When set, marks this as a coding task pinned to a registered code project (repo). The agent implements detected work via the launch-code-task tool, each launch in its own isolated worktree.'),
     model: z.string().optional().describe('ADVANCED — leave unset. Per-task model override.'),
     provider: z.string().optional().describe('ADVANCED — leave unset. Per-task provider name override.'),
     createdAt: z.string().describe('ISO timestamp set once at create-time.'),
@@ -77,6 +85,7 @@ export const BackgroundTaskSummarySchema = z.object({
     instructions: z.string(),
     active: z.boolean(),
     triggers: TriggersSchema.optional(),
+    projectId: z.string().optional(),
     createdAt: z.string(),
     lastAttemptAt: z.string().optional(),
     lastRunId: z.string().optional(),

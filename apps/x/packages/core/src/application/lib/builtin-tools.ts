@@ -1549,6 +1549,35 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         },
     },
 
+    'launch-code-task': {
+        description: "Launch an autonomous coding session that implements a unit of work in the bg-task's pinned code repo. ONLY usable from a coding background task (one with a configured code project). The session runs full-auto in its own isolated git worktree/branch — it never touches the user's checkout — and runs asynchronously: this returns as soon as the session is created, so you can launch several (one per group of related items) in the same run. The tool writes and later updates a row under a `## Code Sessions` section in the task's index.md — do NOT edit that section yourself. Write an excellent, fully self-contained `prompt`: the coding agent has no other context and no human to ask. Group related items into one call; split unrelated items into separate calls.",
+        inputSchema: z.object({
+            taskSlug: z.string().describe("The slug of THIS background task (it's in your run message, e.g. 'implement-meeting-items'). Used to find the pinned repo and to update index.md."),
+            meeting: z.string().min(1).describe("The name/title of the meeting these items came from (e.g. 'Eng Sync — 2026-06-18'). Sessions are grouped under this heading in index.md so the user can see which meeting each change came from."),
+            title: z.string().min(1).max(120).describe("Short human title for this unit of work — one line in index.md (e.g. 'Add retry to upload client')."),
+            items: z.string().min(1).describe("Brief description of the action item(s) this session implements, for the summary row (e.g. 'Fix flaky upload + add retry; raised in standup')."),
+            prompt: z.string().min(1).describe("The full, self-contained coding instruction. Include the concrete goal, relevant context from the meeting, any files/areas to look at, and what 'done' means. The agent runs autonomously with no human — be specific and complete."),
+            context: z.string().optional().describe("Optional extra context, e.g. the relevant excerpt from the meeting."),
+        }),
+        execute: async (input: { taskSlug: string; meeting: string; title: string; items: string; prompt: string; context?: string }, ctx?: ToolContext) => {
+            try {
+                const { launchCodeTask } = await import("../../background-tasks/code-sessions.js");
+                const result = await launchCodeTask({
+                    taskSlug: input.taskSlug,
+                    meeting: input.meeting,
+                    title: input.title,
+                    items: input.items,
+                    prompt: input.prompt,
+                    ...(input.context ? { context: input.context } : {}),
+                    ...(ctx?.runId ? { runId: ctx.runId } : {}),
+                });
+                return result;
+            } catch (err) {
+                return { success: false, error: err instanceof Error ? err.message : String(err) };
+            }
+        },
+    },
+
     'notify-user': {
         description: "Show a native OS notification to the user. Clicking the notification opens the provided link in the default browser, or focuses the Rowboat app if no link is given.",
         inputSchema: z.object({

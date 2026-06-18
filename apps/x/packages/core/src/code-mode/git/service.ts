@@ -161,6 +161,67 @@ export async function status(cwd: string): Promise<GitStatusFile[]> {
     return result;
 }
 
+// Everything this worktree's branch changed since it forked from `baseRef` —
+// committed AND uncommitted. `status()` only sees the working tree (uncommitted),
+// so it misses work an agent committed; this is what you want for a session
+// summary. Counts come from numstat, states from name-status, merged by path.
+export async function changedSinceBase(cwd: string, baseRef: string): Promise<GitStatusFile[]> {
+    let forkPoint = baseRef;
+    try {
+        forkPoint = (await git(cwd, ['merge-base', baseRef, 'HEAD'])).trim() || baseRef;
+    } catch {
+        forkPoint = baseRef;
+    }
+
+    const stateByPath = new Map<string, GitFileState>();
+    try {
+        const ns = await git(cwd, ['diff', '--name-status', '-z', forkPoint]);
+        const parts = ns.split('\0');
+        for (let i = 0; i < parts.length; i++) {
+            const code = parts[i];
+            if (!code) continue;
+            const letter = code[0];
+            if (letter === 'R' || letter === 'C') {
+                // rename/copy: "<code>\0<old>\0<new>"
+                const newPath = parts[i + 2];
+                i += 2;
+                if (newPath) stateByPath.set(newPath, 'renamed');
+            } else {
+                const p = parts[i + 1];
+                i += 1;
+                if (p) stateByPath.set(p, letter === 'A' ? 'added' : letter === 'D' ? 'deleted' : 'modified');
+            }
+        }
+    } catch {
+        // bad ref / no commits — leave states empty
+    }
+
+    const result: GitStatusFile[] = [];
+    try {
+        const numstat = await git(cwd, ['diff', '--numstat', '-z', forkPoint]);
+        const rows = numstat.split('\0');
+        for (let i = 0; i < rows.length; i++) {
+            const row = rows[i];
+            if (!row) continue;
+            const m = row.match(/^(\d+|-)\t(\d+|-)\t?(.*)$/);
+            if (!m) continue;
+            const insertions = m[1] === '-' ? null : Number(m[1]);
+            const deletions = m[2] === '-' ? null : Number(m[2]);
+            let filePath = m[3];
+            if (!filePath) {
+                // rename form: old and new paths follow as separate tokens
+                i += 2;
+                filePath = rows[i] ?? '';
+            }
+            if (!filePath) continue;
+            result.push({ path: filePath, state: stateByPath.get(filePath) ?? 'modified', insertions, deletions });
+        }
+    } catch {
+        // bad ref / no commits — nothing to report
+    }
+    return result;
+}
+
 export interface FileDiff {
     oldText: string;
     newText: string;
