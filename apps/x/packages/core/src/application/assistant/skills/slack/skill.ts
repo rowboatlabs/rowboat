@@ -5,11 +5,26 @@ You interact with Slack by running **agent-slack** commands through \`executeCom
 
 ---
 
-## 1. Check Connection
+## 1. Check Connection & Selected Channels
 
 Before any Slack operation, read \`config/slack.json\` from the workspace root. If \`enabled\` is \`false\` or the \`workspaces\` array is empty, simply tell the user: "Slack is not enabled. You can enable it in the Connectors settings." Do not attempt any agent-slack commands.
 
 If enabled, use the workspace URLs from the config for all commands.
+
+**Which channels the user follows:** The user selects specific channels to sync in \`config/knowledge_sources.json\`. Read that file and find the source with \`"provider": "slack"\`; its \`scopes\` array (entries with \`"type": "channel"\`) lists the selected channels (each has a \`name\` like \`#general\` and an optional \`workspaceUrl\`). For broad "what's on my Slack / catch me up / anything new" requests where the user did NOT name a channel, query these selected channels directly — do not guess or run workspace-wide search.
+
+---
+
+## 1b. Catching Up ("what's new", "today", "yesterday")
+
+For catch-up questions, list recent messages from each selected channel and filter by time with \`--oldest\` / \`--latest\` (Unix-epoch seconds):
+
+\`\`\`
+# Everything in #general since the start of today (compute the epoch for 00:00 local)
+agent-slack message list "#general" --workspace https://team.slack.com --oldest 1718668800 --limit 100 --resolve-users
+\`\`\`
+
+**Do NOT use \`agent-slack unreads\` or \`agent-slack search messages\` to answer catch-up questions.** With desktop-imported auth those endpoints frequently return empty even when channels clearly have messages. Direct \`message list\` against the selected channels is the authoritative source. Run one \`message list\` per selected channel (batch them in a single \`executeCommand\` with \`;\` separators), then summarize across channels. Always pass \`--resolve-users\` so author names are readable.
 
 ---
 
@@ -40,6 +55,8 @@ agent-slack message react remove "<target>" <emoji> --ts <ts>
 \`\`\`
 
 ### Search
+
+Note: search is best for finding a *specific* message by keyword. It can return empty under desktop-imported auth, so never conclude "there's nothing on Slack" from an empty search — fall back to \`message list\` on the selected channels (see section 1b).
 
 \`\`\`
 agent-slack search messages "query text" --limit 20
