@@ -96,3 +96,68 @@ export async function testModelConnection(
         clearTimeout(timeout);
     }
 }
+
+export async function listModelsForProvider(
+    providerConfig: z.infer<typeof Provider>,
+    timeoutMs = 8000,
+): Promise<string[]> {
+    const { flavor, apiKey, baseURL } = providerConfig;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        let url = "";
+        const headers: Record<string, string> = {};
+
+        switch (flavor) {
+            case "openai":
+                url = "https://api.openai.com/v1/models";
+                headers["Authorization"] = `Bearer ${apiKey}`;
+                break;
+            case "anthropic":
+                url = "https://api.anthropic.com/v1/models";
+                headers["x-api-key"] = apiKey ?? "";
+                headers["anthropic-version"] = "2023-06-01";
+                break;
+            case "google":
+                url = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey ?? ""}`;
+                break;
+            case "openrouter":
+                url = "https://openrouter.ai/api/v1/models";
+                if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
+                break;
+            case "ollama":
+                url = `${(baseURL ?? "http://localhost:11434").replace(/\/$/, "")}/api/tags`;
+                break;
+            case "openai-compatible":
+            case "aigateway":
+                url = `${(baseURL ?? "").replace(/\/$/, "")}/models`;
+                if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
+                break;
+            default:
+                throw new Error(`Unsupported provider flavor: ${flavor}`);
+        }
+
+        const res = await fetch(url, { headers, signal: controller.signal });
+        if (!res.ok) {
+            const body = await res.text().catch(() => "");
+            throw new Error(`Failed to list models (${res.status}): ${body.slice(0, 200)}`);
+        }
+        const data = await res.json();
+
+        // Normalize each provider's response shape into a flat list of model id strings.
+        let ids: string[] = [];
+        if (flavor === "google") {
+            // { models: [{ name: "models/gemini-..." }] }
+            ids = (data.models ?? []).map((m: { name: string }) => m.name.replace(/^models\//, ""));
+        } else if (flavor === "ollama") {
+            // { models: [{ name: "llama3:latest" }] }
+            ids = (data.models ?? []).map((m: { name: string }) => m.name);
+        } else {
+            // OpenAI-shaped: { data: [{ id: "..." }] }
+            ids = (data.data ?? []).map((m: { id: string }) => m.id);
+        }
+        return ids.filter((id: string) => typeof id === "string" && id.length > 0);
+    } finally {
+        clearTimeout(timeout);
+    }
+}

@@ -98,7 +98,6 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
   const showBaseURL = llmProvider === "ollama" || llmProvider === "openai-compatible" || llmProvider === "aigateway"
   const isLocalProvider = llmProvider === "ollama" || llmProvider === "openai-compatible"
   const canTest =
-    activeConfig.model.trim().length > 0 &&
     (!requiresApiKey || activeConfig.apiKey.trim().length > 0) &&
     (!requiresBaseURL || activeConfig.baseURL.trim().length > 0)
 
@@ -416,37 +415,45 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
     try {
       const apiKey = activeConfig.apiKey.trim() || undefined
       const baseURL = activeConfig.baseURL.trim() || undefined
-      const model = activeConfig.model.trim()
-      const knowledgeGraphModel = activeConfig.knowledgeGraphModel.trim() || undefined
-      const meetingNotesModel = activeConfig.meetingNotesModel.trim() || undefined
-      const liveNoteAgentModel = activeConfig.liveNoteAgentModel.trim() || undefined
-      const providerConfig = {
-        provider: {
-          flavor: llmProvider,
-          apiKey,
-          baseURL,
-        },
-        model,
-        knowledgeGraphModel,
-        meetingNotesModel,
-        liveNoteAgentModel,
+      const provider = {
+        flavor: llmProvider,
+        apiKey,
+        baseURL,
       }
-      const result = await window.ipc.invoke("models:test", providerConfig)
-      if (result.success) {
-        setTestState({ status: "success" })
-        await window.ipc.invoke("models:saveConfig", providerConfig)
-        window.dispatchEvent(new Event('models-config-changed'))
-        handleNext()
-      } else {
+
+      // Fetch the provider's models from the key — this both validates the
+      // credentials and gives us the list to populate the chat picker.
+      const result = await window.ipc.invoke("models:listForProvider", { provider })
+      if (!result.success) {
         setTestState({ status: "error", error: result.error })
         toast.error(result.error || "Connection test failed")
+        return
       }
+
+      const models: string[] = result.models ?? []
+      const preferred = preferredDefaults[llmProvider]
+      const model =
+        (preferred && models.includes(preferred) && preferred) ||
+        models[0] ||
+        activeConfig.model.trim() ||
+        ""
+
+      const providerConfig = {
+        provider,
+        model,
+        models,
+      }
+
+      setTestState({ status: "success" })
+      await window.ipc.invoke("models:saveConfig", providerConfig)
+      window.dispatchEvent(new Event('models-config-changed'))
+      handleNext()
     } catch (error) {
       console.error("Connection test failed:", error)
       setTestState({ status: "error", error: "Connection test failed" })
       toast.error("Connection test failed")
     }
-  }, [activeConfig.apiKey, activeConfig.baseURL, activeConfig.model, activeConfig.knowledgeGraphModel, activeConfig.meetingNotesModel, activeConfig.liveNoteAgentModel, canTest, llmProvider, handleNext])
+  }, [activeConfig.apiKey, activeConfig.baseURL, activeConfig.model, canTest, llmProvider, handleNext])
 
   // Check connection status for all providers
   const refreshAllStatuses = useCallback(async () => {

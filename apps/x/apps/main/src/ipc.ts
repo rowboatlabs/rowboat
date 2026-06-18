@@ -25,7 +25,7 @@ import { RunEvent } from '@x/shared/dist/runs.js';
 import { ServiceEvent } from '@x/shared/dist/service-events.js';
 import container from '@x/core/dist/di/container.js';
 import { listOnboardingModels } from '@x/core/dist/models/models-dev.js';
-import { testModelConnection } from '@x/core/dist/models/models.js';
+import { testModelConnection, listModelsForProvider } from '@x/core/dist/models/models.js';
 import { isSignedIn } from '@x/core/dist/account/account.js';
 import { listGatewayModels } from '@x/core/dist/models/gateway.js';
 import type { IModelConfigRepo } from '@x/core/dist/models/repo.js';
@@ -658,6 +658,15 @@ export function setupIpcHandlers() {
     },
     'models:test': async (_event, args) => {
       return await testModelConnection(args.provider, args.model);
+    },
+    'models:listForProvider': async (_event, args) => {
+      try {
+        const models = await listModelsForProvider(args.provider);
+        return { success: true, models };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to list models';
+        return { success: false, error: message };
+      }
     },
     'models:saveConfig': async (_event, args) => {
       const repo = container.resolve<IModelConfigRepo>('modelConfigRepo');
