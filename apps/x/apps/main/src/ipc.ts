@@ -1041,6 +1041,9 @@ export function setupIpcHandlers() {
     'slack:setConfig': async (_event, args) => {
       const repo = container.resolve<ISlackConfigRepo>('slackConfigRepo');
       await repo.setConfig({ enabled: args.enabled, workspaces: args.workspaces });
+      // Connecting/disconnecting Slack changes the Copilot's routing (native
+      // `slack` skill vs. Composio), so rebuild its cached instructions.
+      invalidateCopilotInstructionsCache();
       return { success: true };
     },
     'slack:cliStatus': async () => {
@@ -1214,6 +1217,9 @@ export function setupIpcHandlers() {
     'knowledgeSources:upsert': async (_event, args) => {
       const config = knowledgeSourcesRepo.upsertSource(args);
       if (args.provider === 'slack') {
+        // The Copilot prompt lists the selected Slack channels, so refresh it
+        // whenever the channel selection changes.
+        invalidateCopilotInstructionsCache();
         triggerSlackKnowledgeSync();
         void syncSlackKnowledgeSources().catch(error => {
           console.error('[SlackKnowledge] Immediate sync after settings update failed:', error);
