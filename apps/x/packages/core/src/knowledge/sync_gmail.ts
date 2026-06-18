@@ -1406,6 +1406,8 @@ export interface SendReplyOptions {
     bodyText: string;
     inReplyTo?: string;
     references?: string;
+    /** Files to attach. contentBase64 is the raw (unwrapped) base64 of the file bytes. */
+    attachments?: Array<{ filename: string; mimeType: string; contentBase64: string }>;
 }
 
 export interface SendReplyResult {
@@ -1425,6 +1427,44 @@ export async function getAccountEmail(): Promise<string | null> {
     const auth = await GoogleClientFactory.getClient();
     if (!auth) return null;
     return getUserEmail(auth);
+}
+
+let cachedAccountName: string | null | undefined;
+
+/**
+ * The connected account's display name, parsed from the `From` header of a
+ * recent SENT message (which is the user themselves). Cached for the process
+ * lifetime. Uses only the existing gmail.modify scope — no profile/userinfo
+ * scope, so it never triggers a re-consent. Used by the composer to sign off
+ * AI-generated emails with the real name.
+ */
+export async function getAccountName(): Promise<string | null> {
+    if (cachedAccountName !== undefined) return cachedAccountName;
+    try {
+        const auth = await GoogleClientFactory.getClient();
+        if (!auth) return null;
+        const gmailClient = google.gmail({ version: 'v1', auth });
+        const list = await gmailClient.users.messages.list({ userId: 'me', labelIds: ['SENT'], maxResults: 1 });
+        const id = list.data.messages?.[0]?.id;
+        if (!id) {
+            cachedAccountName = null;
+            return null;
+        }
+        const msg = await gmailClient.users.messages.get({
+            userId: 'me',
+            id,
+            format: 'metadata',
+            metadataHeaders: ['From'],
+        });
+        const from = msg.data.payload?.headers?.find((h) => h.name?.toLowerCase() === 'from')?.value || '';
+        // Pull the display name out of `"Name" <email>` / `Name <email>`.
+        const name = from.match(/^\s*"?([^"<]+?)"?\s*</)?.[1]?.trim() || null;
+        cachedAccountName = name;
+        return name;
+    } catch (err) {
+        console.warn('[Gmail] getAccountName failed:', err);
+        return null;
+    }
 }
 
 export async function getConnectionStatus(): Promise<GmailConnectionStatus> {
@@ -1467,6 +1507,17 @@ function encodeMimeBase64(text: string): string {
         ?.join('\r\n') ?? '';
 }
 
+// Re-wrap an already-base64 string into 76-char lines (RFC 2045) and strip any
+// whitespace the renderer may have included.
+function wrapBase64(base64: string): string {
+    return base64.replace(/\s+/g, '').match(/.{1,76}/g)?.join('\r\n') ?? '';
+}
+
+// Quote a filename for a MIME header, dropping characters that would break it.
+function sanitizeAttachmentName(name: string): string {
+    return (name || 'attachment').replace(/[\r\n"\\]/g, '_').trim() || 'attachment';
+}
+
 export async function sendThreadReply(opts: SendReplyOptions): Promise<SendReplyResult> {
     try {
         const auth = await GoogleClientFactory.getClient();
@@ -1486,7 +1537,10 @@ export async function sendThreadReply(opts: SendReplyOptions): Promise<SendReply
             : { bodyHtml: opts.bodyHtml.trim(), bodyText: opts.bodyText.trim() };
         if (!replyBody.bodyText.trim()) return { error: 'Draft is empty.' };
 
-        const boundary = `b_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+        const seed = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+        const altBoundary = `alt_${seed}`;
+        const attachments = (opts.attachments ?? []).filter((a) => a.contentBase64);
+
         const headers: string[] = [];
         headers.push(`From: ${requireSafeHeaderValue('From', userEmail)}`);
         headers.push(`To: ${safeTo}`);
@@ -1496,24 +1550,52 @@ export async function sendThreadReply(opts: SendReplyOptions): Promise<SendReply
         if (safeInReplyTo) headers.push(`In-Reply-To: ${safeInReplyTo}`);
         if (safeReferences) headers.push(`References: ${safeReferences}`);
         headers.push('MIME-Version: 1.0');
-        headers.push(`Content-Type: multipart/alternative; boundary="${boundary}"`);
 
-        const parts: string[] = [];
-        parts.push(`--${boundary}`);
-        parts.push('Content-Type: text/plain; charset="UTF-8"');
-        parts.push('Content-Transfer-Encoding: base64');
-        parts.push('');
-        parts.push(encodeMimeBase64(replyBody.bodyText));
-        parts.push('');
-        parts.push(`--${boundary}`);
-        parts.push('Content-Type: text/html; charset="UTF-8"');
-        parts.push('Content-Transfer-Encoding: base64');
-        parts.push('');
-        parts.push(encodeMimeBase64(replyBody.bodyHtml));
-        parts.push('');
-        parts.push(`--${boundary}--`);
+        // The text+html body as a self-contained multipart/alternative block.
+        const altParts: string[] = [];
+        altParts.push(`--${altBoundary}`);
+        altParts.push('Content-Type: text/plain; charset="UTF-8"');
+        altParts.push('Content-Transfer-Encoding: base64');
+        altParts.push('');
+        altParts.push(encodeMimeBase64(replyBody.bodyText));
+        altParts.push('');
+        altParts.push(`--${altBoundary}`);
+        altParts.push('Content-Type: text/html; charset="UTF-8"');
+        altParts.push('Content-Transfer-Encoding: base64');
+        altParts.push('');
+        altParts.push(encodeMimeBase64(replyBody.bodyHtml));
+        altParts.push('');
+        altParts.push(`--${altBoundary}--`);
 
-        const message = `${headers.join('\r\n')}\r\n\r\n${parts.join('\r\n')}`;
+        let body: string;
+        if (attachments.length) {
+            // Wrap the alternative body plus each attachment in a multipart/mixed.
+            const mixedBoundary = `mixed_${seed}`;
+            headers.push(`Content-Type: multipart/mixed; boundary="${mixedBoundary}"`);
+            const mixed: string[] = [];
+            mixed.push(`--${mixedBoundary}`);
+            mixed.push(`Content-Type: multipart/alternative; boundary="${altBoundary}"`);
+            mixed.push('');
+            mixed.push(altParts.join('\r\n'));
+            for (const att of attachments) {
+                const name = sanitizeAttachmentName(att.filename);
+                const mime = sanitizeAttachmentName(att.mimeType) || 'application/octet-stream';
+                mixed.push(`--${mixedBoundary}`);
+                mixed.push(`Content-Type: ${mime}; name="${name}"`);
+                mixed.push('Content-Transfer-Encoding: base64');
+                mixed.push(`Content-Disposition: attachment; filename="${name}"`);
+                mixed.push('');
+                mixed.push(wrapBase64(att.contentBase64));
+                mixed.push('');
+            }
+            mixed.push(`--${mixedBoundary}--`);
+            body = mixed.join('\r\n');
+        } else {
+            headers.push(`Content-Type: multipart/alternative; boundary="${altBoundary}"`);
+            body = altParts.join('\r\n');
+        }
+
+        const message = `${headers.join('\r\n')}\r\n\r\n${body}`;
         const raw = Buffer.from(message, 'utf8')
             .toString('base64')
             .replace(/\+/g, '-')

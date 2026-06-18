@@ -190,6 +190,15 @@ const ipcSchemas = {
       bodyText: z.string(),
       inReplyTo: z.string().optional(),
       references: z.string().optional(),
+      attachments: z
+        .array(
+          z.object({
+            filename: z.string(),
+            mimeType: z.string(),
+            contentBase64: z.string(),
+          }),
+        )
+        .optional(),
     }),
     res: z.object({
       messageId: z.string().optional(),
@@ -209,6 +218,12 @@ const ipcSchemas = {
     req: z.object({}),
     res: z.object({
       email: z.string().nullable(),
+    }),
+  },
+  'gmail:getAccountName': {
+    req: z.object({}),
+    res: z.object({
+      name: z.string().nullable(),
     }),
   },
   'gmail:archiveThread': {
@@ -385,6 +400,27 @@ const ipcSchemas = {
     req: LlmModelConfig,
     res: z.object({
       success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  'llm:getDefaultModel': {
+    req: z.null(),
+    res: z.object({
+      model: z.string(),
+      provider: z.string(),
+    }),
+  },
+  'llm:generate': {
+    req: z.object({
+      prompt: z.string().min(1),
+      system: z.string().optional(),
+      model: z.string().optional(),
+      provider: z.string().optional(),
+    }),
+    res: z.object({
+      text: z.string().optional(),
+      model: z.string().optional(),
+      provider: z.string().optional(),
       error: z.string().optional(),
     }),
   },
