@@ -78,6 +78,14 @@ async function repoToplevel(cwd: string): Promise<string> {
     }
 }
 
+async function mergeBase(cwd: string, baseRef: string): Promise<string> {
+    try {
+        return (await git(cwd, ['merge-base', baseRef, 'HEAD'])).trim() || baseRef;
+    } catch {
+        return baseRef;
+    }
+}
+
 function stateFromPorcelain(xy: string): GitFileState {
     if (xy === '??') return 'untracked';
     if (xy.includes('R')) return 'renamed';
@@ -166,12 +174,7 @@ export async function status(cwd: string): Promise<GitStatusFile[]> {
 // so it misses work an agent committed; this is what you want for a session
 // summary. Counts come from numstat, states from name-status, merged by path.
 export async function changedSinceBase(cwd: string, baseRef: string): Promise<GitStatusFile[]> {
-    let forkPoint = baseRef;
-    try {
-        forkPoint = (await git(cwd, ['merge-base', baseRef, 'HEAD'])).trim() || baseRef;
-    } catch {
-        forkPoint = baseRef;
-    }
+    const forkPoint = await mergeBase(cwd, baseRef);
 
     const stateByPath = new Map<string, GitFileState>();
     try {
@@ -229,7 +232,7 @@ export interface FileDiff {
     tooLarge: boolean;
 }
 
-export async function fileDiff(cwd: string, relPath: string): Promise<FileDiff> {
+export async function fileDiff(cwd: string, relPath: string, opts: { baseRef?: string | null } = {}): Promise<FileDiff> {
     // Paths from `status` are repo-root-relative; paths clicked in the chat
     // timeline are cwd-relative. Resolve whichever interpretation points at a
     // real file (deleted files fall back to the root interpretation, which is
@@ -250,7 +253,8 @@ export async function fileDiff(cwd: string, relPath: string): Promise<FileDiff> 
     }
     let oldText = '';
     try {
-        oldText = await git(cwd, ['show', `HEAD:${gitPath}`]);
+        const oldRef = opts.baseRef ? await mergeBase(cwd, opts.baseRef) : 'HEAD';
+        oldText = await git(cwd, ['show', `${oldRef}:${gitPath}`]);
     } catch {
         // untracked / newly added / no commits — diff against empty
         oldText = '';

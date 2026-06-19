@@ -1006,12 +1006,22 @@ export function setupIpcHandlers() {
       if (!info.isGitRepo) {
         return { isRepo: false, branch: null, hasCommits: false, files: [] };
       }
-      const files = await codeGit.status(session.cwd);
+      let files = await codeGit.status(session.cwd);
+      if (session.worktree && !session.worktree.removedAt && session.worktree.baseBranch) {
+        const branchFiles = await codeGit.changedSinceBase(session.cwd, session.worktree.baseBranch);
+        const byPath = new Map(branchFiles.map((file) => [file.path, file]));
+        for (const file of files) {
+          if (!byPath.has(file.path)) byPath.set(file.path, file);
+        }
+        files = [...byPath.values()];
+      }
       return { isRepo: true, branch: info.branch, hasCommits: info.hasCommits, files };
     },
     'codeSession:fileDiff': async (_event, args) => {
       const session = await requireCodeSession(args.sessionId);
-      return codeGit.fileDiff(session.cwd, args.path);
+      return codeGit.fileDiff(session.cwd, args.path, {
+        baseRef: session.worktree && !session.worktree.removedAt ? session.worktree.baseBranch : null,
+      });
     },
     'codeSession:readdir': async (_event, args) => {
       const session = await requireCodeSession(args.sessionId);
