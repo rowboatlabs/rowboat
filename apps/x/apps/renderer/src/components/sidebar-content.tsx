@@ -62,6 +62,7 @@ import { SettingsDialog } from "@/components/settings-dialog"
 import { extractConferenceLink } from "@/lib/calendar-event"
 import { useBilling } from "@/hooks/useBilling"
 import { toast } from "@/lib/toast"
+import { getBillingPlanData } from "@x/shared/dist/billing.js"
 import { ServiceEvent } from "@x/shared/src/service-events.js"
 import z from "zod"
 
@@ -89,11 +90,6 @@ type KnowledgeActions = {
   copyPath: (path: string) => void
   revealInFileManager: (path: string, isDir: boolean) => void
   onOpenInNewTab?: (path: string) => void
-}
-
-function formatBillingPlanName(plan: string | null | undefined) {
-  if (!plan) return 'No plan'
-  return `${plan.charAt(0).toUpperCase()}${plan.slice(1)} plan`
 }
 
 function formatAgo(ms: number): string {
@@ -437,6 +433,7 @@ export function SidebarContentPanel({
   const [loggingIn, setLoggingIn] = useState(false)
   const [appUrl, setAppUrl] = useState<string | null>(null)
   const { billing } = useBilling(isRowboatConnected)
+  const currentBillingPlan = billing ? getBillingPlanData(billing.catalog, billing.subscriptionPlanId) : null
 
   // Nav previews: unread important emails + next upcoming meetings (top 2 each).
   const [unreadEmailCount, setUnreadEmailCount] = useState(0)
@@ -921,7 +918,7 @@ export function SidebarContentPanel({
           <div className="flex items-center justify-between rounded-lg border border-sidebar-border bg-sidebar-accent/20 px-3 py-2">
             <div className="min-w-0">
               <span className="text-xs font-medium capitalize text-sidebar-foreground">
-                {formatBillingPlanName(billing.subscriptionPlan)}
+                {currentBillingPlan?.displayName ?? (billing.subscriptionPlanId ? 'Unknown' : 'No plan')}
               </span>
               {billing.subscriptionStatus === 'trialing' && billing.trialExpiresAt && (() => {
                 const days = Math.max(0, Math.ceil((new Date(billing.trialExpiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
@@ -936,7 +933,7 @@ export function SidebarContentPanel({
               onClick={() => appUrl && window.open(`${appUrl}?intent=upgrade`)}
               className="shrink-0 rounded-md bg-sidebar-foreground/10 px-2.5 py-1 text-[11px] font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-foreground/20"
             >
-              {!billing.subscriptionPlan || billing.subscriptionPlan === 'free' || billing.subscriptionPlan === 'starter' ? 'Upgrade' : 'Manage'}
+              {!billing.subscriptionPlanId || currentBillingPlan?.category === 'free' || currentBillingPlan?.category === 'starter' ? 'Upgrade' : 'Manage'}
             </button>
           </div>
         </div>
