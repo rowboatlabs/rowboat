@@ -906,7 +906,7 @@ const AI_GENERATE_SYSTEM =
   '<the email body as plain text>\n' +
   'Do not use markdown. Do not add any commentary, labels, or surrounding quotes. ' +
   'When recipient names are provided, address them naturally (e.g. "Hi <first name>,"). ' +
-  'When the sender\'s name is provided, sign off with it; otherwise omit the sign-off name ' +
+  'When the sender\'s first name is provided, sign off with that first name only; otherwise omit the sign-off name ' +
   '(never write a placeholder like "[Your Name]").'
 
 const AI_REWRITE_SYSTEM =
@@ -931,8 +931,13 @@ function parseGeneratedEmail(text: string): { subject: string | null; body: stri
   return { subject: null, body: text }
 }
 
-// Guarantee the sender's name signs off the email. If the model already ended
-// with the name (e.g. "Best,\nHarsh"), leave it; otherwise append it.
+function firstNameFromDisplayName(name: string): string {
+  const trimmed = name.trim().replace(/^["']|["']$/g, '')
+  return trimmed.split(/\s+/)[0] || ''
+}
+
+// Guarantee the sender's first name signs off the email. If the model already
+// ended with the name (e.g. "Best,\nHarsh"), leave it; otherwise append it.
 function ensureSignature(body: string, name: string): string {
   const signer = name.trim()
   if (!signer) return body
@@ -977,7 +982,7 @@ const ComposeBox = memo(function ComposeBox({
   const [showCc, setShowCc] = useState<boolean>(initialRecipients.cc.length > 0)
   const [showBcc, setShowBcc] = useState<boolean>(false)
   const [subject, setSubject] = useState<string>(() => (thread ? composeSubject(mode, thread.subject) : ''))
-  const modeLabel = isNew ? 'New message' : mode === 'forward' ? 'Forward' : mode === 'replyAll' ? 'Reply all' : 'Reply'
+  const modeLabel = isNew ? 'New message' : mode === 'forward' ? 'Forward' : mode === 'replyAll' ? 'Reply All' : 'Reply'
 
   const initialContent = useMemo(() => {
     if (!thread) return ''
@@ -1050,6 +1055,7 @@ const ComposeBox = memo(function ComposeBox({
 
   // The signed-in account's display name, used to sign off AI-generated emails.
   const [selfName, setSelfName] = useState<string>('')
+  const selfFirstName = useMemo(() => firstNameFromDisplayName(selfName), [selfName])
   useEffect(() => {
     if (!isNew) return
     let cancelled = false
@@ -1104,7 +1110,7 @@ const ComposeBox = memo(function ComposeBox({
         })
         .filter(Boolean)
       if (recipientNames.length) ctx.push(`Recipient(s): ${recipientNames.join(', ')}`)
-      if (selfName) ctx.push(`Sender's name (sign off as this): ${selfName}`)
+      if (selfFirstName) ctx.push(`Sender's first name (sign off as this): ${selfFirstName}`)
       if (subject.trim()) ctx.push(`Desired subject hint: ${subject.trim()}`)
       if (current) ctx.push(`Existing draft (revise or build on it):\n${current}`)
       prompt = `${ctx.length ? ctx.join('\n') + '\n\n' : ''}Instruction: ${instruction.trim()}`
@@ -1130,8 +1136,8 @@ const ComposeBox = memo(function ComposeBox({
       if (aiMode === 'generate') {
         const { subject: generatedSubject, body } = parseGeneratedEmail(res.text)
         if (generatedSubject) setSubject(generatedSubject)
-        // Always sign off with the account name, even if the model omitted it.
-        const signed = ensureSignature(body, selfName)
+        // Always sign off with the account first name, even if the model omitted it.
+        const signed = ensureSignature(body, selfFirstName)
         editor.chain().focus().selectAll().insertContent(plainTextToHtml(signed)).run()
         setHasGenerated(true)
       } else {
@@ -1495,10 +1501,17 @@ function ThreadDetail({
     return () => { cancelled = true }
   }, [])
 
-  const canReplyAll = useMemo(() => {
-    const { to, cc } = buildRecipients('replyAll', thread, selfEmail)
-    return cc.length > 0 || to.length > 1
-  }, [thread, selfEmail])
+  const replyAllRecipients = useMemo(
+    () => buildRecipients('replyAll', thread, selfEmail),
+    [thread, selfEmail],
+  )
+  const canReplyAll = replyAllRecipients.cc.length > 0 || replyAllRecipients.to.length > 1
+  const replyAllButton = canReplyAll ? (
+    <button type="button" onClick={() => setComposeMode('replyAll')}>
+      <ReplyAll size={16} />
+      Reply All
+    </button>
+  ) : null
 
   const toggleExpand = useCallback((index: number) => {
     setExpandedIndices((prev) => {
@@ -1568,16 +1581,11 @@ function ThreadDetail({
         </div>
 
         <div className="gmail-thread-actions">
+          {replyAllButton}
           <button type="button" onClick={() => setComposeMode('reply')}>
             <Reply size={16} />
             Reply
           </button>
-          {canReplyAll && (
-            <button type="button" onClick={() => setComposeMode('replyAll')}>
-              <ReplyAll size={16} />
-              Reply all
-            </button>
-          )}
           <button type="button" onClick={() => setComposeMode('forward')}>
             <Forward size={16} />
             Forward
