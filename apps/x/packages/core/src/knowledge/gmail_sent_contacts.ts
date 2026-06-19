@@ -6,6 +6,7 @@ import { OAuth2Client } from 'google-auth-library';
 import { WorkDir } from '../config/config.js';
 import { GoogleClientFactory } from './google-client-factory.js';
 import { getUserEmail } from './classify_thread.js';
+import { isAutomatedAddress } from './contact_filters.js';
 
 const STATE_FILE = path.join(WorkDir, 'contacts_sent.json');
 const RECENCY_HALFLIFE_DAYS = 60;
@@ -104,6 +105,7 @@ async function saveState(state: StoredState): Promise<void> {
 function indexFromStored(state: StoredState): Map<string, IndexEntry> {
     const map = new Map<string, IndexEntry>();
     for (const e of state.entries) {
+        if (isAutomatedAddress(e.email)) continue;
         map.set(e.email, {
             name: e.name,
             email: e.email,
@@ -167,6 +169,7 @@ async function ingestMessage(
     ];
     for (const { name, email } of recipients) {
         if (!email || email === selfEmail) continue;
+        if (isAutomatedAddress(email)) continue;
         let entry = map.get(email);
         if (!entry) {
             entry = { name, email, count: 0, lastSeenMs: 0, nameCounts: new Map() };
@@ -374,6 +377,7 @@ export async function searchSentContacts(query: string, opts: SearchOpts = {}): 
     const matches: Array<{ entry: IndexEntry; tier: number; s: number }> = [];
     for (const entry of cachedIndex.values()) {
         if (excluded.has(entry.email)) continue;
+        if (isAutomatedAddress(entry.email)) continue;
         const tier = matchTier(q, entry);
         if (tier < 0) continue;
         matches.push({ entry, tier, s: score(entry, nowMs) });
