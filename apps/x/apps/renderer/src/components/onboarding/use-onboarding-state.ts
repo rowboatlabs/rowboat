@@ -41,6 +41,7 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
   const [testState, setTestState] = useState<{ status: "idle" | "testing" | "success" | "error"; error?: string }>({
     status: "idle",
   })
+  const [connectedFlavors, setConnectedFlavors] = useState<Set<LlmProviderFlavor>>(new Set())
   const [showMoreProviders, setShowMoreProviders] = useState(false)
 
   // OAuth provider states
@@ -409,17 +410,15 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
     onComplete()
   }, [onComplete])
 
-  const handleTestAndSaveLlmConfig = useCallback(async () => {
-    if (!canTest) return
+  // Test the active provider's credentials and persist its config. Returns
+  // whether it succeeded so callers can decide whether to advance or stay.
+  const testAndSaveActiveProvider = useCallback(async (): Promise<boolean> => {
+    if (!canTest) return false
     setTestState({ status: "testing" })
     try {
       const apiKey = activeConfig.apiKey.trim() || undefined
       const baseURL = activeConfig.baseURL.trim() || undefined
-      const provider = {
-        flavor: llmProvider,
-        apiKey,
-        baseURL,
-      }
+      const provider = { flavor: llmProvider, apiKey, baseURL }
 
       // Fetch the provider's models from the key — this both validates the
       // credentials and gives us the list to populate the chat picker.
@@ -427,33 +426,48 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
       if (!result.success) {
         setTestState({ status: "error", error: result.error })
         toast.error(result.error || "Connection test failed")
-        return
+        return false
       }
 
       const models: string[] = result.models ?? []
       const preferred = preferredDefaults[llmProvider]
       const model =
         (preferred && models.includes(preferred) && preferred) ||
-        models[0] ||
-        activeConfig.model.trim() ||
-        ""
+        models[0] || activeConfig.model.trim() || ""
 
-      const providerConfig = {
-        provider,
-        model,
-        models,
-      }
-
-      setTestState({ status: "success" })
-      await window.ipc.invoke("models:saveConfig", providerConfig)
+      await window.ipc.invoke("models:saveConfig", { provider, model, models })
       window.dispatchEvent(new Event('models-config-changed'))
-      handleNext()
+      setTestState({ status: "success" })
+      setConnectedFlavors(prev => new Set(prev).add(llmProvider))
+      return true
     } catch (error) {
       console.error("Connection test failed:", error)
       setTestState({ status: "error", error: "Connection test failed" })
       toast.error("Connection test failed")
+      return false
     }
-  }, [activeConfig.apiKey, activeConfig.baseURL, activeConfig.model, canTest, llmProvider, handleNext])
+  }, [activeConfig.apiKey, activeConfig.baseURL, activeConfig.model, canTest, llmProvider])
+
+  // Save the active provider and advance to the next step.
+  const handleTestAndSaveLlmConfig = useCallback(async () => {
+    const ok = await testAndSaveActiveProvider()
+    if (ok) handleNext()
+  }, [testAndSaveActiveProvider, handleNext])
+
+  // Save the active provider but stay on the step. Switch to the next provider the
+  // user hasn't connected yet so the form is fresh and the buttons re-enable once
+  // they enter that key. (Clearing the current field instead left the buttons
+  // disabled on an empty form with no clear next step.)
+  const handleTestAndAddAnother = useCallback(async () => {
+    const ok = await testAndSaveActiveProvider()
+    if (!ok) return
+    // setConnectedFlavors is async, so include the just-saved provider here.
+    const connectedNow = new Set(connectedFlavors).add(llmProvider)
+    const order: LlmProviderFlavor[] = ["openai", "anthropic", "google", "openrouter", "aigateway", "ollama", "openai-compatible"]
+    const next = order.find(p => !connectedNow.has(p))
+    if (next) setLlmProvider(next)
+    setTestState({ status: "idle" })
+  }, [testAndSaveActiveProvider, connectedFlavors, llmProvider])
 
   // Check connection status for all providers
   const refreshAllStatuses = useCallback(async () => {
@@ -639,10 +653,12 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
     showBaseURL,
     isLocalProvider,
     canTest,
+    connectedFlavors,
     showMoreProviders,
     setShowMoreProviders,
     updateProviderConfig,
     handleTestAndSaveLlmConfig,
+    handleTestAndAddAnother,
 
     // OAuth state
     providers,
