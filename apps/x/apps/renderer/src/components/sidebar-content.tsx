@@ -819,7 +819,7 @@ export function SidebarContentPanel({
                 >
                   <FileText className="size-4 shrink-0" />
                   <div className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate">Knowledge</span>
+                    <span className="truncate">Brain</span>
                     {knowledgeUpdatedLabel && (
                       <span className="truncate text-[11px] text-muted-foreground">{knowledgeUpdatedLabel}</span>
                     )}

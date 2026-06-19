@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   ArrowLeft,
   ChevronRight,
@@ -46,17 +46,21 @@ export type KnowledgeViewActions = {
   onOpenInNewTab?: (path: string) => void
 }
 
+export type KnowledgeViewMode = 'graph' | 'basis' | 'files'
+
 type KnowledgeViewProps = {
   tree: TreeNode[]
   actions: KnowledgeViewActions
+  mode: KnowledgeViewMode
+  onModeChange: (mode: KnowledgeViewMode) => void
+  graphContent: ReactNode
+  basisContent: ReactNode
   // Folder currently being browsed (null = root overview). Controlled by the
   // app so drill-down participates in the global back/forward history.
   folderPath: string | null
   onNavigateFolder: (path: string | null) => void
   onOpenNote: (path: string) => void
-  onOpenGraph: () => void
   onOpenSearch: () => void
-  onOpenBases: () => void
   onVoiceNoteCreated?: (path: string) => void
 }
 
@@ -145,12 +149,14 @@ function displayName(node: TreeNode): string {
 export function KnowledgeView({
   tree,
   actions,
+  mode,
+  onModeChange,
+  graphContent,
+  basisContent,
   folderPath,
   onNavigateFolder,
   onOpenNote,
-  onOpenGraph,
   onOpenSearch,
-  onOpenBases,
   onVoiceNoteCreated,
 }: KnowledgeViewProps) {
   const [renameTarget, setRenameTarget] = useState<string | null>(null)
@@ -184,27 +190,46 @@ export function KnowledgeView({
     <div className="flex h-full flex-col overflow-hidden">
       <div className="shrink-0 flex items-start justify-between gap-4 border-b border-border px-8 py-6">
         <div className="min-w-0">
-          <h1 className="text-2xl font-bold tracking-tight">Notes</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Brain</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             {totalNotes} {totalNotes === 1 ? 'note' : 'notes'} across {folders.length}{' '}
             {folders.length === 1 ? 'folder' : 'folders'}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          <div className="inline-flex overflow-hidden rounded-lg border border-border bg-background">
+            <ViewModeButton
+              icon={Network}
+              label="Graph"
+              active={mode === 'graph'}
+              onClick={() => onModeChange('graph')}
+            />
+            <ViewModeButton
+              icon={Table2}
+              label="Base"
+              active={mode === 'basis'}
+              onClick={() => onModeChange('basis')}
+            />
+            <ViewModeButton
+              icon={FileText}
+              label="Files"
+              active={mode === 'files'}
+              onClick={() => onModeChange('files')}
+            />
+          </div>
           <VoiceNoteButton onNoteCreated={onVoiceNoteCreated} />
-          <SecondaryButton icon={SearchIcon} label="Search" onClick={onOpenSearch} />
-          <SecondaryButton icon={Network} label="Graph" onClick={onOpenGraph} />
-          <button
-            type="button"
-            onClick={() => actions.createNote(currentFolder?.path)}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-          >
-            <FilePlus className="size-4" />
-            <span>New note</span>
-          </button>
         </div>
       </div>
 
+      {mode === 'graph' ? (
+        <div className="flex-1 min-h-0 overflow-hidden">
+          {graphContent}
+        </div>
+      ) : mode === 'basis' ? (
+        <div className="flex-1 min-h-0 overflow-hidden">
+          {basisContent}
+        </div>
+      ) : (
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-3xl px-8 py-6">
           {currentFolder ? (
@@ -267,11 +292,12 @@ export function KnowledgeView({
           <QuickActions
             actions={actions}
             currentFolder={currentFolder}
-            onOpenBases={onOpenBases}
+            onOpenSearch={onOpenSearch}
             onFolderCreated={setRenameTarget}
           />
         </div>
       </div>
+      )}
     </div>
   )
 }
@@ -279,12 +305,12 @@ export function KnowledgeView({
 function QuickActions({
   actions,
   currentFolder,
-  onOpenBases,
+  onOpenSearch,
   onFolderCreated,
 }: {
   actions: KnowledgeViewActions
   currentFolder: TreeNode | null
-  onOpenBases: () => void
+  onOpenSearch: () => void
   onFolderCreated: (path: string) => void
 }) {
   // Inside a folder these target that folder; at the root they target knowledge/.
@@ -294,6 +320,7 @@ function QuickActions({
       <SectionHeader label="Quick actions" />
       <div className="flex flex-wrap gap-2">
         <QuickAction icon={FilePlus} label="New note" onClick={() => actions.createNote(parent)} />
+        <QuickAction icon={SearchIcon} label="Search" onClick={onOpenSearch} />
         <QuickAction
           icon={FolderPlus}
           label="New folder"
@@ -304,7 +331,6 @@ function QuickActions({
             } catch { /* ignore */ }
           }}
         />
-        <QuickAction icon={Table2} label="Open as base" onClick={onOpenBases} />
         <QuickAction
           icon={FolderOpen}
           label={`Reveal in ${getFileManagerName()}`}
@@ -315,20 +341,26 @@ function QuickActions({
   )
 }
 
-function SecondaryButton({
+function ViewModeButton({
   icon: Icon,
   label,
+  active,
   onClick,
 }: {
   icon: typeof SearchIcon
   label: string
+  active: boolean
   onClick: () => void
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-accent"
+      aria-pressed={active}
+      className={cn(
+        'inline-flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors',
+        active ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
+      )}
     >
       <Icon className="size-4" />
       <span>{label}</span>
@@ -532,7 +564,7 @@ function FolderDetail({
           onClick={() => onNavigate(null)}
           className="rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         >
-          Notes
+          Brain
         </button>
         {crumbs.map((c, i) => (
           <span key={c.path} className="flex min-w-0 items-center gap-1.5">
