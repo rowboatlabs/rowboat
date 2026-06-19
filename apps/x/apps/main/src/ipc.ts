@@ -1606,6 +1606,7 @@ export function setupIpcHandlers() {
           name: args.name,
           instructions: args.instructions,
           ...(args.triggers ? { triggers: args.triggers } : {}),
+          ...(args.projectId ? { projectId: args.projectId } : {}),
           ...(args.model ? { model: args.model } : {}),
           ...(args.provider ? { provider: args.provider } : {}),
         });

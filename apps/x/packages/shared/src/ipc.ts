@@ -1299,6 +1299,7 @@ const ipcSchemas = {
       name: z.string(),
       instructions: z.string(),
       triggers: TriggersSchema.optional(),
+      projectId: z.string().optional(),
       model: z.string().optional(),
       provider: z.string().optional(),
     }),
