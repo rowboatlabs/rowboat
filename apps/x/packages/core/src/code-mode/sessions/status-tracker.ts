@@ -107,6 +107,9 @@ export class CodeSessionStatusTracker {
     }
 
     private async notify(sessionId: string, previous: CodeSessionStatus, next: CodeSessionStatus): Promise<void> {
+        const session = await this.codeSessionsRepo.get(sessionId);
+        if (session?.suppressNotifications) return;
+
         let notificationService: INotificationService;
         try {
             notificationService = container.resolve<INotificationService>('notificationService');
@@ -114,7 +117,6 @@ export class CodeSessionStatusTracker {
             return; // not registered (e.g. tests)
         }
         if (!notificationService.isSupported()) return;
-        const session = await this.codeSessionsRepo.get(sessionId);
         const title = session?.title ?? 'Coding session';
         if (next === 'needs-you') {
             notificationService.notify({

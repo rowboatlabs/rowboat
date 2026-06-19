@@ -286,6 +286,7 @@ export async function launchCodeTask(args: LaunchCodeTaskArgs): Promise<LaunchCo
             mode: 'direct',
             policy: 'yolo',
             isolation: 'worktree',
+            suppressNotifications: true,
         });
     } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);

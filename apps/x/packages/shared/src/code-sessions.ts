@@ -53,6 +53,7 @@ export const CodeSession = z.object({
     // Where the agent works: the project path, or the worktree path.
     cwd: z.string(),
     worktree: CodeWorktree.optional(),
+    suppressNotifications: z.boolean().optional(),
     createdAt: z.iso.datetime(),
     lastActivityAt: z.iso.datetime().optional(),
 });

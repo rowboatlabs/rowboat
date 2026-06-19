@@ -27,6 +27,7 @@ export interface CreateSessionArgs {
     // LLM for Rowboat-mode turns; unset falls through to the configured default.
     model?: string;
     provider?: string;
+    suppressNotifications?: boolean;
 }
 
 export interface SendMessageResult {
@@ -142,6 +143,7 @@ export class CodeSessionService {
             policy: args.policy,
             cwd,
             ...(worktree ? { worktree } : {}),
+            ...(args.suppressNotifications ? { suppressNotifications: true } : {}),
             createdAt: new Date().toISOString(),
         };
         await this.codeSessionsRepo.save(session);

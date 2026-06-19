@@ -18,6 +18,7 @@ import { getFileAccessAllowList, type FileAccessGrant, type FileAccessOperation 
 import { resolveFilePathForPermission } from "../filesystem/files.js";
 import container from "../di/container.js";
 import { notifyIfEnabled } from "../application/notification/notifier.js";
+import { shouldSuppressRunNotifications } from "../application/notification/policy.js";
 import { IModelConfigRepo } from "../models/repo.js";
 import { createProvider } from "../models/models.js";
 import { resolveProviderConfig } from "../models/defaults.js";
@@ -447,7 +448,7 @@ export class AgentRuntime implements IAgentRuntime {
                     for (const event of finalRun.log) {
                         finalState.ingest(event);
                     }
-                    if (finalState.getPendingPermissions().length === 0) {
+                    if (finalState.getPendingPermissions().length === 0 && !shouldSuppressRunNotifications(finalState.runUseCase, finalState.runSubUseCase)) {
                         void notifyIfEnabled("chat_completion", {
                             title: "Response ready",
                             message: "Your agent finished responding.",
@@ -1578,6 +1579,7 @@ If the user's message is clearly NOT a coding request (small talk, an unrelated 
                 // Permission prompts block the run, so they surface even when the
                 // app is focused (no onlyWhenBackground gate).
                 const notifyPermissionPrompt = (toolCall: typeof permissionCandidates[number]["toolCall"]) => {
+                    if (shouldSuppressRunNotifications(state.runUseCase, state.runSubUseCase)) return;
                     void notifyIfEnabled("agent_permission", {
                         title: "Permission needed",
                         message: `${agent.name} wants to run "${toolCall.toolName}". Review to continue.`,
