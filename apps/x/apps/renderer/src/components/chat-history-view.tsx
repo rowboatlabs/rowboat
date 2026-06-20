@@ -23,6 +23,7 @@ type Run = {
   id: string
   title?: string
   createdAt: string
+  modifiedAt: string
   agentId: string
 }
 
@@ -51,8 +52,8 @@ export function ChatHistoryView({
 
   const sortedRuns = useMemo(() => {
     return [...runs].sort((a, b) => {
-      const at = new Date(a.createdAt).getTime()
-      const bt = new Date(b.createdAt).getTime()
+      const at = new Date(a.modifiedAt).getTime()
+      const bt = new Date(b.modifiedAt).getTime()
       return (Number.isNaN(bt) ? 0 : bt) - (Number.isNaN(at) ? 0 : at)
     })
   }, [runs])
@@ -92,7 +93,7 @@ export function ChatHistoryView({
         <div className="min-w-[480px]">
           <div className="sticky top-0 z-10 flex items-center border-b border-border bg-background px-6 py-2 text-xs font-medium text-muted-foreground">
             <div className="flex-1">Title</div>
-            <div className="w-32 shrink-0">Created</div>
+            <div className="w-32 shrink-0 text-right">Last modified</div>
           </div>
 
           {sortedRuns.length === 0 ? (
@@ -122,8 +123,8 @@ export function ChatHistoryView({
                         <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
                         <span className="min-w-0 truncate">{run.title || '(Untitled chat)'}</span>
                       </div>
-                      <div className="w-32 shrink-0 text-xs text-muted-foreground tabular-nums">
-                        {formatRelativeTime(run.createdAt)}
+                      <div className="w-32 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
+                        {formatRelativeTime(run.modifiedAt)}
                       </div>
                     </button>
                   </ContextMenuTrigger>

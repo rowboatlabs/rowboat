@@ -1759,52 +1759,122 @@ function NoteTaggingSettings({ dialogOpen }: { dialogOpen: boolean }) {
 type AgentStatus = { installed: boolean; signedIn: boolean }
 type CodeModeAgentStatus = { claude: AgentStatus; codex: AgentStatus }
 
+// Engine provisioning runs in the main process and keeps going even if the Settings
+// dialog is closed. Track its state at MODULE level (not in the row component, which
+// unmounts on close) so reopening Settings still shows the live % instead of the Enable
+// button. A single persistent listener on the progress channel feeds this store.
+type ProvState = { pct: number | null; error?: string }
+const provStore: Record<string, ProvState | undefined> = {}
+// Agents we provisioned this session — used to show "Ready" immediately on success
+// without waiting for the async status refresh to round-trip (which caused the row to
+// briefly flash the Enable button again).
+const enabledOptimistic = new Set<string>()
+const provListeners = new Set<() => void>()
+let provChannelHooked = false
+
+function notifyProv() { provListeners.forEach((l) => l()) }
+
+function startProvisioning(agent: 'claude' | 'codex', onDone: () => void | Promise<void>): void {
+  if (provStore[agent] && !provStore[agent]!.error) return // already in flight
+  provStore[agent] = { pct: null }
+  notifyProv()
+  if (!provChannelHooked) {
+    provChannelHooked = true
+    window.ipc.on('codeMode:engineProgress', (p) => {
+      const cur = provStore[p.agent]
+      if (!cur) return
+      const pct = p.totalBytes ? Math.floor(((p.receivedBytes ?? 0) / p.totalBytes) * 100) : cur.pct
+      provStore[p.agent] = { pct }
+      notifyProv()
+    })
+  }
+  window.ipc.invoke('codeMode:provisionEngine', { agent })
+    .then((res) => {
+      if (res.success) {
+        // Mark installed optimistically so the row shows "Ready" the instant the flag
+        // clears — don't depend on the async status refresh (which re-renders the parent
+        // separately and left a window showing the Enable button). loadStatus still runs
+        // in the background to sync the real status.
+        enabledOptimistic.add(agent)
+        provStore[agent] = undefined
+        void onDone()
+      } else {
+        provStore[agent] = { pct: null, error: res.error ?? 'Failed to enable' }
+      }
+    })
+    .catch((e) => { provStore[agent] = { pct: null, error: e instanceof Error ? e.message : 'Failed to enable' } })
+    .finally(notifyProv)
+}
+
+function useProvisioning(agent: string): ProvState | undefined {
+  const [, force] = useState(0)
+  useEffect(() => {
+    const l = () => force((n) => n + 1)
+    provListeners.add(l)
+    return () => { provListeners.delete(l) }
+  }, [])
+  return provStore[agent]
+}
+
 function AgentStatusRow({
   name,
-  installLink,
+  agent,
   signInCommand,
   status,
+  onProvisioned,
 }: {
   name: string
-  installLink: string
+  agent: 'claude' | 'codex'
   signInCommand: string
   status: AgentStatus | null
+  onProvisioned: () => void
 }) {
-  const ready = status?.installed && status?.signedIn
-  const needsSignInOnly = status?.installed && !status?.signedIn
+  const prov = useProvisioning(agent)
+  const provisioning = prov !== undefined && prov.error === undefined
+  const error = prov?.error ?? null
+  const enable = useCallback(() => startProvisioning(agent, onProvisioned), [agent, onProvisioned])
+
+  // Treat a just-enabled engine as installed even before the status refresh lands.
+  const installed = (status?.installed ?? false) || enabledOptimistic.has(agent)
+  const ready = installed && status?.signedIn
   return (
     <div className="rounded-md border px-3 py-2.5 flex items-center gap-3">
       <Terminal className="size-4 text-muted-foreground shrink-0" />
       <div className="flex-1 min-w-0">
         <div className="text-sm font-medium">{name}</div>
         <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-3">
-          <span className={cn("inline-flex items-center gap-1", status?.installed ? "text-green-600" : "text-muted-foreground")}>
-            {status?.installed ? <CheckCircle2 className="size-3" /> : <X className="size-3" />}
-            Installed
+          <span className={cn("inline-flex items-center gap-1", installed ? "text-green-600" : "text-muted-foreground")}>
+            {installed ? <CheckCircle2 className="size-3" /> : <X className="size-3" />}
+            {installed ? 'Engine ready' : 'Not enabled'}
           </span>
           <span className={cn("inline-flex items-center gap-1", status?.signedIn ? "text-green-600" : "text-muted-foreground")}>
             {status?.signedIn ? <CheckCircle2 className="size-3" /> : <X className="size-3" />}
             Signed in
           </span>
         </div>
+        {error && <div className="text-xs text-red-600 mt-1 break-words">{error}</div>}
       </div>
-      {ready ? (
+      {provisioning ? (
+        <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground shrink-0 tabular-nums">
+          <Loader2 className="size-3 animate-spin" />
+          {prov?.pct != null ? `${prov.pct}%` : null}
+        </span>
+      ) : ready ? (
         <span className="rounded-full bg-green-500/10 px-2 py-0.5 text-[10px] font-medium leading-none text-green-600">
           Ready
         </span>
-      ) : needsSignInOnly ? (
+      ) : !installed ? (
+        <button
+          type="button"
+          onClick={enable}
+          className="rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:opacity-90 shrink-0"
+        >
+          Enable
+        </button>
+      ) : (
         <span className="text-xs text-muted-foreground shrink-0">
           Run <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">{signInCommand}</code>
         </span>
-      ) : (
-        <a
-          href={installLink}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-xs text-primary hover:underline shrink-0"
-        >
-          Install &amp; sign in
-        </a>
       )}
     </div>
   )
@@ -1907,6 +1977,14 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
           Requires an active <strong className="text-foreground">Claude Code</strong> subscription or
           a <strong className="text-foreground">ChatGPT/Codex</strong> subscription. You can have one or both.
         </p>
+        <p>
+          For each agent you want to use, you must have it{' '}
+          <strong className="text-foreground">installed and logged in</strong> on this machine: click{' '}
+          <strong className="text-foreground">Enable</strong> below to download its engine, and sign in by
+          running <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">claude login</code>{' '}
+          or <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">codex login</code>{' '}
+          in your terminal. Code mode uses that saved login.
+        </p>
       </div>
 
       <div className="space-y-2">
@@ -1924,15 +2002,17 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
         <div className="space-y-2">
           <AgentStatusRow
             name="Claude Code"
-            installLink="https://claude.ai/code"
+            agent="claude"
             signInCommand="claude login"
             status={status?.claude ?? null}
+            onProvisioned={loadStatus}
           />
           <AgentStatusRow
             name="Codex"
-            installLink="https://developers.openai.com/codex/cli"
+            agent="codex"
             signInCommand="codex login"
             status={status?.codex ?? null}
+            onProvisioned={loadStatus}
           />
         </div>
       </div>
@@ -1984,8 +2064,8 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
         <div className="rounded-md border border-amber-500/40 bg-amber-50/60 dark:bg-amber-950/20 px-3 py-2.5 flex items-start gap-2 text-xs">
           <AlertTriangle className="size-4 text-amber-600 dark:text-amber-500 shrink-0 mt-0.5" />
           <div className="text-amber-900 dark:text-amber-200">
-            Neither Claude Code nor Codex is ready. Install at least one and sign in with a subscription
-            account, then click Re-check.
+            Neither Claude Code nor Codex is ready. Click Enable above to download an engine, sign in with a
+            subscription account, then click Re-check.
           </div>
         </div>
       )}

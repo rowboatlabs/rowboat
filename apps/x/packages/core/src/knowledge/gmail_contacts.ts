@@ -4,6 +4,7 @@ import path from 'path';
 import { WorkDir } from '../config/config.js';
 import type { GmailThreadSnapshot } from './sync_gmail.js';
 import { getAccountEmail } from './sync_gmail.js';
+import { isAutomatedAddress } from './contact_filters.js';
 
 const CACHE_DIR = path.join(WorkDir, 'inbox_lists');
 const INDEX_TTL_MS = 5 * 60 * 1000;
@@ -60,125 +61,6 @@ function parseAddressList(header: string): Array<{ name: string; email: string }
         }
     }
     return result;
-}
-
-// Local-part aliases that are almost always automated/role addresses you don't
-// compose a fresh message to. Matched as a whole segment of the local part
-// (segments split on . _ - +).
-const AUTOMATED_LOCAL_PARTS = new Set([
-    'noreply', 'no-reply', 'donotreply', 'do-not-reply', 'reply',
-    'notifications', 'notification', 'notify',
-    'alerts', 'alert', 'updates', 'update',
-    'news', 'newsletter', 'newsletters',
-    'info', 'information', 'hello', 'hi', 'hey',
-    'welcome', 'onboarding', 'getstarted',
-    'team', 'marketing', 'promo', 'promos', 'promotions',
-    'offer', 'offers', 'deals', 'deal',
-    'accounts', 'account', 'billing', 'invoices', 'statements', 'statement',
-    'learn', 'learning', 'courses',
-    'mailer-daemon', 'mailerdaemon', 'postmaster', 'bounce', 'bounces',
-    'automated', 'auto', 'autoconfirm',
-    'support-bot', 'noticeboard', 'system',
-    'contact', 'connect',
-    'sender', 'broadcast', 'digest', 'campaign', 'campaigns',
-    'support', 'service', 'help', 'helpdesk', 'feedback',
-    'mailer', 'mailers', 'members', 'membership',
-    'careers', 'jobs', 'recruit', 'recruiting',
-    'tickets', 'orders', 'order', 'receipts', 'receipt',
-    'applications', 'apply', 'admissions',
-    'health', 'security', 'auth',
-]);
-
-// Subdomain labels that flag a bulk/marketing infrastructure domain.
-const AUTOMATED_SUBDOMAIN_LABELS = new Set([
-    'mail', 'mailer', 'mailers', 'mailing', 'mailgun', 'sendgrid', 'mta',
-    'email', 'em', 'e', 'm',
-    'news', 'newsletter', 'newsletters',
-    'marketing', 'mkt', 'promo', 'promos', 'offers',
-    'event', 'events', 'ecomm', 'commerce',
-    'notifications', 'notification', 'notify', 'alerts', 'alert', 'updates',
-    'messaging', 'message', 'msg',
-    'noreply', 'donotreply',
-    'creators', 'partners', 'team',
-    'info', 'welcome', 'hi', 'hello',
-    'bounces', 'bounce',
-    'reply', 'user', 'usr', 'auto',
-]);
-
-// Specific bulk-mail provider domains (substring match on full domain).
-const AUTOMATED_DOMAIN_KEYWORDS = [
-    'facebookmail', 'kajabimail', 'substack', 'mailgun', 'sendgrid',
-    'mcsv.net', 'mailchimp', 'mailerlite', 'createsend', 'cmail',
-    'amazonses', 'sparkpost', 'sendinblue', 'brevo',
-    'luma-mail', 'lumamail',
-    'umusic-online', 'icloud-mail',
-];
-
-function localSegments(local: string): string[] {
-    return local.toLowerCase().split(/[._\-+]/).filter(Boolean);
-}
-
-function isAutomatedAddress(email: string): boolean {
-    if (!email) return true;
-    const at = email.indexOf('@');
-    if (at < 0) return true;
-    const local = email.slice(0, at).toLowerCase();
-    const domain = email.slice(at + 1).toLowerCase();
-
-    // Plus-aliased reply bots: `reply+abc123@…`
-    if (/^reply\+/i.test(local)) return true;
-
-    // Whole-segment local-part matches.
-    const segs = localSegments(local);
-    for (const s of segs) {
-        if (AUTOMATED_LOCAL_PARTS.has(s)) return true;
-    }
-    // Some senders pack noise into the local part with no separators
-    // (e.g. `hdfcbanksmartstatement`). Catch the common ones.
-    if (/(no.?reply|do.?not.?reply|notifications?|news.?letter|mailer.?daemon|postmaster|automated|broadcast|statement)/i.test(local)) {
-        return true;
-    }
-
-    // Random-looking machine local parts: long, mostly hex/base32-ish.
-    if (local.length >= 20 && /^[a-z0-9]+(-[a-z0-9]+)*$/.test(local) && /[0-9]/.test(local)) {
-        const digits = (local.match(/[0-9]/g) || []).length;
-        if (digits / local.length >= 0.25) return true;
-    }
-
-    // Subdomain-label check (everything except the registrable last two labels).
-    const labels = domain.split('.');
-    if (labels.length >= 3) {
-        const subs = labels.slice(0, -2);
-        for (const label of subs) {
-            if (AUTOMATED_SUBDOMAIN_LABELS.has(label)) return true;
-        }
-    }
-
-    // Provider keyword anywhere in the domain.
-    for (const kw of AUTOMATED_DOMAIN_KEYWORDS) {
-        if (domain.includes(kw)) return true;
-    }
-
-    // Domain itself contains tell-tale tokens.
-    if (/(^|\.)(mailers?|mailer|mailgun|sendgrid|mailchimp|mailerlite|bounces?|marketing|promo|notifications?|newsletter)(\.|$)/i.test(domain)) {
-        return true;
-    }
-
-    // Marketing-style TLD / second-level domain (e.g. bookmyshow.email,
-    // foo.marketing, bar.news). These domains exist almost exclusively for bulk.
-    const sld = labels[labels.length - 1];
-    if (['email', 'mail', 'marketing', 'promo', 'news', 'newsletter', 'click', 'link'].includes(sld)) {
-        return true;
-    }
-
-    // Brand-identity addresses like `uber@uber.com`, `lenovo@lenovo.com` —
-    // local part equals the first label of the domain. Almost always a
-    // transactional/marketing sender.
-    if (labels.length >= 2 && local === labels[0]) {
-        return true;
-    }
-
-    return false;
 }
 
 function ingestSnapshot(snapshot: GmailThreadSnapshot, selfEmail: string, map: Map<string, IndexEntry>): void {

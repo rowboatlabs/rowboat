@@ -1,7 +1,9 @@
 import { z, ZodType } from "zod";
 import * as path from "path";
+import * as os from "os";
 import * as fs from "fs/promises";
 import { executeCommand, executeCommandAbortable } from "./command-executor.js";
+import { agentSlackShimEnv } from "../../slack/agent-slack-exec.js";
 import { resolveSkill, availableSkills } from "../assistant/skills/index.js";
 import { executeTool, listServers, listTools } from "../../mcp/mcp.js";
 import container from "../../di/container.js";
@@ -19,6 +21,8 @@ import type { CodeModeManager } from "../../code-mode/acp/manager.js";
 import type { CodePermissionRegistry } from "../../code-mode/acp/permission-registry.js";
 import { ICodeModeConfigRepo } from "../../code-mode/repo.js";
 import type { ApprovalPolicy } from "@x/shared/dist/code-mode.js";
+import type { ICodeProjectsRepo } from "../../code-mode/projects/repo.js";
+import * as gitService from "../../code-mode/git/service.js";
 
 // Inputs for the bg-task builtin tools. Reuse the canonical schema field
 // descriptions; only `triggers` gets a tighter contextual override (the
@@ -31,6 +35,9 @@ const CreateBackgroundTaskInput = BackgroundTaskSchema.pick({
     provider: true,
 }).extend({
     triggers: TriggersSchema.optional().describe('All three sub-fields (cronExpr, windows, eventMatchCriteria) are independently optional — mix freely. No triggers at all = manual-only (user clicks Run).'),
+    projectDir: z.string().optional().describe(
+        "Set this ONLY when the user wants the task to WRITE CODE. An absolute path (or ~/…) to a LOCAL GIT REPOSITORY with at least one commit. It turns this into a *coding task*: each run scans the trigger source for actionable items and implements them autonomously in isolated git worktrees off this repo — never touching the user's checkout. Extract the directory from the user's request (e.g. 'use ~/Work/space/test as the work directory'). Omit for ordinary output/action tasks.",
+    ),
 });
 
 const PatchBackgroundTaskInput = BackgroundTaskSchema.pick({
@@ -43,7 +50,43 @@ const PatchBackgroundTaskInput = BackgroundTaskSchema.pick({
 }).partial().extend({
     slug: z.string().describe('The slug of the task to update (the folder name under bg-tasks/).'),
     triggers: TriggersSchema.optional().describe('Replace the triggers object. To remove all triggers (make manual-only) pass an empty object.'),
+    projectDir: z.string().optional().describe("Point an existing task at a code repo (or change which one) to make it a coding task. Absolute path or ~/… to a local git repository with at least one commit. Same rules as on create."),
 });
+
+// Turn a user-supplied directory into a registered code project id. Reuses the
+// same idempotent registry the Code-section picker writes to (add() validates the
+// dir exists & is a directory, and dedupes by resolved path). Returns a soft
+// `warning` — not an error — when the repo isn't yet worktree-ready, so the task
+// still gets created and the copilot can tell the user what to fix.
+function expandHome(p: string): string {
+    const t = p.trim();
+    if (t === '~') return os.homedir();
+    if (t.startsWith('~/') || t.startsWith(`~${path.sep}`)) return path.join(os.homedir(), t.slice(2));
+    return t;
+}
+
+async function resolveCodeProject(dirPath: string): Promise<
+    { ok: true; projectId: string; path: string; warning?: string } | { ok: false; error: string }
+> {
+    const abs = path.resolve(expandHome(dirPath));
+    const projectsRepo = container.resolve<ICodeProjectsRepo>('codeProjectsRepo');
+    let project: Awaited<ReturnType<ICodeProjectsRepo['add']>>;
+    try {
+        project = await projectsRepo.add(abs);
+    } catch (err) {
+        return { ok: false, error: `Could not use '${dirPath}' as a code directory: ${err instanceof Error ? err.message : String(err)}` };
+    }
+    // Worktree isolation needs a real git repo with at least one commit
+    // (codeSessionService.create throws otherwise). Surface it now as a soft
+    // warning rather than letting the next run fail silently.
+    let warning: string | undefined;
+    try {
+        const info = await gitService.repoInfo(project.path);
+        if (!info.isGitRepo) warning = `${project.path} is not a git repository yet — run \`git init\` and make a commit, or the coding sessions will fail.`;
+        else if (!info.hasCommits) warning = `${project.path} has no commits yet — make an initial commit, or the coding sessions will fail.`;
+    } catch { /* best effort — worktree creation will surface it later */ }
+    return { ok: true, projectId: project.id, path: project.path, ...(warning ? { warning } : {}) };
+}
 import { ensureLoaded as ensureBrowserSkillsLoaded, readSkillContent as readBrowserSkillContent, refreshFromRemote as refreshBrowserSkills } from "../browser-skills/index.js";
 import type { ToolContext } from "./exec-tool.js";
 import { generateText } from "ai";
@@ -741,6 +784,9 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
             try {
                 const rootDir = path.resolve(WorkDir);
                 const workingDir = cwd ? path.resolve(rootDir, cwd) : rootDir;
+                // Make `agent-slack` resolvable for skill-authored shell
+                // commands; the shim forwards to the bundled CLI.
+                const env = agentSlackShimEnv(path.join(rootDir, 'bin'));
 
                 // TODO: Re-enable this check
                 // const rootPrefix = rootDir.endsWith(path.sep)
@@ -759,6 +805,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 if (ctx?.signal) {
                     const { promise, process: proc } = executeCommandAbortable(command, {
                         cwd: workingDir,
+                        env,
                         signal: ctx.signal,
                         onData: (chunk: string) => {
                             ctx.publish({
@@ -789,7 +836,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 }
 
                 // Fallback to original for backward compatibility
-                const result = await executeCommand(command, { cwd: workingDir });
+                const result = await executeCommand(command, { cwd: workingDir, env });
 
                 return {
                     success: result.exitCode === 0,
@@ -1486,15 +1533,24 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         inputSchema: CreateBackgroundTaskInput,
         execute: async (input: z.infer<typeof CreateBackgroundTaskInput>) => {
             try {
+                let projectId: string | undefined;
+                let warning: string | undefined;
+                if (input.projectDir) {
+                    const r = await resolveCodeProject(input.projectDir);
+                    if (!r.ok) return { success: false, error: r.error };
+                    projectId = r.projectId;
+                    warning = r.warning;
+                }
                 const { createTask } = await import("../../background-tasks/fileops.js");
                 const result = await createTask({
                     name: input.name,
                     instructions: input.instructions,
                     ...(input.triggers ? { triggers: input.triggers } : {}),
+                    ...(projectId ? { projectId } : {}),
                     ...(input.model ? { model: input.model } : {}),
                     ...(input.provider ? { provider: input.provider } : {}),
                 });
-                return { success: true, slug: result.slug };
+                return { success: true, slug: result.slug, ...(warning ? { warning } : {}) };
             } catch (err) {
                 return { success: false, error: err instanceof Error ? err.message : String(err) };
             }
@@ -1507,9 +1563,16 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         execute: async (input: z.infer<typeof PatchBackgroundTaskInput>) => {
             try {
                 const { patchTask } = await import("../../background-tasks/fileops.js");
-                const { slug, ...partial } = input;
+                const { slug, projectDir, ...partial } = input;
+                let warning: string | undefined;
+                if (projectDir) {
+                    const r = await resolveCodeProject(projectDir);
+                    if (!r.ok) return { success: false, error: r.error };
+                    (partial as { projectId?: string }).projectId = r.projectId;
+                    warning = r.warning;
+                }
                 const result = await patchTask(slug, partial);
-                return { success: true, task: result };
+                return { success: true, task: result, ...(warning ? { warning } : {}) };
             } catch (err) {
                 return { success: false, error: err instanceof Error ? err.message : String(err) };
             }
@@ -1541,6 +1604,35 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
             } catch (err) {
                 const msg = err instanceof Error ? err.message : String(err);
                 return { success: false, error: msg };
+            }
+        },
+    },
+
+    'launch-code-task': {
+        description: "Launch an autonomous coding session that implements a unit of work in the bg-task's pinned code repo. ONLY usable from a coding background task (one with a configured code project). The session runs full-auto in its own isolated git worktree/branch — it never touches the user's checkout — and runs asynchronously: this returns as soon as the session is created, so you can launch several (one per group of related items) in the same run. The tool writes and later updates a row under a `## Code Sessions` section in the task's index.md — do NOT edit that section yourself. Write an excellent, fully self-contained `prompt`: the coding agent has no other context and no human to ask. Group related items into one call; split unrelated items into separate calls.",
+        inputSchema: z.object({
+            taskSlug: z.string().describe("The slug of THIS background task (it's in your run message, e.g. 'implement-meeting-items'). Used to find the pinned repo and to update index.md."),
+            meeting: z.string().min(1).describe("The name/title of the meeting these items came from (e.g. 'Eng Sync — 2026-06-18'). Sessions are grouped under this heading in index.md so the user can see which meeting each change came from."),
+            title: z.string().min(1).max(120).describe("Short human title for this unit of work — one line in index.md (e.g. 'Add retry to upload client')."),
+            items: z.string().min(1).describe("Brief description of the action item(s) this session implements, for the summary row (e.g. 'Fix flaky upload + add retry; raised in standup')."),
+            prompt: z.string().min(1).describe("The full, self-contained coding instruction. Include the concrete goal, relevant context from the meeting, any files/areas to look at, and what 'done' means. The agent runs autonomously with no human — be specific and complete."),
+            context: z.string().optional().describe("Optional extra context, e.g. the relevant excerpt from the meeting."),
+        }),
+        execute: async (input: { taskSlug: string; meeting: string; title: string; items: string; prompt: string; context?: string }, ctx?: ToolContext) => {
+            try {
+                const { launchCodeTask } = await import("../../background-tasks/code-sessions.js");
+                const result = await launchCodeTask({
+                    taskSlug: input.taskSlug,
+                    meeting: input.meeting,
+                    title: input.title,
+                    items: input.items,
+                    prompt: input.prompt,
+                    ...(input.context ? { context: input.context } : {}),
+                    ...(ctx?.runId ? { runId: ctx.runId } : {}),
+                });
+                return result;
+            } catch (err) {
+                return { success: false, error: err instanceof Error ? err.message : String(err) };
             }
         },
     },

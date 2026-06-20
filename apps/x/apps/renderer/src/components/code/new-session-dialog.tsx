@@ -178,7 +178,7 @@ export function NewSessionDialog({
                   >
                     <div className="font-medium">{a === 'claude' ? 'Claude Code' : 'Codex'}</div>
                     <div className="text-[11px] text-muted-foreground">
-                      {ready ? 'Ready' : agentStatus?.[a]?.installed ? 'Not signed in' : 'Not installed'}
+                      {ready ? 'Ready' : agentStatus?.[a]?.installed ? 'Not signed in' : 'Enable in Settings'}
                     </div>
                   </button>
                 )

@@ -37,10 +37,10 @@ import { shutdown as shutdownAnalytics } from "@x/core/dist/analytics/posthog.js
 import { identifyIfSignedIn } from "@x/core/dist/analytics/identify.js";
 
 import { initConfigs } from "@x/core/dist/config/initConfigs.js";
+import { getAgentSlackCliStatus } from "@x/core/dist/slack/agent-slack-exec.js";
 import { resolveWorkspacePath } from "@x/core/dist/workspace/workspace.js";
 import started from "electron-squirrel-startup";
-import { execSync, exec, execFileSync } from "node:child_process";
-import { promisify } from "node:util";
+import { execFileSync } from "node:child_process";
 import { init as initChromeSync } from "@x/core/dist/knowledge/chrome-extension/server/server.js";
 import container, { registerBrowserControlService, registerNotificationService } from "@x/core/dist/di/container.js";
 import type { CodeModeManager } from "@x/core/dist/code-mode/acp/manager.js";
@@ -55,8 +55,6 @@ import {
   setMainWindowForDeepLinks,
 } from "./deeplink.js";
 import { disconnectGoogleIfScopesStale } from "./oauth-handler.js";
-
-const execAsync = promisify(exec);
 
 // Captured as early as possible so it reflects actual process start. Used to
 // gate grace-eligible notifications (e.g. the burst of background-task
@@ -318,18 +316,13 @@ app.whenReady().then(async () => {
     });
   }
 
-  // Ensure agent-slack CLI is available
-  try {
-    execSync('agent-slack --version', { stdio: 'ignore', timeout: 5000 });
-  } catch {
-    try {
-      console.log('agent-slack not found, installing...');
-      await execAsync('npm install -g agent-slack', { timeout: 60000 });
-      console.log('agent-slack installed successfully');
-    } catch (e) {
-      console.error('Failed to install agent-slack:', e);
-    }
-  }
+  // The agent-slack CLI ships bundled with the app (.package/dist/agent-slack.cjs)
+  // and is resolved per call by the shared executor in @x/core. Availability is
+  // exposed to the UI via the slack:cliStatus IPC channel; this startup log is
+  // diagnostics only.
+  getAgentSlackCliStatus().then((status) => {
+    console.log('[Slack] agent-slack CLI status:', status);
+  }).catch(() => { /* probe failures already surface through slack:cliStatus */ });
 
   // Initialize all config files before UI can access them
   await initConfigs();

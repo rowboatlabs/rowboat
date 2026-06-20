@@ -72,6 +72,7 @@ export type StagedAttachment = {
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024 // 10MB
 const MAX_VISIBLE_RECENT_WORK_DIRS = 3
 const MAX_STORED_RECENT_WORK_DIRS = 8
+const CHAT_INPUT_TOOLTIP_DELAY_MS = 1000
 // Stored in the workspace (~/.rowboat/config) so it travels with the workspace and
 // stays consistent with the other config/*.json files (e.g. coding-agents.json).
 const RECENT_WORK_DIRS_CONFIG_PATH = 'config/recent-work-dirs.json'
@@ -829,7 +830,7 @@ function ChatInputInner({
       <div ref={toolbarRef} className="flex items-center gap-2 px-4 pb-3">
         <div ref={leftGroupRef} className="flex min-w-0 items-center gap-2 overflow-hidden">
         <DropdownMenu>
-          <Tooltip>
+          <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
             <TooltipTrigger asChild>
               <DropdownMenuTrigger asChild>
                 <button
@@ -854,16 +855,18 @@ function ChatInputInner({
 
               {/* A bound code session pins the directory — show it, no controls. */}
               {isCodeLocked ? (
-                <div
-                  title={effectiveWorkDir ?? undefined}
-                  className="flex h-auto items-center gap-2 rounded-[9px] px-2.5 py-2 text-muted-foreground"
-                >
-                  <FolderCheck className="size-4 shrink-0" />
-                  <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                    <span className="truncate text-sm">{currentWorkDirLabel}</span>
-                    <span className="truncate text-xs">Pinned by the coding session</span>
-                  </span>
-                </div>
+                <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
+                  <TooltipTrigger asChild>
+                    <div className="flex h-auto items-center gap-2 rounded-[9px] px-2.5 py-2 text-muted-foreground">
+                      <FolderCheck className="size-4 shrink-0" />
+                      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                        <span className="truncate text-sm">{currentWorkDirLabel}</span>
+                        <span className="truncate text-xs">Pinned by the coding session</span>
+                      </span>
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">{effectiveWorkDir}</TooltipContent>
+                </Tooltip>
               ) : (
               /* Working directory lives behind a submenu so the main menu stays to two
                  items. One hover/click away for power users; out of the way otherwise. */
@@ -880,18 +883,20 @@ function ChatInputInner({
                 <DropdownMenuSubContent className="w-72 max-w-[calc(100vw-2rem)] p-1">
                   {/* Current selection — shown for context only when one is set. */}
                   {workDir && (
-                    <div
-                      title={workDir}
-                      className="mb-1 flex items-center gap-2 rounded-[9px] bg-blue-50/80 px-2.5 py-2 text-blue-700 dark:bg-blue-950/30 dark:text-blue-300"
-                    >
-                      <FolderCheck className="size-4 shrink-0 text-blue-600 dark:text-blue-300" />
-                      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                        <span className="truncate text-sm font-medium">{currentWorkDirLabel}</span>
-                        <span className="truncate text-xs text-blue-700/70 dark:text-blue-300/70">
-                          {currentWorkDirPath}
-                        </span>
-                      </span>
-                    </div>
+                    <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
+                      <TooltipTrigger asChild>
+                        <div className="mb-1 flex items-center gap-2 rounded-[9px] bg-blue-50/80 px-2.5 py-2 text-blue-700 dark:bg-blue-950/30 dark:text-blue-300">
+                          <FolderCheck className="size-4 shrink-0 text-blue-600 dark:text-blue-300" />
+                          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                            <span className="truncate text-sm font-medium">{currentWorkDirLabel}</span>
+                            <span className="truncate text-xs text-blue-700/70 dark:text-blue-300/70">
+                              {currentWorkDirPath}
+                            </span>
+                          </span>
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent side="right">{workDir}</TooltipContent>
+                    </Tooltip>
                   )}
 
                   {/* Primary action: choose when unset, change when set. Always on top. */}
@@ -912,16 +917,19 @@ function ChatInputInner({
                         const name = basename(entry.path) || entry.path
                         const when = formatRecentWorkDirTime(entry.lastUsedAt)
                         return (
-                          <DropdownMenuItem
-                            key={entry.path}
-                            title={entry.path}
-                            onSelect={() => { void handleSelectRecentWorkDir(entry.path) }}
-                            className="h-8 rounded-[9px] px-2.5"
-                          >
-                            <FolderClock className="size-4" />
-                            <span className="min-w-0 flex-1 truncate">{name}</span>
-                            {when && <span className="shrink-0 text-xs text-muted-foreground">{when}</span>}
-                          </DropdownMenuItem>
+                          <Tooltip key={entry.path} delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
+                            <TooltipTrigger asChild>
+                              <DropdownMenuItem
+                                onSelect={() => { void handleSelectRecentWorkDir(entry.path) }}
+                                className="h-8 rounded-[9px] px-2.5"
+                              >
+                                <FolderClock className="size-4" />
+                                <span className="min-w-0 flex-1 truncate">{name}</span>
+                                {when && <span className="shrink-0 text-xs text-muted-foreground">{when}</span>}
+                              </DropdownMenuItem>
+                            </TooltipTrigger>
+                            <TooltipContent side="right">{entry.path}</TooltipContent>
+                          </Tooltip>
                         )
                       })}
                     </>
@@ -947,7 +955,7 @@ function ChatInputInner({
           </DropdownMenuContent>
         </DropdownMenu>
         {effectiveWorkDir && collapseLevel < 8 && (
-          <Tooltip>
+          <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
             <TooltipTrigger asChild>
               {/* Level 4: collapse to a square icon */}
               <div className={cn(
@@ -1007,7 +1015,7 @@ function ChatInputInner({
           </button>
         )}
         {collapseLevel < 6 && (
-        <Tooltip>
+        <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
           <TooltipTrigger asChild>
             <button
               type="button"
@@ -1042,7 +1050,7 @@ function ChatInputInner({
         {codeModeFeatureEnabled && collapseLevel < 5 && ((isCodeLocked || codeModeEnabled) ? (
           collapseLevel >= 1 ? (
             /* Level 1: collapse the pill to a single icon */
-            <Tooltip>
+            <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
               <TooltipTrigger asChild>
                 <button
                   type="button"
@@ -1064,7 +1072,7 @@ function ChatInputInner({
             </Tooltip>
           ) : (
             <div className="flex h-7 shrink-0 items-center rounded-full bg-secondary text-xs font-medium text-foreground">
-              <Tooltip>
+              <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
                 <TooltipTrigger asChild>
                   <button
                     type="button"
@@ -1084,7 +1092,7 @@ function ChatInputInner({
                 </TooltipContent>
               </Tooltip>
               <span className="text-foreground/30">·</span>
-              <Tooltip>
+              <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
                 <TooltipTrigger asChild>
                   <button
                     type="button"
@@ -1107,7 +1115,7 @@ function ChatInputInner({
             </div>
           )
         ) : (
-          <Tooltip>
+          <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
             <TooltipTrigger asChild>
               <button
                 type="button"
@@ -1124,7 +1132,7 @@ function ChatInputInner({
         </div>
         {collapseLevel >= 5 && (
           <DropdownMenu>
-            <Tooltip>
+            <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
               <TooltipTrigger asChild>
                 <DropdownMenuTrigger asChild>
                   <button
@@ -1188,12 +1196,16 @@ function ChatInputInner({
         )}
         <div className="flex-1" />
         {lockedModel ? (
-          <span
-            className="flex h-7 min-w-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground"
-            title={`${providerDisplayNames[lockedModel.provider] || lockedModel.provider} — fixed for this chat`}
-          >
-            <span className="min-w-0 truncate">{getSelectedModelDisplayName(lockedModel.model)}</span>
-          </span>
+          <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
+            <TooltipTrigger asChild>
+              <span className="flex h-7 min-w-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground">
+                <span className="min-w-0 truncate">{getSelectedModelDisplayName(lockedModel.model)}</span>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              {providerDisplayNames[lockedModel.provider] || lockedModel.provider} — fixed for this chat
+            </TooltipContent>
+          </Tooltip>
         ) : configuredModels.length > 0 ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -1224,7 +1236,7 @@ function ChatInputInner({
         ) : null}
         {onToggleTts && ttsAvailable && (
           <div className="flex shrink-0 items-center">
-            <Tooltip>
+            <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
               <TooltipTrigger asChild>
                 <button
                   type="button"
@@ -1280,23 +1292,30 @@ function ChatInputInner({
           </button>
         )}
         {isProcessing ? (
-          <Button
-            size="icon"
-            onClick={onStop}
-            title={isStopping ? 'Click again to force stop' : 'Stop generation'}
-            className={cn(
-              'h-7 w-7 shrink-0 rounded-full transition-all',
-              isStopping
-                ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
-                : 'bg-primary text-primary-foreground hover:bg-primary/90'
-            )}
-          >
-            {isStopping ? (
-              <LoaderIcon className="h-4 w-4 animate-spin" />
-            ) : (
-              <Square className="h-3 w-3 fill-current" />
-            )}
-          </Button>
+          <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
+            <TooltipTrigger asChild>
+              <Button
+                size="icon"
+                onClick={onStop}
+                aria-label={isStopping ? 'Force stop generation' : 'Stop generation'}
+                className={cn(
+                  'h-7 w-7 shrink-0 rounded-full transition-all',
+                  isStopping
+                    ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
+                    : 'bg-primary text-primary-foreground hover:bg-primary/90'
+                )}
+              >
+                {isStopping ? (
+                  <LoaderIcon className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Square className="h-3 w-3 fill-current" />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              {isStopping ? 'Click again to force stop' : 'Stop generation'}
+            </TooltipContent>
+          </Tooltip>
         ) : (
           <Button
             size="icon"

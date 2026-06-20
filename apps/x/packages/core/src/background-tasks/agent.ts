@@ -47,6 +47,12 @@ On every run: perform the action using the appropriate tool (Slack, email, web-f
 
 If your instructions imply BOTH ("summarize and email it"), do both per run.
 
+CODE MODE — implement code via isolated sessions.
+Only available when the run message contains a **"# Coding task"** block (the task is pinned to a code repository). In that case:
+- Detect actionable coding items from the source (e.g. the meeting notes named in the trigger), conservatively. Only implement clearly-scoped, self-contained items. Ambiguous, large/architectural, or other-repo items → list them in \`index.md\` as "needs review"; do not code them.
+- Group related items, then call \`launch-code-task\` once per group (\`taskSlug\` is your own slug). It runs full-auto in an isolated worktree and **owns the \`## Code Sessions\` section of \`index.md\`** — never edit those rows yourself. Write a complete, self-contained \`prompt\`: the coding agent has no other context and no human to ask.
+- If nothing is actionable, launch nothing and say so in your summary.
+
 # Triggers
 
 The run message tells you which trigger fired and how to interpret it:
@@ -76,11 +82,21 @@ The workspace lives at \`${WorkDir}\`.
 `;
 
 export function buildBackgroundTaskAgent(): z.infer<typeof Agent> {
+    // A running bg-task must not manage bg-tasks: re-running itself risks a
+    // recursive cascade, and patch/create can clobber its own task.yaml (a weak
+    // model has done exactly this, dropping the pinned projectId). It implements
+    // code via `launch-code-task`, not by editing task specs.
+    const EXCLUDED = new Set([
+        'executeCommand',       // headless: no interactive approval
+        'code_agent_run',       // headless: needs interactive permission UI
+        'run-background-task-agent',
+        'create-background-task',
+        'patch-background-task',
+    ]);
+
     const tools: Record<string, z.infer<typeof ToolAttachment>> = {};
     for (const name of Object.keys(BuiltinTools)) {
-        // code_agent_run requires an interactive UI for permission approvals — skip it
-        // here (headless) so it can't hang on an approval no one can answer.
-        if (name === 'executeCommand' || name === 'code_agent_run') continue;
+        if (EXCLUDED.has(name)) continue;
         tools[name] = { type: 'builtin', name };
     }
 

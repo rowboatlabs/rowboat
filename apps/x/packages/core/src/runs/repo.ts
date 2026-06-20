@@ -298,14 +298,17 @@ export class FSRunsRepo implements IRunsRepo {
 
         for (const name of selected) {
             const runId = name.slice(0, -'.jsonl'.length);
-            const metadata = await this.readRunMetadata(path.join(runsDir, name));
+            const filePath = path.join(runsDir, name);
+            const metadata = await this.readRunMetadata(filePath);
             if (!metadata) {
                 continue;
             }
+            const stat = await fsp.stat(filePath);
             runs.push({
                 id: runId,
                 title: metadata.title,
                 createdAt: metadata.start.ts!,
+                modifiedAt: stat.mtime.toISOString(),
                 agentId: metadata.start.agentName,
                 ...(metadata.start.useCase ? { useCase: metadata.start.useCase } : {}),
             });

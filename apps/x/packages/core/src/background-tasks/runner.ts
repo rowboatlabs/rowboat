@@ -32,11 +32,31 @@ const BG_TASK_EVENT_DECISION_DIRECTIVE = '**Decision:** Determine whether this e
 
 const BG_TASK_MANUAL_PAREN = 'user-triggered — either the Run button in the Background Task detail view or the `run-background-task-agent` tool';
 
+function buildCodeBlock(slug: string, project: { id: string; path: string; name: string }): string {
+    return `
+
+# Coding task
+
+This is a **coding task**. It is pinned to a code repository:
+- **Project:** ${project.name}
+- **Path:** \`${project.path}\`
+
+Your job this run:
+1. Read the relevant source (e.g. the meeting notes named in the trigger below) and identify **actionable coding items** — bugs to fix, features to build, concrete changes requested.
+2. Be **conservative**: only implement items that are clearly scoped and self-contained. Items that are ambiguous, large/architectural, or about a different repository — do NOT code them. List them briefly in \`index.md\` as "needs review" instead.
+3. **Group** related items together; keep unrelated items separate.
+4. For each group, call the \`launch-code-task\` tool with \`taskSlug: "${slug}"\`, the \`meeting\` name/title these items came from (so sessions are grouped by meeting), a short \`title\`, the \`items\` summary, and a **detailed, fully self-contained \`prompt\`** describing exactly what to implement (the coding agent has no other context and no human to ask). Put the relevant meeting excerpt in \`context\`.
+5. \`launch-code-task\` runs asynchronously in an isolated git worktree (full-auto) and manages a \`## Code Sessions\` section in \`index.md\` itself — **do not edit that section.** You may add a short note ABOVE it summarizing what you detected.
+
+If there are no actionable coding items, launch nothing and say so in your final summary.`;
+}
+
 function buildMessage(
     slug: string,
     task: BackgroundTask,
     trigger: BackgroundTaskTriggerType,
     context?: string,
+    codeProject?: { id: string; path: string; name: string },
 ): string {
     const now = new Date();
     const localNow = now.toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'long' });
@@ -51,7 +71,7 @@ function buildMessage(
 **Instructions:**
 ${task.instructions}
 
-Your task folder is \`${wsFolder}\`. The user-visible artifact is \`${wsFolder}index.md\` — read it with \`file-readText\` and update it with \`file-editText\` per the OUTPUT / ACTION mode rule. Do not touch \`${wsFolder}task.yaml\` (the runtime owns it).`;
+Your task folder is \`${wsFolder}\`. The user-visible artifact is \`${wsFolder}index.md\` — read it with \`file-readText\` and update it with \`file-editText\` per the OUTPUT / ACTION mode rule. Do not touch \`${wsFolder}task.yaml\` (the runtime owns it).${codeProject ? buildCodeBlock(slug, codeProject) : ''}`;
 
     return baseMessage + buildTriggerBlock({
         trigger,
@@ -104,6 +124,20 @@ export async function runBackgroundTask(
         // `||` not `??`: an empty-string `task.model` (occasionally synthesized
         // by an LLM call to create-background-task) should fall through to the
         // default just like undefined does.
+        // Coding tasks carry a pinned code project — resolve it so the run
+        // message can tell the agent which repo to work in.
+        let codeProject: { id: string; path: string; name: string } | undefined;
+        if (task.projectId) {
+            try {
+                const { default: container } = await import('../di/container.js');
+                const projectsRepo = container.resolve<import('../code-mode/projects/repo.js').ICodeProjectsRepo>('codeProjectsRepo');
+                const project = await projectsRepo.get(task.projectId);
+                if (project) codeProject = { id: project.id, path: project.path, name: project.name };
+            } catch (err) {
+                log.log(`${slug} — could not resolve code project ${task.projectId}: ${err instanceof Error ? err.message : String(err)}`);
+            }
+        }
+
         const model = task.model || await getBackgroundTaskAgentModel();
         const agentRun = await createRun({
             agentId: 'background-task-agent',
@@ -130,9 +164,16 @@ export async function runBackgroundTask(
         // we leave `lastRunAt` / `lastRunSummary` / `lastRunError` untouched —
         // the previous successful run stays visible in the UI even while this
         // new run is in-flight or fails.
+        // `projectId` is runtime-owned config the agent must never lose. A weak
+        // model can clobber task.yaml mid-run (despite "never touch this"), which
+        // would silently disable coding on later runs — so we re-assert it on
+        // every patch to self-heal.
+        const heal = task.projectId ? { projectId: task.projectId } : {};
+
         await patchTask(slug, {
             lastAttemptAt: startedAt,
             lastRunId: runId,
+            ...heal,
         });
 
         backgroundTaskBus.publish({
@@ -153,7 +194,7 @@ export async function runBackgroundTask(
             // the trigger point instead.)
             await withUseCase(
                 { useCase: 'background_task_agent', subUseCase: trigger },
-                () => createMessage(runId, buildMessage(slug, task, trigger, context)),
+                () => createMessage(runId, buildMessage(slug, task, trigger, context, codeProject)),
             );
             await waitForRunCompletion(runId, { throwOnError: true });
             const summary = await extractAgentResponse(runId);
@@ -163,6 +204,7 @@ export async function runBackgroundTask(
                 lastRunAt: new Date().toISOString(),
                 lastRunSummary: summary ?? undefined,
                 lastRunError: undefined,
+                ...heal,
             });
 
             log.log(`${slug} — done summary="${truncate(summary)}"`);
@@ -183,7 +225,7 @@ export async function runBackgroundTask(
             // state; the scheduler's backoff (lastAttemptAt + 5min) prevents
             // retry-storming.
             try {
-                await patchTask(slug, { lastRunError: msg });
+                await patchTask(slug, { lastRunError: msg, ...heal });
             } catch {
                 // don't mask the original error
             }

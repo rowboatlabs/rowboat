@@ -4,6 +4,7 @@ import {
     ListChecks, Play, Square, Loader2, Trash2, Plus, X, AlertCircle,
     Repeat, Clock, Zap, ChevronLeft, ChevronDown, ChevronRight,
     Pencil, Check, PanelRightClose, PanelRightOpen, Sparkles,
+    Code2, FolderOpen, LayoutTemplate,
 } from 'lucide-react'
 import type { z } from 'zod'
 import type { BackgroundTask, BackgroundTaskSummary, Triggers } from '@x/shared/dist/background-task.js'
@@ -271,7 +272,16 @@ function TriggersEditor({
 // New Task dialog
 // ---------------------------------------------------------------------------
 
-type DialogMode = 'describe' | 'manual'
+type DialogMode = 'describe' | 'manual' | 'templates' | 'coding'
+
+// Prefills for the "Coding from meetings" preset.
+const CODING_PRESET = {
+    name: 'Implement coding items from meetings',
+    instructions: `After a meeting's notes are ready, scan them for coding action items (bugs to fix, features to build, concrete changes requested) for me or my team.
+
+Conservatively implement the clearly-scoped, self-contained ones in the configured repo using the launch-code-task tool — group related items into one session, split unrelated ones. Note ambiguous, large/architectural, or other-repo items as "needs review" instead of coding them. If nothing is actionable, do nothing.`,
+    eventMatchCriteria: `A meeting's notes or transcript just became available (engineering standup, planning, sprint, or technical discussion) that may contain coding action items, bugs to fix, or features to build.`,
+}
 
 function NewTaskDialog({
     open,
@@ -295,6 +305,9 @@ function NewTaskDialog({
     const [name, setName] = useState('')
     const [instructions, setInstructions] = useState('')
     const [triggers, setTriggers] = useState<Triggers | undefined>(undefined)
+    const [projectId, setProjectId] = useState<string | undefined>(undefined)
+    const [projectName, setProjectName] = useState<string | undefined>(undefined)
+    const [addingProject, setAddingProject] = useState(false)
     const [submitting, setSubmitting] = useState(false)
 
     useEffect(() => {
@@ -304,11 +317,64 @@ function NewTaskDialog({
             setName('')
             setInstructions('')
             setTriggers(undefined)
+            setProjectId(undefined)
+            setProjectName(undefined)
         }
     }, [open, copilotEnabled])
 
+    // Switch into the coding preset: prefill name/instructions/trigger once.
+    const enterCodingMode = () => {
+        setMode('coding')
+        setName(CODING_PRESET.name)
+        setInstructions(CODING_PRESET.instructions)
+        setTriggers({ eventMatchCriteria: CODING_PRESET.eventMatchCriteria })
+    }
+
+    const pickRepo = async () => {
+        setAddingProject(true)
+        try {
+            const res = await window.ipc.invoke('dialog:openDirectory', { title: 'Choose the repository for this task' })
+            const dir = res.path
+            if (!dir) return
+            const added = await window.ipc.invoke('codeProject:add', { path: dir })
+            if (!added.git?.isGitRepo) {
+                toast('That folder is not a git repository — coding tasks need one.', 'error')
+                return
+            }
+            setProjectId(added.project.id)
+            setProjectName(added.project.name)
+        } catch (err) {
+            toast(err instanceof Error ? err.message : String(err), 'error')
+        } finally {
+            setAddingProject(false)
+        }
+    }
+
     const canSubmitDescribe = description.trim().length > 0 && !submitting
     const canSubmitManual = name.trim().length > 0 && instructions.trim().length > 0 && !submitting
+    const canSubmitCoding = name.trim().length > 0 && instructions.trim().length > 0 && !!projectId && !submitting
+
+    const submitCoding = async () => {
+        if (!canSubmitCoding) return
+        setSubmitting(true)
+        try {
+            const result = await window.ipc.invoke('bg-task:create', {
+                name: name.trim(),
+                instructions: instructions.trim(),
+                ...(triggers ? { triggers } : {}),
+                ...(projectId ? { projectId } : {}),
+            })
+            if (result.success && result.slug) {
+                onCreated(result.slug)
+            } else {
+                toast(result.error ?? 'Failed to create task', 'error')
+            }
+        } catch (err) {
+            toast(err instanceof Error ? err.message : String(err), 'error')
+        } finally {
+            setSubmitting(false)
+        }
+    }
 
     const submitDescribe = () => {
         if (!canSubmitDescribe || !onCreateWithCopilot) return
@@ -359,7 +425,116 @@ function NewTaskDialog({
                     </button>
                 </div>
 
-                {mode === 'describe' ? (
+                {(mode === 'describe' || mode === 'manual') && (
+                    <button
+                        type="button"
+                        onClick={() => setMode('templates')}
+                        className="mb-4 flex w-full items-center justify-between gap-2 rounded-md border border-dashed bg-muted/40 px-3 py-2 text-left text-[12px] hover:border-solid hover:bg-accent"
+                    >
+                        <span className="flex items-center gap-2">
+                            <LayoutTemplate className="size-4 shrink-0 text-muted-foreground" />
+                            <span className="font-medium">View available templates</span>
+                        </span>
+                        <ChevronRight className="size-4 text-muted-foreground" />
+                    </button>
+                )}
+
+                {mode === 'templates' ? (
+                    <>
+                        <div className="space-y-2">
+                            {[
+                                {
+                                    id: 'coding-from-meetings',
+                                    title: 'Coding from meetings',
+                                    description: "When a meeting's notes are ready, scan them for coding action items and auto-implement them in a repo — each on its own isolated branch, with a summary.",
+                                    icon: Code2,
+                                    onSelect: enterCodingMode,
+                                },
+                            ].map(preset => (
+                                <button
+                                    key={preset.id}
+                                    type="button"
+                                    onClick={preset.onSelect}
+                                    className="flex w-full items-start gap-2.5 rounded-md border bg-muted/40 px-3 py-2.5 text-left hover:border-foreground/30 hover:bg-accent"
+                                >
+                                    <preset.icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                                    <span className="min-w-0">
+                                        <span className="block text-[12.5px] font-medium">{preset.title}</span>
+                                        <span className="mt-0.5 block text-[11px] leading-snug text-muted-foreground">{preset.description}</span>
+                                    </span>
+                                </button>
+                            ))}
+                        </div>
+
+                        <div className="mt-5 flex items-center justify-between gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setMode(copilotEnabled ? 'describe' : 'manual')}
+                                className="text-[11px] text-muted-foreground hover:text-foreground"
+                            >
+                                ← Back
+                            </button>
+                            <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
+                        </div>
+                    </>
+                ) : mode === 'coding' ? (
+                    <>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Repository</label>
+                                {projectName ? (
+                                    <div className="flex items-center justify-between rounded-md border bg-muted/40 px-3 py-2">
+                                        <span className="flex items-center gap-2 text-[13px]">
+                                            <FolderOpen className="size-4 text-muted-foreground" />
+                                            <span className="font-medium">{projectName}</span>
+                                        </span>
+                                        <button type="button" onClick={pickRepo} className="text-[11px] text-muted-foreground hover:text-foreground" disabled={addingProject}>Change</button>
+                                    </div>
+                                ) : (
+                                    <Button variant="outline" size="sm" onClick={pickRepo} disabled={addingProject}>
+                                        {addingProject ? <Loader2 className="mr-1 size-3 animate-spin" /> : <FolderOpen className="mr-1 size-3" />}
+                                        Choose a git repository…
+                                    </Button>
+                                )}
+                                <p className="mt-1 text-[11px] text-muted-foreground">
+                                    Code changes run full-auto in an isolated git worktree — your working checkout is never touched.
+                                </p>
+                            </div>
+                            <div>
+                                <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Name</label>
+                                <Input value={name} onChange={e => setName(e.target.value)} />
+                            </div>
+                            <div>
+                                <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Instructions</label>
+                                <Textarea value={instructions} onChange={e => setInstructions(e.target.value)} rows={6} className="text-[12.5px] leading-relaxed" />
+                            </div>
+                            <div>
+                                <label className="mb-2 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Triggers</label>
+                                <TriggersEditor value={triggers} onChange={setTriggers} />
+                                <p className="mt-2 text-[11px] text-muted-foreground">
+                                    Prefilled to fire when a meeting's notes become available. Adjust if you want.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div className="mt-5 flex items-center justify-between gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setMode(copilotEnabled ? 'describe' : 'manual')}
+                                className="text-[11px] text-muted-foreground hover:text-foreground"
+                            >
+                                ← Back
+                            </button>
+                            <div className="flex items-center gap-2">
+                                <Button variant="outline" size="sm" onClick={onClose} disabled={submitting}>Cancel</Button>
+                                <Button size="sm" onClick={submitCoding} disabled={!canSubmitCoding}>
+                                    {submitting && <Loader2 className="mr-1 size-3 animate-spin" />}
+                                    Create
+                                </Button>
+                            </div>
+                        </div>
+                    </>
+                ) : mode === 'describe' ? (
                     <>
                         <Textarea
                             value={description}

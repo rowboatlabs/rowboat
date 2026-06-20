@@ -44,6 +44,11 @@ const POLICY_LABEL: Record<ApprovalPolicy, string> = {
   'auto-approve-reads': 'Auto-approve reads',
   yolo: 'Auto-approve everything',
 }
+const POLICY_HEADER_LABEL: Record<ApprovalPolicy, string> = {
+  ask: 'Ask',
+  'auto-approve-reads': 'Auto reads',
+  yolo: 'Auto all',
+}
 
 export interface ActiveCodeSession {
   session: CodeSession
@@ -180,45 +185,53 @@ export function CodeView({
       <div className="flex min-w-0 flex-1 flex-col">
         {selectedSession ? (
           <>
-            <div className="flex items-center gap-3 border-b px-4 py-2">
-              <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-start gap-x-3 gap-y-2 border-b px-4 py-2.5">
+              <div className="min-w-64 flex-[1_1_360px]">
                 <div className="truncate text-sm font-medium">{selectedSession.title}</div>
-                <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                  <span>{AGENT_LABEL[selectedSession.agent]}</span>
-                  <span>·</span>
-                  <span className="truncate font-mono" title={selectedSession.cwd}>{selectedSession.cwd}</span>
+                <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+                  <span className="shrink-0 whitespace-nowrap">{AGENT_LABEL[selectedSession.agent]}</span>
+                  <span className="shrink-0 text-muted-foreground/50">·</span>
+                  <span className="min-w-0 max-w-full flex-1 truncate font-mono" title={selectedSession.cwd}>{selectedSession.cwd}</span>
                   {selectedSession.worktree && !selectedSession.worktree.removedAt && (
-                    <span className="flex shrink-0 items-center gap-1 rounded-full bg-muted px-1.5 py-0.5">
+                    <span className="flex min-w-0 max-w-72 shrink items-center gap-1 rounded-full bg-muted px-1.5 py-0.5">
                       <GitBranch className="size-3" />
-                      {selectedSession.worktree.branch}
+                      <span className="truncate">{selectedSession.worktree.branch}</span>
                     </span>
                   )}
                 </div>
               </div>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-muted-foreground">
-                    {POLICY_LABEL[selectedSession.policy]}
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  {(Object.keys(POLICY_LABEL) as ApprovalPolicy[]).map((policy) => (
-                    <DropdownMenuItem key={policy} onClick={() => void handleUpdateSession({ policy })}>
-                      {POLICY_LABEL[policy]}
-                      {selectedSession.policy === policy && <span className="ml-auto">✓</span>}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <label className="flex shrink-0 cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
-                <Bot className="size-3.5" />
-                Rowboat drives
-                <Switch
-                  checked={selectedSession.mode === 'rowboat'}
-                  disabled={busy}
-                  onCheckedChange={(checked) => void handleUpdateSession({ mode: checked ? 'rowboat' : 'direct' })}
-                />
-              </label>
+              <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
+                      title={POLICY_LABEL[selectedSession.policy]}
+                    >
+                      <span className="whitespace-nowrap">{POLICY_HEADER_LABEL[selectedSession.policy]}</span>
+                      <ChevronDown className="size-3" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    {(Object.keys(POLICY_LABEL) as ApprovalPolicy[]).map((policy) => (
+                      <DropdownMenuItem key={policy} onClick={() => void handleUpdateSession({ policy })}>
+                        {POLICY_LABEL[policy]}
+                        {selectedSession.policy === policy && <span className="ml-auto">✓</span>}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <label className="flex shrink-0 cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
+                  <Bot className="size-3.5" />
+                  <span className="whitespace-nowrap">Rowboat drives</span>
+                  <Switch
+                    checked={selectedSession.mode === 'rowboat'}
+                    disabled={busy}
+                    onCheckedChange={(checked) => void handleUpdateSession({ mode: checked ? 'rowboat' : 'direct' })}
+                  />
+                </label>
+              </div>
             </div>
             <div className="min-h-0 flex-1">
               <WorkspacePane
