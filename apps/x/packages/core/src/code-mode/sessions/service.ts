@@ -27,6 +27,10 @@ export interface CreateSessionArgs {
     // LLM for Rowboat-mode turns; unset falls through to the configured default.
     model?: string;
     provider?: string;
+    // The coding agent's own model + reasoning effort (ACP engine); unset leaves
+    // the engine default. Re-applied to the ACP session on every turn.
+    agentModel?: string;
+    agentEffort?: string;
 }
 
 export interface SendMessageResult {
@@ -142,6 +146,8 @@ export class CodeSessionService {
             policy: args.policy,
             cwd,
             ...(worktree ? { worktree } : {}),
+            ...(args.agentModel ? { agentModel: args.agentModel } : {}),
+            ...(args.agentEffort ? { agentEffort: args.agentEffort } : {}),
             createdAt: new Date().toISOString(),
         };
         await this.codeSessionsRepo.save(session);
@@ -149,7 +155,7 @@ export class CodeSessionService {
         return session;
     }
 
-    async update(sessionId: string, patch: Partial<Pick<CodeSession, 'title' | 'mode' | 'policy' | 'agent'>>): Promise<CodeSession> {
+    async update(sessionId: string, patch: Partial<Pick<CodeSession, 'title' | 'mode' | 'policy' | 'agent' | 'agentModel' | 'agentEffort'>>): Promise<CodeSession> {
         const session = await this.codeSessionsRepo.get(sessionId);
         if (!session) throw new Error(`Unknown session: ${sessionId}`);
         const updated: CodeSession = { ...session, ...patch };
@@ -217,6 +223,8 @@ export class CodeSessionService {
                     cwd: session.cwd,
                     prompt: text,
                     policy: session.policy,
+                    ...(session.agentModel ? { model: session.agentModel } : {}),
+                    ...(session.agentEffort ? { effort: session.agentEffort } : {}),
                     signal,
                     suppressReplay: true,
                     onEvent: (event) => {

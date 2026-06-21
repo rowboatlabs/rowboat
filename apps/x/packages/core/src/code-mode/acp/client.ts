@@ -37,6 +37,74 @@ const STARTUP_TIMEOUT_MS = Number(process.env.ROWBOAT_ACP_STARTUP_TIMEOUT_MS) > 
     ? Number(process.env.ROWBOAT_ACP_STARTUP_TIMEOUT_MS)
     : 60_000;
 
+export interface CodeAgentOption { value: string; label: string }
+export interface CodeAgentModelOptions { models: CodeAgentOption[]; efforts: CodeAgentOption[] }
+
+// The agent advertises its model + effort choices on the session it opens (the
+// same data that backs its `/model` picker), in one of two shapes:
+//   - `configOptions`: select options with id "model" / "effort" (Claude).
+//   - `models`: a SessionModelState { availableModels: [{ modelId, name }] }
+//     (Codex — which folds effort into the model id, so no separate effort).
+// We read configOptions first and fall back to `models`, then prepend a
+// synthetic "Default" so the user can always keep the engine default.
+type RawSelectOption = { value?: unknown; name?: unknown; options?: Array<{ value?: unknown; name?: unknown }> };
+type RawConfigOption = { id?: string; options?: RawSelectOption[] };
+type RawModelState = { availableModels?: Array<{ modelId?: unknown; name?: unknown }> };
+
+function withDefault(choices: CodeAgentOption[]): CodeAgentOption[] {
+    return choices.some((c) => c.value === 'default')
+        ? choices
+        : [{ value: 'default', label: 'Default' }, ...choices];
+}
+
+function toChoices(option: RawConfigOption | undefined): CodeAgentOption[] {
+    const flat = (option?.options ?? []).flatMap((o) => (Array.isArray(o.options) ? o.options : [o]));
+    return flat
+        .filter((o): o is { value: string; name?: unknown } => typeof o.value === 'string')
+        .map((o) => ({ value: o.value, label: typeof o.name === 'string' && o.name ? o.name : o.value }));
+}
+
+function modelStateChoices(models: RawModelState | undefined): CodeAgentOption[] {
+    return (models?.availableModels ?? [])
+        .filter((m): m is { modelId: string; name?: unknown } => typeof m.modelId === 'string')
+        .map((m) => ({ value: m.modelId, label: typeof m.name === 'string' && m.name ? m.name : m.modelId }));
+}
+
+export function extractModelOptions(configOptions: unknown, models?: unknown): CodeAgentModelOptions {
+    const list = (Array.isArray(configOptions) ? configOptions : []) as RawConfigOption[];
+    const modelOpt = list.find((o) => o.id === 'model');
+    const effortOpt = list.find((o) => o.id === 'effort');
+    const modelChoices = toChoices(modelOpt);
+    return {
+        // configOptions is authoritative when present; otherwise fall back to the
+        // SessionModelState list (Codex reports models only there).
+        models: withDefault(modelChoices.length ? modelChoices : modelStateChoices(models as RawModelState)),
+        efforts: effortOpt ? withDefault(toChoices(effortOpt)) : [],
+    };
+}
+
+// Claude's `availableModels` exposes its top model only as "Default
+// (recommended)" and omits an explicit "Opus" row (the interactive `/model`
+// lists it, the ACP adapter dedupes it). Surface the canonical aliases
+// explicitly for clarity — the adapter resolves "opus"/"sonnet"/"haiku" to the
+// concrete model. Deduped against what the engine already returned, so in
+// practice this only adds the missing "Opus" entry, placed right after Default.
+const CLAUDE_ALIAS_ROWS: CodeAgentOption[] = [
+    { value: 'opus', label: 'Opus' },
+    { value: 'sonnet', label: 'Sonnet' },
+    { value: 'haiku', label: 'Haiku' },
+];
+
+function withClaudeAliases(options: CodeAgentModelOptions): CodeAgentModelOptions {
+    const have = new Set(options.models.map((m) => m.value));
+    const extra = CLAUDE_ALIAS_ROWS.filter((r) => !have.has(r.value));
+    if (extra.length === 0) return options;
+    const at = options.models.findIndex((m) => m.value === 'default');
+    const models = [...options.models];
+    models.splice(at >= 0 ? at + 1 : 0, 0, ...extra);
+    return { ...options, models };
+}
+
 // Map a raw ACP session/update notification onto our small CodeRunEvent union.
 function toEvent(update: SessionUpdate): CodeRunEvent {
     switch (update.sessionUpdate) {
@@ -180,12 +248,40 @@ export class AcpClient {
         }
     }
 
+    // Open a throwaway session purely to read the agent's advertised model +
+    // effort choices, then let the caller dispose this client. Used for the
+    // model picker before any real session exists.
+    async describeModelOptions(): Promise<CodeAgentModelOptions> {
+        try {
+            const res = await this.withStartupTimeout(this.conn().newSession({ cwd: this.cwd, mcpServers: [] }));
+            const r = res as { configOptions?: unknown; models?: unknown };
+            const options = extractModelOptions(r.configOptions, r.models);
+            return this.agent === 'claude' ? withClaudeAliases(options) : options;
+        } catch (e) {
+            throw this.enrich(e, 'describeModelOptions');
+        }
+    }
+
     async loadSession(sessionId: string): Promise<void> {
         try {
             await this.withStartupTimeout(this.conn().loadSession({ sessionId, cwd: this.cwd, mcpServers: [] }));
         } catch (e) {
             throw this.enrich(e, 'loadSession');
         }
+    }
+
+    // Point the open session at a specific model. The adapter resolves aliases
+    // ("opus"/"sonnet"/…) to concrete ids. Throws if the model is unknown; the
+    // caller applies this best-effort so a bad value never blocks a turn.
+    async setModel(sessionId: string, modelId: string): Promise<void> {
+        await this.conn().unstable_setSessionModel({ sessionId, modelId });
+    }
+
+    // Set the reasoning-effort level via the agent's "effort" config option.
+    // The option only exists for models that support it, so this throws for
+    // others — again applied best-effort by the caller.
+    async setEffort(sessionId: string, value: string): Promise<void> {
+        await this.conn().setSessionConfigOption({ sessionId, configId: 'effort', value });
     }
 
     async prompt(sessionId: string, text: string): Promise<PromptResponse> {
