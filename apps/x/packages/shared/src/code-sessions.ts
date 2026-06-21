@@ -53,10 +53,33 @@ export const CodeSession = z.object({
     // Where the agent works: the project path, or the worktree path.
     cwd: z.string(),
     worktree: CodeWorktree.optional(),
+    // The coding agent's own model + reasoning effort (applied to the ACP engine,
+    // not the Rowboat-mode LLM). Values come from CODE_AGENT_MODELS /
+    // CODE_AGENT_EFFORTS; unset (or 'default') leaves the engine's own default.
+    agentModel: z.string().optional(),
+    agentEffort: z.string().optional(),
     createdAt: z.iso.datetime(),
     lastActivityAt: z.iso.datetime().optional(),
 });
 export type CodeSession = z.infer<typeof CodeSession>;
+
+// Model + effort choices for the ACP coding agents are discovered live from the
+// engine (the same list `/model` shows), not hardcoded — so they always reflect
+// whatever the provider currently offers. See the `codeMode:listModelOptions`
+// IPC and CodeModeManager.listModelOptions. 'default' is a synthetic sentinel
+// meaning "don't override the engine default".
+//
+// Claude exposes model and effort as two independent options; Codex folds the
+// reasoning effort into the model id ("gpt-5-codex[high]") and so reports no
+// separate effort list. The UI renders whatever each agent advertises.
+export const CodeAgentOption = z.object({ value: z.string(), label: z.string() });
+export type CodeAgentOption = z.infer<typeof CodeAgentOption>;
+
+export const CodeAgentModelOptions = z.object({
+    models: z.array(CodeAgentOption),
+    efforts: z.array(CodeAgentOption),
+});
+export type CodeAgentModelOptions = z.infer<typeof CodeAgentModelOptions>;
 
 export const GitFileState = z.enum(["modified", "added", "deleted", "untracked", "renamed"]);
 export type GitFileState = z.infer<typeof GitFileState>;

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Bot, ChevronDown, ChevronUp, Code2, GitBranch, Terminal as TerminalIcon } from 'lucide-react'
-import type { CodeSession, CodeSessionStatus } from '@x/shared/src/code-sessions.js'
+import type { CodeSession, CodeSessionStatus, CodeAgentModelOptions } from '@x/shared/src/code-sessions.js'
+import { fetchCodeAgentOptions, withDefault, optionLabel } from './code-agent-options'
 import type { ApprovalPolicy } from '@x/shared/src/code-mode.js'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -30,6 +31,16 @@ import { TerminalPane } from './terminal-pane'
 const TERMINAL_HEIGHT_STORAGE_KEY = 'x:code-terminal-height'
 const TERMINAL_MIN_HEIGHT = 120
 const TERMINAL_MAX_HEIGHT = 600
+
+// Remember which session was open so leaving the Code section (which unmounts
+// this view) and coming back restores the selection — and with it the chat
+// output in the right pane — instead of dropping back to the empty state.
+const SELECTED_SESSION_STORAGE_KEY = 'x:code-selected-session'
+
+function readStoredSelectedSessionId(): string | null {
+  if (typeof window === 'undefined') return null
+  return window.localStorage.getItem(SELECTED_SESSION_STORAGE_KEY) || null
+}
 
 function readStoredTerminalHeight(): number {
   if (typeof window === 'undefined') return 240
@@ -70,7 +81,7 @@ export function CodeView({
   onDiffOpened?: () => void
 }) {
   const { projects, sessions, statusOf, refresh } = useCodeSessions()
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(readStoredSelectedSessionId)
   const [newSessionProjectId, setNewSessionProjectId] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<CodeSession | null>(null)
   const [terminalOpen, setTerminalOpen] = useState(false)
@@ -80,6 +91,11 @@ export function CodeView({
   useEffect(() => {
     window.localStorage.setItem(TERMINAL_HEIGHT_STORAGE_KEY, String(terminalHeight))
   }, [terminalHeight])
+
+  useEffect(() => {
+    if (selectedSessionId) window.localStorage.setItem(SELECTED_SESSION_STORAGE_KEY, selectedSessionId)
+    else window.localStorage.removeItem(SELECTED_SESSION_STORAGE_KEY)
+  }, [selectedSessionId])
 
   const handleTerminalDragStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -103,6 +119,17 @@ export function CodeView({
   const selectedSession = sessions.find((s) => s.id === selectedSessionId) ?? null
   const selectedStatus = selectedSession ? statusOf(selectedSession.id) : 'idle'
   const newSessionProject = projects.find((p) => p.project.id === newSessionProjectId) ?? null
+
+  // Live model/effort choices for the selected session's agent, for the header
+  // pickers. Discovered from the engine and cached, so this is cheap to re-run.
+  const [modelOpts, setModelOpts] = useState<CodeAgentModelOptions>({ models: [], efforts: [] })
+  const selectedAgent = selectedSession?.agent
+  useEffect(() => {
+    if (!selectedAgent) { setModelOpts({ models: [], efforts: [] }); return }
+    let cancelled = false
+    void fetchCodeAgentOptions(selectedAgent).then((opts) => { if (!cancelled) setModelOpts(opts) })
+    return () => { cancelled = true }
+  }, [selectedAgent])
 
   // Tell App which session (and status) owns the right-hand chat pane.
   useEffect(() => {
@@ -152,7 +179,7 @@ export function CodeView({
     }
   }, [refresh, selectedSessionId])
 
-  const handleUpdateSession = useCallback(async (patch: { mode?: 'direct' | 'rowboat'; policy?: ApprovalPolicy; agent?: 'claude' | 'codex' }) => {
+  const handleUpdateSession = useCallback(async (patch: { mode?: 'direct' | 'rowboat'; policy?: ApprovalPolicy; agent?: 'claude' | 'codex'; agentModel?: string; agentEffort?: string }) => {
     if (!selectedSessionId) return
     try {
       await window.ipc.invoke('codeSession:update', { sessionId: selectedSessionId, patch })
@@ -201,6 +228,50 @@ export function CodeView({
                 </div>
               </div>
               <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
+                      title="Coding agent model"
+                    >
+                      <span className="whitespace-nowrap">{optionLabel(modelOpts.models, selectedSession.agentModel)}</span>
+                      <ChevronDown className="size-3" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="max-h-80 overflow-y-auto">
+                    {withDefault(modelOpts.models).map((m) => (
+                      <DropdownMenuItem key={m.value} onClick={() => void handleUpdateSession({ agentModel: m.value })}>
+                        {m.label}
+                        {(selectedSession.agentModel ?? 'default') === m.value && <span className="ml-auto">✓</span>}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                {modelOpts.efforts.length > 0 && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
+                        title="Reasoning effort"
+                      >
+                        <span className="whitespace-nowrap">{optionLabel(modelOpts.efforts, selectedSession.agentEffort)}</span>
+                        <ChevronDown className="size-3" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      {withDefault(modelOpts.efforts).map((e) => (
+                        <DropdownMenuItem key={e.value} onClick={() => void handleUpdateSession({ agentEffort: e.value })}>
+                          {e.label}
+                          {(selectedSession.agentEffort ?? 'default') === e.value && <span className="ml-auto">✓</span>}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button

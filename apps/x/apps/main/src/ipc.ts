@@ -41,6 +41,7 @@ import type { ICodeProjectsRepo } from '@x/core/dist/code-mode/projects/repo.js'
 import type { ICodeSessionsRepo } from '@x/core/dist/code-mode/sessions/repo.js';
 import { CodeSessionService } from '@x/core/dist/code-mode/sessions/service.js';
 import { CodeSessionStatusTracker } from '@x/core/dist/code-mode/sessions/status-tracker.js';
+import type { CodeModeManager } from '@x/core/dist/code-mode/acp/manager.js';
 import * as codeGit from '@x/core/dist/code-mode/git/service.js';
 import { readProjectDir, readProjectFile } from '@x/core/dist/code-mode/projects/fs.js';
 import { ensureTerminal, writeTerminal, resizeTerminal, disposeTerminal } from './terminal.js';
@@ -971,6 +972,10 @@ export function setupIpcHandlers() {
     'codeSession:update': async (_event, args) => {
       const service = container.resolve<CodeSessionService>('codeSessionService');
       return { session: await service.update(args.sessionId, args.patch) };
+    },
+    'codeMode:listModelOptions': async (_event, args) => {
+      const manager = container.resolve<CodeModeManager>('codeModeManager');
+      return manager.listModelOptions(args.agent);
     },
     'codeSession:delete': async (_event, args) => {
       const service = container.resolve<CodeSessionService>('codeSessionService');
