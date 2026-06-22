@@ -9,17 +9,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { GoogleClientIdModal } from '@/components/google-client-id-modal'
-import { setGoogleCredentials } from '@/lib/google-credentials-store'
-import { getStoredPickerApiKey, setStoredPickerApiKey } from '@/lib/google-picker'
 import { toast } from '@/lib/toast'
-
-type GoogleDocsStatus = {
-  connected: boolean
-  hasRequiredScopes: boolean
-  missingScopes: string[]
-}
 
 type GoogleDocPickerDialogProps = {
   open: boolean
@@ -34,138 +24,62 @@ export function GoogleDocPickerDialog({
   onOpenChange,
   onImported,
 }: GoogleDocPickerDialogProps) {
-  const [status, setStatus] = useState<GoogleDocsStatus | null>(null)
-  const [connecting, setConnecting] = useState(false)
+  // The managed picker runs its own drive.file OAuth in the browser, gated on
+  // the Rowboat web session. So the only desktop prerequisite is being signed
+  // in to Rowboat — it needs NO prior Google connection and NO drive.file scope
+  // on the main grant (the picker grants drive.file per-file as you choose).
+  const [signedIn, setSignedIn] = useState<boolean | null>(null)
   const [opening, setOpening] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [byokOpen, setByokOpen] = useState(false)
-  const [apiKey, setApiKey] = useState('')
 
-  const canPick = Boolean(status?.connected && status.hasRequiredScopes)
   const targetLabel = useMemo(() => targetFolder.replace(/^knowledge\/?/, '') || 'knowledge', [targetFolder])
 
   const loadStatus = useCallback(async () => {
-    setError(null)
     try {
-      const result = await window.ipc.invoke('google-docs:getStatus', null)
-      setStatus(result)
+      const account = await window.ipc.invoke('account:getRowboat', null)
+      setSignedIn(account.signedIn)
+      setError(null)
     } catch (err) {
-      setStatus(null)
-      setError(err instanceof Error ? err.message : 'Failed to check Google connection')
+      setSignedIn(null)
+      setError(err instanceof Error ? err.message : 'Failed to check your Rowboat sign-in')
     }
   }, [])
 
   useEffect(() => {
     if (!open) return
-    setError(null)
-    setApiKey(getStoredPickerApiKey())
     void loadStatus()
   }, [loadStatus, open])
 
-  const handleConnect = useCallback(async () => {
-    setConnecting(true)
-    setError(null)
-    try {
-      const result = await window.ipc.invoke('oauth:connect', { provider: 'google' })
-      if (!result.success) {
-        setError(result.error ?? 'Failed to start Google connection')
-      } else {
-        toast('Finish Google connection in the browser, then reopen the picker.', 'info')
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to start Google connection')
-    } finally {
-      setConnecting(false)
-    }
-  }, [])
-
-  // BYOK: connect Google with the user's own OAuth client, which requests the
-  // drive.file scope locally (managed sign-in can't grant it without a backend
-  // change).
-  const handleByokSubmit = useCallback((clientId: string, clientSecret: string) => {
-    setGoogleCredentials(clientId, clientSecret)
-    setByokOpen(false)
-    setConnecting(true)
-    setError(null)
-    void window.ipc.invoke('oauth:connect', { provider: 'google', clientId, clientSecret })
-      .then((result) => {
-        if (!result.success) setError(result.error ?? 'Failed to start Google connection')
-        else toast('Finish Google consent in the browser…', 'info')
-      })
-      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to start Google connection'))
-      .finally(() => setConnecting(false))
-  }, [])
-
-  // Re-check scopes as soon as a Google connection completes in the browser.
-  useEffect(() => {
-    if (!open) return
-    const cleanup = window.ipc.on('oauth:didConnect', (event) => {
-      if (event.provider !== 'google') return
-      void loadStatus()
-    })
-    return cleanup
-  }, [open, loadStatus])
-
   const handleChoose = useCallback(async () => {
     setError(null)
-    const key = apiKey.trim()
-    if (!key) {
-      setError('Enter your Google Picker API key first.')
-      return
-    }
-    setStoredPickerApiKey(key)
     setOpening(true)
 
-    let accessToken: string | null = null
-    try {
-      const res = await window.ipc.invoke('google-docs:getAccessToken', null)
-      accessToken = res.accessToken
-    } catch (err) {
-      setOpening(false)
-      setError(err instanceof Error ? err.message : 'Failed to get a Google access token')
-      return
-    }
-    if (!accessToken) {
-      setOpening(false)
-      setError('Google access token unavailable — reconnect Google.')
-      return
-    }
-
-    // Open the Picker in the user's real browser (Chrome) via a localhost
-    // loopback in the main process. Google 403s the Picker inside Electron;
-    // a real browser is a trusted context. Close our modal during the hand-off.
+    // Managed pick: the Rowboat backend runs the whole grant + pick in the
+    // browser with the company Google client, then deep-links the selection
+    // back. No API key, BYOK creds, or redirect URL to configure. Close our
+    // modal during the hand-off.
     onOpenChange(false)
-    toast('Continue in your browser to choose a document…', 'info')
-    let picked: { id: string; name: string; mimeType: string } | null = null
+    toast('Continue in your browser: grant access and pick a document…', 'info')
+    let result: { path: string; doc: { name: string } } | null = null
     try {
-      picked = await window.ipc.invoke('google-docs:openPicker', {
-        accessToken,
-        apiKey: key || undefined,
-      })
+      result = await window.ipc.invoke('google-docs:pickViaManaged', { targetFolder })
     } catch (err) {
       setOpening(false)
       toast(err instanceof Error ? err.message : 'Failed to open the Google Picker', 'error')
       return
     }
 
-    if (!picked) {
+    if (!result) {
       setOpening(false)
       return
     }
 
-    try {
-      const result = await window.ipc.invoke('google-docs:import', { fileId: picked.id, targetFolder })
-      toast(`Added “${picked.name}”`, 'success')
-      onImported(result.path)
-    } catch (err) {
-      toast(err instanceof Error ? err.message : 'Failed to import the document', 'error')
-    } finally {
-      setOpening(false)
-    }
-  }, [apiKey, targetFolder, onImported, onOpenChange])
+    toast(`Added “${result.doc.name}”`, 'success')
+    onImported(result.path)
+    setOpening(false)
+  }, [targetFolder, onImported, onOpenChange])
 
   return (
-    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[min(720px,calc(100vh-4rem))] max-w-lg flex-col gap-0 overflow-hidden p-0">
         <DialogHeader className="shrink-0 border-b border-border px-5 py-4">
@@ -176,7 +90,7 @@ export function GoogleDocPickerDialog({
         </DialogHeader>
 
         <div className="flex min-h-0 flex-1 flex-col">
-          {!status && error ? (
+          {signedIn === null && error ? (
             <div className="flex min-h-[280px] flex-1 flex-col items-center justify-center gap-4 px-8 text-center">
               <div className="max-w-sm text-sm text-destructive">{error}</div>
               <Button variant="outline" onClick={() => void loadStatus()}>
@@ -184,34 +98,21 @@ export function GoogleDocPickerDialog({
                 Retry
               </Button>
             </div>
-          ) : !status ? (
+          ) : signedIn === null ? (
             <div className="flex min-h-[280px] flex-1 items-center justify-center text-sm text-muted-foreground">
               <Loader2 className="mr-2 size-4 animate-spin" />
-              Checking Google connection...
+              Checking your Rowboat sign-in…
             </div>
-          ) : !canPick ? (
-            <div className="flex min-h-[300px] flex-1 flex-col items-center justify-center gap-4 overflow-y-auto px-8 py-8 text-center">
+          ) : !signedIn ? (
+            <div className="flex min-h-[300px] flex-1 flex-col items-center justify-center gap-4 px-8 py-8 text-center">
               <div className="max-w-sm text-sm text-muted-foreground">
-                To choose a document, Rowboat needs per-file Drive access (the <code>drive.file</code> scope).
+                Sign in to Rowboat to add Google Docs from Drive. The picker uses your
+                Rowboat account — no Google credentials or API key needed.
               </div>
-              {status.missingScopes.length > 0 && (
-                <div className="max-w-md rounded-md border border-border bg-muted/30 px-3 py-2 text-left text-xs text-muted-foreground">
-                  Missing scopes: {status.missingScopes.join(', ')}
-                </div>
-              )}
-              <div className="flex w-full max-w-xs flex-col gap-2">
-                <Button onClick={() => setByokOpen(true)} disabled={connecting}>
-                  {connecting ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
-                  Connect with your Google credentials
-                </Button>
-                <Button variant="outline" onClick={handleConnect} disabled={connecting}>
-                  Use managed Google sign-in
-                </Button>
-              </div>
-              <p className="max-w-sm text-xs text-muted-foreground">
-                Managed sign-in may not grant Drive access yet. If it keeps asking for scopes,
-                connect a Google OAuth client (Desktop app) with the Drive&nbsp;API and Picker&nbsp;API enabled.
-              </p>
+              <Button variant="outline" onClick={() => void loadStatus()}>
+                <RefreshCw className="size-4" />
+                I&apos;ve signed in — retry
+              </Button>
             </div>
           ) : (
             <div className="flex min-h-[300px] flex-1 flex-col items-center justify-center gap-4 px-8 py-8 text-center">
@@ -219,31 +120,13 @@ export function GoogleDocPickerDialog({
                 Pick a Google Doc or Word file from your Drive. It imports as an editable
                 <code> .docx</code> and stays linked for two-way sync.
               </div>
-              <div className="flex w-full max-w-sm flex-col gap-1.5 text-left">
-                <label htmlFor="picker-api-key" className="text-xs font-medium text-muted-foreground">
-                  Google Picker API key
-                </label>
-                <Input
-                  id="picker-api-key"
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  placeholder="AIza…"
-                  className="font-mono text-xs"
-                />
-                <p className="text-xs text-muted-foreground">
-                  From your Google Cloud project (APIs &amp; Services → Credentials → API key),
-                  with the Picker&nbsp;API enabled. Stored locally.
-                </p>
-              </div>
+              <p className="max-w-sm text-xs text-muted-foreground">
+                You&apos;ll continue in your browser to grant access and choose a document — no
+                API key or setup needed.
+              </p>
               {error && (
-                <div className="flex max-w-sm flex-col items-center gap-2">
-                  <div className="w-full rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                    {error}
-                  </div>
-                  <Button variant="outline" size="sm" onClick={() => setByokOpen(true)} disabled={connecting}>
-                    <RefreshCw className="size-4" />
-                    Reconnect Google
-                  </Button>
+                <div className="w-full max-w-sm rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                  {error}
                 </div>
               )}
               <Button onClick={() => void handleChoose()} disabled={opening}>
@@ -255,12 +138,5 @@ export function GoogleDocPickerDialog({
         </div>
       </DialogContent>
     </Dialog>
-    <GoogleClientIdModal
-      open={byokOpen}
-      onOpenChange={setByokOpen}
-      onSubmit={handleByokSubmit}
-      description="Enter a Google OAuth client (Desktop app) with the Drive API and Picker API enabled."
-    />
-    </>
   )
 }

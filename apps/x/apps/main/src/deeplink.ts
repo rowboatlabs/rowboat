@@ -39,6 +39,8 @@ export function extractDeepLinkFromArgv(argv: readonly string[]): string | null 
 export function dispatchUrl(url: string): void {
     if (parseAction(url)) {
         void dispatchAction(url);
+    } else if (parsePickerCompletion(url)) {
+        void dispatchPickerCompletion(url);
     } else if (parseOAuthCompletion(url)) {
         void dispatchOAuthCompletion(url);
     } else {
@@ -156,6 +158,41 @@ async function dispatchOAuthCompletion(url: string): Promise<void> {
     // potential circular dep with oauth-handler.ts.
     const { completeRowboatGoogleConnect } = await import("./oauth-handler.js");
     await completeRowboatGoogleConnect(parsed.state);
+}
+
+// --- Managed OAuth-redirect Picker completion ---
+
+interface PickerCompletion {
+    state: string;
+}
+
+/**
+ * Match rowboat://oauth/google/picker/done?session=<state>. Distinct from the
+ * connect completion above (oauth/google/done) by the extra `picker` segment.
+ */
+function parsePickerCompletion(url: string): PickerCompletion | null {
+    if (!url.startsWith(URL_PREFIX)) return null;
+    const rest = url.slice(URL_PREFIX.length);
+    const queryIdx = rest.indexOf("?");
+    const path = queryIdx >= 0 ? rest.slice(0, queryIdx) : rest;
+    const parts = path.split("/").filter(Boolean);
+    if (parts.length !== 4) return null;
+    if (parts[0] !== "oauth" || parts[1] !== "google" || parts[2] !== "picker" || parts[3] !== "done") return null;
+    const params = new URLSearchParams(queryIdx >= 0 ? rest.slice(queryIdx + 1) : "");
+    const state = params.get("session");
+    return state ? { state } : null;
+}
+
+async function dispatchPickerCompletion(url: string): Promise<void> {
+    const parsed = parsePickerCompletion(url);
+    if (!parsed) return;
+
+    const win = mainWindowRef;
+    if (win && !win.isDestroyed()) focusWindow(win);
+
+    // Lazy-import to keep deeplink.ts free of the picker's OAuth/knowledge deps.
+    const { completeManagedGooglePick } = await import("./google-picker-managed.js");
+    await completeManagedGooglePick(parsed.state);
 }
 
 function focusWindow(win: BrowserWindow): void {

@@ -650,27 +650,6 @@ const ipcSchemas = {
       missingScopes: z.array(z.string()),
     }),
   },
-  // Live Google OAuth access token for driving the Google Picker in the renderer.
-  'google-docs:getAccessToken': {
-    req: z.null(),
-    res: z.object({
-      accessToken: z.string().nullable(),
-    }),
-  },
-  // Open a Google Picker in a dedicated BrowserWindow (avoids session-cookie
-  // issues when running the Picker widget inside the renderer iframe).
-  'google-docs:openPicker': {
-    req: z.object({
-      accessToken: z.string(),
-      apiKey: z.string().optional(),
-      appId: z.string().optional(),
-    }),
-    res: z.object({
-      id: z.string(),
-      name: z.string(),
-      mimeType: z.string(),
-    }).nullable(),
-  },
   'google-docs:import': {
     req: z.object({
       fileId: z.string().min(1),
@@ -686,6 +665,24 @@ const ipcSchemas = {
         owner: z.string().nullable(),
       }),
     }),
+  },
+  // Managed OAuth-redirect Picker: the Rowboat backend runs the pick with the
+  // company Google client; the desktop opens the start URL, waits for the deep
+  // link, and imports with the existing managed token. No API key or BYOK creds.
+  'google-docs:pickViaManaged': {
+    req: z.object({
+      targetFolder: RelPath,
+    }),
+    res: z.object({
+      path: RelPath,
+      doc: z.object({
+        id: z.string(),
+        name: z.string(),
+        url: z.string(),
+        modifiedTime: z.string().nullable(),
+        owner: z.string().nullable(),
+      }),
+    }).nullable(),
   },
   'google-docs:refreshSnapshot': {
     req: z.object({
