@@ -790,6 +790,11 @@ function NowBadge() {
 
 function UpcomingEventItem({ event, isLast, isPrepTarget, onOpenNote }: { event: UpcomingEvent; isLast: boolean; isPrepTarget: boolean; onOpenNote: (path: string) => void }) {
   const [open, setOpen] = useState(false)
+  // The next meeting auto-expands its prep; any other meeting with attendees
+  // can be expanded on demand via the Prep toggle (resolves lazily on open).
+  const prepEligible = !event.isAllDay && event.attendees.some((a) => !a.self)
+  const [prepOpen, setPrepOpen] = useState(isPrepTarget)
+  const showPrep = prepEligible && prepOpen
   const isNow = isEventNow(event)
   const platform = meetingPlatformLabel(event.conferenceLink)
   const subtitle = platform ?? event.location
@@ -805,7 +810,7 @@ function UpcomingEventItem({ event, isLast, isPrepTarget, onOpenNote }: { event:
           title={titleAndLocation}
           className={cn(
             'group flex w-full cursor-pointer items-center gap-4 px-5 py-3 text-left transition-colors',
-            isPrepTarget && 'border-b',
+            showPrep && 'border-b',
             isNow ? 'bg-muted' : 'hover:bg-muted/50',
           )}
         >
@@ -826,7 +831,24 @@ function UpcomingEventItem({ event, isLast, isPrepTarget, onOpenNote }: { event:
               </span>
             ) : null}
           </span>
-          <div className="shrink-0">
+          <div className="flex shrink-0 items-center gap-2">
+            {prepEligible ? (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setPrepOpen((v) => !v) }}
+                onMouseDown={(e) => e.stopPropagation()}
+                aria-expanded={prepOpen}
+                title={prepOpen ? 'Hide prep' : 'Show meeting prep'}
+                className={cn(
+                  'inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors',
+                  prepOpen ? 'bg-accent text-foreground' : 'bg-background text-foreground hover:bg-accent',
+                )}
+              >
+                <Sparkles className="size-3.5" />
+                Prep
+                <ChevronDown className={cn('size-3 transition-transform', prepOpen && 'rotate-180')} />
+              </button>
+            ) : null}
             {event.conferenceLink ? (
               <SplitJoinButton
                 onJoinAndNotes={() => triggerMeetingCapture(event, true)}
@@ -848,7 +870,7 @@ function UpcomingEventItem({ event, isLast, isPrepTarget, onOpenNote }: { event:
       </PopoverTrigger>
       <EventDetailsPopover event={event} onClose={() => setOpen(false)} />
     </Popover>
-    {isPrepTarget ? <InlineMeetingPrep event={event} onOpenNote={onOpenNote} /> : null}
+    {showPrep ? <InlineMeetingPrep event={event} onOpenNote={onOpenNote} /> : null}
     </div>
   )
 }
