@@ -345,11 +345,11 @@ export async function connectProvider(provider: string, credentials?: { clientId
                 signedInUserId = billing.userId;
                 analyticsIdentify(billing.userId, {
                   ...(billing.userEmail ? { email: billing.userEmail } : {}),
-                  plan: billing.subscriptionPlan,
+                  plan: billing.subscriptionPlanId,
                   status: billing.subscriptionStatus,
                 });
                 analyticsCapture('user_signed_in', {
-                  plan: billing.subscriptionPlan,
+                  plan: billing.subscriptionPlanId,
                   status: billing.subscriptionStatus,
                 });
               }

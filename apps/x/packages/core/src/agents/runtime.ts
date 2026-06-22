@@ -17,6 +17,7 @@ import { isBlocked, extractCommandNames } from "../application/lib/command-execu
 import { getFileAccessAllowList, type FileAccessGrant, type FileAccessOperation } from "../config/security.js";
 import { resolveFilePathForPermission } from "../filesystem/files.js";
 import container from "../di/container.js";
+import { notifyIfEnabled } from "../application/notification/notifier.js";
 import { IModelConfigRepo } from "../models/repo.js";
 import { createProvider } from "../models/models.js";
 import { resolveProviderConfig } from "../models/defaults.js";
@@ -36,6 +37,7 @@ import { getRaw as getLabelingAgentRaw } from "../knowledge/labeling_agent.js";
 import { getRaw as getNoteTaggingAgentRaw } from "../knowledge/note_tagging_agent.js";
 import { getRaw as getInlineTaskAgentRaw } from "../knowledge/inline_task_agent.js";
 import { getRaw as getAgentNotesAgentRaw } from "../knowledge/agent_notes_agent.js";
+import { classifyToolPermissions, type AutoPermissionCandidate } from "../security/auto-permission-classifier.js";
 
 const AGENT_NOTES_DIR = path.join(WorkDir, 'knowledge', 'Agent Notes');
 
@@ -376,6 +378,7 @@ export class AgentRuntime implements IAgentRuntime {
                 type: "run-processing-start",
                 subflow: [],
             });
+            let totalEvents = 0;
             while (true) {
                 // Check for abort before each iteration
                 if (signal.aborted) {
@@ -416,6 +419,7 @@ export class AgentRuntime implements IAgentRuntime {
                     throw error;
                 }
 
+                totalEvents += eventCount;
                 // if no events, break
                 if (!eventCount) {
                     break;
@@ -432,6 +436,27 @@ export class AgentRuntime implements IAgentRuntime {
                 };
                 await this.runsRepo.appendEvents(runId, [stoppedEvent]);
                 await this.bus.publish(stoppedEvent);
+            } else if (totalEvents > 0) {
+                // The run reached a natural stopping point and actually did
+                // something this cycle. Notify "chat completion" — unless it
+                // paused on a permission request, which surfaces its own
+                // notification (distinguish by inspecting the final state).
+                const finalRun = await this.runsRepo.fetch(runId);
+                if (finalRun) {
+                    const finalState = new AgentState();
+                    for (const event of finalRun.log) {
+                        finalState.ingest(event);
+                    }
+                    if (finalState.getPendingPermissions().length === 0) {
+                        void notifyIfEnabled("chat_completion", {
+                            title: "Response ready",
+                            message: "Your agent finished responding.",
+                            link: `rowboat://open?type=chat&runId=${runId}`,
+                            actionLabel: "Open",
+                            onlyWhenBackground: true,
+                        });
+                    }
+                }
             }
         } catch (error) {
             console.error(`Run ${runId} failed:`, error);
@@ -901,6 +926,7 @@ export class AgentState {
     agentName: string | null = null;
     runModel: string | null = null;
     runProvider: string | null = null;
+    permissionMode: "manual" | "auto" = "manual";
     runUseCase: UseCase | null = null;
     runSubUseCase: string | null = null;
     messages: z.infer<typeof MessageList> = [];
@@ -912,6 +938,8 @@ export class AgentState {
     pendingAskHumanRequests: Record<string, z.infer<typeof AskHumanRequestEvent>> = {};
     allowedToolCallIds: Record<string, true> = {};
     deniedToolCallIds: Record<string, true> = {};
+    autoAllowedToolCalls: Record<string, { reason: string }> = {};
+    autoDeniedToolCalls: Record<string, { reason: string }> = {};
     sessionAllowedCommands: Set<string> = new Set();
     sessionAllowedFileAccess: FileAccessGrant[] = [];
 
@@ -1019,6 +1047,7 @@ export class AgentState {
                 this.agentName = event.agentName;
                 this.runModel = event.model;
                 this.runProvider = event.provider;
+                this.permissionMode = event.permissionMode ?? "manual";
                 this.runUseCase = event.useCase ?? null;
                 this.runSubUseCase = event.subUseCase ?? null;
                 break;
@@ -1031,6 +1060,7 @@ export class AgentState {
                 this.subflowStates[event.toolCallId].agentName = event.agentName;
                 this.subflowStates[event.toolCallId].runModel = this.runModel;
                 this.subflowStates[event.toolCallId].runProvider = this.runProvider;
+                this.subflowStates[event.toolCallId].permissionMode = this.permissionMode;
                 this.subflowStates[event.toolCallId].runUseCase = this.runUseCase;
                 this.subflowStates[event.toolCallId].runSubUseCase = this.runSubUseCase;
                 break;
@@ -1081,9 +1111,21 @@ export class AgentState {
                         break;
                     case "deny":
                         this.deniedToolCallIds[event.toolCallId] = true;
+                        delete this.autoDeniedToolCalls[event.toolCallId];
                         break;
                 }
                 delete this.pendingToolPermissionRequests[event.toolCallId];
+                break;
+            case "tool-permission-auto-decision":
+                switch (event.decision) {
+                    case "allow":
+                        this.allowedToolCallIds[event.toolCallId] = true;
+                        this.autoAllowedToolCalls[event.toolCallId] = { reason: event.reason };
+                        break;
+                    case "deny":
+                        this.autoDeniedToolCalls[event.toolCallId] = { reason: event.reason };
+                        break;
+                }
                 break;
             case "ask-human-request":
                 this.pendingAskHumanRequests[event.toolCallId] = event;
@@ -1163,6 +1205,8 @@ export async function* streamAgent({
     let voiceOutput: 'summary' | 'full' | null = null;
     let searchEnabled = false;
     let codeMode: 'claude' | 'codex' | null = null;
+    let codeCwd: string | null = null;
+    let codePolicy: 'ask' | 'auto-approve-reads' | 'yolo' | null = null;
     let middlePaneContext:
         | { kind: 'note'; path: string; content: string }
         | { kind: 'browser'; url: string; title: string }
@@ -1190,13 +1234,19 @@ export async function* streamAgent({
             // if tool has been denied, deny
             if (state.deniedToolCallIds[toolCallId]) {
                 _logger.log('returning denied tool message, reason: tool has been denied');
+                const autoDenied = state.autoDeniedToolCalls[toolCallId];
                 yield* processEvent({
                     runId,
                     messageId: await idGenerator.next(),
                     type: "message",
                     message: {
                         role: "tool",
-                        content: "Unable to execute this tool: Permission was denied.",
+                        content: autoDenied
+                            ? JSON.stringify({
+                                success: false,
+                                error: `Auto-permission denied: ${autoDenied.reason}`,
+                            })
+                            : "Unable to execute this tool: Permission was denied.",
                         toolCallId: toolCallId,
                         toolName: toolCall.toolName,
                     },
@@ -1255,6 +1305,9 @@ export async function* streamAgent({
                     signal,
                     abortRegistry,
                     publish: (event) => bus.publish(event),
+                    codeMode,
+                    codeCwd,
+                    codePolicy,
                 });
             }
             } catch (error) {
@@ -1314,6 +1367,8 @@ export async function* streamAgent({
             // Code mode is per-message: latest message decides whether the assistant
             // should route coding work through the code-with-agents skill / chosen agent.
             codeMode = msg.codeMode ?? null;
+            codeCwd = msg.codeCwd ?? null;
+            codePolicy = msg.codePolicy ?? null;
             if (msg.voiceOutput) {
                 voiceOutput = msg.voiceOutput;
             }
@@ -1402,44 +1457,19 @@ Do not announce the work directory unless it's relevant. Just use it.`;
         if (codeMode) {
             loopLogger.log('code mode enabled, injecting coding-agent context', codeMode);
             const agentDisplay = codeMode === 'claude' ? 'Claude Code' : 'Codex';
-            const otherAgent = codeMode === 'claude' ? 'codex' : 'claude';
-            const otherDisplay = codeMode === 'claude' ? 'Codex' : 'Claude Code';
-            // Deterministic, per-chat session name so the coding agent keeps
-            // context across the user's requests within this chat. Reusing the
-            // same -s <name> resumes the session; the first call creates it.
-            const sessionName = `rowboat-${runId}`;
-            instructionsWithDateTime += `\n\n# Code Mode (Active) — Default agent: ${agentDisplay}
-The user has turned on **code mode** and the composer chip is set to **${agentDisplay}** (\`${codeMode}\`). Use this as the **default** agent for coding tasks in this turn.
+            instructionsWithDateTime += `\n\n# Code Mode (Active) — Agent: ${agentDisplay}
+The user has turned on **code mode** and the composer chip is set to **${agentDisplay}** (\`${codeMode}\`). For EVERY coding task this turn, use **${agentDisplay}**, and narrate that agent ("Using ${agentDisplay} to …").
 
-**The user can override the agent at any time, two ways:**
-1. By toggling the chip in the composer (preferred).
-2. By asking you directly in chat ("use codex", "switch to claude", "do this with ${otherDisplay}", etc.). When the user explicitly asks to use a different agent in the current message, honor that — use \`${otherAgent}\` instead of \`${codeMode}\` for this turn, and briefly mention they can also toggle it via the chip for stickiness.
+The chip is the single source of truth for which agent runs:
+- Do NOT carry over a different agent from earlier in this thread — even if a previous run used the other agent, use **${agentDisplay}** now.
+- Do NOT switch agents based on an in-chat text request ("use codex", "switch to claude"). The agent only changes when the user toggles the chip; if they ask in chat, tell them to toggle the chip.
 
-**Persistent session for this chat — session name: \`${sessionName}\`.** This chat uses one named agent session so the agent keeps context across your requests. The session must exist before it can be prompted (\`-s\` only resumes; it does not create).
+**How to run coding work — call the \`code_agent_run\` tool** with:
+- \`agent\`: \`${codeMode}\` (always — match the chip).
+- \`cwd\`: ${codeCwd ? `\`${codeCwd}\` (always — this coding session is pinned to that directory; never use another path)` : `the absolute project/working directory (resolve it per the code-with-agents skill — a path the user named, the "# User Work Directory" block, or ask once)`}.
+- \`prompt\`: a clear, self-contained coding instruction.
 
-**1. First coding action in this chat — ensure the session exists:**
-
-\`\`\`
-npx acpx@latest --approve-all --cwd <workdir> <agent> sessions ensure --name ${sessionName}
-\`\`\`
-
-(\`ensure\` creates the session if missing and reuses it if it already exists — safe to call when reopening this chat later.)
-
-**2. Then run the prompt:**
-
-\`\`\`
-npx acpx@latest --approve-all --timeout 600 --cwd <workdir> <agent> -s ${sessionName} "<prompt>"
-\`\`\`
-
-**3. Every follow-up coding request in this chat — reuse the same session (do NOT create again):**
-
-\`\`\`
-npx acpx@latest --approve-all --timeout 600 --cwd <workdir> <agent> -s ${sessionName} "<prompt>"
-\`\`\`
-
-Run these as **separate, sequential** \`executeCommand\` calls — issue the \`sessions ensure\` call first and WAIT for it to finish, then issue the prompt call. Do NOT fire both in the same turn / batch.
-
-Where \`<agent>\` is either \`claude\` or \`codex\` — pick based on (in priority order): an explicit in-chat override → the chip setting (\`${codeMode}\`). Use \`${sessionName}\` exactly — do NOT invent a different name, and do NOT use \`exec\` (it is one-shot and forgets).
+The tool runs the agent on-device and streams its tool calls, file diffs, and plan into the chat; any action needing approval surfaces as an inline permission card, so you do NOT pre-confirm with an in-chat "reply yes". This chat keeps ONE persistent agent session, so follow-up coding requests automatically resume with full context — just call \`code_agent_run\` again. Do NOT shell out to \`acpx\` or \`executeCommand\` for coding, and do NOT fall back to your own file tools.
 
 If the user's message is clearly NOT a coding request (small talk, an unrelated question), answer directly without invoking the coding agent. Code mode signals readiness, not that every message must route through the agent.`;
         }
@@ -1493,6 +1523,7 @@ If the user's message is clearly NOT a coding request (small talk, an unrelated 
 
         // if there were any ask-human calls, emit those events
         if (message.content instanceof Array) {
+            const permissionCandidates: AutoPermissionCandidate[] = [];
             for (const part of message.content) {
                 if (part.type === "tool-call") {
                     const underlyingTool = agent.tools![part.toolName];
@@ -1518,14 +1549,7 @@ If the user's message is clearly NOT a coding request (small talk, an unrelated 
                         state.sessionAllowedFileAccess,
                     );
                     if (permission) {
-                        loopLogger.log('emitting tool-permission-request, toolCallId:', part.toolCallId);
-                        yield* processEvent({
-                            runId,
-                            type: "tool-permission-request",
-                            toolCall: part,
-                            permission,
-                            subflow: [],
-                        });
+                        permissionCandidates.push({ toolCall: part, permission });
                     }
                     if (underlyingTool.type === "agent" && underlyingTool.name) {
                         loopLogger.log('emitting spawn-subflow, toolCallId:', part.toolCallId);
@@ -1546,6 +1570,100 @@ If the user's message is clearly NOT a coding request (small talk, an unrelated 
                             },
                             subflow: [part.toolCallId],
                         });
+                    }
+                }
+            }
+
+            if (permissionCandidates.length > 0) {
+                // Permission prompts block the run, so they surface even when the
+                // app is focused (no onlyWhenBackground gate).
+                const notifyPermissionPrompt = (toolCall: typeof permissionCandidates[number]["toolCall"]) => {
+                    void notifyIfEnabled("agent_permission", {
+                        title: "Permission needed",
+                        message: `${agent.name} wants to run "${toolCall.toolName}". Review to continue.`,
+                        link: `rowboat://open?type=chat&runId=${runId}`,
+                        actionLabel: "Review",
+                    });
+                };
+                if (state.permissionMode === "auto") {
+                    let decisionsByToolCallId = new Map<string, { decision: "allow" | "deny"; reason: string }>();
+                    try {
+                        const decisions = await classifyToolPermissions({
+                            runId,
+                            agentName: state.agentName,
+                            messages: convertFromMessages(state.messages),
+                            candidates: permissionCandidates,
+                            useCase: state.runUseCase ?? "copilot_chat",
+                            subUseCase: state.runSubUseCase,
+                        });
+                        decisionsByToolCallId = new Map(decisions.map((decision) => [
+                            decision.toolCallId,
+                            { decision: decision.decision, reason: decision.reason },
+                        ]));
+                    } catch (error) {
+                        loopLogger.log(
+                            'auto-permission classifier failed:',
+                            error instanceof Error ? error.message : String(error),
+                        );
+                    }
+
+                    for (const candidate of permissionCandidates) {
+                        const decision = decisionsByToolCallId.get(candidate.toolCall.toolCallId);
+                        if (!decision) {
+                            loopLogger.log('auto-permission missing decision, falling back to prompt:', candidate.toolCall.toolCallId);
+                            yield* processEvent({
+                                runId,
+                                type: "tool-permission-request",
+                                toolCall: candidate.toolCall,
+                                permission: candidate.permission,
+                                subflow: [],
+                            });
+                            notifyPermissionPrompt(candidate.toolCall);
+                            continue;
+                        }
+
+                        loopLogger.log(
+                            'emitting tool-permission-auto-decision, toolCallId:',
+                            candidate.toolCall.toolCallId,
+                            'decision:',
+                            decision.decision,
+                        );
+                        yield* processEvent({
+                            runId,
+                            type: "tool-permission-auto-decision",
+                            toolCallId: candidate.toolCall.toolCallId,
+                            toolCall: candidate.toolCall,
+                            permission: candidate.permission,
+                            decision: decision.decision,
+                            reason: decision.reason,
+                            subflow: [],
+                        });
+                        if (decision.decision === "deny") {
+                            loopLogger.log(
+                                'auto-permission denied, falling back to prompt:',
+                                candidate.toolCall.toolCallId,
+                            );
+                            yield* processEvent({
+                                runId,
+                                type: "tool-permission-request",
+                                toolCall: candidate.toolCall,
+                                permission: candidate.permission,
+                                subflow: [],
+                            });
+                            notifyPermissionPrompt(candidate.toolCall);
+                        }
+                    }
+                } else {
+                    for (const candidate of permissionCandidates) {
+                        loopLogger.log('emitting tool-permission-request, toolCallId:', candidate.toolCall.toolCallId);
+                        yield* processEvent({
+                            runId,
+                            type: "tool-permission-request",
+                            toolCall: candidate.toolCall,
+                            permission: candidate.permission,
+                            subflow: [],
+                        });
+                        notifyPermissionPrompt(candidate.toolCall);
                     }
                 }
             }

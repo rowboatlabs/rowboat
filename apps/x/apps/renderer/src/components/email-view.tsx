@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Archive, Bold, CheckCheck, Forward, Italic, Link as LinkIcon, List, ListOrdered, LoaderIcon, Mail, Paperclip, Quote, RefreshCw, Reply, ReplyAll, Search, Send, Sparkles, Strikethrough, Trash2 } from 'lucide-react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Archive, Bold, CheckCheck, Forward, Italic, Link as LinkIcon, List, ListOrdered, LoaderIcon, Mail, Paperclip, Quote, Redo2, RefreshCw, Reply, ReplyAll, Search, Send, Sparkles, SquarePen, Strikethrough, Trash2, Undo2 } from 'lucide-react'
 import { useEditor, EditorContent, type Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
@@ -258,6 +258,15 @@ function escapeHtml(text: string): string {
     .replace(/'/g, '&#39;')
 }
 
+// Convert AI-generated plain text into the simple paragraph HTML the Tiptap
+// editor expects (blank lines → paragraphs, single newlines → <br />).
+function plainTextToHtml(text: string): string {
+  return text
+    .split(/\n{2,}/)
+    .map((para) => `<p>${escapeHtml(para.trim()).replace(/\n/g, '<br />')}</p>`)
+    .join('')
+}
+
 function splitPlainTextQuote(text: string): { visible: string; quoted: string | null } {
   const re = /(?:^|\n)On\s+.+?\swrote:\s*(?:\n|$)/
   const match = re.exec(text)
@@ -300,7 +309,10 @@ function buildEmailDocument(
   opts: { theme: 'light' | 'dark'; adaptToTheme: boolean },
 ): string {
   const useDark = opts.theme === 'dark' && opts.adaptToTheme
-  const colorScheme = opts.theme === 'dark' ? 'light dark' : 'light'
+  // Only opt into the dark color scheme when the email actually adapts to the
+  // theme — otherwise Chromium paints the canvas dark under emails that
+  // assume a white background.
+  const colorScheme = useDark ? 'light dark' : 'light'
   const bodyColor = useDark ? '#d4d4d8' : '#202124'
   const linkColor = useDark ? '#a78bfa' : '#1a73e8'
   const quoteBorder = useDark ? '#2e2e35' : '#dadce0'
@@ -511,7 +523,7 @@ function MessageAttachments({ attachments }: { attachments: NonNullable<GmailThr
   )
 }
 
-type ComposeMode = 'reply' | 'replyAll' | 'forward'
+type ComposeMode = 'reply' | 'replyAll' | 'forward' | 'new'
 
 function ComposeToolbarButton({
   editor,
@@ -547,6 +559,29 @@ function ComposeToolbarButton({
 function ComposeToolbar({ editor, onOpenLink }: { editor: Editor; onOpenLink: () => void }) {
   return (
     <div className="gmail-compose-toolbar">
+      <button
+        type="button"
+        className="gmail-compose-tool"
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => editor.chain().focus().undo().run()}
+        disabled={!editor.can().undo()}
+        aria-label="Undo"
+        title="Undo"
+      >
+        <Undo2 size={14} />
+      </button>
+      <button
+        type="button"
+        className="gmail-compose-tool"
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => editor.chain().focus().redo().run()}
+        disabled={!editor.can().redo()}
+        aria-label="Redo"
+        title="Redo"
+      >
+        <Redo2 size={14} />
+      </button>
+      <span className="gmail-compose-tool-sep" />
       <ComposeToolbarButton
         editor={editor}
         command={() => editor.chain().focus().toggleBold().run()}
@@ -612,6 +647,43 @@ function ComposeToolbar({ editor, onOpenLink }: { editor: Editor; onOpenLink: ()
   )
 }
 
+type ContactSuggestion = {
+  name: string
+  email: string
+}
+
+function formatContactToken(c: ContactSuggestion): string {
+  return c.name ? `${c.name} <${c.email}>` : c.email
+}
+
+// Stable hue per email so the avatar circle keeps a consistent color.
+function contactHue(email: string): number {
+  let h = 0
+  for (let i = 0; i < email.length; i++) h = (h * 31 + email.charCodeAt(i)) >>> 0
+  return h % 360
+}
+
+function contactInitial(c: ContactSuggestion): string {
+  const src = (c.name || c.email).trim()
+  return (src[0] || '?').toUpperCase()
+}
+
+// Renders a string with the matched substring wrapped in <mark>.
+function HighlightedText({ text, query }: { text: string; query: string }) {
+  if (!query) return <>{text}</>
+  const lower = text.toLowerCase()
+  const q = query.toLowerCase()
+  const idx = lower.indexOf(q)
+  if (idx < 0) return <>{text}</>
+  return (
+    <>
+      {text.slice(0, idx)}
+      <mark className="gmail-recipient-suggestion-match">{text.slice(idx, idx + q.length)}</mark>
+      {text.slice(idx + q.length)}
+    </>
+  )
+}
+
 function RecipientField({
   label,
   value,
@@ -626,34 +698,123 @@ function RecipientField({
   trailing?: React.ReactNode
 }) {
   const [draft, setDraft] = useState('')
+  const [suggestions, setSuggestions] = useState<ContactSuggestion[]>([])
+  const [activeIndex, setActiveIndex] = useState(0)
+  const [isFocused, setIsFocused] = useState(false)
+  const [queryShown, setQueryShown] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
+  const fieldRef = useRef<HTMLDivElement>(null)
+  const listRef = useRef<HTMLUListElement>(null)
+  const queryTokenRef = useRef(0)
 
   useEffect(() => {
     if (autoFocus) inputRef.current?.focus()
   }, [autoFocus])
+
+  const excludeEmails = useMemo(
+    () => value.map((token) => extractAddress(token).toLowerCase()).filter(Boolean),
+    [value],
+  )
+
+  // Debounced contact search — only runs when the user has actually typed
+  // something. An empty draft (including the post-pick reset) closes the menu.
+  useEffect(() => {
+    const trimmed = draft.trim()
+    if (!isFocused || !trimmed) {
+      queryTokenRef.current++
+      setSuggestions([])
+      return
+    }
+    const token = ++queryTokenRef.current
+    const timer = window.setTimeout(async () => {
+      try {
+        const result = (await window.ipc.invoke('gmail:searchContacts', {
+          query: draft,
+          limit: 8,
+          excludeEmails,
+        })) as { contacts?: ContactSuggestion[] } | undefined
+        if (token !== queryTokenRef.current) return
+        setSuggestions(result?.contacts ?? [])
+        setQueryShown(trimmed)
+        setActiveIndex(0)
+      } catch {
+        if (token !== queryTokenRef.current) return
+        setSuggestions([])
+      }
+    }, 60)
+    return () => window.clearTimeout(timer)
+  }, [draft, isFocused, excludeEmails])
+
+  // Keep the active row scrolled into view during keyboard navigation.
+  useEffect(() => {
+    const list = listRef.current
+    if (!list) return
+    const node = list.children[activeIndex] as HTMLElement | undefined
+    node?.scrollIntoView({ block: 'nearest' })
+  }, [activeIndex, suggestions])
 
   const commit = (raw: string) => {
     const additions = splitAddresses(raw)
     if (additions.length === 0) return
     onChange(dedupeRecipients([...value, ...additions], new Set()))
     setDraft('')
+    setSuggestions([])
+  }
+
+  const pickSuggestion = (c: ContactSuggestion) => {
+    commit(formatContactToken(c))
+    // Keep focus in the input so the user can keep typing more recipients.
+    inputRef.current?.focus()
   }
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === 'Enter' || event.key === ',' || event.key === ';' || (event.key === 'Tab' && draft.trim())) {
+    const hasSuggestions = suggestions.length > 0
+    if (event.key === 'ArrowDown' && hasSuggestions) {
+      event.preventDefault()
+      setActiveIndex((i) => (i + 1) % suggestions.length)
+      return
+    }
+    if (event.key === 'ArrowUp' && hasSuggestions) {
+      event.preventDefault()
+      setActiveIndex((i) => (i - 1 + suggestions.length) % suggestions.length)
+      return
+    }
+    if (event.key === 'Escape' && hasSuggestions) {
+      event.preventDefault()
+      setSuggestions([])
+      return
+    }
+    if (event.key === 'Enter' || (event.key === 'Tab' && hasSuggestions)) {
+      // Prefer the highlighted suggestion when one is present.
+      if (hasSuggestions) {
+        event.preventDefault()
+        pickSuggestion(suggestions[activeIndex])
+        return
+      }
+      if (event.key === 'Enter' && draft.trim()) {
+        event.preventDefault()
+        commit(draft)
+        return
+      }
+    }
+    if (event.key === ',' || event.key === ';') {
       if (draft.trim()) {
         event.preventDefault()
         commit(draft)
       }
-    } else if (event.key === 'Backspace' && !draft && value.length > 0) {
+      return
+    }
+    if (event.key === 'Backspace' && !draft && value.length > 0) {
       onChange(value.slice(0, -1))
     }
   }
 
+  const showSuggestions = isFocused && suggestions.length > 0
+
   return (
     <div className="gmail-recipient-row">
       <span className="gmail-recipient-label">{label}</span>
-      <div className="gmail-recipient-field">
+      <div className="gmail-recipient-field" ref={fieldRef}>
         {value.map((token, index) => (
           <span key={`${token}-${index}`} className="gmail-recipient-chip" title={extractAddress(token)}>
             <span className="gmail-recipient-chip-label">{recipientLabel(token)}</span>
@@ -674,7 +835,16 @@ function RecipientField({
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={onKeyDown}
-          onBlur={() => { if (draft.trim()) commit(draft) }}
+          onFocus={() => setIsFocused(true)}
+          onBlur={() => {
+            // Defer so a mousedown on a suggestion can pick it before the menu closes.
+            window.setTimeout(() => {
+              setIsFocused(false)
+              if (inputRef.current && draft.trim() && document.activeElement !== inputRef.current) {
+                commit(draft)
+              }
+            }, 80)
+          }}
           onPaste={(event) => {
             const text = event.clipboardData.getData('text')
             if (text && /[,;\n]/.test(text)) {
@@ -683,26 +853,126 @@ function RecipientField({
             }
           }}
         />
+        {showSuggestions && (
+          <ul className="gmail-recipient-suggestions" role="listbox" ref={listRef}>
+            {suggestions.map((c, idx) => {
+              const hue = contactHue(c.email)
+              return (
+                <li
+                  key={c.email}
+                  role="option"
+                  aria-selected={idx === activeIndex}
+                  className={cn('gmail-recipient-suggestion', idx === activeIndex && 'is-active')}
+                  onMouseDown={(event) => {
+                    // Prevent input blur before click fires.
+                    event.preventDefault()
+                    pickSuggestion(c)
+                  }}
+                  onMouseEnter={() => setActiveIndex(idx)}
+                >
+                  <span
+                    className="gmail-recipient-suggestion-avatar"
+                    style={{ background: `hsl(${hue}, 60%, 42%)` }}
+                    aria-hidden="true"
+                  >
+                    {contactInitial(c)}
+                  </span>
+                  <span className="gmail-recipient-suggestion-text">
+                    <span className="gmail-recipient-suggestion-name">
+                      <HighlightedText text={c.name || c.email} query={queryShown} />
+                    </span>
+                    {c.name && (
+                      <span className="gmail-recipient-suggestion-email">
+                        <HighlightedText text={c.email} query={queryShown} />
+                      </span>
+                    )}
+                  </span>
+                </li>
+              )
+            })}
+          </ul>
+        )}
       </div>
       {trailing && <div className="gmail-recipient-trailing">{trailing}</div>}
     </div>
   )
 }
 
-function ComposeBox({
+const AI_GENERATE_SYSTEM =
+  'You write complete emails. Given an instruction, produce a subject line and a body. ' +
+  'Respond in EXACTLY this format and nothing else:\n' +
+  'Subject: <a concise, specific subject line>\n' +
+  '\n' +
+  '<the email body as plain text>\n' +
+  'Do not use markdown. Do not add any commentary, labels, or surrounding quotes. ' +
+  'When recipient names are provided, address them naturally (e.g. "Hi <first name>,"). ' +
+  'When the sender\'s first name is provided, sign off with that first name only; otherwise omit the sign-off name ' +
+  '(never write a placeholder like "[Your Name]").'
+
+const AI_REWRITE_SYSTEM =
+  'You rewrite emails. Given the current subject and body plus an edit instruction, ' +
+  'produce the revised subject line and body. Keep the subject if it still fits, or ' +
+  'refine it so it matches the rewritten body. Respond in EXACTLY this format and nothing else:\n' +
+  'Subject: <the subject line>\n' +
+  '\n' +
+  '<the rewritten email body as plain text>\n' +
+  'Do not use markdown. Do not add any commentary, labels, or surrounding quotes. ' +
+  'Preserve the existing sign-off; do not invent placeholder names like "[Your Name]".'
+
+// Split AI output of the form "Subject: …\n\n<body>" into its parts. If no
+// subject line is present, the whole text is treated as the body.
+function parseGeneratedEmail(text: string): { subject: string | null; body: string } {
+  const match = text.match(/^\s*Subject:\s*(.+?)(?:\r?\n|$)/i)
+  if (match) {
+    const subject = match[1].trim()
+    const body = text.slice(match.index! + match[0].length).replace(/^\s+/, '')
+    return { subject, body }
+  }
+  return { subject: null, body: text }
+}
+
+function firstNameFromDisplayName(name: string): string {
+  const trimmed = name.trim().replace(/^["']|["']$/g, '')
+  return trimmed.split(/\s+/)[0] || ''
+}
+
+// Guarantee the sender's first name signs off the email. If the model already
+// ended with the name (e.g. "Best,\nHarsh"), leave it; otherwise append it.
+function ensureSignature(body: string, name: string): string {
+  const signer = name.trim()
+  if (!signer) return body
+  const trimmed = body.replace(/\s+$/, '')
+  // Check the last couple of lines so we don't double up an existing sign-off.
+  const tail = trimmed.split('\n').slice(-2).join('\n').toLowerCase()
+  if (tail.includes(signer.toLowerCase())) return trimmed
+  return `${trimmed}\n\n${signer}`
+}
+
+const TONE_PRESETS: Array<{ key: string; label: string; instruction: string }> = [
+  { key: 'formal', label: 'Formal', instruction: 'Rewrite this email to be more formal and professional.' },
+  { key: 'casual', label: 'Casual', instruction: 'Rewrite this email to be more casual and friendly.' },
+  { key: 'shorter', label: 'Shorter', instruction: 'Rewrite this email to be more concise, keeping the key points.' },
+  { key: 'longer', label: 'Longer', instruction: 'Rewrite this email to be more detailed and thorough.' },
+]
+
+// Composer for replies, forwards, and (mode 'new') from-scratch emails. With a
+// thread it renders as an inline card under the thread; in 'new' mode it has no
+// thread and renders as a centered modal with the AI writing bar.
+const ComposeBox = memo(function ComposeBox({
   mode,
   thread,
-  selfEmail,
+  selfEmail = '',
   onClose,
 }: {
   mode: ComposeMode
-  thread: GmailThread
-  selfEmail: string
+  thread?: GmailThread
+  selfEmail?: string
   onClose: () => void
 }) {
-  const latest = latestMessage(thread)
+  const isNew = mode === 'new'
+  const latest = thread ? latestMessage(thread) : undefined
   const initialRecipients = useMemo(
-    () => buildRecipients(mode, thread, selfEmail),
+    () => (thread ? buildRecipients(mode, thread, selfEmail) : { to: [], cc: [] }),
     [mode, thread, selfEmail],
   )
 
@@ -711,10 +981,11 @@ function ComposeBox({
   const [bccList, setBccList] = useState<string[]>([])
   const [showCc, setShowCc] = useState<boolean>(initialRecipients.cc.length > 0)
   const [showBcc, setShowBcc] = useState<boolean>(false)
-  const [subject, setSubject] = useState<string>(() => composeSubject(mode, thread.subject))
-  const modeLabel = mode === 'forward' ? 'Forward' : mode === 'replyAll' ? 'Reply all' : 'Reply'
+  const [subject, setSubject] = useState<string>(() => (thread ? composeSubject(mode, thread.subject) : ''))
+  const modeLabel = isNew ? 'New message' : mode === 'forward' ? 'Forward' : mode === 'replyAll' ? 'Reply All' : 'Reply'
 
   const initialContent = useMemo(() => {
+    if (!thread) return ''
     if (mode === 'forward') return buildForwardedContent(thread)
     // Gmail-side draft (user's own work) wins over the AI-generated draft.
     const source = stripQuotedReplyText(thread.gmail_draft || thread.draft_response || '')
@@ -730,7 +1001,7 @@ function ComposeBox({
       StarterKit.configure({ link: false }),
       Link.configure({ openOnClick: false, autolink: true }),
       Placeholder.configure({
-        placeholder: mode === 'forward' ? 'Write a message…' : 'Write your reply…',
+        placeholder: isNew || mode === 'forward' ? 'Write a message…' : 'Write your reply…',
       }),
     ],
     editorProps: {
@@ -782,13 +1053,177 @@ function ComposeBox({
     if (editor && sel) editor.chain().focus().setTextSelection(sel).run()
   }
 
+  // The signed-in account's display name, used to sign off AI-generated emails.
+  const [selfName, setSelfName] = useState<string>('')
+  const selfFirstName = useMemo(() => firstNameFromDisplayName(selfName), [selfName])
+  useEffect(() => {
+    if (!isNew) return
+    let cancelled = false
+    window.ipc.invoke('gmail:getAccountName', {})
+      .then((res) => { if (!cancelled && res?.name) setSelfName(res.name) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [isNew])
+
+  const [aiPrompt, setAiPrompt] = useState('')
+  const [generating, setGenerating] = useState(false)
+  // Once a draft has been generated, show a follow-up bar for iterative edits
+  // ("add a line about…", "remove the last paragraph", etc.). It hides again if
+  // the draft is emptied (e.g. undone), tracked via hasContent below.
+  const [hasGenerated, setHasGenerated] = useState(false)
+  const [hasContent, setHasContent] = useState(false)
+
+  // Keep hasContent in sync with the editor across typing, undo/redo, and clears.
+  useEffect(() => {
+    if (!editor) return
+    const sync = () => setHasContent(!editor.isEmpty)
+    sync()
+    editor.on('update', sync)
+    return () => { editor.off('update', sync) }
+  }, [editor])
+
+  // Clearing the body reverts the AI control to its "Write" state and drops the
+  // generated subject, so an emptied composer behaves like a fresh one. The
+  // hasGenerated guard avoids wiping a subject typed before any generation.
+  useEffect(() => {
+    if (hasGenerated && !hasContent) {
+      setHasGenerated(false)
+      setSubject('')
+    }
+  }, [hasGenerated, hasContent])
+
+  const runAi = async (instruction: string, aiMode: 'generate' | 'rewrite') => {
+    if (!editor || generating) return
+    const current = editor.getText().trim()
+    let prompt: string
+    let system: string
+    if (aiMode === 'generate') {
+      if (!instruction.trim()) { toast('Describe what to write.', 'error'); return }
+      system = AI_GENERATE_SYSTEM
+      const ctx: string[] = []
+      // Use the recipients' names (from the contacts picker) so the AI can
+      // address them naturally; fall back to the address when there's no name.
+      const recipientNames = toList
+        .map((token) => {
+          const name = extractName(token)
+          return name && name !== 'Unknown' ? name : extractAddress(token)
+        })
+        .filter(Boolean)
+      if (recipientNames.length) ctx.push(`Recipient(s): ${recipientNames.join(', ')}`)
+      if (selfFirstName) ctx.push(`Sender's first name (sign off as this): ${selfFirstName}`)
+      if (subject.trim()) ctx.push(`Desired subject hint: ${subject.trim()}`)
+      if (current) ctx.push(`Existing draft (revise or build on it):\n${current}`)
+      prompt = `${ctx.length ? ctx.join('\n') + '\n\n' : ''}Instruction: ${instruction.trim()}`
+    } else {
+      if (!instruction.trim()) { toast('Describe the edit to make.', 'error'); return }
+      if (!current) { toast('Write something first.', 'error'); return }
+      system = AI_REWRITE_SYSTEM
+      const subjectLine = subject.trim() ? `Subject: ${subject.trim()}\n\n` : ''
+      prompt = `Instruction: ${instruction}\n\n---\n${subjectLine}${current}`
+    }
+
+    setGenerating(true)
+    try {
+      // Draft through Copilot: no model override, so the backend resolves the
+      // same default model/provider the Copilot chat uses (models.json).
+      const res = await window.ipc.invoke('llm:generate', { prompt, system })
+      if (res.error || !res.text) {
+        toast(res.error || 'No text was generated.', 'error')
+        return
+      }
+      // Replace via a tracked transaction (selectAll + insertContent) so the AI
+      // draft lands in the editor's undo history and the toolbar's Undo reverts it.
+      if (aiMode === 'generate') {
+        const { subject: generatedSubject, body } = parseGeneratedEmail(res.text)
+        if (generatedSubject) setSubject(generatedSubject)
+        // Always sign off with the account first name, even if the model omitted it.
+        const signed = ensureSignature(body, selfFirstName)
+        editor.chain().focus().selectAll().insertContent(plainTextToHtml(signed)).run()
+        setHasGenerated(true)
+      } else {
+        // Rewrites also regenerate the subject so it stays in sync with the body.
+        const { subject: rewrittenSubject, body } = parseGeneratedEmail(res.text)
+        if (rewrittenSubject) setSubject(rewrittenSubject)
+        editor.chain().focus().selectAll().insertContent(plainTextToHtml(body)).run()
+      }
+    } catch (err) {
+      toast(`Generation failed: ${err instanceof Error ? err.message : String(err)}`, 'error')
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  // The single Write/Edit bar: generate a fresh draft until one exists, then
+  // switch to rewriting it. Clears the prompt after a run kicks off.
+  const runAiBar = async () => {
+    await runAi(aiPrompt, hasGenerated ? 'rewrite' : 'generate')
+    setAiPrompt('')
+  }
+
+  // Attachments staged for this message. contentBase64 is the raw file bytes,
+  // read in the renderer; the main process wraps them into the MIME on send.
+  const [attachments, setAttachments] = useState<
+    Array<{ id: string; filename: string; mimeType: string; size: number; contentBase64: string }>
+  >([])
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Gmail rejects messages over ~25MB; base64 inflates bytes by ~33%.
+  const MAX_TOTAL_BYTES = 25 * 1024 * 1024
+
+  // Read a file's bytes as raw base64 (the part after the data: URL prefix).
+  const readAsBase64 = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onerror = () => reject(reader.error ?? new Error('read failed'))
+      reader.onload = () => {
+        const result = String(reader.result)
+        const comma = result.indexOf(',')
+        resolve(comma >= 0 ? result.slice(comma + 1) : result)
+      }
+      reader.readAsDataURL(file)
+    })
+
+  const addFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return
+    const staged: typeof attachments = []
+    for (const file of Array.from(files)) {
+      try {
+        staged.push({
+          id: `${file.name}-${file.size}-${file.lastModified}`,
+          filename: file.name,
+          mimeType: file.type || 'application/octet-stream',
+          size: file.size,
+          contentBase64: await readAsBase64(file),
+        })
+      } catch {
+        toast(`Could not read ${file.name}.`, 'error')
+      }
+    }
+    setAttachments((prev) => {
+      const merged = [...prev]
+      for (const item of staged) {
+        if (!merged.some((a) => a.id === item.id)) merged.push(item)
+      }
+      const total = merged.reduce((sum, a) => sum + a.size, 0)
+      if (total > MAX_TOTAL_BYTES) {
+        toast('Attachments exceed the 25MB limit.', 'error')
+        return prev
+      }
+      return merged
+    })
+  }
+
+  const removeAttachment = (id: string) => {
+    setAttachments((prev) => prev.filter((a) => a.id !== id))
+  }
+
   const [sending, setSending] = useState(false)
   const sendInGmail = async () => {
     if (!editor || sending) return
     const html = editor.getHTML()
     const text = editor.getText().trim()
     if (!text) {
-      toast('Draft is empty.', 'error')
+      toast(isNew ? 'Message is empty.' : 'Draft is empty.', 'error')
       return
     }
 
@@ -798,25 +1233,29 @@ function ComposeBox({
     }
 
     // Build References chain from all known message ids (newest last).
-    const messageIds = thread.messages
+    const messageIds = (thread?.messages ?? [])
       .map((m) => m.messageIdHeader)
       .filter((v): v is string => Boolean(v))
     const references = messageIds.join(' ')
     const inReplyTo = latest?.messageIdHeader
-    const isForward = mode === 'forward'
+    // Only replies stay on the thread; forwards and new emails start fresh.
+    const isThreaded = Boolean(thread) && mode !== 'forward' && !isNew
 
     setSending(true)
     try {
       const result = await window.ipc.invoke('gmail:sendReply', {
-        threadId: isForward ? undefined : thread.threadId,
+        threadId: isThreaded ? thread?.threadId : undefined,
         to: toList.join(', '),
         cc: ccList.length ? ccList.join(', ') : undefined,
         bcc: bccList.length ? bccList.join(', ') : undefined,
-        subject: subject.trim() || composeSubject(mode, thread.subject),
+        subject: subject.trim() || (thread ? composeSubject(mode, thread.subject) : '(No subject)'),
         bodyHtml: html,
         bodyText: text,
-        inReplyTo: isForward ? undefined : inReplyTo,
-        references: isForward ? undefined : references || undefined,
+        inReplyTo: isThreaded ? inReplyTo : undefined,
+        references: isThreaded ? references || undefined : undefined,
+        attachments: attachments.length
+          ? attachments.map(({ filename, mimeType, contentBase64 }) => ({ filename, mimeType, contentBase64 }))
+          : undefined,
       })
       if (result.error) {
         toast(`Send failed: ${result.error}`, 'error')
@@ -832,7 +1271,7 @@ function ComposeBox({
   }
 
   const refineWithCopilot = () => {
-    if (!editor) return
+    if (!editor || !thread) return
     const currentDraft = editor.getText().trim()
     const threadSubject = thread.subject || '(No subject)'
 
@@ -862,17 +1301,25 @@ function ComposeBox({
     window.dispatchEvent(new Event('email-block:draft-with-assistant'))
   }
 
-  return (
-    <div className="gmail-compose-card">
-      <div className="gmail-compose-header">
+  const card = (
+    <div
+      className={isNew ? 'gmail-compose-modal' : 'gmail-compose-card'}
+      onClick={isNew ? (event) => event.stopPropagation() : undefined}
+    >
+      <div className={isNew ? 'gmail-compose-modal-header' : 'gmail-compose-header'}>
         <span>{modeLabel}</span>
-        <button type="button" onClick={onClose} aria-label="Close compose">×</button>
+        <button
+          type="button"
+          className={isNew ? 'gmail-icon-button' : undefined}
+          onClick={onClose}
+          aria-label="Close compose"
+        >×</button>
       </div>
       <RecipientField
         label="To"
         value={toList}
         onChange={setToList}
-        autoFocus={mode === 'forward'}
+        autoFocus={isNew || mode === 'forward'}
         trailing={
           <div className="gmail-recipient-toggles">
             {!showCc && <button type="button" onClick={() => setShowCc(true)}>Cc</button>}
@@ -882,18 +1329,83 @@ function ComposeBox({
       />
       {showCc && <RecipientField label="Cc" value={ccList} onChange={setCcList} />}
       {showBcc && <RecipientField label="Bcc" value={bccList} onChange={setBccList} />}
-      {mode === 'forward' && (
+      {isNew && (
+        <>
+          <div className="gmail-compose-ai-bar">
+            <input
+              className="gmail-compose-ai-input"
+              value={aiPrompt}
+              onChange={(event) => setAiPrompt(event.target.value)}
+              placeholder={hasGenerated
+                ? 'Edit the draft (e.g. add a line about…, remove the last paragraph)…'
+                : 'Describe the email and let AI write it…'}
+              disabled={generating}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  void runAiBar()
+                }
+              }}
+            />
+            <button
+              type="button"
+              className="gmail-refine-button"
+              onClick={() => { void runAiBar() }}
+              disabled={generating}
+              title={hasGenerated ? 'Apply this edit to the draft' : 'Write a draft with AI'}
+            >
+              {generating ? <LoaderIcon size={15} className="animate-spin" /> : <Sparkles size={15} />}
+              {generating
+                ? (hasGenerated ? 'Editing…' : 'Writing…')
+                : (hasGenerated ? 'Edit' : 'Write')}
+            </button>
+          </div>
+          <div className="gmail-compose-ai-presets">
+            <button type="button" onClick={() => { void runAi('Improve the clarity, grammar, and flow of this email while preserving its meaning.', 'rewrite') }} disabled={generating}>Improve</button>
+            {TONE_PRESETS.map((preset) => (
+              <button key={preset.key} type="button" onClick={() => { void runAi(preset.instruction, 'rewrite') }} disabled={generating}>{preset.label}</button>
+            ))}
+          </div>
+        </>
+      )}
+      {(isNew || mode === 'forward') && (
         <div className="gmail-compose-line">
           <span className="gmail-compose-label">Subject</span>
           <input
             className="gmail-compose-subject-input"
             value={subject}
             onChange={(event) => setSubject(event.target.value)}
-            placeholder="Subject"
           />
         </div>
       )}
       <EditorContent editor={editor} className="gmail-compose-editor" />
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        style={{ display: 'none' }}
+        onChange={(event) => {
+          void addFiles(event.target.value ? event.currentTarget.files : null)
+          event.currentTarget.value = ''
+        }}
+      />
+      {attachments.length > 0 && (
+        <div className="gmail-compose-attachments">
+          {attachments.map((att) => (
+            <div key={att.id} className="gmail-compose-attachment" title={att.filename}>
+              <Paperclip size={13} />
+              <span className="gmail-compose-attachment-name">{att.filename}</span>
+              <span className="gmail-compose-attachment-size">{formatAttachmentSize(att.size)}</span>
+              <button
+                type="button"
+                className="gmail-compose-attachment-remove"
+                onClick={() => removeAttachment(att.id)}
+                aria-label={`Remove ${att.filename}`}
+              >×</button>
+            </div>
+          ))}
+        </div>
+      )}
       {linkOpen && (
         <div className="gmail-compose-link-popover" onMouseDown={(event) => event.preventDefault()}>
           <input
@@ -922,7 +1434,7 @@ function ComposeBox({
             className="gmail-send-button"
             onClick={() => { void sendInGmail() }}
             disabled={sending}
-            title="Send this reply via Gmail"
+            title={isNew ? 'Send this email via Gmail' : 'Send this reply via Gmail'}
           >
             {sending ? <LoaderIcon size={15} className="animate-spin" /> : <Send size={15} />}
             {sending ? 'Sending…' : 'Send'}
@@ -930,19 +1442,40 @@ function ComposeBox({
           <button
             type="button"
             className="gmail-refine-button"
-            onClick={refineWithCopilot}
-            title="Refine this draft with Copilot"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={sending}
+            title="Attach files"
           >
-            <Sparkles size={15} />
-            Refine
+            <Paperclip size={15} />
+            Attach
           </button>
+          {thread && (
+            <button
+              type="button"
+              className="gmail-refine-button"
+              onClick={refineWithCopilot}
+              title="Refine this draft with Copilot"
+            >
+              <Sparkles size={15} />
+              Refine
+            </button>
+          )}
         </div>
         {editor && <ComposeToolbar editor={editor} onOpenLink={openLink} />}
         <button type="button" className="gmail-compose-link" onClick={onClose}>Discard</button>
       </div>
     </div>
   )
-}
+
+  if (isNew) {
+    return (
+      <div className="gmail-compose-overlay" onClick={onClose}>
+        {card}
+      </div>
+    )
+  }
+  return card
+})
 
 function ThreadDetail({
   thread,
@@ -968,10 +1501,17 @@ function ThreadDetail({
     return () => { cancelled = true }
   }, [])
 
-  const canReplyAll = useMemo(() => {
-    const { to, cc } = buildRecipients('replyAll', thread, selfEmail)
-    return cc.length > 0 || to.length > 1
-  }, [thread, selfEmail])
+  const replyAllRecipients = useMemo(
+    () => buildRecipients('replyAll', thread, selfEmail),
+    [thread, selfEmail],
+  )
+  const canReplyAll = replyAllRecipients.cc.length > 0 || replyAllRecipients.to.length > 1
+  const replyAllButton = canReplyAll ? (
+    <button type="button" onClick={() => setComposeMode('replyAll')}>
+      <ReplyAll size={16} />
+      Reply All
+    </button>
+  ) : null
 
   const toggleExpand = useCallback((index: number) => {
     setExpandedIndices((prev) => {
@@ -1041,16 +1581,11 @@ function ThreadDetail({
         </div>
 
         <div className="gmail-thread-actions">
+          {replyAllButton}
           <button type="button" onClick={() => setComposeMode('reply')}>
             <Reply size={16} />
             Reply
           </button>
-          {canReplyAll && (
-            <button type="button" onClick={() => setComposeMode('replyAll')}>
-              <ReplyAll size={16} />
-              Reply all
-            </button>
-          )}
           <button type="button" onClick={() => setComposeMode('forward')}>
             <Forward size={16} />
             Forward
@@ -1124,6 +1659,9 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
   const [refreshing, setRefreshing] = useState(!hadPersistedDataOnMount.current)
   const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
+  const [composeOpen, setComposeOpen] = useState(false)
+  // Stable so the open composer isn't re-rendered on every inbox sync tick.
+  const closeCompose = useCallback(() => setComposeOpen(false), [])
   // Gmail sync uses the native Google OAuth connection.
   const [emailConnection, setEmailConnection] = useState<GmailConnectionStatus | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -1349,12 +1887,18 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
   // when files change. Throttled to at most one reload per ~3s so a burst of
   // backend writes (sync processing many threads sequentially) coalesces into
   // a small number of in-place updates rather than a flicker storm.
-  // Suppressed while a thread is open (composing/reading); deferred until close.
+  // Suppressed while a thread is open (reading/replying) or the compose-new
+  // modal is open; deferred until whichever is open closes. A reload replaces
+  // the threads array and re-renders the whole inbox list (and any mounted
+  // ThreadDetail iframes) on the main thread — that re-render janks an open
+  // composer even though ComposeBox itself is memoized, so we pause it.
   const pendingReloadRef = useRef(false)
   const reloadDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastReloadAtRef = useRef(0)
   const isSelectedRef = useRef<string | null>(null)
   isSelectedRef.current = selectedThreadId
+  const composeOpenRef = useRef(false)
+  composeOpenRef.current = composeOpen
   const isRefreshingRef = useRef(false)
   isRefreshingRef.current = refreshing
   const otherHasThreadsRef = useRef(false)
@@ -1364,7 +1908,7 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
 
   const doReload = useCallback(() => {
     if (isRefreshingRef.current) return
-    if (isSelectedRef.current !== null) {
+    if (isSelectedRef.current !== null || composeOpenRef.current) {
       pendingReloadRef.current = true
       return
     }
@@ -1419,9 +1963,10 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
     }
   }, [triggerLiveReload])
 
-  // When user closes a thread, if updates arrived while they were reading, flush now.
+  // When the user closes the open thread or the compose-new modal, if updates
+  // arrived while it was open, flush them now.
   useEffect(() => {
-    if (selectedThreadId !== null) return
+    if (selectedThreadId !== null || composeOpen) return
     if (!pendingReloadRef.current) return
     pendingReloadRef.current = false
     lastReloadAtRef.current = Date.now()
@@ -1429,7 +1974,7 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
     if (otherHasThreadsRef.current) {
       void reloadFirstPage('other', { silent: true })
     }
-  }, [selectedThreadId, reloadFirstPage])
+  }, [selectedThreadId, composeOpen, reloadFirstPage])
 
   // Manual refresh: wake the background sync loop. It updates inbox_lists/,
   // the watcher fires, and triggerLiveReload picks up the changes. The
@@ -1568,9 +2113,14 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
               placeholder="Search loaded mail"
             />
           </div>
-          <button type="button" className="gmail-icon-button" onClick={() => void refresh()} aria-label="Refresh">
-            {refreshing ? <LoaderIcon size={18} className="animate-spin" /> : <RefreshCw size={18} />}
-          </button>
+          <div className="gmail-topbar-actions">
+            <button type="button" className="gmail-icon-button" onClick={() => void refresh()} aria-label="Refresh">
+              {refreshing ? <LoaderIcon size={18} className="animate-spin" /> : <RefreshCw size={18} />}
+            </button>
+            <button type="button" className="gmail-icon-button" onClick={() => setComposeOpen(true)} aria-label="Compose new email">
+              <SquarePen size={18} />
+            </button>
+          </div>
         </div>
 
         {error && !hasAny ? (
@@ -1637,6 +2187,7 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
           </div>
         )}
       </div>
+      {composeOpen && <ComposeBox mode="new" onClose={closeCompose} />}
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} defaultTab="connections" />
     </div>
   )

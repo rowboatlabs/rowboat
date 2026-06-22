@@ -2,6 +2,16 @@ packages:
   - apps/*
   - packages/*
 
+allowBuilds:
+  core-js: true
+  electron: true
+  electron-winstaller: true
+  esbuild: true
+  fs-xattr: true
+  macos-alias: true
+  node-pty: true
+  protobufjs: true
+
 catalog:
   vitest: 4.1.7
 
@@ -13,3 +23,5 @@ onlyBuiltDependencies:
   - fs-xattr
   - macos-alias
   - protobufjs
+patchedDependencies:
+  '@openai/codex@0.128.0': patches/@openai__codex@0.128.0.patch

@@ -15,7 +15,15 @@ export class ElectronNotificationService implements INotificationService {
         return Notification.isSupported();
     }
 
-    notify({ title = "Rowboat", message, link, actionLabel, secondaryActions }: NotifyInput): void {
+    notify({ title = "Rowboat", message, link, actionLabel, secondaryActions, onlyWhenBackground }: NotifyInput): void {
+        // Ambient notifications are suppressed while the app is in the
+        // foreground — the user is already looking at it. A window counts as
+        // foreground only if it's actually focused (minimized / other-space
+        // windows are not), so this correctly treats those as background.
+        if (onlyWhenBackground && BrowserWindow.getAllWindows().some((w) => w.isFocused())) {
+            return;
+        }
+
         // Build the actions array AND a parallel index → link map.
         // macOS shows actions[0] inline (Banner) or all of them (Alert);
         // additional ones live behind the chevron menu.

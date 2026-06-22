@@ -9,6 +9,8 @@ import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { LlmModelConfig, LlmProvider } from "@x/shared/dist/models.js";
 import z from "zod";
 import { getGatewayProvider } from "./gateway.js";
+import { getDefaultModelAndProvider, resolveProviderConfig } from "./defaults.js";
+import { withUseCase } from "../analytics/use_case.js";
 
 export const Provider = LlmProvider;
 export const ModelConfig = LlmModelConfig;
@@ -94,5 +96,114 @@ export async function testModelConnection(
         return { success: false, error: message };
     } finally {
         clearTimeout(timeout);
+    }
+}
+
+export async function listModelsForProvider(
+    providerConfig: z.infer<typeof Provider>,
+    timeoutMs = 8000,
+): Promise<string[]> {
+    const { flavor, apiKey, baseURL } = providerConfig;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        let url = "";
+        const headers: Record<string, string> = {};
+
+        switch (flavor) {
+            case "openai":
+                url = "https://api.openai.com/v1/models";
+                headers["Authorization"] = `Bearer ${apiKey}`;
+                break;
+            case "anthropic":
+                url = "https://api.anthropic.com/v1/models";
+                headers["x-api-key"] = apiKey ?? "";
+                headers["anthropic-version"] = "2023-06-01";
+                break;
+            case "google":
+                url = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey ?? ""}`;
+                break;
+            case "openrouter":
+                url = "https://openrouter.ai/api/v1/models";
+                if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
+                break;
+            case "ollama":
+                url = `${(baseURL ?? "http://localhost:11434").replace(/\/$/, "")}/api/tags`;
+                break;
+            case "openai-compatible":
+            case "aigateway":
+                url = `${(baseURL ?? "").replace(/\/$/, "")}/models`;
+                if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
+                break;
+            default:
+                throw new Error(`Unsupported provider flavor: ${flavor}`);
+        }
+
+        const res = await fetch(url, { headers, signal: controller.signal });
+        if (!res.ok) {
+            const body = await res.text().catch(() => "");
+            throw new Error(`Failed to list models (${res.status}): ${body.slice(0, 200)}`);
+        }
+        const data = await res.json();
+
+        // Normalize each provider's response shape into a flat list of model id strings.
+        let ids: string[] = [];
+        if (flavor === "google") {
+            // { models: [{ name: "models/gemini-..." }] }
+            ids = (data.models ?? []).map((m: { name: string }) => m.name.replace(/^models\//, ""));
+        } else if (flavor === "ollama") {
+            // { models: [{ name: "llama3:latest" }] }
+            ids = (data.models ?? []).map((m: { name: string }) => m.name);
+        } else {
+            // OpenAI-shaped: { data: [{ id: "..." }] }
+            ids = (data.data ?? []).map((m: { id: string }) => m.id);
+        }
+        return ids.filter((id: string) => typeof id === "string" && id.length > 0);
+    } finally {
+        clearTimeout(timeout);
+    }
+}
+
+export interface GenerateTextOptions {
+    prompt: string;
+    system?: string;
+    /** Model id. Falls back to the active default when omitted. */
+    model?: string;
+    /** Provider name (e.g. "rowboat", "openai"). Falls back to the active default. */
+    provider?: string;
+}
+
+export interface GenerateTextResult {
+    text?: string;
+    /** The model/provider actually used (after resolving defaults). */
+    model?: string;
+    provider?: string;
+    error?: string;
+}
+
+/**
+ * One-shot text generation for lightweight UI features (e.g. the email
+ * composer's "write with AI"). Resolves the requested model+provider, falling
+ * back to the active default, and returns the generated text. Never throws —
+ * errors are returned in the result so the renderer can surface them.
+ */
+export async function generateOneShot(opts: GenerateTextOptions): Promise<GenerateTextResult> {
+    try {
+        const def = await getDefaultModelAndProvider();
+        const modelId = opts.model || def.model;
+        const providerName = opts.provider || def.provider;
+        const providerConfig = await resolveProviderConfig(providerName);
+        const languageModel = createProvider(providerConfig).languageModel(modelId);
+        const result = await withUseCase(
+            { useCase: "copilot_chat", subUseCase: "email_compose" },
+            () => generateText({
+                model: languageModel,
+                ...(opts.system ? { system: opts.system } : {}),
+                prompt: opts.prompt,
+            }),
+        );
+        return { text: result.text.trim(), model: modelId, provider: providerName };
+    } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) };
     }
 }

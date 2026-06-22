@@ -3,6 +3,7 @@ import path from "node:path";
 import {
   setupIpcHandlers,
   startRunsWatcher,
+  startCodeSessionStatusWatcher,
   startServicesWatcher,
   startLiveNoteAgentWatcher,
   startBackgroundTaskAgentWatcher,
@@ -11,6 +12,7 @@ import {
   stopServicesWatcher,
   stopWorkspaceWatcher
 } from "./ipc.js";
+import { disposeAllTerminals } from "./terminal.js";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname } from "node:path";
 import { updateElectronApp, UpdateSourceType } from "update-electron-app";
@@ -35,12 +37,13 @@ import { shutdown as shutdownAnalytics } from "@x/core/dist/analytics/posthog.js
 import { identifyIfSignedIn } from "@x/core/dist/analytics/identify.js";
 
 import { initConfigs } from "@x/core/dist/config/initConfigs.js";
+import { getAgentSlackCliStatus } from "@x/core/dist/slack/agent-slack-exec.js";
 import { resolveWorkspacePath } from "@x/core/dist/workspace/workspace.js";
 import started from "electron-squirrel-startup";
-import { execSync, exec, execFileSync } from "node:child_process";
-import { promisify } from "node:util";
+import { execFileSync } from "node:child_process";
 import { init as initChromeSync } from "@x/core/dist/knowledge/chrome-extension/server/server.js";
-import { registerBrowserControlService, registerNotificationService } from "@x/core/dist/di/container.js";
+import container, { registerBrowserControlService, registerNotificationService } from "@x/core/dist/di/container.js";
+import type { CodeModeManager } from "@x/core/dist/code-mode/acp/manager.js";
 import { browserViewManager, BROWSER_PARTITION } from "./browser/view.js";
 import { setupBrowserEventForwarding } from "./browser/ipc.js";
 import { ElectronBrowserControlService } from "./browser/control-service.js";
@@ -52,8 +55,6 @@ import {
   setMainWindowForDeepLinks,
 } from "./deeplink.js";
 import { disconnectGoogleIfScopesStale } from "./oauth-handler.js";
-
-const execAsync = promisify(exec);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -220,6 +221,7 @@ function createWindow() {
     backgroundColor: "#252525", // Prevent white flash (matches dark mode)
     titleBarStyle: "hiddenInset",
     trafficLightPosition: { x: 12, y: 12 },
+    icon: process.platform !== "darwin" ? path.join(__dirname, "../../icons/icon.png") : undefined,
     webPreferences: {
       // IMPORTANT: keep Node out of renderer
       nodeIntegration: false,
@@ -251,14 +253,34 @@ function createWindow() {
     return { action: "deny" };
   });
 
-  // Handle navigation to external URLs (e.g., clicking a link without target="_blank")
-  win.webContents.on("will-navigate", (event, url) => {
+  // Handle navigation to external URLs (e.g., clicking a link without target="_blank").
+  // Returns true when the URL was external and routed to the system browser.
+  const routeExternalNavigation = (url: string): boolean => {
     const isInternal =
       url.startsWith("app://") || url.startsWith("http://localhost:5173");
-    if (!isInternal) {
-      event.preventDefault();
-      shell.openExternal(url);
-    }
+    if (isInternal) return false;
+    shell.openExternal(url);
+    return true;
+  };
+
+  win.webContents.on("will-navigate", (event, url) => {
+    if (routeExternalNavigation(url)) event.preventDefault();
+  });
+
+  // Subframe navigations (e.g. links clicked inside the sandboxed iframe that
+  // renders a background-task / workspace `index.html`) fire `will-frame-navigate`,
+  // not `will-navigate`. Route their external links to the system browser too,
+  // so HTML reports behave like the markdown viewer. Main-frame navigations are
+  // already handled by `will-navigate` above — skip them here to avoid double-open.
+  //
+  // Scope this to our own HTML viewer frames (identified by their app://workspace
+  // document origin). Third-party note embeds (YouTube, Figma, Twitter via the
+  // embed/iframe blocks) load from their own origins — leave their internal
+  // navigation untouched so the embeds keep working.
+  win.webContents.on("will-frame-navigate", (event) => {
+    if (event.isMainFrame) return;
+    if (!event.frame?.url.startsWith("app://workspace/")) return;
+    if (routeExternalNavigation(event.url)) event.preventDefault();
   });
 
   // Attach the embedded browser pane manager to this window.
@@ -289,18 +311,13 @@ app.whenReady().then(async () => {
     });
   }
 
-  // Ensure agent-slack CLI is available
-  try {
-    execSync('agent-slack --version', { stdio: 'ignore', timeout: 5000 });
-  } catch {
-    try {
-      console.log('agent-slack not found, installing...');
-      await execAsync('npm install -g agent-slack', { timeout: 60000 });
-      console.log('agent-slack installed successfully');
-    } catch (e) {
-      console.error('Failed to install agent-slack:', e);
-    }
-  }
+  // The agent-slack CLI ships bundled with the app (.package/dist/agent-slack.cjs)
+  // and is resolved per call by the shared executor in @x/core. Availability is
+  // exposed to the UI via the slack:cliStatus IPC channel; this startup log is
+  // diagnostics only.
+  getAgentSlackCliStatus().then((status) => {
+    console.log('[Slack] agent-slack CLI status:', status);
+  }).catch(() => { /* probe failures already surface through slack:cliStatus */ });
 
   // Initialize all config files before UI can access them
   await initConfigs();
@@ -329,6 +346,9 @@ app.whenReady().then(async () => {
 
   // start runs watcher
   startRunsWatcher();
+
+  // start code-session status tracker (derives working/needs-you/idle + notifications)
+  startCodeSessionStatusWatcher();
 
   // start services watcher
   startServicesWatcher();
@@ -416,6 +436,14 @@ app.on("before-quit", () => {
   stopWorkspaceWatcher();
   stopRunsWatcher();
   stopServicesWatcher();
+  // Tear down any live ACP coding-agent adapter processes so they don't outlive the app.
+  try {
+    container.resolve<CodeModeManager>('codeModeManager').disposeAll();
+  } catch {
+    // nothing live to dispose
+  }
+  // Kill embedded terminal shells.
+  disposeAllTerminals();
   shutdownLocalSites().catch((error) => {
     console.error('[LocalSites] Failed to shut down cleanly:', error);
   });

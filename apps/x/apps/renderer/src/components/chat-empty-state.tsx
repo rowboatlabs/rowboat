@@ -2,6 +2,7 @@ import { ArrowUpRight, Bot, Mail, MessageSquare, Sparkles, Telescope } from 'luc
 
 import { cn } from '@/lib/utils'
 import { formatRelativeTime } from '@/lib/relative-time'
+import { ToolConnectionsCard } from '@/components/tool-connections-card'
 
 export interface ChatEmptyStateRun {
   id: string
@@ -101,6 +102,8 @@ export function ChatEmptyState({
           ))}
         </div>
       </div>
+
+      <ToolConnectionsCard />
     </div>
   )
 }

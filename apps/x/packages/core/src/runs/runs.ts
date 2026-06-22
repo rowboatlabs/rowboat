@@ -3,6 +3,7 @@ import container from "../di/container.js";
 import { IMessageQueue, UserMessageContentType, VoiceOutputMode, MiddlePaneContext } from "../application/lib/message-queue.js";
 import { AskHumanResponseEvent, ToolPermissionRequestEvent, ToolPermissionResponseEvent, CreateRunOptions, Run, ListRunsResponse, ToolPermissionAuthorizePayload, AskHumanResponsePayload } from "@x/shared/dist/runs.js";
 import { IRunsRepo } from "./repo.js";
+import { ICodeSessionsRepo } from "../code-mode/sessions/repo.js";
 import { IAgentRuntime } from "../agents/runtime.js";
 import { IBus } from "../application/lib/bus.js";
 import { IAbortRegistry } from "./abort-registry.js";
@@ -32,6 +33,7 @@ export async function createRun(opts: z.infer<typeof CreateRunOptions>): Promise
         agentId: opts.agentId,
         model,
         provider,
+        permissionMode: opts.permissionMode ?? "manual",
         useCase,
         ...(opts.subUseCase ? { subUseCase: opts.subUseCase } : {}),
     });
@@ -39,9 +41,23 @@ export async function createRun(opts: z.infer<typeof CreateRunOptions>): Promise
     return run;
 }
 
-export async function createMessage(runId: string, message: UserMessageContentType, voiceInput?: boolean, voiceOutput?: VoiceOutputMode, searchEnabled?: boolean, middlePaneContext?: MiddlePaneContext, codeMode?: 'claude' | 'codex'): Promise<string> {
+export async function createMessage(runId: string, message: UserMessageContentType, voiceInput?: boolean, voiceOutput?: VoiceOutputMode, searchEnabled?: boolean, middlePaneContext?: MiddlePaneContext, codeMode?: 'claude' | 'codex', codeCwd?: string, codePolicy?: 'ask' | 'auto-approve-reads' | 'yolo'): Promise<string> {
+    // Code-section sessions carry their coding context in the session meta.
+    // Pin it here — not in the composer — so EVERY path into the run (assistant
+    // chat pane, voice, palette) drives the session's agent in its directory,
+    // and the session header stays the single source of truth.
+    try {
+        const sessionMeta = await container.resolve<ICodeSessionsRepo>('codeSessionsRepo').get(runId);
+        if (sessionMeta) {
+            codeMode = sessionMeta.agent;
+            codeCwd = sessionMeta.cwd;
+            codePolicy = sessionMeta.policy;
+        }
+    } catch {
+        // sessions repo unavailable — treat as a regular chat run
+    }
     const queue = container.resolve<IMessageQueue>('messageQueue');
-    const id = await queue.enqueue(runId, message, voiceInput, voiceOutput, searchEnabled, middlePaneContext, codeMode);
+    const id = await queue.enqueue(runId, message, voiceInput, voiceOutput, searchEnabled, middlePaneContext, codeMode, codeCwd, codePolicy);
     const runtime = container.resolve<IAgentRuntime>('agentRuntime');
     runtime.trigger(runId);
     return id;

@@ -97,6 +97,7 @@ export interface CreateTaskInput {
     name: string;
     instructions: string;
     triggers?: BackgroundTask['triggers'];
+    projectId?: string;
     model?: string;
     provider?: string;
 }
@@ -136,6 +137,7 @@ export async function createTask(input: CreateTaskInput): Promise<{ slug: string
         instructions: input.instructions,
         active: true,
         ...(input.triggers ? { triggers: input.triggers } : {}),
+        ...(input.projectId ? { projectId: input.projectId } : {}),
         ...(input.model ? { model: input.model } : {}),
         ...(input.provider ? { provider: input.provider } : {}),
         createdAt: new Date().toISOString(),
@@ -194,6 +196,7 @@ export async function listTasks(opts: ListTasksOptions = {}): Promise<ListTasksR
             instructions: task.instructions,
             active: task.active,
             ...(task.triggers ? { triggers: task.triggers } : {}),
+            ...(task.projectId ? { projectId: task.projectId } : {}),
             createdAt: task.createdAt,
             ...(task.lastAttemptAt ? { lastAttemptAt: task.lastAttemptAt } : {}),
             ...(task.lastRunId ? { lastRunId: task.lastRunId } : {}),

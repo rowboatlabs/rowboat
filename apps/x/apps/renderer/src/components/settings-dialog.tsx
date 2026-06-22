@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Bug, Terminal, AlertTriangle, RefreshCw } from "lucide-react"
+import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Bug, Terminal, AlertTriangle, RefreshCw, PanelRight, Bell } from "lucide-react"
 
 import {
   Dialog,
@@ -25,8 +25,9 @@ import { useTheme } from "@/contexts/theme-context"
 import { toast } from "sonner"
 import { AccountSettings } from "@/components/settings/account-settings"
 import { ConnectedAccountsSettings } from "@/components/settings/connected-accounts-settings"
+import type { ApprovalPolicy } from "@x/shared/src/code-mode.js"
 
-type ConfigTab = "account" | "connections" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "note-tagging" | "help"
+type ConfigTab = "account" | "connections" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "notifications" | "note-tagging" | "help"
 
 interface TabConfig {
   id: ConfigTab
@@ -81,6 +82,12 @@ const tabs: TabConfig[] = [
     label: "Appearance",
     icon: Palette,
     description: "Customize the look and feel",
+  },
+  {
+    id: "notifications",
+    label: "Notifications",
+    icon: Bell,
+    description: "Choose which notifications you receive",
   },
   {
     id: "note-tagging",
@@ -210,7 +217,7 @@ function ThemeOption({
 }
 
 function AppearanceSettings() {
-  const { theme, setTheme } = useTheme()
+  const { theme, setTheme, chatPanePlacement, setChatPanePlacement, chatPaneSize, setChatPaneSize } = useTheme()
 
   return (
     <div className="space-y-6">
@@ -237,6 +244,50 @@ function AppearanceSettings() {
             icon={Monitor}
             isSelected={theme === "system"}
             onClick={() => setTheme("system")}
+          />
+        </div>
+      </div>
+      <div>
+        <h4 className="text-sm font-medium mb-3">Chat</h4>
+        <p className="text-xs text-muted-foreground mb-4">
+          Choose where chat sits when another pane is open
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <ThemeOption
+            label="Chat right"
+            icon={PanelRight}
+            isSelected={chatPanePlacement === "right"}
+            onClick={() => setChatPanePlacement("right")}
+          />
+          <ThemeOption
+            label="Chat middle"
+            icon={MessageCircle}
+            isSelected={chatPanePlacement === "middle"}
+            onClick={() => setChatPanePlacement("middle")}
+          />
+        </div>
+        <h4 className="mt-6 text-sm font-medium mb-3">Chat size</h4>
+        <p className="text-xs text-muted-foreground mb-4">
+          Choose how much width chat gets when another pane is open
+        </p>
+        <div className="grid grid-cols-3 gap-3">
+          <ThemeOption
+            label="Chat smaller"
+            icon={MessageCircle}
+            isSelected={chatPaneSize === "chat-smaller"}
+            onClick={() => setChatPaneSize("chat-smaller")}
+          />
+          <ThemeOption
+            label="Chat equal"
+            icon={Monitor}
+            isSelected={chatPaneSize === "chat-equal"}
+            onClick={() => setChatPaneSize("chat-equal")}
+          />
+          <ThemeOption
+            label="Chat bigger"
+            icon={PanelRight}
+            isSelected={chatPaneSize === "chat-bigger"}
+            onClick={() => setChatPaneSize("chat-bigger")}
           />
         </div>
       </div>
@@ -277,17 +328,27 @@ const defaultBaseURLs: Partial<Record<LlmProviderFlavor, string>> = {
   "openai-compatible": "http://localhost:1234/v1",
 }
 
+type ProviderModelConfig = {
+  apiKey: string
+  baseURL: string
+  models: string[]
+  knowledgeGraphModel: string
+  meetingNotesModel: string
+  liveNoteAgentModel: string
+  autoPermissionDecisionModel: string
+}
+
 function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
   const [provider, setProvider] = useState<LlmProviderFlavor>("openai")
   const [defaultProvider, setDefaultProvider] = useState<LlmProviderFlavor | null>(null)
-  const [providerConfigs, setProviderConfigs] = useState<Record<LlmProviderFlavor, { apiKey: string; baseURL: string; models: string[]; knowledgeGraphModel: string; meetingNotesModel: string; liveNoteAgentModel: string }>>({
-    openai: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "" },
-    anthropic: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "" },
-    google: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "" },
-    openrouter: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "" },
-    aigateway: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "" },
-    ollama: { apiKey: "", baseURL: "http://localhost:11434", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "" },
-    "openai-compatible": { apiKey: "", baseURL: "http://localhost:1234/v1", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "" },
+  const [providerConfigs, setProviderConfigs] = useState<Record<LlmProviderFlavor, ProviderModelConfig>>({
+    openai: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
+    anthropic: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
+    google: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
+    openrouter: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
+    aigateway: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
+    ollama: { apiKey: "", baseURL: "http://localhost:11434", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
+    "openai-compatible": { apiKey: "", baseURL: "http://localhost:1234/v1", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
   })
   const [modelsCatalog, setModelsCatalog] = useState<Record<string, LlmModelOption[]>>({})
   const [modelsLoading, setModelsLoading] = useState(false)
@@ -313,7 +374,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
     (!requiresBaseURL || activeConfig.baseURL.trim().length > 0)
 
   const updateConfig = useCallback(
-    (prov: LlmProviderFlavor, updates: Partial<{ apiKey: string; baseURL: string; models: string[]; knowledgeGraphModel: string; meetingNotesModel: string; liveNoteAgentModel: string }>) => {
+    (prov: LlmProviderFlavor, updates: Partial<ProviderModelConfig>) => {
       setProviderConfigs(prev => ({
         ...prev,
         [prov]: { ...prev[prov], ...updates },
@@ -388,6 +449,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
                     knowledgeGraphModel: e.knowledgeGraphModel || "",
                     meetingNotesModel: e.meetingNotesModel || "",
                     liveNoteAgentModel: e.liveNoteAgentModel || "",
+                    autoPermissionDecisionModel: e.autoPermissionDecisionModel || "",
                   };
                 }
               }
@@ -406,6 +468,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
                 knowledgeGraphModel: parsed.knowledgeGraphModel || "",
                 meetingNotesModel: parsed.meetingNotesModel || "",
                 liveNoteAgentModel: parsed.liveNoteAgentModel || "",
+                autoPermissionDecisionModel: parsed.autoPermissionDecisionModel || "",
               };
             }
             return next;
@@ -481,6 +544,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
         knowledgeGraphModel: activeConfig.knowledgeGraphModel.trim() || undefined,
         meetingNotesModel: activeConfig.meetingNotesModel.trim() || undefined,
         liveNoteAgentModel: activeConfig.liveNoteAgentModel.trim() || undefined,
+        autoPermissionDecisionModel: activeConfig.autoPermissionDecisionModel.trim() || undefined,
       }
       const result = await window.ipc.invoke("models:test", providerConfig)
       if (result.success) {
@@ -515,6 +579,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
         knowledgeGraphModel: config.knowledgeGraphModel.trim() || undefined,
         meetingNotesModel: config.meetingNotesModel.trim() || undefined,
         liveNoteAgentModel: config.liveNoteAgentModel.trim() || undefined,
+        autoPermissionDecisionModel: config.autoPermissionDecisionModel.trim() || undefined,
       })
       setDefaultProvider(prov)
       window.dispatchEvent(new Event('models-config-changed'))
@@ -546,6 +611,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
         parsed.knowledgeGraphModel = defConfig.knowledgeGraphModel.trim() || undefined
         parsed.meetingNotesModel = defConfig.meetingNotesModel.trim() || undefined
         parsed.liveNoteAgentModel = defConfig.liveNoteAgentModel.trim() || undefined
+        parsed.autoPermissionDecisionModel = defConfig.autoPermissionDecisionModel.trim() || undefined
       }
       await window.ipc.invoke("workspace:writeFile", {
         path: "config/models.json",
@@ -553,7 +619,7 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
       })
       setProviderConfigs(prev => ({
         ...prev,
-        [prov]: { apiKey: "", baseURL: defaultBaseURLs[prov] || "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "" },
+        [prov]: { apiKey: "", baseURL: defaultBaseURLs[prov] || "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
       }))
       setTestState({ status: "idle" })
       window.dispatchEvent(new Event('models-config-changed'))
@@ -796,6 +862,40 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
             <Select
               value={activeConfig.liveNoteAgentModel || "__same__"}
               onValueChange={(value) => updateConfig(provider, { liveNoteAgentModel: value === "__same__" ? "" : value })}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select a model" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__same__">Same as assistant</SelectItem>
+                {modelsForProvider.map((m) => (
+                  <SelectItem key={m.id} value={m.id}>
+                    {m.name || m.id}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </div>
+
+        {/* Auto-permission model */}
+        <div className="space-y-2">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Auto-permission model</span>
+          {modelsLoading ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" />
+              Loading...
+            </div>
+          ) : showModelInput ? (
+            <Input
+              value={activeConfig.autoPermissionDecisionModel}
+              onChange={(e) => updateConfig(provider, { autoPermissionDecisionModel: e.target.value })}
+              placeholder={primaryModel || "Enter model"}
+            />
+          ) : (
+            <Select
+              value={activeConfig.autoPermissionDecisionModel || "__same__"}
+              onValueChange={(value) => updateConfig(provider, { autoPermissionDecisionModel: value === "__same__" ? "" : value })}
             >
               <SelectTrigger>
                 <SelectValue placeholder="Select a model" />
@@ -1659,52 +1759,122 @@ function NoteTaggingSettings({ dialogOpen }: { dialogOpen: boolean }) {
 type AgentStatus = { installed: boolean; signedIn: boolean }
 type CodeModeAgentStatus = { claude: AgentStatus; codex: AgentStatus }
 
+// Engine provisioning runs in the main process and keeps going even if the Settings
+// dialog is closed. Track its state at MODULE level (not in the row component, which
+// unmounts on close) so reopening Settings still shows the live % instead of the Enable
+// button. A single persistent listener on the progress channel feeds this store.
+type ProvState = { pct: number | null; error?: string }
+const provStore: Record<string, ProvState | undefined> = {}
+// Agents we provisioned this session — used to show "Ready" immediately on success
+// without waiting for the async status refresh to round-trip (which caused the row to
+// briefly flash the Enable button again).
+const enabledOptimistic = new Set<string>()
+const provListeners = new Set<() => void>()
+let provChannelHooked = false
+
+function notifyProv() { provListeners.forEach((l) => l()) }
+
+function startProvisioning(agent: 'claude' | 'codex', onDone: () => void | Promise<void>): void {
+  if (provStore[agent] && !provStore[agent]!.error) return // already in flight
+  provStore[agent] = { pct: null }
+  notifyProv()
+  if (!provChannelHooked) {
+    provChannelHooked = true
+    window.ipc.on('codeMode:engineProgress', (p) => {
+      const cur = provStore[p.agent]
+      if (!cur) return
+      const pct = p.totalBytes ? Math.floor(((p.receivedBytes ?? 0) / p.totalBytes) * 100) : cur.pct
+      provStore[p.agent] = { pct }
+      notifyProv()
+    })
+  }
+  window.ipc.invoke('codeMode:provisionEngine', { agent })
+    .then((res) => {
+      if (res.success) {
+        // Mark installed optimistically so the row shows "Ready" the instant the flag
+        // clears — don't depend on the async status refresh (which re-renders the parent
+        // separately and left a window showing the Enable button). loadStatus still runs
+        // in the background to sync the real status.
+        enabledOptimistic.add(agent)
+        provStore[agent] = undefined
+        void onDone()
+      } else {
+        provStore[agent] = { pct: null, error: res.error ?? 'Failed to enable' }
+      }
+    })
+    .catch((e) => { provStore[agent] = { pct: null, error: e instanceof Error ? e.message : 'Failed to enable' } })
+    .finally(notifyProv)
+}
+
+function useProvisioning(agent: string): ProvState | undefined {
+  const [, force] = useState(0)
+  useEffect(() => {
+    const l = () => force((n) => n + 1)
+    provListeners.add(l)
+    return () => { provListeners.delete(l) }
+  }, [])
+  return provStore[agent]
+}
+
 function AgentStatusRow({
   name,
-  installLink,
+  agent,
   signInCommand,
   status,
+  onProvisioned,
 }: {
   name: string
-  installLink: string
+  agent: 'claude' | 'codex'
   signInCommand: string
   status: AgentStatus | null
+  onProvisioned: () => void
 }) {
-  const ready = status?.installed && status?.signedIn
-  const needsSignInOnly = status?.installed && !status?.signedIn
+  const prov = useProvisioning(agent)
+  const provisioning = prov !== undefined && prov.error === undefined
+  const error = prov?.error ?? null
+  const enable = useCallback(() => startProvisioning(agent, onProvisioned), [agent, onProvisioned])
+
+  // Treat a just-enabled engine as installed even before the status refresh lands.
+  const installed = (status?.installed ?? false) || enabledOptimistic.has(agent)
+  const ready = installed && status?.signedIn
   return (
     <div className="rounded-md border px-3 py-2.5 flex items-center gap-3">
       <Terminal className="size-4 text-muted-foreground shrink-0" />
       <div className="flex-1 min-w-0">
         <div className="text-sm font-medium">{name}</div>
         <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-3">
-          <span className={cn("inline-flex items-center gap-1", status?.installed ? "text-green-600" : "text-muted-foreground")}>
-            {status?.installed ? <CheckCircle2 className="size-3" /> : <X className="size-3" />}
-            Installed
+          <span className={cn("inline-flex items-center gap-1", installed ? "text-green-600" : "text-muted-foreground")}>
+            {installed ? <CheckCircle2 className="size-3" /> : <X className="size-3" />}
+            {installed ? 'Engine ready' : 'Not enabled'}
           </span>
           <span className={cn("inline-flex items-center gap-1", status?.signedIn ? "text-green-600" : "text-muted-foreground")}>
             {status?.signedIn ? <CheckCircle2 className="size-3" /> : <X className="size-3" />}
             Signed in
           </span>
         </div>
+        {error && <div className="text-xs text-red-600 mt-1 break-words">{error}</div>}
       </div>
-      {ready ? (
+      {provisioning ? (
+        <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground shrink-0 tabular-nums">
+          <Loader2 className="size-3 animate-spin" />
+          {prov?.pct != null ? `${prov.pct}%` : null}
+        </span>
+      ) : ready ? (
         <span className="rounded-full bg-green-500/10 px-2 py-0.5 text-[10px] font-medium leading-none text-green-600">
           Ready
         </span>
-      ) : needsSignInOnly ? (
+      ) : !installed ? (
+        <button
+          type="button"
+          onClick={enable}
+          className="rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:opacity-90 shrink-0"
+        >
+          Enable
+        </button>
+      ) : (
         <span className="text-xs text-muted-foreground shrink-0">
           Run <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">{signInCommand}</code>
         </span>
-      ) : (
-        <a
-          href={installLink}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-xs text-primary hover:underline shrink-0"
-        >
-          Install &amp; sign in
-        </a>
       )}
     </div>
   )
@@ -1712,6 +1882,7 @@ function AgentStatusRow({
 
 function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
   const [enabled, setEnabled] = useState(false)
+  const [approvalPolicy, setApprovalPolicy] = useState<ApprovalPolicy>('ask')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [status, setStatus] = useState<CodeModeAgentStatus | null>(null)
@@ -1736,7 +1907,10 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
       setLoading(true)
       try {
         const result = await window.ipc.invoke("codeMode:getConfig", null)
-        if (!cancelled) setEnabled(result.enabled)
+        if (!cancelled) {
+          setEnabled(result.enabled)
+          setApprovalPolicy(result.approvalPolicy ?? 'ask')
+        }
       } catch {
         if (!cancelled) setEnabled(false)
       } finally {
@@ -1752,7 +1926,7 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
     setSaving(true)
     setEnabled(next)
     try {
-      await window.ipc.invoke("codeMode:setConfig", { enabled: next })
+      await window.ipc.invoke("codeMode:setConfig", { enabled: next, approvalPolicy })
       window.dispatchEvent(new Event("code-mode-config-changed"))
       toast.success(next ? "Code mode enabled" : "Code mode disabled")
     } catch {
@@ -1761,7 +1935,22 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
     } finally {
       setSaving(false)
     }
-  }, [])
+  }, [approvalPolicy])
+
+  const handlePolicyChange = useCallback(async (next: ApprovalPolicy) => {
+    const prev = approvalPolicy
+    setSaving(true)
+    setApprovalPolicy(next)
+    try {
+      await window.ipc.invoke("codeMode:setConfig", { enabled, approvalPolicy: next })
+      window.dispatchEvent(new Event("code-mode-config-changed"))
+    } catch {
+      setApprovalPolicy(prev)
+      toast.error("Failed to update approval policy")
+    } finally {
+      setSaving(false)
+    }
+  }, [enabled, approvalPolicy])
 
   const anyReady = status?.claude.installed && status?.claude.signedIn
     || status?.codex.installed && status?.codex.signedIn
@@ -1781,13 +1970,20 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
         <p>
           <strong className="text-foreground">Code mode</strong> lets the assistant delegate coding tasks
           to <strong className="text-foreground">Claude Code</strong> or <strong className="text-foreground">Codex</strong> running
-          on your machine. Pick the agent inline from the composer; the assistant calls it via
-          <code className="mx-1 rounded bg-muted px-1 py-0.5 text-[11px]">acpx</code>
-          and streams results back into chat.
+          on your machine. Pick the agent inline from the composer; the assistant runs it on-device
+          and streams its work — tool calls, file diffs, and approvals — back into chat.
         </p>
         <p>
           Requires an active <strong className="text-foreground">Claude Code</strong> subscription or
           a <strong className="text-foreground">ChatGPT/Codex</strong> subscription. You can have one or both.
+        </p>
+        <p>
+          For each agent you want to use, you must have it{' '}
+          <strong className="text-foreground">installed and logged in</strong> on this machine: click{' '}
+          <strong className="text-foreground">Enable</strong> below to download its engine, and sign in by
+          running <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">claude login</code>{' '}
+          or <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">codex login</code>{' '}
+          in your terminal. Code mode uses that saved login.
         </p>
       </div>
 
@@ -1806,15 +2002,17 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
         <div className="space-y-2">
           <AgentStatusRow
             name="Claude Code"
-            installLink="https://claude.ai/code"
+            agent="claude"
             signInCommand="claude login"
             status={status?.claude ?? null}
+            onProvisioned={loadStatus}
           />
           <AgentStatusRow
             name="Codex"
-            installLink="https://developers.openai.com/codex/cli"
+            agent="codex"
             signInCommand="codex login"
             status={status?.codex ?? null}
+            onProvisioned={loadStatus}
           />
         </div>
       </div>
@@ -1833,15 +2031,137 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
         />
       </div>
 
+      {enabled && (
+        <div className="rounded-md border px-3 py-3 space-y-2">
+          <div className="text-sm font-medium">Approvals</div>
+          <div className="text-xs text-muted-foreground">
+            How the coding agent checks in before changing files or running commands. You always see
+            everything it does in the timeline — this only controls the prompts.
+          </div>
+          <Select
+            value={approvalPolicy}
+            onValueChange={(v) => handlePolicyChange(v as ApprovalPolicy)}
+            disabled={saving}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ask">Ask every time</SelectItem>
+              <SelectItem value="auto-approve-reads">Auto-approve reads</SelectItem>
+              <SelectItem value="yolo">Auto-approve everything (YOLO)</SelectItem>
+            </SelectContent>
+          </Select>
+          <div className="text-xs text-muted-foreground">
+            {approvalPolicy === 'ask' && 'You approve every file change and command the agent wants to run.'}
+            {approvalPolicy === 'auto-approve-reads' && 'Reading and searching run automatically; you still approve writes, edits, and commands.'}
+            {approvalPolicy === 'yolo' && 'The agent runs everything — writes, edits, and commands — without asking. Use only in folders you trust.'}
+          </div>
+        </div>
+      )}
+
       {enabled && status && !anyReady && (
         <div className="rounded-md border border-amber-500/40 bg-amber-50/60 dark:bg-amber-950/20 px-3 py-2.5 flex items-start gap-2 text-xs">
           <AlertTriangle className="size-4 text-amber-600 dark:text-amber-500 shrink-0 mt-0.5" />
           <div className="text-amber-900 dark:text-amber-200">
-            Neither Claude Code nor Codex is ready. Install at least one and sign in with a subscription
-            account, then click Re-check.
+            Neither Claude Code nor Codex is ready. Click Enable above to download an engine, sign in with a
+            subscription account, then click Re-check.
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// --- Notification Settings ---
+
+type NotificationCategoryKey = "chat_completion" | "new_email" | "agent_permission"
+
+const NOTIFICATION_CATEGORIES: { key: NotificationCategoryKey; label: string; description: string }[] = [
+  {
+    key: "chat_completion",
+    label: "Chat responses",
+    description: "When an agent finishes responding while the app is in the background.",
+  },
+  {
+    key: "new_email",
+    label: "New email",
+    description: "When a new email arrives during sync while the app is in the background.",
+  },
+  {
+    key: "agent_permission",
+    label: "Permission requests",
+    description: "When an agent needs your approval to run a tool. Always shown, even when the app is focused.",
+  },
+]
+
+function NotificationSettings({ dialogOpen }: { dialogOpen: boolean }) {
+  const [categories, setCategories] = useState<Record<NotificationCategoryKey, boolean> | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (!dialogOpen) return
+    let cancelled = false
+    async function load() {
+      try {
+        const result = await window.ipc.invoke("notifications:getSettings", null)
+        if (!cancelled) setCategories(result.categories)
+      } catch {
+        if (!cancelled) toast.error("Failed to load notification settings")
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [dialogOpen])
+
+  const handleToggle = useCallback(async (key: NotificationCategoryKey, next: boolean) => {
+    // Optimistic update with rollback on failure.
+    const previous = categories
+    if (!previous) return
+    const updated = { ...previous, [key]: next }
+    setCategories(updated)
+    setSaving(true)
+    try {
+      await window.ipc.invoke("notifications:setSettings", { categories: updated })
+    } catch {
+      setCategories(previous)
+      toast.error("Failed to update notification settings")
+    } finally {
+      setSaving(false)
+    }
+  }, [categories])
+
+  if (!categories) {
+    return (
+      <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
+        <Loader2 className="size-4 animate-spin mr-2" />
+        Loading...
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="text-sm text-muted-foreground leading-relaxed">
+        Choose which desktop notifications Rowboat sends you. Ambient notifications are only shown
+        when the app is in the background.
+      </div>
+
+      <div className="space-y-2">
+        {NOTIFICATION_CATEGORIES.map((cat) => (
+          <div key={cat.key} className="rounded-md border px-3 py-3 flex items-start gap-3">
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-medium">{cat.label}</div>
+              <div className="text-xs text-muted-foreground mt-0.5">{cat.description}</div>
+            </div>
+            <Switch
+              checked={categories[cat.key]}
+              onCheckedChange={(next) => handleToggle(cat.key, next)}
+              disabled={saving}
+            />
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
@@ -1893,7 +2213,7 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
   }
 
   const loadConfig = useCallback(async (tab: ConfigTab) => {
-    if (tab === "appearance" || tab === "models" || tab === "note-tagging" || tab === "account" || tab === "connections" || tab === "help" || tab === "code-mode") return
+    if (tab === "appearance" || tab === "models" || tab === "note-tagging" || tab === "account" || tab === "connections" || tab === "help" || tab === "code-mode" || tab === "notifications") return
     const tabConfig = tabs.find((t) => t.id === tab)!
     if (!tabConfig.path) return
     setLoading(true)
@@ -2001,7 +2321,7 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
             </div>
 
             {/* Content */}
-            <div className={cn("flex-1 p-4 min-h-0", (activeTab === "models" || activeTab === "connections" || activeTab === "account" || activeTab === "code-mode") ? "overflow-y-auto" : activeTab === "note-tagging" ? "overflow-hidden flex flex-col" : "overflow-hidden")}>
+            <div className={cn("flex-1 p-4 min-h-0", (activeTab === "models" || activeTab === "connections" || activeTab === "account" || activeTab === "code-mode" || activeTab === "notifications") ? "overflow-y-auto" : activeTab === "note-tagging" ? "overflow-hidden flex flex-col" : "overflow-hidden")}>
               {activeTab === "account" ? (
                 <AccountSettings dialogOpen={open} />
               ) : activeTab === "connections" ? (
@@ -2024,6 +2344,8 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
                 <NoteTaggingSettings dialogOpen={open} />
               ) : activeTab === "appearance" ? (
                 <AppearanceSettings />
+              ) : activeTab === "notifications" ? (
+                <NotificationSettings dialogOpen={open} />
               ) : activeTab === "help" ? (
                 <HelpSettings />
               ) : activeTab === "code-mode" ? (

@@ -1,19 +1,37 @@
 "use client"
 
 import * as React from "react"
-import { Loader2, Mic, Mail, Calendar } from "lucide-react"
+import { Loader2, Mic, Mail, Calendar, MessageSquare } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
+import { Switch } from "@/components/ui/switch"
+import { Textarea } from "@/components/ui/textarea"
 import { GoogleClientIdModal } from "@/components/google-client-id-modal"
 import { ComposioApiKeyModal } from "@/components/composio-api-key-modal"
-import { useConnectors } from "@/hooks/useConnectors"
+import { useConnectors, actionableSlackError } from "@/hooks/useConnectors"
 
 interface ConnectedAccountsSettingsProps {
   dialogOpen: boolean
 }
 
+function relativeTime(iso?: string): string {
+  if (!iso) return "never"
+  const then = Date.parse(iso)
+  if (!Number.isFinite(then)) return "never"
+  const diffSec = Math.round((Date.now() - then) / 1000)
+  if (diffSec < 60) return "just now"
+  const diffMin = Math.round(diffSec / 60)
+  if (diffMin < 60) return `${diffMin}m ago`
+  const diffHr = Math.round(diffMin / 60)
+  if (diffHr < 24) return `${diffHr}h ago`
+  return `${Math.round(diffHr / 24)}d ago`
+}
+
 export function ConnectedAccountsSettings({ dialogOpen }: ConnectedAccountsSettingsProps) {
   const c = useConnectors(dialogOpen)
+  // Windows exclusively locks Slack's Cookies DB while it runs, so we offer a
+  // "quit Slack first" one-click import there. mac/Linux import with Slack open.
+  const isWindows = typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('win')
 
   const renderOAuthProvider = (provider: string, displayName: string, icon: React.ReactNode, description: string) => {
     const state = c.providerStates[provider] || {
@@ -235,6 +253,224 @@ export function ConnectedAccountsSettings({ dialogOpen }: ConnectedAccountsSetti
 
             {/* Fireflies */}
             {renderOAuthProvider('fireflies-ai', 'Fireflies', <Mic className="size-4" />, 'AI meeting transcripts')}
+          </>
+        )}
+
+        {/* Team Communication Section */}
+        <>
+          <Separator className="my-2" />
+          <div className="px-3 pt-1 pb-0.5">
+            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              Team Communication
+            </span>
+          </div>
+          <div className="rounded-md px-3 py-2 hover:bg-accent/50 transition-colors">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="flex size-8 items-center justify-center rounded-md bg-muted">
+                  <MessageSquare className="size-4" />
+                </div>
+                <div className="flex flex-col min-w-0">
+                  <span className="text-sm font-medium truncate">Slack</span>
+                  {c.slackLoading ? (
+                    <span className="text-xs text-muted-foreground">Checking...</span>
+                  ) : c.slackEnabled && c.slackWorkspaces.length > 0 ? (
+                    <span className="text-xs text-emerald-600 truncate">
+                      {c.slackWorkspaces.map(workspace => workspace.name).join(', ')}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-muted-foreground truncate">Send messages and view channels</span>
+                  )}
+                </div>
+              </div>
+              <div className="shrink-0">
+                {c.slackLoading || c.slackDiscovering ? (
+                  <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                ) : c.slackEnabled ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={c.handleSlackDisable}
+                    className="h-7 px-3 text-xs"
+                  >
+                    Disable
+                  </Button>
+                ) : (
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={c.handleSlackEnable}
+                    className="h-7 px-3 text-xs"
+                  >
+                    Enable
+                  </Button>
+                )}
+              </div>
+            </div>
+            {c.slackPickerOpen && (
+              <div className="mt-2 ml-10 space-y-2">
+                {c.slackNeedsAuth ? (
+                  <>
+                    <p className="text-xs text-muted-foreground">
+                      {c.slackDiscoverError ?? 'Connect your signed-in Slack desktop app to continue.'}
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2.5">
+                      <Button
+                        size="sm"
+                        onClick={c.handleSlackImportDesktop}
+                        disabled={c.slackAuthImporting}
+                        className="h-7 px-3 text-xs"
+                      >
+                        {c.slackAuthImporting ? <Loader2 className="size-3 animate-spin" /> : "Connect Slack"}
+                      </Button>
+                      {isWindows && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={c.handleSlackQuitAndImport}
+                          disabled={c.slackAuthImporting}
+                          className="h-7 px-3 text-xs"
+                          title="Closes Slack so its data unlocks, then connects"
+                        >
+                          Quit Slack &amp; connect
+                        </Button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => c.setSlackCurlOpen(!c.slackCurlOpen)}
+                        className="text-xs text-primary underline-offset-2 hover:underline"
+                      >
+                        Paste from browser instead
+                      </button>
+                    </div>
+                    {c.slackCurlOpen && (
+                      <div className="space-y-1.5">
+                        <p className="text-[11px] leading-relaxed text-muted-foreground">
+                          In a browser signed in to Slack, open DevTools → Network, click any
+                          request to <code>app.slack.com</code>, right-click → Copy → Copy as cURL,
+                          then paste it below.
+                        </p>
+                        <Textarea
+                          value={c.slackCurlValue}
+                          onChange={(event) => c.setSlackCurlValue(event.target.value)}
+                          placeholder="curl 'https://your-team.slack.com/api/...' -H 'Cookie: d=xoxd-...' ..."
+                          className="min-h-20 text-[11px] font-mono"
+                          disabled={c.slackCurlSubmitting}
+                        />
+                        <Button
+                          size="sm"
+                          onClick={c.handleSlackParseCurl}
+                          disabled={c.slackCurlSubmitting || c.slackCurlValue.trim().length === 0}
+                          className="h-7 px-3 text-xs"
+                        >
+                          {c.slackCurlSubmitting ? <Loader2 className="size-3 animate-spin" /> : "Connect with cURL"}
+                        </Button>
+                      </div>
+                    )}
+                  </>
+                ) : c.slackDiscoverError ? (
+                  <p className="text-xs text-muted-foreground">{c.slackDiscoverError}</p>
+                ) : (
+                  <>
+                    {c.slackAvailableWorkspaces.map(workspace => (
+                      <label key={workspace.url} className="flex items-center gap-2 text-sm cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={c.slackSelectedUrls.has(workspace.url)}
+                          onChange={(event) => {
+                            c.setSlackSelectedUrls(prev => {
+                              const next = new Set(prev)
+                              if (event.target.checked) next.add(workspace.url)
+                              else next.delete(workspace.url)
+                              return next
+                            })
+                          }}
+                          className="rounded border-border"
+                        />
+                        <span className="truncate">{workspace.name}</span>
+                      </label>
+                    ))}
+                    <Button
+                      size="sm"
+                      onClick={c.handleSlackSaveWorkspaces}
+                      disabled={c.slackSelectedUrls.size === 0 || c.slackLoading}
+                      className="h-7 px-3 text-xs"
+                    >
+                      Save
+                    </Button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        </>
+
+        {/* Knowledge Sources Section */}
+        {c.slackEnabled && (
+          <>
+            <Separator className="my-2" />
+            <div className="px-3 pt-1 pb-0.5">
+              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                Knowledge Sources
+              </span>
+            </div>
+            <div className="rounded-md px-3 py-2 hover:bg-accent/50 transition-colors">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="flex size-8 items-center justify-center rounded-md bg-muted">
+                    <MessageSquare className="size-4" />
+                  </div>
+                  <div className="flex flex-col min-w-0">
+                    <span className="text-sm font-medium truncate">Slack to knowledge</span>
+                    <span className="text-xs text-muted-foreground truncate">
+                      Sync selected channels into the knowledge graph
+                    </span>
+                  </div>
+                </div>
+                <Switch
+                  checked={c.slackKnowledgeEnabled}
+                  onCheckedChange={c.setSlackKnowledgeEnabled}
+                  disabled={c.slackKnowledgeSaving}
+                />
+              </div>
+              <div className="mt-2 space-y-2">
+                <Textarea
+                  value={c.slackKnowledgeChannels}
+                  onChange={(event) => c.setSlackKnowledgeChannels(event.target.value)}
+                  placeholder={c.slackWorkspaces.length > 1 ? "https://team.slack.com #engineering" : "#engineering"}
+                  className="min-h-20 text-xs"
+                  disabled={!c.slackKnowledgeEnabled || c.slackKnowledgeSaving}
+                />
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs text-muted-foreground">
+                    One channel per line. Use channel names or IDs.
+                  </span>
+                  {(c.slackKnowledgeDirty || c.slackKnowledgeSaving) && (
+                    <Button
+                      size="sm"
+                      onClick={c.handleSlackKnowledgeSave}
+                      disabled={c.slackKnowledgeSaving || (c.slackKnowledgeEnabled && c.slackKnowledgeChannels.trim().length === 0)}
+                      className="h-7 px-3 text-xs"
+                    >
+                      {c.slackKnowledgeSaving ? <Loader2 className="size-3 animate-spin" /> : "Save"}
+                    </Button>
+                  )}
+                </div>
+                {c.slackKnowledgeEnabled && c.slackSyncStatuses.filter(s => s.enabled).map(status => (
+                  <div key={status.id} className="flex items-center gap-1.5 text-xs">
+                    {status.lastStatus === 'error' ? (
+                      <span className="text-amber-600 truncate">
+                        Sync failing — {actionableSlackError(status.lastError?.kind, status.lastError?.message)}
+                      </span>
+                    ) : status.lastSyncAt ? (
+                      <span className="text-muted-foreground">Last synced {relativeTime(status.lastSyncAt)}</span>
+                    ) : (
+                      <span className="text-muted-foreground">Not synced yet — first sync runs shortly</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
           </>
         )}
       </div>

@@ -9,6 +9,7 @@ export type MiddlePaneContext =
     | { kind: 'browser'; url: string; title: string };
 
 export type CodeMode = 'claude' | 'codex';
+export type CodePolicy = 'ask' | 'auto-approve-reads' | 'yolo';
 
 type EnqueuedMessage = {
     messageId: string;
@@ -17,11 +18,16 @@ type EnqueuedMessage = {
     voiceOutput?: VoiceOutputMode;
     searchEnabled?: boolean;
     codeMode?: CodeMode;
+    // Code-section sessions pin the coding agent's working directory and
+    // approval policy for the turn (code_agent_run honors these over its
+    // model-provided arguments / the global policy).
+    codeCwd?: string;
+    codePolicy?: CodePolicy;
     middlePaneContext?: MiddlePaneContext;
 };
 
 export interface IMessageQueue {
-    enqueue(runId: string, message: UserMessageContentType, voiceInput?: boolean, voiceOutput?: VoiceOutputMode, searchEnabled?: boolean, middlePaneContext?: MiddlePaneContext, codeMode?: CodeMode): Promise<string>;
+    enqueue(runId: string, message: UserMessageContentType, voiceInput?: boolean, voiceOutput?: VoiceOutputMode, searchEnabled?: boolean, middlePaneContext?: MiddlePaneContext, codeMode?: CodeMode, codeCwd?: string, codePolicy?: CodePolicy): Promise<string>;
     dequeue(runId: string): Promise<EnqueuedMessage | null>;
 }
 
@@ -37,7 +43,7 @@ export class InMemoryMessageQueue implements IMessageQueue {
         this.idGenerator = idGenerator;
     }
 
-    async enqueue(runId: string, message: UserMessageContentType, voiceInput?: boolean, voiceOutput?: VoiceOutputMode, searchEnabled?: boolean, middlePaneContext?: MiddlePaneContext, codeMode?: CodeMode): Promise<string> {
+    async enqueue(runId: string, message: UserMessageContentType, voiceInput?: boolean, voiceOutput?: VoiceOutputMode, searchEnabled?: boolean, middlePaneContext?: MiddlePaneContext, codeMode?: CodeMode, codeCwd?: string, codePolicy?: CodePolicy): Promise<string> {
         if (!this.store[runId]) {
             this.store[runId] = [];
         }
@@ -49,6 +55,8 @@ export class InMemoryMessageQueue implements IMessageQueue {
             voiceOutput,
             searchEnabled,
             codeMode,
+            codeCwd,
+            codePolicy,
             middlePaneContext,
         });
         return id;

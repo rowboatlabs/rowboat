@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   ArrowUp,
@@ -10,13 +10,19 @@ import {
   FileSpreadsheet,
   FileText,
   FileVideo,
+  FolderCheck,
+  FolderClock,
   FolderCog,
+  FolderOpen,
   Globe,
   Headphones,
   ImagePlus,
   LoaderIcon,
+  Lock,
   Mic,
+  MoreHorizontal,
   Plus,
+  ShieldCheck,
   Square,
   Terminal,
   X,
@@ -25,10 +31,14 @@ import {
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import {
@@ -60,6 +70,13 @@ export type StagedAttachment = {
 }
 
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024 // 10MB
+const MAX_VISIBLE_RECENT_WORK_DIRS = 3
+const MAX_STORED_RECENT_WORK_DIRS = 8
+const CHAT_INPUT_TOOLTIP_DELAY_MS = 1000
+// Stored in the workspace (~/.rowboat/config) so it travels with the workspace and
+// stays consistent with the other config/*.json files (e.g. coding-agents.json).
+const RECENT_WORK_DIRS_CONFIG_PATH = 'config/recent-work-dirs.json'
+const RECENT_WORK_DIRS_CHANGED_EVENT = 'rowboat-chat-recent-work-dirs-changed'
 
 
 const providerDisplayNames: Record<string, string> = {
@@ -80,10 +97,17 @@ interface ConfiguredModel {
   model: string
 }
 
+type RecentWorkDir = {
+  path: string
+  lastUsedAt: number
+}
+
 export interface SelectedModel {
   provider: string
   model: string
 }
+
+export type PermissionMode = 'manual' | 'auto'
 
 function getSelectedModelDisplayName(model: string) {
   return model.split('/').pop() || model
@@ -108,8 +132,86 @@ function getAttachmentIcon(kind: AttachmentIconKind) {
   }
 }
 
+function normalizeRecentWorkDir(value: unknown): RecentWorkDir | null {
+  if (typeof value === 'string') {
+    const path = value.trim()
+    return path ? { path, lastUsedAt: 0 } : null
+  }
+  if (!value || typeof value !== 'object') return null
+  const entry = value as Record<string, unknown>
+  const path = typeof entry.path === 'string' ? entry.path.trim() : ''
+  const lastUsedAt = typeof entry.lastUsedAt === 'number' && Number.isFinite(entry.lastUsedAt)
+    ? entry.lastUsedAt
+    : 0
+  return path ? { path, lastUsedAt } : null
+}
+
+async function readRecentWorkDirs(): Promise<RecentWorkDir[]> {
+  try {
+    const result = await window.ipc.invoke('workspace:readFile', { path: RECENT_WORK_DIRS_CONFIG_PATH })
+    const parsed = JSON.parse(result.data)
+    if (!Array.isArray(parsed)) return []
+    const seen = new Set<string>()
+    const dirs: RecentWorkDir[] = []
+    for (const value of parsed) {
+      const entry = normalizeRecentWorkDir(value)
+      if (!entry || seen.has(entry.path)) continue
+      seen.add(entry.path)
+      dirs.push(entry)
+      if (dirs.length >= MAX_STORED_RECENT_WORK_DIRS) break
+    }
+    return dirs
+  } catch {
+    // File missing or invalid — no recents yet.
+    return []
+  }
+}
+
+async function writeRecentWorkDirs(dirs: RecentWorkDir[]) {
+  try {
+    await window.ipc.invoke('workspace:writeFile', {
+      path: RECENT_WORK_DIRS_CONFIG_PATH,
+      data: JSON.stringify(dirs.slice(0, MAX_STORED_RECENT_WORK_DIRS), null, 2),
+    })
+  } catch (err) {
+    console.error('Failed to persist recent work directories', err)
+  }
+  // Notify other mounted chat inputs in this window to re-read.
+  window.dispatchEvent(new CustomEvent(RECENT_WORK_DIRS_CHANGED_EVENT))
+}
+
+function formatRecentWorkDirTime(lastUsedAt: number) {
+  if (!lastUsedAt) return ''
+  const now = Date.now()
+  const diffMs = Math.max(0, now - lastUsedAt)
+  const minute = 60 * 1000
+  const hour = 60 * minute
+  const day = 24 * hour
+  if (diffMs < minute) return 'now'
+  if (diffMs < hour) return `${Math.max(1, Math.floor(diffMs / minute))}m ago`
+  if (diffMs < day) return `${Math.floor(diffMs / hour)}h ago`
+
+  const used = new Date(lastUsedAt)
+  const yesterday = new Date(now - day)
+  if (
+    used.getFullYear() === yesterday.getFullYear() &&
+    used.getMonth() === yesterday.getMonth() &&
+    used.getDate() === yesterday.getDate()
+  ) {
+    return 'Yesterday'
+  }
+  if (diffMs < 7 * day) {
+    return used.toLocaleDateString(undefined, { weekday: 'short' })
+  }
+  return used.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
+
+function compactWorkDirPath(path: string) {
+  return path.replace(/^\/Users\/[^/]+/, '~')
+}
+
 interface ChatInputInnerProps {
-  onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex') => void
+  onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => void
   onStop?: () => void
   isProcessing: boolean
   isStopping?: boolean
@@ -122,6 +224,8 @@ interface ChatInputInnerProps {
   isRecording?: boolean
   recordingText?: string
   recordingState?: 'connecting' | 'listening'
+  /** Live mic amplitude history (RMS per frame) driving the recording waveform. */
+  audioLevelsRef?: React.MutableRefObject<number[]>
   onStartRecording?: () => void
   onSubmitRecording?: () => void
   onCancelRecording?: () => void
@@ -137,6 +241,12 @@ interface ChatInputInnerProps {
   workDir?: string | null
   /** Fired when the user sets/changes/clears the work directory for this chat. */
   onWorkDirChange?: (value: string | null) => void
+  /**
+   * Set when this chat is bound to a Code-section session: the work directory
+   * and coding agent come from the session and are FROZEN — the backend pins
+   * them server-side regardless, so the composer must not pretend otherwise.
+   */
+  codeSessionLock?: { cwd: string; agent: 'claude' | 'codex' } | null
 }
 
 function ChatInputInner({
@@ -152,7 +262,7 @@ function ChatInputInner({
   onDraftChange,
   isRecording,
   recordingText,
-  recordingState,
+  audioLevelsRef,
   onStartRecording,
   onSubmitRecording,
   onCancelRecording,
@@ -165,6 +275,7 @@ function ChatInputInner({
   onSelectedModelChange,
   workDir = null,
   onWorkDirChange,
+  codeSessionLock = null,
 }: ChatInputInnerProps) {
   const controller = usePromptInputController()
   const message = controller.textInput.value
@@ -182,11 +293,59 @@ function ChatInputInner({
   const [codingAgent, setCodingAgent] = useState<'claude' | 'codex'>('claude')
   const [codeModeEnabled, setCodeModeEnabled] = useState(false)
   const [codeModeFeatureEnabled, setCodeModeFeatureEnabled] = useState(false)
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>('auto')
+  const [recentWorkDirs, setRecentWorkDirs] = useState<RecentWorkDir[]>([])
+
+  // Responsive toolbar: measure real overflow and progressively collapse items
+  // right→left until everything fits. Stages:
+  //   1 code→icon · 2 perm→icon · 3 search label hidden · 4 workDir→icon
+  //   5 code→menu · 6 perm→menu · 7 search→menu · 8 workDir→menu
+  // Once items move into the "⋯" overflow menu (≥5) no icon is ever hidden.
+  // overflow-hidden on the left group is the hard guarantee against any overlap.
+  const toolbarRef = useRef<HTMLDivElement>(null)
+  const leftGroupRef = useRef<HTMLDivElement>(null)
+  const lastWidthRef = useRef(0)
+  const [collapseLevel, setCollapseLevel] = useState(0)
+
+  // Re-evaluate from scratch (level 0) whenever the available width changes…
+  useEffect(() => {
+    const outer = toolbarRef.current
+    if (!outer) return
+    const ro = new ResizeObserver(() => {
+      const w = outer.clientWidth
+      if (w !== lastWidthRef.current) {
+        lastWidthRef.current = w
+        setCollapseLevel(0)
+      }
+    })
+    ro.observe(outer)
+    return () => ro.disconnect()
+  }, [])
+
+  // …or when the *set* of items changes (an item appears/disappears, or the model
+  // name width changes). Deliberately excludes the in-place toggles (searchEnabled,
+  // permissionMode, codeModeEnabled, codingAgent): those fire from the overflow menu
+  // for items already inside it, so resetting here would unmount the open menu. The
+  // no-dep effect below still re-collapses if any toggle happens to widen the row.
+  useLayoutEffect(() => {
+    setCollapseLevel(0)
+  }, [workDir, searchAvailable, codeModeFeatureEnabled, lockedModel, activeModelKey])
+
+  // After each render, if the left group still overflows, collapse one more step.
+  // Runs before paint, so the intermediate (overflowing) state is never visible.
+  useLayoutEffect(() => {
+    const el = leftGroupRef.current
+    if (!el) return
+    if (el.scrollWidth > el.clientWidth + 1 && collapseLevel < 8) {
+      setCollapseLevel((l) => Math.min(8, l + 1))
+    }
+  })
 
   // When a run exists, freeze the dropdown to the run's resolved model+provider.
   useEffect(() => {
     if (!runId) {
       setLockedModel(null)
+      setPermissionMode('auto')
       return
     }
     let cancelled = false
@@ -195,9 +354,19 @@ function ChatInputInner({
       if (run.provider && run.model) {
         setLockedModel({ provider: run.provider, model: run.model })
       }
+      setPermissionMode(run.permissionMode ?? 'manual')
     }).catch(() => { /* legacy run or fetch failure — leave unlocked */ })
     return () => { cancelled = true }
   }, [runId])
+
+  useEffect(() => {
+    const syncRecentWorkDirs = () => { void readRecentWorkDirs().then(setRecentWorkDirs) }
+    syncRecentWorkDirs()
+    window.addEventListener(RECENT_WORK_DIRS_CHANGED_EVENT, syncRecentWorkDirs)
+    return () => {
+      window.removeEventListener(RECENT_WORK_DIRS_CHANGED_EVENT, syncRecentWorkDirs)
+    }
+  }, [])
 
   // Check Rowboat sign-in state
   useEffect(() => {
@@ -283,26 +452,23 @@ function ChatInputInner({
     }
   }, [codeModeFeatureEnabled, codeModeEnabled])
 
-  // Listen for coding-agent runs that were triggered without the explicit code-mode
-  // toggle. App.tsx dispatches this when it sees an acpx executeCommand fire. We
-  // flip the pill on with the detected agent so the UI reflects what's happening.
-  useEffect(() => {
-    const handler = (ev: Event) => {
-      const detail = (ev as CustomEvent<{ runId?: string; agent?: 'claude' | 'codex' }>).detail
-      if (!detail || !detail.agent) return
-      if (runId && detail.runId && detail.runId !== runId) return
-      setCodeModeEnabled(true)
-      setCodingAgent(detail.agent)
-    }
-    window.addEventListener('code-mode-detected', handler)
-    return () => window.removeEventListener('code-mode-detected', handler)
-  }, [runId])
 
   // Cross-platform basename — handles both / and \ separators.
   const basename = useCallback((p: string): string => {
     const trimmed = p.replace(/[\\/]+$/, '')
     const idx = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'))
     return idx >= 0 ? trimmed.slice(idx + 1) : trimmed
+  }, [])
+
+  const rememberWorkDir = useCallback(async (dir: string) => {
+    const trimmed = dir.trim()
+    if (!trimmed) return
+    const next = [
+      { path: trimmed, lastUsedAt: Date.now() },
+      ...(await readRecentWorkDirs()).filter((item) => item.path !== trimmed),
+    ].slice(0, MAX_STORED_RECENT_WORK_DIRS)
+    setRecentWorkDirs(next)
+    await writeRecentWorkDirs(next)
   }, [])
 
   // Load coding-agent preference for a given workdir.
@@ -321,7 +487,7 @@ function ChatInputInner({
   }, [])
 
   const persistCodingAgent = useCallback(async (dir: string, agent: 'claude' | 'codex') => {
-    let existing: Record<string, 'claude' | 'codex'> = {}
+    const existing: Record<string, 'claude' | 'codex'> = {}
     try {
       const result = await window.ipc.invoke('workspace:readFile', { path: 'config/coding-agents.json' })
       const parsed = JSON.parse(result.data) as Record<string, unknown>
@@ -336,18 +502,33 @@ function ChatInputInner({
     })
   }, [])
 
+  // A chat bound to a Code-section session has its work directory and coding
+  // agent frozen to the session's — the backend pins them server-side, so the
+  // composer reflects that instead of offering controls that wouldn't apply.
+  const isCodeLocked = Boolean(codeSessionLock)
+  const effectiveWorkDir = codeSessionLock?.cwd ?? workDir
+
   // Work directory is owned per-chat by the parent (App). This component only
   // drives the picker dialog and reports changes up via onWorkDirChange. Whenever
   // the work directory changes, load its persisted coding-agent preference.
   useEffect(() => {
+    if (codeSessionLock) {
+      setCodingAgent(codeSessionLock.agent)
+      return
+    }
     let cancelled = false
     loadCodingAgentFor(workDir).then((agent) => {
       if (!cancelled) setCodingAgent(agent)
     })
     return () => { cancelled = true }
-  }, [workDir, loadCodingAgentFor])
+  }, [workDir, loadCodingAgentFor, codeSessionLock])
+
+  useEffect(() => {
+    if (isActive && workDir && !isCodeLocked) void rememberWorkDir(workDir)
+  }, [isActive, workDir, rememberWorkDir, isCodeLocked])
 
   const handleSetWorkDir = useCallback(async () => {
+    if (isCodeLocked) return
     try {
       let defaultPath: string | undefined = workDir ?? undefined
       try {
@@ -367,21 +548,31 @@ function ChatInputInner({
       })
       if (!chosen) return
       onWorkDirChange?.(chosen)
+      await rememberWorkDir(chosen)
       setCodingAgent(await loadCodingAgentFor(chosen))
       toast.success(`Work directory set: ${chosen}`)
     } catch (err) {
       console.error('Failed to set work directory', err)
       toast.error('Failed to set work directory')
     }
-  }, [workDir, onWorkDirChange, loadCodingAgentFor])
+  }, [workDir, onWorkDirChange, rememberWorkDir, loadCodingAgentFor, isCodeLocked])
+
+  const handleSelectRecentWorkDir = useCallback(async (dir: string) => {
+    onWorkDirChange?.(dir)
+    await rememberWorkDir(dir)
+    setCodingAgent(await loadCodingAgentFor(dir))
+    toast.success(`Work directory set: ${dir}`)
+  }, [onWorkDirChange, rememberWorkDir, loadCodingAgentFor])
 
   const handleClearWorkDir = useCallback(() => {
+    if (isCodeLocked) return
     onWorkDirChange?.(null)
     setCodingAgent('claude')
     toast.success('Work directory cleared')
-  }, [onWorkDirChange])
+  }, [onWorkDirChange, isCodeLocked])
 
   const handleToggleCodingAgent = useCallback(async () => {
+    if (isCodeLocked) return
     const next: 'claude' | 'codex' = codingAgent === 'claude' ? 'codex' : 'claude'
     setCodingAgent(next)
     // Persist only when scoped to a workdir; without one there's nothing to key on.
@@ -394,7 +585,7 @@ function ChatInputInner({
       // revert on failure
       setCodingAgent(codingAgent)
     }
-  }, [workDir, codingAgent, persistCodingAgent])
+  }, [workDir, codingAgent, persistCodingAgent, isCodeLocked])
 
   // Check search tool availability (exa or signed-in via gateway)
   useEffect(() => {
@@ -480,15 +671,16 @@ function ChatInputInner({
 
   const handleSubmit = useCallback(() => {
     if (!canSubmit) return
-    // codeMode is sticky per conversation — don't reset after send.
-    const effectiveCodeMode = codeModeEnabled ? codingAgent : undefined
-    onSubmit({ text: message.trim(), files: [] }, controller.mentions.mentions, attachments, searchEnabled || undefined, effectiveCodeMode)
+    // codeMode is sticky per conversation — don't reset after send. A code
+    // session forces it (the backend pins the agent anyway).
+    const effectiveCodeMode = codeSessionLock ? codeSessionLock.agent : (codeModeEnabled ? codingAgent : undefined)
+    onSubmit({ text: message.trim(), files: [] }, controller.mentions.mentions, attachments, searchEnabled || undefined, effectiveCodeMode, permissionMode)
     controller.textInput.clear()
     controller.mentions.clearMentions()
     setAttachments([])
     // Web search toggle stays on for the rest of the chat session; the user
     // turns it off explicitly. (Not persisted across app restarts.)
-  }, [attachments, canSubmit, controller, message, onSubmit, searchEnabled, codeModeEnabled, codingAgent, workDir])
+  }, [attachments, canSubmit, controller, message, onSubmit, searchEnabled, codeModeEnabled, codingAgent, permissionMode, workDir, codeSessionLock])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -526,6 +718,12 @@ function ChatInputInner({
       document.removeEventListener('drop', onDrop)
     }
   }, [addFiles, isActive])
+
+  const visibleRecentWorkDirs = recentWorkDirs
+    .filter((entry) => entry.path !== workDir)
+    .slice(0, MAX_VISIBLE_RECENT_WORK_DIRS)
+  const currentWorkDirLabel = effectiveWorkDir ? basename(effectiveWorkDir) || effectiveWorkDir : 'Not set'
+  const currentWorkDirPath = effectiveWorkDir ? compactWorkDirPath(effectiveWorkDir) : ''
 
   return (
     <div className="rowboat-chat-input rounded-lg border border-border bg-background shadow-none">
@@ -599,11 +797,10 @@ function ChatInputInner({
           >
             <X className="h-4 w-4" />
           </button>
-          <div className="flex flex-1 items-center gap-2 overflow-hidden">
-            <VoiceWaveform />
-            <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
-              {recordingState === 'connecting' ? 'Connecting...' : recordingText || 'Listening...'}
-            </span>
+          {/* Audio-reactive waveform only — the transcribed words are intentionally
+              not shown while recording; they're still captured and submitted. */}
+          <div className="flex flex-1 items-center overflow-hidden">
+            <VoiceWaveform audioLevelsRef={audioLevelsRef} />
           </div>
           <Button
             size="icon"
@@ -631,9 +828,10 @@ function ChatInputInner({
           className="min-h-6 rounded-none border-0 py-0 shadow-none focus-visible:ring-0"
         />
       </div>
-      <div className="flex items-center gap-2 px-4 pb-3">
+      <div ref={toolbarRef} className="flex items-center gap-2 px-4 pb-3">
+        <div ref={leftGroupRef} className="flex min-w-0 items-center gap-2 overflow-hidden">
         <DropdownMenu>
-          <Tooltip>
+          <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
             <TooltipTrigger asChild>
               <DropdownMenuTrigger asChild>
                 <button
@@ -645,47 +843,158 @@ function ChatInputInner({
                 </button>
               </DropdownMenuTrigger>
             </TooltipTrigger>
-            <TooltipContent side="top">Add files or set work directory</TooltipContent>
+            <TooltipContent side="top">
+              {isCodeLocked ? 'Add files' : workDir ? 'Add files or change work directory' : 'Add files or set work directory'}
+            </TooltipContent>
           </Tooltip>
-          <DropdownMenuContent align="start" className="min-w-56">
-            <DropdownMenuItem onSelect={() => fileInputRef.current?.click()}>
-              <ImagePlus className="size-4" />
-              <span>Add files or photos</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => { void handleSetWorkDir() }}>
-              <FolderCog className="size-4" />
-              <span>{workDir ? 'Change work directory' : 'Set work directory'}</span>
-            </DropdownMenuItem>
+          <DropdownMenuContent align="start" className="w-72 max-w-[calc(100vw-2rem)] p-2">
+            <div className="rounded-[14px] border border-border/80 bg-background p-1">
+              <DropdownMenuItem onSelect={() => fileInputRef.current?.click()} className="h-9 rounded-[9px] px-2.5">
+                <ImagePlus className="size-4" />
+                <span>Add files or photos</span>
+              </DropdownMenuItem>
+
+              {/* A bound code session pins the directory — show it, no controls. */}
+              {isCodeLocked ? (
+                <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
+                  <TooltipTrigger asChild>
+                    <div className="flex h-auto items-center gap-2 rounded-[9px] px-2.5 py-2 text-muted-foreground">
+                      <FolderCheck className="size-4 shrink-0" />
+                      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                        <span className="truncate text-sm">{currentWorkDirLabel}</span>
+                        <span className="truncate text-xs">Pinned by the coding session</span>
+                      </span>
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">{effectiveWorkDir}</TooltipContent>
+                </Tooltip>
+              ) : (
+              /* Working directory lives behind a submenu so the main menu stays to two
+                 items. One hover/click away for power users; out of the way otherwise. */
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger className="h-9 rounded-[9px] px-2.5">
+                  <FolderCog className="size-4" />
+                  <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
+                    <span>Set working directory</span>
+                    <span className="min-w-0 max-w-[110px] truncate text-xs text-muted-foreground">
+                      {currentWorkDirLabel}
+                    </span>
+                  </span>
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent className="w-72 max-w-[calc(100vw-2rem)] p-1">
+                  {/* Current selection — shown for context only when one is set. */}
+                  {workDir && (
+                    <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
+                      <TooltipTrigger asChild>
+                        <div className="mb-1 flex items-center gap-2 rounded-[9px] bg-blue-50/80 px-2.5 py-2 text-blue-700 dark:bg-blue-950/30 dark:text-blue-300">
+                          <FolderCheck className="size-4 shrink-0 text-blue-600 dark:text-blue-300" />
+                          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                            <span className="truncate text-sm font-medium">{currentWorkDirLabel}</span>
+                            <span className="truncate text-xs text-blue-700/70 dark:text-blue-300/70">
+                              {currentWorkDirPath}
+                            </span>
+                          </span>
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent side="right">{workDir}</TooltipContent>
+                    </Tooltip>
+                  )}
+
+                  {/* Primary action: choose when unset, change when set. Always on top. */}
+                  <DropdownMenuItem
+                    onSelect={() => { void handleSetWorkDir() }}
+                    className="h-9 rounded-[9px] px-2.5"
+                  >
+                    <FolderOpen className="size-4" />
+                    <span>{workDir ? 'Change folder…' : 'Choose a folder…'}</span>
+                  </DropdownMenuItem>
+
+                  {visibleRecentWorkDirs.length > 0 && (
+                    <>
+                      <div className="px-2.5 pb-1 pt-2 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        Recent
+                      </div>
+                      {visibleRecentWorkDirs.map((entry) => {
+                        const name = basename(entry.path) || entry.path
+                        const when = formatRecentWorkDirTime(entry.lastUsedAt)
+                        return (
+                          <Tooltip key={entry.path} delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
+                            <TooltipTrigger asChild>
+                              <DropdownMenuItem
+                                onSelect={() => { void handleSelectRecentWorkDir(entry.path) }}
+                                className="h-8 rounded-[9px] px-2.5"
+                              >
+                                <FolderClock className="size-4" />
+                                <span className="min-w-0 flex-1 truncate">{name}</span>
+                                {when && <span className="shrink-0 text-xs text-muted-foreground">{when}</span>}
+                              </DropdownMenuItem>
+                            </TooltipTrigger>
+                            <TooltipContent side="right">{entry.path}</TooltipContent>
+                          </Tooltip>
+                        )
+                      })}
+                    </>
+                  )}
+
+                  {/* Clear — only meaningful once a directory is set. Kept at the bottom. */}
+                  {workDir && (
+                    <>
+                      <div className="my-1 h-px bg-border/60" />
+                      <DropdownMenuItem
+                        onSelect={handleClearWorkDir}
+                        className="h-8 rounded-[9px] px-2.5 text-red-600 focus:bg-red-50 focus:text-red-600 dark:text-red-400 dark:focus:bg-red-950/30"
+                      >
+                        <X className="size-4" />
+                        <span>Clear folder</span>
+                      </DropdownMenuItem>
+                    </>
+                  )}
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+              )}
+            </div>
           </DropdownMenuContent>
         </DropdownMenu>
-        {workDir && (
-          <Tooltip>
+        {effectiveWorkDir && collapseLevel < 8 && (
+          <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
             <TooltipTrigger asChild>
-              <div className="group flex h-7 max-w-[180px] shrink-0 items-center rounded-full border border-border bg-muted/40 pl-2.5 pr-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+              {/* Level 4: collapse to a square icon */}
+              <div className={cn(
+                "group flex h-7 shrink-0 items-center rounded-full border border-border bg-muted/40 text-xs text-muted-foreground transition-colors",
+                !isCodeLocked && "hover:bg-muted hover:text-foreground",
+                collapseLevel >= 4 ? "w-7 justify-center" : "max-w-[180px] pl-2.5 pr-2"
+              )}>
                 <button
                   type="button"
                   onClick={handleSetWorkDir}
-                  className="flex min-w-0 items-center gap-1.5"
+                  disabled={isCodeLocked}
+                  className={cn("flex min-w-0 items-center gap-1.5", isCodeLocked && "cursor-default")}
                 >
-                  <FolderCog className="h-3.5 w-3.5 shrink-0" />
-                  <span className="truncate">{basename(workDir) || workDir}</span>
+                  {isCodeLocked
+                    ? <Lock className="h-3 w-3 shrink-0" />
+                    : <FolderCog className="h-3.5 w-3.5 shrink-0" />}
+                  {collapseLevel < 4 && <span className="truncate">{basename(effectiveWorkDir) || effectiveWorkDir}</span>}
                 </button>
-                <button
-                  type="button"
-                  onClick={handleClearWorkDir}
-                  aria-label="Remove work directory"
-                  className="flex h-3.5 w-0 shrink-0 items-center justify-center overflow-hidden opacity-0 transition-all duration-150 ease-out hover:text-red-500 group-hover:ml-1 group-hover:w-3.5 group-hover:opacity-100"
-                >
-                  <X className="h-3.5 w-3.5 shrink-0" />
-                </button>
+                {collapseLevel < 4 && !isCodeLocked && (
+                  <button
+                    type="button"
+                    onClick={handleClearWorkDir}
+                    aria-label="Remove work directory"
+                    className="flex h-3.5 w-0 shrink-0 items-center justify-center overflow-hidden opacity-0 transition-all duration-150 ease-out hover:text-red-500 group-hover:ml-1 group-hover:w-3.5 group-hover:opacity-100"
+                  >
+                    <X className="h-3.5 w-3.5 shrink-0" />
+                  </button>
+                )}
               </div>
             </TooltipTrigger>
             <TooltipContent side="top">
-              Work directory: {workDir}
+              {isCodeLocked
+                ? `Pinned by the coding session: ${effectiveWorkDir}`
+                : `Work directory: ${effectiveWorkDir}`}
             </TooltipContent>
           </Tooltip>
         )}
-        {searchAvailable && (
+        {searchAvailable && collapseLevel < 7 && (
           <button
             type="button"
             onClick={() => setSearchEnabled((v) => !v)}
@@ -699,49 +1008,115 @@ function ChatInputInner({
             )}
           >
             <Globe className="h-4 w-4 shrink-0" />
-            <span
-              className={cn(
-                'overflow-hidden whitespace-nowrap text-xs font-medium transition-all duration-150 ease-out',
-                searchEnabled ? 'ml-1.5 max-w-[60px] opacity-100' : 'max-w-0 opacity-0'
-              )}
-            >
-              Search
-            </span>
+            {searchEnabled && collapseLevel < 3 && (
+              <span className="ml-1.5 whitespace-nowrap text-xs font-medium">
+                Search
+              </span>
+            )}
           </button>
         )}
-        {codeModeFeatureEnabled && (codeModeEnabled ? (
-          <div className="flex h-7 shrink-0 items-center rounded-full bg-secondary text-xs font-medium text-foreground">
-            <Tooltip>
+        {collapseLevel < 6 && (
+        <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={() => {
+                if (runId) return
+                setPermissionMode((mode) => mode === 'auto' ? 'manual' : 'auto')
+              }}
+              disabled={Boolean(runId)}
+              className={cn(
+                "flex h-7 shrink-0 items-center gap-1.5 rounded-full text-xs font-medium transition-colors",
+                collapseLevel >= 2 ? "w-7 justify-center" : "px-2.5",
+                permissionMode === 'auto'
+                  ? "bg-secondary text-foreground hover:bg-secondary/70"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                runId && "cursor-not-allowed opacity-70 hover:bg-secondary"
+              )}
+              aria-label="Permission mode"
+            >
+              <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
+              {collapseLevel < 2 && <span>{permissionMode === 'auto' ? 'Auto' : 'Manual'}</span>}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top">
+            {runId
+              ? `Permission mode is fixed for this run: ${permissionMode === 'auto' ? 'Auto' : 'Manual'}`
+              : permissionMode === 'auto'
+                ? 'Auto-permission on — click for manual approval prompts'
+                : 'Manual approval prompts — click for auto-permission'}
+          </TooltipContent>
+        </Tooltip>
+        )}
+        {codeModeFeatureEnabled && collapseLevel < 5 && ((isCodeLocked || codeModeEnabled) ? (
+          collapseLevel >= 1 ? (
+            /* Level 1: collapse the pill to a single icon */
+            <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  onClick={() => setCodeModeEnabled(false)}
-                  className="flex h-full items-center gap-1.5 rounded-l-full pl-2.5 pr-2 transition-colors hover:bg-secondary/70"
+                  onClick={() => { if (!isCodeLocked) setCodeModeEnabled(false) }}
+                  disabled={isCodeLocked}
+                  className={cn(
+                    "flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-secondary text-foreground transition-colors",
+                    isCodeLocked ? "cursor-default" : "hover:bg-secondary/70",
+                  )}
                 >
                   <Terminal className="h-3.5 w-3.5" />
-                  <span>Code</span>
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="top">Code mode on — click to disable</TooltipContent>
-            </Tooltip>
-            <span className="text-foreground/30">·</span>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={handleToggleCodingAgent}
-                  className="flex h-full items-center rounded-r-full pl-2 pr-2.5 transition-colors hover:bg-secondary/70"
-                >
-                  <span>{codingAgent === 'claude' ? 'Claude' : 'Codex'}</span>
                 </button>
               </TooltipTrigger>
               <TooltipContent side="top">
-                Coding agent: {codingAgent === 'claude' ? 'Claude Code' : 'Codex'} — click to swap
+                {isCodeLocked
+                  ? `Coding session — ${codingAgent === 'claude' ? 'Claude Code' : 'Codex'}`
+                  : `Code mode on (${codingAgent === 'claude' ? 'Claude Code' : 'Codex'}) — click to disable`}
               </TooltipContent>
             </Tooltip>
-          </div>
+          ) : (
+            <div className="flex h-7 shrink-0 items-center rounded-full bg-secondary text-xs font-medium text-foreground">
+              <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() => { if (!isCodeLocked) setCodeModeEnabled(false) }}
+                    disabled={isCodeLocked}
+                    className={cn(
+                      "flex h-full items-center gap-1.5 rounded-l-full pl-2.5 pr-2 transition-colors",
+                      isCodeLocked ? "cursor-default" : "hover:bg-secondary/70",
+                    )}
+                  >
+                    {isCodeLocked ? <Lock className="h-3 w-3" /> : <Terminal className="h-3.5 w-3.5" />}
+                    <span>Code</span>
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  {isCodeLocked ? 'Pinned by the coding session' : 'Code mode on — click to disable'}
+                </TooltipContent>
+              </Tooltip>
+              <span className="text-foreground/30">·</span>
+              <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={handleToggleCodingAgent}
+                    disabled={isCodeLocked}
+                    className={cn(
+                      "flex h-full items-center rounded-r-full pl-2 pr-2.5 transition-colors",
+                      isCodeLocked ? "cursor-default" : "hover:bg-secondary/70",
+                    )}
+                  >
+                    <span>{codingAgent === 'claude' ? 'Claude' : 'Codex'}</span>
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  {isCodeLocked
+                    ? `Coding agent fixed by the session: ${codingAgent === 'claude' ? 'Claude Code' : 'Codex'}`
+                    : `Coding agent: ${codingAgent === 'claude' ? 'Claude Code' : 'Codex'} — click to swap`}
+                </TooltipContent>
+              </Tooltip>
+            </div>
+          )
         ) : (
-          <Tooltip>
+          <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
             <TooltipTrigger asChild>
               <button
                 type="button"
@@ -755,25 +1130,94 @@ function ChatInputInner({
             <TooltipContent side="top">Use a coding agent (Claude Code or Codex)</TooltipContent>
           </Tooltip>
         ))}
+        </div>
+        {collapseLevel >= 5 && (
+          <DropdownMenu>
+            <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
+              <TooltipTrigger asChild>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="More options"
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  >
+                    <MoreHorizontal className="h-4 w-4" />
+                  </button>
+                </DropdownMenuTrigger>
+              </TooltipTrigger>
+              <TooltipContent side="top">More options</TooltipContent>
+            </Tooltip>
+            <DropdownMenuContent align="start" side="top" className="min-w-52">
+              {effectiveWorkDir && collapseLevel >= 8 && (
+                <DropdownMenuItem disabled={isCodeLocked} onSelect={() => { void handleSetWorkDir() }}>
+                  {isCodeLocked ? <Lock className="size-4" /> : <FolderCog className="size-4" />}
+                  <span className="min-w-0 flex-1 truncate">{basename(effectiveWorkDir) || effectiveWorkDir}</span>
+                </DropdownMenuItem>
+              )}
+              {searchAvailable && collapseLevel >= 7 && (
+                <DropdownMenuCheckboxItem
+                  checked={searchEnabled}
+                  onSelect={(e) => e.preventDefault()}
+                  onCheckedChange={(c) => setSearchEnabled(Boolean(c))}
+                >
+                  Web search
+                </DropdownMenuCheckboxItem>
+              )}
+              {collapseLevel >= 6 && (
+                <DropdownMenuCheckboxItem
+                  checked={permissionMode === 'auto'}
+                  disabled={Boolean(runId)}
+                  onSelect={(e) => e.preventDefault()}
+                  onCheckedChange={(c) => setPermissionMode(c ? 'auto' : 'manual')}
+                >
+                  Auto-approve actions
+                </DropdownMenuCheckboxItem>
+              )}
+              {codeModeFeatureEnabled && collapseLevel >= 5 && (
+                <>
+                  <DropdownMenuCheckboxItem
+                    checked={isCodeLocked || codeModeEnabled}
+                    disabled={isCodeLocked}
+                    onSelect={(e) => e.preventDefault()}
+                    onCheckedChange={(c) => setCodeModeEnabled(Boolean(c))}
+                  >
+                    Code mode
+                  </DropdownMenuCheckboxItem>
+                  {(isCodeLocked || codeModeEnabled) && (
+                    <DropdownMenuItem disabled={isCodeLocked} onSelect={(e) => { e.preventDefault(); handleToggleCodingAgent() }}>
+                      <Terminal className="size-4" />
+                      <span className="min-w-0 flex-1">Coding agent</span>
+                      <span className="text-xs text-muted-foreground">{codingAgent === 'claude' ? 'Claude' : 'Codex'}</span>
+                    </DropdownMenuItem>
+                  )}
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
         <div className="flex-1" />
         {lockedModel ? (
-          <span
-            className="flex h-7 shrink-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground"
-            title={`${providerDisplayNames[lockedModel.provider] || lockedModel.provider} — fixed for this chat`}
-          >
-            <span className="max-w-[150px] truncate">{getSelectedModelDisplayName(lockedModel.model)}</span>
-          </span>
+          <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
+            <TooltipTrigger asChild>
+              <span className="flex h-7 min-w-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground">
+                <span className="min-w-0 truncate">{getSelectedModelDisplayName(lockedModel.model)}</span>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              {providerDisplayNames[lockedModel.provider] || lockedModel.provider} — fixed for this chat
+            </TooltipContent>
+          </Tooltip>
         ) : configuredModels.length > 0 ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                className="flex h-7 shrink-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                className="flex h-7 min-w-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               >
-                <span className="max-w-[150px] truncate">
+                <span className="min-w-0 truncate">
                   {getSelectedModelDisplayName(configuredModels.find((m) => `${m.provider}/${m.model}` === activeModelKey)?.model || configuredModels[0]?.model || 'Model')}
                 </span>
-                <ChevronDown className="h-3 w-3" />
+                <ChevronDown className="h-3 w-3 shrink-0" />
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
@@ -793,7 +1237,7 @@ function ChatInputInner({
         ) : null}
         {onToggleTts && ttsAvailable && (
           <div className="flex shrink-0 items-center">
-            <Tooltip>
+            <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
               <TooltipTrigger asChild>
                 <button
                   type="button"
@@ -849,23 +1293,30 @@ function ChatInputInner({
           </button>
         )}
         {isProcessing ? (
-          <Button
-            size="icon"
-            onClick={onStop}
-            title={isStopping ? 'Click again to force stop' : 'Stop generation'}
-            className={cn(
-              'h-7 w-7 shrink-0 rounded-full transition-all',
-              isStopping
-                ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
-                : 'bg-primary text-primary-foreground hover:bg-primary/90'
-            )}
-          >
-            {isStopping ? (
-              <LoaderIcon className="h-4 w-4 animate-spin" />
-            ) : (
-              <Square className="h-3 w-3 fill-current" />
-            )}
-          </Button>
+          <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
+            <TooltipTrigger asChild>
+              <Button
+                size="icon"
+                onClick={onStop}
+                aria-label={isStopping ? 'Force stop generation' : 'Stop generation'}
+                className={cn(
+                  'h-7 w-7 shrink-0 rounded-full transition-all',
+                  isStopping
+                    ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
+                    : 'bg-primary text-primary-foreground hover:bg-primary/90'
+                )}
+              >
+                {isStopping ? (
+                  <LoaderIcon className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Square className="h-3 w-3 fill-current" />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              {isStopping ? 'Click again to force stop' : 'Stop generation'}
+            </TooltipContent>
+          </Tooltip>
         ) : (
           <Button
             size="icon"
@@ -889,22 +1340,89 @@ function ChatInputInner({
 }
 
 /** Animated waveform bars for the recording indicator */
-function VoiceWaveform() {
+// Live recording waveform. Each bar is one captured audio frame; bars accumulate
+// from the left and grow rightward until they fill the width, then scroll (oldest
+// drops off the left). Bar height tracks that frame's mic amplitude, so the
+// waveform visibly reacts to how loud the user is speaking.
+const WAVE_BAR_WIDTH = 3 // px
+const WAVE_BAR_GAP = 2 // px
+const WAVE_BAR_PITCH = WAVE_BAR_WIDTH + WAVE_BAR_GAP
+const WAVE_BAR_MIN = 1.5 // px — floor so silence still shows a faint line
+const WAVE_BAR_MAX = 18 // px — fits inside the h-5 (20px) row
+const WAVE_CURVE = 0.8 // <1 lifts quiet speech slightly; near-linear keeps loud peaks tall
+
+function waveBarHeight(level: number): number {
+  // `level` is already auto-gained to ~0..1 in the hook, so map it close to linearly
+  // (a gentle curve) — louder voice ⇒ visibly taller bar, quiet ⇒ short.
+  const amp = Math.min(1, Math.max(0, level)) ** WAVE_CURVE
+  return WAVE_BAR_MIN + amp * (WAVE_BAR_MAX - WAVE_BAR_MIN)
+}
+
+function VoiceWaveform({ audioLevelsRef }: { audioLevelsRef?: React.MutableRefObject<number[]> }) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [bars, setBars] = useState<number[]>([])
+  // How many bars fit in the current width; recomputed on resize.
+  const maxBarsRef = useRef(48)
+
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const measure = () => {
+      maxBarsRef.current = Math.max(1, Math.floor(el.clientWidth / WAVE_BAR_PITCH))
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  useEffect(() => {
+    if (!audioLevelsRef) return
+    let raf = 0
+    let lastSig = ''
+    const tick = () => {
+      const levels = audioLevelsRef.current
+      const maxBars = maxBarsRef.current
+      const next = levels.length > maxBars ? levels.slice(levels.length - maxBars) : levels
+      // Only re-render when the visible window actually changed. Length covers
+      // the growth phase; the trailing value covers the scrolling phase once full.
+      const sig = `${next.length}:${next.length ? next[next.length - 1] : 0}`
+      if (sig !== lastSig) {
+        lastSig = sig
+        setBars(next.slice())
+      }
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [audioLevelsRef])
+
   return (
-    <div className="flex items-center gap-[3px] h-5">
-      {[0, 1, 2, 3, 4].map((i) => (
+    <div
+      ref={containerRef}
+      className="flex h-5 w-full items-center overflow-hidden"
+      style={{ gap: `${WAVE_BAR_GAP}px` }}
+    >
+      {/* Each newly-appended bar mounts with `voice-bar-in` (grows + fades in) so it
+          doesn't pop. Once the strip is full and values scroll through the bars, the
+          height transition makes them flow smoothly instead of stepping. */}
+      {bars.map((level, i) => (
         <span
           key={i}
-          className="w-[3px] rounded-full bg-primary"
+          className="shrink-0 rounded-full bg-primary"
           style={{
-            animation: `voice-wave 1.2s ease-in-out ${i * 0.15}s infinite`,
+            width: `${WAVE_BAR_WIDTH}px`,
+            height: `${waveBarHeight(level)}px`,
+            transformOrigin: 'center',
+            transition: 'height 90ms linear',
+            animation: 'voice-bar-in 130ms ease-out',
           }}
         />
       ))}
       <style>{`
-        @keyframes voice-wave {
-          0%, 100% { height: 4px; }
-          50% { height: 16px; }
+        @keyframes voice-bar-in {
+          from { transform: scaleY(0.15); opacity: 0; }
+          to { transform: scaleY(1); opacity: 1; }
         }
       `}</style>
     </div>
@@ -915,7 +1433,7 @@ export interface ChatInputWithMentionsProps {
   knowledgeFiles: string[]
   recentFiles: string[]
   visibleFiles: string[]
-  onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex') => void
+  onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => void
   onStop?: () => void
   isProcessing: boolean
   isStopping?: boolean
@@ -928,6 +1446,7 @@ export interface ChatInputWithMentionsProps {
   isRecording?: boolean
   recordingText?: string
   recordingState?: 'connecting' | 'listening'
+  audioLevelsRef?: React.MutableRefObject<number[]>
   onStartRecording?: () => void
   onSubmitRecording?: () => void
   onCancelRecording?: () => void
@@ -940,6 +1459,8 @@ export interface ChatInputWithMentionsProps {
   onSelectedModelChange?: (model: SelectedModel | null) => void
   workDir?: string | null
   onWorkDirChange?: (value: string | null) => void
+  /** Set when this chat is bound to a Code-section session — freezes workdir + agent. */
+  codeSessionLock?: { cwd: string; agent: 'claude' | 'codex' } | null
 }
 
 export function ChatInputWithMentions({
@@ -959,6 +1480,7 @@ export function ChatInputWithMentions({
   isRecording,
   recordingText,
   recordingState,
+  audioLevelsRef,
   onStartRecording,
   onSubmitRecording,
   onCancelRecording,
@@ -971,6 +1493,7 @@ export function ChatInputWithMentions({
   onSelectedModelChange,
   workDir,
   onWorkDirChange,
+  codeSessionLock,
 }: ChatInputWithMentionsProps) {
   return (
     <PromptInputProvider knowledgeFiles={knowledgeFiles} recentFiles={recentFiles} visibleFiles={visibleFiles}>
@@ -988,6 +1511,7 @@ export function ChatInputWithMentions({
         isRecording={isRecording}
         recordingText={recordingText}
         recordingState={recordingState}
+        audioLevelsRef={audioLevelsRef}
         onStartRecording={onStartRecording}
         onSubmitRecording={onSubmitRecording}
         onCancelRecording={onCancelRecording}
@@ -1000,6 +1524,7 @@ export function ChatInputWithMentions({
         onSelectedModelChange={onSelectedModelChange}
         workDir={workDir}
         onWorkDirChange={onWorkDirChange}
+        codeSessionLock={codeSessionLock}
       />
     </PromptInputProvider>
   )

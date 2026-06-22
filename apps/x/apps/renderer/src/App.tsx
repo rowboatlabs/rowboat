@@ -5,13 +5,13 @@ import { RunEvent, ListRunsResponse } from '@x/shared/src/runs.js';
 import type { LanguageModelUsage, ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
-import { CheckIcon, LoaderIcon, PanelLeftIcon, ArrowRight, MessageSquare, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon } from 'lucide-react';
+import { CheckIcon, LoaderIcon, PanelLeftIcon, ArrowLeft, ArrowRight, MessageSquare, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MarkdownEditor, type MarkdownEditorHandle } from './components/markdown-editor';
 import { ChatSidebar } from './components/chat-sidebar';
 import { ChatHeader } from './components/chat-header';
 import { ChatEmptyState } from './components/chat-empty-state';
-import { ChatInputWithMentions, type StagedAttachment } from './components/chat-input-with-mentions';
+import { ChatInputWithMentions, type PermissionMode, type StagedAttachment } from './components/chat-input-with-mentions';
 import { ChatMessageAttachments } from '@/components/chat-message-attachments'
 import { GraphView, type GraphEdge, type GraphNode } from '@/components/graph-view';
 import { BasesView, type BaseConfig, DEFAULT_BASE_CONFIG } from '@/components/bases-view';
@@ -29,11 +29,15 @@ import { LiveNotesView } from '@/components/live-notes-view';
 import { BgTasksView } from '@/components/bg-tasks-view';
 import { EmailView } from '@/components/email-view';
 import { WorkspaceView } from '@/components/workspace-view';
-import { KnowledgeView } from '@/components/knowledge-view';
+import { CodingRunBlock } from '@/components/coding-run';
+import { KnowledgeView, type KnowledgeViewMode } from '@/components/knowledge-view';
 import { GoogleDocPickerDialog } from '@/components/google-doc-picker-dialog';
 import { ChatHistoryView } from '@/components/chat-history-view';
 import { HomeView } from '@/components/home-view';
 import { MeetingsView } from '@/components/meetings-view';
+import { CodeView, type ActiveCodeSession } from '@/components/code/code-view';
+import { CodeChat } from '@/components/code/code-chat';
+import { ResizableRightPane } from '@/components/code/resizable-right-pane';
 import { SidebarSectionProvider } from '@/contexts/sidebar-context';
 import {
   Conversation,
@@ -57,9 +61,10 @@ import { WebSearchResult } from '@/components/ai-elements/web-search-result';
 import { AppActionCard } from '@/components/ai-elements/app-action-card';
 import { ComposioConnectCard } from '@/components/ai-elements/composio-connect-card';
 import { PermissionRequest } from '@/components/ai-elements/permission-request';
+import { AutoPermissionDecision } from '@/components/ai-elements/auto-permission-decision';
 import { TerminalOutput } from '@/components/terminal-output';
 import { AskHumanRequest } from '@/components/ai-elements/ask-human-request';
-import { ToolPermissionRequestEvent, AskHumanRequestEvent } from '@x/shared/src/runs.js';
+import { ToolPermissionAutoDecisionEvent, ToolPermissionRequestEvent, AskHumanRequestEvent } from '@x/shared/src/runs.js';
 import {
   SidebarInset,
   SidebarProvider,
@@ -117,6 +122,7 @@ import { useVoiceTTS } from '@/hooks/useVoiceTTS'
 import { useMeetingTranscription, type CalendarEventMeta } from '@/hooks/useMeetingTranscription'
 import { useAnalyticsIdentity } from '@/hooks/useAnalyticsIdentity'
 import * as analytics from '@/lib/analytics'
+import { useTheme } from '@/contexts/theme-context'
 
 type DirEntry = z.infer<typeof workspace.DirEntry>
 type RunEventType = z.infer<typeof RunEvent>
@@ -165,6 +171,7 @@ function AutoScrollPre({ className, children }: { className?: string; children: 
 }
 
 const DEFAULT_SIDEBAR_WIDTH = 256
+const DEFAULT_CHAT_PANE_WIDTH = 460
 const wikiLinkRegex = /\[\[([^[\]]+)\]\]/g
 const graphPalette = [
   { hue: 210, sat: 72, light: 52 },
@@ -196,6 +203,7 @@ const KNOWLEDGE_VIEW_TAB_PATH = '__rowboat_knowledge_view__'
 const CHAT_HISTORY_TAB_PATH = '__rowboat_chat_history__'
 const HOME_TAB_PATH = '__rowboat_home__'
 const BASES_DEFAULT_TAB_PATH = '__rowboat_bases_default__'
+const CODE_TAB_PATH = '__rowboat_code__'
 
 const clampNumber = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value))
@@ -370,6 +378,7 @@ const isKnowledgeViewTabPath = (path: string) => path === KNOWLEDGE_VIEW_TAB_PAT
 const isChatHistoryTabPath = (path: string) => path === CHAT_HISTORY_TAB_PATH
 const isHomeTabPath = (path: string) => path === HOME_TAB_PATH
 const isBaseFilePath = (path: string) => path.endsWith('.base') || path === BASES_DEFAULT_TAB_PATH
+const isCodeTabPath = (path: string) => path === CODE_TAB_PATH
 
 const getSuggestedTopicTargetFolder = (category?: string) => {
   const normalized = category?.trim().toLowerCase()
@@ -620,9 +629,10 @@ type ViewState =
   | { type: 'live-notes' }
   | { type: 'email' }
   | { type: 'workspace'; path?: string }
-  | { type: 'knowledge-view'; folderPath?: string }
+  | { type: 'knowledge-view'; folderPath?: string; mode?: KnowledgeViewMode }
   | { type: 'chat-history' }
   | { type: 'home' }
+  | { type: 'code' }
 
 function viewStatesEqual(a: ViewState, b: ViewState): boolean {
   if (a.type !== b.type) return false
@@ -630,7 +640,7 @@ function viewStatesEqual(a: ViewState, b: ViewState): boolean {
   if (a.type === 'file' && b.type === 'file') return a.path === b.path
   if (a.type === 'task' && b.type === 'task') return a.name === b.name
   if (a.type === 'workspace' && b.type === 'workspace') return (a.path ?? '') === (b.path ?? '')
-  if (a.type === 'knowledge-view' && b.type === 'knowledge-view') return (a.folderPath ?? '') === (b.folderPath ?? '')
+  if (a.type === 'knowledge-view' && b.type === 'knowledge-view') return (a.folderPath ?? '') === (b.folderPath ?? '') && (a.mode ?? '') === (b.mode ?? '')
   return true // both graph
 }
 
@@ -680,12 +690,19 @@ function parseDeepLink(input: string): ViewState | null {
     }
     case 'knowledge-view': {
       const folderPath = params.get('folderPath')
-      return { type: 'knowledge-view', folderPath: folderPath ?? undefined }
+      const mode = params.get('mode')
+      return {
+        type: 'knowledge-view',
+        folderPath: folderPath ?? undefined,
+        mode: mode === 'graph' || mode === 'basis' || mode === 'files' ? mode : undefined,
+      }
     }
     case 'chat-history':
       return { type: 'chat-history' }
     case 'home':
       return { type: 'home' }
+    case 'code':
+      return { type: 'code' }
     default:
       return null
   }
@@ -773,6 +790,9 @@ function ContentHeader({
 }
 
 function App() {
+  const { chatPanePlacement, chatPaneSize } = useTheme()
+  const isChatPaneInMiddle = chatPanePlacement === 'middle'
+
   type ShortcutPane = 'left' | 'right'
   type MarkdownHistoryHandlers = { undo: () => boolean; redo: () => boolean }
 
@@ -798,13 +818,14 @@ function App() {
   const [isWorkspaceOpen, setIsWorkspaceOpen] = useState(false)
   const [workspaceInitialPath, setWorkspaceInitialPath] = useState<string | null>(null)
   const [isKnowledgeViewOpen, setIsKnowledgeViewOpen] = useState(false)
+  const [knowledgeViewMode, setKnowledgeViewMode] = useState<KnowledgeViewMode>('graph')
   // Folder being browsed inside the knowledge view (null = root overview).
   // Lives in ViewState so folder drill-down participates in back/forward history.
   const [knowledgeViewFolderPath, setKnowledgeViewFolderPath] = useState<string | null>(null)
   const [googleDocPickerOpen, setGoogleDocPickerOpen] = useState(false)
   const [googleDocPickerTargetFolder, setGoogleDocPickerTargetFolder] = useState('knowledge')
   const [isChatHistoryOpen, setIsChatHistoryOpen] = useState(false)
-  // Default landing view: Home in the middle with the chat docked on the right.
+  // Default landing view: Home with the chat docked according to appearance settings.
   const [isHomeOpen, setIsHomeOpen] = useState(true)
   const [emailInitialThreadId, setEmailInitialThreadId] = useState<string | null>(null)
   const [emailThreadIdVersion, setEmailThreadIdVersion] = useState(0)
@@ -1002,7 +1023,7 @@ function App() {
     voice.start()
   }, [voice])
 
-  const handlePromptSubmitRef = useRef<((message: PromptInputMessage, mentions?: FileMention[], stagedAttachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex') => Promise<void>) | null>(null)
+  const handlePromptSubmitRef = useRef<((message: PromptInputMessage, mentions?: FileMention[], stagedAttachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => Promise<void>) | null>(null)
   const pendingVoiceInputRef = useRef(false)
 
   // Palette: per-tab editor handles for capturing cursor context on Cmd+K, and pending payload
@@ -1068,7 +1089,7 @@ function App() {
   }, [])
 
   // Runs history state
-  type RunListItem = { id: string; title?: string; createdAt: string; agentId: string }
+  type RunListItem = { id: string; title?: string; createdAt: string; modifiedAt: string; agentId: string; useCase?: string }
   const [runs, setRuns] = useState<RunListItem[]>([])
 
   // Chat tab state
@@ -1193,6 +1214,23 @@ function App() {
   const [activeFileTabId, setActiveFileTabId] = useState<string | null>('home-tab')
   const activeFileTabIdRef = useRef(activeFileTabId)
   activeFileTabIdRef.current = activeFileTabId
+  // The Code section is tab-derived (no boolean to keep in sync with the other
+  // section flags): it is open exactly while its sentinel tab is active.
+  const isCodeOpen = React.useMemo(() => {
+    const activeTab = fileTabs.find((tab) => tab.id === activeFileTabId)
+    return activeTab ? isCodeTabPath(activeTab.path) : false
+  }, [fileTabs, activeFileTabId])
+  // The code session that owns the right-hand chat pane: rowboat-mode sessions
+  // bind the assistant chat to their run; direct-mode sessions swap the pane
+  // for the direct-drive chat.
+  const [activeCodeSession, setActiveCodeSession] = useState<ActiveCodeSession | null>(null)
+  // A file the code chat asked to review — consumed by the workspace pane.
+  const [codeDiffPath, setCodeDiffPath] = useState<string | null>(null)
+  const boundCodeSessionRef = useRef<string | null>(null)
+  // Composer locks for runs that are code sessions: the session's cwd + agent
+  // are frozen in the chat input (the backend pins them server-side anyway).
+  // Kept after the Code view unmounts — the chat tab stays bound to the run.
+  const [codeSessionLocks, setCodeSessionLocks] = useState<Record<string, { cwd: string; agent: 'claude' | 'codex' }>>({})
   const [editorSessionByTabId, setEditorSessionByTabId] = useState<Record<string, number>>({})
   const fileHistoryHandlersRef = useRef<Map<string, MarkdownHistoryHandlers>>(new Map())
   const fileTabIdCounterRef = useRef(0)
@@ -1206,9 +1244,10 @@ function App() {
     if (isBgTasksTabPath(tab.path)) return 'Background tasks'
     if (isEmailTabPath(tab.path)) return 'Email'
     if (isWorkspaceTabPath(tab.path)) return 'Workspace'
-    if (isKnowledgeViewTabPath(tab.path)) return 'Notes'
+    if (isKnowledgeViewTabPath(tab.path)) return 'Brain'
     if (isChatHistoryTabPath(tab.path)) return 'Chat history'
     if (isHomeTabPath(tab.path)) return 'Home'
+    if (isCodeTabPath(tab.path)) return 'Code'
     if (tab.path === BASES_DEFAULT_TAB_PATH) return 'Bases'
     if (tab.path.endsWith('.base')) return tab.path.split('/').pop()?.replace(/\.base$/i, '') || 'Base'
     return tab.path.split('/').pop()?.replace(/\.md$/i, '') || tab.path
@@ -1221,6 +1260,7 @@ function App() {
   const [allPermissionRequests, setAllPermissionRequests] = useState<Map<string, z.infer<typeof ToolPermissionRequestEvent>>>(new Map())
   // Track permission responses (toolCallId -> response)
   const [permissionResponses, setPermissionResponses] = useState<Map<string, 'approve' | 'deny'>>(new Map())
+  const [autoPermissionDecisions, setAutoPermissionDecisions] = useState<Map<string, z.infer<typeof ToolPermissionAutoDecisionEvent>>>(new Map())
 
   useEffect(() => {
     chatViewStateByTabRef.current = chatViewStateByTab
@@ -1234,6 +1274,7 @@ function App() {
       pendingAskHumanRequests: new Map(pendingAskHumanRequests),
       allPermissionRequests: new Map(allPermissionRequests),
       permissionResponses: new Map(permissionResponses),
+      autoPermissionDecisions: new Map(autoPermissionDecisions),
     }
     setChatViewStateByTab((prev) => ({ ...prev, [activeChatTabId]: snapshot }))
   }, [
@@ -1244,6 +1285,7 @@ function App() {
     pendingAskHumanRequests,
     allPermissionRequests,
     permissionResponses,
+    autoPermissionDecisions,
   ])
 
   useEffect(() => {
@@ -1918,8 +1960,8 @@ function App() {
         cursor = result.nextCursor
       } while (cursor)
 
-      // Filter for copilot runs only
-      const copilotRuns = allRuns.filter((run: RunListItem) => run.agentId === 'copilot')
+      // Filter for copilot chats only (Code-section sessions live in the Code view)
+      const copilotRuns = allRuns.filter((run: RunListItem) => run.agentId === 'copilot' && run.useCase !== 'code_session')
       setRuns(copilotRuns)
     } catch (err) {
       console.error('Failed to load runs:', err)
@@ -2147,6 +2189,7 @@ function App() {
       // Track permission requests and responses from history
       const allPermissionRequests = new Map<string, z.infer<typeof ToolPermissionRequestEvent>>()
       const permResponseMap = new Map<string, 'approve' | 'deny'>()
+      const autoPermissionDecisions = new Map<string, z.infer<typeof ToolPermissionAutoDecisionEvent>>()
       const askHumanRequests = new Map<string, z.infer<typeof AskHumanRequestEvent>>()
       const respondedAskHumanIds = new Set<string>()
 
@@ -2155,6 +2198,8 @@ function App() {
           allPermissionRequests.set(event.toolCall.toolCallId, event)
         } else if (event.type === 'tool-permission-response') {
           permResponseMap.set(event.toolCallId, event.response)
+        } else if (event.type === 'tool-permission-auto-decision') {
+          autoPermissionDecisions.set(event.toolCallId, event)
         } else if (event.type === 'ask-human-request') {
           askHumanRequests.set(event.toolCallId, event)
         } else if (event.type === 'ask-human-response') {
@@ -2183,10 +2228,20 @@ function App() {
       setConversation(items)
       setRunId(id)
       setMessage('')
+      // Reconcile composer state with THIS run. Loading a run while another one
+      // is mid-turn (e.g. binding a code session steals the single chat tab)
+      // must not leave isProcessing/isStopping pointing at the old run — that
+      // wedges the composer: stop targets the new run (a no-op) while the old
+      // run's processing-end arrives flagged as non-active and clears nothing.
+      setIsProcessing(processingRunIdsRef.current.has(id))
+      setIsStopping(false)
+      setStopClickedAt(null)
+      setCurrentAssistantMessage(streamingBuffersRef.current.get(id)?.assistant ?? '')
       setPendingPermissionRequests(pendingPerms)
       setPendingAskHumanRequests(pendingAsks)
       setAllPermissionRequests(allPermissionRequests)
       setPermissionResponses(permResponseMap)
+      setAutoPermissionDecisions(autoPermissionDecisions)
 
       // Restore the run's per-chat work directory into the tab it was loaded into.
       const tabId = activeChatTabIdRef.current
@@ -2252,6 +2307,11 @@ function App() {
         break
 
       case 'start':
+        // Run creation alone isn't a turn. Code-session runs are created when
+        // the session is (no message follows until the user sends one), so
+        // marking them processing here would never be cleared — and wedge the
+        // composer (Stop shown, send blocked) once the session binds a chat tab.
+        if (event.useCase === 'code_session') return
         setProcessingRunIds(prev => {
           if (prev.has(event.runId)) return prev
           const next = new Set(prev)
@@ -2306,19 +2366,6 @@ function App() {
               status: 'running',
               timestamp: Date.now(),
             }])
-            // Detect acpx-driven coding-agent runs so the composer can retroactively
-            // flip code mode on with the right agent (when the user reached the skill
-            // via plain prompt rather than the explicit toggle).
-            if (llmEvent.toolName === 'executeCommand') {
-              const input = llmEvent.input as { command?: unknown } | undefined
-              const cmd = typeof input?.command === 'string' ? input.command : ''
-              const match = cmd.match(/\bacpx\b[\s\S]*?\b(claude|codex)\b/)
-              if (match) {
-                window.dispatchEvent(new CustomEvent('code-mode-detected', {
-                  detail: { runId: event.runId, agent: match[1] as 'claude' | 'codex' },
-                }))
-              }
-            }
           } else if (llmEvent.type === 'finish-step') {
             const nextUsage = normalizeUsage(llmEvent.usage)
             if (nextUsage) {
@@ -2416,6 +2463,8 @@ function App() {
                   ...item,
                   result: event.result as ToolUIPart['output'],
                   status: 'completed' as const,
+                  // a code_agent_run finished — drop any lingering permission card
+                  pendingCodePermission: null,
                 }
               }
               return item
@@ -2491,6 +2540,43 @@ function App() {
         setPermissionResponses(prev => {
           const next = new Map(prev)
           next.set(event.toolCallId, event.response)
+          return next
+        })
+        break
+      }
+
+      case 'code-run-event': {
+        if (!isActiveRun) return
+        setConversation(prev => prev.map(item => {
+          if (isToolCall(item) && item.id === event.toolCallId) {
+            const existing = item.codeRunEvents ?? []
+            if (existing.length === 0) {
+              setToolOpenForTab(activeChatTabIdRef.current, item.id, true)
+            }
+            return { ...item, codeRunEvents: [...existing, event.event] }
+          }
+          return item
+        }))
+        break
+      }
+
+      case 'code-run-permission-request': {
+        if (!isActiveRun) return
+        setConversation(prev => prev.map(item => {
+          if (isToolCall(item) && item.id === event.toolCallId) {
+            setToolOpenForTab(activeChatTabIdRef.current, item.id, true)
+            return { ...item, pendingCodePermission: { requestId: event.requestId, ask: event.ask } }
+          }
+          return item
+        }))
+        break
+      }
+
+      case 'tool-permission-auto-decision': {
+        if (!isActiveRun) return
+        setAutoPermissionDecisions(prev => {
+          const next = new Map(prev)
+          next.set(event.toolCallId, event)
           return next
         })
         break
@@ -2612,6 +2698,7 @@ function App() {
     stagedAttachments: StagedAttachment[] = [],
     searchEnabled?: boolean,
     codeMode?: 'claude' | 'codex',
+    permissionMode?: PermissionMode,
   ) => {
     if (isProcessing) return
 
@@ -2651,6 +2738,7 @@ function App() {
         const run = await window.ipc.invoke('runs:create', {
           agentId,
           ...(selected ? { model: selected.model, provider: selected.provider } : {}),
+          permissionMode: permissionMode ?? 'manual',
         })
         currentRunId = run.id
         newRunCreatedAt = run.createdAt
@@ -2755,10 +2843,12 @@ function App() {
         const inferredTitle = inferRunTitleFromMessage(titleSource)
         setRuns((prev) => {
           const withoutCurrent = prev.filter((run) => run.id !== currentRunId)
+          const createdAt = newRunCreatedAt ?? new Date().toISOString()
           return [{
             id: currentRunId!,
             title: inferredTitle,
-            createdAt: newRunCreatedAt ?? new Date().toISOString(),
+            createdAt,
+            modifiedAt: createdAt,
             agentId,
           }, ...withoutCurrent]
         })
@@ -2826,6 +2916,26 @@ function App() {
     }
   }, [runId])
 
+  // Answer a mid-run permission request from a code_agent_run coding turn. The
+  // pending ask lives on the tool call itself, so we optimistically clear it and
+  // tell main which decision the user picked (keyed by the request id).
+  const handleCodePermissionResponse = useCallback(async (
+    toolCallId: string,
+    requestId: string,
+    decision: 'allow_once' | 'allow_always' | 'reject',
+  ) => {
+    setConversation(prev => prev.map(item =>
+      isToolCall(item) && item.id === toolCallId
+        ? { ...item, pendingCodePermission: null }
+        : item
+    ))
+    try {
+      await window.ipc.invoke('codeRun:resolvePermission', { requestId, decision })
+    } catch (error) {
+      console.error('Failed to resolve code permission:', error)
+    }
+  }, [])
+
   const handleAskHumanResponse = useCallback(async (toolCallId: string, subflow: string[], response: string) => {
     if (!runId) return
     try {
@@ -2855,6 +2965,7 @@ function App() {
     setPendingAskHumanRequests(new Map())
     setAllPermissionRequests(new Map())
     setPermissionResponses(new Map())
+    setAutoPermissionDecisions(new Map())
     setSelectedBackgroundTask(null)
     setChatViewportAnchor(activeChatTabIdRef.current, null)
     setChatViewStateByTab(prev => ({
@@ -2881,6 +2992,7 @@ function App() {
       setPendingAskHumanRequests(new Map())
       setAllPermissionRequests(new Map())
       setPermissionResponses(new Map())
+      setAutoPermissionDecisions(new Map())
       setChatViewportAnchor(tab.id, null)
     }
   }, [loadRun, setChatViewportAnchor])
@@ -2906,6 +3018,7 @@ function App() {
     setPendingAskHumanRequests(new Map(cached.pendingAskHumanRequests))
     setAllPermissionRequests(new Map(cached.allPermissionRequests))
     setPermissionResponses(new Map(cached.permissionResponses))
+    setAutoPermissionDecisions(new Map(cached.autoPermissionDecisions))
     setIsProcessing(Boolean(resolvedRunId && processingRunIdsRef.current.has(resolvedRunId)))
     return true
   }, [])
@@ -2933,6 +3046,38 @@ function App() {
       applyChatTab(tab)
     }
   }, [chatTabs, activeChatTabId, applyChatTab, loadRun, restoreChatTabState, saveChatScrollForTab])
+
+  // A code session was selected (or changed mode/status) in the Code view.
+  // Rowboat-mode sessions take over the assistant chat pane by binding their
+  // run to a chat tab — the conversation IS the assistant chat, no copy.
+  // Direct-mode sessions render their own pane instead (see right-pane JSX).
+  const handleCodeSessionSelected = useCallback((active: ActiveCodeSession | null) => {
+    setActiveCodeSession(active)
+    if (active) {
+      const { id, cwd, agent } = active.session
+      setCodeSessionLocks((prev) => (
+        prev[id]?.cwd === cwd && prev[id]?.agent === agent
+          ? prev
+          : { ...prev, [id]: { cwd, agent } }
+      ))
+    }
+    const rowboatSessionId = active && active.session.mode === 'rowboat' ? active.session.id : null
+    if (!rowboatSessionId) {
+      boundCodeSessionRef.current = null
+      return
+    }
+    if (boundCodeSessionRef.current === rowboatSessionId) return
+    boundCodeSessionRef.current = rowboatSessionId
+    const existingTab = chatTabsRef.current.find((t) => t.runId === rowboatSessionId)
+    if (existingTab) {
+      switchChatTab(existingTab.id)
+      return
+    }
+    setChatTabs((prev) => prev.map((t) => (
+      t.id === activeChatTabIdRef.current ? { ...t, runId: rowboatSessionId } : t
+    )))
+    loadRun(rowboatSessionId)
+  }, [switchChatTab, loadRun])
 
   const closeChatTab = useCallback((tabId: string) => {
     if (chatTabs.length <= 1) return
@@ -3203,6 +3348,14 @@ function App() {
       setIsHomeOpen(true)
       return
     }
+    if (isCodeTabPath(tab.path)) {
+      // isCodeOpen itself is derived from the active tab — just clear the rest.
+      setSelectedPath(null)
+      setIsGraphOpen(false)
+      setIsSuggestedTopicsOpen(false)
+      setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false)
+      return
+    }
     setIsGraphOpen(false)
     setIsSuggestedTopicsOpen(false)
     setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false)
@@ -3211,7 +3364,7 @@ function App() {
 
   const closeFileTab = useCallback((tabId: string) => {
     const closingTab = fileTabs.find(t => t.id === tabId)
-    if (closingTab && !isGraphTabPath(closingTab.path) && !isSuggestedTopicsTabPath(closingTab.path) && !isLiveNotesTabPath(closingTab.path) && !isBgTasksTabPath(closingTab.path) && !isEmailTabPath(closingTab.path) && !isWorkspaceTabPath(closingTab.path) && !isKnowledgeViewTabPath(closingTab.path) && !isChatHistoryTabPath(closingTab.path) && !isHomeTabPath(closingTab.path) && !isBaseFilePath(closingTab.path)) {
+    if (closingTab && !isGraphTabPath(closingTab.path) && !isSuggestedTopicsTabPath(closingTab.path) && !isLiveNotesTabPath(closingTab.path) && !isBgTasksTabPath(closingTab.path) && !isEmailTabPath(closingTab.path) && !isWorkspaceTabPath(closingTab.path) && !isKnowledgeViewTabPath(closingTab.path) && !isChatHistoryTabPath(closingTab.path) && !isHomeTabPath(closingTab.path) && !isCodeTabPath(closingTab.path) && !isBaseFilePath(closingTab.path)) {
       removeEditorCacheForPath(closingTab.path)
       initialContentByPathRef.current.delete(closingTab.path)
       untitledRenameReadyPathsRef.current.delete(closingTab.path)
@@ -3601,13 +3754,14 @@ function App() {
     if (isLiveNotesOpen) return { type: 'live-notes' }
     if (isSuggestedTopicsOpen) return { type: 'suggested-topics' }
     if (isWorkspaceOpen) return { type: 'workspace', path: workspaceInitialPath ?? undefined }
-    if (isKnowledgeViewOpen) return { type: 'knowledge-view', folderPath: knowledgeViewFolderPath ?? undefined }
+    if (isKnowledgeViewOpen) return { type: 'knowledge-view', folderPath: knowledgeViewFolderPath ?? undefined, mode: knowledgeViewMode }
     if (isChatHistoryOpen) return { type: 'chat-history' }
     if (isHomeOpen) return { type: 'home' }
+    if (isCodeOpen) return { type: 'code' }
     if (selectedPath) return { type: 'file', path: selectedPath }
     if (isGraphOpen) return { type: 'graph' }
     return { type: 'chat', runId }
-  }, [selectedBackgroundTask, isEmailOpen, isMeetingsOpen, isLiveNotesOpen, isBgTasksOpen, isSuggestedTopicsOpen, selectedPath, isGraphOpen, isWorkspaceOpen, isKnowledgeViewOpen, knowledgeViewFolderPath, isChatHistoryOpen, isHomeOpen, workspaceInitialPath, runId])
+  }, [selectedBackgroundTask, isEmailOpen, isMeetingsOpen, isLiveNotesOpen, isBgTasksOpen, isSuggestedTopicsOpen, selectedPath, isGraphOpen, isWorkspaceOpen, isKnowledgeViewOpen, knowledgeViewFolderPath, knowledgeViewMode, isChatHistoryOpen, isHomeOpen, isCodeOpen, workspaceInitialPath, runId])
 
   const appendUnique = useCallback((stack: ViewState[], entry: ViewState) => {
     const last = stack[stack.length - 1]
@@ -3752,6 +3906,17 @@ function App() {
     setActiveFileTabId(id)
   }, [fileTabs])
 
+  const ensureCodeFileTab = useCallback(() => {
+    const existing = fileTabs.find((tab) => isCodeTabPath(tab.path))
+    if (existing) {
+      setActiveFileTabId(existing.id)
+      return
+    }
+    const id = newFileTabId()
+    setFileTabs((prev) => [...prev, { id, path: CODE_TAB_PATH }])
+    setActiveFileTabId(id)
+  }, [fileTabs])
+
   const openEmailView = useCallback((threadId?: string) => {
     setSelectedPath(null)
     setIsGraphOpen(false)
@@ -3806,6 +3971,18 @@ function App() {
     setIsRightPaneMaximized(false)
     ensureMeetingsFileTab()
   }, [ensureMeetingsFileTab])
+
+  const openCodeView = useCallback(() => {
+    setSelectedPath(null)
+    setIsGraphOpen(false)
+    setIsBrowserOpen(false)
+    setIsSuggestedTopicsOpen(false)
+    setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false)
+    setSelectedBackgroundTask(null)
+    setExpandedFrom(null)
+    setIsRightPaneMaximized(false)
+    ensureCodeFileTab()
+  }, [ensureCodeFileTab])
 
   const applyViewState = useCallback(async (view: ViewState) => {
     switch (view.type) {
@@ -3947,6 +4124,7 @@ function App() {
         setIsEmailOpen(false)
         setIsWorkspaceOpen(false)
         setIsKnowledgeViewOpen(true)
+        setKnowledgeViewMode(view.mode ?? (view.folderPath ? 'files' : 'graph'))
         setKnowledgeViewFolderPath(view.folderPath ?? null)
         setIsChatHistoryOpen(false)
       setIsHomeOpen(false)
@@ -3987,6 +4165,17 @@ function App() {
         setIsHomeOpen(true)
         ensureHomeFileTab()
         return
+      case 'code':
+        setSelectedPath(null)
+        setIsGraphOpen(false)
+        setIsBrowserOpen(false)
+        setExpandedFrom(null)
+        setIsRightPaneMaximized(false)
+        setSelectedBackgroundTask(null)
+        setIsSuggestedTopicsOpen(false)
+        setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false)
+        ensureCodeFileTab()
+        return
       case 'chat':
         setSelectedPath(null)
         setIsGraphOpen(false)
@@ -4015,7 +4204,7 @@ function App() {
         }
         return
     }
-  }, [ensureEmailFileTab, ensureMeetingsFileTab, ensureLiveNotesFileTab, ensureFileTabForPath, ensureGraphFileTab, ensureSuggestedTopicsFileTab, ensureWorkspaceFileTab, ensureKnowledgeViewFileTab, ensureChatHistoryFileTab, ensureHomeFileTab, handleNewChat, isRightPaneMaximized, loadRun])
+  }, [ensureEmailFileTab, ensureMeetingsFileTab, ensureLiveNotesFileTab, ensureFileTabForPath, ensureGraphFileTab, ensureSuggestedTopicsFileTab, ensureWorkspaceFileTab, ensureKnowledgeViewFileTab, ensureChatHistoryFileTab, ensureHomeFileTab, ensureCodeFileTab, handleNewChat, isRightPaneMaximized, loadRun])
 
   const navigateToView = useCallback(async (nextView: ViewState) => {
     const current = currentViewState
@@ -4162,10 +4351,9 @@ function App() {
     setBaseConfigByPath((prev) => ({ ...prev, [path]: config }))
   }, [])
 
-  const handleBaseSave = useCallback(async (name: string | null) => {
-    if (!selectedPath) return
-    const isDefault = selectedPath === BASES_DEFAULT_TAB_PATH
-    const config = baseConfigByPath[selectedPath] ?? DEFAULT_BASE_CONFIG
+  const handleBaseSave = useCallback(async (path: string, name: string | null) => {
+    const isDefault = path === BASES_DEFAULT_TAB_PATH
+    const config = baseConfigByPath[path] ?? DEFAULT_BASE_CONFIG
 
     if (isDefault && name) {
       // Save as new base file
@@ -4189,14 +4377,14 @@ function App() {
       // Save in place
       try {
         await window.ipc.invoke('workspace:writeFile', {
-          path: selectedPath,
+          path,
           data: JSON.stringify(config, null, 2),
         })
       } catch (err) {
         console.error('Failed to save base:', err)
       }
     }
-  }, [selectedPath, baseConfigByPath, loadDirectory, navigateToView])
+  }, [baseConfigByPath, loadDirectory, navigateToView])
 
   // External search set by app-navigation tool (passed to BasesView)
   const [externalBaseSearch, setExternalBaseSearch] = useState<string | undefined>(undefined)
@@ -4350,7 +4538,7 @@ function App() {
   }, [])
 
   // Keyboard shortcut: Ctrl+L to toggle main chat view
-  const isFullScreenChat = !selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isMeetingsOpen && !isLiveNotesOpen && !isBgTasksOpen && !isEmailOpen && !isWorkspaceOpen && !isKnowledgeViewOpen && !isChatHistoryOpen && !isHomeOpen && !selectedBackgroundTask && !isBrowserOpen
+  const isFullScreenChat = !selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isMeetingsOpen && !isLiveNotesOpen && !isBgTasksOpen && !isEmailOpen && !isWorkspaceOpen && !isKnowledgeViewOpen && !isChatHistoryOpen && !isHomeOpen && !isCodeOpen && !selectedBackgroundTask && !isBrowserOpen
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'l') {
@@ -5064,8 +5252,10 @@ function App() {
     },
   }), [knowledgeFiles, recentWikiFiles, openWikiLink, ensureWikiFile])
 
+  const isBrainGraphOpen = isKnowledgeViewOpen && knowledgeViewMode === 'graph'
+
   useEffect(() => {
-    if (!isGraphOpen) return
+    if (!isGraphOpen && !isBrainGraphOpen) return
     let cancelled = false
 
     const buildGraph = async () => {
@@ -5180,9 +5370,13 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [isGraphOpen, knowledgeFilePaths])
+  }, [isGraphOpen, isBrainGraphOpen, knowledgeFilePaths])
 
-  const renderConversationItem = (item: ConversationItem, tabId: string) => {
+  const renderConversationItem = (
+    item: ConversationItem,
+    tabId: string,
+    options?: { autoPermissionDetail?: { decision: 'allow'; reason: string } },
+  ) => {
     if (isChatMessage(item)) {
       if (item.role === 'user') {
         if (item.attachments && item.attachments.length > 0) {
@@ -5240,6 +5434,21 @@ function App() {
     }
 
     if (isToolCall(item)) {
+      if (item.name === 'code_agent_run') {
+        return (
+          <CodingRunBlock
+            key={item.id}
+            item={item}
+            open={isToolOpenForTab(tabId, item.id)}
+            onOpenChange={(open) => setToolOpenForTab(tabId, item.id, open)}
+            onPermissionDecision={(decision) => {
+              if (item.pendingCodePermission) {
+                handleCodePermissionResponse(item.id, item.pendingCodePermission.requestId, decision)
+              }
+            }}
+          />
+        )
+      }
       const appActionData = getAppActionCardData(item)
       if (appActionData) {
         return <AppActionCard key={item.id} data={appActionData} status={item.status} />
@@ -5280,6 +5489,7 @@ function App() {
           key={item.id}
           open={isToolOpenForTab(tabId, item.id)}
           onOpenChange={(open) => setToolOpenForTab(tabId, item.id, open)}
+          autoPermissionDetail={options?.autoPermissionDetail}
         >
           <ToolHeader
             title={toolTitle}
@@ -5322,6 +5532,7 @@ function App() {
     pendingAskHumanRequests,
     allPermissionRequests,
     permissionResponses,
+    autoPermissionDecisions,
   }), [
     runId,
     conversation,
@@ -5329,6 +5540,7 @@ function App() {
     pendingAskHumanRequests,
     allPermissionRequests,
     permissionResponses,
+    autoPermissionDecisions,
   ])
   const emptyChatTabState = React.useMemo<ChatTabViewState>(() => createEmptyChatTabViewState(), [])
   const getChatTabStateForRender = useCallback((tabId: string): ChatTabViewState => {
@@ -5338,9 +5550,20 @@ function App() {
   const selectedTask = selectedBackgroundTask
     ? backgroundTasks.find(t => t.name === selectedBackgroundTask)
     : null
-  const isRightPaneContext = Boolean(selectedPath || isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen || isHomeOpen || isBrowserOpen)
+  const isRightPaneContext = Boolean(selectedPath || isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen || isHomeOpen || isCodeOpen || isBrowserOpen)
   const isRightPaneOnlyMode = isRightPaneContext && isChatSidebarOpen && isRightPaneMaximized
   const shouldCollapseLeftPane = isRightPaneOnlyMode
+  const nonChatPaneStyle = React.useMemo<React.CSSProperties>(() => {
+    const style: React.CSSProperties = { maxWidth: insetMaxWidth }
+    if (!isRightPaneContext || !isChatSidebarOpen || isRightPaneMaximized) return style
+    if (chatPaneSize === 'chat-equal') {
+      return { ...style, width: 0, flex: '1 1 0' }
+    }
+    if (chatPaneSize === 'chat-bigger') {
+      return { ...style, width: DEFAULT_CHAT_PANE_WIDTH, flex: '0 0 auto' }
+    }
+    return style
+  }, [chatPaneSize, insetMaxWidth, isChatSidebarOpen, isRightPaneContext, isRightPaneMaximized])
   // Collapsing: pin max-width to the snapshot px (no transition) for one frame so it's
   // binding immediately (no flex jump), then animate to 0. Expanding goes back to 100%
   // — its non-binding range lands at the end of the range, where it isn't visible.
@@ -5395,16 +5618,19 @@ function App() {
                 isHomeOpen ? 'home'
                 : isEmailOpen ? 'email'
                 : isMeetingsOpen ? 'meetings'
+                : isCodeOpen ? 'code'
                 : (isKnowledgeViewOpen || isGraphOpen || (selectedPath != null && selectedPath.startsWith('knowledge/'))) ? 'knowledge'
                 : isBgTasksOpen ? 'agents'
                 : isWorkspaceOpen ? 'workspaces'
                 : null
               }
               onOpenMeetings={openMeetingsView}
+              onOpenCode={openCodeView}
               onOpenBgTasks={() => { setBgTaskInitialSlug(null); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
               onOpenAgent={(slug) => { setBgTaskInitialSlug(slug); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
               recentRuns={runs}
               onOpenRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
+              onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
               onOpenEmail={(threadId) => openEmailView(threadId)}
               onOpenHome={() => void navigateToView({ type: 'home' })}
               onNewChat={handleNewChatTab}
@@ -5417,10 +5643,11 @@ function App() {
             <SidebarInset
               className={cn(
                 "overflow-hidden! min-h-0 min-w-0",
+                isRightPaneContext && isChatPaneInMiddle && "order-3",
                 insetAnimateMaxWidth && "transition-[max-width] duration-200 ease-linear",
                 shouldCollapseLeftPane && "pointer-events-none select-none"
               )}
-              style={{ maxWidth: insetMaxWidth }}
+              style={nonChatPaneStyle}
               aria-hidden={shouldCollapseLeftPane}
               onMouseDownCapture={() => setActiveShortcutPane('left')}
               onFocusCapture={() => setActiveShortcutPane('left')}
@@ -5433,7 +5660,7 @@ function App() {
                 canNavigateForward={canNavigateForward}
                 collapsedLeftPaddingPx={collapsedLeftPaddingPx}
               >
-                {(selectedPath || isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen || isHomeOpen) && fileTabs.length >= 1 ? (
+                {(selectedPath || isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen || isHomeOpen || isCodeOpen) && fileTabs.length >= 1 ? (
                   <TabBar
                     tabs={fileTabs}
                     activeTabId={activeFileTabId ?? ''}
@@ -5441,7 +5668,7 @@ function App() {
                     getTabId={(t) => t.id}
                     onSwitchTab={switchFileTab}
                     onCloseTab={closeFileTab}
-                    allowSingleTabClose={fileTabs.length === 1 && (isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen || isHomeOpen || (selectedPath != null && isBaseFilePath(selectedPath)))}
+                    allowSingleTabClose={fileTabs.length === 1 && (isGraphOpen || isSuggestedTopicsOpen || isMeetingsOpen || isLiveNotesOpen || isBgTasksOpen || isEmailOpen || isWorkspaceOpen || isKnowledgeViewOpen || isChatHistoryOpen || isHomeOpen || isCodeOpen || (selectedPath != null && isBaseFilePath(selectedPath)))}
                   />
                 ) : isFullScreenChat ? (
                   <ChatHeader
@@ -5506,7 +5733,7 @@ function App() {
                     <TooltipContent side="bottom">Version history</TooltipContent>
                   </Tooltip>
                 )}
-                {!isFullScreenChat && !selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isMeetingsOpen && !isLiveNotesOpen && !isBgTasksOpen && !isEmailOpen && !isWorkspaceOpen && !isKnowledgeViewOpen && !isChatHistoryOpen && !selectedTask && !isBrowserOpen && (
+                {!isFullScreenChat && !selectedPath && !isGraphOpen && !isSuggestedTopicsOpen && !isMeetingsOpen && !isLiveNotesOpen && !isBgTasksOpen && !isEmailOpen && !isWorkspaceOpen && !isKnowledgeViewOpen && !isChatHistoryOpen && !isCodeOpen && !selectedTask && !isBrowserOpen && (
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
@@ -5532,7 +5759,11 @@ function App() {
                     : (viewOpen && !isChatSidebarOpen)
                       ? { onClick: openChatSidePane, icon: <MessageSquare className="size-5" />, label: 'Open chat' }
                       : (viewOpen && isChatSidebarOpen && !isRightPaneMaximized)
-                        ? { onClick: () => setIsChatSidebarOpen(false), icon: <ArrowRight className="size-5" />, label: 'Expand pane' }
+                        ? {
+                            onClick: () => setIsChatSidebarOpen(false),
+                            icon: isChatPaneInMiddle ? <ArrowLeft className="size-5" /> : <ArrowRight className="size-5" />,
+                            label: 'Expand pane'
+                          }
                         : null
                   return (
                     <Tooltip>
@@ -5596,6 +5827,14 @@ function App() {
                     meetingSummarizing={meetingSummarizing}
                   />
                 </div>
+              ) : isCodeOpen ? (
+                <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+                  <CodeView
+                    onSessionSelected={handleCodeSessionSelected}
+                    openDiffPath={codeDiffPath}
+                    onDiffOpened={() => setCodeDiffPath(null)}
+                  />
+                </div>
               ) : isLiveNotesOpen ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                   <LiveNotesView
@@ -5654,12 +5893,44 @@ function App() {
                       revealInFileManager: knowledgeActions.revealInFileManager,
                       onOpenInNewTab: knowledgeActions.onOpenInNewTab,
                     }}
+                    mode={knowledgeViewMode}
+                    onModeChange={setKnowledgeViewMode}
+                    graphContent={(
+                      <GraphView
+                        nodes={graphData.nodes}
+                        edges={graphData.edges}
+                        isLoading={false}
+                        error={graphStatus === 'error' ? (graphError ?? 'Failed to build graph') : null}
+                        onSelectNode={(path) => {
+                          navigateToFile(path)
+                        }}
+                      />
+                    )}
+                    basisContent={(
+                      <BasesView
+                        tree={tree}
+                        onSelectNote={(path) => navigateToFile(path)}
+                        config={baseConfigByPath[BASES_DEFAULT_TAB_PATH] ?? DEFAULT_BASE_CONFIG}
+                        onConfigChange={(cfg) => handleBaseConfigChange(BASES_DEFAULT_TAB_PATH, cfg)}
+                        isDefaultBase
+                        onSave={(name) => void handleBaseSave(BASES_DEFAULT_TAB_PATH, name)}
+                        externalSearch={externalBaseSearch}
+                        onExternalSearchConsumed={() => setExternalBaseSearch(undefined)}
+                        actions={{
+                          rename: knowledgeActions.rename,
+                          remove: knowledgeActions.remove,
+                          copyPath: knowledgeActions.copyPath,
+                          revealInFileManager: knowledgeActions.revealInFileManager,
+                        }}
+                      />
+                    )}
                     folderPath={knowledgeViewFolderPath}
-                    onNavigateFolder={(path) => { void navigateToView({ type: 'knowledge-view', folderPath: path ?? undefined }) }}
+                    onNavigateFolder={(path) => {
+                      setKnowledgeViewMode('files')
+                      void navigateToView({ type: 'knowledge-view', folderPath: path ?? undefined, mode: 'files' })
+                    }}
                     onOpenNote={(path) => navigateToFile(path)}
-                    onOpenGraph={() => knowledgeActions.openGraph()}
                     onOpenSearch={() => { setSearchDefaultScope('knowledge'); setIsSearchOpen(true) }}
-                    onOpenBases={() => knowledgeActions.openBases()}
                     onVoiceNoteCreated={handleVoiceNoteCreated}
                   />
                 </div>
@@ -5690,7 +5961,7 @@ function App() {
                     config={baseConfigByPath[selectedPath] ?? DEFAULT_BASE_CONFIG}
                     onConfigChange={(cfg) => handleBaseConfigChange(selectedPath, cfg)}
                     isDefaultBase={selectedPath === BASES_DEFAULT_TAB_PATH}
-                    onSave={(name) => void handleBaseSave(name)}
+                    onSave={(name) => void handleBaseSave(selectedPath, name)}
                     externalSearch={externalBaseSearch}
                     onExternalSearchConsumed={() => setExternalBaseSearch(undefined)}
                     actions={{
@@ -5929,7 +6200,7 @@ function App() {
                               <>
                                 {groupConversationItems(
                                   tabState.conversation,
-                                  (id) => !!tabState.allPermissionRequests.get(id)
+                                  (id) => !!tabState.allPermissionRequests.get(id) || !!tabState.autoPermissionDecisions.get(id)
                                 ).map(item => {
                                   if (isToolGroup(item)) {
                                     return (
@@ -5941,41 +6212,43 @@ function App() {
                                       />
                                     )
                                   }
-                                  const rendered = renderConversationItem(item, tab.id)
+                                  const autoDecision = isToolCall(item)
+                                    ? tabState.autoPermissionDecisions.get(item.id)
+                                    : undefined
+                                  const rendered = renderConversationItem(
+                                    item,
+                                    tab.id,
+                                    autoDecision?.decision === 'allow'
+                                      ? { autoPermissionDetail: { decision: 'allow', reason: autoDecision.reason } }
+                                      : undefined,
+                                  )
                                   if (isToolCall(item)) {
+                                    const deniedAutoDecision = autoDecision?.decision === 'deny' ? autoDecision : null
                                     const permRequest = tabState.allPermissionRequests.get(item.id)
-                                    if (permRequest) {
+                                    if (deniedAutoDecision || permRequest) {
                                       const response = tabState.permissionResponses.get(item.id) || null
                                       return (
                                         <React.Fragment key={item.id}>
-                                          <PermissionRequest
-                                            toolCall={permRequest.toolCall}
-                                            permission={permRequest.permission}
-                                            onApprove={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
-                                            onApproveSession={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'session')}
-                                            onApproveAlways={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'always')}
-                                            onDeny={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
-                                            onSwitchAgent={async (newAgent) => {
-                                              const runIdForSwitch = tab.runId
-                                              await handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')
-                                              window.dispatchEvent(new CustomEvent('code-mode-detected', {
-                                                detail: { runId: runIdForSwitch, agent: newAgent },
-                                              }))
-                                              if (runIdForSwitch) {
-                                                try {
-                                                  await window.ipc.invoke('runs:createMessage', {
-                                                    runId: runIdForSwitch,
-                                                    message: `Use ${newAgent === 'claude' ? 'Claude Code' : 'Codex'} instead — rerun the same task with the same prompt, just swap the agent binary to \`${newAgent}\`.`,
-                                                    codeMode: newAgent,
-                                                  })
-                                                } catch (err) {
-                                                  console.error('Failed to send swap-agent follow-up', err)
-                                                }
-                                              }
-                                            }}
-                                            isProcessing={isActive && isProcessing}
-                                            response={response}
-                                          />
+                                          {deniedAutoDecision && (
+                                            <AutoPermissionDecision
+                                              toolCall={deniedAutoDecision.toolCall}
+                                              permission={deniedAutoDecision.permission}
+                                              decision={deniedAutoDecision.decision}
+                                              reason={deniedAutoDecision.reason}
+                                            />
+                                          )}
+                                          {permRequest && (
+                                            <PermissionRequest
+                                              toolCall={permRequest.toolCall}
+                                              permission={permRequest.permission}
+                                              onApprove={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
+                                              onApproveSession={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'session')}
+                                              onApproveAlways={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'always')}
+                                              onDeny={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
+                                              isProcessing={isActive && isProcessing}
+                                              response={response}
+                                            />
+                                          )}
                                           {rendered}
                                         </React.Fragment>
                                       )
@@ -6044,6 +6317,7 @@ function App() {
                             presetMessage={isActive ? presetMessage : undefined}
                             onPresetMessageConsumed={isActive ? () => setPresetMessage(undefined) : undefined}
                             runId={tabState.runId}
+                            codeSessionLock={tabState.runId ? codeSessionLocks[tabState.runId] ?? null : null}
                             initialDraft={chatDraftsRef.current.get(tab.id)}
                             onDraftChange={(text) => setChatDraftForTab(tab.id, text)}
                             onSelectedModelChange={(m) => {
@@ -6058,6 +6332,7 @@ function App() {
                             isRecording={isActive && isRecording}
                             recordingText={isActive ? voice.interimText : undefined}
                             recordingState={isActive ? (voice.state === 'connecting' ? 'connecting' : 'listening') : undefined}
+                            audioLevelsRef={voice.audioLevelsRef}
                             onStartRecording={isActive ? handleStartRecording : undefined}
                             onSubmitRecording={isActive ? handleSubmitRecording : undefined}
                             onCancelRecording={isActive ? handleCancelRecording : undefined}
@@ -6078,10 +6353,27 @@ function App() {
               )}
             </SidebarInset>
 
-            {/* Chat sidebar - shown when viewing files/graph */}
-            {isRightPaneContext && (
+            {/* Chat pane - shown when viewing files/graph. For a direct-mode
+                code session it swaps to the direct-drive chat; rowboat-mode
+                sessions use the regular assistant chat bound to their run. */}
+            {isRightPaneContext && isCodeOpen && activeCodeSession?.session.mode === 'direct' ? (
+              <ResizableRightPane
+                defaultWidth={DEFAULT_CHAT_PANE_WIDTH}
+                onActivate={() => setActiveShortcutPane('right')}
+              >
+                <CodeChat
+                  key={activeCodeSession.session.id}
+                  session={activeCodeSession.session}
+                  status={activeCodeSession.status}
+                  onOpenDiff={setCodeDiffPath}
+                />
+              </ResizableRightPane>
+            ) : isRightPaneContext && (
               <ChatSidebar
-                defaultWidth={460}
+                placement={chatPanePlacement}
+                paneSize={chatPaneSize}
+                className={isChatPaneInMiddle ? "order-2" : undefined}
+                defaultWidth={DEFAULT_CHAT_PANE_WIDTH}
                 isOpen={isChatSidebarOpen}
                 isMaximized={isRightPaneMaximized}
                 chatTabs={chatTabs}
@@ -6125,9 +6417,20 @@ function App() {
                 }}
                 workDirByTab={workDirByTab}
                 onWorkDirChangeForTab={setTabWorkDir}
+                codeSessionLocks={codeSessionLocks}
+                pinnedToCodeSession={
+                  isCodeOpen
+                    && activeCodeSession?.session.mode === 'rowboat'
+                    // Only while the pane is actually bound to the session — a
+                    // palette-initiated fresh chat, for example, unbinds it.
+                    && chatTabs.find((t) => t.id === activeChatTabId)?.runId === activeCodeSession.session.id
+                    ? { title: activeCodeSession.session.title }
+                    : null
+                }
                 pendingAskHumanRequests={pendingAskHumanRequests}
                 allPermissionRequests={allPermissionRequests}
                 permissionResponses={permissionResponses}
+                autoPermissionDecisions={autoPermissionDecisions}
                 onPermissionResponse={handlePermissionResponse}
                 onAskHumanResponse={handleAskHumanResponse}
                 isToolOpenForTab={isToolOpenForTab}
@@ -6138,6 +6441,7 @@ function App() {
                 isRecording={isRecording}
                 recordingText={voice.interimText}
                 recordingState={voice.state === 'connecting' ? 'connecting' : 'listening'}
+                audioLevelsRef={voice.audioLevelsRef}
                 onStartRecording={handleStartRecording}
                 onSubmitRecording={handleSubmitRecording}
                 onCancelRecording={handleCancelRecording}

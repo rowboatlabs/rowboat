@@ -99,7 +99,7 @@ const definitions: SkillDefinition[] = [
   {
     id: "code-with-agents",
     title: "Code with Agents",
-    summary: "Write code, build projects, create scripts, or fix bugs by delegating to Claude Code or Codex via acpx.",
+    summary: "Write code, build projects, create scripts, or fix bugs by delegating to Claude Code or Codex.",
     content: codeWithAgentsSkill,
   },
   {

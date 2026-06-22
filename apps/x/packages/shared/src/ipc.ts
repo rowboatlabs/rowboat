@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { RelPath, Encoding, Stat, DirEntry, ReaddirOptions, ReadFileResult, WorkspaceChangeEvent, WriteFileOptions, WriteFileResult, RemoveOptions } from './workspace.js';
 import { ListToolsResponse } from './mcp.js';
 import { AskHumanResponsePayload, CreateRunOptions, Run, ListRunsResponse, ToolPermissionAuthorizePayload } from './runs.js';
-import { LlmModelConfig } from './models.js';
+import { LlmModelConfig, LlmProvider } from './models.js';
 import { AgentScheduleConfig, AgentScheduleEntry } from './agent-schedule.js';
 import { AgentScheduleState } from './agent-schedule-state.js';
 import { ServiceEvent } from './service-events.js';
@@ -19,10 +19,40 @@ import { ZListToolkitsResponse } from './composio.js';
 import { BrowserStateSchema } from './browser-control.js';
 import { BillingInfoSchema } from './billing.js';
 import { EmailBlockSchema, GmailThreadSchema } from './blocks.js';
+import { PermissionDecision, ApprovalPolicy, CodingAgent } from './code-mode.js';
+import { NotificationSettingsSchema } from './notification-settings.js';
+import { CodeProject, CodeSession, CodeSessionMode, CodeSessionStatus, GitRepoInfo, GitStatusFile, CodeAgentModelOptions } from './code-sessions.js';
 
 // ============================================================================
 // Runtime Validation Schemas (Single Source of Truth)
 // ============================================================================
+
+const KnowledgeSourceScopeSchema = z.object({
+  type: z.string(),
+  id: z.string(),
+  name: z.string().optional(),
+  workspaceUrl: z.string().optional(),
+});
+
+// Mirrors AgentSlackErrorKind in @x/core/slack/agent-slack-exec. Kept as a
+// standalone enum so the renderer can branch on failure cause without
+// importing core.
+const SlackErrorKindSchema = z.enum([
+  'not_installed', 'timeout', 'parse_error',
+  'not_authed', 'rate_limited', 'network', 'bad_channel', 'unknown',
+]);
+
+const KnowledgeSourceConfigSchema = z.object({
+  id: z.string(),
+  provider: z.enum(['gmail', 'meeting', 'voice_memo', 'slack', 'github', 'linear']),
+  enabled: z.boolean(),
+  artifactDir: z.string(),
+  syncMode: z.enum(['file', 'poll', 'event', 'manual']).default('file'),
+  intervalMs: z.number().int().positive().optional(),
+  scopes: z.array(KnowledgeSourceScopeSchema).default([]),
+  instructions: z.string().optional(),
+  filters: z.record(z.string(), z.unknown()).optional(),
+});
 
 const ipcSchemas = {
   'app:getVersions': {
@@ -160,6 +190,15 @@ const ipcSchemas = {
       bodyText: z.string(),
       inReplyTo: z.string().optional(),
       references: z.string().optional(),
+      attachments: z
+        .array(
+          z.object({
+            filename: z.string(),
+            mimeType: z.string(),
+            contentBase64: z.string(),
+          }),
+        )
+        .optional(),
     }),
     res: z.object({
       messageId: z.string().optional(),
@@ -181,6 +220,12 @@ const ipcSchemas = {
       email: z.string().nullable(),
     }),
   },
+  'gmail:getAccountName': {
+    req: z.object({}),
+    res: z.object({
+      name: z.string().nullable(),
+    }),
+  },
   'gmail:archiveThread': {
     req: z.object({ threadId: z.string().min(1) }),
     res: z.object({ ok: z.boolean(), error: z.string().optional() }),
@@ -200,6 +245,21 @@ const ipcSchemas = {
       height: z.number().int().positive(),
     }),
     res: z.object({}),
+  },
+  'gmail:searchContacts': {
+    req: z.object({
+      query: z.string(),
+      limit: z.number().int().positive().optional(),
+      excludeEmails: z.array(z.string()).optional(),
+    }),
+    res: z.object({
+      contacts: z.array(z.object({
+        name: z.string(),
+        email: z.string(),
+        count: z.number(),
+        lastSeenMs: z.number(),
+      })),
+    }),
   },
   'mcp:listTools': {
     req: z.object({
@@ -230,6 +290,10 @@ const ipcSchemas = {
       voiceOutput: z.enum(['summary', 'full']).optional(),
       searchEnabled: z.boolean().optional(),
       codeMode: z.enum(['claude', 'codex']).optional(),
+      // Code-section sessions pin the coding agent's working directory and
+      // approval policy for the whole turn (see code_agent_run overrides).
+      codeCwd: z.string().optional(),
+      codePolicy: ApprovalPolicy.optional(),
       middlePaneContext: z.discriminatedUnion('kind', [
         z.object({
           kind: z.literal('note'),
@@ -339,6 +403,37 @@ const ipcSchemas = {
       error: z.string().optional(),
     }),
   },
+  'models:listForProvider': {
+    req: z.object({
+      provider: LlmProvider,
+    }),
+    res: z.object({
+      success: z.boolean(),
+      models: z.array(z.string()).optional(),
+      error: z.string().optional(),
+    }),
+  },
+  'llm:getDefaultModel': {
+    req: z.null(),
+    res: z.object({
+      model: z.string(),
+      provider: z.string(),
+    }),
+  },
+  'llm:generate': {
+    req: z.object({
+      prompt: z.string().min(1),
+      system: z.string().optional(),
+      model: z.string().optional(),
+      provider: z.string().optional(),
+    }),
+    res: z.object({
+      text: z.string().optional(),
+      model: z.string().optional(),
+      provider: z.string().optional(),
+      error: z.string().optional(),
+    }),
+  },
   'models:saveConfig': {
     req: LlmModelConfig,
     res: z.object({
@@ -430,11 +525,23 @@ const ipcSchemas = {
     req: z.null(),
     res: z.object({
       enabled: z.boolean(),
+      approvalPolicy: ApprovalPolicy.optional(),
     }),
   },
   'codeMode:setConfig': {
     req: z.object({
       enabled: z.boolean(),
+      approvalPolicy: ApprovalPolicy.optional(),
+    }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  // Answer a mid-run permission request from a code_agent_run coding turn.
+  'codeRun:resolvePermission': {
+    req: z.object({
+      requestId: z.string(),
+      decision: PermissionDecision,
     }),
     res: z.object({
       success: z.literal(true),
@@ -446,6 +553,244 @@ const ipcSchemas = {
       claude: z.object({ installed: z.boolean(), signedIn: z.boolean() }),
       codex: z.object({ installed: z.boolean(), signedIn: z.boolean() }),
     }),
+  },
+  // Download + install an agent's native engine (the Settings "Enable" action).
+  // Streams progress over the 'codeMode:engineProgress' push channel while it runs.
+  'codeMode:provisionEngine': {
+    req: z.object({ agent: z.enum(['claude', 'codex']) }),
+    res: z.object({ success: z.boolean(), error: z.string().optional() }),
+  },
+  // Push (main -> renderer): engine provisioning progress for the Settings UI.
+  'codeMode:engineProgress': {
+    req: z.object({
+      agent: z.enum(['claude', 'codex']),
+      phase: z.enum(['download', 'verify', 'extract', 'done']),
+      receivedBytes: z.number().optional(),
+      totalBytes: z.number().optional(),
+    }),
+    res: z.null(),
+  },
+  // ==========================================================================
+  // Code section: project registry + coding sessions
+  // ==========================================================================
+  'codeProject:add': {
+    req: z.object({
+      path: z.string(),
+    }),
+    res: z.object({
+      project: CodeProject,
+      git: GitRepoInfo,
+    }),
+  },
+  'codeProject:remove': {
+    req: z.object({
+      projectId: z.string(),
+    }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  'codeProject:list': {
+    req: z.null(),
+    res: z.object({
+      projects: z.array(z.object({
+        project: CodeProject,
+        git: GitRepoInfo,
+      })),
+    }),
+  },
+  'codeSession:create': {
+    req: z.object({
+      projectId: z.string(),
+      title: z.string().optional(),
+      agent: CodingAgent,
+      mode: CodeSessionMode,
+      policy: ApprovalPolicy,
+      isolation: z.enum(['in-repo', 'worktree']),
+      // LLM for Rowboat-mode turns. Unset = the configured default. Like any
+      // chat, the model is fixed once the session's run exists.
+      model: z.string().optional(),
+      provider: z.string().optional(),
+      // The coding agent's own model + reasoning effort (ACP engine). Unlike the
+      // Rowboat model these are re-applied each turn, so they stay editable.
+      agentModel: z.string().optional(),
+      agentEffort: z.string().optional(),
+    }),
+    res: z.object({
+      session: CodeSession,
+    }),
+  },
+  'codeSession:list': {
+    req: z.null(),
+    res: z.object({
+      sessions: z.array(CodeSession),
+      statuses: z.record(z.string(), CodeSessionStatus),
+    }),
+  },
+  'codeSession:update': {
+    req: z.object({
+      sessionId: z.string(),
+      patch: CodeSession.pick({ title: true, mode: true, policy: true, agent: true, agentModel: true, agentEffort: true }).partial(),
+    }),
+    res: z.object({
+      session: CodeSession,
+    }),
+  },
+  // Live model + effort choices for a coding agent, discovered from the engine
+  // (cached per agent in the main process). Mirrors what `/model` would show.
+  'codeMode:listModelOptions': {
+    req: z.object({ agent: CodingAgent }),
+    res: CodeAgentModelOptions,
+  },
+  'codeSession:delete': {
+    req: z.object({
+      sessionId: z.string(),
+      removeWorktree: z.boolean().optional(),
+      deleteBranch: z.boolean().optional(),
+    }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  // Direct-drive: send the user's message straight to the session's ACP agent
+  // (no copilot LLM in between). Streams back over `runs:events`.
+  'codeSession:sendMessage': {
+    req: z.object({
+      sessionId: z.string(),
+      text: z.string().min(1),
+    }),
+    res: z.object({
+      accepted: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  'codeSession:stop': {
+    req: z.object({
+      sessionId: z.string(),
+    }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  'codeSession:gitStatus': {
+    req: z.object({
+      sessionId: z.string(),
+    }),
+    res: z.object({
+      isRepo: z.boolean(),
+      branch: z.string().nullable(),
+      hasCommits: z.boolean(),
+      files: z.array(GitStatusFile),
+    }),
+  },
+  'codeSession:fileDiff': {
+    req: z.object({
+      sessionId: z.string(),
+      path: z.string(),
+    }),
+    res: z.object({
+      oldText: z.string(),
+      newText: z.string(),
+      isBinary: z.boolean(),
+      tooLarge: z.boolean(),
+    }),
+  },
+  'codeSession:readdir': {
+    req: z.object({
+      sessionId: z.string(),
+      relPath: z.string(),
+    }),
+    res: z.object({
+      entries: z.array(z.object({
+        name: z.string(),
+        kind: z.enum(['file', 'dir']),
+        size: z.number().optional(),
+      })),
+    }),
+  },
+  'codeSession:readFile': {
+    req: z.object({
+      sessionId: z.string(),
+      relPath: z.string(),
+    }),
+    res: z.object({
+      content: z.string(),
+      isBinary: z.boolean(),
+      tooLarge: z.boolean(),
+    }),
+  },
+  'codeSession:mergeBack': {
+    req: z.object({
+      sessionId: z.string(),
+    }),
+    res: z.object({
+      ok: z.boolean(),
+      conflict: z.boolean().optional(),
+      message: z.string(),
+    }),
+  },
+  'codeSession:cleanupWorktree': {
+    req: z.object({
+      sessionId: z.string(),
+      deleteBranch: z.boolean(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  // main → renderer: live session status transitions from the status tracker.
+  'codeSession:status': {
+    req: z.object({
+      sessionId: z.string(),
+      status: CodeSessionStatus,
+    }),
+    res: z.null(),
+  },
+  // ==========================================================================
+  // Embedded terminal (Code section): one PTY per coding session
+  // ==========================================================================
+  // Create-or-attach. Returns the scrollback backlog so a remounted view can
+  // repaint what happened while it was closed.
+  'terminal:ensure': {
+    req: z.object({
+      id: z.string(),
+      cwd: z.string(),
+      cols: z.number().int().positive(),
+      rows: z.number().int().positive(),
+    }),
+    res: z.object({
+      backlog: z.string(),
+      running: z.boolean(),
+    }),
+  },
+  'terminal:input': {
+    req: z.object({
+      id: z.string(),
+      data: z.string(),
+    }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  'terminal:resize': {
+    req: z.object({
+      id: z.string(),
+      cols: z.number().int().positive(),
+      rows: z.number().int().positive(),
+    }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  'terminal:dispose': {
+    req: z.object({ id: z.string() }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  // main → renderer streams
+  'terminal:data': {
+    req: z.object({ id: z.string(), data: z.string() }),
+    res: z.null(),
+  },
+  'terminal:exit': {
+    req: z.object({ id: z.string(), exitCode: z.number() }),
+    res: z.null(),
   },
   'granola:setConfig': {
     req: z.object({
@@ -471,11 +816,112 @@ const ipcSchemas = {
       success: z.literal(true),
     }),
   },
+  'slack:cliStatus': {
+    req: z.null(),
+    res: z.object({
+      available: z.boolean(),
+      version: z.string().optional(),
+      source: z.enum(['bundled', 'global', 'path']).optional(),
+    }),
+  },
   'slack:listWorkspaces': {
     req: z.null(),
     res: z.object({
       workspaces: z.array(z.object({ url: z.string(), name: z.string() })),
       error: z.string().optional(),
+      errorKind: SlackErrorKindSchema.optional(),
+    }),
+  },
+  'slack:importDesktopAuth': {
+    req: z.null(),
+    res: z.object({
+      ok: z.boolean(),
+      workspaces: z.array(z.object({ url: z.string(), name: z.string() })),
+      error: z.string().optional(),
+      errorKind: SlackErrorKindSchema.optional(),
+    }),
+  },
+  'slack:quitAndImportDesktop': {
+    req: z.null(),
+    res: z.object({
+      ok: z.boolean(),
+      workspaces: z.array(z.object({ url: z.string(), name: z.string() })),
+      error: z.string().optional(),
+      errorKind: SlackErrorKindSchema.optional(),
+    }),
+  },
+  'slack:parseCurlAuth': {
+    req: z.object({ curl: z.string() }),
+    res: z.object({
+      ok: z.boolean(),
+      workspaces: z.array(z.object({ url: z.string(), name: z.string() })),
+      error: z.string().optional(),
+      errorKind: SlackErrorKindSchema.optional(),
+    }),
+  },
+  'slack:knowledgeStatus': {
+    req: z.null(),
+    res: z.object({
+      cli: z.object({
+        available: z.boolean(),
+        version: z.string().optional(),
+        source: z.enum(['bundled', 'global', 'path']).optional(),
+      }),
+      sources: z.array(z.object({
+        id: z.string(),
+        enabled: z.boolean(),
+        lastSyncAt: z.string().optional(),
+        lastStatus: z.enum(['ok', 'error']).optional(),
+        lastError: z.object({ kind: z.string(), message: z.string() }).optional(),
+        nextDueAt: z.string().optional(),
+      })),
+    }),
+  },
+  'slack:listChannels': {
+    req: z.object({
+      workspaceUrl: z.string(),
+    }),
+    res: z.object({
+      channels: z.array(z.object({
+        id: z.string(),
+        name: z.string(),
+        isPrivate: z.boolean().optional(),
+        isMember: z.boolean().optional(),
+      })),
+      error: z.string().optional(),
+    }),
+  },
+  'slack:getRecentMessages': {
+    req: z.object({
+      limit: z.number().int().positive().max(20).optional(),
+    }),
+    res: z.object({
+      enabled: z.boolean(),
+      messages: z.array(z.object({
+        id: z.string(),
+        workspaceName: z.string().optional(),
+        workspaceUrl: z.string().optional(),
+        channelId: z.string().optional(),
+        channelName: z.string().optional(),
+        author: z.string().optional(),
+        text: z.string(),
+        ts: z.string(),
+        url: z.string().optional(),
+      })),
+      error: z.string().optional(),
+      errorKind: SlackErrorKindSchema.optional(),
+    }),
+  },
+  'knowledgeSources:getConfig': {
+    req: z.null(),
+    res: z.object({
+      sources: z.array(KnowledgeSourceConfigSchema),
+    }),
+  },
+  'knowledgeSources:upsert': {
+    req: KnowledgeSourceConfigSchema,
+    res: z.object({
+      sources: z.array(KnowledgeSourceConfigSchema),
     }),
   },
   'onboarding:getStatus': {
@@ -617,6 +1063,15 @@ const ipcSchemas = {
       path: z.string().nullable(),
     }),
   },
+  'dialog:openFiles': {
+    req: z.object({
+      defaultPath: z.string().optional(),
+      title: z.string().optional(),
+    }),
+    res: z.object({
+      paths: z.array(z.string()),
+    }),
+  },
   // Knowledge version history channels
   'knowledge:history': {
     req: z.object({ path: RelPath }),
@@ -755,6 +1210,16 @@ const ipcSchemas = {
     res: z.object({
       audioBase64: z.string(),
       mimeType: z.string(),
+    }),
+  },
+  // Ensures the OS-level microphone permission is settled before capturing.
+  // On first-ever use (macOS) the permission is 'not-determined'; resolving
+  // the native prompt up front prevents the in-flight getUserMedia from
+  // rejecting on the first mic click.
+  'voice:ensureMicAccess': {
+    req: z.null(),
+    res: z.object({
+      granted: z.boolean(),
     }),
   },
   'meeting:checkScreenPermission': {
@@ -937,6 +1402,7 @@ const ipcSchemas = {
       name: z.string(),
       instructions: z.string(),
       triggers: TriggersSchema.optional(),
+      projectId: z.string().optional(),
       model: z.string().optional(),
       provider: z.string().optional(),
     }),
@@ -1072,6 +1538,17 @@ const ipcSchemas = {
   'billing:getInfo': {
     req: z.null(),
     res: BillingInfoSchema,
+  },
+  // Notification settings channels
+  'notifications:getSettings': {
+    req: z.null(),
+    res: NotificationSettingsSchema,
+  },
+  'notifications:setSettings': {
+    req: NotificationSettingsSchema,
+    res: z.object({
+      success: z.literal(true),
+    }),
   },
 } as const;
 
