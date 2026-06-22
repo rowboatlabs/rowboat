@@ -211,23 +211,6 @@ export async function getGoogleDocsConnectionStatus(): Promise<{
   return GoogleClientFactory.getCredentialStatus([...GOOGLE_DOC_SCOPES]);
 }
 
-/**
- * The live Google OAuth access token, for the renderer to drive the Google
- * Picker (file selection happens client-side; the app never lists Drive).
- */
-export async function getGoogleAccessToken(): Promise<string | null> {
-  // getClient() refreshes an expired token when it can. If it returns a token
-  // that's still past expiry, the refresh failed (e.g. no refresh_token) — hand
-  // back null rather than a dead token, so the UI prompts a reconnect instead
-  // of silently passing an expired token to the Picker (which 403s on it).
-  const auth = await GoogleClientFactory.getClient();
-  const token = auth?.credentials?.access_token ?? null;
-  if (!token) return null;
-  const expiry = auth?.credentials?.expiry_date;
-  if (typeof expiry === 'number' && expiry <= Date.now()) return null;
-  return token;
-}
-
 // Write the exported .docx bytes into the knowledge folder and record the
 // Drive link. Shared by both import paths (stored connection / explicit token).
 async function writeDocxAndLink(

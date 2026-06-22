@@ -52,7 +52,7 @@ import { getAccessToken } from '@x/core/dist/auth/tokens.js';
 import { getRowboatConfig } from '@x/core/dist/config/rowboat.js';
 import { runLiveNoteAgent } from '@x/core/dist/knowledge/live-note/runner.js';
 import { listImportantThreads, listEverythingElseThreads, saveMessageBodyHeight, triggerSync as triggerGmailSync, sendThreadReply, archiveThread, trashThread, markThreadRead, getAccountEmail, getConnectionStatus as getGmailConnectionStatus } from '@x/core/dist/knowledge/sync_gmail.js';
-import { getGoogleDocsConnectionStatus, importGoogleDoc, getGoogleAccessToken, syncGoogleDocDown, syncGoogleDocUp, getGoogleDocLink } from '@x/core/dist/knowledge/google_docs.js';
+import { getGoogleDocsConnectionStatus, importGoogleDoc, syncGoogleDocDown, syncGoogleDocUp, getGoogleDocLink } from '@x/core/dist/knowledge/google_docs.js';
 import { startManagedGooglePick } from './google-picker-managed.js';
 import { liveNoteBus } from '@x/core/dist/knowledge/live-note/bus.js';
 import { getInstallationId } from '@x/core/dist/analytics/installation.js';
@@ -815,115 +815,6 @@ export function setupIpcHandlers() {
     },
     'google-docs:getStatus': async () => {
       return getGoogleDocsConnectionStatus();
-    },
-    'google-docs:getAccessToken': async () => {
-      return { accessToken: await getGoogleAccessToken() };
-    },
-    'google-docs:openPicker': async (_event, args) => {
-      const { accessToken, apiKey } = args;
-      // Run the Picker in the user's real system browser (Chrome) rather than
-      // inside Electron. Google's Picker / sign-in 403s in an Electron window
-      // (non-standard browser), but works in a real browser. We serve the
-      // Picker page from a localhost server, open it via the OS browser, and
-      // the page reports the selection back to that same server (OAuth-style
-      // loopback). Token/key are injected server-side so they never hit history.
-      const DOC_MIME = 'application/vnd.google-apps.document';
-      const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-
-      // setAppId is REQUIRED for the drive.file scope: it tells Google which
-      // Cloud project (app) the picked file should be shared with. Without it,
-      // the selected file is never granted to our OAuth client and the later
-      // export/download 404s. The project number is the prefix of the OAuth
-      // client id (e.g. "916714831831-xxx.apps.googleusercontent.com").
-      let appId = args.appId;
-      if (!appId) {
-        try {
-          const oauthJson = JSON.parse(
-            await fs.readFile(path.join(WorkDir, 'config', 'oauth.json'), 'utf8')
-          );
-          const cid: string = oauthJson?.providers?.google?.clientId ?? '';
-          const proj = cid.split('-')[0];
-          if (/^\d+$/.test(proj)) appId = proj;
-        } catch { /* fall through — picker still works for native Google Docs */ }
-      }
-      console.log(`[Picker] opening with appId=${appId ?? '(none)'} apiKey=${apiKey ? 'set' : 'none'}`);
-      const pickerHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Choose a document to sync</title>
-<style>body{margin:0;background:#fff;display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;color:#555}
-#msg{font-size:15px}</style></head>
-<body><div id="msg">Loading Google Picker…</div>
-<script src="https://apis.google.com/js/api.js"></script>
-<script>
-gapi.load('picker',function(){
-  var view=new google.picker.DocsView()
-    .setIncludeFolders(false)
-    .setMimeTypes('${DOC_MIME},${DOCX_MIME}');
-  var b=new google.picker.PickerBuilder()
-    .addView(view)
-    .setOAuthToken(${JSON.stringify(accessToken)})
-    .setTitle('Choose a document to sync')
-    .setCallback(function(d){
-      if(d.action===google.picker.Action.PICKED&&d.docs&&d.docs[0]){
-        var f=d.docs[0];
-        window.location.href='/result?action=picked&fileId='+encodeURIComponent(f.id)+'&name='+encodeURIComponent(f.name)+'&mimeType='+encodeURIComponent(f.mimeType);
-      } else if(d.action===google.picker.Action.CANCEL){
-        window.location.href='/result?action=cancel';
-      }
-    });
-  ${apiKey ? `b.setDeveloperKey(${JSON.stringify(apiKey)});` : ''}
-  ${appId ? `b.setAppId(${JSON.stringify(appId)});` : ''}
-  document.getElementById('msg').style.display='none';
-  b.build().setVisible(true);
-});
-</script></body></html>`;
-
-      const donePage = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Done</title>
-<style>body{font-family:sans-serif;text-align:center;margin-top:120px;color:#444}</style></head>
-<body><h2>✓ Selection sent to Rowboat</h2><p>You can close this tab and return to the app.</p></body></html>`;
-
-      const { createServer } = await import('node:http');
-
-      return new Promise<{ id: string; name: string; mimeType: string } | null>((resolve) => {
-        let settled = false;
-        const finish = (result: { id: string; name: string; mimeType: string } | null) => {
-          if (settled) return;
-          settled = true;
-          server.close();
-          // Bring the app back to the foreground after the browser hand-off.
-          const w = BrowserWindow.getAllWindows()[0];
-          if (w) { if (w.isMinimized()) w.restore(); w.focus(); }
-          resolve(result);
-        };
-
-        const server = createServer((req, res) => {
-          const u = new URL(req.url ?? '/', 'http://localhost');
-          if (u.pathname === '/result') {
-            res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-            res.end(donePage);
-            if (u.searchParams.get('action') === 'picked') {
-              finish({
-                id: u.searchParams.get('fileId') ?? '',
-                name: u.searchParams.get('name') ?? '',
-                mimeType: u.searchParams.get('mimeType') ?? '',
-              });
-            } else {
-              finish(null);
-            }
-            return;
-          }
-          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-          res.end(pickerHtml);
-        });
-
-        server.listen(0, '127.0.0.1', () => {
-          const port = (server.address() as { port: number }).port;
-          // Opens in the user's default browser (Chrome) — a trusted browser
-          // for Google, so the Picker and any sign-in work without the 403.
-          shell.openExternal(`http://localhost:${port}/`);
-        });
-
-        // Safety: don't leak the server/promise if the user never finishes.
-        setTimeout(() => finish(null), 5 * 60 * 1000);
-      });
     },
     'google-docs:import': async (_event, args) => {
       console.log(`[GoogleDocs] import fileId=${args.fileId} -> ${args.targetFolder}`);
