@@ -178,6 +178,7 @@ interface ChatSidebarProps {
   isRecording?: boolean
   recordingText?: string
   recordingState?: 'connecting' | 'listening'
+  audioLevelsRef?: React.MutableRefObject<number[]>
   onStartRecording?: () => void
   onSubmitRecording?: () => void
   onCancelRecording?: () => void
@@ -240,6 +241,7 @@ export function ChatSidebar({
   isRecording,
   recordingText,
   recordingState,
+  audioLevelsRef,
   onStartRecording,
   onSubmitRecording,
   onCancelRecording,
@@ -811,6 +813,7 @@ export function ChatSidebar({
                           isRecording={isActive && isRecording}
                           recordingText={isActive ? recordingText : undefined}
                           recordingState={isActive ? recordingState : undefined}
+                          audioLevelsRef={audioLevelsRef}
                           onStartRecording={isActive ? onStartRecording : undefined}
                           onSubmitRecording={isActive ? onSubmitRecording : undefined}
                           onCancelRecording={isActive ? onCancelRecording : undefined}
