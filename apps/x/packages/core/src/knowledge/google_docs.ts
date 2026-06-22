@@ -127,27 +127,43 @@ async function getDriveClient() {
   return google.drive({ version: 'v3', auth });
 }
 
+// Build a Drive client from a raw OAuth access token, bypassing the stored
+// connection. Used by the OAuth-redirect Picker (trigger_onepick), which runs
+// its own standalone drive.file authorization and hands back a fresh token —
+// no stored connection, Picker API key, or appId involved. Read/export only;
+// the token is short-lived and used immediately, so no refresh is wired up.
+function driveClientFromToken(accessToken: string) {
+  const auth = new google.auth.OAuth2();
+  auth.setCredentials({ access_token: accessToken });
+  return google.drive({ version: 'v3', auth });
+}
+
 // Get the file as .docx bytes: a native Google Doc is exported; an uploaded
-// Word file is downloaded as-is.
-async function fetchAsDocx(fileId: string, mimeType: string | undefined): Promise<Buffer> {
-  const driveClient = await getDriveClient();
+// Word file is downloaded as-is. Pass `driveClient` to use a specific token
+// (e.g. the OAuth-redirect Picker's); omit it to use the stored connection.
+async function fetchAsDocx(
+  fileId: string,
+  mimeType: string | undefined,
+  driveClient?: drive.Drive,
+): Promise<Buffer> {
+  const dc = driveClient ?? await getDriveClient();
   if (!mimeType || mimeType === GOOGLE_DOC_MIME) {
-    const result = await driveClient.files.export(
+    const result = await dc.files.export(
       { fileId, mimeType: DOCX_MIME },
       { responseType: 'arraybuffer' },
     );
     return Buffer.from(result.data as ArrayBuffer);
   }
-  const result = await driveClient.files.get(
+  const result = await dc.files.get(
     { fileId, alt: 'media', supportsAllDrives: true },
     { responseType: 'arraybuffer' },
   );
   return Buffer.from(result.data as ArrayBuffer);
 }
 
-async function getDocMetadata(fileId: string): Promise<GoogleDocListItem> {
-  const driveClient = await getDriveClient();
-  const result = await driveClient.files.get({
+async function getDocMetadata(fileId: string, driveClient?: drive.Drive): Promise<GoogleDocListItem> {
+  const dc = driveClient ?? await getDriveClient();
+  const result = await dc.files.get({
     fileId,
     fields: 'id,name,webViewLink,modifiedTime,mimeType,owners(displayName,emailAddress)',
     supportsAllDrives: true,
@@ -212,17 +228,13 @@ export async function getGoogleAccessToken(): Promise<string | null> {
   return token;
 }
 
-/** Import a Google Doc as a local .docx and register the link. */
-export async function importGoogleDoc(fileId: string, targetFolder: string): Promise<{
-  path: string;
-  doc: GoogleDocListItem;
-}> {
-  const status = await getGoogleDocsConnectionStatus();
-  if (!status.connected) throw new Error('Google is not connected.');
-  if (!status.hasRequiredScopes) throw new Error('Google is missing Drive access. Reconnect Google.');
-
-  const doc = await getDocMetadata(fileId);
-  const bytes = await fetchAsDocx(fileId, doc.mimeType);
+// Write the exported .docx bytes into the knowledge folder and record the
+// Drive link. Shared by both import paths (stored connection / explicit token).
+async function writeDocxAndLink(
+  doc: GoogleDocListItem,
+  bytes: Buffer,
+  targetFolder: string,
+): Promise<string> {
   const relPath = await uniqueDocxPath(targetFolder, doc.name);
   const absPath = resolveWorkspacePath(relPath);
   await fs.mkdir(path.dirname(absPath), { recursive: true });
@@ -235,6 +247,40 @@ export async function importGoogleDoc(fileId: string, targetFolder: string): Pro
     mimeType: doc.mimeType,
     remoteModifiedTime: doc.modifiedTime ?? undefined,
   });
+  return relPath;
+}
+
+/** Import a Google Doc as a local .docx and register the link. */
+export async function importGoogleDoc(fileId: string, targetFolder: string): Promise<{
+  path: string;
+  doc: GoogleDocListItem;
+}> {
+  const status = await getGoogleDocsConnectionStatus();
+  if (!status.connected) throw new Error('Google is not connected.');
+  if (!status.hasRequiredScopes) throw new Error('Google is missing Drive access. Reconnect Google.');
+
+  const doc = await getDocMetadata(fileId);
+  const bytes = await fetchAsDocx(fileId, doc.mimeType);
+  const relPath = await writeDocxAndLink(doc, bytes, targetFolder);
+  return { path: relPath, doc };
+}
+
+/**
+ * Import a Google Doc using an explicit OAuth access token instead of the
+ * stored Google connection. Powers the OAuth-redirect Picker (trigger_onepick):
+ * that flow runs its own standalone drive.file authorization, so the picked
+ * file is granted to a fresh token that has no other scopes and isn't persisted
+ * as the user's main connection. No Picker API key or appId is involved.
+ */
+export async function importGoogleDocWithToken(
+  fileId: string,
+  targetFolder: string,
+  accessToken: string,
+): Promise<{ path: string; doc: GoogleDocListItem }> {
+  const driveClient = driveClientFromToken(accessToken);
+  const doc = await getDocMetadata(fileId, driveClient);
+  const bytes = await fetchAsDocx(fileId, doc.mimeType, driveClient);
+  const relPath = await writeDocxAndLink(doc, bytes, targetFolder);
   return { path: relPath, doc };
 }
 

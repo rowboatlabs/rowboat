@@ -687,6 +687,24 @@ const ipcSchemas = {
       }),
     }),
   },
+  // Managed OAuth-redirect Picker: the Rowboat backend runs the pick with the
+  // company Google client; the desktop opens the start URL, waits for the deep
+  // link, and imports with the existing managed token. No API key or BYOK creds.
+  'google-docs:pickViaManaged': {
+    req: z.object({
+      targetFolder: RelPath,
+    }),
+    res: z.object({
+      path: RelPath,
+      doc: z.object({
+        id: z.string(),
+        name: z.string(),
+        url: z.string(),
+        modifiedTime: z.string().nullable(),
+        owner: z.string().nullable(),
+      }),
+    }).nullable(),
+  },
   'google-docs:refreshSnapshot': {
     req: z.object({
       path: RelPath,

@@ -53,6 +53,7 @@ import { getRowboatConfig } from '@x/core/dist/config/rowboat.js';
 import { runLiveNoteAgent } from '@x/core/dist/knowledge/live-note/runner.js';
 import { listImportantThreads, listEverythingElseThreads, saveMessageBodyHeight, triggerSync as triggerGmailSync, sendThreadReply, archiveThread, trashThread, markThreadRead, getAccountEmail, getConnectionStatus as getGmailConnectionStatus } from '@x/core/dist/knowledge/sync_gmail.js';
 import { getGoogleDocsConnectionStatus, importGoogleDoc, getGoogleAccessToken, syncGoogleDocDown, syncGoogleDocUp, getGoogleDocLink } from '@x/core/dist/knowledge/google_docs.js';
+import { startManagedGooglePick } from './google-picker-managed.js';
 import { liveNoteBus } from '@x/core/dist/knowledge/live-note/bus.js';
 import { getInstallationId } from '@x/core/dist/analytics/installation.js';
 import { API_URL } from '@x/core/dist/config/env.js';
@@ -934,6 +935,17 @@ gapi.load('picker',function(){
         console.error('[GoogleDocs] import FAILED:', err instanceof Error ? err.message : err);
         throw err;
       }
+    },
+    // Managed (rowboat-mode) OAuth-redirect Picker: the Rowboat backend runs the
+    // pick with the company Google client; the desktop opens the start URL,
+    // waits for the deep link, and imports the picked doc with the existing
+    // managed token. No API key, appId, or local credentials.
+    'google-docs:pickViaManaged': async (_event, args) => {
+      console.log(`[GoogleDocs] managed pick -> ${args.targetFolder}`);
+      const result = await startManagedGooglePick(args.targetFolder);
+      if (!result) return null;
+      console.log(`[GoogleDocs] managed pick import OK -> ${result.path}`);
+      return result;
     },
     'google-docs:refreshSnapshot': async (_event, args) => {
       return syncGoogleDocDown(args.path);
