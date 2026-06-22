@@ -40,7 +40,10 @@ const DEFAULT_NOTE_TYPE_DEFINITIONS: NoteTypeDefinition[] = [
 {Substantive facts only. Leave empty if none.}
 
 ## Open items
-{Commitments and next steps only. Leave empty if none.}`,
+{Commitments and next steps only. Leave empty if none.}
+
+## Assistant notes
+- [{ISO_TIMESTAMP}] {One concise assistant-facing observation about this person.}`,
     extractionGuide:
       "Look for: name, role, organization, email, aliases, relationship context",
   },
@@ -77,7 +80,10 @@ const DEFAULT_NOTE_TYPE_DEFINITIONS: NoteTypeDefinition[] = [
 {Substantive facts only. Leave empty if none.}
 
 ## Open items
-{Commitments and next steps only. Leave empty if none.}`,
+{Commitments and next steps only. Leave empty if none.}
+
+## Assistant notes
+- [{ISO_TIMESTAMP}] {One concise assistant-facing observation about this organization.}`,
     extractionGuide:
       "Look for: organization name, type, industry, relationship, domain, key people, projects",
   },
@@ -116,7 +122,10 @@ const DEFAULT_NOTE_TYPE_DEFINITIONS: NoteTypeDefinition[] = [
 {Commitments and next steps only. Leave empty if none.}
 
 ## Key facts
-{Substantive facts only. Leave empty if none.}`,
+{Substantive facts only. Leave empty if none.}
+
+## Assistant notes
+- [{ISO_TIMESTAMP}] {One concise assistant-facing observation about this project.}`,
     extractionGuide:
       "Look for: project name, type, status, people involved, organizations, timeline, decisions",
   },
@@ -149,7 +158,10 @@ const DEFAULT_NOTE_TYPE_DEFINITIONS: NoteTypeDefinition[] = [
 {Commitments and next steps only. Leave empty if none.}
 
 ## Key facts
-{Substantive facts only. Leave empty if none.}`,
+{Substantive facts only. Leave empty if none.}
+
+## Assistant notes
+- [{ISO_TIMESTAMP}] {One concise assistant-facing observation about this topic.}`,
     extractionGuide:
       "Look for: topic name, keywords, related people/orgs/projects, decisions, key facts",
   },
@@ -199,11 +211,39 @@ export function getNoteTypeDefinitions(): NoteTypeDefinition[] {
 
 // ── Render helper ────────────────────────────────────────────────────────
 
+function assistantNotesPlaceholder(type: string): string {
+  const normalized = type.toLowerCase();
+  if (normalized === "people") {
+    return "person";
+  }
+  if (normalized === "organizations") {
+    return "organization";
+  }
+  if (normalized === "projects") {
+    return "project";
+  }
+  if (normalized === "topics") {
+    return "topic";
+  }
+  return "entity";
+}
+
+function renderTemplateWithAssistantNotes(def: NoteTypeDefinition): string {
+  if (!["People", "Organizations", "Projects", "Topics"].includes(def.type)) {
+    return def.template;
+  }
+  if (/^## Assistant notes\b/im.test(def.template)) {
+    return def.template;
+  }
+  const target = assistantNotesPlaceholder(def.type);
+  return `${def.template.trimEnd()}\n\n## Assistant notes\n- [{ISO_TIMESTAMP}] {One concise assistant-facing observation about this ${target}.}`;
+}
+
 export function renderNoteTypesBlock(): string {
   const defs = getNoteTypeDefinitions();
   const sections = defs.map(
     (d) =>
-      `## ${d.type}\n\`\`\`markdown\n${d.template}\n\`\`\``,
+      `## ${d.type}\n\`\`\`markdown\n${renderTemplateWithAssistantNotes(d)}\n\`\`\``,
   );
   return `# Note Templates\n\n${sections.join("\n\n")}`;
 }
