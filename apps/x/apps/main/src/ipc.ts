@@ -72,6 +72,8 @@ import { runLiveNoteAgent } from '@x/core/dist/knowledge/live-note/runner.js';
 import { listImportantThreads, listEverythingElseThreads, saveMessageBodyHeight, triggerSync as triggerGmailSync, sendThreadReply, archiveThread, trashThread, markThreadRead, getAccountEmail, getAccountName, getConnectionStatus as getGmailConnectionStatus } from '@x/core/dist/knowledge/sync_gmail.js';
 import { searchContacts as searchGmailContacts, warmContactIndex } from '@x/core/dist/knowledge/gmail_contacts.js';
 import { searchSentContacts, warmSentContacts } from '@x/core/dist/knowledge/gmail_sent_contacts.js';
+import { getGoogleDocsConnectionStatus, importGoogleDoc, syncGoogleDocDown, syncGoogleDocUp, getGoogleDocLink } from '@x/core/dist/knowledge/google_docs.js';
+import { startManagedGooglePick } from './google-picker-managed.js';
 import { liveNoteBus } from '@x/core/dist/knowledge/live-note/bus.js';
 import { getInstallationId } from '@x/core/dist/analytics/installation.js';
 import { API_URL } from '@x/core/dist/config/env.js';
@@ -1415,6 +1417,40 @@ export function setupIpcHandlers() {
     'knowledge:restore': async (_event, args) => {
       await versionHistory.restoreFile(args.path, args.oid);
       return { ok: true };
+    },
+    'google-docs:getStatus': async () => {
+      return getGoogleDocsConnectionStatus();
+    },
+    'google-docs:import': async (_event, args) => {
+      console.log(`[GoogleDocs] import fileId=${args.fileId} -> ${args.targetFolder}`);
+      try {
+        const result = await importGoogleDoc(args.fileId, args.targetFolder);
+        console.log(`[GoogleDocs] import OK -> ${result.path}`);
+        return result;
+      } catch (err) {
+        console.error('[GoogleDocs] import FAILED:', err instanceof Error ? err.message : err);
+        throw err;
+      }
+    },
+    // Managed (rowboat-mode) OAuth-redirect Picker: the Rowboat backend runs the
+    // pick with the company Google client; the desktop opens the start URL,
+    // waits for the deep link, and imports the picked doc with the existing
+    // managed token. No API key, appId, or local credentials.
+    'google-docs:pickViaManaged': async (_event, args) => {
+      console.log(`[GoogleDocs] managed pick -> ${args.targetFolder}`);
+      const result = await startManagedGooglePick(args.targetFolder);
+      if (!result) return null;
+      console.log(`[GoogleDocs] managed pick import OK -> ${result.path}`);
+      return result;
+    },
+    'google-docs:refreshSnapshot': async (_event, args) => {
+      return syncGoogleDocDown(args.path);
+    },
+    'google-docs:sync': async (_event, args) => {
+      return syncGoogleDocUp(args.path, { force: args.force });
+    },
+    'google-docs:getLink': async (_event, args) => {
+      return { link: await getGoogleDocLink(args.path) };
     },
     // Search handler
     'search:query': async (_event, args) => {

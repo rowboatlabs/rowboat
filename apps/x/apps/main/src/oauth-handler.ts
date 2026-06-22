@@ -420,15 +420,23 @@ export async function connectProvider(provider: string, credentials?: { clientId
         scope: scopes.join(' '),
         code_challenge: codeChallenge,
         state,
+        // Google only returns a refresh_token when offline access is requested,
+        // and only re-issues one when re-consent is forced. Without these, a
+        // BYOK token expires after ~1h with no way to refresh (it goes stale and
+        // every Google call — including the Picker — starts failing).
+        ...(provider === 'google' ? { access_type: 'offline', prompt: 'consent' } : {}),
       });
 
-      // Set timeout to clean up abandoned flows (2 minutes)
+      // Set timeout to clean up abandoned flows. Generous (10 min) because a
+      // first-time connect can involve creating/locating OAuth credentials in
+      // the Cloud Console mid-flow; a short window tears down the callback
+      // server before the user finishes consent, silently dropping the token.
       const cleanupTimeout = setTimeout(() => {
         if (activeFlow?.state === state) {
           console.log(`[OAuth] Cleaning up abandoned OAuth flow for ${provider} (timeout)`);
           cancelActiveFlow('timed_out');
         }
-      }, 2 * 60 * 1000);
+      }, 10 * 60 * 1000);
 
       activeFlow = {
         provider,

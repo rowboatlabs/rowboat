@@ -1096,6 +1096,89 @@ const ipcSchemas = {
     req: z.object({}),
     res: z.null(),
   },
+  // Google Docs linked knowledge files
+  'google-docs:getStatus': {
+    req: z.null(),
+    res: z.object({
+      connected: z.boolean(),
+      hasRequiredScopes: z.boolean(),
+      missingScopes: z.array(z.string()),
+    }),
+  },
+  'google-docs:import': {
+    req: z.object({
+      fileId: z.string().min(1),
+      targetFolder: RelPath,
+    }),
+    res: z.object({
+      path: RelPath,
+      doc: z.object({
+        id: z.string(),
+        name: z.string(),
+        url: z.string(),
+        modifiedTime: z.string().nullable(),
+        owner: z.string().nullable(),
+      }),
+    }),
+  },
+  // Managed OAuth-redirect Picker: the Rowboat backend runs the pick with the
+  // company Google client; the desktop opens the start URL, waits for the deep
+  // link, and imports with the existing managed token. No API key or BYOK creds.
+  'google-docs:pickViaManaged': {
+    req: z.object({
+      targetFolder: RelPath,
+    }),
+    res: z.object({
+      path: RelPath,
+      doc: z.object({
+        id: z.string(),
+        name: z.string(),
+        url: z.string(),
+        modifiedTime: z.string().nullable(),
+        owner: z.string().nullable(),
+      }),
+    }).nullable(),
+  },
+  'google-docs:refreshSnapshot': {
+    req: z.object({
+      path: RelPath,
+    }),
+    res: z.object({
+      ok: z.literal(true),
+      syncedAt: z.string(),
+    }),
+  },
+  'google-docs:sync': {
+    req: z.object({
+      path: RelPath,
+      // Overwrite the Google Doc even if it changed remotely since last sync.
+      force: z.boolean().optional(),
+      // Legacy field from the markdown-link path; ignored by the .docx sync.
+      markdown: z.string().optional(),
+    }),
+    res: z.object({
+      synced: z.boolean(),
+      syncedAt: z.string().optional(),
+      // True when a remote edit was detected and the push was held back.
+      conflict: z.boolean().optional(),
+      error: z.string().optional(),
+    }),
+  },
+  // Is this local .docx linked to a Google Doc? Drives the sync UI in the viewer.
+  'google-docs:getLink': {
+    req: z.object({
+      path: RelPath,
+    }),
+    res: z.object({
+      link: z.object({
+        id: z.string(),
+        url: z.string(),
+        title: z.string(),
+        syncedAt: z.string(),
+        remoteModifiedTime: z.string().optional(),
+      }).nullable(),
+    }),
+  },
   // Search channels
   'search:query': {
     req: z.object({

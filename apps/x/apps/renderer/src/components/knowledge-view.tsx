@@ -38,6 +38,7 @@ interface TreeNode {
 
 export type KnowledgeViewActions = {
   createNote: (parentPath?: string) => void
+  addGoogleDoc: (parentPath?: string) => void
   createFolder: (parentPath?: string) => Promise<string>
   rename: (path: string, newName: string, isDir: boolean) => Promise<void>
   remove: (path: string) => Promise<void>
@@ -106,6 +107,21 @@ function latestMtime(node: TreeNode): number {
   let max = node.stat?.mtimeMs ?? 0
   for (const child of node.children ?? []) max = Math.max(max, latestMtime(child))
   return max
+}
+
+function GoogleDriveIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className}
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path fill="#1FA463" d="M8.52 3.5h6.96l6.95 12.04h-6.96L8.52 3.5Z" />
+      <path fill="#FFD04B" d="M1.57 15.54 8.52 3.5l3.48 6.02-3.48 6.02H1.57Z" />
+      <path fill="#4688F1" d="M8.52 15.54h13.91L18.95 21H5.05l3.47-5.46Z" />
+    </svg>
+  )
 }
 
 function sortNodes(nodes: TreeNode[]): TreeNode[] {
@@ -218,6 +234,14 @@ export function KnowledgeView({
             />
           </div>
           <VoiceNoteButton onNoteCreated={onVoiceNoteCreated} />
+          <button
+            type="button"
+            onClick={() => actions.addGoogleDoc(currentFolder?.path)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-accent"
+          >
+            <GoogleDriveIcon className="size-4" />
+            <span>Add Google Doc</span>
+          </button>
         </div>
       </div>
 
@@ -795,6 +819,10 @@ function RowContextMenu({
             <ContextMenuItem onClick={() => actions.createNote(node.path)}>
               <FilePlus className="mr-2 size-4" />
               New Note
+            </ContextMenuItem>
+            <ContextMenuItem onClick={() => actions.addGoogleDoc(node.path)}>
+              <GoogleDriveIcon className="mr-2 size-4" />
+              Add Google Doc
             </ContextMenuItem>
             <ContextMenuItem onClick={() => void actions.createFolder(node.path)}>
               <FolderPlus className="mr-2 size-4" />

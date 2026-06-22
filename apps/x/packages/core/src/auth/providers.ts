@@ -77,6 +77,10 @@ const providerConfigs: ProviderConfig = {
     scopes: [
       'https://www.googleapis.com/auth/gmail.modify',
       'https://www.googleapis.com/auth/calendar.events.readonly',
+      // Per-file Drive access (non-restricted): the user grants read/write to a
+      // specific doc by choosing it in the Google Picker. Enough to export/
+      // download and write back, without the restricted full-drive scope.
+      'https://www.googleapis.com/auth/drive.file',
     ],
   },
   'fireflies-ai': {
