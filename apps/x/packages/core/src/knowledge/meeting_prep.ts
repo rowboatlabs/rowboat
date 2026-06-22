@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { WorkDir } from '../config/config.js';
-import { buildKnowledgeIndex } from './knowledge_index.js';
+import { getKnowledgeIndex } from './knowledge_index.js';
 
 const KNOWLEDGE_DIR = path.join(WorkDir, 'knowledge');
 
@@ -40,9 +40,18 @@ export interface MeetingPrepResolved {
     note: MeetingPrepNote | null;
 }
 
+/** An organization note relevant to the meeting (resolved from attendee domains). */
+export interface MeetingPrepOrg {
+    path: string;
+    name: string;
+    markdown: string;
+}
+
 export interface MeetingPrepResult {
     /** Resolved attendees, matched ones first (notes-first ordering). */
     attendees: MeetingPrepResolved[];
+    /** Distinct external organizations in the meeting that have a note. */
+    organizations: MeetingPrepOrg[];
     /** How many have a note vs. not — convenience for the UI header. */
     matchedCount: number;
     unmatchedCount: number;
@@ -50,6 +59,27 @@ export interface MeetingPrepResult {
 
 function norm(value: string | undefined): string {
     return (value ?? '').trim().toLowerCase();
+}
+
+/** Normalize a display name for matching: drop parenthetical suffixes like
+ *  "(via Google Calendar)" / "(Guest)" that calendars sometimes append. */
+function normName(value: string | undefined): string {
+    return norm((value ?? '').replace(/\s*\([^)]*\)\s*$/g, ''));
+}
+
+/** Lowercased domain part of an email, or '' if there isn't one. */
+function domainOf(email: string | undefined): string {
+    const e = norm(email);
+    const at = e.lastIndexOf('@');
+    return at >= 0 ? e.slice(at + 1) : '';
+}
+
+/** Tidy a field value for display: strip a leading knowledge folder segment so
+ *  a link target like "Organizations/Rowboat Labs" reads as "Rowboat Labs". */
+function displayRef(value: string | undefined): string | undefined {
+    if (!value) return undefined;
+    const m = value.match(/^(?:People|Organizations|Projects|Topics)\/(.+)$/i);
+    return (m ? m[1] : value).trim() || undefined;
 }
 
 /**
@@ -60,7 +90,7 @@ function norm(value: string | undefined): string {
 export async function resolveMeetingPrep(
     attendees: MeetingPrepAttendee[],
 ): Promise<MeetingPrepResult> {
-    const index = buildKnowledgeIndex();
+    const index = getKnowledgeIndex();
 
     // email -> person (first wins; emails are effectively unique).
     const byEmail = new Map<string, (typeof index.people)[number]>();
@@ -72,13 +102,30 @@ export async function resolveMeetingPrep(
         if (email && !byEmail.has(email)) byEmail.set(email, person);
 
         for (const key of [person.name, ...person.aliases]) {
-            const nk = norm(key);
+            const nk = normName(key);
             if (!nk) continue;
             const list = byName.get(nk) ?? [];
             list.push(person);
             byName.set(nk, list);
         }
     }
+
+    // domain -> organization, and name/alias -> organization, for resolving the
+    // companies in the meeting from attendee email domains.
+    const orgByDomain = new Map<string, (typeof index.organizations)[number]>();
+    const orgByName = new Map<string, (typeof index.organizations)[number]>();
+    for (const org of index.organizations) {
+        const d = norm(org.domain);
+        if (d && !orgByDomain.has(d)) orgByDomain.set(d, org);
+        for (const key of [org.name, ...org.aliases]) {
+            const nk = norm(key);
+            if (nk && !orgByName.has(nk)) orgByName.set(nk, org);
+        }
+    }
+
+    // The user's own domain (from the self attendee) is "internal" — we never
+    // surface the user's own company as meeting context.
+    const selfDomain = domainOf(attendees.find((a) => a.self)?.email);
 
     // Cache note reads so a person listed under multiple keys is read once.
     const noteCache = new Map<string, MeetingPrepNote | null>();
@@ -90,8 +137,8 @@ export async function resolveMeetingPrep(
             note = {
                 path: path.posix.join('knowledge', person.file.split(path.sep).join('/')),
                 name: person.name,
-                role: person.role,
-                organization: person.organization,
+                role: displayRef(person.role),
+                organization: displayRef(person.organization),
                 markdown,
             };
         } catch {
@@ -104,12 +151,15 @@ export async function resolveMeetingPrep(
 
     const resolved: MeetingPrepResolved[] = [];
     const seenFiles = new Set<string>();
+    // Distinct external orgs to surface, keyed by note file.
+    const orgEntries = new Map<string, (typeof index.organizations)[number]>();
 
     for (const attendee of attendees) {
         if (attendee.self) continue;
 
         const email = norm(attendee.email);
-        const displayName = norm(attendee.displayName);
+        const displayName = normName(attendee.displayName);
+        const domain = domainOf(attendee.email);
 
         let person = email ? byEmail.get(email) : undefined;
         if (!person && displayName) {
@@ -117,6 +167,16 @@ export async function resolveMeetingPrep(
             // Only a single, unambiguous hit counts — never guess between two
             // people who happen to share a name.
             if (candidates && candidates.length === 1) person = candidates[0];
+        }
+
+        // Resolve the attendee's company — but only for external domains, so an
+        // internal standup doesn't surface the user's own org note. Prefer a
+        // domain match; fall back to the matched person's Organization field.
+        if (domain && domain !== selfDomain) {
+            const org =
+                orgByDomain.get(domain) ??
+                (person?.organization ? orgByName.get(norm(person.organization)) : undefined);
+            if (org) orgEntries.set(org.file, org);
         }
 
         const label =
@@ -145,9 +205,25 @@ export async function resolveMeetingPrep(
         return a.note ? -1 : 1;
     });
 
+    // Read the resolved org notes (skip any whose file vanished).
+    const organizations: MeetingPrepOrg[] = [];
+    for (const org of orgEntries.values()) {
+        try {
+            const markdown = await fs.readFile(path.join(KNOWLEDGE_DIR, org.file), 'utf-8');
+            organizations.push({
+                path: path.posix.join('knowledge', org.file.split(path.sep).join('/')),
+                name: org.name,
+                markdown,
+            });
+        } catch {
+            // Indexed file vanished between index build and read — skip it.
+        }
+    }
+
     const matchedCount = resolved.filter((a) => a.note).length;
     return {
         attendees: resolved,
+        organizations,
         matchedCount,
         unmatchedCount: resolved.length - matchedCount,
     };

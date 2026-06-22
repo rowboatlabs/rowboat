@@ -63,6 +63,7 @@ import { IAgentScheduleStateRepo } from '@x/core/dist/agent-schedule/state-repo.
 import { triggerRun as triggerAgentScheduleRun } from '@x/core/dist/agent-schedule/runner.js';
 import { search } from '@x/core/dist/search/search.js';
 import { resolveMeetingPrep } from '@x/core/dist/knowledge/meeting_prep.js';
+import { invalidateKnowledgeIndex } from '@x/core/dist/knowledge/knowledge_index.js';
 import { versionHistory, voice } from '@x/core';
 import { classifySchedule, processRowboatInstruction } from '@x/core/dist/knowledge/inline_tasks.js';
 import { getBillingInfo } from '@x/core/dist/billing/billing.js';
@@ -506,7 +507,25 @@ function queueChange(relPath: string): void {
 /**
  * Handle workspace change event from core watcher
  */
+function touchesKnowledge(event: z.infer<typeof workspaceShared.WorkspaceChangeEvent>): boolean {
+  const hit = (p: string | undefined) => typeof p === 'string' && p.startsWith('knowledge/');
+  switch (event.type) {
+    case 'created':
+    case 'changed':
+    case 'deleted':
+      return hit(event.path);
+    case 'moved':
+      return hit(event.from) || hit(event.to);
+    case 'bulkChanged':
+      return !event.paths || event.paths.some(hit);
+    default:
+      return false;
+  }
+}
+
 function handleWorkspaceChange(event: z.infer<typeof workspaceShared.WorkspaceChangeEvent>): void {
+  // Any knowledge-base change drops the cached index so the next read rebuilds.
+  if (touchesKnowledge(event)) invalidateKnowledgeIndex();
   // Debounce 'changed' events, emit others immediately
   if (event.type === 'changed' && event.path) {
     queueChange(event.path);

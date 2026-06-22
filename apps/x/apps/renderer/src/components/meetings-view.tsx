@@ -35,8 +35,14 @@ type PrepAttendee = {
   displayName?: string
   note: PrepNote | null
 }
+type PrepOrg = {
+  path: string
+  name: string
+  markdown: string
+}
 type PrepResult = {
   attendees: PrepAttendee[]
+  organizations: PrepOrg[]
   matchedCount: number
   unmatchedCount: number
 }
@@ -395,11 +401,16 @@ function requestCreateNote(attendee: PrepAttendee, meetingSummary: string) {
   window.dispatchEvent(new Event('meeting-prep:create-note'))
 }
 
-function PrepAttendeeNote({ attendee, onOpenNote }: { attendee: PrepAttendee; onOpenNote: (path: string) => void }) {
+// One expandable note row (used for both people and organizations): a header
+// you click to reveal the rendered markdown, plus an "Open note" link.
+function PrepNoteRow({ title, subtitle, markdown, path, onOpenNote }: {
+  title: string
+  subtitle?: string
+  markdown: string
+  path: string
+  onOpenNote: (path: string) => void
+}) {
   const [open, setOpen] = useState(false)
-  const note = attendee.note
-  if (!note) return null
-  const subtitle = [note.role, note.organization].filter(Boolean).join(' · ')
 
   return (
     <div className="border-b last:border-b-0">
@@ -410,18 +421,18 @@ function PrepAttendeeNote({ attendee, onOpenNote }: { attendee: PrepAttendee; on
       >
         {open ? <ChevronDown className="size-4 shrink-0 text-muted-foreground" /> : <ChevronRight className="size-4 shrink-0 text-muted-foreground" />}
         <span className="flex min-w-0 flex-1 flex-col">
-          <span className="truncate text-sm font-semibold text-foreground">{note.name}</span>
+          <span className="truncate text-sm font-semibold text-foreground">{title}</span>
           {subtitle ? <span className="truncate text-xs text-muted-foreground">{subtitle}</span> : null}
         </span>
       </button>
       {open ? (
         <div className="px-5 pb-4 pl-12">
           <Streamdown className="prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-1.5 [&_ul]:my-1.5 [&_ol]:my-1.5">
-            {note.markdown}
+            {markdown}
           </Streamdown>
           <button
             type="button"
-            onClick={() => onOpenNote(note.path)}
+            onClick={() => onOpenNote(path)}
             className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
           >
             <FileText className="size-3.5" />
@@ -431,6 +442,13 @@ function PrepAttendeeNote({ attendee, onOpenNote }: { attendee: PrepAttendee; on
       ) : null}
     </div>
   )
+}
+
+function PrepAttendeeNote({ attendee, onOpenNote }: { attendee: PrepAttendee; onOpenNote: (path: string) => void }) {
+  const note = attendee.note
+  if (!note) return null
+  const subtitle = [note.role, note.organization].filter(Boolean).join(' · ')
+  return <PrepNoteRow title={note.name} subtitle={subtitle || undefined} markdown={note.markdown} path={note.path} onOpenNote={onOpenNote} />
 }
 
 function PrepUnmatchedSection({ attendees, meetingSummary }: { attendees: PrepAttendee[]; meetingSummary: string }) {
@@ -532,6 +550,18 @@ function InlineMeetingPrep({ event, onOpenNote }: { event: UpcomingEvent; onOpen
         <PrepAttendeeNote key={att.note!.path + idx} attendee={att} onOpenNote={onOpenNote} />
       ))}
       <PrepUnmatchedSection attendees={unmatched} meetingSummary={event.summary} />
+      {prep.organizations.length > 0 ? (
+        <>
+          <div className="px-5 pb-1 pt-2.5">
+            <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+              {prep.organizations.length === 1 ? 'Company' : 'Companies'}
+            </span>
+          </div>
+          {prep.organizations.map((org) => (
+            <PrepNoteRow key={org.path} title={org.name} subtitle="Organization" markdown={org.markdown} path={org.path} onOpenNote={onOpenNote} />
+          ))}
+        </>
+      ) : null}
     </div>
   )
 }

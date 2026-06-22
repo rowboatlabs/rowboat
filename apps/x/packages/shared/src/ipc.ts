@@ -1183,6 +1183,11 @@ const ipcSchemas = {
           markdown: z.string(),
         }).nullable(),
       })),
+      organizations: z.array(z.object({
+        path: z.string(),
+        name: z.string(),
+        markdown: z.string(),
+      })),
       matchedCount: z.number().int().nonnegative(),
       unmatchedCount: z.number().int().nonnegative(),
     }),
