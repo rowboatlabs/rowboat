@@ -24,6 +24,13 @@ const DEEPGRAM_LISTEN_URL = `wss://api.deepgram.com/v1/listen?${DEEPGRAM_PARAMS.
 // The waveform only ever displays the most recent window, so older samples are dropped.
 const MAX_AUDIO_LEVELS = 4800;
 
+// Auto-gain for the waveform: each frame's amplitude is stored normalized against a
+// running peak (instant attack, slow release) so bar heights track the *relative*
+// loudness of the voice accurately regardless of mic/OS input gain. MIN_PEAK is a
+// floor so near-silence doesn't get amplified up into tall bars.
+const PEAK_DECAY = 0.97;
+const MIN_PEAK = 0.02;
+
 // Cache auth details so we don't need IPC round-trips on every mic click
 let cachedAuth: { type: 'rowboat'; url: string; token: string } | { type: 'local'; apiKey: string } | null = null;
 
@@ -39,10 +46,12 @@ export function useVoiceMode() {
     const interimRef = useRef('');
     // Buffer audio chunks captured before the WebSocket is ready
     const audioBufferRef = useRef<ArrayBuffer[]>([]);
-    // Rolling history of per-frame mic amplitude (RMS, 0..~1), oldest first.
+    // Rolling history of per-frame mic amplitude (auto-gained to 0..1), oldest first.
     // Drives the live waveform — the UI reads this via requestAnimationFrame so
     // amplitude updates never re-render the rest of the tree.
     const audioLevelsRef = useRef<number[]>([]);
+    // Running peak amplitude for the waveform auto-gain (see PEAK_DECAY/MIN_PEAK).
+    const audioPeakRef = useRef(0);
 
     // Refresh cached auth details (called on warmup, not on mic click)
     const refreshAuth = useCallback(async () => {
@@ -141,6 +150,7 @@ export function useVoiceMode() {
         }
         audioBufferRef.current = [];
         audioLevelsRef.current = [];
+        audioPeakRef.current = 0;
         setInterimText('');
         transcriptBufferRef.current = '';
         interimRef.current = '';
@@ -155,6 +165,7 @@ export function useVoiceMode() {
         setInterimText('');
         audioBufferRef.current = [];
         audioLevelsRef.current = [];
+        audioPeakRef.current = 0;
 
         // Show listening immediately — don't wait for WebSocket
         setState('listening');
@@ -213,11 +224,15 @@ export function useVoiceMode() {
                 int16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
                 sumSquares += s * s;
             }
-            // Record this frame's loudness for the live waveform. Cap the history
-            // so a long recording can't grow it unbounded (~128ms/frame here).
+            // Record this frame's loudness for the live waveform, auto-gained against
+            // a running peak so bar heights accurately reflect the voice's dynamics.
+            // Instant attack (a louder frame raises the peak immediately), slow
+            // release (PEAK_DECAY), floored at MIN_PEAK so silence stays flat.
             const rms = Math.sqrt(sumSquares / float32.length);
+            const peak = Math.max(rms, audioPeakRef.current * PEAK_DECAY, MIN_PEAK);
+            audioPeakRef.current = peak;
             const levels = audioLevelsRef.current;
-            levels.push(rms);
+            levels.push(rms / peak);
             if (levels.length > MAX_AUDIO_LEVELS) {
                 levels.splice(0, levels.length - MAX_AUDIO_LEVELS);
             }

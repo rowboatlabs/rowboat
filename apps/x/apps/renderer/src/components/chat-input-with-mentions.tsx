@@ -1347,14 +1347,14 @@ function ChatInputInner({
 const WAVE_BAR_WIDTH = 3 // px
 const WAVE_BAR_GAP = 2 // px
 const WAVE_BAR_PITCH = WAVE_BAR_WIDTH + WAVE_BAR_GAP
-const WAVE_BAR_MIN = 2 // px — floor so silence still shows a faint line
+const WAVE_BAR_MIN = 1.5 // px — floor so silence still shows a faint line
 const WAVE_BAR_MAX = 18 // px — fits inside the h-5 (20px) row
-const WAVE_GAIN = 2.8 // amplifies typically-small speech RMS into the visible range
+const WAVE_CURVE = 0.8 // <1 lifts quiet speech slightly; near-linear keeps loud peaks tall
 
 function waveBarHeight(level: number): number {
-  // sqrt curve maps the small dynamic range of speech RMS onto something
-  // perceptually even, then clamp into [WAVE_BAR_MIN, WAVE_BAR_MAX].
-  const amp = Math.min(1, Math.sqrt(Math.max(0, level)) * WAVE_GAIN)
+  // `level` is already auto-gained to ~0..1 in the hook, so map it close to linearly
+  // (a gentle curve) — louder voice ⇒ visibly taller bar, quiet ⇒ short.
+  const amp = Math.min(1, Math.max(0, level)) ** WAVE_CURVE
   return WAVE_BAR_MIN + amp * (WAVE_BAR_MAX - WAVE_BAR_MIN)
 }
 
