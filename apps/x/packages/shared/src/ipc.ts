@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { RelPath, Encoding, Stat, DirEntry, ReaddirOptions, ReadFileResult, WorkspaceChangeEvent, WriteFileOptions, WriteFileResult, RemoveOptions } from './workspace.js';
 import { ListToolsResponse } from './mcp.js';
 import { AskHumanResponsePayload, CreateRunOptions, Run, ListRunsResponse, ToolPermissionAuthorizePayload } from './runs.js';
-import { LlmModelConfig } from './models.js';
+import { LlmModelConfig, LlmProvider } from './models.js';
 import { AgentScheduleConfig, AgentScheduleEntry } from './agent-schedule.js';
 import { AgentScheduleState } from './agent-schedule-state.js';
 import { ServiceEvent } from './service-events.js';
@@ -400,6 +400,16 @@ const ipcSchemas = {
     req: LlmModelConfig,
     res: z.object({
       success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  'models:listForProvider': {
+    req: z.object({
+      provider: LlmProvider,
+    }),
+    res: z.object({
+      success: z.boolean(),
+      models: z.array(z.string()).optional(),
       error: z.string().optional(),
     }),
   },

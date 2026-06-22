@@ -2,13 +2,6 @@ import { Loader2, CheckCircle2, ArrowLeft, X, Lightbulb } from "lucide-react"
 import { motion } from "motion/react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 import {
   OpenAIIcon,
@@ -40,16 +33,22 @@ const moreProviders: Array<{ id: LlmProviderFlavor; name: string; description: s
 
 export function LlmSetupStep({ state }: LlmSetupStepProps) {
   const {
-    llmProvider, setLlmProvider, modelsCatalog, modelsLoading, modelsError,
+    llmProvider, setLlmProvider, modelsLoading, modelsError,
     activeConfig, testState, setTestState, showApiKey,
-    showBaseURL, isLocalProvider, canTest, showMoreProviders, setShowMoreProviders,
+    showBaseURL, canTest, showMoreProviders, setShowMoreProviders,
     updateProviderConfig, handleTestAndSaveLlmConfig, handleBack,
     upsellDismissed, setUpsellDismissed, handleSwitchToRowboat,
   } = state
 
   const isMoreProvider = moreProviders.some(p => p.id === llmProvider)
-  const modelsForProvider = modelsCatalog[llmProvider] || []
-  const showModelInput = isLocalProvider || modelsForProvider.length === 0
+  // Hosted providers (openai/anthropic/google) get a default model, so we only
+  // ask for a model on providers that truly need one (local/custom/gateway),
+  // or as a fallback if no model is set yet.
+  // Hosted providers (openai/anthropic/google) fetch their models from the API
+  // key on test, so they never need a manual model field. Only local/custom/
+  // gateway providers, where the user must specify a model, show the input.
+  const hostedProviders: LlmProviderFlavor[] = ["openai", "anthropic", "google"]
+  const showModelInput = !hostedProviders.includes(llmProvider)
 
   const renderProviderCard = (provider: typeof primaryProviders[0], index: number) => {
     const isSelected = llmProvider === provider.id
@@ -87,7 +86,7 @@ export function LlmSetupStep({ state }: LlmSetupStepProps) {
     <div className="flex flex-col flex-1">
       {/* Title */}
       <h2 className="text-3xl font-bold tracking-tight text-center mb-2">
-        Choose your model
+        Choose your provider
       </h2>
       <p className="text-base text-muted-foreground text-center mb-6">
         Select a provider and configure your API key
@@ -145,153 +144,33 @@ export function LlmSetupStep({ state }: LlmSetupStepProps) {
       {/* Separator */}
       <div className="h-px bg-border my-4" />
 
-      {/* Model configuration */}
+      {/* Provider configuration */}
       <div className="space-y-4">
-        <h3 className="text-sm font-semibold">Model Configuration</h3>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div className="space-y-2 min-w-0">
+        {/* Cloud providers get a default model auto-selected; only local/custom
+            providers (no catalog) need a model here. Users can pick any of the
+            provider's models later in the chat view. */}
+        {showModelInput && (
+          <div className="space-y-2">
             <label className="text-xs font-medium text-muted-foreground">
-              Assistant Model
+              Model
             </label>
             {modelsLoading ? (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="size-4 animate-spin" />
                 Loading...
               </div>
-            ) : showModelInput ? (
+            ) : (
               <Input
                 value={activeConfig.model}
                 onChange={(e) => updateProviderConfig(llmProvider, { model: e.target.value })}
                 placeholder="Enter model"
               />
-            ) : (
-              <Select
-                value={activeConfig.model}
-                onValueChange={(value) => updateProviderConfig(llmProvider, { model: value })}
-              >
-                <SelectTrigger className="w-full truncate">
-                  <SelectValue placeholder="Select a model" />
-                </SelectTrigger>
-                <SelectContent>
-                  {modelsForProvider.map((model) => (
-                    <SelectItem key={model.id} value={model.id}>
-                      {model.name || model.id}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             )}
             {modelsError && (
               <div className="text-xs text-destructive">{modelsError}</div>
             )}
           </div>
-
-          <div className="space-y-2 min-w-0">
-            <label className="text-xs font-medium text-muted-foreground">
-              Knowledge Graph Model
-            </label>
-            {modelsLoading ? (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="size-4 animate-spin" />
-                Loading...
-              </div>
-            ) : showModelInput ? (
-              <Input
-                value={activeConfig.knowledgeGraphModel}
-                onChange={(e) => updateProviderConfig(llmProvider, { knowledgeGraphModel: e.target.value })}
-                placeholder={activeConfig.model || "Enter model"}
-              />
-            ) : (
-              <Select
-                value={activeConfig.knowledgeGraphModel || "__same__"}
-                onValueChange={(value) => updateProviderConfig(llmProvider, { knowledgeGraphModel: value === "__same__" ? "" : value })}
-              >
-                <SelectTrigger className="w-full truncate">
-                  <SelectValue placeholder="Select a model" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__same__">Same as assistant</SelectItem>
-                  {modelsForProvider.map((model) => (
-                    <SelectItem key={model.id} value={model.id}>
-                      {model.name || model.id}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-          </div>
-
-          <div className="space-y-2 min-w-0">
-            <label className="text-xs font-medium text-muted-foreground">
-              Meeting Notes Model
-            </label>
-            {modelsLoading ? (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="size-4 animate-spin" />
-                Loading...
-              </div>
-            ) : showModelInput ? (
-              <Input
-                value={activeConfig.meetingNotesModel}
-                onChange={(e) => updateProviderConfig(llmProvider, { meetingNotesModel: e.target.value })}
-                placeholder={activeConfig.model || "Enter model"}
-              />
-            ) : (
-              <Select
-                value={activeConfig.meetingNotesModel || "__same__"}
-                onValueChange={(value) => updateProviderConfig(llmProvider, { meetingNotesModel: value === "__same__" ? "" : value })}
-              >
-                <SelectTrigger className="w-full truncate">
-                  <SelectValue placeholder="Select a model" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__same__">Same as assistant</SelectItem>
-                  {modelsForProvider.map((model) => (
-                    <SelectItem key={model.id} value={model.id}>
-                      {model.name || model.id}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-          </div>
-
-          <div className="space-y-2 min-w-0">
-            <label className="text-xs font-medium text-muted-foreground">
-              Track Block Model
-            </label>
-            {modelsLoading ? (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="size-4 animate-spin" />
-                Loading...
-              </div>
-            ) : showModelInput ? (
-              <Input
-                value={activeConfig.liveNoteAgentModel}
-                onChange={(e) => updateProviderConfig(llmProvider, { liveNoteAgentModel: e.target.value })}
-                placeholder={activeConfig.model || "Enter model"}
-              />
-            ) : (
-              <Select
-                value={activeConfig.liveNoteAgentModel || "__same__"}
-                onValueChange={(value) => updateProviderConfig(llmProvider, { liveNoteAgentModel: value === "__same__" ? "" : value })}
-              >
-                <SelectTrigger className="w-full truncate">
-                  <SelectValue placeholder="Select a model" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__same__">Same as assistant</SelectItem>
-                  {modelsForProvider.map((model) => (
-                    <SelectItem key={model.id} value={model.id}>
-                      {model.name || model.id}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-          </div>
-        </div>
+        )}
 
         {showApiKey && (
           <div className="space-y-2">
