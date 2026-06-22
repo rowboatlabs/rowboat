@@ -6193,6 +6193,7 @@ function App() {
                             isRecording={isActive && isRecording}
                             recordingText={isActive ? voice.interimText : undefined}
                             recordingState={isActive ? (voice.state === 'connecting' ? 'connecting' : 'listening') : undefined}
+                            audioLevelsRef={voice.audioLevelsRef}
                             onStartRecording={isActive ? handleStartRecording : undefined}
                             onSubmitRecording={isActive ? handleSubmitRecording : undefined}
                             onCancelRecording={isActive ? handleCancelRecording : undefined}
@@ -6301,6 +6302,7 @@ function App() {
                 isRecording={isRecording}
                 recordingText={voice.interimText}
                 recordingState={voice.state === 'connecting' ? 'connecting' : 'listening'}
+                audioLevelsRef={voice.audioLevelsRef}
                 onStartRecording={handleStartRecording}
                 onSubmitRecording={handleSubmitRecording}
                 onCancelRecording={handleCancelRecording}

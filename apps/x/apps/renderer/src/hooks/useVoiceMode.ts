@@ -20,6 +20,10 @@ const DEEPGRAM_PARAMS = new URLSearchParams({
 });
 const DEEPGRAM_LISTEN_URL = `wss://api.deepgram.com/v1/listen?${DEEPGRAM_PARAMS.toString()}`;
 
+// Cap on retained per-frame amplitude samples (~64ms/frame ⇒ ~5 min of history).
+// The waveform only ever displays the most recent window, so older samples are dropped.
+const MAX_AUDIO_LEVELS = 4800;
+
 // Cache auth details so we don't need IPC round-trips on every mic click
 let cachedAuth: { type: 'rowboat'; url: string; token: string } | { type: 'local'; apiKey: string } | null = null;
 
@@ -35,6 +39,10 @@ export function useVoiceMode() {
     const interimRef = useRef('');
     // Buffer audio chunks captured before the WebSocket is ready
     const audioBufferRef = useRef<ArrayBuffer[]>([]);
+    // Rolling history of per-frame mic amplitude (RMS, 0..~1), oldest first.
+    // Drives the live waveform — the UI reads this via requestAnimationFrame so
+    // amplitude updates never re-render the rest of the tree.
+    const audioLevelsRef = useRef<number[]>([]);
 
     // Refresh cached auth details (called on warmup, not on mic click)
     const refreshAuth = useCallback(async () => {
@@ -132,6 +140,7 @@ export function useVoiceMode() {
             wsRef.current = null;
         }
         audioBufferRef.current = [];
+        audioLevelsRef.current = [];
         setInterimText('');
         transcriptBufferRef.current = '';
         interimRef.current = '';
@@ -145,6 +154,7 @@ export function useVoiceMode() {
         interimRef.current = '';
         setInterimText('');
         audioBufferRef.current = [];
+        audioLevelsRef.current = [];
 
         // Show listening immediately — don't wait for WebSocket
         setState('listening');
@@ -188,15 +198,28 @@ export function useVoiceMode() {
         const audioCtx = new AudioContext({ sampleRate: 16000 });
         audioCtxRef.current = audioCtx;
         const source = audioCtx.createMediaStreamSource(stream);
-        const processor = audioCtx.createScriptProcessor(2048, 1, 1);
+        // 1024-sample frames (~64ms at 16kHz) — smaller than the usual 2048 so the
+        // waveform gets ~16 amplitude updates/sec, making bars appear faster and
+        // flow more smoothly. Still a comfortable chunk size for Deepgram streaming.
+        const processor = audioCtx.createScriptProcessor(1024, 1, 1);
         processorRef.current = processor;
 
         processor.onaudioprocess = (e) => {
             const float32 = e.inputBuffer.getChannelData(0);
             const int16 = new Int16Array(float32.length);
+            let sumSquares = 0;
             for (let i = 0; i < float32.length; i++) {
                 const s = Math.max(-1, Math.min(1, float32[i]));
                 int16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+                sumSquares += s * s;
+            }
+            // Record this frame's loudness for the live waveform. Cap the history
+            // so a long recording can't grow it unbounded (~128ms/frame here).
+            const rms = Math.sqrt(sumSquares / float32.length);
+            const levels = audioLevelsRef.current;
+            levels.push(rms);
+            if (levels.length > MAX_AUDIO_LEVELS) {
+                levels.splice(0, levels.length - MAX_AUDIO_LEVELS);
             }
             const buffer = int16.buffer;
             if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -232,5 +255,5 @@ export function useVoiceMode() {
         refreshAuth().catch(() => {});
     }, [refreshAuth]);
 
-    return { state, interimText, start, submit, cancel, warmup };
+    return { state, interimText, audioLevelsRef, start, submit, cancel, warmup };
 }

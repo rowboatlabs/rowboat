@@ -224,6 +224,8 @@ interface ChatInputInnerProps {
   isRecording?: boolean
   recordingText?: string
   recordingState?: 'connecting' | 'listening'
+  /** Live mic amplitude history (RMS per frame) driving the recording waveform. */
+  audioLevelsRef?: React.MutableRefObject<number[]>
   onStartRecording?: () => void
   onSubmitRecording?: () => void
   onCancelRecording?: () => void
@@ -260,7 +262,7 @@ function ChatInputInner({
   onDraftChange,
   isRecording,
   recordingText,
-  recordingState,
+  audioLevelsRef,
   onStartRecording,
   onSubmitRecording,
   onCancelRecording,
@@ -795,11 +797,10 @@ function ChatInputInner({
           >
             <X className="h-4 w-4" />
           </button>
-          <div className="flex flex-1 items-center gap-2 overflow-hidden">
-            <VoiceWaveform />
-            <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
-              {recordingState === 'connecting' ? 'Connecting...' : recordingText || 'Listening...'}
-            </span>
+          {/* Audio-reactive waveform only — the transcribed words are intentionally
+              not shown while recording; they're still captured and submitted. */}
+          <div className="flex flex-1 items-center overflow-hidden">
+            <VoiceWaveform audioLevelsRef={audioLevelsRef} />
           </div>
           <Button
             size="icon"
@@ -1339,22 +1340,89 @@ function ChatInputInner({
 }
 
 /** Animated waveform bars for the recording indicator */
-function VoiceWaveform() {
+// Live recording waveform. Each bar is one captured audio frame; bars accumulate
+// from the left and grow rightward until they fill the width, then scroll (oldest
+// drops off the left). Bar height tracks that frame's mic amplitude, so the
+// waveform visibly reacts to how loud the user is speaking.
+const WAVE_BAR_WIDTH = 3 // px
+const WAVE_BAR_GAP = 2 // px
+const WAVE_BAR_PITCH = WAVE_BAR_WIDTH + WAVE_BAR_GAP
+const WAVE_BAR_MIN = 2 // px — floor so silence still shows a faint line
+const WAVE_BAR_MAX = 18 // px — fits inside the h-5 (20px) row
+const WAVE_GAIN = 2.8 // amplifies typically-small speech RMS into the visible range
+
+function waveBarHeight(level: number): number {
+  // sqrt curve maps the small dynamic range of speech RMS onto something
+  // perceptually even, then clamp into [WAVE_BAR_MIN, WAVE_BAR_MAX].
+  const amp = Math.min(1, Math.sqrt(Math.max(0, level)) * WAVE_GAIN)
+  return WAVE_BAR_MIN + amp * (WAVE_BAR_MAX - WAVE_BAR_MIN)
+}
+
+function VoiceWaveform({ audioLevelsRef }: { audioLevelsRef?: React.MutableRefObject<number[]> }) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [bars, setBars] = useState<number[]>([])
+  // How many bars fit in the current width; recomputed on resize.
+  const maxBarsRef = useRef(48)
+
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const measure = () => {
+      maxBarsRef.current = Math.max(1, Math.floor(el.clientWidth / WAVE_BAR_PITCH))
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  useEffect(() => {
+    if (!audioLevelsRef) return
+    let raf = 0
+    let lastSig = ''
+    const tick = () => {
+      const levels = audioLevelsRef.current
+      const maxBars = maxBarsRef.current
+      const next = levels.length > maxBars ? levels.slice(levels.length - maxBars) : levels
+      // Only re-render when the visible window actually changed. Length covers
+      // the growth phase; the trailing value covers the scrolling phase once full.
+      const sig = `${next.length}:${next.length ? next[next.length - 1] : 0}`
+      if (sig !== lastSig) {
+        lastSig = sig
+        setBars(next.slice())
+      }
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [audioLevelsRef])
+
   return (
-    <div className="flex items-center gap-[3px] h-5">
-      {[0, 1, 2, 3, 4].map((i) => (
+    <div
+      ref={containerRef}
+      className="flex h-5 w-full items-center overflow-hidden"
+      style={{ gap: `${WAVE_BAR_GAP}px` }}
+    >
+      {/* Each newly-appended bar mounts with `voice-bar-in` (grows + fades in) so it
+          doesn't pop. Once the strip is full and values scroll through the bars, the
+          height transition makes them flow smoothly instead of stepping. */}
+      {bars.map((level, i) => (
         <span
           key={i}
-          className="w-[3px] rounded-full bg-primary"
+          className="shrink-0 rounded-full bg-primary"
           style={{
-            animation: `voice-wave 1.2s ease-in-out ${i * 0.15}s infinite`,
+            width: `${WAVE_BAR_WIDTH}px`,
+            height: `${waveBarHeight(level)}px`,
+            transformOrigin: 'center',
+            transition: 'height 90ms linear',
+            animation: 'voice-bar-in 130ms ease-out',
           }}
         />
       ))}
       <style>{`
-        @keyframes voice-wave {
-          0%, 100% { height: 4px; }
-          50% { height: 16px; }
+        @keyframes voice-bar-in {
+          from { transform: scaleY(0.15); opacity: 0; }
+          to { transform: scaleY(1); opacity: 1; }
         }
       `}</style>
     </div>
@@ -1378,6 +1446,7 @@ export interface ChatInputWithMentionsProps {
   isRecording?: boolean
   recordingText?: string
   recordingState?: 'connecting' | 'listening'
+  audioLevelsRef?: React.MutableRefObject<number[]>
   onStartRecording?: () => void
   onSubmitRecording?: () => void
   onCancelRecording?: () => void
@@ -1411,6 +1480,7 @@ export function ChatInputWithMentions({
   isRecording,
   recordingText,
   recordingState,
+  audioLevelsRef,
   onStartRecording,
   onSubmitRecording,
   onCancelRecording,
@@ -1441,6 +1511,7 @@ export function ChatInputWithMentions({
         isRecording={isRecording}
         recordingText={recordingText}
         recordingState={recordingState}
+        audioLevelsRef={audioLevelsRef}
         onStartRecording={onStartRecording}
         onSubmitRecording={onSubmitRecording}
         onCancelRecording={onCancelRecording}
