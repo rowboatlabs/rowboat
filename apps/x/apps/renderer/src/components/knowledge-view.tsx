@@ -234,14 +234,6 @@ export function KnowledgeView({
             />
           </div>
           <VoiceNoteButton onNoteCreated={onVoiceNoteCreated} />
-          <button
-            type="button"
-            onClick={() => actions.addGoogleDoc(currentFolder?.path)}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-accent"
-          >
-            <GoogleDriveIcon className="size-4" />
-            <span>Add Google Doc</span>
-          </button>
         </div>
       </div>
 
@@ -344,6 +336,7 @@ function QuickActions({
       <SectionHeader label="Quick actions" />
       <div className="flex flex-wrap gap-2">
         <QuickAction icon={FilePlus} label="New note" onClick={() => actions.createNote(parent)} />
+        <QuickAction icon={GoogleDriveIcon} label="Add Google Doc" onClick={() => actions.addGoogleDoc(parent)} />
         <QuickAction icon={SearchIcon} label="Search" onClick={onOpenSearch} />
         <QuickAction
           icon={FolderPlus}
@@ -397,7 +390,7 @@ function QuickAction({
   label,
   onClick,
 }: {
-  icon: typeof FilePlus
+  icon: typeof FilePlus | typeof GoogleDriveIcon
   label: string
   onClick: () => void
 }) {
