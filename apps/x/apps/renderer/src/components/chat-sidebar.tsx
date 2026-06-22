@@ -154,6 +154,7 @@ interface ChatSidebarProps {
   getInitialDraft?: (tabId: string) => string | undefined
   onDraftChangeForTab?: (tabId: string, text: string) => void
   onSelectedModelChangeForTab?: (tabId: string, model: SelectedModel | null) => void
+  onSwitchModelNewChatForTab?: (tabId: string, model: SelectedModel) => void
   workDirByTab?: Record<string, string | null>
   /** Composer locks for runs bound to Code-section sessions (cwd + agent frozen). */
   codeSessionLocks?: Record<string, { cwd: string; agent: 'claude' | 'codex' }>
@@ -223,6 +224,7 @@ export function ChatSidebar({
   getInitialDraft,
   onDraftChangeForTab,
   onSelectedModelChangeForTab,
+  onSwitchModelNewChatForTab,
   workDirByTab = {},
   codeSessionLocks = {},
   pinnedToCodeSession = null,
@@ -802,6 +804,7 @@ export function ChatSidebar({
                           initialDraft={getInitialDraft?.(tab.id)}
                           onDraftChange={onDraftChangeForTab ? (text) => onDraftChangeForTab(tab.id, text) : undefined}
                           onSelectedModelChange={onSelectedModelChangeForTab ? (m) => onSelectedModelChangeForTab(tab.id, m) : undefined}
+                          onSwitchModelNewChat={onSwitchModelNewChatForTab ? (m) => onSwitchModelNewChatForTab(tab.id, m) : undefined}
                           workDir={workDirByTab[tab.id] ?? null}
                           onWorkDirChange={onWorkDirChangeForTab ? (v) => onWorkDirChangeForTab(tab.id, v) : undefined}
                           codeSessionLock={tabState.runId ? codeSessionLocks[tabState.runId] ?? null : null}

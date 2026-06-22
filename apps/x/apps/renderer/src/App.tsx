@@ -6352,6 +6352,10 @@ function App() {
                                 selectedModelByTabRef.current.delete(tab.id)
                               }
                             }}
+                            onSwitchModelNewChat={(m) => {
+                              selectedModelByTabRef.current.set(tab.id, m)
+                              handleNewChatTab()
+                            }}
                             workDir={workDirByTab[tab.id] ?? null}
                             onWorkDirChange={(v) => setTabWorkDir(tab.id, v)}
                             isRecording={isActive && isRecording}
@@ -6439,6 +6443,10 @@ function App() {
                   } else {
                     selectedModelByTabRef.current.delete(tabId)
                   }
+                }}
+                onSwitchModelNewChatForTab={(tabId, m) => {
+                  selectedModelByTabRef.current.set(tabId, m)
+                  handleNewChatTabInSidebar()
                 }}
                 workDirByTab={workDirByTab}
                 onWorkDirChangeForTab={setTabWorkDir}

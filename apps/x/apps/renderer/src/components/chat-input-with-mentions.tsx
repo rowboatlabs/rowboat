@@ -237,6 +237,11 @@ interface ChatInputInnerProps {
   onTtsModeChange?: (mode: 'summary' | 'full') => void
   /** Fired when the user picks a different model in the dropdown (only when no run exists yet). */
   onSelectedModelChange?: (model: SelectedModel | null) => void
+  /**
+   * Fired when the user picks a *different* model on a chat that already has a run.
+   * A run's model is frozen, so this forks a fresh chat (in place) on the new model.
+   */
+  onSwitchModelNewChat?: (model: SelectedModel) => void
   /** Work directory for this chat (per-chat). Null when none is set. */
   workDir?: string | null
   /** Fired when the user sets/changes/clears the work directory for this chat. */
@@ -273,6 +278,7 @@ function ChatInputInner({
   onToggleTts,
   onTtsModeChange,
   onSelectedModelChange,
+  onSwitchModelNewChat,
   workDir = null,
   onWorkDirChange,
   codeSessionLock = null,
@@ -353,6 +359,7 @@ function ChatInputInner({
       if (cancelled) return
       if (run.provider && run.model) {
         setLockedModel({ provider: run.provider, model: run.model })
+        setActiveModelKey(`${run.provider}/${run.model}`)
       }
       setPermissionMode(run.permissionMode ?? 'manual')
     }).catch(() => { /* legacy run or fetch failure — leave unlocked */ })
@@ -637,15 +644,26 @@ function ChatInputInner({
     checkSearch()
   }, [isActive, isRowboatConnected])
 
-  // Selecting a model affects only the *next* run created from this tab.
-  // Once a run exists, model is frozen on the run and the dropdown is read-only.
+  // Before a run exists, selecting a model just sets the model for the *next* run
+  // created from this tab. Once a run exists its model is frozen, so picking a
+  // *different* model forks a fresh chat (in place) on the new model; re-picking
+  // the same model is a no-op.
   const handleModelChange = useCallback((key: string) => {
-    if (lockedModel) return
     const entry = configuredModels.find((m) => `${m.provider}/${m.model}` === key)
     if (!entry) return
+    if (lockedModel) {
+      if (`${lockedModel.provider}/${lockedModel.model}` === key) return
+      // Reflect the new model in the dropdown right away. The fork resets the run
+      // (runId→null clears lockedModel), at which point the dropdown falls back to
+      // activeModelKey — without this it would show the *old* run's model until the
+      // first message of the forked chat creates a run on the new model.
+      setActiveModelKey(key)
+      onSwitchModelNewChat?.({ provider: entry.provider, model: entry.model })
+      return
+    }
     setActiveModelKey(key)
     onSelectedModelChange?.({ provider: entry.provider, model: entry.model })
-  }, [configuredModels, lockedModel, onSelectedModelChange])
+  }, [configuredModels, lockedModel, onSelectedModelChange, onSwitchModelNewChat])
 
   // Restore the tab draft when this input mounts.
   useEffect(() => {
@@ -1228,18 +1246,7 @@ function ChatInputInner({
           </DropdownMenu>
         )}
         <div className="flex-1" />
-        {lockedModel ? (
-          <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
-            <TooltipTrigger asChild>
-              <span className="flex h-7 min-w-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground">
-                <span className="min-w-0 truncate">{getSelectedModelDisplayName(lockedModel.model)}</span>
-              </span>
-            </TooltipTrigger>
-            <TooltipContent side="top">
-              {providerDisplayNames[lockedModel.provider] || lockedModel.provider} — fixed for this chat
-            </TooltipContent>
-          </Tooltip>
-        ) : configuredModels.length > 0 ? (
+        {configuredModels.length > 0 ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
@@ -1247,13 +1254,18 @@ function ChatInputInner({
                 className="flex h-7 min-w-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               >
                 <span className="min-w-0 truncate">
-                  {getSelectedModelDisplayName(configuredModels.find((m) => `${m.provider}/${m.model}` === activeModelKey)?.model || configuredModels[0]?.model || 'Model')}
+                  {lockedModel
+                    ? getSelectedModelDisplayName(lockedModel.model)
+                    : getSelectedModelDisplayName(configuredModels.find((m) => `${m.provider}/${m.model}` === activeModelKey)?.model || configuredModels[0]?.model || 'Model')}
                 </span>
                 <ChevronDown className="h-3 w-3 shrink-0" />
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuRadioGroup value={activeModelKey} onValueChange={handleModelChange}>
+              <DropdownMenuRadioGroup
+                value={lockedModel ? `${lockedModel.provider}/${lockedModel.model}` : activeModelKey}
+                onValueChange={handleModelChange}
+              >
                 {configuredModels.map((m) => {
                   const key = `${m.provider}/${m.model}`
                   return (
@@ -1266,6 +1278,19 @@ function ChatInputInner({
               </DropdownMenuRadioGroup>
             </DropdownMenuContent>
           </DropdownMenu>
+        ) : lockedModel ? (
+          // Models not loaded yet but a run is locked — show its model read-only
+          // so the name never disappears.
+          <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
+            <TooltipTrigger asChild>
+              <span className="flex h-7 min-w-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground">
+                <span className="min-w-0 truncate">{getSelectedModelDisplayName(lockedModel.model)}</span>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              {providerDisplayNames[lockedModel.provider] || lockedModel.provider}
+            </TooltipContent>
+          </Tooltip>
         ) : null}
         {onToggleTts && ttsAvailable && (
           <div className="flex shrink-0 items-center">
@@ -1489,6 +1514,7 @@ export interface ChatInputWithMentionsProps {
   onToggleTts?: () => void
   onTtsModeChange?: (mode: 'summary' | 'full') => void
   onSelectedModelChange?: (model: SelectedModel | null) => void
+  onSwitchModelNewChat?: (model: SelectedModel) => void
   workDir?: string | null
   onWorkDirChange?: (value: string | null) => void
   /** Set when this chat is bound to a Code-section session — freezes workdir + agent. */
@@ -1523,6 +1549,7 @@ export function ChatInputWithMentions({
   onToggleTts,
   onTtsModeChange,
   onSelectedModelChange,
+  onSwitchModelNewChat,
   workDir,
   onWorkDirChange,
   codeSessionLock,
@@ -1554,6 +1581,7 @@ export function ChatInputWithMentions({
         onToggleTts={onToggleTts}
         onTtsModeChange={onTtsModeChange}
         onSelectedModelChange={onSelectedModelChange}
+        onSwitchModelNewChat={onSwitchModelNewChat}
         workDir={workDir}
         onWorkDirChange={onWorkDirChange}
         codeSessionLock={codeSessionLock}
