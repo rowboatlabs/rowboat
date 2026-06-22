@@ -5,6 +5,12 @@
 const path = require('path');
 const pkg = require('./package.json');
 
+// The Arch Linux (pacman) package is meant only for local builds on an Arch host
+// with makepkg. It already self-skips elsewhere (maker-pacman checks for makepkg),
+// but CI sets ROWBOAT_SKIP_PACMAN=1 to disable it explicitly — GitHub runners are
+// Ubuntu and shouldn't attempt to ship an Arch package.
+const SKIP_PACMAN = process.env.ROWBOAT_SKIP_PACMAN === '1';
+
 // Stage the ACP coding-adapters (@agentclientprotocol/*-acp) and their full
 // production dependency closure into the packaged app.
 //
@@ -178,7 +184,8 @@ module.exports = {
                 }
             }
         },
-        {
+        // Arch Linux package — local-only; disabled in CI via ROWBOAT_SKIP_PACMAN.
+        ...(SKIP_PACMAN ? [] : [{
             name: require.resolve('./makers/maker-pacman.cjs'),
             platforms: ['linux'],
             config: {
@@ -192,7 +199,7 @@ module.exports = {
                 icon: path.join(__dirname, 'icons/icon.png'),
                 mimeType: ['x-scheme-handler/rowboat'],
             }
-        },
+        }]),
         {
             name: '@electron-forge/maker-zip',
             platform: ["darwin", "win32", "linux"],
