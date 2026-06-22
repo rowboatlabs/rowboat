@@ -36,7 +36,8 @@ export function LlmSetupStep({ state }: LlmSetupStepProps) {
     llmProvider, setLlmProvider, modelsLoading, modelsError,
     activeConfig, testState, setTestState, showApiKey,
     showBaseURL, canTest, showMoreProviders, setShowMoreProviders,
-    updateProviderConfig, handleTestAndSaveLlmConfig, handleBack,
+    updateProviderConfig, handleTestAndSaveLlmConfig, handleTestAndAddAnother,
+    connectedFlavors, handleNext, handleBack,
     upsellDismissed, setUpsellDismissed, handleSwitchToRowboat,
   } = state
 
@@ -77,6 +78,9 @@ export function LlmSetupStep({ state }: LlmSetupStepProps) {
             <div className="text-sm font-semibold">{provider.name}</div>
             <div className="text-xs text-muted-foreground">{provider.description}</div>
           </div>
+          {connectedFlavors.has(provider.id) && (
+            <CheckCircle2 className="size-4 text-green-600 dark:text-green-400 ml-auto shrink-0" />
+          )}
         </div>
       </motion.button>
     )
@@ -232,14 +236,23 @@ export function LlmSetupStep({ state }: LlmSetupStepProps) {
             </span>
           )}
           <Button
-            onClick={handleTestAndSaveLlmConfig}
+            variant="outline"
+            onClick={handleTestAndAddAnother}
             disabled={!canTest || testState.status === "testing"}
+          >
+            Save & add another
+          </Button>
+          <Button
+            onClick={canTest ? handleTestAndSaveLlmConfig : handleNext}
+            disabled={testState.status === "testing" || (!canTest && connectedFlavors.size === 0)}
             className="min-w-[140px]"
           >
             {testState.status === "testing" ? (
               <><Loader2 className="size-4 animate-spin mr-2" />Testing...</>
-            ) : (
+            ) : (canTest || connectedFlavors.size === 0) ? (
               "Test & Continue"
+            ) : (
+              "Continue"
             )}
           </Button>
         </div>
