@@ -1159,6 +1159,34 @@ const ipcSchemas = {
       notes: z.string(),
     }),
   },
+  // Resolve a meeting's attendees against the knowledge base — returns each
+  // attendee's existing person note (or null). Deterministic, no LLM; powers
+  // the ambient "Next up" prep card.
+  'meeting-prep:resolve': {
+    req: z.object({
+      attendees: z.array(z.object({
+        email: z.string().optional(),
+        displayName: z.string().optional(),
+        self: z.boolean().optional(),
+      })),
+    }),
+    res: z.object({
+      attendees: z.array(z.object({
+        label: z.string(),
+        email: z.string().optional(),
+        displayName: z.string().optional(),
+        note: z.object({
+          path: z.string(),
+          name: z.string(),
+          role: z.string().optional(),
+          organization: z.string().optional(),
+          markdown: z.string(),
+        }).nullable(),
+      })),
+      matchedCount: z.number().int().nonnegative(),
+      unmatchedCount: z.number().int().nonnegative(),
+    }),
+  },
   // Inline task schedule classification
   'export:note': {
     req: z.object({

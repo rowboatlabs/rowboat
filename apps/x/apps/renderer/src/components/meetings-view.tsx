@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Calendar, ChevronDown, Clock, ExternalLink, Loader2, MapPin, Mic, Square, UserRound, UsersRound, Video, X } from 'lucide-react'
+import { Calendar, ChevronDown, ChevronRight, Clock, ExternalLink, FileText, Loader2, MapPin, Mic, Sparkles, Square, UserPlus, UserRound, UsersRound, Video, X } from 'lucide-react'
+import { Streamdown } from 'streamdown'
 
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -13,6 +14,32 @@ import type { MeetingTranscriptionState } from '@/hooks/useMeetingTranscription'
 const MEETINGS_ROOT = 'knowledge/Meetings'
 const CALENDAR_DIR = 'calendar_sync'
 const UPCOMING_MAX_DAYS = 4 // today + next 3
+
+declare global {
+  interface Window {
+    __pendingMeetingPrepCreate?: { prompt: string }
+  }
+}
+
+// Mirrors the `meeting-prep:resolve` IPC response shape.
+type PrepNote = {
+  path: string
+  name: string
+  role?: string
+  organization?: string
+  markdown: string
+}
+type PrepAttendee = {
+  label: string
+  email?: string
+  displayName?: string
+  note: PrepNote | null
+}
+type PrepResult = {
+  attendees: PrepAttendee[]
+  matchedCount: number
+  unmatchedCount: number
+}
 
 type MeetingNoteRow = {
   path: string
@@ -358,7 +385,158 @@ function parseDescriptionParts(value: string): DescriptionPart[] {
   }).filter((part) => part.text.length > 0)
 }
 
-function UpcomingEvents() {
+// Hand the unmatched attendee off to the Copilot to research + create a note.
+function requestCreateNote(attendee: PrepAttendee, meetingSummary: string) {
+  const who = attendee.displayName || attendee.label
+  const email = attendee.email ? ` <${attendee.email}>` : ''
+  window.__pendingMeetingPrepCreate = {
+    prompt: `Create a person note in my knowledge base for ${who}${email}. They're attending my "${meetingSummary}" meeting. Pull together what you know about them from my emails, past meetings, and calendar.`,
+  }
+  window.dispatchEvent(new Event('meeting-prep:create-note'))
+}
+
+function PrepAttendeeNote({ attendee, onOpenNote }: { attendee: PrepAttendee; onOpenNote: (path: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const note = attendee.note
+  if (!note) return null
+  const subtitle = [note.role, note.organization].filter(Boolean).join(' · ')
+
+  return (
+    <div className="border-b last:border-b-0">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-3 px-5 py-3 text-left transition-colors hover:bg-muted/50"
+      >
+        {open ? <ChevronDown className="size-4 shrink-0 text-muted-foreground" /> : <ChevronRight className="size-4 shrink-0 text-muted-foreground" />}
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate text-sm font-semibold text-foreground">{note.name}</span>
+          {subtitle ? <span className="truncate text-xs text-muted-foreground">{subtitle}</span> : null}
+        </span>
+      </button>
+      {open ? (
+        <div className="px-5 pb-4 pl-12">
+          <Streamdown className="prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-1.5 [&_ul]:my-1.5 [&_ol]:my-1.5">
+            {note.markdown}
+          </Streamdown>
+          <button
+            type="button"
+            onClick={() => onOpenNote(note.path)}
+            className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <FileText className="size-3.5" />
+            Open note
+          </button>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function PrepUnmatchedSection({ attendees, meetingSummary }: { attendees: PrepAttendee[]; meetingSummary: string }) {
+  const [open, setOpen] = useState(false)
+  if (attendees.length === 0) return null
+
+  return (
+    <div className="border-t bg-muted/20">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-3 px-5 py-2.5 text-left transition-colors hover:bg-muted/40"
+      >
+        {open ? <ChevronDown className="size-4 shrink-0 text-muted-foreground" /> : <ChevronRight className="size-4 shrink-0 text-muted-foreground" />}
+        <span className="text-xs font-medium text-muted-foreground">
+          {attendees.length} {attendees.length === 1 ? 'other' : 'others'} — no notes yet
+        </span>
+      </button>
+      {open ? (
+        <div className="flex flex-col gap-1 px-5 pb-3 pl-12">
+          {attendees.map((att, idx) => (
+            <div key={`${att.email ?? att.label}-${idx}`} className="flex items-center justify-between gap-3 py-1">
+              <span className="min-w-0 truncate text-sm text-foreground">{att.label}</span>
+              <button
+                type="button"
+                onClick={() => requestCreateNote(att, meetingSummary)}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-md border bg-background px-2 py-1 text-xs font-medium text-foreground transition-colors hover:bg-accent"
+              >
+                <UserPlus className="size-3.5" />
+                Create note
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+// Inline prep for a single event: resolves the attendees against the knowledge
+// base and renders their notes directly beneath the event row. Re-resolves when
+// a person note changes (e.g. after "Create note") so it stays fresh.
+function InlineMeetingPrep({ event, onOpenNote }: { event: UpcomingEvent; onOpenNote: (path: string) => void }) {
+  const [prep, setPrep] = useState<PrepResult | null>(null)
+  const [refreshTick, setRefreshTick] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    const run = async () => {
+      try {
+        const attendees = event.attendees.map((a) => ({ email: a.email, displayName: a.displayName, self: a.self }))
+        const result = await window.ipc.invoke('meeting-prep:resolve', { attendees })
+        if (!cancelled) setPrep(result)
+      } catch (err) {
+        console.error('Meeting prep failed:', err)
+        if (!cancelled) setPrep(null)
+      }
+    }
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [event.id, refreshTick])
+
+  // Refresh when a People note is created/changed so newly-created notes appear.
+  useEffect(() => {
+    const isPeoplePath = (p: string | undefined) =>
+      typeof p === 'string' && p.startsWith('knowledge/People/')
+    const cleanup = window.ipc.on('workspace:didChange', (e) => {
+      switch (e.type) {
+        case 'created':
+        case 'changed':
+        case 'deleted':
+          if (isPeoplePath(e.path)) setRefreshTick((t) => t + 1)
+          break
+        case 'moved':
+          if (isPeoplePath(e.from) || isPeoplePath(e.to)) setRefreshTick((t) => t + 1)
+          break
+        case 'bulkChanged':
+          if (!e.paths || e.paths.some(isPeoplePath)) setRefreshTick((t) => t + 1)
+          break
+      }
+    })
+    return cleanup
+  }, [])
+
+  if (!prep || prep.attendees.length === 0) return null
+
+  const matched = prep.attendees.filter((a) => a.note)
+  const unmatched = prep.attendees.filter((a) => !a.note)
+
+  return (
+    <div className="bg-muted/10">
+      <div className="flex items-center gap-1.5 px-5 pb-1 pt-2.5">
+        <Sparkles className="size-3.5 text-primary" />
+        <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Meeting prep</span>
+      </div>
+      {matched.map((att, idx) => (
+        <PrepAttendeeNote key={att.note!.path + idx} attendee={att} onOpenNote={onOpenNote} />
+      ))}
+      <PrepUnmatchedSection attendees={unmatched} meetingSummary={event.summary} />
+    </div>
+  )
+}
+
+function UpcomingEvents({ onOpenNote }: { onOpenNote: (path: string) => void }) {
   const [events, setEvents] = useState<UpcomingEvent[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -487,6 +665,20 @@ function UpcomingEvents() {
     return selectVisibleDays(window)
   }, [events])
 
+  // The next meeting that's worth prepping for — soonest timed event with at
+  // least one other attendee that hasn't ended. Its row gets inline prep.
+  // `events` is sorted (all-day first, then by start), so `find` returns it.
+  const prepEventId = useMemo(() => {
+    const nowMs = Date.now()
+    const candidate = events.find((ev) => {
+      if (ev.isAllDay) return false
+      if (ev.attendees.every((a) => a.self)) return false
+      const endMs = ev.end ? ev.end.getTime() : ev.start.getTime() + 30 * 60 * 1000
+      return endMs > nowMs
+    })
+    return candidate?.id ?? null
+  }, [events])
+
   const totalVisible = visibleDays.reduce((s, d) => s + d.events.length, 0)
   const now = new Date()
   const todayKey = localDateKey(now)
@@ -532,6 +724,8 @@ function UpcomingEvents() {
                 key={day.dateKey}
                 day={day}
                 isToday={day.dateKey === todayKey}
+                prepEventId={prepEventId}
+                onOpenNote={onOpenNote}
               />
             ))}
           </div>
@@ -542,7 +736,7 @@ function UpcomingEvents() {
   )
 }
 
-function UpcomingDayCard({ day, isToday }: { day: DayGroup; isToday: boolean }) {
+function UpcomingDayCard({ day, isToday, prepEventId, onOpenNote }: { day: DayGroup; isToday: boolean; prepEventId: string | null; onOpenNote: (path: string) => void }) {
   const dayNum = day.date.getDate()
   const month = day.date.toLocaleDateString([], { month: 'short' })
   const weekday = day.date.toLocaleDateString([], { weekday: 'short' })
@@ -573,7 +767,13 @@ function UpcomingDayCard({ day, isToday }: { day: DayGroup; isToday: boolean }) 
         </div>
       ) : (
         day.events.map((ev, idx) => (
-          <UpcomingEventItem key={ev.id} event={ev} isLast={idx === count - 1} />
+          <UpcomingEventItem
+            key={ev.id}
+            event={ev}
+            isLast={idx === count - 1}
+            isPrepTarget={ev.id === prepEventId}
+            onOpenNote={onOpenNote}
+          />
         ))
       )}
     </div>
@@ -588,7 +788,7 @@ function NowBadge() {
   )
 }
 
-function UpcomingEventItem({ event, isLast }: { event: UpcomingEvent; isLast: boolean }) {
+function UpcomingEventItem({ event, isLast, isPrepTarget, onOpenNote }: { event: UpcomingEvent; isLast: boolean; isPrepTarget: boolean; onOpenNote: (path: string) => void }) {
   const [open, setOpen] = useState(false)
   const isNow = isEventNow(event)
   const platform = meetingPlatformLabel(event.conferenceLink)
@@ -596,6 +796,7 @@ function UpcomingEventItem({ event, isLast }: { event: UpcomingEvent; isLast: bo
   const titleAndLocation = event.location ? `${event.summary} · ${event.location}` : event.summary
 
   return (
+    <div className={cn(!isLast && 'border-b')}>
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <div
@@ -604,7 +805,7 @@ function UpcomingEventItem({ event, isLast }: { event: UpcomingEvent; isLast: bo
           title={titleAndLocation}
           className={cn(
             'group flex w-full cursor-pointer items-center gap-4 px-5 py-3 text-left transition-colors',
-            !isLast && 'border-b',
+            isPrepTarget && 'border-b',
             isNow ? 'bg-muted' : 'hover:bg-muted/50',
           )}
         >
@@ -647,6 +848,8 @@ function UpcomingEventItem({ event, isLast }: { event: UpcomingEvent; isLast: bo
       </PopoverTrigger>
       <EventDetailsPopover event={event} onClose={() => setOpen(false)} />
     </Popover>
+    {isPrepTarget ? <InlineMeetingPrep event={event} onOpenNote={onOpenNote} /> : null}
+    </div>
   )
 }
 
@@ -1017,7 +1220,7 @@ export function MeetingsView({ onOpenNote, onTakeMeetingNotes, meetingState, mee
         </p>
       </div>
       <div className="flex-1 overflow-auto">
-        <UpcomingEvents />
+        <UpcomingEvents onOpenNote={onOpenNote} />
         <div className="p-6">
         {loading ? (
           <div className="flex items-center justify-center py-10">

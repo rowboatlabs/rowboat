@@ -62,6 +62,7 @@ import { IAgentScheduleRepo } from '@x/core/dist/agent-schedule/repo.js';
 import { IAgentScheduleStateRepo } from '@x/core/dist/agent-schedule/state-repo.js';
 import { triggerRun as triggerAgentScheduleRun } from '@x/core/dist/agent-schedule/runner.js';
 import { search } from '@x/core/dist/search/search.js';
+import { resolveMeetingPrep } from '@x/core/dist/knowledge/meeting_prep.js';
 import { versionHistory, voice } from '@x/core';
 import { classifySchedule, processRowboatInstruction } from '@x/core/dist/knowledge/inline_tasks.js';
 import { getBillingInfo } from '@x/core/dist/billing/billing.js';
@@ -1504,6 +1505,9 @@ export function setupIpcHandlers() {
     'meeting:summarize': async (_event, args) => {
       const notes = await summarizeMeeting(args.transcript, args.meetingStartTime, args.calendarEventJson);
       return { notes };
+    },
+    'meeting-prep:resolve': async (_event, args) => {
+      return resolveMeetingPrep(args.attendees);
     },
     'inline-task:classifySchedule': async (_event, args) => {
       const schedule = await classifySchedule(args.instruction);
