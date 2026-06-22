@@ -14,7 +14,7 @@ export async function identifyIfSignedIn(): Promise<void> {
     if (!billing.userId) return;
     identify(billing.userId, {
       ...(billing.userEmail ? { email: billing.userEmail } : {}),
-      plan: billing.subscriptionPlan,
+      plan: billing.subscriptionPlanId,
       status: billing.subscriptionStatus,
     });
   } catch (err) {

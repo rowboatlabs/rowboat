@@ -41,6 +41,7 @@ import type { ICodeProjectsRepo } from '@x/core/dist/code-mode/projects/repo.js'
 import type { ICodeSessionsRepo } from '@x/core/dist/code-mode/sessions/repo.js';
 import { CodeSessionService } from '@x/core/dist/code-mode/sessions/service.js';
 import { CodeSessionStatusTracker } from '@x/core/dist/code-mode/sessions/status-tracker.js';
+import type { CodeModeManager } from '@x/core/dist/code-mode/acp/manager.js';
 import * as codeGit from '@x/core/dist/code-mode/git/service.js';
 import { readProjectDir, readProjectFile } from '@x/core/dist/code-mode/projects/fs.js';
 import { ensureTerminal, writeTerminal, resizeTerminal, disposeTerminal } from './terminal.js';
@@ -981,6 +982,10 @@ export function setupIpcHandlers() {
       const service = container.resolve<CodeSessionService>('codeSessionService');
       return { session: await service.update(args.sessionId, args.patch) };
     },
+    'codeMode:listModelOptions': async (_event, args) => {
+      const manager = container.resolve<CodeModeManager>('codeModeManager');
+      return manager.listModelOptions(args.agent);
+    },
     'codeSession:delete': async (_event, args) => {
       const service = container.resolve<CodeSessionService>('codeSessionService');
       disposeTerminal(args.sessionId);
@@ -1015,12 +1020,22 @@ export function setupIpcHandlers() {
       if (!info.isGitRepo) {
         return { isRepo: false, branch: null, hasCommits: false, files: [] };
       }
-      const files = await codeGit.status(session.cwd);
+      let files = await codeGit.status(session.cwd);
+      if (session.worktree && !session.worktree.removedAt && session.worktree.baseBranch) {
+        const branchFiles = await codeGit.changedSinceBase(session.cwd, session.worktree.baseBranch);
+        const byPath = new Map(branchFiles.map((file) => [file.path, file]));
+        for (const file of files) {
+          if (!byPath.has(file.path)) byPath.set(file.path, file);
+        }
+        files = [...byPath.values()];
+      }
       return { isRepo: true, branch: info.branch, hasCommits: info.hasCommits, files };
     },
     'codeSession:fileDiff': async (_event, args) => {
       const session = await requireCodeSession(args.sessionId);
-      return codeGit.fileDiff(session.cwd, args.path);
+      return codeGit.fileDiff(session.cwd, args.path, {
+        baseRef: session.worktree && !session.worktree.removedAt ? session.worktree.baseBranch : null,
+      });
     },
     'codeSession:readdir': async (_event, args) => {
       const session = await requireCodeSession(args.sessionId);
@@ -1615,6 +1630,7 @@ export function setupIpcHandlers() {
           name: args.name,
           instructions: args.instructions,
           ...(args.triggers ? { triggers: args.triggers } : {}),
+          ...(args.projectId ? { projectId: args.projectId } : {}),
           ...(args.model ? { model: args.model } : {}),
           ...(args.provider ? { provider: args.provider } : {}),
         });

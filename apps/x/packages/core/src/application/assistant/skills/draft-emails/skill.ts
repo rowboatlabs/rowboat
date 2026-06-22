@@ -202,6 +202,7 @@ Subject: Re: {original_subject}
 **Drafting Guidelines:**
 - Draft ONE email - do not offer multiple versions or options unless explicitly asked
 - Be concise and professional
+- If you include a sign-off name, use only the user's first name, never their full name
 - For scheduling: propose specific times based on calendar availability
 - For inquiries: answer directly or indicate what info is needed
 - Reference any relevant context from memory naturally - show you remember past interactions

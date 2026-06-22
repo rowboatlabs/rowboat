@@ -21,7 +21,7 @@ import { BillingInfoSchema } from './billing.js';
 import { EmailBlockSchema, GmailThreadSchema } from './blocks.js';
 import { PermissionDecision, ApprovalPolicy, CodingAgent } from './code-mode.js';
 import { NotificationSettingsSchema } from './notification-settings.js';
-import { CodeProject, CodeSession, CodeSessionMode, CodeSessionStatus, GitRepoInfo, GitStatusFile } from './code-sessions.js';
+import { CodeProject, CodeSession, CodeSessionMode, CodeSessionStatus, GitRepoInfo, GitStatusFile, CodeAgentModelOptions } from './code-sessions.js';
 
 // ============================================================================
 // Runtime Validation Schemas (Single Source of Truth)
@@ -611,6 +611,10 @@ const ipcSchemas = {
       // chat, the model is fixed once the session's run exists.
       model: z.string().optional(),
       provider: z.string().optional(),
+      // The coding agent's own model + reasoning effort (ACP engine). Unlike the
+      // Rowboat model these are re-applied each turn, so they stay editable.
+      agentModel: z.string().optional(),
+      agentEffort: z.string().optional(),
     }),
     res: z.object({
       session: CodeSession,
@@ -626,11 +630,17 @@ const ipcSchemas = {
   'codeSession:update': {
     req: z.object({
       sessionId: z.string(),
-      patch: CodeSession.pick({ title: true, mode: true, policy: true, agent: true }).partial(),
+      patch: CodeSession.pick({ title: true, mode: true, policy: true, agent: true, agentModel: true, agentEffort: true }).partial(),
     }),
     res: z.object({
       session: CodeSession,
     }),
+  },
+  // Live model + effort choices for a coding agent, discovered from the engine
+  // (cached per agent in the main process). Mirrors what `/model` would show.
+  'codeMode:listModelOptions': {
+    req: z.object({ agent: CodingAgent }),
+    res: CodeAgentModelOptions,
   },
   'codeSession:delete': {
     req: z.object({
@@ -1309,6 +1319,7 @@ const ipcSchemas = {
       name: z.string(),
       instructions: z.string(),
       triggers: TriggersSchema.optional(),
+      projectId: z.string().optional(),
       model: z.string().optional(),
       provider: z.string().optional(),
     }),

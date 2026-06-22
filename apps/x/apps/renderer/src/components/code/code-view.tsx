@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Bot, ChevronDown, ChevronUp, Code2, GitBranch, Terminal as TerminalIcon } from 'lucide-react'
-import type { CodeSession, CodeSessionStatus } from '@x/shared/src/code-sessions.js'
+import type { CodeSession, CodeSessionStatus, CodeAgentModelOptions } from '@x/shared/src/code-sessions.js'
+import { fetchCodeAgentOptions, withDefault, optionLabel } from './code-agent-options'
 import type { ApprovalPolicy } from '@x/shared/src/code-mode.js'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -31,6 +32,16 @@ const TERMINAL_HEIGHT_STORAGE_KEY = 'x:code-terminal-height'
 const TERMINAL_MIN_HEIGHT = 120
 const TERMINAL_MAX_HEIGHT = 600
 
+// Remember which session was open so leaving the Code section (which unmounts
+// this view) and coming back restores the selection — and with it the chat
+// output in the right pane — instead of dropping back to the empty state.
+const SELECTED_SESSION_STORAGE_KEY = 'x:code-selected-session'
+
+function readStoredSelectedSessionId(): string | null {
+  if (typeof window === 'undefined') return null
+  return window.localStorage.getItem(SELECTED_SESSION_STORAGE_KEY) || null
+}
+
 function readStoredTerminalHeight(): number {
   if (typeof window === 'undefined') return 240
   const raw = Number(window.localStorage.getItem(TERMINAL_HEIGHT_STORAGE_KEY))
@@ -43,6 +54,11 @@ const POLICY_LABEL: Record<ApprovalPolicy, string> = {
   ask: 'Ask every time',
   'auto-approve-reads': 'Auto-approve reads',
   yolo: 'Auto-approve everything',
+}
+const POLICY_HEADER_LABEL: Record<ApprovalPolicy, string> = {
+  ask: 'Ask',
+  'auto-approve-reads': 'Auto reads',
+  yolo: 'Auto all',
 }
 
 export interface ActiveCodeSession {
@@ -65,7 +81,7 @@ export function CodeView({
   onDiffOpened?: () => void
 }) {
   const { projects, sessions, statusOf, refresh } = useCodeSessions()
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(readStoredSelectedSessionId)
   const [newSessionProjectId, setNewSessionProjectId] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<CodeSession | null>(null)
   const [terminalOpen, setTerminalOpen] = useState(false)
@@ -75,6 +91,11 @@ export function CodeView({
   useEffect(() => {
     window.localStorage.setItem(TERMINAL_HEIGHT_STORAGE_KEY, String(terminalHeight))
   }, [terminalHeight])
+
+  useEffect(() => {
+    if (selectedSessionId) window.localStorage.setItem(SELECTED_SESSION_STORAGE_KEY, selectedSessionId)
+    else window.localStorage.removeItem(SELECTED_SESSION_STORAGE_KEY)
+  }, [selectedSessionId])
 
   const handleTerminalDragStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -98,6 +119,17 @@ export function CodeView({
   const selectedSession = sessions.find((s) => s.id === selectedSessionId) ?? null
   const selectedStatus = selectedSession ? statusOf(selectedSession.id) : 'idle'
   const newSessionProject = projects.find((p) => p.project.id === newSessionProjectId) ?? null
+
+  // Live model/effort choices for the selected session's agent, for the header
+  // pickers. Discovered from the engine and cached, so this is cheap to re-run.
+  const [modelOpts, setModelOpts] = useState<CodeAgentModelOptions>({ models: [], efforts: [] })
+  const selectedAgent = selectedSession?.agent
+  useEffect(() => {
+    if (!selectedAgent) { setModelOpts({ models: [], efforts: [] }); return }
+    let cancelled = false
+    void fetchCodeAgentOptions(selectedAgent).then((opts) => { if (!cancelled) setModelOpts(opts) })
+    return () => { cancelled = true }
+  }, [selectedAgent])
 
   // Tell App which session (and status) owns the right-hand chat pane.
   useEffect(() => {
@@ -147,7 +179,7 @@ export function CodeView({
     }
   }, [refresh, selectedSessionId])
 
-  const handleUpdateSession = useCallback(async (patch: { mode?: 'direct' | 'rowboat'; policy?: ApprovalPolicy; agent?: 'claude' | 'codex' }) => {
+  const handleUpdateSession = useCallback(async (patch: { mode?: 'direct' | 'rowboat'; policy?: ApprovalPolicy; agent?: 'claude' | 'codex'; agentModel?: string; agentEffort?: string }) => {
     if (!selectedSessionId) return
     try {
       await window.ipc.invoke('codeSession:update', { sessionId: selectedSessionId, patch })
@@ -180,45 +212,97 @@ export function CodeView({
       <div className="flex min-w-0 flex-1 flex-col">
         {selectedSession ? (
           <>
-            <div className="flex items-center gap-3 border-b px-4 py-2">
-              <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-start gap-x-3 gap-y-2 border-b px-4 py-2.5">
+              <div className="min-w-64 flex-[1_1_360px]">
                 <div className="truncate text-sm font-medium">{selectedSession.title}</div>
-                <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                  <span>{AGENT_LABEL[selectedSession.agent]}</span>
-                  <span>·</span>
-                  <span className="truncate font-mono" title={selectedSession.cwd}>{selectedSession.cwd}</span>
+                <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+                  <span className="shrink-0 whitespace-nowrap">{AGENT_LABEL[selectedSession.agent]}</span>
+                  <span className="shrink-0 text-muted-foreground/50">·</span>
+                  <span className="min-w-0 max-w-full flex-1 truncate font-mono" title={selectedSession.cwd}>{selectedSession.cwd}</span>
                   {selectedSession.worktree && !selectedSession.worktree.removedAt && (
-                    <span className="flex shrink-0 items-center gap-1 rounded-full bg-muted px-1.5 py-0.5">
+                    <span className="flex min-w-0 max-w-72 shrink items-center gap-1 rounded-full bg-muted px-1.5 py-0.5">
                       <GitBranch className="size-3" />
-                      {selectedSession.worktree.branch}
+                      <span className="truncate">{selectedSession.worktree.branch}</span>
                     </span>
                   )}
                 </div>
               </div>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-muted-foreground">
-                    {POLICY_LABEL[selectedSession.policy]}
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  {(Object.keys(POLICY_LABEL) as ApprovalPolicy[]).map((policy) => (
-                    <DropdownMenuItem key={policy} onClick={() => void handleUpdateSession({ policy })}>
-                      {POLICY_LABEL[policy]}
-                      {selectedSession.policy === policy && <span className="ml-auto">✓</span>}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <label className="flex shrink-0 cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
-                <Bot className="size-3.5" />
-                Rowboat drives
-                <Switch
-                  checked={selectedSession.mode === 'rowboat'}
-                  disabled={busy}
-                  onCheckedChange={(checked) => void handleUpdateSession({ mode: checked ? 'rowboat' : 'direct' })}
-                />
-              </label>
+              <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
+                      title="Coding agent model"
+                    >
+                      <span className="whitespace-nowrap">{optionLabel(modelOpts.models, selectedSession.agentModel)}</span>
+                      <ChevronDown className="size-3" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="max-h-80 overflow-y-auto">
+                    {withDefault(modelOpts.models).map((m) => (
+                      <DropdownMenuItem key={m.value} onClick={() => void handleUpdateSession({ agentModel: m.value })}>
+                        {m.label}
+                        {(selectedSession.agentModel ?? 'default') === m.value && <span className="ml-auto">✓</span>}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                {modelOpts.efforts.length > 0 && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
+                        title="Reasoning effort"
+                      >
+                        <span className="whitespace-nowrap">{optionLabel(modelOpts.efforts, selectedSession.agentEffort)}</span>
+                        <ChevronDown className="size-3" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      {withDefault(modelOpts.efforts).map((e) => (
+                        <DropdownMenuItem key={e.value} onClick={() => void handleUpdateSession({ agentEffort: e.value })}>
+                          {e.label}
+                          {(selectedSession.agentEffort ?? 'default') === e.value && <span className="ml-auto">✓</span>}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
+                      title={POLICY_LABEL[selectedSession.policy]}
+                    >
+                      <span className="whitespace-nowrap">{POLICY_HEADER_LABEL[selectedSession.policy]}</span>
+                      <ChevronDown className="size-3" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    {(Object.keys(POLICY_LABEL) as ApprovalPolicy[]).map((policy) => (
+                      <DropdownMenuItem key={policy} onClick={() => void handleUpdateSession({ policy })}>
+                        {POLICY_LABEL[policy]}
+                        {selectedSession.policy === policy && <span className="ml-auto">✓</span>}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <label className="flex shrink-0 cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
+                  <Bot className="size-3.5" />
+                  <span className="whitespace-nowrap">Rowboat drives</span>
+                  <Switch
+                    checked={selectedSession.mode === 'rowboat'}
+                    disabled={busy}
+                    onCheckedChange={(checked) => void handleUpdateSession({ mode: checked ? 'rowboat' : 'direct' })}
+                  />
+                </label>
+              </div>
             </div>
             <div className="min-h-0 flex-1">
               <WorkspacePane

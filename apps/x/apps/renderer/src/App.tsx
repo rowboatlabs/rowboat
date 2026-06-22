@@ -30,7 +30,7 @@ import { BgTasksView } from '@/components/bg-tasks-view';
 import { EmailView } from '@/components/email-view';
 import { WorkspaceView } from '@/components/workspace-view';
 import { CodingRunBlock } from '@/components/coding-run';
-import { KnowledgeView } from '@/components/knowledge-view';
+import { KnowledgeView, type KnowledgeViewMode } from '@/components/knowledge-view';
 import { ChatHistoryView } from '@/components/chat-history-view';
 import { HomeView } from '@/components/home-view';
 import { MeetingsView } from '@/components/meetings-view';
@@ -591,7 +591,7 @@ type ViewState =
   | { type: 'live-notes' }
   | { type: 'email' }
   | { type: 'workspace'; path?: string }
-  | { type: 'knowledge-view'; folderPath?: string }
+  | { type: 'knowledge-view'; folderPath?: string; mode?: KnowledgeViewMode }
   | { type: 'chat-history' }
   | { type: 'home' }
   | { type: 'code' }
@@ -602,7 +602,7 @@ function viewStatesEqual(a: ViewState, b: ViewState): boolean {
   if (a.type === 'file' && b.type === 'file') return a.path === b.path
   if (a.type === 'task' && b.type === 'task') return a.name === b.name
   if (a.type === 'workspace' && b.type === 'workspace') return (a.path ?? '') === (b.path ?? '')
-  if (a.type === 'knowledge-view' && b.type === 'knowledge-view') return (a.folderPath ?? '') === (b.folderPath ?? '')
+  if (a.type === 'knowledge-view' && b.type === 'knowledge-view') return (a.folderPath ?? '') === (b.folderPath ?? '') && (a.mode ?? '') === (b.mode ?? '')
   return true // both graph
 }
 
@@ -652,7 +652,12 @@ function parseDeepLink(input: string): ViewState | null {
     }
     case 'knowledge-view': {
       const folderPath = params.get('folderPath')
-      return { type: 'knowledge-view', folderPath: folderPath ?? undefined }
+      const mode = params.get('mode')
+      return {
+        type: 'knowledge-view',
+        folderPath: folderPath ?? undefined,
+        mode: mode === 'graph' || mode === 'basis' || mode === 'files' ? mode : undefined,
+      }
     }
     case 'chat-history':
       return { type: 'chat-history' }
@@ -775,6 +780,7 @@ function App() {
   const [isWorkspaceOpen, setIsWorkspaceOpen] = useState(false)
   const [workspaceInitialPath, setWorkspaceInitialPath] = useState<string | null>(null)
   const [isKnowledgeViewOpen, setIsKnowledgeViewOpen] = useState(false)
+  const [knowledgeViewMode, setKnowledgeViewMode] = useState<KnowledgeViewMode>('graph')
   // Folder being browsed inside the knowledge view (null = root overview).
   // Lives in ViewState so folder drill-down participates in back/forward history.
   const [knowledgeViewFolderPath, setKnowledgeViewFolderPath] = useState<string | null>(null)
@@ -1197,7 +1203,7 @@ function App() {
     if (isBgTasksTabPath(tab.path)) return 'Background tasks'
     if (isEmailTabPath(tab.path)) return 'Email'
     if (isWorkspaceTabPath(tab.path)) return 'Workspace'
-    if (isKnowledgeViewTabPath(tab.path)) return 'Notes'
+    if (isKnowledgeViewTabPath(tab.path)) return 'Brain'
     if (isChatHistoryTabPath(tab.path)) return 'Chat history'
     if (isHomeTabPath(tab.path)) return 'Home'
     if (isCodeTabPath(tab.path)) return 'Code'
@@ -3627,14 +3633,14 @@ function App() {
     if (isLiveNotesOpen) return { type: 'live-notes' }
     if (isSuggestedTopicsOpen) return { type: 'suggested-topics' }
     if (isWorkspaceOpen) return { type: 'workspace', path: workspaceInitialPath ?? undefined }
-    if (isKnowledgeViewOpen) return { type: 'knowledge-view', folderPath: knowledgeViewFolderPath ?? undefined }
+    if (isKnowledgeViewOpen) return { type: 'knowledge-view', folderPath: knowledgeViewFolderPath ?? undefined, mode: knowledgeViewMode }
     if (isChatHistoryOpen) return { type: 'chat-history' }
     if (isHomeOpen) return { type: 'home' }
     if (isCodeOpen) return { type: 'code' }
     if (selectedPath) return { type: 'file', path: selectedPath }
     if (isGraphOpen) return { type: 'graph' }
     return { type: 'chat', runId }
-  }, [selectedBackgroundTask, isEmailOpen, isMeetingsOpen, isLiveNotesOpen, isBgTasksOpen, isSuggestedTopicsOpen, selectedPath, isGraphOpen, isWorkspaceOpen, isKnowledgeViewOpen, knowledgeViewFolderPath, isChatHistoryOpen, isHomeOpen, isCodeOpen, workspaceInitialPath, runId])
+  }, [selectedBackgroundTask, isEmailOpen, isMeetingsOpen, isLiveNotesOpen, isBgTasksOpen, isSuggestedTopicsOpen, selectedPath, isGraphOpen, isWorkspaceOpen, isKnowledgeViewOpen, knowledgeViewFolderPath, knowledgeViewMode, isChatHistoryOpen, isHomeOpen, isCodeOpen, workspaceInitialPath, runId])
 
   const appendUnique = useCallback((stack: ViewState[], entry: ViewState) => {
     const last = stack[stack.length - 1]
@@ -3997,6 +4003,7 @@ function App() {
         setIsEmailOpen(false)
         setIsWorkspaceOpen(false)
         setIsKnowledgeViewOpen(true)
+        setKnowledgeViewMode(view.mode ?? (view.folderPath ? 'files' : 'graph'))
         setKnowledgeViewFolderPath(view.folderPath ?? null)
         setIsChatHistoryOpen(false)
       setIsHomeOpen(false)
@@ -4223,10 +4230,9 @@ function App() {
     setBaseConfigByPath((prev) => ({ ...prev, [path]: config }))
   }, [])
 
-  const handleBaseSave = useCallback(async (name: string | null) => {
-    if (!selectedPath) return
-    const isDefault = selectedPath === BASES_DEFAULT_TAB_PATH
-    const config = baseConfigByPath[selectedPath] ?? DEFAULT_BASE_CONFIG
+  const handleBaseSave = useCallback(async (path: string, name: string | null) => {
+    const isDefault = path === BASES_DEFAULT_TAB_PATH
+    const config = baseConfigByPath[path] ?? DEFAULT_BASE_CONFIG
 
     if (isDefault && name) {
       // Save as new base file
@@ -4250,14 +4256,14 @@ function App() {
       // Save in place
       try {
         await window.ipc.invoke('workspace:writeFile', {
-          path: selectedPath,
+          path,
           data: JSON.stringify(config, null, 2),
         })
       } catch (err) {
         console.error('Failed to save base:', err)
       }
     }
-  }, [selectedPath, baseConfigByPath, loadDirectory, navigateToView])
+  }, [baseConfigByPath, loadDirectory, navigateToView])
 
   // External search set by app-navigation tool (passed to BasesView)
   const [externalBaseSearch, setExternalBaseSearch] = useState<string | undefined>(undefined)
@@ -5121,8 +5127,10 @@ function App() {
     },
   }), [knowledgeFiles, recentWikiFiles, openWikiLink, ensureWikiFile])
 
+  const isBrainGraphOpen = isKnowledgeViewOpen && knowledgeViewMode === 'graph'
+
   useEffect(() => {
-    if (!isGraphOpen) return
+    if (!isGraphOpen && !isBrainGraphOpen) return
     let cancelled = false
 
     const buildGraph = async () => {
@@ -5237,7 +5245,7 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [isGraphOpen, knowledgeFilePaths])
+  }, [isGraphOpen, isBrainGraphOpen, knowledgeFilePaths])
 
   const renderConversationItem = (
     item: ConversationItem,
@@ -5760,12 +5768,44 @@ function App() {
                       revealInFileManager: knowledgeActions.revealInFileManager,
                       onOpenInNewTab: knowledgeActions.onOpenInNewTab,
                     }}
+                    mode={knowledgeViewMode}
+                    onModeChange={setKnowledgeViewMode}
+                    graphContent={(
+                      <GraphView
+                        nodes={graphData.nodes}
+                        edges={graphData.edges}
+                        isLoading={false}
+                        error={graphStatus === 'error' ? (graphError ?? 'Failed to build graph') : null}
+                        onSelectNode={(path) => {
+                          navigateToFile(path)
+                        }}
+                      />
+                    )}
+                    basisContent={(
+                      <BasesView
+                        tree={tree}
+                        onSelectNote={(path) => navigateToFile(path)}
+                        config={baseConfigByPath[BASES_DEFAULT_TAB_PATH] ?? DEFAULT_BASE_CONFIG}
+                        onConfigChange={(cfg) => handleBaseConfigChange(BASES_DEFAULT_TAB_PATH, cfg)}
+                        isDefaultBase
+                        onSave={(name) => void handleBaseSave(BASES_DEFAULT_TAB_PATH, name)}
+                        externalSearch={externalBaseSearch}
+                        onExternalSearchConsumed={() => setExternalBaseSearch(undefined)}
+                        actions={{
+                          rename: knowledgeActions.rename,
+                          remove: knowledgeActions.remove,
+                          copyPath: knowledgeActions.copyPath,
+                          revealInFileManager: knowledgeActions.revealInFileManager,
+                        }}
+                      />
+                    )}
                     folderPath={knowledgeViewFolderPath}
-                    onNavigateFolder={(path) => { void navigateToView({ type: 'knowledge-view', folderPath: path ?? undefined }) }}
+                    onNavigateFolder={(path) => {
+                      setKnowledgeViewMode('files')
+                      void navigateToView({ type: 'knowledge-view', folderPath: path ?? undefined, mode: 'files' })
+                    }}
                     onOpenNote={(path) => navigateToFile(path)}
-                    onOpenGraph={() => knowledgeActions.openGraph()}
                     onOpenSearch={() => { setSearchDefaultScope('knowledge'); setIsSearchOpen(true) }}
-                    onOpenBases={() => knowledgeActions.openBases()}
                     onVoiceNoteCreated={handleVoiceNoteCreated}
                   />
                 </div>
@@ -5796,7 +5836,7 @@ function App() {
                     config={baseConfigByPath[selectedPath] ?? DEFAULT_BASE_CONFIG}
                     onConfigChange={(cfg) => handleBaseConfigChange(selectedPath, cfg)}
                     isDefaultBase={selectedPath === BASES_DEFAULT_TAB_PATH}
-                    onSave={(name) => void handleBaseSave(name)}
+                    onSave={(name) => void handleBaseSave(selectedPath, name)}
                     externalSearch={externalBaseSearch}
                     onExternalSearchConsumed={() => setExternalBaseSearch(undefined)}
                     actions={{

@@ -6,6 +6,7 @@ import container from '../../di/container.js';
 import { IGranolaConfigRepo } from './repo.js';
 import { serviceLogger } from '../../services/service_logger.js';
 import { limitEventItems } from '../limit_event_items.js';
+import { publishMeetingNotesReadyEvent } from '../meeting-events.js';
 import {
     GetDocumentsResponse,
     SyncState,
@@ -439,6 +440,14 @@ async function syncNotes(): Promise<void> {
                 } else {
                     console.log(`[Granola] Saved: ${filename}`);
                     newCount++;
+                    // First-time write only — don't re-fire on later edits to the
+                    // same note (Granola notes update live).
+                    await publishMeetingNotesReadyEvent({
+                        source: 'granola',
+                        title: docTitle,
+                        filePath,
+                        when: docDate.toISOString(),
+                    });
                 }
 
                 // Update state

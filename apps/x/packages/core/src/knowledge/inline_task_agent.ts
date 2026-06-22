@@ -166,7 +166,7 @@ If there are events, include them:
 1. Use \`file-list\` with path \`gmail_sync\` to list files (skip \`sync_state.json\` and \`attachments/\`)
 2. Use \`file-readText\` to read the email markdown files (e.g. \`gmail_sync/threadid123.md\`)
 3. Check the frontmatter \`action\` field — emails with \`action: reply\` or \`action: respond\` need a response
-4. Output ALL emails (both action items and FYI) in a single \\\`\\\`\\\`emails block as a JSON array. Emails needing a response get a \`draft_response\`. Write drafts in the user's voice — direct, informal, no fluff. Example:
+4. Output ALL emails (both action items and FYI) in a single \\\`\\\`\\\`emails block as a JSON array. Emails needing a response get a \`draft_response\`. Write drafts in the user's voice — direct, informal, no fluff. If a draft includes a sign-off name, use only the user's first name, never their full name. Example:
 
 \`\`\`
 \\\`\\\`\\\`emails
