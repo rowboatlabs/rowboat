@@ -26,18 +26,13 @@
 </p>
 
 # Rowboat  
-**Open-source AI coworker that turns work into a knowledge graph and acts on it**
+**Open-source alternative to Claude Desktop that builds a knowledge graph from work.**
 
 </h5>
 
-Rowboat connects to your email and meeting notes, builds a long-lived knowledge graph, and uses that context to help you get work done - privately, on your machine.
+Rowboat turns your work into a living, editable knowlege graph and has built-in 'work-surfaces' for effective human-AI collaboration.
 
-You can do things like:
-- `Build me a deck about our next quarter roadmap` → generates a PDF using context from your knowledge graph
-- `Prep me for my meeting with Alex` → pulls past decisions, open questions, and relevant threads into a crisp brief (or a voice note)
-- Track a person, company or topic through live notes
-- Visualize, edit, and update your knowledge graph anytime (it’s just Markdown)
-- Record voice memos that automatically capture and update key takeaways in the graph
+Brain
 
 Download latest for Mac/Windows/Linux: [Download](https://www.rowboatlabs.com/downloads)
 
@@ -49,7 +44,66 @@ Download latest for Mac/Windows/Linux: [Download](https://www.rowboatlabs.com/do
 [Watch the full video](https://www.youtube.com/watch?v=7xTpciZCfpw)
 
 ---
+## Features
 
+<table>
+<tr>
+<td width="40%" valign="middle">
+<h3>Brain</h3>
+Rowboat indexes email, meetings, slack and assistant conversations into a living Obsidian-style backlined knowledge graph. 
+</td>
+<td width="60%">
+<img width="1512" height="948" alt="Screenshot 2026-06-23 at 10 34 37 PM" src="https://github.com/user-attachments/assets/aa6cc14c-2ed7-418c-a949-531f8ca64b59" />
+</td>
+</tr>
+<tr>
+<td width="40%" valign="middle">
+<h3>Email</h3>
+The built-in email client sorts emails into important and everthing else. Rowboat automatically drafts responses for important email using all the work context.
+</td>
+<td width="60%">
+<img width="1512" height="948" alt="Screenshot 2026-06-23 at 10 35 51 PM" src="https://github.com/user-attachments/assets/4392b3ca-cc4c-473a-849a-eea0e97388f2" />
+</td>
+</tr>
+<tr>
+<td width="40%" valign="middle">
+<h3>Background agents</h3>
+You can setup background agents that run on events like new email or on schedule like very day at 8am. They can connect to tools, search the web, use the browser and write code using Claude Code or Codex.  
+</td>
+<td width="60%">
+<img width="1512" height="951" alt="Screenshot 2026-06-23 at 10 44 11 PM" src="https://github.com/user-attachments/assets/5b73a3c3-f0d3-4151-83e7-0997457074e6" />
+
+</td>
+</tr>
+<tr>
+<td width="40%" valign="middle">
+<h3>Built-in Browser</h3>
+Rowboat includes an browser that lets you and assistant collaborate on web tasks. Because its isolated from your main browser, you can log in only to the accounts that want the assistant to access. 
+</td>
+<td width="60%">
+<img width="1512" height="948" alt="Screenshot 2026-06-23 at 11 02 14 PM" src="https://github.com/user-attachments/assets/ce04871f-4477-40eb-8310-13ef7f125b11" />
+</td>
+</tr>
+<tr>
+<td width="40%" valign="middle">
+<h3>SSH</h3>
+<code>cmux ssh user@remote</code> creates a workspace for a remote machine. Browser panes route through the remote network so localhost just works. Drag an image into a remote session to upload via scp.
+</td>
+<td width="60%">
+<img src="./docs/assets/ssh.png" alt="cmux SSH" width="100%" />
+</td>
+</tr>
+<tr>
+<td width="40%" valign="middle">
+<h3>Claude Code Teams</h3>
+<code>cmux claude-teams</code> runs Claude Code's teammate mode with one command. Teammates spawn as native splits with sidebar metadata and notifications. No tmux required.
+</td>
+<td width="60%">
+<img src="./docs/assets/claude-code-teams.png" alt="Claude Code Teams" width="100%" />
+</td>
+</tr>
+</table>
+---
 ## Installation
 
 **Download latest for Mac/Windows/Linux:** [Download](https://www.rowboatlabs.com/downloads)
