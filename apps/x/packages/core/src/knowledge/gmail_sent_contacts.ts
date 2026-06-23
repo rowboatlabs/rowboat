@@ -7,6 +7,7 @@ import { WorkDir } from '../config/config.js';
 import { GoogleClientFactory } from './google-client-factory.js';
 import { getUserEmail } from './classify_thread.js';
 import { isAutomatedAddress } from './contact_filters.js';
+import { withGoogleApiLogging } from './google-api-call-log.js';
 
 const STATE_FILE = path.join(WorkDir, 'contacts_sent.json');
 const RECENCY_HALFLIFE_DAYS = 60;
@@ -192,7 +193,7 @@ async function processInBatches<T>(items: T[], size: number, fn: (item: T) => Pr
 }
 
 async function fullSync(auth: OAuth2Client, selfEmail: string): Promise<{ map: Map<string, IndexEntry>; historyId: string | null }> {
-    const client = google.gmail({ version: 'v1', auth });
+    const client = withGoogleApiLogging(google.gmail({ version: 'v1', auth }), 'gmail');
 
     // Lock in the current historyId BEFORE we start listing, so any messages
     // sent during the sync get caught by the next incremental run.
@@ -231,7 +232,7 @@ async function incrementalSync(
     startHistoryId: string,
     map: Map<string, IndexEntry>,
 ): Promise<{ historyId: string | null; added: number } | null> {
-    const client = google.gmail({ version: 'v1', auth });
+    const client = withGoogleApiLogging(google.gmail({ version: 'v1', auth }), 'gmail');
     const added: string[] = [];
     let pageToken: string | undefined;
     let latestHistoryId: string | null = null;

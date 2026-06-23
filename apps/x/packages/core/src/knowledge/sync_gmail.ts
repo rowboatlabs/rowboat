@@ -10,6 +10,7 @@ import { limitEventItems } from './limit_event_items.js';
 import { createEvent } from '../events/producer.js';
 import { classifyThread, getUserEmail } from './classify_thread.js';
 import { notifyIfEnabled } from '../application/notification/notifier.js';
+import { withGoogleApiLogging } from './google-api-call-log.js';
 
 // Configuration
 const SYNC_DIR = path.join(WorkDir, 'gmail_sync');
@@ -30,6 +31,7 @@ const SYNC_INTERVAL_MS = 30 * 1000; // Check every 30 seconds
 const REQUIRED_SCOPE = 'https://www.googleapis.com/auth/gmail.modify';
 const MAX_THREADS_IN_DIGEST = 10;
 const RECENT_BACKFILL_INTERVAL_MS = 15 * 60 * 1000;
+const INBOX_PRUNE_INTERVAL_MS = 30 * 60 * 1000;
 const nhm = new NodeHtmlMarkdown();
 
 // Bump whenever snapshot-building logic changes in a way that should invalidate
@@ -98,7 +100,7 @@ function deleteCachedSnapshot(threadId: string): void {
 async function getGmailClientOrThrow() {
     const auth = await GoogleClientFactory.getClient();
     if (!auth) throw new Error('Gmail is not connected.');
-    return google.gmail({ version: 'v1', auth });
+    return withGoogleApiLogging(google.gmail({ version: 'v1', auth }), 'gmail');
 }
 
 export interface ThreadActionResult {
@@ -660,7 +662,7 @@ export async function listRecentThreadIds(daysAgo: number = 2): Promise<RecentTh
         throw new Error('Gmail is not connected.');
     }
 
-    const gmailClient = google.gmail({ version: 'v1', auth });
+    const gmailClient = withGoogleApiLogging(google.gmail({ version: 'v1', auth }), 'gmail');
     const since = new Date();
     since.setDate(since.getDate() - daysAgo);
     const dateQuery = since.toISOString().split('T')[0].replace(/-/g, '/');
@@ -852,7 +854,7 @@ async function saveAttachment(gmail: gmail.Gmail, userId: string, msgId: string,
 // --- Sync Logic ---
 
 async function processThread(auth: OAuth2Client, threadId: string, syncDir: string, attachmentsDir: string): Promise<SyncedThread | null> {
-    const gmail = google.gmail({ version: 'v1', auth });
+    const gmail = withGoogleApiLogging(google.gmail({ version: 'v1', auth }), 'gmail');
     try {
         const res = await gmail.users.threads.get({ userId: 'me', id: threadId });
         const thread = res.data;
@@ -940,14 +942,14 @@ async function processThread(auth: OAuth2Client, threadId: string, syncDir: stri
 }
 
 /**
- * After a sync cycle, prune inbox_lists/ entries for threadIds that are
- * no longer in INBOX (archived/trashed elsewhere). Single threads.list call,
- * keeps the cache in lock-step with Gmail's INBOX label.
+ * Fallback cleanup for inbox_lists/ entries whose threads are no longer in
+ * INBOX. This can walk many Gmail pages, so normal external archive/trash
+ * changes are handled through history.labelRemoved instead.
  */
 async function pruneInboxCache(auth: OAuth2Client): Promise<void> {
     if (!fs.existsSync(CACHE_DIR)) return;
     try {
-        const gmailClient = google.gmail({ version: 'v1', auth });
+        const gmailClient = withGoogleApiLogging(google.gmail({ version: 'v1', auth }), 'gmail');
         const inInbox = new Set<string>();
         let pageToken: string | undefined;
         do {
@@ -979,7 +981,7 @@ async function pruneInboxCache(auth: OAuth2Client): Promise<void> {
     }
 }
 
-function loadState(stateFile: string): { historyId?: string; last_sync?: string; last_recent_backfill?: string } {
+function loadState(stateFile: string): { historyId?: string; last_sync?: string; last_recent_backfill?: string; last_inbox_prune?: string } {
     if (fs.existsSync(stateFile)) {
         return JSON.parse(fs.readFileSync(stateFile, 'utf-8'));
     }
@@ -992,6 +994,15 @@ function saveState(historyId: string, stateFile: string, extra: { last_recent_ba
         historyId,
         last_sync: new Date().toISOString(),
         last_recent_backfill: extra.last_recent_backfill ?? previous.last_recent_backfill,
+        last_inbox_prune: previous.last_inbox_prune,
+        ...extra,
+    }, null, 2));
+}
+
+function updateStateMetadata(stateFile: string, extra: { last_inbox_prune?: string }) {
+    const previous = loadState(stateFile);
+    fs.writeFileSync(stateFile, JSON.stringify({
+        ...previous,
         ...extra,
     }, null, 2));
 }
@@ -1045,6 +1056,20 @@ function shouldRunRecentBackfill(stateFile: string): boolean {
     return Date.now() - lastRunMs >= RECENT_BACKFILL_INTERVAL_MS;
 }
 
+function shouldPruneInboxCache(stateFile: string): boolean {
+    const state = loadState(stateFile);
+    if (!state.last_inbox_prune) return true;
+    const lastRunMs = new Date(state.last_inbox_prune).getTime();
+    if (!Number.isFinite(lastRunMs)) return true;
+    return Date.now() - lastRunMs >= INBOX_PRUNE_INTERVAL_MS;
+}
+
+async function pruneInboxCacheIfDue(auth: OAuth2Client, stateFile: string): Promise<void> {
+    if (!shouldPruneInboxCache(stateFile)) return;
+    await pruneInboxCache(auth);
+    updateStateMetadata(stateFile, { last_inbox_prune: new Date().toISOString() });
+}
+
 async function backfillMissingRecentThreads(
     auth: OAuth2Client,
     syncDir: string,
@@ -1054,7 +1079,7 @@ async function backfillMissingRecentThreads(
 ): Promise<SyncedThread[]> {
     if (!shouldRunRecentBackfill(stateFile)) return [];
 
-    const gmailClient = google.gmail({ version: 'v1', auth });
+    const gmailClient = withGoogleApiLogging(google.gmail({ version: 'v1', auth }), 'gmail');
     const recentThreads = await listRecentNonDeletedThreadIds(gmailClient, lookbackDays);
     const missingThreadIds = recentThreads
         .map((thread) => thread.threadId)
@@ -1076,7 +1101,7 @@ async function backfillMissingRecentThreads(
 }
 
 async function fullSync(auth: OAuth2Client, syncDir: string, attachmentsDir: string, stateFile: string, lookbackDays: number) {
-    const gmail = google.gmail({ version: 'v1', auth });
+    const gmail = withGoogleApiLogging(google.gmail({ version: 'v1', auth }), 'gmail');
 
     // If the state file holds a last_sync timestamp (e.g. left over from a
     // prior Composio sync, or from a previous successful native sync that
@@ -1202,7 +1227,7 @@ async function fullSync(auth: OAuth2Client, syncDir: string, attachmentsDir: str
 
 async function partialSync(auth: OAuth2Client, startHistoryId: string, syncDir: string, attachmentsDir: string, stateFile: string, lookbackDays: number) {
     console.log(`Checking updates since historyId ${startHistoryId}...`);
-    const gmail = google.gmail({ version: 'v1', auth });
+    const gmail = withGoogleApiLogging(google.gmail({ version: 'v1', auth }), 'gmail');
 
     let run: ServiceRunContext | null = null;
     const ensureRun = async () => {
@@ -1222,7 +1247,7 @@ async function partialSync(auth: OAuth2Client, startHistoryId: string, syncDir: 
             const res = await gmail.users.history.list({
                 userId: 'me',
                 startHistoryId,
-                historyTypes: ['messageAdded'],
+                historyTypes: ['messageAdded', 'labelRemoved'],
                 maxResults: 500,
                 pageToken,
             });
@@ -1243,6 +1268,14 @@ async function partialSync(auth: OAuth2Client, startHistoryId: string, syncDir: 
         const threadIds = new Set<string>();
 
         for (const record of changes) {
+            for (const item of record.labelsRemoved ?? []) {
+                const labels = item.labelIds ?? [];
+                const threadId = item.message?.threadId;
+                if (threadId && labels.includes('INBOX')) {
+                    deleteCachedSnapshot(threadId);
+                }
+            }
+
             if (record.messagesAdded) {
                 for (const item of record.messagesAdded) {
                     const labels = item.message?.labelIds ?? [];
@@ -1384,9 +1417,10 @@ async function performSync() {
             await partialSync(auth, state.historyId, SYNC_DIR, ATTACHMENTS_DIR, STATE_FILE, LOOKBACK_DAYS);
         }
 
-        // Keep inbox_lists/ in lock-step with Gmail's INBOX label —
-        // remove cache files for threads that were archived/trashed elsewhere.
-        await pruneInboxCache(auth);
+        // Keep inbox_lists/ eventually in lock-step with Gmail's INBOX label.
+        // This walks every INBOX page, so run it as throttled maintenance; in-app
+        // archive/trash actions already delete their cache entries immediately.
+        await pruneInboxCacheIfDue(auth, STATE_FILE);
 
         console.log("Sync completed.");
     } catch (error) {
@@ -1443,7 +1477,7 @@ export async function getAccountName(): Promise<string | null> {
     try {
         const auth = await GoogleClientFactory.getClient();
         if (!auth) return null;
-        const gmailClient = google.gmail({ version: 'v1', auth });
+        const gmailClient = withGoogleApiLogging(google.gmail({ version: 'v1', auth }), 'gmail');
         const list = await gmailClient.users.messages.list({ userId: 'me', labelIds: ['SENT'], maxResults: 1 });
         const id = list.data.messages?.[0]?.id;
         if (!id) {
@@ -1523,7 +1557,7 @@ export async function sendThreadReply(opts: SendReplyOptions): Promise<SendReply
         const auth = await GoogleClientFactory.getClient();
         if (!auth) return { error: 'Gmail is not connected.' };
 
-        const gmailClient = google.gmail({ version: 'v1', auth });
+        const gmailClient = withGoogleApiLogging(google.gmail({ version: 'v1', auth }), 'gmail');
         const userEmail = await getUserEmail(auth);
         if (!userEmail) return { error: 'Could not determine your Gmail address.' };
 

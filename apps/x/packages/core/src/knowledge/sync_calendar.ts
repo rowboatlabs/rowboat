@@ -8,6 +8,7 @@ import { GoogleClientFactory } from './google-client-factory.js';
 import { serviceLogger } from '../services/service_logger.js';
 import { limitEventItems } from './limit_event_items.js';
 import { createEvent } from '../events/producer.js';
+import { withGoogleApiLogging } from './google-api-call-log.js';
 
 const MAX_EVENTS_IN_DIGEST = 50;
 const MAX_DESCRIPTION_CHARS = 500;
@@ -308,8 +309,8 @@ async function syncCalendarWindow(auth: OAuth2Client, syncDir: string, lookbackD
 
     console.log(`Syncing calendar from ${timeMin} to ${timeMax} (lookback: ${lookbackDays} days)...`);
 
-    const calendar = google.calendar({ version: 'v3', auth });
-    const drive = google.drive({ version: 'v3', auth });
+    const calendar = withGoogleApiLogging(google.calendar({ version: 'v3', auth }), 'calendar');
+    const drive = withGoogleApiLogging(google.drive({ version: 'v3', auth }), 'drive');
 
     let runId: string | null = null;
     let runStartedAt = 0;

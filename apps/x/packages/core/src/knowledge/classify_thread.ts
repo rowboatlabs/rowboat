@@ -14,6 +14,7 @@ import {
 import { captureLlmUsage } from '../analytics/usage.js';
 import { withUseCase } from '../analytics/use_case.js';
 import type { GmailThreadSnapshot } from './sync_gmail.js';
+import { withGoogleApiLogging } from './google-api-call-log.js';
 
 const STYLE_GUIDE_PATH = path.join(WorkDir, 'knowledge', 'Agent Notes', 'style', 'email.md');
 const CALENDAR_DIR = path.join(WorkDir, 'calendar_sync');
@@ -88,7 +89,7 @@ let cachedUserEmail: string | null = null;
 export async function getUserEmail(auth: OAuth2Client): Promise<string | null> {
     if (cachedUserEmail) return cachedUserEmail;
     try {
-        const gmailClient = google.gmail({ version: 'v1', auth });
+        const gmailClient = withGoogleApiLogging(google.gmail({ version: 'v1', auth }), 'gmail');
         const res = await gmailClient.users.getProfile({ userId: 'me' });
         if (res.data.emailAddress) {
             cachedUserEmail = res.data.emailAddress.toLowerCase();

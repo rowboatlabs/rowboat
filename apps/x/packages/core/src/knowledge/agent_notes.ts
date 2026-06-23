@@ -8,6 +8,7 @@ import { getErrorDetails, waitForRunCompletion } from '../agents/utils.js';
 import { serviceLogger } from '../services/service_logger.js';
 import { loadUserConfig, updateUserEmail } from '../config/user_config.js';
 import { GoogleClientFactory } from './google-client-factory.js';
+import { withGoogleApiLogging } from './google-api-call-log.js';
 import {
     loadAgentNotesState,
     saveAgentNotesState,
@@ -201,7 +202,7 @@ async function ensureUserEmail(): Promise<string | null> {
     try {
         const auth = await GoogleClientFactory.getClient();
         if (auth) {
-            const gmail = google.gmail({ version: 'v1', auth });
+            const gmail = withGoogleApiLogging(google.gmail({ version: 'v1', auth }), 'gmail');
             const profile = await gmail.users.getProfile({ userId: 'me' });
             if (profile.data.emailAddress) {
                 updateUserEmail(profile.data.emailAddress);
