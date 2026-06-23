@@ -99,6 +99,7 @@ import { getAccessToken } from "../../auth/tokens.js";
 import { API_URL } from "../../config/env.js";
 import type { IBrowserControlService } from "../browser-control/service.js";
 import type { INotificationService } from "../notification/service.js";
+import { notifyIfEnabled } from "../notification/notifier.js";
 // Parser libraries are loaded dynamically inside parseFile.execute()
 // to avoid pulling pdfjs-dist's DOM polyfills into the main bundle.
 // Import paths are computed so esbuild cannot statically resolve them.
@@ -1659,13 +1660,44 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 return false;
             }
         },
-        execute: async ({ title, message, link, actionLabel, secondaryActions }: { title?: string; message: string; link?: string; actionLabel?: string; secondaryActions?: Array<{ label: string; link: string }> }) => {
+        execute: async ({ title, message, link, actionLabel, secondaryActions }: { title?: string; message: string; link?: string; actionLabel?: string; secondaryActions?: Array<{ label: string; link: string }> }, ctx?: ToolContext) => {
             try {
                 const service = container.resolve<INotificationService>('notificationService');
                 if (!service.isSupported()) {
                     return { success: false, error: 'Notifications are not supported on this system' };
                 }
-                service.notify({ title, message, link, actionLabel, secondaryActions });
+                let uc = getCurrentUseCase()?.useCase;
+                // ALS doesn't reliably propagate across the run's async generator,
+                // so when the in-context use-case is missing, fall back to the
+                // persisted use case on the run record via ctx.runId.
+                if (!uc && ctx?.runId) {
+                    try {
+                        const { fetchRun } = await import("../../runs/runs.js");
+                        const run = await fetchRun(ctx.runId);
+                        uc = run.useCase;
+                    } catch {
+                        // best effort — fall through to the default branch
+                    }
+                }
+                if (uc === 'background_task_agent') {
+                    // User-configured background agent: gate behind the
+                    // background_task category (toggleable), suppress the reopen
+                    // flood, and default the deep-link to the background tasks
+                    // page if the agent didn't supply its own link.
+                    await notifyIfEnabled('background_task', {
+                        title,
+                        message,
+                        link: link ?? 'rowboat://open?type=bg-tasks',
+                        actionLabel,
+                        secondaryActions,
+                        suppressDuringStartupGrace: true,
+                        onlyWhenBackground: true,
+                    });
+                } else {
+                    // Regular chat (or any other) agent calling notify-user:
+                    // notify directly as before.
+                    service.notify({ title, message, link, actionLabel, secondaryActions });
+                }
                 return { success: true };
             } catch (error) {
                 return {

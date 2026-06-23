@@ -448,6 +448,20 @@ export class AgentRuntime implements IAgentRuntime {
                         finalState.ingest(event);
                     }
                     if (finalState.getPendingPermissions().length === 0) {
+                        // This generic completion ping is only for real user
+                        // chats (copilot_chat). Skip it for:
+                        //  - knowledge_sync: an internal, auto-running agent
+                        //    (knowledge-graph generation) that never notifies at
+                        //    all and has no user-facing chat to "Open".
+                        //  - background_task_agent: a user-configured agent that
+                        //    DOES notify, but exclusively through its own
+                        //    notify-user path; firing this ping too would
+                        //    duplicate that notification.
+                        // (The finally block still runs on this early return.)
+                        if (
+                            finalState.runUseCase === "knowledge_sync" ||
+                            finalState.runUseCase === "background_task_agent"
+                        ) return;
                         void notifyIfEnabled("chat_completion", {
                             title: "Response ready",
                             message: "Your agent finished responding.",

@@ -222,19 +222,39 @@ function summarizeGmailSync(threads: SyncedThread[]): string {
 }
 
 /**
+ * A "new email" notification for a message older than this is treated as a
+ * stale backlog item — e.g. Gmail replaying history after the app reopens from
+ * a long offline period — and suppressed, so a reopen doesn't surface day-old
+ * mail as if it just arrived.
+ */
+export const NEW_EMAIL_MAX_AGE_MS = 5 * 60 * 1000;
+
+/**
+ * True when an email is too old to be worth a "new email" ping. A `dateMs` of 0
+ * means the age couldn't be determined, in which case we err toward notifying
+ * rather than risk silently dropping genuinely-new mail.
+ */
+export function isEmailTooOldToNotify(dateMs: number, now: number = Date.now()): boolean {
+    return dateMs > 0 && now - dateMs > NEW_EMAIL_MAX_AGE_MS;
+}
+
+/**
  * Fire one OS notification per genuinely-new email thread. Only ever called
  * from the partial-sync (incremental) path, so the first-time connect — which
- * goes through fullSync — never notifies. Suppressed while the app is focused.
+ * goes through fullSync — never notifies. Suppressed while the app is focused,
+ * and for stale backlog (see isEmailTooOldToNotify).
  */
 function notifyNewEmails(threads: SyncedThread[]): void {
+    const now = Date.now();
     for (const { threadId } of threads) {
         const snapshot = readCachedSnapshot(threadId)?.snapshot;
+        if (snapshot && isEmailTooOldToNotify(snapshotDateMs(snapshot), now)) continue;
         const subject = snapshot?.subject?.trim() || '(no subject)';
         const from = snapshot?.from?.trim();
         void notifyIfEnabled('new_email', {
             title: from ? `New email from ${from}` : 'New email',
             message: subject,
-            link: 'rowboat://open?type=chat',
+            link: `rowboat://open?type=email&threadId=${threadId}`,
             actionLabel: 'Open',
             onlyWhenBackground: true,
         });

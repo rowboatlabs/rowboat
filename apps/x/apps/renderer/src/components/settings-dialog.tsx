@@ -2075,7 +2075,7 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
 
 // --- Notification Settings ---
 
-type NotificationCategoryKey = "chat_completion" | "new_email" | "agent_permission"
+type NotificationCategoryKey = "chat_completion" | "new_email" | "agent_permission" | "background_task"
 
 const NOTIFICATION_CATEGORIES: { key: NotificationCategoryKey; label: string; description: string }[] = [
   {
@@ -2092,6 +2092,11 @@ const NOTIFICATION_CATEGORIES: { key: NotificationCategoryKey; label: string; de
     key: "agent_permission",
     label: "Permission requests",
     description: "When an agent needs your approval to run a tool. Always shown, even when the app is focused.",
+  },
+  {
+    key: "background_task",
+    label: "Background agents",
+    description: "When a background agent you've set up has something to surface. Click to open it on the background tasks page.",
   },
 ]
 
