@@ -86,24 +86,26 @@ Rowboat includes an browser that lets you and assistant collaborate on web tasks
 </tr>
 <tr>
 <td width="40%" valign="middle">
-<h3>SSH</h3>
-<code>cmux ssh user@remote</code> creates a workspace for a remote machine. Browser panes route through the remote network so localhost just works. Drag an image into a remote session to upload via scp.
+<h3>Meeting Notes</h3>
+A local meeting note-taker that taps into mic & speaker, take live transcript and summarizes the meeting in a markdown file and updates the knowledge graph. 
 </td>
 <td width="60%">
-<img src="./docs/assets/ssh.png" alt="cmux SSH" width="100%" />
+<img width="1512" height="947" alt="Screenshot 2026-06-23 at 11 47 02 PM" src="https://github.com/user-attachments/assets/c3729952-3c75-4c84-88e0-2a9070136502" />
 </td>
 </tr>
 <tr>
 <td width="40%" valign="middle">
-<h3>Claude Code Teams</h3>
-<code>cmux claude-teams</code> runs Claude Code's teammate mode with one command. Teammates spawn as native splits with sidebar metadata and notifications. No tmux required.
+<h3>Code Mode</h3>
+Code mode lets you spin up parallel coding agents with Claude Code or Codex, and have Rowboat drive them with all the work context where needed.
 </td>
 <td width="60%">
-<img src="./docs/assets/claude-code-teams.png" alt="Claude Code Teams" width="100%" />
+<img width="1512" height="949" alt="Screenshot 2026-06-24 at 12 02 31 AM" src="https://github.com/user-attachments/assets/306618b5-9aaf-4ef8-9117-91ea58e5e4e7" />
 </td>
 </tr>
 </table>
+
 ---
+
 ## Installation
 
 **Download latest for Mac/Windows/Linux:** [Download](https://www.rowboatlabs.com/downloads)
