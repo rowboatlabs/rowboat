@@ -49,7 +49,7 @@ Download latest for Mac/Windows/Linux: [Download](https://www.rowboatlabs.com/do
 <tr>
 <td width="40%" valign="middle">
 <h3>Brain</h3>
-Rowboat indexes email, meetings, slack and assistant conversations into a living Obsidian-style backlined knowledge graph. 
+Rowboat indexes email, meetings, slack and assistant conversations into a living Obsidian-style backlinked knowledge graph. 
 </td>
 <td width="60%">
 <img width="1512" height="948" alt="Screenshot 2026-06-23 at 10 34 37 PM" src="https://github.com/user-attachments/assets/aa6cc14c-2ed7-418c-a949-531f8ca64b59" />
@@ -58,7 +58,7 @@ Rowboat indexes email, meetings, slack and assistant conversations into a living
 <tr>
 <td width="40%" valign="middle">
 <h3>Email</h3>
-The built-in email client sorts emails into important and everthing else. Rowboat automatically drafts responses for important email using all the work context.
+The built-in email client sorts emails into important and everything else. Rowboat automatically drafts responses for important email using all the work context.
 </td>
 <td width="60%">
 <img width="1512" height="948" alt="Screenshot 2026-06-23 at 10 35 51 PM" src="https://github.com/user-attachments/assets/4392b3ca-cc4c-473a-849a-eea0e97388f2" />
@@ -67,7 +67,7 @@ The built-in email client sorts emails into important and everthing else. Rowboa
 <tr>
 <td width="40%" valign="middle">
 <h3>Background agents</h3>
-You can setup background agents that run on events like new email or on schedule like very day at 8am. They can connect to tools, search the web, use the browser and write code using Claude Code or Codex.  
+You can set up background agents that run on events like new email or on schedule like every day at 8am. They can connect to tools, search the web, use the browser and write code using Claude Code or Codex.  
 </td>
 <td width="60%">
 <img width="1512" height="951" alt="Screenshot 2026-06-23 at 10 44 11 PM" src="https://github.com/user-attachments/assets/5b73a3c3-f0d3-4151-83e7-0997457074e6" />
@@ -77,7 +77,7 @@ You can setup background agents that run on events like new email or on schedule
 <tr>
 <td width="40%" valign="middle">
 <h3>Built-in Browser</h3>
-Rowboat includes an browser that lets you and assistant collaborate on web tasks. Because its isolated from your main browser, you can log in only to the accounts that want the assistant to access. 
+Rowboat includes a browser that lets you and assistant collaborate on web tasks. Because its isolated from your main browser, you can log in only to the accounts that want the assistant to access. 
 </td>
 <td width="60%">
 <img width="1512" height="948" alt="Screenshot 2026-06-23 at 11 02 14 PM" src="https://github.com/user-attachments/assets/ce04871f-4477-40eb-8310-13ef7f125b11" />
@@ -86,7 +86,7 @@ Rowboat includes an browser that lets you and assistant collaborate on web tasks
 <tr>
 <td width="40%" valign="middle">
 <h3>Meeting Notes</h3>
-A local meeting note-taker that taps into mic & speaker, take live transcript and summarizes the meeting in a markdown file and updates the knowledge graph. 
+A local meeting note-taker that taps into mic & speaker, produces live transcript and summarizes the meeting in a markdown file and updates the knowledge graph. 
 </td>
 <td width="60%">
 <img width="1512" height="947" alt="Screenshot 2026-06-23 at 11 47 02 PM" src="https://github.com/user-attachments/assets/c3729952-3c75-4c84-88e0-2a9070136502" />
