@@ -102,6 +102,16 @@ Code mode lets you spin up parallel coding agents with Claude Code or Codex, and
 <img width="1512" height="949" alt="Screenshot 2026-06-24 at 12 02 31 AM" src="https://github.com/user-attachments/assets/306618b5-9aaf-4ef8-9117-91ea58e5e4e7" />
 </td>
 </tr>
+<tr>
+<td width="40%" valign="middle">
+<h3>Integrations</h3>
+Includes one-click integrations to most popular products. 
+</td>
+<td width="60%">
+<img width="1512" height="948" alt="Screenshot 2026-06-24 at 12 06 14 AM" src="https://github.com/user-attachments/assets/402e89db-8229-468a-8881-a763b9f20ad9" />
+</td>
+</tr>
+
 </table>
 
 ---
