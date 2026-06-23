@@ -26,13 +26,12 @@
 </p>
 
 # Rowboat  
-**Open-source alternative to Claude Desktop that builds a knowledge graph from work.**
+**Open-source AI Coworker with self-updating knowledge graph and built-in work surfaces.**
 
 </h5>
 
-Rowboat turns your work into a living, editable knowlege graph and has built-in 'work-surfaces' for effective human-AI collaboration.
+Rowboat indexes your work into a living knowledge graph and uses that to get work done on your machine. It includes work surfaces for collaborating with AI: email client, notes, browser, code mode, meeting note taker, and workspaces for different projects. 
 
-Brain
 
 Download latest for Mac/Windows/Linux: [Download](https://www.rowboatlabs.com/downloads)
 
@@ -44,7 +43,7 @@ Download latest for Mac/Windows/Linux: [Download](https://www.rowboatlabs.com/do
 [Watch the full video](https://www.youtube.com/watch?v=7xTpciZCfpw)
 
 ---
-## Features
+## Overview
 
 <table>
 <tr>
@@ -147,23 +146,6 @@ All API key files use the same format:
 }
 ```
 
-## What it does
-
-Rowboat is a **local-first AI coworker** that can:
-- **Remember** the important context you don’t want to re-explain (people, projects, decisions, commitments)
-- **Understand** what’s relevant right now (before a meeting, while replying to an email, when writing a doc)
-- **Help you act** by drafting, summarizing, planning, and producing real artifacts (briefs, emails, docs, PDF slides)
-
-Under the hood, Rowboat maintains an **Obsidian-compatible vault** of plain Markdown notes with backlinks — a transparent “working memory” you can inspect and edit.
-
-## Integrations
-
-Rowboat builds memory from the work you already do, including:
-- **Gmail** (email)
-- **Google Calendar** 
-- **Rowboat meeting notes** or **Fireflies**
-
-It also contains a library of product integrations through Composio.dev
 
 ## How it’s different
 
@@ -176,24 +158,6 @@ Rowboat maintains **long-lived knowledge** instead:
 - everything lives on your machine as plain Markdown
 
 The result is memory that compounds, rather than retrieval that starts cold every time.
-
-## What you can do with it
-
-- **Meeting prep** from prior decisions, threads, and open questions
-- **Email drafting** grounded in history and commitments
-- **Docs & decks** generated from your ongoing context (including PDF slides)
-- **Follow-ups**: capture decisions, action items, and owners so nothing gets dropped
-- **On-your-machine help**: create files, summarize into notes, and run workflows using local tools (with explicit, reviewable actions)
-
-## Live notes
-
-Live notes are notes that stay updated automatically. You can create one by typing '@rowboat' on a note. 
-
-- Track a competitor or market topic across X, Reddit, and the news
-- Monitor a person, project, or deal across web or your communications
-- Keep a running summary of any subject you care about
-
-Everything is written back into your local Markdown vault. You control what runs and when.
 
 ## Bring your own model
 
