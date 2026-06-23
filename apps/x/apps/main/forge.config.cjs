@@ -20,53 +20,88 @@ const SKIP_PACMAN = process.env.ROWBOAT_SKIP_PACMAN === '1';
 // strips the workspace node_modules (see `ignore` below). Without this, packaged
 // builds throw `Cannot find module '@agentclientprotocol/...'`.
 //
-// Why we reconstruct a nested tree instead of copying node_modules: pnpm's store is a
+// Why we reconstruct the tree instead of copying node_modules: pnpm's store is a
 // symlink farm that legitimately holds multiple versions of the same package (e.g.
 // @agentclientprotocol/sdk 0.21 for claude vs 0.22 for codex). We rebuild an npm-style
-// nested node_modules — dereferencing symlinks and nesting on version conflict — which
-// resolves correctly regardless of pnpm layout.
+// node_modules — dereferencing symlinks — that resolves correctly regardless of pnpm
+// layout. We HOIST every package to the top-level node_modules and only nest a package
+// under its requirer on a genuine version conflict. Hoisting (vs. always nesting) keeps
+// the tree shallow: without it, transitive chains like codex-acp → open → wsl-utils →
+// is-wsl → is-inside-container → is-docker nest 5+ deep and produce ~260-char paths that
+// break the Windows Squirrel/nuget maker's MAX_PATH limit. Node resolution stays correct
+// because the top-level node_modules is an ancestor of every staged file, so a hoisted
+// package resolves for all requirers and a conflicting version shadows it via nesting.
+// verifyAcpStaging() below asserts this held for every dependency edge.
 //
 // What we DON'T bundle: the agents' native engines (claude / codex, ~200 MB each, shipped
 // as platform-specific packages). Those are PROVISIONED on demand into
 // ~/.rowboat/engines/<agent>/<version>/ and the adapters are pointed at them via
 // CLAUDE_CODE_EXECUTABLE / CODEX_PATH (see packages/core/src/code-mode/acp/). Skipping
 // them keeps each OS installer ~400 MB smaller while code mode stays fully functional.
+// Shared by stageAcpAdapters and verifyAcpStaging so staging and verification use
+// identical resolution semantics.
+const ACP_ADAPTERS = [
+    '@agentclientprotocol/claude-agent-acp',
+    '@agentclientprotocol/codex-acp',
+];
+
+// The native engines, shipped as platform packages. Provisioned on demand
+// (see header comment), so they're excluded from staging.
+const isAcpNativeEngine = (key) =>
+    /^@anthropic-ai\/claude-agent-sdk-(win32|darwin|linux)/.test(key) || // native claude
+    /^@openai\/codex-(win32|darwin|linux)/.test(key);                    // native codex
+
+// Resolve a dependency's real directory by walking node_modules the way Node does,
+// looking for the package DIRECTORY. We deliberately do NOT use
+// require.resolve(`${key}/package.json`): that throws for packages whose `exports`
+// map doesn't expose package.json (e.g. @anthropic-ai/claude-agent-sdk), which would
+// silently drop them and their subtrees. realpathSync dereferences pnpm's symlinks.
+// Returns null for deps not installed for this OS (platform-optional binaries).
+const acpRealDirOf = (key, fromDir) => {
+    const fs = require('fs');
+    let dir = fromDir;
+    for (;;) {
+        const cand = path.join(dir, 'node_modules', ...key.split('/'));
+        if (fs.existsSync(path.join(cand, 'package.json'))) return fs.realpathSync(cand);
+        const parent = path.dirname(dir);
+        if (parent === dir) return null;
+        dir = parent;
+    }
+};
+
 function stageAcpAdapters(mainDir, destNodeModules) {
     const fs = require('fs');
-    const ADAPTERS = [
-        '@agentclientprotocol/claude-agent-acp',
-        '@agentclientprotocol/codex-acp',
-    ];
-
-    // The native engines, shipped as platform packages. Provisioned on demand instead
-    // (see comment above), so they're excluded from staging.
-    const isNativeEngine = (key) =>
-        /^@anthropic-ai\/claude-agent-sdk-(win32|darwin|linux)/.test(key) || // native claude
-        /^@openai\/codex-(win32|darwin|linux)/.test(key);                    // native codex
-
-    // Resolve a dependency's real directory by walking node_modules the way Node does,
-    // looking for the package DIRECTORY. We deliberately do NOT use
-    // require.resolve(`${key}/package.json`): that throws for packages whose `exports`
-    // map doesn't expose package.json (e.g. @anthropic-ai/claude-agent-sdk), which would
-    // silently drop them and their subtrees. realpathSync dereferences pnpm's symlinks.
-    // Returns null for deps not installed for this OS (platform-optional binaries).
-    const realDirOf = (key, fromDir) => {
-        let dir = fromDir;
-        for (;;) {
-            const cand = path.join(dir, 'node_modules', ...key.split('/'));
-            if (fs.existsSync(path.join(cand, 'package.json'))) return fs.realpathSync(cand);
-            const parent = path.dirname(dir);
-            if (parent === dir) return null;
-            dir = parent;
-        }
-    };
 
     let copied = 0;
     const skippedEngines = new Set();
-    const install = (srcDir, key, destNM, chain) => {
-        const destDir = path.join(destNM, ...key.split('/'));
-        if (fs.existsSync(destDir)) return; // already placed at this exact location
+    // srcRealDir -> the staged directory whose content represents it. Lets
+    // verifyAcpStaging map every source package to where it landed.
+    const placements = new Map();
+    // package key -> version placed at the TOP-LEVEL node_modules. We hoist every
+    // package to the top level and only nest a package under its requirer when a
+    // DIFFERENT version is already hoisted there. See the header comment for why
+    // (a shallow tree stays under Windows' MAX_PATH).
+    const rootHoisted = new Map();
+    const install = (srcDir, key, parentNM, chain) => {
         if (chain.has(srcDir)) return;      // dependency cycle — resolves to ancestor copy
+        const pj = JSON.parse(fs.readFileSync(path.join(srcDir, 'package.json'), 'utf8'));
+        const version = pj.version;
+        const hoisted = rootHoisted.get(key);
+        let destNM;
+        if (hoisted === undefined) {
+            destNM = destNodeModules;       // first sighting → hoist to the top level
+            rootHoisted.set(key, version);
+        } else if (hoisted === version) {
+            // identical version already hoisted at root → reuse it (its subtree is
+            // already staged); just record where this srcDir resolves to.
+            placements.set(srcDir, path.join(destNodeModules, ...key.split('/')));
+            return;
+        } else {
+            destNM = parentNM;              // genuine version conflict → nest under requirer
+        }
+        const destDir = path.join(destNM, ...key.split('/'));
+        placements.set(srcDir, destDir);
+        if (fs.existsSync(destDir)) return; // already placed at this exact location
         fs.mkdirSync(path.dirname(destDir), { recursive: true });
         fs.cpSync(srcDir, destDir, {
             recursive: true,
@@ -74,18 +109,17 @@ function stageAcpAdapters(mainDir, destNodeModules) {
             filter: (s) => path.basename(s) !== 'node_modules', // deps handled by recursion
         });
         copied++;
-        const pj = JSON.parse(fs.readFileSync(path.join(srcDir, 'package.json'), 'utf8'));
         const deps = { ...pj.dependencies, ...pj.optionalDependencies };
         const nextChain = new Set(chain).add(srcDir);
         for (const depKey of Object.keys(deps)) {
-            if (isNativeEngine(depKey)) { skippedEngines.add(depKey); continue; }
-            const depDir = realDirOf(depKey, srcDir);
+            if (isAcpNativeEngine(depKey)) { skippedEngines.add(depKey); continue; }
+            const depDir = acpRealDirOf(depKey, srcDir);
             if (depDir) install(depDir, depKey, path.join(destDir, 'node_modules'), nextChain);
         }
     };
 
-    for (const key of ADAPTERS) {
-        const srcDir = realDirOf(key, mainDir);
+    for (const key of ACP_ADAPTERS) {
+        const srcDir = acpRealDirOf(key, mainDir);
         if (!srcDir) {
             throw new Error(`ACP adapter '${key}' is not installed in ${mainDir} — run pnpm install`);
         }
@@ -94,7 +128,64 @@ function stageAcpAdapters(mainDir, destNodeModules) {
     if (skippedEngines.size) {
         console.log(`  (skipped native engines — provisioned on demand: ${[...skippedEngines].join(', ')})`);
     }
-    return copied;
+    return { copied, placements };
+}
+
+// Fail the build LOUDLY if hoisting misplaced anything. Re-walk the source dependency
+// closure and assert that every (package → dependency) edge resolves, in the STAGED
+// tree, to the SAME version it resolves to in the SOURCE pnpm tree. This converts a
+// silent runtime "Cannot find module" (or a wrong-version resolution from a botched
+// hoist) into an immediate build failure. Expectations are derived from the source
+// tree — nothing is hardcoded — so it keeps working as the dependency set changes.
+function verifyAcpStaging(mainDir, placements) {
+    const fs = require('fs');
+    const versionAt = (dir) =>
+        JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')).version;
+    // Resolve `key`'s staged version as seen from `fromStagedDir`, via Node's own
+    // upward node_modules walk. Reads package.json directly (not require.resolve, whose
+    // `${key}/package.json` subpath some exports maps block).
+    const stagedVersionOf = (key, fromStagedDir) => {
+        let dir = fromStagedDir;
+        for (;;) {
+            const cand = path.join(dir, 'node_modules', ...key.split('/'));
+            if (fs.existsSync(path.join(cand, 'package.json'))) return versionAt(cand);
+            const parent = path.dirname(dir);
+            if (parent === dir) return null;
+            dir = parent;
+        }
+    };
+    const errors = [];
+    const visited = new Set();
+    const walk = (srcDir) => {
+        if (visited.has(srcDir)) return;
+        visited.add(srcDir);
+        const pj = JSON.parse(fs.readFileSync(path.join(srcDir, 'package.json'), 'utf8'));
+        const stagedDir = placements.get(srcDir);
+        if (!stagedDir) { errors.push(`not staged: ${pj.name}@${pj.version}`); return; }
+        const deps = { ...pj.dependencies, ...pj.optionalDependencies };
+        for (const depKey of Object.keys(deps)) {
+            if (isAcpNativeEngine(depKey)) continue;
+            const depSrc = acpRealDirOf(depKey, srcDir);
+            if (!depSrc) continue; // platform-optional / not installed for this OS
+            const want = versionAt(depSrc);
+            const got = stagedVersionOf(depKey, stagedDir);
+            if (got === null) {
+                errors.push(`${pj.name} → ${depKey}: unresolved in staged tree (expected ${want})`);
+            } else if (got !== want) {
+                errors.push(`${pj.name} → ${depKey}: staged resolves ${got}, source resolves ${want}`);
+            }
+            walk(depSrc);
+        }
+    };
+    for (const key of ACP_ADAPTERS) {
+        const srcDir = acpRealDirOf(key, mainDir);
+        if (srcDir) walk(srcDir);
+    }
+    if (errors.length) {
+        throw new Error(
+            `ACP staging verification failed — the staged tree resolves differently than source:\n  - ${errors.join('\n  - ')}`
+        );
+    }
 }
 
 module.exports = {
@@ -298,8 +389,10 @@ module.exports = {
             // must be copied in explicitly. See stageAcpAdapters() above for the why.
             console.log('Staging ACP adapters...');
             const acpDest = path.join(packageDir, 'acp', 'node_modules');
-            const staged = stageAcpAdapters(__dirname, acpDest);
-            console.log(`✅ Staged ${staged} ACP adapter packages into .package/acp/node_modules`);
+            const { copied: staged, placements } = stageAcpAdapters(__dirname, acpDest);
+            // Assert the hoisted tree resolves identically to source before shipping it.
+            verifyAcpStaging(__dirname, placements);
+            console.log(`✅ Staged ${staged} ACP adapter packages into .package/acp/node_modules (resolution verified)`);
 
             console.log('✅ All assets staged in .package/');
         },
