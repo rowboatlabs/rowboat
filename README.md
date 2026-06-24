@@ -55,7 +55,7 @@ Download latest for Mac/Windows/Linux: [Download](https://www.rowboatlabs.com/do
 Rowboat indexes email, meetings, slack and assistant conversations into a living Obsidian-style backlinked knowledge graph. 
 </td>
 <td width="60%">
-<img width="1500" height="939" alt="Screenshot 2026-06-24 at 10 27 34 PM" src="https://github.com/user-attachments/assets/fb93c2d2-e2af-4750-94b7-dc79667a02ed" />
+<img width="1500" height="939" alt="Brain screenshot" src="https://github.com/user-attachments/assets/fb93c2d2-e2af-4750-94b7-dc79667a02ed" />
 </td>
 </tr>
 <tr>
@@ -64,7 +64,7 @@ Rowboat indexes email, meetings, slack and assistant conversations into a living
 The built-in email client sorts emails into important and everything else. Rowboat automatically drafts responses for important email using all the work context.
 </td>
 <td width="60%">
-<img width="1512" height="948" alt="Screenshot 2026-06-23 at 10 35 51 PM" src="https://github.com/user-attachments/assets/4392b3ca-cc4c-473a-849a-eea0e97388f2" />
+<img width="1512" height="948" alt="Email screenshot" src="https://github.com/user-attachments/assets/4392b3ca-cc4c-473a-849a-eea0e97388f2" />
 </td>
 </tr>
 <tr>
@@ -73,7 +73,7 @@ The built-in email client sorts emails into important and everything else. Rowbo
 You can set up background agents that run on events like new email or on schedule like every day at 8am. They can connect to tools, search the web, use the browser and write code using Claude Code or Codex.  
 </td>
 <td width="60%">
-<img width="1512" height="951" alt="Screenshot 2026-06-23 at 10 44 11 PM" src="https://github.com/user-attachments/assets/5b73a3c3-f0d3-4151-83e7-0997457074e6" />
+<img width="1512" height="951" alt="Background agents screenshot" src="https://github.com/user-attachments/assets/5b73a3c3-f0d3-4151-83e7-0997457074e6" />
 
 </td>
 </tr>
@@ -83,7 +83,7 @@ You can set up background agents that run on events like new email or on schedul
 Rowboat includes a browser that lets you and assistant collaborate on web tasks. Because its isolated from your main browser, you can log in only to the accounts that want the assistant to access. 
 </td>
 <td width="60%">
-<img width="1512" height="948" alt="Screenshot 2026-06-23 at 11 02 14 PM" src="https://github.com/user-attachments/assets/ce04871f-4477-40eb-8310-13ef7f125b11" />
+<img width="1512" height="948" alt="Browser screenshot" src="https://github.com/user-attachments/assets/ce04871f-4477-40eb-8310-13ef7f125b11" />
 </td>
 </tr>
 <tr>
@@ -92,7 +92,7 @@ Rowboat includes a browser that lets you and assistant collaborate on web tasks.
 A local meeting note-taker that taps into mic & speaker, produces live transcript and summarizes the meeting in a markdown file and updates the knowledge graph. 
 </td>
 <td width="60%">
-<img width="1512" height="947" alt="Screenshot 2026-06-23 at 11 47 02 PM" src="https://github.com/user-attachments/assets/c3729952-3c75-4c84-88e0-2a9070136502" />
+<img width="1512" height="947" alt="Meeting notes screenshot" src="https://github.com/user-attachments/assets/c3729952-3c75-4c84-88e0-2a9070136502" />
 </td>
 </tr>
 <tr>
@@ -101,7 +101,7 @@ A local meeting note-taker that taps into mic & speaker, produces live transcrip
 Code mode lets you spin up parallel coding agents with Claude Code or Codex, and have Rowboat drive them with all the work context where needed.
 </td>
 <td width="60%">
-<img width="1512" height="949" alt="Screenshot 2026-06-24 at 12 02 31 AM" src="https://github.com/user-attachments/assets/306618b5-9aaf-4ef8-9117-91ea58e5e4e7" />
+<img width="1512" height="949" alt="Code mode screenshot" src="https://github.com/user-attachments/assets/306618b5-9aaf-4ef8-9117-91ea58e5e4e7" />
 </td>
 </tr>
 <tr>
@@ -110,7 +110,7 @@ Code mode lets you spin up parallel coding agents with Claude Code or Codex, and
 Includes one-click integrations to most popular products. 
 </td>
 <td width="60%">
-<img width="1512" height="948" alt="Screenshot 2026-06-24 at 12 06 14 AM" src="https://github.com/user-attachments/assets/402e89db-8229-468a-8881-a763b9f20ad9" />
+<img width="1512" height="948" alt="Integrations screenshot" src="https://github.com/user-attachments/assets/402e89db-8229-468a-8881-a763b9f20ad9" />
 </td>
 </tr>
 
