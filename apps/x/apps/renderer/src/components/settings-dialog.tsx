@@ -384,38 +384,6 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
     []
   )
 
-  const updateModelAt = useCallback(
-    (prov: LlmProviderFlavor, index: number, value: string) => {
-      setProviderConfigs(prev => {
-        const models = [...prev[prov].models]
-        models[index] = value
-        return { ...prev, [prov]: { ...prev[prov], models } }
-      })
-      setTestState({ status: "idle" })
-    },
-    []
-  )
-
-  const addModel = useCallback(
-    (prov: LlmProviderFlavor) => {
-      setProviderConfigs(prev => ({
-        ...prev,
-        [prov]: { ...prev[prov], models: [...prev[prov].models, ""] },
-      }))
-    },
-    []
-  )
-
-  const removeModel = useCallback(
-    (prov: LlmProviderFlavor, index: number) => {
-      setProviderConfigs(prev => {
-        const models = prev[prov].models.filter((_, i) => i !== index)
-        return { ...prev, [prov]: { ...prev[prov], models: models.length > 0 ? models : [""] } }
-      })
-      setTestState({ status: "idle" })
-    },
-    []
-  )
 
   // Load current config from file
   useEffect(() => {
@@ -727,48 +695,29 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
             </div>
           ) : (
             <div className="space-y-2">
-              {activeConfig.models.map((model, index) => (
-                <div key={index} className="group/model relative">
-                  {showModelInput ? (
-                    <Input
-                      value={model}
-                      onChange={(e) => updateModelAt(provider, index, e.target.value)}
-                      placeholder="Enter model"
-                    />
-                  ) : (
-                    <Select
-                      value={model}
-                      onValueChange={(value) => updateModelAt(provider, index, value)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select a model" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {modelsForProvider.map((m) => (
-                          <SelectItem key={m.id} value={m.id}>
-                            {m.name || m.id}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                  {activeConfig.models.length > 1 && (
-                    <button
-                      onClick={() => removeModel(provider, index)}
-                      className="absolute right-8 top-1/2 -translate-y-1/2 flex size-6 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/model:opacity-100"
-                    >
-                      <X className="size-3.5" />
-                    </button>
-                  )}
-                </div>
-              ))}
-              <button
-                onClick={() => addModel(provider)}
-                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-              >
-                <Plus className="size-3.5" />
-                Add assistant model
-              </button>
+              {showModelInput ? (
+                <Input
+                  value={primaryModel}
+                  onChange={(e) => updateConfig(provider, { models: [e.target.value] })}
+                  placeholder="Enter model"
+                />
+              ) : (
+                <Select
+                  value={primaryModel}
+                  onValueChange={(value) => updateConfig(provider, { models: [value] })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a model" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {modelsForProvider.map((m) => (
+                      <SelectItem key={m.id} value={m.id}>
+                        {m.name || m.id}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
             </div>
           )}
           {modelsError && (
