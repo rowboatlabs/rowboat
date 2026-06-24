@@ -1,5 +1,8 @@
 <h5 align="center">
 
+<h1 align="center">Rowboat</h1>
+<p align="center">A desktop AI coworker with a memory of your work and built-in surfaces to act on it.</p>
+
 <p align="center" style="display: flex; justify-content: center; gap: 20px; align-items: center;">
   <a href="https://trendshift.io/repositories/13609" target="blank">
     <img src="https://trendshift.io/api/badge/repositories/13609" alt="rowboatlabs/rowboat | Trendshift" width="250" height="55"/>
@@ -20,9 +23,6 @@
     <img alt="Y Combinator" src="https://img.shields.io/badge/Y%20Combinator-S24-orange">
   </a>
 </p>
-
-<h1 align="center">Rowboat</h1>
-<p align="center">A desktop AI coworker with a memory of your work and built-in surfaces to act on it.</p>
 
 </h5>
 
