@@ -32,9 +32,7 @@ Rowboat indexes your work into a living knowledge graph and uses that to get wor
 Download latest for Mac/Windows/Linux: [Download](https://www.rowboatlabs.com/downloads)
 
 <p align="center">
-  <img width="1501" height="940" alt="Screenshot 2026-06-24 at 9 44 08 PM" src="https://github.com/user-attachments/assets/3e5d2713-66ad-47e9-aa46-f7f7a253a1d6" />
-
-  
+  <img width="1502" height="938" alt="Screenshot 2026-06-24 at 11 40 45 PM" src="https://github.com/user-attachments/assets/d84cbdf2-42a6-4767-9dec-81cfa435f310" />
 </p>
 
 
@@ -55,7 +53,7 @@ Download latest for Mac/Windows/Linux: [Download](https://www.rowboatlabs.com/do
 Rowboat indexes email, meetings, slack and assistant conversations into a living Obsidian-style backlinked knowledge graph. 
 </td>
 <td width="60%">
-<img width="1500" height="939" alt="Brain screenshot" src="https://github.com/user-attachments/assets/fb93c2d2-e2af-4750-94b7-dc79667a02ed" />
+<img width="1499" height="940" alt="Screenshot 2026-06-24 at 11 22 52 PM" src="https://github.com/user-attachments/assets/203ca1d5-2f40-43dd-8da7-c5cef4e31a41" />
 </td>
 </tr>
 <tr>
