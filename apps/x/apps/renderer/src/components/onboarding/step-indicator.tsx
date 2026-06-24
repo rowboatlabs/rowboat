@@ -6,14 +6,16 @@ import type { Step, OnboardingPath } from "./use-onboarding-state"
 const ROWBOAT_STEPS = [
   { step: 0 as Step, label: "Welcome" },
   { step: 2 as Step, label: "Connect" },
-  { step: 3 as Step, label: "Done" },
+  { step: 3 as Step, label: "Code" },
+  { step: 4 as Step, label: "Done" },
 ]
 
 const BYOK_STEPS = [
   { step: 0 as Step, label: "Welcome" },
   { step: 1 as Step, label: "Model" },
   { step: 2 as Step, label: "Connect" },
-  { step: 3 as Step, label: "Done" },
+  { step: 3 as Step, label: "Code" },
+  { step: 4 as Step, label: "Done" },
 ]
 
 interface StepIndicatorProps {

@@ -26,6 +26,7 @@ import { toast } from "sonner"
 import { AccountSettings } from "@/components/settings/account-settings"
 import { ConnectedAccountsSettings } from "@/components/settings/connected-accounts-settings"
 import type { ApprovalPolicy } from "@x/shared/src/code-mode.js"
+import { startProvisioning, useProvisioning, enabledOptimistic, type AgentStatus, type CodeModeAgentStatus } from "@/lib/code-mode-provisioning"
 
 type ConfigTab = "account" | "connections" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "notifications" | "note-tagging" | "help"
 
@@ -1704,66 +1705,6 @@ function NoteTaggingSettings({ dialogOpen }: { dialogOpen: boolean }) {
 }
 
 // --- Code Mode Settings ---
-
-type AgentStatus = { installed: boolean; signedIn: boolean }
-type CodeModeAgentStatus = { claude: AgentStatus; codex: AgentStatus }
-
-// Engine provisioning runs in the main process and keeps going even if the Settings
-// dialog is closed. Track its state at MODULE level (not in the row component, which
-// unmounts on close) so reopening Settings still shows the live % instead of the Enable
-// button. A single persistent listener on the progress channel feeds this store.
-type ProvState = { pct: number | null; error?: string }
-const provStore: Record<string, ProvState | undefined> = {}
-// Agents we provisioned this session — used to show "Ready" immediately on success
-// without waiting for the async status refresh to round-trip (which caused the row to
-// briefly flash the Enable button again).
-const enabledOptimistic = new Set<string>()
-const provListeners = new Set<() => void>()
-let provChannelHooked = false
-
-function notifyProv() { provListeners.forEach((l) => l()) }
-
-function startProvisioning(agent: 'claude' | 'codex', onDone: () => void | Promise<void>): void {
-  if (provStore[agent] && !provStore[agent]!.error) return // already in flight
-  provStore[agent] = { pct: null }
-  notifyProv()
-  if (!provChannelHooked) {
-    provChannelHooked = true
-    window.ipc.on('codeMode:engineProgress', (p) => {
-      const cur = provStore[p.agent]
-      if (!cur) return
-      const pct = p.totalBytes ? Math.floor(((p.receivedBytes ?? 0) / p.totalBytes) * 100) : cur.pct
-      provStore[p.agent] = { pct }
-      notifyProv()
-    })
-  }
-  window.ipc.invoke('codeMode:provisionEngine', { agent })
-    .then((res) => {
-      if (res.success) {
-        // Mark installed optimistically so the row shows "Ready" the instant the flag
-        // clears — don't depend on the async status refresh (which re-renders the parent
-        // separately and left a window showing the Enable button). loadStatus still runs
-        // in the background to sync the real status.
-        enabledOptimistic.add(agent)
-        provStore[agent] = undefined
-        void onDone()
-      } else {
-        provStore[agent] = { pct: null, error: res.error ?? 'Failed to enable' }
-      }
-    })
-    .catch((e) => { provStore[agent] = { pct: null, error: e instanceof Error ? e.message : 'Failed to enable' } })
-    .finally(notifyProv)
-}
-
-function useProvisioning(agent: string): ProvState | undefined {
-  const [, force] = useState(0)
-  useEffect(() => {
-    const l = () => force((n) => n + 1)
-    provListeners.add(l)
-    return () => { provListeners.delete(l) }
-  }, [])
-  return provStore[agent]
-}
 
 function AgentStatusRow({
   name,

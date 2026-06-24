@@ -8,7 +8,7 @@ export interface ProviderState {
   isConnecting: boolean
 }
 
-export type Step = 0 | 1 | 2 | 3
+export type Step = 0 | 1 | 2 | 3 | 4
 
 export type OnboardingPath = 'rowboat' | 'byok' | null
 
@@ -377,8 +377,8 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
   }, [startGoogleCalendarConnect])
 
   // New step flow:
-  // Rowboat path: 0 (welcome) → 2 (connect) → 3 (done)
-  // BYOK path: 0 (welcome) → 1 (llm setup) → 2 (connect) → 3 (done)
+  // Rowboat path: 0 (welcome) → 2 (connect) → 3 (code mode) → 4 (done)
+  // BYOK path: 0 (welcome) → 1 (llm setup) → 2 (connect) → 3 (code mode) → 4 (done)
   const handleNext = useCallback(() => {
     if (currentStep === 0) {
       if (onboardingPath === 'byok') {
@@ -390,6 +390,8 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
       setCurrentStep(2)
     } else if (currentStep === 2) {
       setCurrentStep(3)
+    } else if (currentStep === 3) {
+      setCurrentStep(4)
     }
   }, [currentStep, onboardingPath])
 
@@ -403,6 +405,8 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
       } else {
         setCurrentStep(1)
       }
+    } else if (currentStep === 3) {
+      setCurrentStep(2)
     }
   }, [currentStep, onboardingPath])
 
