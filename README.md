@@ -31,11 +31,16 @@ Rowboat indexes your work into a living knowledge graph and uses that to get wor
 
 Download latest for Mac/Windows/Linux: [Download](https://www.rowboatlabs.com/downloads)
 
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/4b1a327d-7a68-4776-9bea-68da881b509f" alt="Rowboat" width="920" />
+</p>
 
-<img width="1504" height="939" alt="Screenshot 2026-06-24 at 1 40 09 PM" src="https://github.com/user-attachments/assets/4b1a327d-7a68-4776-9bea-68da881b509f" />
+<p align="center">
+  <a href="https://youtu.be/NcWGdwQ7Cpo"> Demo - email to code</a> · <a href="https://www.youtube.com/watch?v=7xTpciZCfpw"> Demo - knowledge graph</a>
+</p>
+
 
 ⭐ If you find Rowboat useful, please star the repo. It helps more people find it.
-[Demo](https://www.youtube.com/watch?v=7xTpciZCfpw)
 
 ---
 ## Overview
