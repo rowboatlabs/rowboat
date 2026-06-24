@@ -26,7 +26,7 @@ export function StepIndicator({ currentStep, path }: StepIndicatorProps) {
   const currentIndex = steps.findIndex(s => s.step === currentStep)
 
   return (
-    <div className="flex items-center gap-2 mb-8 px-4">
+    <div className="flex items-center gap-2 mb-14 px-4">
       {steps.map((s, i) => (
         <React.Fragment key={s.step}>
           {i > 0 && (
