@@ -12,15 +12,21 @@ export function WelcomeStep({ state }: WelcomeStepProps) {
 
   return (
     <div className="flex flex-col items-center justify-center text-center flex-1">
-      {/* Logo with ambient glow */}
+      {/* Logo + main heading on the same level */}
       <motion.div
-        initial={{ opacity: 0, scale: 0.8 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-        className="relative mb-8"
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.2 }}
+        className="flex items-center gap-4 mb-4"
       >
-        <div className="absolute inset-0 size-16 rounded-2xl bg-primary/10 blur-xl scale-[2.5]" />
-        <img src="/logo-only.png" alt="Rowboat" className="relative size-16" />
+        <h1 className="text-3xl font-bold tracking-tight">
+          Welcome to Rowboat
+        </h1>
+        {/* Logo with ambient glow */}
+        <div className="relative shrink-0">
+          <div className="absolute inset-0 size-12 rounded-2xl bg-primary/10 blur-xl scale-[2.5]" />
+          <img src="/logo-only.png" alt="Rowboat" className="relative size-12" />
+        </div>
       </motion.div>
 
       {/* Tagline badge */}
@@ -28,21 +34,11 @@ export function WelcomeStep({ state }: WelcomeStepProps) {
         initial={{ opacity: 0, y: 6 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.15 }}
-        className="inline-flex items-center gap-2 rounded-full border bg-muted/50 px-3.5 py-1.5 text-xs font-medium text-muted-foreground mb-6"
+        className="inline-flex items-center gap-2 rounded-full border bg-muted/50 px-3.5 py-1.5 text-xs font-medium text-muted-foreground mb-10"
       >
         <span className="size-1.5 rounded-full bg-green-500 animate-pulse" />
         Your AI coworker, with memory
       </motion.div>
-
-      {/* Main heading */}
-      <motion.h1
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.2 }}
-        className="text-3xl font-bold tracking-tight mb-3"
-      >
-        Welcome to Rowboat
-      </motion.h1>
       <motion.p
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
