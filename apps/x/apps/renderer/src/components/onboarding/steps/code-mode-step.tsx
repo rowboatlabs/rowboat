@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback } from "react"
 import { Loader2, ArrowLeft, Terminal, CheckCircle2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
-import { cn } from "@/lib/utils"
 import { startProvisioning, type CodeModeAgentStatus } from "@/lib/code-mode-provisioning"
 import type { OnboardingState } from "../use-onboarding-state"
 
@@ -11,8 +10,8 @@ interface CodeModeStepProps {
 }
 
 const AGENTS = [
-  { key: "claude" as const, name: "Claude Code", signInCommand: "claude login" },
-  { key: "codex" as const, name: "Codex", signInCommand: "codex login" },
+  { key: "claude" as const, name: "Claude Code" },
+  { key: "codex" as const, name: "Codex" },
 ]
 
 export function CodeModeStep({ state }: CodeModeStepProps) {
@@ -78,9 +77,10 @@ export function CodeModeStep({ state }: CodeModeStepProps) {
         Set Up Code Mode
       </h2>
       <p className="text-base text-muted-foreground text-center leading-relaxed mb-6 max-w-md mx-auto">
-        Let the assistant delegate coding tasks to Claude Code or Codex running on your machine.
-        You'll need an active Claude Code or ChatGPT/Codex subscription, and to be signed in
-        locally — run <code className="rounded bg-muted px-1 py-0.5 font-mono text-[13px] text-foreground">claude&nbsp;login</code> or{" "}
+        Use your existing Claude Code or Codex subscription inside Rowboat to tackle coding
+        tasks and unlock far more workflows, all without leaving the app. Make sure Claude Code
+        and Codex are signed in locally with{" "}
+        <code className="rounded bg-muted px-1 py-0.5 font-mono text-[13px] text-foreground">claude&nbsp;login</code> or{" "}
         <code className="rounded bg-muted px-1 py-0.5 font-mono text-[13px] text-foreground">codex&nbsp;login</code> in your terminal.
       </p>
 
@@ -109,28 +109,12 @@ export function CodeModeStep({ state }: CodeModeStepProps) {
               </span>
               {AGENTS.map((a) => {
                 const st = status?.[a.key]
-                const installed = st?.installed ?? false
-                const signedIn = st?.signedIn ?? false
-                const ready = installed && signedIn
+                const ready = (st?.installed ?? false) && (st?.signedIn ?? false)
                 return (
                   <div key={a.key} className="rounded-xl border px-4 py-3 flex items-center gap-3">
                     <Terminal className="size-4 text-muted-foreground shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium">{a.name}</div>
-                      <div className="text-xs text-muted-foreground mt-0.5">
-                        {ready ? (
-                          <span className="inline-flex items-center gap-1 text-green-600">
-                            <CheckCircle2 className="size-3" /> Ready
-                          </span>
-                        ) : installed ? (
-                          <>Installed — sign in with <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">{a.signInCommand}</code></>
-                        ) : selected[a.key] ? (
-                          <>Engine downloads in the background (~200 MB) after you continue. Sign in with <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">{a.signInCommand}</code>.</>
-                        ) : (
-                          <>Not set up</>
-                        )}
-                      </div>
-                    </div>
+                    <div className="flex-1 min-w-0 text-sm font-medium">{a.name}</div>
+                    {ready && <CheckCircle2 className="size-4 text-green-600 shrink-0" />}
                     <Switch
                       checked={selected[a.key]}
                       onCheckedChange={(v) => setSelected((prev) => ({ ...prev, [a.key]: v }))}
@@ -138,10 +122,6 @@ export function CodeModeStep({ state }: CodeModeStepProps) {
                   </div>
                 )
               })}
-              <p className={cn("text-xs text-muted-foreground pt-1")}>
-                Engines download in the background — you can watch progress and re-check sign-in
-                anytime in Settings → Code Mode.
-              </p>
             </div>
           )}
         </div>
