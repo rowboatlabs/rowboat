@@ -401,18 +401,50 @@ function ChatInputInner({
       } else {
         const result = await window.ipc.invoke('workspace:readFile', { path: 'config/models.json' })
         const parsed = JSON.parse(result.data)
+
+        // Offer every model the configured key supports — the same full catalog
+        // Settings uses for its dropdowns — so BYOK chat matches the signed-in
+        // gateway picker. The picker is no longer limited to a hand-curated
+        // config.models list. Providers with no catalog (Ollama, OpenAI-compatible)
+        // fall back to the model saved in config.
+        const catalog: Record<string, string[]> = {}
+        try {
+          const listResult = await window.ipc.invoke('models:list', null)
+          for (const p of listResult.providers || []) {
+            catalog[p.id] = (p.models || []).map((m: { id: string }) => m.id)
+          }
+        } catch { /* offline / no catalog — fall back to saved config below */ }
+
         const models: ConfiguredModel[] = []
-        if (parsed?.providers) {
-          for (const [flavor, entry] of Object.entries(parsed.providers)) {
-            const e = entry as Record<string, unknown>
-            const modelList: string[] = Array.isArray(e.models) ? e.models as string[] : []
-            const singleModel = typeof e.model === 'string' ? e.model : ''
-            const allModels = modelList.length > 0 ? modelList : singleModel ? [singleModel] : []
-            for (const model of allModels) {
-              if (model) {
-                models.push({ provider: flavor as ProviderName, model })
-              }
-            }
+        const seen = new Set<string>()
+        const push = (provider: string, model: string) => {
+          if (!model) return
+          const key = `${provider}/${model}`
+          if (seen.has(key)) return
+          seen.add(key)
+          models.push({ provider: provider as ProviderName, model })
+        }
+
+        // List the default provider first so its default model leads the picker.
+        const defaultFlavor = typeof parsed?.provider?.flavor === 'string' ? parsed.provider.flavor : ''
+        const flavors = Object.keys(parsed?.providers || {})
+          .sort((a, b) => (a === defaultFlavor ? -1 : b === defaultFlavor ? 1 : 0))
+
+        for (const flavor of flavors) {
+          const e = (parsed.providers[flavor] || {}) as Record<string, unknown>
+          const hasKey = typeof e.apiKey === 'string' && (e.apiKey as string).trim().length > 0
+          const hasBaseURL = typeof e.baseURL === 'string' && (e.baseURL as string).trim().length > 0
+          if (!hasKey && !hasBaseURL) continue // provider not configured
+
+          // The provider's saved default model leads, then the rest of its catalog.
+          push(flavor, typeof e.model === 'string' ? e.model : '')
+          const catalogModels = catalog[flavor] || []
+          if (catalogModels.length > 0) {
+            for (const m of catalogModels) push(flavor, m)
+          } else {
+            // No catalog (local provider) — fall back to whatever is saved.
+            const saved = Array.isArray(e.models) ? e.models as string[] : []
+            for (const m of saved) push(flavor, m)
           }
         }
         setConfiguredModels(models)

@@ -429,13 +429,17 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
         return false
       }
 
-      const models: string[] = result.models ?? []
+      const catalog: string[] = result.models ?? []
       const preferred = preferredDefaults[llmProvider]
       const model =
-        (preferred && models.includes(preferred) && preferred) ||
-        models[0] || activeConfig.model.trim() || ""
+        (preferred && catalog.includes(preferred) && preferred) ||
+        catalog[0] || activeConfig.model.trim() || ""
 
-      await window.ipc.invoke("models:saveConfig", { provider, model, models })
+      // `models` is the user's curated assistant-model list (shown in Settings),
+      // NOT the full provider catalog. Onboarding seeds it with just the selected
+      // model; users add more from Settings. Persisting the whole catalog here
+      // rendered every model as a separate assistant-model row.
+      await window.ipc.invoke("models:saveConfig", { provider, model, models: model ? [model] : [] })
       window.dispatchEvent(new Event('models-config-changed'))
       setTestState({ status: "success" })
       setConnectedFlavors(prev => new Set(prev).add(llmProvider))
