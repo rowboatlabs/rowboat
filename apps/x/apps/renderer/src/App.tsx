@@ -6219,9 +6219,6 @@ function App() {
                             {!tabHasConversation ? (
                               <ChatEmptyState
                                 wide
-                                recentRuns={runs}
-                                onSelectRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
-                                onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
                                 onPickPrompt={setPresetMessage}
                               />
                             ) : (

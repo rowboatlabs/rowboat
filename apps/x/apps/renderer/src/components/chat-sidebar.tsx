@@ -674,11 +674,6 @@ export function ChatSidebar({
                           {!tabHasConversation ? (
                             <ChatEmptyState
                               wide={isMaximized}
-                              // A pinned coding-session chat must not offer jumping
-                              // to other conversations from the empty state either.
-                              recentRuns={pinnedToCodeSession ? [] : recentRuns}
-                              onSelectRun={pinnedToCodeSession ? undefined : onSelectRun}
-                              onOpenChatHistory={pinnedToCodeSession ? undefined : onOpenChatHistory}
                               onPickPrompt={setLocalPresetMessage}
                             />
                           ) : (
