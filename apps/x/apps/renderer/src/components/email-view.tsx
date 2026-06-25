@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Archive, Bold, CheckCheck, Forward, Italic, Link as LinkIcon, List, ListOrdered, LoaderIcon, Mail, Paperclip, Quote, Redo2, RefreshCw, Reply, ReplyAll, Search, Send, Sparkles, SquarePen, Strikethrough, Trash2, Undo2 } from 'lucide-react'
+import { Archive, Bold, CheckCheck, Forward, Italic, Link as LinkIcon, List, ListOrdered, LoaderIcon, Mail, Paperclip, Quote, Redo2, RefreshCw, Reply, ReplyAll, Search, Send, Sparkles, SquarePen, Strikethrough, Trash2, Undo2, X } from 'lucide-react'
 import { useEditor, EditorContent, type Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
@@ -9,6 +9,9 @@ import { cn } from '@/lib/utils'
 import { toast } from '@/lib/toast'
 import { useTheme } from '@/contexts/theme-context'
 import { SettingsDialog } from '@/components/settings-dialog'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 
 type GmailThread = blocks.GmailThread
 type GmailThreadMessage = blocks.GmailThreadMessage
@@ -539,9 +542,11 @@ function ComposeToolbarButton({
   children: React.ReactNode
 }) {
   return (
-    <button
+    <Button
       type="button"
-      className={cn('gmail-compose-tool', isActive && 'is-active')}
+      variant="ghost"
+      size="icon-sm"
+      className={cn('size-7 text-muted-foreground', isActive && 'bg-accent text-foreground')}
       onMouseDown={(event) => event.preventDefault()}
       onClick={() => {
         command()
@@ -552,43 +557,47 @@ function ComposeToolbarButton({
       title={label}
     >
       {children}
-    </button>
+    </Button>
   )
 }
 
 function ComposeToolbar({ editor, onOpenLink }: { editor: Editor; onOpenLink: () => void }) {
   return (
-    <div className="gmail-compose-toolbar">
-      <button
+    <div className="flex min-w-0 flex-1 items-center gap-0.5 border-l border-border pl-2.5">
+      <Button
         type="button"
-        className="gmail-compose-tool"
+        variant="ghost"
+        size="icon-sm"
+        className="size-7 text-muted-foreground"
         onMouseDown={(event) => event.preventDefault()}
         onClick={() => editor.chain().focus().undo().run()}
         disabled={!editor.can().undo()}
         aria-label="Undo"
         title="Undo"
       >
-        <Undo2 size={14} />
-      </button>
-      <button
+        <Undo2 className="size-3.5" />
+      </Button>
+      <Button
         type="button"
-        className="gmail-compose-tool"
+        variant="ghost"
+        size="icon-sm"
+        className="size-7 text-muted-foreground"
         onMouseDown={(event) => event.preventDefault()}
         onClick={() => editor.chain().focus().redo().run()}
         disabled={!editor.can().redo()}
         aria-label="Redo"
         title="Redo"
       >
-        <Redo2 size={14} />
-      </button>
-      <span className="gmail-compose-tool-sep" />
+        <Redo2 className="size-3.5" />
+      </Button>
+      <span className="mx-1.5 h-4 w-px bg-border" />
       <ComposeToolbarButton
         editor={editor}
         command={() => editor.chain().focus().toggleBold().run()}
         isActive={editor.isActive('bold')}
         label="Bold"
       >
-        <Bold size={14} />
+        <Bold className="size-3.5" />
       </ComposeToolbarButton>
       <ComposeToolbarButton
         editor={editor}
@@ -596,7 +605,7 @@ function ComposeToolbar({ editor, onOpenLink }: { editor: Editor; onOpenLink: ()
         isActive={editor.isActive('italic')}
         label="Italic"
       >
-        <Italic size={14} />
+        <Italic className="size-3.5" />
       </ComposeToolbarButton>
       <ComposeToolbarButton
         editor={editor}
@@ -604,16 +613,16 @@ function ComposeToolbar({ editor, onOpenLink }: { editor: Editor; onOpenLink: ()
         isActive={editor.isActive('strike')}
         label="Strikethrough"
       >
-        <Strikethrough size={14} />
+        <Strikethrough className="size-3.5" />
       </ComposeToolbarButton>
-      <span className="gmail-compose-tool-sep" />
+      <span className="mx-1.5 h-4 w-px bg-border" />
       <ComposeToolbarButton
         editor={editor}
         command={() => editor.chain().focus().toggleBulletList().run()}
         isActive={editor.isActive('bulletList')}
         label="Bulleted list"
       >
-        <List size={14} />
+        <List className="size-3.5" />
       </ComposeToolbarButton>
       <ComposeToolbarButton
         editor={editor}
@@ -621,7 +630,7 @@ function ComposeToolbar({ editor, onOpenLink }: { editor: Editor; onOpenLink: ()
         isActive={editor.isActive('orderedList')}
         label="Numbered list"
       >
-        <ListOrdered size={14} />
+        <ListOrdered className="size-3.5" />
       </ComposeToolbarButton>
       <ComposeToolbarButton
         editor={editor}
@@ -629,20 +638,22 @@ function ComposeToolbar({ editor, onOpenLink }: { editor: Editor; onOpenLink: ()
         isActive={editor.isActive('blockquote')}
         label="Quote"
       >
-        <Quote size={14} />
+        <Quote className="size-3.5" />
       </ComposeToolbarButton>
-      <span className="gmail-compose-tool-sep" />
-      <button
+      <span className="mx-1.5 h-4 w-px bg-border" />
+      <Button
         type="button"
-        className={cn('gmail-compose-tool', editor.isActive('link') && 'is-active')}
+        variant="ghost"
+        size="icon-sm"
+        className={cn('size-7 text-muted-foreground', editor.isActive('link') && 'bg-accent text-foreground')}
         onMouseDown={(event) => event.preventDefault()}
         onClick={onOpenLink}
         aria-label="Link"
         aria-pressed={editor.isActive('link')}
         title="Link"
       >
-        <LinkIcon size={14} />
-      </button>
+        <LinkIcon className="size-3.5" />
+      </Button>
     </div>
   )
 }
@@ -678,7 +689,7 @@ function HighlightedText({ text, query }: { text: string; query: string }) {
   return (
     <>
       {text.slice(0, idx)}
-      <mark className="gmail-recipient-suggestion-match">{text.slice(idx, idx + q.length)}</mark>
+      <mark className="bg-transparent p-0 font-bold text-inherit">{text.slice(idx, idx + q.length)}</mark>
       {text.slice(idx + q.length)}
     </>
   )
@@ -812,26 +823,30 @@ function RecipientField({
   const showSuggestions = isFocused && suggestions.length > 0
 
   return (
-    <div className="gmail-recipient-row">
-      <span className="gmail-recipient-label">{label}</span>
-      <div className="gmail-recipient-field" ref={fieldRef}>
+    <div className="flex items-start gap-2 border-b border-border px-3 py-1.5 text-sm">
+      <span className="min-w-7 pt-1.5 text-muted-foreground">{label}</span>
+      <div className="relative flex min-w-0 flex-1 flex-wrap items-center gap-1" ref={fieldRef}>
         {value.map((token, index) => (
-          <span key={`${token}-${index}`} className="gmail-recipient-chip" title={extractAddress(token)}>
-            <span className="gmail-recipient-chip-label">{recipientLabel(token)}</span>
+          <span
+            key={`${token}-${index}`}
+            className="inline-flex h-6 max-w-full items-center gap-1 rounded-md bg-muted pl-2 pr-1 text-xs text-foreground"
+            title={extractAddress(token)}
+          >
+            <span className="max-w-[240px] truncate">{recipientLabel(token)}</span>
             <button
               type="button"
-              className="gmail-recipient-chip-remove"
+              className="inline-flex size-4 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               aria-label={`Remove ${extractAddress(token)}`}
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => onChange(value.filter((_, idx) => idx !== index))}
             >
-              ×
+              <X className="size-3" />
             </button>
           </span>
         ))}
         <input
           ref={inputRef}
-          className="gmail-recipient-input"
+          className="h-6 min-w-[80px] flex-1 border-0 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={onKeyDown}
@@ -854,7 +869,11 @@ function RecipientField({
           }}
         />
         {showSuggestions && (
-          <ul className="gmail-recipient-suggestions" role="listbox" ref={listRef}>
+          <ul
+            className="absolute left-0 top-[calc(100%+6px)] z-30 m-0 max-h-[296px] w-max min-w-[280px] max-w-[min(440px,100%)] list-none overflow-y-auto overscroll-contain rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
+            role="listbox"
+            ref={listRef}
+          >
             {suggestions.map((c, idx) => {
               const hue = contactHue(c.email)
               return (
@@ -862,7 +881,10 @@ function RecipientField({
                   key={c.email}
                   role="option"
                   aria-selected={idx === activeIndex}
-                  className={cn('gmail-recipient-suggestion', idx === activeIndex && 'is-active')}
+                  className={cn(
+                    'flex cursor-pointer items-center gap-2.5 rounded-sm px-2.5 py-1.5 text-sm transition-colors',
+                    idx === activeIndex ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/60'
+                  )}
                   onMouseDown={(event) => {
                     // Prevent input blur before click fires.
                     event.preventDefault()
@@ -871,18 +893,18 @@ function RecipientField({
                   onMouseEnter={() => setActiveIndex(idx)}
                 >
                   <span
-                    className="gmail-recipient-suggestion-avatar"
+                    className="inline-flex size-6 flex-none items-center justify-center rounded-full text-xs font-semibold uppercase text-white"
                     style={{ background: `hsl(${hue}, 60%, 42%)` }}
                     aria-hidden="true"
                   >
                     {contactInitial(c)}
                   </span>
-                  <span className="gmail-recipient-suggestion-text">
-                    <span className="gmail-recipient-suggestion-name">
+                  <span className="flex min-w-0 flex-1 flex-col leading-tight">
+                    <span className="truncate font-medium">
                       <HighlightedText text={c.name || c.email} query={queryShown} />
                     </span>
                     {c.name && (
-                      <span className="gmail-recipient-suggestion-email">
+                      <span className="mt-0.5 truncate text-xs text-muted-foreground">
                         <HighlightedText text={c.email} query={queryShown} />
                       </span>
                     )}
@@ -893,7 +915,7 @@ function RecipientField({
           </ul>
         )}
       </div>
-      {trailing && <div className="gmail-recipient-trailing">{trailing}</div>}
+      {trailing && <div className="flex-none pt-1.5">{trailing}</div>}
     </div>
   )
 }
@@ -1005,7 +1027,7 @@ const ComposeBox = memo(function ComposeBox({
       }),
     ],
     editorProps: {
-      attributes: { class: 'gmail-compose-content' },
+      attributes: { class: 'compose-content' },
     },
     content: initialContent,
   })
@@ -1054,16 +1076,17 @@ const ComposeBox = memo(function ComposeBox({
   }
 
   // The signed-in account's display name, used to sign off AI-generated emails.
+  // Loaded in every mode (new, reply, forward) since the AI writer is available
+  // throughout and needs a name to sign off with.
   const [selfName, setSelfName] = useState<string>('')
   const selfFirstName = useMemo(() => firstNameFromDisplayName(selfName), [selfName])
   useEffect(() => {
-    if (!isNew) return
     let cancelled = false
     window.ipc.invoke('gmail:getAccountName', {})
       .then((res) => { if (!cancelled && res?.name) setSelfName(res.name) })
       .catch(() => {})
     return () => { cancelled = true }
-  }, [isNew])
+  }, [])
 
   const [aiPrompt, setAiPrompt] = useState('')
   const [generating, setGenerating] = useState(false)
@@ -1101,6 +1124,18 @@ const ComposeBox = memo(function ComposeBox({
       if (!instruction.trim()) { toast('Describe what to write.', 'error'); return }
       system = AI_GENERATE_SYSTEM
       const ctx: string[] = []
+      // When replying or forwarding, give the model the thread it's responding
+      // to (oldest first) so the draft is on-topic and references the right
+      // points. New emails have no thread and skip this.
+      if (thread) {
+        const threadText = thread.messages
+          .map((message, index) => {
+            const header = message.from ? `From: ${message.from}\n` : ''
+            return `--- Message ${index + 1} ---\n${header}${(message.body || '').trim()}`
+          })
+          .join('\n\n')
+        ctx.push(`This is a ${modeLabel.toLowerCase()} to the following email thread (oldest first):\n${threadText}`)
+      }
       // Use the recipients' names (from the contacts picker) so the AI can
       // address them naturally; fall back to the address when there's no name.
       const recipientNames = toList
@@ -1111,7 +1146,7 @@ const ComposeBox = memo(function ComposeBox({
         .filter(Boolean)
       if (recipientNames.length) ctx.push(`Recipient(s): ${recipientNames.join(', ')}`)
       if (selfFirstName) ctx.push(`Sender's first name (sign off as this): ${selfFirstName}`)
-      if (subject.trim()) ctx.push(`Desired subject hint: ${subject.trim()}`)
+      if (isNew && subject.trim()) ctx.push(`Desired subject hint: ${subject.trim()}`)
       if (current) ctx.push(`Existing draft (revise or build on it):\n${current}`)
       prompt = `${ctx.length ? ctx.join('\n') + '\n\n' : ''}Instruction: ${instruction.trim()}`
     } else {
@@ -1135,15 +1170,18 @@ const ComposeBox = memo(function ComposeBox({
       // draft lands in the editor's undo history and the toolbar's Undo reverts it.
       if (aiMode === 'generate') {
         const { subject: generatedSubject, body } = parseGeneratedEmail(res.text)
-        if (generatedSubject) setSubject(generatedSubject)
+        // Only new emails take the AI's subject; replies/forwards keep their
+        // derived "Re:"/"Fwd:" subject (and don't expose a subject field).
+        if (generatedSubject && isNew) setSubject(generatedSubject)
         // Always sign off with the account first name, even if the model omitted it.
         const signed = ensureSignature(body, selfFirstName)
         editor.chain().focus().selectAll().insertContent(plainTextToHtml(signed)).run()
         setHasGenerated(true)
       } else {
-        // Rewrites also regenerate the subject so it stays in sync with the body.
+        // Rewrites also regenerate the subject so it stays in sync with the body —
+        // but only for new emails, to preserve a reply/forward's threaded subject.
         const { subject: rewrittenSubject, body } = parseGeneratedEmail(res.text)
-        if (rewrittenSubject) setSubject(rewrittenSubject)
+        if (rewrittenSubject && isNew) setSubject(rewrittenSubject)
         editor.chain().focus().selectAll().insertContent(plainTextToHtml(body)).run()
       }
     } catch (err) {
@@ -1301,84 +1339,100 @@ const ComposeBox = memo(function ComposeBox({
     window.dispatchEvent(new Event('email-block:draft-with-assistant'))
   }
 
-  const card = (
-    <div
-      className={isNew ? 'gmail-compose-modal' : 'gmail-compose-card'}
-      onClick={isNew ? (event) => event.stopPropagation() : undefined}
-    >
-      <div className={isNew ? 'gmail-compose-modal-header' : 'gmail-compose-header'}>
-        <span>{modeLabel}</span>
-        <button
-          type="button"
-          className={isNew ? 'gmail-icon-button' : undefined}
-          onClick={onClose}
-          aria-label="Close compose"
-        >×</button>
-      </div>
+  const inner = (
+    <>
       <RecipientField
         label="To"
         value={toList}
         onChange={setToList}
         autoFocus={isNew || mode === 'forward'}
         trailing={
-          <div className="gmail-recipient-toggles">
-            {!showCc && <button type="button" onClick={() => setShowCc(true)}>Cc</button>}
-            {!showBcc && <button type="button" onClick={() => setShowBcc(true)}>Bcc</button>}
+          <div className="flex gap-2.5">
+            {!showCc && (
+              <button
+                type="button"
+                className="text-xs text-muted-foreground hover:text-foreground hover:underline"
+                onClick={() => setShowCc(true)}
+              >Cc</button>
+            )}
+            {!showBcc && (
+              <button
+                type="button"
+                className="text-xs text-muted-foreground hover:text-foreground hover:underline"
+                onClick={() => setShowBcc(true)}
+              >Bcc</button>
+            )}
           </div>
         }
       />
       {showCc && <RecipientField label="Cc" value={ccList} onChange={setCcList} />}
       {showBcc && <RecipientField label="Bcc" value={bccList} onChange={setBccList} />}
-      {isNew && (
-        <>
-          <div className="gmail-compose-ai-bar">
-            <input
-              className="gmail-compose-ai-input"
-              value={aiPrompt}
-              onChange={(event) => setAiPrompt(event.target.value)}
-              placeholder={hasGenerated
-                ? 'Edit the draft (e.g. add a line about…, remove the last paragraph)…'
-                : 'Describe the email and let AI write it…'}
-              disabled={generating}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') {
-                  event.preventDefault()
-                  void runAiBar()
-                }
-              }}
-            />
-            <button
-              type="button"
-              className="gmail-refine-button"
-              onClick={() => { void runAiBar() }}
-              disabled={generating}
-              title={hasGenerated ? 'Apply this edit to the draft' : 'Write a draft with AI'}
-            >
-              {generating ? <LoaderIcon size={15} className="animate-spin" /> : <Sparkles size={15} />}
-              {generating
-                ? (hasGenerated ? 'Editing…' : 'Writing…')
-                : (hasGenerated ? 'Edit' : 'Write')}
-            </button>
-          </div>
-          <div className="gmail-compose-ai-presets">
-            <button type="button" onClick={() => { void runAi('Improve the clarity, grammar, and flow of this email while preserving its meaning.', 'rewrite') }} disabled={generating}>Improve</button>
-            {TONE_PRESETS.map((preset) => (
-              <button key={preset.key} type="button" onClick={() => { void runAi(preset.instruction, 'rewrite') }} disabled={generating}>{preset.label}</button>
-            ))}
-          </div>
-        </>
-      )}
+      <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+        <Input
+          className="h-8"
+          value={aiPrompt}
+          onChange={(event) => setAiPrompt(event.target.value)}
+          placeholder={hasGenerated
+            ? 'Edit the draft (e.g. add a line about…, remove the last paragraph)…'
+            : isNew
+              ? 'Describe the email and let AI write it…'
+              : 'Describe your reply and let AI write it…'}
+          disabled={generating}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault()
+              void runAiBar()
+            }
+          }}
+        />
+        <Button
+          type="button"
+          size="sm"
+          onClick={() => { void runAiBar() }}
+          disabled={generating}
+          title={hasGenerated ? 'Apply this edit to the draft' : 'Write a draft with AI'}
+        >
+          {generating ? <LoaderIcon className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+          {generating
+            ? (hasGenerated ? 'Editing…' : 'Writing…')
+            : (hasGenerated ? 'Edit' : 'Write')}
+        </Button>
+      </div>
+      <div className="flex flex-wrap gap-1.5 border-b border-border px-3 pb-2.5">
+        <Button
+          type="button"
+          variant="outline"
+          size="xs"
+          className="rounded-full"
+          onClick={() => { void runAi('Improve the clarity, grammar, and flow of this email while preserving its meaning.', 'rewrite') }}
+          disabled={generating}
+        >Improve</Button>
+        {TONE_PRESETS.map((preset) => (
+          <Button
+            key={preset.key}
+            type="button"
+            variant="outline"
+            size="xs"
+            className="rounded-full"
+            onClick={() => { void runAi(preset.instruction, 'rewrite') }}
+            disabled={generating}
+          >{preset.label}</Button>
+        ))}
+      </div>
       {(isNew || mode === 'forward') && (
-        <div className="gmail-compose-line">
-          <span className="gmail-compose-label">Subject</span>
+        <div className="flex min-h-8 items-center gap-2 border-b border-border px-3 text-sm">
+          <span className="text-muted-foreground">Subject</span>
           <input
-            className="gmail-compose-subject-input"
+            className="min-w-0 flex-1 border-0 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
             value={subject}
             onChange={(event) => setSubject(event.target.value)}
           />
         </div>
       )}
-      <EditorContent editor={editor} className="gmail-compose-editor" />
+      <EditorContent
+        editor={editor}
+        className={cn('w-full overflow-y-auto', isNew ? 'min-h-0 flex-1' : 'max-h-[360px]')}
+      />
       <input
         ref={fileInputRef}
         type="file"
@@ -1390,26 +1444,34 @@ const ComposeBox = memo(function ComposeBox({
         }}
       />
       {attachments.length > 0 && (
-        <div className="gmail-compose-attachments">
+        <div className="flex flex-wrap gap-1.5 px-3 pt-2">
           {attachments.map((att) => (
-            <div key={att.id} className="gmail-compose-attachment" title={att.filename}>
-              <Paperclip size={13} />
-              <span className="gmail-compose-attachment-name">{att.filename}</span>
-              <span className="gmail-compose-attachment-size">{formatAttachmentSize(att.size)}</span>
+            <div
+              key={att.id}
+              className="inline-flex max-w-60 items-center gap-1.5 rounded-md border border-border bg-muted/50 px-2 py-1 text-xs text-foreground"
+              title={att.filename}
+            >
+              <Paperclip className="size-3 shrink-0" />
+              <span className="truncate">{att.filename}</span>
+              <span className="shrink-0 text-muted-foreground">{formatAttachmentSize(att.size)}</span>
               <button
                 type="button"
-                className="gmail-compose-attachment-remove"
+                className="shrink-0 rounded-sm text-muted-foreground transition-colors hover:text-foreground"
                 onClick={() => removeAttachment(att.id)}
                 aria-label={`Remove ${att.filename}`}
-              >×</button>
+              ><X className="size-3" /></button>
             </div>
           ))}
         </div>
       )}
       {linkOpen && (
-        <div className="gmail-compose-link-popover" onMouseDown={(event) => event.preventDefault()}>
-          <input
+        <div
+          className="flex items-center gap-1.5 border-t border-border bg-muted/30 px-3 py-2"
+          onMouseDown={(event) => event.preventDefault()}
+        >
+          <Input
             ref={linkInputRef}
+            className="h-7 flex-1 text-xs"
             value={linkUrl}
             onChange={(event) => setLinkUrl(event.target.value)}
             placeholder="https://example.com"
@@ -1423,58 +1485,99 @@ const ComposeBox = memo(function ComposeBox({
               }
             }}
           />
-          <button type="button" className="gmail-compose-link-popover-apply" onClick={applyLink}>Apply</button>
-          <button type="button" className="gmail-compose-link-popover-cancel" onClick={cancelLink}>Cancel</button>
+          <Button type="button" size="xs" onClick={applyLink}>Apply</Button>
+          <Button type="button" variant="outline" size="xs" onClick={cancelLink}>Cancel</Button>
         </div>
       )}
-      <div className="gmail-compose-actions">
-        <div className="gmail-compose-actions-primary">
-          <button
+      <div className="flex items-center gap-3 border-t border-border px-3 py-2.5">
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
             type="button"
-            className="gmail-send-button"
+            size="sm"
             onClick={() => { void sendInGmail() }}
             disabled={sending}
             title={isNew ? 'Send this email via Gmail' : 'Send this reply via Gmail'}
           >
-            {sending ? <LoaderIcon size={15} className="animate-spin" /> : <Send size={15} />}
+            {sending ? <LoaderIcon className="size-4 animate-spin" /> : <Send className="size-4" />}
             {sending ? 'Sending…' : 'Send'}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="gmail-refine-button"
+            variant="outline"
+            size="sm"
             onClick={() => fileInputRef.current?.click()}
             disabled={sending}
             title="Attach files"
           >
-            <Paperclip size={15} />
+            <Paperclip className="size-4" />
             Attach
-          </button>
+          </Button>
           {thread && (
-            <button
+            <Button
               type="button"
-              className="gmail-refine-button"
+              variant="outline"
+              size="sm"
               onClick={refineWithCopilot}
               title="Refine this draft with Copilot"
             >
-              <Sparkles size={15} />
+              <Sparkles className="size-4" />
               Refine
-            </button>
+            </Button>
           )}
         </div>
         {editor && <ComposeToolbar editor={editor} onOpenLink={openLink} />}
-        <button type="button" className="gmail-compose-link" onClick={onClose}>Discard</button>
+        <Button type="button" variant="ghost" size="sm" className="text-muted-foreground" onClick={onClose}>
+          Discard
+        </Button>
       </div>
-    </div>
+    </>
   )
 
   if (isNew) {
     return (
-      <div className="gmail-compose-overlay" onClick={onClose}>
-        {card}
-      </div>
+      <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
+        <DialogContent
+          showCloseButton={false}
+          aria-describedby={undefined}
+          className="flex h-[min(720px,calc(100vh-4rem))] flex-col gap-0 overflow-hidden p-0 font-sans sm:max-w-[840px]"
+        >
+          <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-3">
+            <DialogTitle className="flex-1 text-sm font-medium text-foreground">{modeLabel}</DialogTitle>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              className="size-7 text-muted-foreground"
+              onClick={onClose}
+              aria-label="Close compose"
+            >
+              <X className="size-4" />
+            </Button>
+          </div>
+          {inner}
+        </DialogContent>
+      </Dialog>
     )
   }
-  return card
+
+  return (
+    <div className="ml-10 max-w-[720px] overflow-hidden rounded-lg border border-border bg-background font-sans">
+      <div className="flex h-8 items-center justify-between border-b border-border px-3">
+        <span className="text-xs font-medium text-muted-foreground">{modeLabel}</span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          className="text-muted-foreground"
+          onClick={onClose}
+          aria-label="Close compose"
+        >
+          <X className="size-3.5" />
+        </Button>
+      </div>
+      {inner}
+    </div>
+  )
 })
 
 function ThreadDetail({
@@ -1690,6 +1793,30 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
       cleanupOAuthConnect()
     }
   }, [])
+
+  // Gmail-style "n" to start a new message. EmailView only mounts while the
+  // inbox is open, so this is naturally scoped to that view. Ignored while
+  // typing in any field or when a dialog (compose/settings) is already up.
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'n' || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || e.isComposing) return
+      if (composeOpen || settingsOpen) return
+      const target = e.target as HTMLElement | null
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return
+      }
+      e.preventDefault()
+      setComposeOpen(true)
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [composeOpen, settingsOpen])
 
   useEffect(() => { persistedImportant = important }, [important])
   useEffect(() => { persistedOther = other }, [other])
