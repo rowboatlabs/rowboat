@@ -1398,12 +1398,12 @@ const ComposeBox = memo(function ComposeBox({
             : (hasGenerated ? 'Edit' : 'Write')}
         </Button>
       </div>
-      <div className="flex flex-wrap gap-1.5 border-b border-border px-3 pb-2.5">
+      <div className="flex flex-wrap gap-x-1.5 gap-y-2 border-b border-border px-3 pb-2.5">
         <Button
           type="button"
           variant="outline"
           size="xs"
-          className="rounded-full"
+          className="rounded-md"
           onClick={() => { void runAi('Improve the clarity, grammar, and flow of this email while preserving its meaning.', 'rewrite') }}
           disabled={generating}
         >Improve</Button>
@@ -1413,7 +1413,7 @@ const ComposeBox = memo(function ComposeBox({
             type="button"
             variant="outline"
             size="xs"
-            className="rounded-full"
+            className="rounded-md"
             onClick={() => { void runAi(preset.instruction, 'rewrite') }}
             disabled={generating}
           >{preset.label}</Button>

@@ -4727,6 +4727,25 @@ function App() {
         }
         return
       }
+
+      // Ctrl+Tab — next tab, Ctrl+Shift+Tab — previous tab (browser-style).
+      // Bound to Ctrl specifically (Cmd+Tab is the OS app switcher on macOS).
+      if (e.ctrlKey && e.key === 'Tab') {
+        e.preventDefault()
+        const direction = e.shiftKey ? -1 : 1
+        if (inFileView) {
+          const currentIdx = fileTabs.findIndex(t => t.id === targetFileTabId)
+          if (currentIdx === -1) return
+          const nextIdx = (currentIdx + direction + fileTabs.length) % fileTabs.length
+          switchFileTab(fileTabs[nextIdx].id)
+        } else {
+          const currentIdx = chatTabs.findIndex(t => t.id === activeChatTabId)
+          if (currentIdx === -1) return
+          const nextIdx = (currentIdx + direction + chatTabs.length) % chatTabs.length
+          switchChatTab(chatTabs[nextIdx].id)
+        }
+        return
+      }
     }
     document.addEventListener('keydown', handleTabKeyDown)
     return () => document.removeEventListener('keydown', handleTabKeyDown)
