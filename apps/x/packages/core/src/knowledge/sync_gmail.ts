@@ -615,11 +615,29 @@ export function listEverythingElseThreads(opts: { cursor?: string; limit?: numbe
     return listInboxPage({ section: 'other', ...opts });
 }
 
+// In-memory index of parsed snapshots, keyed by cache filename and validated by
+// file mtime. listInboxPage runs on every inbox open, every "load more", and
+// every throttled live reload during a sync — without this it re-reads and
+// JSON.parses every cached thread (message bodies included) on each call. The
+// cache lets unchanged files skip the read+parse, so e.g. the "Everything else"
+// page right after "Important", reloads mid-sync, and re-opening the inbox cost
+// a cheap stat() per file instead of a full parse of the whole cache.
+interface ListCacheEntry {
+    mtimeMs: number;
+    dateMs: number;
+    section: InboxSection;
+    snapshot: GmailThreadSnapshot;
+}
+const listCache = new Map<string, ListCacheEntry>();
+
 export function listInboxPage(opts: InboxPageOptions): InboxPageResult {
     const limit = Math.max(1, Math.min(100, opts.limit ?? 25));
     const cursor = parseCursor(opts.cursor);
 
-    if (!fs.existsSync(CACHE_DIR)) return { threads: [], nextCursor: null };
+    if (!fs.existsSync(CACHE_DIR)) {
+        listCache.clear();
+        return { threads: [], nextCursor: null };
+    }
 
     let names: string[];
     try {
@@ -628,24 +646,56 @@ export function listInboxPage(opts: InboxPageOptions): InboxPageResult {
         return { threads: [], nextCursor: null };
     }
 
+    const seen = new Set<string>();
     const entries: IndexedEntry[] = [];
     for (const name of names) {
         if (!name.endsWith('.json')) continue;
+        seen.add(name);
         const filePath = path.join(CACHE_DIR, name);
+
+        let mtimeMs: number;
         try {
-            const raw = fs.readFileSync(filePath, 'utf-8');
-            const wrapper = JSON.parse(raw) as SnapshotCacheEntry;
-            const snapshot = wrapper.snapshot;
-            if (!snapshot) continue;
-            if (snapshotImportance(snapshot) !== opts.section) continue;
-            entries.push({
-                threadId: snapshot.threadId,
-                dateMs: snapshotDateMs(snapshot),
-                snapshot,
-            });
-        } catch (err) {
-            console.warn(`[Inbox lists] read failed for ${name}:`, err);
+            mtimeMs = fs.statSync(filePath).mtimeMs;
+        } catch {
+            listCache.delete(name);
+            continue;
         }
+
+        let cached = listCache.get(name);
+        if (!cached || cached.mtimeMs !== mtimeMs) {
+            try {
+                const raw = fs.readFileSync(filePath, 'utf-8');
+                const wrapper = JSON.parse(raw) as SnapshotCacheEntry;
+                const snapshot = wrapper.snapshot;
+                if (!snapshot) {
+                    listCache.delete(name);
+                    continue;
+                }
+                cached = {
+                    mtimeMs,
+                    dateMs: snapshotDateMs(snapshot),
+                    section: snapshotImportance(snapshot),
+                    snapshot,
+                };
+                listCache.set(name, cached);
+            } catch (err) {
+                console.warn(`[Inbox lists] read failed for ${name}:`, err);
+                listCache.delete(name);
+                continue;
+            }
+        }
+
+        if (cached.section !== opts.section) continue;
+        entries.push({
+            threadId: cached.snapshot.threadId,
+            dateMs: cached.dateMs,
+            snapshot: cached.snapshot,
+        });
+    }
+
+    // Evict cache entries for files that are gone (archived/trashed/pruned).
+    for (const key of listCache.keys()) {
+        if (!seen.has(key)) listCache.delete(key);
     }
 
     // Newest first, threadId asc as tiebreak.
