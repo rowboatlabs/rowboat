@@ -216,6 +216,38 @@ function configureSessionPermissions(targetSession: Session): void {
   });
 }
 
+// Wire Ctrl/Cmd + (+ / − / 0) to zoom the renderer in/out/reset.
+// The app sets no application menu, so the default menu's zoom roles aren't
+// available — and on Linux the menu bar is suppressed by the frameless
+// `hiddenInset` title bar — so handle the accelerators directly here.
+// `event.preventDefault()` stops the keystroke from leaking into the editor.
+function setupZoomShortcuts(win: BrowserWindow) {
+  const ZOOM_STEP = 0.5; // zoom-level units (factor = 1.2 ^ level, ~9.5% per step)
+  const MIN_ZOOM_LEVEL = -3;
+  const MAX_ZOOM_LEVEL = 3;
+  const wc = win.webContents;
+
+  wc.on("before-input-event", (event, input) => {
+    if (input.type !== "keyDown") return;
+    // Cmd on macOS, Ctrl elsewhere.
+    if (!(process.platform === "darwin" ? input.meta : input.control)) return;
+
+    // input.key is the produced character: "+"/"=" share a physical key (as do
+    // "-"/"_"), and numpad +/- produce the same characters, so this covers both.
+    const key = input.key;
+    if (key === "+" || key === "=") {
+      wc.setZoomLevel(Math.min(wc.getZoomLevel() + ZOOM_STEP, MAX_ZOOM_LEVEL));
+      event.preventDefault();
+    } else if (key === "-" || key === "_") {
+      wc.setZoomLevel(Math.max(wc.getZoomLevel() - ZOOM_STEP, MIN_ZOOM_LEVEL));
+      event.preventDefault();
+    } else if (key === "0") {
+      wc.setZoomLevel(0);
+      event.preventDefault();
+    }
+  });
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1280,
@@ -291,6 +323,9 @@ function createWindow() {
   // Attach the embedded browser pane manager to this window.
   // The WebContentsView is created lazily on first `browser:setVisible`.
   browserViewManager.attach(win);
+
+  // Cmd/Ctrl + (+ / − / 0) zoom shortcuts for the renderer UI.
+  setupZoomShortcuts(win);
 
   if (app.isPackaged) {
     win.loadURL("app://-/index.html");
