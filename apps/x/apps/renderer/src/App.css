@@ -726,8 +726,29 @@
   background: rgba(0, 0, 0, 0.32);
 }
 
+/* Dark defaults (mirrors .gmail-shell); .light overrides below. */
 .gmail-compose-modal,
 .gmail-compose-card {
+  --gm-bg-card: #131317;
+  --gm-bg-input: #1c1c20;
+  --gm-bg-elevated: #1c1c20;
+  --gm-bg-pill: #1c1c20;
+  --gm-bg-pill-hover: #232328;
+  --gm-text: #e4e4e7;
+  --gm-text-strong: #fafafa;
+  --gm-text-muted: #71717a;
+  --gm-text-body: #d4d4d8;
+  --gm-border: #1f1f24;
+  --gm-border-strong: #2e2e35;
+  --gm-accent: #a78bfa;
+  --gm-accent-hover: #b9a6ff;
+  --gm-accent-fg: #18181b;
+  --gm-icon-hover-bg: #1f1f24;
+  --gm-placeholder: #52525b;
+}
+
+.light .gmail-compose-modal,
+.light .gmail-compose-card {
   --gm-bg-card: #ffffff;
   --gm-bg-input: #f4f4f7;
   --gm-bg-elevated: #ffffff;
