@@ -27,6 +27,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import {
@@ -55,8 +56,24 @@ type WorkspaceActions = {
   copyPath: (path: string) => void
   revealInFileManager: (path: string, isDir: boolean) => void
   createNote: (parentPath?: string) => void
+  addGoogleDoc: (parentPath?: string) => void
   createFolder: (parentPath?: string) => Promise<string>
   onOpenInNewTab?: (path: string) => void
+}
+
+function GoogleDriveIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className}
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path fill="#1FA463" d="M8.52 3.5h6.96l6.95 12.04h-6.96L8.52 3.5Z" />
+      <path fill="#FFD04B" d="M1.57 15.54 8.52 3.5l3.48 6.02-3.48 6.02H1.57Z" />
+      <path fill="#4688F1" d="M8.52 15.54h13.91L18.95 21H5.05l3.47-5.46Z" />
+    </svg>
+  )
 }
 
 type WorkspaceViewProps = {
@@ -359,6 +376,15 @@ export function WorkspaceView({ tree, initialPath, actions, onNavigate, onOpenNo
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => actions.createNote(currentPath)}>
+                  <FilePlus className="mr-2 size-4" />
+                  New note
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => actions.addGoogleDoc(currentPath)}>
+                  <GoogleDriveIcon className="mr-2 size-4" />
+                  Add Google Doc
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => filesInputRef.current?.click()}>
                   <FilePlus className="mr-2 size-4" />
                   Add files…

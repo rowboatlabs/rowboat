@@ -5918,6 +5918,7 @@ function App() {
                       copyPath: knowledgeActions.copyPath,
                       revealInFileManager: knowledgeActions.revealInFileManager,
                       createNote: knowledgeActions.createNote,
+                      addGoogleDoc: knowledgeActions.addGoogleDoc,
                       createFolder: knowledgeActions.createFolder,
                       onOpenInNewTab: knowledgeActions.onOpenInNewTab,
                     }}
