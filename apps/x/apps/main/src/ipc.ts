@@ -1304,6 +1304,12 @@ export function setupIpcHandlers() {
     'composio:list-toolkits': async () => {
       return composioHandler.listToolkits();
     },
+    'composio:execute-tool': async (_event, args) => {
+      return composioHandler.executeTool(args.toolkitSlug, args.toolSlug, args.arguments);
+    },
+    'composio:search-tools': async (_event, args) => {
+      return composioHandler.searchToolsInToolkit(args.toolkitSlug, args.query);
+    },
     'migration:check-composio-google': async () => {
       return qualifyAndDisconnectComposioGoogle();
     },

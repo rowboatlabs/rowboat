@@ -109,6 +109,10 @@ const style = `
 .action.like.on { color:#f91880; }
 .action.repost.on { color:#00ba7c; }
 .empty { padding:48px 16px; text-align:center; color:#71767b; font-size:15px; }
+.banner { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:14px 16px 0; padding:12px 14px; border:1px solid #1d9bf0; background:rgba(29,155,240,0.12); border-radius:12px; }
+.banner-text { font-size:13px; color:#e7e9ea; }
+.banner-btn { background:#1d9bf0; color:#fff; border:0; border-radius:999px; padding:7px 16px; font-size:13px; font-weight:700; cursor:pointer; }
+.banner-btn:disabled { opacity:.6; cursor:default; }
 .toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#1d9bf0; color:#fff; font-size:14px; font-weight:600; padding:10px 18px; border-radius:999px; opacity:0; transition:opacity .2s; pointer-events:none; }
 .toast.show { opacity:1; }
 .loading { padding:48px 16px; text-align:center; color:#71767b; font-size:15px; }
@@ -131,6 +135,17 @@ function fmt(n) {
 }
 function persist() {
   window.rowboat.setState({ topics: selected, liked: liked, reposted: reposted });
+}
+
+// X/Twitter has no Composio managed-OAuth2 flow, so this sample stays a local UI
+// demo (see GitHub Radar for the real connect -> execute bridge).
+function act(action, id) {
+  if (action === 'reply') { flash('Reply drafted (demo)'); return; }
+  if (action === 'like') liked[id] = !liked[id];
+  if (action === 'repost') reposted[id] = !reposted[id];
+  persist(); render();
+  if (action === 'repost') flash(reposted[id] ? 'Reposted (demo)' : 'Removed');
+  if (action === 'like') flash(liked[id] ? 'Liked (demo)' : 'Unliked');
 }
 
 function postHtml(p) {
@@ -193,18 +208,7 @@ root.addEventListener('click', function (e) {
   }
   var btn = t && t.closest ? t.closest('.action') : null;
   if (!btn) return;
-  var action = btn.getAttribute('data-action');
-  var id = btn.getAttribute('data-id');
-  if (action === 'reply') { flash('Reply drafted (demo)'); return; }
-  if (action === 'like') { liked[id] = !liked[id]; }
-  if (action === 'repost') { reposted[id] = !reposted[id]; }
-  persist();
-  render();
-  window.rowboat.callAction('twitter', action, { id: id }).then(function (res) {
-    flash((res && res.message) || 'Done');
-  }).catch(function (err) {
-    flash('Failed: ' + (err && err.message ? err.message : err));
-  });
+  act(btn.getAttribute('data-action'), btn.getAttribute('data-id'));
 });
 
 window.rowboat.onData(function (d) {

@@ -1020,6 +1020,34 @@ const ipcSchemas = {
     req: z.object({}),
     res: ZListToolkitsResponse,
   },
+  // Mini Apps: execute a Composio tool by slug (scoped to a connected toolkit).
+  'composio:execute-tool': {
+    req: z.object({
+      toolkitSlug: z.string(),
+      toolSlug: z.string(),
+      arguments: z.record(z.string(), z.unknown()).optional(),
+    }),
+    res: z.object({
+      successful: z.boolean(),
+      data: z.unknown().optional(),
+      error: z.string().optional(),
+    }),
+  },
+  // Mini Apps: search Composio tools within a toolkit (returns slugs + schemas).
+  'composio:search-tools': {
+    req: z.object({
+      toolkitSlug: z.string(),
+      query: z.string(),
+    }),
+    res: z.object({
+      tools: z.array(z.object({
+        slug: z.string(),
+        name: z.string(),
+        description: z.string().optional(),
+      })),
+      error: z.string().optional(),
+    }),
+  },
   // Agent schedule channels
   'agent-schedule:getConfig': {
     req: z.null(),

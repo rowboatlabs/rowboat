@@ -19,6 +19,13 @@ const BRIDGE_SHIM = /* js */ `
   var dataCbs = [], stateCbs = [];
   var pending = {}, seq = 0;
   function post(msg) { parent.postMessage(msg, '*'); }
+  function rpc(method, params) {
+    var id = 'r' + (++seq);
+    return new Promise(function (resolve, reject) {
+      pending[id] = { resolve: resolve, reject: reject };
+      post({ type: 'rowboat:mini-app:rpc', id: id, method: method, params: params });
+    });
+  }
   window.addEventListener('message', function (e) {
     var m = e.data;
     if (!m || typeof m !== 'object') return;
@@ -28,11 +35,11 @@ const BRIDGE_SHIM = /* js */ `
     } else if (m.type === 'rowboat:mini-app:state') {
       state = m.state;
       stateCbs.forEach(function (cb) { try { cb(state); } catch (_) {} });
-    } else if (m.type === 'rowboat:mini-app:action-result') {
+    } else if (m.type === 'rowboat:mini-app:rpc-result') {
       var p = pending[m.id];
       if (p) {
         delete pending[m.id];
-        if (m.ok) p.resolve(m.result); else p.reject(new Error(m.error || 'action failed'));
+        if (m.ok) p.resolve(m.result); else p.reject(new Error(m.error || 'request failed'));
       }
     }
   });
@@ -54,13 +61,15 @@ const BRIDGE_SHIM = /* js */ `
       post({ type: 'rowboat:mini-app:setState', patch: patch });
       stateCbs.forEach(function (cb) { try { cb(state); } catch (_) {} });
     },
-    callAction: function (scope, action, args) {
-      var id = 'a' + (++seq);
-      return new Promise(function (resolve, reject) {
-        pending[id] = { resolve: resolve, reject: reject };
-        post({ type: 'rowboat:mini-app:action', id: id, scope: scope, action: action, args: args });
-      });
-    },
+    // Execute a Composio tool by slug within the app's scope. Resolves to the
+    // tool result, rejects with an Error (e.g. not connected / out of scope).
+    callAction: function (scope, tool, args) { return rpc('callAction', { scope: scope, tool: tool, args: args }); },
+    // Find tool slugs within a toolkit. Resolves to [{ slug, name, description }].
+    searchTools: function (scope, query) { return rpc('searchTools', { scope: scope, query: query }); },
+    // Resolve to true/false whether the toolkit is connected.
+    isConnected: function (scope) { return rpc('isConnected', { scope: scope }); },
+    // Trigger the Composio OAuth flow for the toolkit. Resolves when started.
+    connect: function (scope) { return rpc('connect', { scope: scope }); },
     ready: function () { post({ type: 'rowboat:mini-app:ready' }); },
   };
 })();

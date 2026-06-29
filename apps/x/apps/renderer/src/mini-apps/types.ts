@@ -46,12 +46,22 @@ export type MiniApp = {
 // surface the app codes against and the security boundary.
 // ---------------------------------------------------------------------------
 
+/**
+ * Host RPC methods the app can call (all scope-checked against the app's
+ * declared integration scope by the host before they run):
+ * - callAction:  execute a Composio tool by slug   params: { scope, tool, args? }
+ * - searchTools: find tool slugs within a toolkit   params: { scope, query }
+ * - isConnected: is the toolkit connected?          params: { scope }
+ * - connect:     trigger the Composio OAuth flow     params: { scope }
+ */
+export type MiniAppRpcMethod = 'callAction' | 'searchTools' | 'isConnected' | 'connect'
+
 /** Messages sent from the iframe (app) up to the host (renderer). */
 export type MiniAppOutboundMessage =
   /** Handshake: app is mounted and wants its initial data + state. */
   | { type: 'rowboat:mini-app:ready' }
-  /** App requests a scoped Composio action. Host replies with action-result. */
-  | { type: 'rowboat:mini-app:action'; id: string; scope: string; action: string; args?: unknown }
+  /** A request/response call into the host, correlated by id. */
+  | { type: 'rowboat:mini-app:rpc'; id: string; method: MiniAppRpcMethod; params?: unknown }
   /** App wants to persist a patch to its per-app state store. */
   | { type: 'rowboat:mini-app:setState'; patch: unknown }
 
@@ -61,14 +71,14 @@ export type MiniAppInboundMessage =
   | { type: 'rowboat:mini-app:data'; data: unknown }
   /** Current per-app state; sent on ready and after setState. */
   | { type: 'rowboat:mini-app:state'; state: unknown }
-  /** Result of a previously requested action, correlated by id. */
-  | { type: 'rowboat:mini-app:action-result'; id: string; ok: boolean; result?: unknown; error?: string }
+  /** Result of a previously requested rpc call, correlated by id. */
+  | { type: 'rowboat:mini-app:rpc-result'; id: string; ok: boolean; result?: unknown; error?: string }
 
 export const MINI_APP_MESSAGE = {
   ready: 'rowboat:mini-app:ready',
-  action: 'rowboat:mini-app:action',
+  rpc: 'rowboat:mini-app:rpc',
   setState: 'rowboat:mini-app:setState',
   data: 'rowboat:mini-app:data',
   state: 'rowboat:mini-app:state',
-  actionResult: 'rowboat:mini-app:action-result',
+  rpcResult: 'rowboat:mini-app:rpc-result',
 } as const
