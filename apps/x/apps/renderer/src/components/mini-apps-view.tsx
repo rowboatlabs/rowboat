@@ -12,12 +12,12 @@ import { MiniAppFrame } from '@/components/mini-app-frame'
 type Theme = { accent: string; glow: string }
 
 const THEMES: Theme[] = [
-  { accent: '#7C5CFF', glow: 'rgba(124,92,255,0.45)' }, // Indigo
-  { accent: '#4F9CFF', glow: 'rgba(79,156,255,0.45)' }, // Ocean
+  { accent: '#FF4D8D', glow: 'rgba(255,77,141,0.45)' }, // Pink
+  { accent: '#EF4444', glow: 'rgba(239,68,68,0.45)' }, // Red
   { accent: '#22C55E', glow: 'rgba(34,197,94,0.40)' }, // Emerald
   { accent: '#F59E0B', glow: 'rgba(245,158,11,0.42)' }, // Amber
-  { accent: '#EC4899', glow: 'rgba(236,72,153,0.42)' }, // Rose
   { accent: '#14B8A6', glow: 'rgba(20,184,166,0.40)' }, // Teal
+  { accent: '#EC4899', glow: 'rgba(236,72,153,0.42)' }, // Rose
 ]
 
 const PATTERNS = ['dots', 'grid', 'diagonal', 'radial', 'waves', 'mesh']
@@ -27,7 +27,9 @@ function hash(s: string): number {
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0
   return Math.abs(h)
 }
-const themeFor = (id: string): Theme => THEMES[hash(id) % THEMES.length]
+// Spread accents across the grid by card position so adjacent cards differ and
+// the full palette is exercised. Pattern stays tied to id (stable per app).
+const themeForIndex = (i: number): Theme => THEMES[i % THEMES.length]
 const patternFor = (id: string): string => PATTERNS[hash(id + '·pat') % PATTERNS.length]
 
 // Card styling lives here (precise gradients/glows/patterns are awkward in
@@ -127,8 +129,8 @@ const CARD_CSS = `
 .ma-new-hint { font-size:12px; color:var(--ma-new-hint); }
 `
 
-function Card({ app, onOpen }: { app: MiniApp; onOpen: () => void }) {
-  const theme = themeFor(app.id)
+function Card({ app, index, onOpen }: { app: MiniApp; index: number; onOpen: () => void }) {
+  const theme = themeForIndex(index)
   const pattern = patternFor(app.id)
   return (
     <button
@@ -185,8 +187,8 @@ export function MiniAppsView() {
         <p className="ma-sub">Little apps that live inside Rowboat, powered by your agents and integrations.</p>
 
         <div className="ma-grid">
-          {MINI_APPS.map((app) => (
-            <Card key={app.id} app={app} onOpen={() => setSelectedId(app.id)} />
+          {MINI_APPS.map((app, i) => (
+            <Card key={app.id} app={app} index={i} onOpen={() => setSelectedId(app.id)} />
           ))}
 
           {/* Placeholder for copilot-generated apps (Phase 3). */}
