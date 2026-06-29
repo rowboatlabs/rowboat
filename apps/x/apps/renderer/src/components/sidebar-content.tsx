@@ -13,6 +13,7 @@ import {
   Globe,
   AlertTriangle,
   Home,
+  LayoutGrid,
   Mic,
   SquarePen,
   Plug,
@@ -161,6 +162,7 @@ type SidebarContentPanelProps = {
   onOpenMeetings?: () => void
   onOpenCode?: () => void
   onOpenBgTasks?: () => void
+  onOpenApps?: () => void
   onOpenAgent?: (slug: string) => void
   recentRuns?: { id: string; title?: string; createdAt: string; modifiedAt?: string }[]
   onOpenRun?: (runId: string) => void
@@ -171,7 +173,7 @@ type SidebarContentPanelProps = {
   onToggleBrowser?: () => void
   onVoiceNoteCreated?: (path: string) => void
   /** Which primary destination is currently active, for nav highlighting. */
-  activeNav?: 'home' | 'email' | 'meetings' | 'code' | 'knowledge' | 'agents' | 'workspaces' | null
+  activeNav?: 'home' | 'email' | 'meetings' | 'code' | 'knowledge' | 'agents' | 'apps' | 'workspaces' | null
   /** Live meeting recording state, so the recording row can show its indicator/stop. */
   meetingRecordingState?: 'idle' | 'connecting' | 'recording' | 'stopping'
   recordingMeetingSource?: string | null
@@ -410,6 +412,7 @@ export function SidebarContentPanel({
   onOpenMeetings,
   onOpenCode,
   onOpenBgTasks,
+  onOpenApps,
   recentRuns = [],
   onOpenRun,
   onOpenChatHistory,
@@ -846,6 +849,15 @@ export function SidebarContentPanel({
                       </span>
                     )}
                   </div>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  isActive={activeNav === 'apps'}
+                  onClick={onOpenApps}
+                >
+                  <LayoutGrid className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="flex-1 truncate text-muted-foreground">Mini Apps</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
