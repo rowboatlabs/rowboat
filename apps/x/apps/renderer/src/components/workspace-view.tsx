@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ChevronRight,
   Copy,
@@ -9,6 +9,8 @@ import {
   FolderOpen,
   FolderPlus,
   Home,
+  Loader2,
+  MessageSquare,
   Pencil,
   Plus,
   Trash2,
@@ -85,6 +87,24 @@ type WorkspaceViewProps = {
   onNavigate: (path: string) => void
   onOpenNote: (path: string) => void
   onCreateWorkspace: (name: string) => Promise<void>
+  // Opens a previous chat (run) whose work directory is set to this workspace.
+  onOpenRun: (runId: string) => void
+}
+
+type WorkspaceChat = {
+  id: string
+  title?: string
+  createdAt: string
+  modifiedAt: string
+}
+
+function formatChatAt(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const now = new Date()
+  const sameDay = d.toDateString() === now.toDateString()
+  if (sameDay) return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric' })
 }
 
 function getFileManagerName(): string {
@@ -143,9 +163,12 @@ function readFileAsBase64(file: File): Promise<string> {
   })
 }
 
-export function WorkspaceView({ tree, initialPath, actions, onNavigate, onOpenNote, onCreateWorkspace }: WorkspaceViewProps) {
+export function WorkspaceView({ tree, initialPath, actions, onNavigate, onOpenNote, onCreateWorkspace, onOpenRun }: WorkspaceViewProps) {
   const currentPath = initialPath || WORKSPACE_ROOT
   const [addOpen, setAddOpen] = useState(false)
+  const [chatsOpen, setChatsOpen] = useState(false)
+  const [chats, setChats] = useState<WorkspaceChat[]>([])
+  const [chatsLoading, setChatsLoading] = useState(false)
   const [newName, setNewName] = useState('')
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -181,6 +204,32 @@ export function WorkspaceView({ tree, initialPath, actions, onNavigate, onOpenNo
       return { path: acc, name: seg }
     })
   }, [currentPath, isRoot])
+
+  // Load the chats whose work directory is this workspace folder (or nested
+  // inside it). The work directory is stored as an absolute path per run, so
+  // resolve this folder against the workspace root before querying.
+  const loadChats = useCallback(async () => {
+    if (isRoot) {
+      setChats([])
+      return
+    }
+    setChatsLoading(true)
+    try {
+      const { root } = await window.ipc.invoke('workspace:getRoot', null)
+      const abs = `${root.replace(/\/$/, '')}/${currentPath}`
+      const { runs } = await window.ipc.invoke('runs:listByWorkDir', { dir: abs })
+      setChats(runs.map((r) => ({ id: r.id, title: r.title, createdAt: r.createdAt, modifiedAt: r.modifiedAt })))
+    } catch (err) {
+      console.error('Failed to load workspace chats:', err)
+      setChats([])
+    } finally {
+      setChatsLoading(false)
+    }
+  }, [currentPath, isRoot])
+
+  useEffect(() => {
+    void loadChats()
+  }, [loadChats])
 
   const handleItemClick = useCallback(
     (item: TreeNode) => {
@@ -352,25 +401,34 @@ export function WorkspaceView({ tree, initialPath, actions, onNavigate, onOpenNo
             )
           })}
         </div>
-        <div className="grid shrink-0 grid-cols-2 items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
+          {!isRoot && (
+            <Button
+              size="sm"
+              variant={chatsOpen ? 'secondary' : 'outline'}
+              onClick={() => setChatsOpen((v) => !v)}
+            >
+              <MessageSquare className="size-4" />
+              Chats{chats.length ? ` (${chats.length})` : ''}
+            </Button>
+          )}
           <Button
             size="sm"
             variant="outline"
-            className="w-full"
             onClick={() => actions.revealInFileManager(currentPath, true)}
           >
             <FolderOpen className="size-4" />
             Open in {fileManagerName}
           </Button>
           {isRoot ? (
-            <Button size="sm" className="w-full" onClick={() => setAddOpen(true)}>
+            <Button size="sm" onClick={() => setAddOpen(true)}>
               <Plus className="size-4" />
               Add workspace
             </Button>
           ) : (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button size="sm" className="w-full">
+                <Button size="sm">
                   <Plus className="size-4" />
                   Add
                 </Button>
@@ -422,6 +480,7 @@ export function WorkspaceView({ tree, initialPath, actions, onNavigate, onOpenNo
         }}
       />
 
+      <div className="flex flex-1 overflow-hidden">
       <div
         className="relative flex-1 overflow-y-auto px-6 py-6"
         onDragEnter={handleDragEnter}
@@ -547,6 +606,45 @@ export function WorkspaceView({ tree, initialPath, actions, onNavigate, onOpenNo
             Adding files…
           </div>
         )}
+      </div>
+
+      {!isRoot && chatsOpen && (
+        <aside className="flex w-72 shrink-0 flex-col overflow-hidden border-l border-border bg-background">
+          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-4 py-3">
+            <span className="text-sm font-medium text-foreground">Chats</span>
+            {chatsLoading && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            {!chatsLoading && chats.length === 0 ? (
+              <div className="px-4 py-8 text-center text-xs text-muted-foreground">
+                No chats use this workspace yet. Set a chat's work directory to this folder and it will appear here.
+              </div>
+            ) : (
+              <div className="divide-y divide-border">
+                {chats.map((chat) => (
+                  <button
+                    key={chat.id}
+                    type="button"
+                    onClick={() => onOpenRun(chat.id)}
+                    className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-accent/40"
+                  >
+                    <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
+                    <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                      <span className="truncate text-[13px] text-foreground">
+                        {chat.title || '(Untitled chat)'}
+                      </span>
+                      <span className="text-[11px] text-muted-foreground">
+                        {formatChatAt(chat.createdAt)}
+                      </span>
+                    </div>
+                    <ChevronRight className="size-3 shrink-0 text-muted-foreground" />
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </aside>
+      )}
       </div>
 
       <Dialog

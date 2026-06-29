@@ -350,6 +350,12 @@ const ipcSchemas = {
     }),
     res: ListRunsResponse,
   },
+  'runs:listByWorkDir': {
+    req: z.object({
+      dir: z.string(),
+    }),
+    res: ListRunsResponse,
+  },
   'runs:delete': {
     req: z.object({
       runId: z.string(),

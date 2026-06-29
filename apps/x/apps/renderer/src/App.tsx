@@ -5925,6 +5925,7 @@ function App() {
                     onNavigate={(path) => { void navigateToView({ type: 'workspace', path: path === WORKSPACE_ROOT ? undefined : path }) }}
                     onOpenNote={(path) => navigateToFile(path)}
                     onCreateWorkspace={async (name) => { await knowledgeActions.createWorkspace(name) }}
+                    onOpenRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
                   />
                 </div>
               ) : isKnowledgeViewOpen ? (

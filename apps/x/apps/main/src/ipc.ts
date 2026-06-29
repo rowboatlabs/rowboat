@@ -813,6 +813,9 @@ export function setupIpcHandlers() {
     'runs:list': async (_event, args) => {
       return runsCore.listRuns(args.cursor);
     },
+    'runs:listByWorkDir': async (_event, args) => {
+      return runsCore.listRunsByWorkDir(args.dir);
+    },
     'runs:delete': async (_event, args) => {
       await runsCore.deleteRun(args.runId);
       return { success: true };
