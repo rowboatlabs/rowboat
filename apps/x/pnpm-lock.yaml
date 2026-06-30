@@ -11,6 +11,9 @@ catalogs:
       version: 4.1.7
 
 patchedDependencies:
+  '@agentclientprotocol/codex-acp@0.0.44':
+    hash: 0079b1ab3870451b47fe5ea5ecaca697e17139cff50fd2ee9c296b172aba525e
+    path: patches/@agentclientprotocol__codex-acp@0.0.44.patch
   '@openai/codex@0.128.0':
     hash: 9edd926108a95aaa788aa93870fd6b16d70eeccdf5740b503af5d34cc9f25e86
     path: patches/@openai__codex@0.128.0.patch
@@ -57,7 +60,7 @@ importers:
         version: 0.39.0(@anthropic-ai/sdk@0.100.1(zod@4.2.1))(@modelcontextprotocol/sdk@1.25.1(hono@4.11.3)(zod@4.2.1))
       '@agentclientprotocol/codex-acp':
         specifier: ^0.0.44
-        version: 0.0.44(zod@4.2.1)
+        version: 0.0.44(patch_hash=0079b1ab3870451b47fe5ea5ecaca697e17139cff50fd2ee9c296b172aba525e)(zod@4.2.1)
       '@x/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -414,7 +417,7 @@ importers:
         version: 0.39.0(@anthropic-ai/sdk@0.100.1(zod@4.2.1))(@modelcontextprotocol/sdk@1.25.1(hono@4.11.3)(zod@4.2.1))
       '@agentclientprotocol/codex-acp':
         specifier: ^0.0.44
-        version: 0.0.44(zod@4.2.1)
+        version: 0.0.44(patch_hash=0079b1ab3870451b47fe5ea5ecaca697e17139cff50fd2ee9c296b172aba525e)(zod@4.2.1)
       '@agentclientprotocol/sdk':
         specifier: ^0.22.1
         version: 0.22.1(zod@4.2.1)
@@ -8512,7 +8515,7 @@ snapshots:
       - '@anthropic-ai/sdk'
       - '@modelcontextprotocol/sdk'
 
-  '@agentclientprotocol/codex-acp@0.0.44(zod@4.2.1)':
+  '@agentclientprotocol/codex-acp@0.0.44(patch_hash=0079b1ab3870451b47fe5ea5ecaca697e17139cff50fd2ee9c296b172aba525e)(zod@4.2.1)':
     dependencies:
       '@agentclientprotocol/sdk': 0.21.1(zod@4.2.1)
       '@openai/codex': 0.128.0(patch_hash=9edd926108a95aaa788aa93870fd6b16d70eeccdf5740b503af5d34cc9f25e86)
