@@ -223,11 +223,11 @@ interface ChatInputInnerProps {
   onDraftChange?: (text: string) => void
   isRecording?: boolean
   recordingText?: string
-  recordingState?: 'connecting' | 'listening'
+  recordingState?: 'connecting' | 'listening' | 'stopping'
   /** Live mic amplitude history (RMS per frame) driving the recording waveform. */
   audioLevelsRef?: React.MutableRefObject<number[]>
   onStartRecording?: () => void
-  onSubmitRecording?: () => void
+  onSubmitRecording?: () => void | Promise<void>
   onCancelRecording?: () => void
   voiceAvailable?: boolean
   ttsAvailable?: boolean
@@ -262,6 +262,7 @@ function ChatInputInner({
   onDraftChange,
   isRecording,
   recordingText,
+  recordingState,
   audioLevelsRef,
   onStartRecording,
   onSubmitRecording,
@@ -829,23 +830,33 @@ function ChatInputInner({
           >
             <X className="h-4 w-4" />
           </button>
-          {/* Audio-reactive waveform only — the transcribed words are intentionally
-              not shown while recording; they're still captured and submitted. */}
-          <div className="flex flex-1 items-center overflow-hidden">
+          <div className="flex min-w-0 flex-1 flex-col gap-1 overflow-hidden">
             <VoiceWaveform audioLevelsRef={audioLevelsRef} />
+            <div
+              className={cn(
+                'min-h-5 truncate text-sm leading-5',
+                recordingText?.trim() ? 'text-foreground' : 'text-muted-foreground'
+              )}
+            >
+              {recordingText?.trim() || (recordingState === 'stopping' ? 'Finalizing...' : 'Listening...')}
+            </div>
           </div>
           <Button
             size="icon"
             onClick={onSubmitRecording}
-            disabled={!recordingText?.trim()}
+            disabled={recordingState === 'stopping'}
             className={cn(
               'h-7 w-7 shrink-0 rounded-full transition-all',
-              recordingText?.trim()
+              recordingState !== 'stopping'
                 ? 'bg-primary text-primary-foreground hover:bg-primary/90'
                 : 'bg-muted text-muted-foreground'
             )}
           >
-            <ArrowUp className="h-4 w-4" />
+            {recordingState === 'stopping' ? (
+              <LoaderIcon className="h-4 w-4 animate-spin" />
+            ) : (
+              <ArrowUp className="h-4 w-4" />
+            )}
           </Button>
         </div>
       ) : (
@@ -1477,10 +1488,10 @@ export interface ChatInputWithMentionsProps {
   onDraftChange?: (text: string) => void
   isRecording?: boolean
   recordingText?: string
-  recordingState?: 'connecting' | 'listening'
+  recordingState?: 'connecting' | 'listening' | 'stopping'
   audioLevelsRef?: React.MutableRefObject<number[]>
   onStartRecording?: () => void
-  onSubmitRecording?: () => void
+  onSubmitRecording?: () => void | Promise<void>
   onCancelRecording?: () => void
   voiceAvailable?: boolean
   ttsAvailable?: boolean

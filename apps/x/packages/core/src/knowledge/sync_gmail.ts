@@ -248,6 +248,7 @@ function notifyNewEmails(threads: SyncedThread[]): void {
     const now = Date.now();
     for (const { threadId } of threads) {
         const snapshot = readCachedSnapshot(threadId)?.snapshot;
+        if (snapshot?.importance !== 'important') continue;
         if (snapshot && isEmailTooOldToNotify(snapshotDateMs(snapshot), now)) continue;
         const subject = snapshot?.subject?.trim() || '(no subject)';
         const from = snapshot?.from?.trim();

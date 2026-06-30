@@ -1,10 +1,11 @@
 import { useCallback, useRef, useState } from 'react';
 import { buildDeepgramListenUrl } from '@/lib/deepgram-listen-url';
+import { finalizeDeepgramStream } from '@/lib/deepgram-finalize';
 import { useRowboatAccount } from '@/hooks/useRowboatAccount';
 import posthog from 'posthog-js';
 import * as analytics from '@/lib/analytics';
 
-export type VoiceState = 'idle' | 'connecting' | 'listening';
+export type VoiceState = 'idle' | 'connecting' | 'listening' | 'submitting';
 
 const DEEPGRAM_PARAMS = new URLSearchParams({
     model: 'nova-3',
@@ -129,8 +130,45 @@ export function useVoiceMode() {
         };
     }, [refreshAuth]);
 
-    // Stop audio capture and close WS
-    const stopAudioCapture = useCallback(() => {
+    const waitForWsOpen = useCallback(async (timeoutMs = 1500): Promise<boolean> => {
+        const ws = wsRef.current;
+        if (!ws) return false;
+        if (ws.readyState === WebSocket.OPEN) return true;
+        if (ws.readyState !== WebSocket.CONNECTING) return false;
+
+        return new Promise<boolean>((resolve) => {
+            let done = false;
+            let timeout: ReturnType<typeof setTimeout>;
+            const finish = (ok: boolean) => {
+                if (done) return;
+                done = true;
+                clearTimeout(timeout);
+                ws.removeEventListener('open', onOpen);
+                ws.removeEventListener('error', onError);
+                ws.removeEventListener('close', onClose);
+                resolve(ok);
+            };
+            const onOpen = () => finish(true);
+            const onError = () => finish(false);
+            const onClose = () => finish(false);
+            timeout = setTimeout(() => finish(false), timeoutMs);
+            ws.addEventListener('open', onOpen);
+            ws.addEventListener('error', onError);
+            ws.addEventListener('close', onClose);
+        });
+    }, []);
+
+    const flushBufferedAudio = useCallback(() => {
+        const ws = wsRef.current;
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        const buffered = audioBufferRef.current;
+        audioBufferRef.current = [];
+        for (const chunk of buffered) {
+            ws.send(chunk);
+        }
+    }, []);
+
+    const stopInputCapture = useCallback(() => {
         if (processorRef.current) {
             processorRef.current.disconnect();
             processorRef.current = null;
@@ -143,6 +181,11 @@ export function useVoiceMode() {
             mediaStreamRef.current.getTracks().forEach(t => t.stop());
             mediaStreamRef.current = null;
         }
+    }, []);
+
+    // Stop audio capture and close WS
+    const stopAudioCapture = useCallback(() => {
+        stopInputCapture();
         if (wsRef.current) {
             wsRef.current.onclose = null;
             wsRef.current.close();
@@ -155,7 +198,7 @@ export function useVoiceMode() {
         transcriptBufferRef.current = '';
         interimRef.current = '';
         setState('idle');
-    }, []);
+    }, [stopInputCapture]);
 
     const start = useCallback(async () => {
         if (state !== 'idle') return;
@@ -250,15 +293,25 @@ export function useVoiceMode() {
     }, [state, connectWs, stopAudioCapture]);
 
     /** Stop recording and return the full transcript (finalized + any current interim) */
-    const submit = useCallback((): string => {
+    const submit = useCallback(async (): Promise<string> => {
+        setState('submitting');
+        stopInputCapture();
+
+        if (wsRef.current?.readyState === WebSocket.CONNECTING) {
+            await waitForWsOpen();
+        }
+        flushBufferedAudio();
+        await finalizeDeepgramStream(wsRef.current);
+
         let text = transcriptBufferRef.current;
         if (interimRef.current) {
             text += (text ? ' ' : '') + interimRef.current;
         }
         text = text.trim();
+
         stopAudioCapture();
         return text;
-    }, [stopAudioCapture]);
+    }, [flushBufferedAudio, stopAudioCapture, stopInputCapture, waitForWsOpen]);
 
     /** Cancel recording without returning transcript */
     const cancel = useCallback(() => {

@@ -1040,8 +1040,9 @@ function App() {
   const editorRefsByTabId = useRef<Map<string, MarkdownEditorHandle>>(new Map())
   const [pendingPaletteSubmit, setPendingPaletteSubmit] = useState<{ text: string; mention: CommandPaletteMention | null } | null>(null)
 
-  const handleSubmitRecording = useCallback(() => {
-    const text = voice.submit()
+  const handleSubmitRecording = useCallback(async () => {
+    if (!isRecordingRef.current) return
+    const text = await voice.submit()
     setIsRecording(false)
     isRecordingRef.current = false
     if (text) {
@@ -6377,7 +6378,7 @@ function App() {
                             onWorkDirChange={(v) => setTabWorkDir(tab.id, v)}
                             isRecording={isActive && isRecording}
                             recordingText={isActive ? voice.interimText : undefined}
-                            recordingState={isActive ? (voice.state === 'connecting' ? 'connecting' : 'listening') : undefined}
+                            recordingState={isActive ? (voice.state === 'submitting' ? 'stopping' : voice.state === 'connecting' ? 'connecting' : 'listening') : undefined}
                             audioLevelsRef={voice.audioLevelsRef}
                             onStartRecording={isActive ? handleStartRecording : undefined}
                             onSubmitRecording={isActive ? handleSubmitRecording : undefined}
@@ -6486,7 +6487,7 @@ function App() {
                 collapsedLeftPaddingPx={collapsedLeftPaddingPx}
                 isRecording={isRecording}
                 recordingText={voice.interimText}
-                recordingState={voice.state === 'connecting' ? 'connecting' : 'listening'}
+                recordingState={voice.state === 'submitting' ? 'stopping' : voice.state === 'connecting' ? 'connecting' : 'listening'}
                 audioLevelsRef={voice.audioLevelsRef}
                 onStartRecording={handleStartRecording}
                 onSubmitRecording={handleSubmitRecording}
