@@ -136,6 +136,86 @@ Copilot writing a new app folder + an associated background agent; the agent
 browsing via embedded browser for social feeds; copilot verifying Composio wiring
 by actually calling tools before finalizing.
 
+## 2c. Remaining work (after on-disk move)
+
+Done so far: surface + runtime (Phase 1), real scoped Composio bridge (Phase 2),
+apps on disk served via `app://miniapp` (Phase 2.5).
+
+**Next — Copilot builder (demo target).**
+- Copilot creates an app folder in `~/.rowboat/apps/<id>/` via the `mini-apps:seed`
+  install primitive (writes `manifest.json` + `dist/index.html`).
+- Copilot must **verify wiring by actually calling Composio tools** and inspecting
+  the returned data before finalizing — never speculate the shape.
+- Give generated apps the bridge contract — prefer **serving a canonical shim**
+  from the protocol (e.g. `app://miniapp/__bridge__.js`) over inlining.
+
+**Background-agent data pipeline (deterministic).**
+- Reuse the existing bg-tasks engine; link via `manifest.agent`.
+- The agent does NOT write files. It **returns structured data validated against
+  the app's data schema**; the bg-task **runner (code) atomically writes the
+  app's `data.json`** (temp→rename, keep last-good on failure). Path / atomicity
+  / validation / fallback all live in code — only the *content* is LLM-driven.
+- Social feeds (Twitter/LinkedIn/Reddit): the agent browses via the embedded
+  browser, curates, returns data → runner writes `data.json`.
+
+**Later (roadmap).**
+- Living apps + breakage recovery (edit by chat; surface errors → fix-with-copilot).
+- Scale/polish: context-overload windowing; app notifications; design-consistency
+  / component templates (team-deferred).
+- V2: drag an app into the main workspace.
+
+## 2d. Mini App builder skill — spec
+
+A Copilot skill (`build-mini-app`, in `packages/core/src/application/assistant/
+skills/`) that turns a chat request into an installed app under `~/.rowboat/
+apps/<id>/`. Copilot orchestrates; the actual code-writing is delegated by the
+chat's active engine (the chip), but the on-disk artifact is identical either way.
+
+**Trigger + intent gate** (like live-note/background-task signal tiers):
+- **Strong (build directly):** "make/build/create an app · mini app · dashboard
+  for …", "turn this into an app".
+- **Medium (CONFIRM FIRST):** requests that could be a one-off answer or a
+  recurring app — e.g. "show me my open PRs", "track competitor launches". Ask:
+  "Want this as a Mini App you can reopen, or just a one-time answer?" Build only
+  on yes. (Building installs a folder + maybe a bg agent + an OAuth prompt — too
+  heavy to trigger on a casual question.)
+- **Anti (do NOT build):** clearly one-off lookups/questions → just answer.
+
+**Flow:**
+1. **Scope the app** — derive `id` (slug), `title`, `description`, `source`, the
+   Composio `scope[]`, and whether it's **agent-backed** (scheduled data) or
+   **live** (calls Composio on use).
+2. **Verify wiring BEFORE building** (mandatory, engine-agnostic) — ensure the
+   toolkits are connected (prompt OAuth if not), then actually call the needed
+   tools (`composio-search-tools` → `composio-execute-tool`), inspect the REAL
+   returned data, and derive the **data schema from actual responses** — never
+   guess the shape.
+3. **Pick the writer (branch):**
+   - **Code Mode active** → create the folder + a manifest skeleton, then
+     `code_agent_run` with `cwd = ~/.rowboat/apps/<id>/` to author
+     `dist/index.html` against the verified schema + bridge contract; it can
+     iterate/test on-device.
+   - **No Code Mode** → Copilot writes `dist/index.html` itself (from the app
+     template + bridge shim) and installs via `mini-apps:seed`.
+4. **Bridge contract** — generated app references the canonical shim
+   (`app://miniapp/__bridge__.js`) and uses `window.rowboat`
+   (`getData/onData`, `isConnected/connect`, `searchTools/callAction`).
+5. **Data pipeline (if agent-backed)** — create a background task (existing
+   bg-tasks engine), set `manifest.agent` to its slug. The agent **returns
+   schema-validated data**; the **runner writes `data.json` deterministically**
+   (temp→rename, last-good on failure). App reads it via `onData`.
+6. **Finalize** — write `manifest.json` (incl. `scope`, `agent?`), ensure
+   `dist/index.html`, install → app appears in the gallery (`mini-apps:list`).
+   Confirm end-to-end (open it; data loads).
+
+**Infra this needs (repo side):**
+- Serve the canonical bridge shim from the protocol: `app://miniapp/__bridge__.js`
+  (move the shim out of per-app inlining into served infra).
+- bg-tasks runner: when a task is app-linked, validate its structured output
+  against the app schema and write that app's `data.json` (deterministic write
+  mode) instead of `index.md`.
+- A `build-mini-app` skill registered in the skills catalog.
+
 ## 3. Phase 1 — detailed implementation
 
 UI-first. Everything hand-coded; no `~/.rowboat` storage, no IPC, no agent yet.

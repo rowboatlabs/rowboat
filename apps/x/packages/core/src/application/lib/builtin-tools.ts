@@ -15,6 +15,7 @@ import { WorkDir } from "../../config/config.js";
 import { composioAccountsRepo } from "../../composio/repo.js";
 import { executeAction as executeComposioAction, isConfigured as isComposioConfigured, searchTools as searchComposioTools } from "../../composio/client.js";
 import { CURATED_TOOLKITS, CURATED_TOOLKIT_SLUGS } from "@x/shared/dist/composio.js";
+import { MiniAppManifest } from "@x/shared/dist/mini-app.js";
 import { BrowserControlInputSchema, type BrowserControlInput } from "@x/shared/dist/browser-control.js";
 import { BackgroundTaskSchema, TriggersSchema } from "@x/shared/dist/background-task.js";
 import type { CodeModeManager } from "../../code-mode/acp/manager.js";
@@ -1494,6 +1495,51 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
             };
         },
         isAvailable: async () => isComposioConfigured(),
+    },
+    'mini-app-install': {
+        description: "Install or update a Mini App on disk at ~/.rowboat/apps/<id>/. Writes manifest.json + dist/index.html (and optional initial data.json). Use this to materialize an app you built — do NOT hand-write these files with file tools. The HTML must be self-contained and include the bridge via <script src=\"/__bridge__.js\"></script>, coding against window.rowboat. After install, the app shows up in the Mini Apps gallery.",
+        inputSchema: z.object({
+            manifest: MiniAppManifest,
+            html: z.string().describe('Full self-contained HTML for dist/index.html.'),
+            data: z.unknown().optional().describe('Optional initial data.json content (only written if no data.json exists yet).'),
+        }),
+        execute: async ({ manifest, html, data }: { manifest: z.infer<typeof MiniAppManifest>; html: string; data?: unknown }) => {
+            try {
+                const m = MiniAppManifest.parse(manifest);
+                const dir = path.join(WorkDir, 'apps', m.id);
+                const dist = path.join(dir, 'dist');
+                await fs.mkdir(dist, { recursive: true });
+                await fs.writeFile(path.join(dir, 'manifest.json'), JSON.stringify(m, null, 2));
+                await fs.writeFile(path.join(dist, 'index.html'), html);
+                if (data !== undefined) {
+                    const dataPath = path.join(dir, 'data.json');
+                    try { await fs.access(dataPath); } catch { await fs.writeFile(dataPath, JSON.stringify(data, null, 2)); }
+                }
+                return { success: true, id: m.id, url: `app://miniapp/${m.id}/index.html` };
+            } catch (e) {
+                return { success: false, error: e instanceof Error ? e.message : String(e) };
+            }
+        },
+    },
+    'mini-app-set-data': {
+        description: "Write a Mini App's data.json — the JSON its frontend reads via rowboat.getData/onData. The path is derived from appId and the write is atomic (temp→rename), so you only supply the content. This is how a background task refreshes an app's data; the agent returns the data, the write is deterministic.",
+        inputSchema: z.object({
+            appId: z.string().describe('The app id (folder name under ~/.rowboat/apps).'),
+            data: z.unknown().describe('Full data payload to store as data.json (matching the app data schema).'),
+        }),
+        execute: async ({ appId, data }: { appId: string; data: unknown }) => {
+            try {
+                const dir = path.join(WorkDir, 'apps', appId);
+                await fs.mkdir(dir, { recursive: true });
+                const dataPath = path.join(dir, 'data.json');
+                const tmp = `${dataPath}.tmp`;
+                await fs.writeFile(tmp, JSON.stringify(data, null, 2));
+                await fs.rename(tmp, dataPath);
+                return { success: true, appId };
+            } catch (e) {
+                return { success: false, error: e instanceof Error ? e.message : String(e) };
+            }
+        },
     },
     'run-live-note-agent': {
         description: "Manually trigger the live-note agent to run now on a note. Equivalent to the user clicking the Run button in the live-note sidebar, but you can pass extra `context` to bias what the agent does this run — most useful for backfills (e.g. seeding a newly-made-live note from existing synced emails) or focused refreshes. Returns the action taken, summary, and the new note body.",

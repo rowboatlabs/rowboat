@@ -16,6 +16,54 @@ function appDir(id: string): string {
   return path.join(APPS_DIR, id);
 }
 
+/**
+ * Canonical Mini App bridge shim, served at app://miniapp/__bridge__.js. Apps
+ * include it with `<script src="/__bridge__.js"></script>` and code against
+ * `window.rowboat`. This is the single source of truth for the bridge protocol
+ * (kept in sync with the host in components/mini-app-frame.tsx + types.ts).
+ */
+export const MINIAPP_BRIDGE_JS = `
+(function () {
+  var data = null, state = null;
+  var dataCbs = [], stateCbs = [];
+  var pending = {}, seq = 0;
+  function post(msg) { parent.postMessage(msg, '*'); }
+  function rpc(method, params) {
+    var id = 'r' + (++seq);
+    return new Promise(function (resolve, reject) {
+      pending[id] = { resolve: resolve, reject: reject };
+      post({ type: 'rowboat:mini-app:rpc', id: id, method: method, params: params });
+    });
+  }
+  window.addEventListener('message', function (e) {
+    var m = e.data;
+    if (!m || typeof m !== 'object') return;
+    if (m.type === 'rowboat:mini-app:data') {
+      data = m.data;
+      dataCbs.forEach(function (cb) { try { cb(data); } catch (_) {} });
+    } else if (m.type === 'rowboat:mini-app:state') {
+      state = m.state;
+      stateCbs.forEach(function (cb) { try { cb(state); } catch (_) {} });
+    } else if (m.type === 'rowboat:mini-app:rpc-result') {
+      var p = pending[m.id];
+      if (p) { delete pending[m.id]; if (m.ok) p.resolve(m.result); else p.reject(new Error(m.error || 'request failed')); }
+    }
+  });
+  window.rowboat = {
+    getData: function () { return data; },
+    onData: function (cb) { dataCbs.push(cb); if (data !== null) { try { cb(data); } catch (_) {} } return function () { var i = dataCbs.indexOf(cb); if (i >= 0) dataCbs.splice(i, 1); }; },
+    getState: function () { return state; },
+    onState: function (cb) { stateCbs.push(cb); if (state !== null) { try { cb(state); } catch (_) {} } return function () { var i = stateCbs.indexOf(cb); if (i >= 0) stateCbs.splice(i, 1); }; },
+    setState: function (patch) { state = Object.assign({}, state || {}, patch); post({ type: 'rowboat:mini-app:setState', patch: patch }); stateCbs.forEach(function (cb) { try { cb(state); } catch (_) {} }); },
+    callAction: function (scope, tool, args) { return rpc('callAction', { scope: scope, tool: tool, args: args }); },
+    searchTools: function (scope, query) { return rpc('searchTools', { scope: scope, query: query }); },
+    isConnected: function (scope) { return rpc('isConnected', { scope: scope }); },
+    connect: function (scope) { return rpc('connect', { scope: scope }); },
+    ready: function () { post({ type: 'rowboat:mini-app:ready' }); },
+  };
+})();
+`;
+
 function ensureDir(dir: string): void {
   fs.mkdirSync(dir, { recursive: true });
 }

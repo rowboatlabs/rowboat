@@ -16,6 +16,7 @@ import composioIntegrationSkill from "./composio-integration/skill.js";
 import liveNoteSkill from "./live-note/skill.js";
 import backgroundTaskSkill from "./background-task/skill.js";
 import notifyUserSkill from "./notify-user/skill.js";
+import buildMiniAppSkill from "./build-mini-app/skill.js";
 
 const CURRENT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const CATALOG_PREFIX = "src/application/assistant/skills";
@@ -101,6 +102,12 @@ const definitions: SkillDefinition[] = [
     title: "Code with Agents",
     summary: "Write code, build projects, create scripts, or fix bugs by delegating to Claude Code or Codex.",
     content: codeWithAgentsSkill,
+  },
+  {
+    id: "build-mini-app",
+    title: "Build a Mini App",
+    summary: "Build a Mini App the user opens inside Rowboat — its own UI powered by their integrations and an optional background agent. Use when the user asks to make/build/create an app, mini app, or dashboard; for ambiguous 'show me X' requests, confirm whether they want an app first.",
+    content: buildMiniAppSkill,
   },
   {
     id: "background-task",
