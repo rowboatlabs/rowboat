@@ -153,9 +153,14 @@ function Card({ app, index, onOpen }: { app: miniApp.MiniAppManifest; index: num
   )
 }
 
-export function MiniAppsView() {
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+export function MiniAppsView({ initialAppId, initialVersion }: { initialAppId?: string | null; initialVersion?: number } = {}) {
+  const [selectedId, setSelectedId] = useState<string | null>(initialAppId ?? null)
   const [manifests, setManifests] = useState<miniApp.MiniAppManifest[]>([])
+
+  // Open a specific app when asked from outside (app-navigation open-app).
+  useEffect(() => {
+    if (initialAppId) setSelectedId(initialAppId)
+  }, [initialAppId, initialVersion])
 
   // List apps installed under ~/.rowboat/apps. Apps are created there by the
   // copilot builder (or placed manually); none are bundled in the repo.

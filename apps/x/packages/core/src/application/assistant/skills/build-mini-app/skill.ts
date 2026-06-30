@@ -95,10 +95,14 @@ manifest's \`agent\` field to the task's slug. Give the task a sensible trigger
 
 ## 5. Finalize
 
-Call \`mini-app-install\` with the manifest + html (+ optional seed data). Then
-confirm to the user, and ideally open it so they see it populate. For agent-backed
-apps, trigger the agent once (\`run-background-task-agent\`) so \`data.json\` exists
-immediately instead of waiting for the first scheduled run.
+Call \`mini-app-install\` with the manifest + html (+ optional seed data). For
+agent-backed apps, trigger the agent once (\`run-background-task-agent\`) so
+\`data.json\` exists immediately instead of waiting for the first scheduled run.
+
+Then **open it for the user**: call \`app-navigation\` with
+\`{ action: "open-app", appId: "<id>" }\`. This opens the app in the middle pane
+(under Mini Apps / its title) and shows an "Opened <app>" card in the chat. Only
+do this once the app is installed AND its data is populated, so it renders ready.
 
 ## Manifest schema (manifest.json)
 

@@ -210,6 +210,7 @@ export const getAppActionCardData = (tool: ToolCall): AppActionCardData | null =
     switch (action) {
       case 'open-note': return { action, label: `Opening ${(input.path as string || '').split('/').pop()?.replace(/\.md$/, '') || 'note'}...` }
       case 'open-view': return { action, label: `Opening ${input.view} view...` }
+      case 'open-app': return { action, label: `Opening ${input.appId || 'app'}...` }
       case 'update-base-view': return { action, label: 'Updating view...' }
       case 'create-base': return { action, label: `Creating "${input.name}"...` }
       case 'get-base-state': return null // renders as normal tool block
@@ -225,6 +226,8 @@ export const getAppActionCardData = (tool: ToolCall): AppActionCardData | null =
     }
     case 'open-view':
       return { action: 'open-view', label: `Opened ${result.view} view` }
+    case 'open-app':
+      return { action: 'open-app', label: `Opened ${result.appName || result.appId || 'app'}` }
     case 'update-base-view':
       return {
         action: 'update-base-view',

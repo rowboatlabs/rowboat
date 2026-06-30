@@ -1068,9 +1068,11 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
     'app-navigation': {
         description: 'Control the app UI - navigate to notes, switch views, filter/search the knowledge base, and manage saved views.',
         inputSchema: z.object({
-            action: z.enum(["open-note", "open-view", "update-base-view", "get-base-state", "create-base"]).describe("The navigation action to perform"),
+            action: z.enum(["open-note", "open-view", "open-app", "update-base-view", "get-base-state", "create-base"]).describe("The navigation action to perform"),
             // open-note
             path: z.string().optional().describe("Knowledge file path for open-note, e.g. knowledge/People/John.md"),
+            // open-app
+            appId: z.string().optional().describe("Mini App id (folder name under ~/.rowboat/apps) for open-app — opens it in the middle pane under Mini Apps."),
             // open-view
             view: z.enum(["bases", "graph"]).optional().describe("Which view to open (for open-view action)"),
             // update-base-view
@@ -1116,6 +1118,20 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 case 'open-view': {
                     const view = input.view as string;
                     return { success: true, action: 'open-view', view };
+                }
+
+                case 'open-app': {
+                    const appId = input.appId as string;
+                    if (!appId) return { success: false, error: 'open-app requires appId' };
+                    let appName = appId;
+                    try {
+                        const raw = await fs.readFile(path.join(WorkDir, 'apps', appId, 'manifest.json'), 'utf-8');
+                        const m = JSON.parse(raw) as { title?: string };
+                        if (m.title) appName = m.title;
+                    } catch {
+                        return { success: false, error: `Mini App not found: ${appId}` };
+                    }
+                    return { success: true, action: 'open-app', appId, appName };
                 }
 
                 case 'update-base-view': {

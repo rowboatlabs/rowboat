@@ -2001,6 +2001,9 @@ function App() {
   }>>([])
   const [bgTaskInitialSlug, setBgTaskInitialSlug] = useState<string | null>(null)
   const [bgTaskSlugVersion, setBgTaskSlugVersion] = useState(0)
+  // Mini App to auto-open in the Mini Apps view (set by app-navigation open-app).
+  const [appInitialId, setAppInitialId] = useState<string | null>(null)
+  const [appIdVersion, setAppIdVersion] = useState(0)
 
   const loadBgTaskSummaries = useCallback(async () => {
     try {
@@ -4506,6 +4509,13 @@ function App() {
           void navigateToView({ type: 'file', path: BASES_DEFAULT_TAB_PATH })
         }
         break
+      case 'open-app':
+        if (result.appId) {
+          setAppInitialId(result.appId as string)
+          setAppIdVersion((v) => v + 1)
+          openAppsView()
+        }
+        break
       case 'update-base-view': {
         // Navigate to bases if not already there
         const targetPath = selectedPath && isBaseFilePath(selectedPath) ? selectedPath : BASES_DEFAULT_TAB_PATH
@@ -5983,7 +5993,7 @@ function App() {
                 </div>
               ) : isAppsOpen ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-                  <MiniAppsView />
+                  <MiniAppsView initialAppId={appInitialId} initialVersion={appIdVersion} />
                 </div>
               ) : isEmailOpen ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
