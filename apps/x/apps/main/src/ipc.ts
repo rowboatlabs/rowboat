@@ -63,6 +63,7 @@ import { IAgentScheduleStateRepo } from '@x/core/dist/agent-schedule/state-repo.
 import { triggerRun as triggerAgentScheduleRun } from '@x/core/dist/agent-schedule/runner.js';
 import { search } from '@x/core/dist/search/search.js';
 import { resolveMeetingPrep } from '@x/core/dist/knowledge/meeting_prep.js';
+import { readPrepNoteForEvent } from '@x/core/dist/knowledge/meeting_prep_brief.js';
 import { invalidateKnowledgeIndex } from '@x/core/dist/knowledge/knowledge_index.js';
 import { versionHistory, voice } from '@x/core';
 import { classifySchedule, processRowboatInstruction } from '@x/core/dist/knowledge/inline_tasks.js';
@@ -1526,7 +1527,9 @@ export function setupIpcHandlers() {
       return { notes };
     },
     'meeting-prep:resolve': async (_event, args) => {
-      return resolveMeetingPrep(args.attendees);
+      const result = await resolveMeetingPrep(args.attendees);
+      const prepNote = args.eventId ? await readPrepNoteForEvent(args.eventId) : null;
+      return { ...result, prepNote };
     },
     'inline-task:classifySchedule': async (_event, args) => {
       const schedule = await classifySchedule(args.instruction);

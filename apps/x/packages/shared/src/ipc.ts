@@ -1169,6 +1169,9 @@ const ipcSchemas = {
         displayName: z.string().optional(),
         self: z.boolean().optional(),
       })),
+      // When provided, the response includes any pre-generated prep note for
+      // this calendar event (matched by the eventId stamped in frontmatter).
+      eventId: z.string().optional(),
     }),
     res: z.object({
       attendees: z.array(z.object({
@@ -1188,6 +1191,11 @@ const ipcSchemas = {
         name: z.string(),
         markdown: z.string(),
       })),
+      // The pre-generated prep note (brief + path), if one exists for eventId.
+      prepNote: z.object({
+        path: z.string(),
+        brief: z.string(),
+      }).nullable(),
       matchedCount: z.number().int().nonnegative(),
       unmatchedCount: z.number().int().nonnegative(),
     }),

@@ -43,6 +43,7 @@ type PrepOrg = {
 type PrepResult = {
   attendees: PrepAttendee[]
   organizations: PrepOrg[]
+  prepNote: { path: string; brief: string } | null
   matchedCount: number
   unmatchedCount: number
 }
@@ -401,46 +402,27 @@ function requestCreateNote(attendee: PrepAttendee, meetingSummary: string) {
   window.dispatchEvent(new Event('meeting-prep:create-note'))
 }
 
-// One expandable note row (used for both people and organizations): a header
-// you click to reveal the rendered markdown, plus an "Open note" link.
-function PrepNoteRow({ title, subtitle, markdown, path, onOpenNote }: {
+// One note row (used for both people and organizations): a clickable row that
+// navigates to the note. The markdown is NOT rendered inline in the card.
+function PrepNoteRow({ title, subtitle, path, onOpenNote }: {
   title: string
   subtitle?: string
-  markdown: string
   path: string
   onOpenNote: (path: string) => void
 }) {
-  const [open, setOpen] = useState(false)
-
   return (
-    <div className="border-b last:border-b-0">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-3 px-5 py-3 text-left transition-colors hover:bg-muted/50"
-      >
-        {open ? <ChevronDown className="size-4 shrink-0 text-muted-foreground" /> : <ChevronRight className="size-4 shrink-0 text-muted-foreground" />}
-        <span className="flex min-w-0 flex-1 flex-col">
-          <span className="truncate text-sm font-semibold text-foreground">{title}</span>
-          {subtitle ? <span className="truncate text-xs text-muted-foreground">{subtitle}</span> : null}
-        </span>
-      </button>
-      {open ? (
-        <div className="px-5 pb-4 pl-12">
-          <Streamdown className="prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-1.5 [&_ul]:my-1.5 [&_ol]:my-1.5">
-            {markdown}
-          </Streamdown>
-          <button
-            type="button"
-            onClick={() => onOpenNote(path)}
-            className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-          >
-            <FileText className="size-3.5" />
-            Open note
-          </button>
-        </div>
-      ) : null}
-    </div>
+    <button
+      type="button"
+      onClick={() => onOpenNote(path)}
+      title={`Open ${title}`}
+      className="flex w-full items-center gap-3 border-b px-5 py-1.5 text-left transition-colors last:border-b-0 hover:bg-muted/50"
+    >
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate text-[12.5px] font-semibold text-foreground">{title}</span>
+        {subtitle ? <span className="truncate text-[11px] text-muted-foreground">{subtitle}</span> : null}
+      </span>
+      <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
+    </button>
   )
 }
 
@@ -448,7 +430,7 @@ function PrepAttendeeNote({ attendee, onOpenNote }: { attendee: PrepAttendee; on
   const note = attendee.note
   if (!note) return null
   const subtitle = [note.role, note.organization].filter(Boolean).join(' · ')
-  return <PrepNoteRow title={note.name} subtitle={subtitle || undefined} markdown={note.markdown} path={note.path} onOpenNote={onOpenNote} />
+  return <PrepNoteRow title={note.name} subtitle={subtitle || undefined} path={note.path} onOpenNote={onOpenNote} />
 }
 
 function PrepUnmatchedSection({ attendees, meetingSummary }: { attendees: PrepAttendee[]; meetingSummary: string }) {
@@ -500,7 +482,7 @@ function InlineMeetingPrep({ event, onOpenNote }: { event: UpcomingEvent; onOpen
     const run = async () => {
       try {
         const attendees = event.attendees.map((a) => ({ email: a.email, displayName: a.displayName, self: a.self }))
-        const result = await window.ipc.invoke('meeting-prep:resolve', { attendees })
+        const result = await window.ipc.invoke('meeting-prep:resolve', { attendees, eventId: event.id })
         if (!cancelled) setPrep(result)
       } catch (err) {
         console.error('Meeting prep failed:', err)
@@ -542,9 +524,24 @@ function InlineMeetingPrep({ event, onOpenNote }: { event: UpcomingEvent; onOpen
 
   return (
     <div className="bg-muted/10">
+      {prep.prepNote && prep.prepNote.brief ? (
+        <div className="border-b px-5 pb-3 pt-3">
+          <Streamdown className="prose prose-sm dark:prose-invert max-w-none text-foreground/90 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0.5 [&_p]:text-[12.5px] [&_li]:text-[12.5px]">
+            {prep.prepNote.brief}
+          </Streamdown>
+          <button
+            type="button"
+            onClick={() => onOpenNote(prep.prepNote!.path)}
+            className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <FileText className="size-3.5" />
+            Open full prep
+          </button>
+        </div>
+      ) : null}
       <div className="flex items-center gap-1.5 px-5 pb-1 pt-2.5">
-        <Sparkles className="size-3.5 text-primary" />
-        <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Meeting prep</span>
+        <UsersRound className="size-3.5 text-muted-foreground" />
+        <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">People</span>
       </div>
       {matched.map((att, idx) => (
         <PrepAttendeeNote key={att.note!.path + idx} attendee={att} onOpenNote={onOpenNote} />
@@ -558,7 +555,7 @@ function InlineMeetingPrep({ event, onOpenNote }: { event: UpcomingEvent; onOpen
             </span>
           </div>
           {prep.organizations.map((org) => (
-            <PrepNoteRow key={org.path} title={org.name} subtitle="Organization" markdown={org.markdown} path={org.path} onOpenNote={onOpenNote} />
+            <PrepNoteRow key={org.path} title={org.name} subtitle="Organization" path={org.path} onOpenNote={onOpenNote} />
           ))}
         </>
       ) : null}
@@ -1172,6 +1169,9 @@ export function MeetingsView({ onOpenNote, onTakeMeetingNotes, meetingState, mee
 
       const rows = entries
 	        .filter((entry) => entry.kind === 'file' && entry.name.endsWith('.md'))
+	        // Generated prep notes live under Meetings/prep/ — they're upcoming
+	        // prep, not past meeting notes, so keep them out of this table.
+	        .filter((entry) => !entry.path.startsWith(`${MEETINGS_ROOT}/prep/`))
 	        .map((entry) => {
 	          const relative = entry.path.slice(`${MEETINGS_ROOT}/`.length)
 	          const parts = relative.split('/')

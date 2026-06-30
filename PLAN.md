@@ -64,6 +64,45 @@ minute, so the card stays current for free.
 - Configurable lead time (hardcode 30 min for v1).
 - LLM-synthesized brief button on the card.
 
+## Phase 2 — Proactive, meeting-aware prep (6h ahead)
+
+Shift from a static contact viewer to meeting-aware prep, generated ahead of time.
+
+### Decisions
+- **Trigger:** a calendar-driven tick (clone of `notify_calendar_meetings.ts`), NOT the
+  cron/bg-task engine — fire time is `start − 6h`, which varies per event, so a
+  calendar scan + state file is the right fit (self-healing on reschedule/cancel).
+- **Storage:** write a real note → `knowledge/Meetings/prep/<slug>-<date>.md` (openable/editable).
+- **Notify:** none — silent background generation; appears in the Meetings view.
+- **Adaptive by meeting type:**
+  - Recurring (`recurringEventId` + prior notes found) → lead with **"Last time" recap**
+    (prior instance's `## Action items` / summary), then roster.
+  - One-off / new → lead with **agenda** (event `description`), then roster + company.
+- **Roster:** always list every attendee; ones with a note link to it, ones without
+  get **Create note**.
+- **AI brief:** the only LLM step. Reuses the `summarizeMeeting` path exactly —
+  `generateText` against the user's configured model (`getMeetingNotesModel` /
+  `getDefaultModelAndProvider`), tagged `useCase: 'meeting_prep'`. Deterministic
+  parts (roster, recap, agenda) are assembled in code; the model only writes the
+  "what matters" summary.
+
+### Build slices
+- **A. Core generator** (`meeting_prep_brief.ts`): assemble context (roster + recap +
+  agenda, meeting-type aware) → `generatePrepBrief()` (one model call) → render +
+  `writePrepNote()` to `knowledge/Meetings/prep/`. Frontmatter stamps `eventId` /
+  `recurringEventId` / `meetingDate` / `generatedAt`.
+- **B. Scheduler** (`meeting_prep_scheduler.ts`): tick (~few min), scan `calendar_sync/`,
+  for events starting within 6h, not ended, ≥1 non-self attendee, not already prepped
+  (state file keyed by eventId) → generate + write. `init()` wired in `main.ts` beside
+  `initCalendarNotifications()`.
+- **C. Card integration:** the inline prep card prefers the generated prep note when it
+  exists (instant), else falls back to the live deterministic resolve.
+
+### Open detail / enabler
+- Notes don't store an event id today, so recap linking is a title/date heuristic.
+  Stamp `eventId`/`recurringEventId` into captured notes' frontmatter going forward so
+  future links are exact.
+
 ## Verification
 
 - Resolver: feed known attendee emails → correct note match; unknown → no-note.

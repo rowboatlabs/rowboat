@@ -27,6 +27,7 @@ import { init as initInlineTasks } from "@x/core/dist/knowledge/inline_tasks.js"
 import { init as initAgentRunner } from "@x/core/dist/agent-schedule/runner.js";
 import { init as initAgentNotes } from "@x/core/dist/knowledge/agent_notes.js";
 import { init as initCalendarNotifications } from "@x/core/dist/knowledge/notify_calendar_meetings.js";
+import { init as initMeetingPrep } from "@x/core/dist/knowledge/meeting_prep_scheduler.js";
 import { init as initLiveNoteScheduler } from "@x/core/dist/knowledge/live-note/scheduler.js";
 import { init as initEventProcessor, registerConsumer } from "@x/core/dist/events/init.js";
 import { liveNoteEventConsumer } from "@x/core/dist/knowledge/live-note/event-consumer.js";
@@ -409,6 +410,9 @@ app.whenReady().then(async () => {
 
   // start calendar meeting notification service (fires 1-minute warnings)
   initCalendarNotifications();
+
+  // start meeting prep scheduler (generates prep notes ~6h before a meeting)
+  void initMeetingPrep();
 
   // start chrome extension sync server
   initChromeSync();
