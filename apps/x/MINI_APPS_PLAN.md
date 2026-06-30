@@ -78,6 +78,64 @@ rowboat.ready()                               // handshake: "send me data"
    notifications (reuse `notify-user`).
 6. **(V2)** Drag an app into the main workspace (macOS-style).
 
+## 2b. Phase 2.5 — On-disk apps + `app://miniapp` serving (CURRENT)
+
+Move built-in apps out of source into `~/.rowboat/apps/<id>/`, served as static
+assets, with an optional background agent producing `data.json`. Sets up the
+copilot builder path (it will write the same folder layout). Team-agreed.
+
+### On-disk layout (one folder per app)
+```
+~/.rowboat/apps/<id>/
+  manifest.json     # id, title, description, source, scope[], active, lastRun,
+                    #   entry (default "dist/index.html"), agent (optional bg-task slug)
+  dist/             # static assets served via app://miniapp/<id>/...
+    index.html      # the app (self-contained; bridge shim inlined)
+  data.json         # latest agent output (read by the host, pushed to the app)
+```
+
+### Serving — `app://miniapp/<id>/<path>` (option A)
+- Extend `registerAppProtocol` (`apps/main/src/main.ts`) with a new host
+  `miniapp`: map `app://miniapp/<id>/<path>` → `~/.rowboat/apps/<id>/dist/<path>`
+  (path-traversal guarded; default `index.html`). `app://` is already registered
+  privileged (standard/secure/fetch/cors) so apps get a **real origin** —
+  remote CDNs/images and `fetch` work, unlike the opaque `srcdoc` origin.
+- The iframe loads via `src="app://miniapp/<id>/index.html"` (not `srcDoc`).
+  Sandbox becomes `allow-scripts allow-same-origin allow-popups allow-forms
+  allow-modals allow-downloads` — same-origin is its OWN `app://miniapp` origin,
+  still isolated from the renderer (different host).
+
+### Data path
+- Built-in/static `data` is seeded to `data.json`. A future background agent
+  (reuse bg-tasks engine, linked via manifest `agent`) overwrites it on schedule.
+- App keeps using `rowboat.onData`; the **host** now sources that data by reading
+  `~/.rowboat/apps/<id>/data.json` (via IPC) and posting it on `ready`. Composio
+  still flows through the bridge RPC. (GitHub app needs no `data.json` — it pulls
+  live via Composio.)
+
+### Steps
+1. **Shared schema** — `packages/shared/src/mini-app.ts`: `MiniAppManifest` zod +
+   type. Export it. New IPC channels in `shared/src/ipc.ts`:
+   - `mini-apps:seed` (req: `{apps:[{manifest, html, data?}]}`) — idempotent.
+   - `mini-apps:list` (res: `{manifests: MiniAppManifest[]}`).
+   - `mini-apps:get-data` (req `{id}`, res `{data: unknown|null}`).
+2. **Main** — `apps/main/src/mini-apps-handler.ts`: `seedApps` (write
+   manifest/dist/data to `~/.rowboat/apps/<id>/` only if absent), `listApps`
+   (read manifests), `getAppData` (read data.json). Register handlers in
+   `ipc.ts`. Extend `registerAppProtocol` for the `miniapp` host.
+3. **Renderer** — keep `MiniApp` defs + `buildMiniAppHtml`; `registry.ts` adds
+   `toSeed(app)` (→ `{manifest, html, data}`). `MiniAppsView`: on mount → `seed`
+   → `list` → render cards from manifests. `MiniAppFrame`: take the manifest,
+   load `src=app://miniapp/<id>/<entry>`, on `ready` fetch `mini-apps:get-data`
+   and post it; RPC scope from `manifest.scope`.
+4. **Verify**: GitHub app end-to-end from disk (`~/.rowboat/apps/github-radar/`),
+   then the others; confirm connect + live PRs still work.
+
+### Out of scope here (next: copilot builder, tomorrow)
+Copilot writing a new app folder + an associated background agent; the agent
+browsing via embedded browser for social feeds; copilot verifying Composio wiring
+by actually calling tools before finalizing.
+
 ## 3. Phase 1 — detailed implementation
 
 UI-first. Everything hand-coded; no `~/.rowboat` storage, no IPC, no agent yet.

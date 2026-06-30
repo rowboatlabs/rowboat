@@ -16,6 +16,7 @@ import {
 import { UserMessageContent } from './message.js';
 import { RowboatApiConfig } from './rowboat-account.js';
 import { ZListToolkitsResponse } from './composio.js';
+import { MiniAppManifest } from './mini-app.js';
 import { BrowserStateSchema } from './browser-control.js';
 import { BillingInfoSchema } from './billing.js';
 import { EmailBlockSchema, GmailThreadSchema } from './blocks.js';
@@ -1006,6 +1007,31 @@ const ipcSchemas = {
     res: z.object({
       shouldShow: z.boolean(),
     }),
+  },
+  // Mini Apps: seed built-in apps to ~/.rowboat/apps/<id>/ (idempotent).
+  'mini-apps:seed': {
+    req: z.object({
+      apps: z.array(z.object({
+        manifest: MiniAppManifest,
+        html: z.string(),
+        data: z.unknown().optional(),
+      })),
+    }),
+    res: z.object({
+      seeded: z.array(z.string()),
+    }),
+  },
+  // Mini Apps: list installed app manifests from ~/.rowboat/apps/.
+  'mini-apps:list': {
+    req: z.null(),
+    res: z.object({
+      manifests: z.array(MiniAppManifest),
+    }),
+  },
+  // Mini Apps: read an app's latest data.json (agent output).
+  'mini-apps:get-data': {
+    req: z.object({ id: z.string() }),
+    res: z.object({ data: z.unknown().nullable() }),
   },
   'composio:didConnect': {
     req: z.object({

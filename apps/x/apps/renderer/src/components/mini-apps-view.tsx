@@ -1,7 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ArrowLeft, Plus } from 'lucide-react'
-import { MINI_APPS, getMiniApp } from '@/mini-apps/registry'
-import type { MiniApp } from '@/mini-apps/types'
+import { miniApp } from '@x/shared'
 import { MiniAppFrame } from '@/components/mini-app-frame'
 
 // The "Mini Apps" section: a gallery of premium product tiles; click one to open
@@ -129,7 +128,7 @@ const CARD_CSS = `
 .ma-new-hint { font-size:12px; color:var(--ma-new-hint); }
 `
 
-function Card({ app, index, onOpen }: { app: MiniApp; index: number; onOpen: () => void }) {
+function Card({ app, index, onOpen }: { app: miniApp.MiniAppManifest; index: number; onOpen: () => void }) {
   const theme = themeForIndex(index)
   const pattern = patternFor(app.id)
   return (
@@ -144,7 +143,7 @@ function Card({ app, index, onOpen }: { app: MiniApp; index: number; onOpen: () 
           {app.active ? 'ACTIVE' : 'PAUSED'}
         </span>
       </div>
-      <div className="ma-title">{app.name}</div>
+      <div className="ma-title">{app.title}</div>
       <div className="ma-desc">{app.description}</div>
       <div className="ma-footer">
         <span className="ma-source">{app.source}</span>
@@ -156,7 +155,25 @@ function Card({ app, index, onOpen }: { app: MiniApp; index: number; onOpen: () 
 
 export function MiniAppsView() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const selected = selectedId ? getMiniApp(selectedId) : undefined
+  const [manifests, setManifests] = useState<miniApp.MiniAppManifest[]>([])
+
+  // List apps installed under ~/.rowboat/apps. Apps are created there by the
+  // copilot builder (or placed manually); none are bundled in the repo.
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const r = await window.ipc.invoke('mini-apps:list', null)
+        if (cancelled) return
+        setManifests([...r.manifests].sort((a, b) => a.title.localeCompare(b.title)))
+      } catch {
+        if (!cancelled) setManifests([])
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
+
+  const selected = selectedId ? manifests.find((m) => m.id === selectedId) : undefined
 
   if (selected) {
     return (
@@ -170,10 +187,10 @@ export function MiniAppsView() {
             <ArrowLeft className="size-4" />
             Apps
           </button>
-          <span className="text-sm font-medium">{selected.name}</span>
+          <span className="text-sm font-medium">{selected.title}</span>
         </div>
         <div className="min-h-0 flex-1">
-          <MiniAppFrame app={selected} />
+          <MiniAppFrame manifest={selected} />
         </div>
       </div>
     )
@@ -187,8 +204,8 @@ export function MiniAppsView() {
         <p className="ma-sub">Little apps that live inside Rowboat, powered by your agents and integrations.</p>
 
         <div className="ma-grid">
-          {MINI_APPS.map((app, i) => (
-            <Card key={app.id} app={app} index={i} onOpen={() => setSelectedId(app.id)} />
+          {manifests.map((m, i) => (
+            <Card key={m.id} app={m} index={i} onOpen={() => setSelectedId(m.id)} />
           ))}
 
           {/* Placeholder for copilot-generated apps (Phase 3). */}

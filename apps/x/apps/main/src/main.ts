@@ -39,6 +39,7 @@ import { identifyIfSignedIn } from "@x/core/dist/analytics/identify.js";
 import { initConfigs } from "@x/core/dist/config/initConfigs.js";
 import { getAgentSlackCliStatus } from "@x/core/dist/slack/agent-slack-exec.js";
 import { resolveWorkspacePath } from "@x/core/dist/workspace/workspace.js";
+import { resolveMiniAppAsset } from "./mini-apps-handler.js";
 import started from "electron-squirrel-startup";
 import { execFileSync } from "node:child_process";
 import { init as initChromeSync } from "@x/core/dist/knowledge/chrome-extension/server/server.js";
@@ -160,6 +161,20 @@ function registerAppProtocol() {
         const relPath = decodeURIComponent(url.pathname).replace(/^\/+/, "");
         if (!relPath) return new Response("Not Found", { status: 404 });
         const absPath = resolveWorkspacePath(relPath);
+        return net.fetch(pathToFileURL(absPath).toString());
+      } catch {
+        return new Response("Forbidden", { status: 403 });
+      }
+    }
+
+    // Mini App assets: app://miniapp/<id>/<rel-path> → ~/.rowboat/apps/<id>/dist/
+    if (url.host === "miniapp") {
+      try {
+        const segments = decodeURIComponent(url.pathname).replace(/^\/+/, "").split("/");
+        const id = segments.shift();
+        if (!id) return new Response("Not Found", { status: 404 });
+        const absPath = resolveMiniAppAsset(id, segments.join("/"));
+        if (!absPath) return new Response("Forbidden", { status: 403 });
         return net.fetch(pathToFileURL(absPath).toString());
       } catch {
         return new Response("Forbidden", { status: 403 });

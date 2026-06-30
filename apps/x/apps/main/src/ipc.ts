@@ -56,6 +56,7 @@ import { syncSlackKnowledgeSources, triggerSync as triggerSlackKnowledgeSync, ge
 import { isOnboardingComplete, markOnboardingComplete } from '@x/core/dist/config/note_creation_config.js';
 import { loadNotificationSettings, saveNotificationSettings } from '@x/core/dist/config/notification_config.js';
 import * as composioHandler from './composio-handler.js';
+import * as miniAppsHandler from './mini-apps-handler.js';
 import { consumePendingDeepLink } from './deeplink.js';
 import { qualifyAndDisconnectComposioGoogle } from '@x/core/dist/migrations/composio-google-migration.js';
 import { IAgentScheduleRepo } from '@x/core/dist/agent-schedule/repo.js';
@@ -1312,6 +1313,16 @@ export function setupIpcHandlers() {
     },
     'migration:check-composio-google': async () => {
       return qualifyAndDisconnectComposioGoogle();
+    },
+    // Mini Apps handlers
+    'mini-apps:seed': async (_event, args) => {
+      return miniAppsHandler.seedApps(args.apps);
+    },
+    'mini-apps:list': async () => {
+      return miniAppsHandler.listApps();
+    },
+    'mini-apps:get-data': async (_event, args) => {
+      return miniAppsHandler.getAppData(args.id);
     },
     // Agent schedule handlers
     'agent-schedule:getConfig': async () => {
