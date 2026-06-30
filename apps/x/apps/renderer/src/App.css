@@ -1017,6 +1017,17 @@
     var(--rowboat-shadow);
 }
 
+.dark .rowboat-code-chat-input {
+  border-color: color-mix(in oklab, var(--border) 76%, transparent);
+  background: #000000;
+  box-shadow: none;
+}
+
+.dark .rowboat-code-chat-input:focus-within {
+  border-color: color-mix(in oklab, var(--ring) 70%, var(--border) 30%);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--ring) 30%, transparent);
+}
+
 [data-slot="message-content"] {
   line-height: 1.62;
 }

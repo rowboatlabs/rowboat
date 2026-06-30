@@ -6413,6 +6413,7 @@ function App() {
                   session={activeCodeSession.session}
                   status={activeCodeSession.status}
                   onOpenDiff={setCodeDiffPath}
+                  voiceAvailable={voiceAvailable}
                 />
               </ResizableRightPane>
             ) : isRightPaneContext && (
