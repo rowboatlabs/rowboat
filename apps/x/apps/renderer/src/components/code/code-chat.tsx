@@ -103,7 +103,8 @@ export function CodeChat({
   onOpenDiff: (path: string) => void
 }) {
   const {
-    items, liveText, isProcessing, pendingPermission, pendingToolPermissions, pendingAskHumans,
+    items, liveText, isProcessing, compactionStatus, contextUsage,
+    pendingPermission, pendingToolPermissions, pendingAskHumans,
     loading, send, stop, resolvePermission, respondToToolPermission, respondToAskHuman,
   } = useCodeChat(session)
   const [draft, setDraft] = useState('')
@@ -111,6 +112,9 @@ export function CodeChat({
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const busy = isProcessing || status === 'working' || status === 'needs-you'
+  const contextUsedPercent = contextUsage
+    ? Math.min(100, Math.round((contextUsage.used / contextUsage.size) * 100))
+    : null
   // Attached file PATHS — like dragging a file into the Claude Code CLI, the
   // agent receives paths and reads the files itself with its own tools.
   const [attachments, setAttachments] = useState<string[]>([])
@@ -188,7 +192,10 @@ export function CodeChat({
         <Terminal className="size-3.5 shrink-0 text-muted-foreground" />
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium">{session.title}</div>
-          <div className="text-[11px] text-muted-foreground">{AGENT_LABEL[session.agent]} — direct</div>
+          <div className="text-[11px] text-muted-foreground">
+            {AGENT_LABEL[session.agent]} — direct
+            {contextUsedPercent != null ? ` · ${contextUsedPercent}% context used` : ''}
+          </div>
         </div>
       </div>
 
@@ -239,9 +246,19 @@ export function CodeChat({
             />
           ))}
           {busy && !pendingPermission && pendingToolPermissions.size === 0 && pendingAskHumans.size === 0 && (
-            <Shimmer className="text-sm">
-              {stopping ? 'Stopping…' : `${AGENT_LABEL[session.agent]} is working…`}
-            </Shimmer>
+            compactionStatus === 'stalled' ? (
+              <div className="text-sm text-amber-600">
+                Context compaction is taking longer than expected. You can stop and retry in a fresh session.
+              </div>
+            ) : (
+              <Shimmer className="text-sm">
+                {stopping
+                  ? 'Stopping…'
+                  : compactionStatus === 'running'
+                    ? 'Compacting context…'
+                    : `${AGENT_LABEL[session.agent]} is working…`}
+              </Shimmer>
+            )
           )}
         </ConversationContent>
         <ConversationScrollButton />
