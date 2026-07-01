@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { TalkingHead, type MascotHat } from '@/components/talking-head'
+import { AgentsFleet, MascotVignette, type TourVignetteKind } from '@/components/tour-vignettes'
 import { TourSounds } from '@/lib/tour-sounds'
 import type { TTSState } from '@/hooks/useVoiceTTS'
 import { cn } from '@/lib/utils'
@@ -24,6 +25,8 @@ type TourStep = {
   navigate?: TourNavTarget
   /** Costume the mascot wears at this stop. */
   hat?: MascotHat
+  /** Looping animation staged around the mascot while it presents this stop. */
+  vignette?: TourVignetteKind
   title: string
   text: string
 }
@@ -46,6 +49,7 @@ const TOUR_STEPS: TourStep[] = [
     targetId: 'nav-email',
     navigate: 'email',
     hat: 'mailcap',
+    vignette: 'email',
     title: 'Email',
     text: 'Read and triage your inbox right here. Rowboat can summarize threads, label messages, and help you draft replies.',
   },
@@ -54,6 +58,7 @@ const TOUR_STEPS: TourStep[] = [
     targetId: 'nav-meetings',
     navigate: 'meetings',
     hat: 'headphones',
+    vignette: 'meetings',
     title: 'Meetings',
     text: 'Record or join meetings, and get transcripts and notes automatically — prep briefs show up before your calls, too.',
   },
@@ -70,6 +75,7 @@ const TOUR_STEPS: TourStep[] = [
     targetId: 'nav-knowledge',
     navigate: 'knowledge',
     hat: 'gradcap',
+    vignette: 'brain',
     title: 'Brain',
     text: "Brain is your knowledge base — notes, files, and everything Rowboat learns for you, all connected and searchable.",
   },
@@ -78,6 +84,7 @@ const TOUR_STEPS: TourStep[] = [
     targetId: 'nav-agents',
     navigate: 'agents',
     hat: 'captain',
+    vignette: 'agents',
     title: 'Background agents',
     text: 'Background agents work on schedules — they keep your Brain fresh and take care of recurring tasks while you row elsewhere.',
   },
@@ -418,6 +425,8 @@ export function ProductTour({
     travelRafRef.current = requestAnimationFrame(frame)
   }, [cancelTravel, moveMascot, reducedMotion])
 
+  const playDing = useCallback(() => soundsRef.current?.ding(), [])
+
   const finish = useCallback(() => {
     cancelSpeechRef.current()
     onCloseRef.current()
@@ -610,6 +619,9 @@ export function ProductTour({
         className="fixed left-0 top-0 z-[70]"
         style={{ width: MASCOT_SIZE, pointerEvents: 'none' }}
       >
+        {arrived && !reducedMotion && step.vignette && step.vignette !== 'agents' && (
+          <MascotVignette kind={step.vignette} playDing={playDing} />
+        )}
         <div style={{ transform: flipped ? 'scaleX(-1)' : undefined, transition: 'transform 0.35s ease-in-out' }}>
           <TalkingHead ttsState={ttsState} getLevel={getLevel} size={MASCOT_SIZE} hat={step.hat} rowing={rowing} />
         </div>
@@ -617,7 +629,7 @@ export function ProductTour({
           <div
             key={step.id}
             className={cn(
-              'pointer-events-auto absolute top-0 rounded-xl border border-border bg-popover p-4 text-popover-foreground shadow-lg',
+              'pointer-events-auto absolute top-0 z-10 rounded-xl border border-border bg-popover p-4 text-popover-foreground shadow-lg',
               bubbleSide === 'right' ? 'left-full ml-3' : 'right-full mr-3'
             )}
             style={{
@@ -657,6 +669,8 @@ export function ProductTour({
           </div>
         )}
       </div>
+
+      {arrived && !reducedMotion && step.vignette === 'agents' && <AgentsFleet />}
 
       {confettiOn && !reducedMotion && <ConfettiBurst />}
     </>,

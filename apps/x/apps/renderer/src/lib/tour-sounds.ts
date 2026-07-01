@@ -65,6 +65,22 @@ export class TourSounds {
         osc.stop(ctx.currentTime + 0.3)
     }
 
+    /** Gentle high blip — an email landing in the boat. */
+    ding() {
+        const ctx = this.ensure()
+        if (!ctx || !this.master) return
+        const osc = ctx.createOscillator()
+        osc.type = 'sine'
+        osc.frequency.setValueAtTime(880, ctx.currentTime)
+        osc.frequency.exponentialRampToValueAtTime(1320, ctx.currentTime + 0.05)
+        const gain = ctx.createGain()
+        gain.gain.setValueAtTime(0.08, ctx.currentTime)
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3)
+        osc.connect(gain).connect(this.master)
+        osc.start()
+        osc.stop(ctx.currentTime + 0.35)
+    }
+
     /** Little four-note arpeggio for the tour finale. */
     fanfare() {
         const ctx = this.ensure()
