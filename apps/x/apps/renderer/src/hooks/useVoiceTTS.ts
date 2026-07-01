@@ -14,10 +14,15 @@ function synthesize(text: string): Promise<SynthesizedAudio> {
     );
 }
 
-function playAudio(dataUrl: string, audioRef: React.MutableRefObject<HTMLAudioElement | null>): Promise<void> {
+function playAudio(
+    dataUrl: string,
+    audioRef: React.MutableRefObject<HTMLAudioElement | null>,
+    onAudioElement?: (audio: HTMLAudioElement) => void
+): Promise<void> {
     return new Promise<void>((resolve, reject) => {
         const audio = new Audio(dataUrl);
         audioRef.current = audio;
+        onAudioElement?.(audio);
         audio.onended = () => {
             console.log('[tts] audio ended');
             resolve();
@@ -42,6 +47,53 @@ export function useVoiceTTS() {
     const processingRef = useRef(false);
     // Pre-fetched audio ready to play immediately
     const prefetchedRef = useRef<Promise<SynthesizedAudio> | null>(null);
+    // Web Audio analyser tap for lip-sync (talking head)
+    const audioCtxRef = useRef<AudioContext | null>(null);
+    const analyserRef = useRef<AnalyserNode | null>(null);
+    const levelBufferRef = useRef<Uint8Array | null>(null);
+
+    // Route playback through an AnalyserNode so consumers can read the live
+    // output level. If Web Audio wiring fails, the element still plays directly.
+    const connectAnalyser = useCallback((audio: HTMLAudioElement) => {
+        try {
+            let ctx = audioCtxRef.current;
+            if (!ctx) {
+                ctx = new AudioContext();
+                audioCtxRef.current = ctx;
+                const analyser = ctx.createAnalyser();
+                analyser.fftSize = 512;
+                analyser.smoothingTimeConstant = 0.5;
+                analyser.connect(ctx.destination);
+                analyserRef.current = analyser;
+            }
+            if (ctx.state === 'suspended') {
+                void ctx.resume();
+            }
+            const source = ctx.createMediaElementSource(audio);
+            source.connect(analyserRef.current!);
+        } catch (err) {
+            console.error('[tts] analyser hookup failed:', err);
+        }
+    }, []);
+
+    // Current output level, 0..1. Safe to call every animation frame.
+    const getLevel = useCallback((): number => {
+        const analyser = analyserRef.current;
+        if (!analyser) return 0;
+        let buffer = levelBufferRef.current;
+        if (!buffer || buffer.length !== analyser.fftSize) {
+            buffer = new Uint8Array(analyser.fftSize);
+            levelBufferRef.current = buffer;
+        }
+        analyser.getByteTimeDomainData(buffer);
+        let sum = 0;
+        for (let i = 0; i < buffer.length; i++) {
+            const d = (buffer[i] - 128) / 128;
+            sum += d * d;
+        }
+        const rms = Math.sqrt(sum / buffer.length);
+        return Math.min(1, rms * 4);
+    }, []);
 
     const processQueue = useCallback(async () => {
         if (processingRef.current) return;
@@ -74,7 +126,7 @@ export function useVoiceTTS() {
                     prefetchedRef.current = synthesize(nextText);
                 }
 
-                await playAudio(audio.dataUrl, audioRef);
+                await playAudio(audio.dataUrl, audioRef, connectAnalyser);
             } catch (err) {
                 console.error('[tts] error:', err);
                 prefetchedRef.current = null;
@@ -85,7 +137,7 @@ export function useVoiceTTS() {
         prefetchedRef.current = null;
         processingRef.current = false;
         setState('idle');
-    }, []);
+    }, [connectAnalyser]);
 
     const speak = useCallback((text: string) => {
         console.log('[tts] speak() called:', text.substring(0, 80));
@@ -104,5 +156,5 @@ export function useVoiceTTS() {
         setState('idle');
     }, []);
 
-    return { state, speak, cancel };
+    return { state, speak, cancel, getLevel };
 }

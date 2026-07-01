@@ -50,6 +50,7 @@ import {
 } from '@/lib/attachment-presentation'
 import { getExtension, getFileDisplayName, getMimeFromExtension, isImageMime } from '@/lib/file-utils'
 import { cn } from '@/lib/utils'
+import { MascotFaceIcon } from '@/components/talking-head'
 import {
   type FileMention,
   type PromptInputMessage,
@@ -235,6 +236,8 @@ interface ChatInputInnerProps {
   ttsMode?: 'summary' | 'full'
   onToggleTts?: () => void
   onTtsModeChange?: (mode: 'summary' | 'full') => void
+  ttsAvatarEnabled?: boolean
+  onToggleTtsAvatar?: () => void
   /** Fired when the user picks a different model in the dropdown (only when no run exists yet). */
   onSelectedModelChange?: (model: SelectedModel | null) => void
   /** Work directory for this chat (per-chat). Null when none is set. */
@@ -273,6 +276,8 @@ function ChatInputInner({
   ttsMode,
   onToggleTts,
   onTtsModeChange,
+  ttsAvatarEnabled,
+  onToggleTtsAvatar,
   onSelectedModelChange,
   workDir = null,
   onWorkDirChange,
@@ -1318,6 +1323,33 @@ function ChatInputInner({
             )}
           </div>
         )}
+        {onToggleTtsAvatar && ttsAvailable && (
+          <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={onToggleTtsAvatar}
+                className={cn(
+                  'relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors',
+                  ttsAvatarEnabled
+                    ? 'text-foreground hover:bg-muted'
+                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                )}
+                aria-label={ttsAvatarEnabled ? 'Disable talking head' : 'Enable talking head'}
+              >
+                <MascotFaceIcon />
+                {!ttsAvatarEnabled && (
+                  <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <span className="block h-[1.5px] w-5 -rotate-45 rounded-full bg-muted-foreground" />
+                  </span>
+                )}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              {ttsAvatarEnabled ? 'Talking head on' : 'Talking head off'}
+            </TooltipContent>
+          </Tooltip>
+        )}
         {voiceAvailable && onStartRecording && (
           <button
             type="button"
@@ -1492,6 +1524,8 @@ export interface ChatInputWithMentionsProps {
   ttsMode?: 'summary' | 'full'
   onToggleTts?: () => void
   onTtsModeChange?: (mode: 'summary' | 'full') => void
+  ttsAvatarEnabled?: boolean
+  onToggleTtsAvatar?: () => void
   onSelectedModelChange?: (model: SelectedModel | null) => void
   workDir?: string | null
   onWorkDirChange?: (value: string | null) => void
@@ -1526,6 +1560,8 @@ export function ChatInputWithMentions({
   ttsMode,
   onToggleTts,
   onTtsModeChange,
+  ttsAvatarEnabled,
+  onToggleTtsAvatar,
   onSelectedModelChange,
   workDir,
   onWorkDirChange,
@@ -1557,6 +1593,8 @@ export function ChatInputWithMentions({
         ttsMode={ttsMode}
         onToggleTts={onToggleTts}
         onTtsModeChange={onTtsModeChange}
+        ttsAvatarEnabled={ttsAvatarEnabled}
+        onToggleTtsAvatar={onToggleTtsAvatar}
         onSelectedModelChange={onSelectedModelChange}
         workDir={workDir}
         onWorkDirChange={onWorkDirChange}
