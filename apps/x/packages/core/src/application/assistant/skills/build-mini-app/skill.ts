@@ -112,10 +112,15 @@ buggy run can't corrupt the app with the wrong shape or wipe series with empties
 
 The agent only RETURNS the data; \`mini-app-set-data\` writes \`data.json\`
 atomically (deterministic path + write — the agent never touches files). Set the
-manifest's \`agent\` field to the task's slug, and give the task a **capable model**
-(e.g. a Claude Sonnet / GPT-class model) via its model override — the default
-light model fabricates output and hallucinates tool names on side-effect tasks.
-Give it a sensible trigger (cron/window) from the background-task skill.
+manifest's \`agent\` field to the task's slug.
+
+**Give the task a capable model.** The default bg-task model is a light one that
+fabricates output and hallucinates tool names on data/side-effect tasks. Set the
+task's \`model\` (via \`create-background-task\`) to a strong reasoning model —
+but only to an **allowed ID**: call **\`list-models\`** first and pick from what it
+returns (arbitrary IDs are rejected). \`list-models.defaultModel\` is always a safe
+capable choice. Give the task a sensible trigger (cron/window) from the
+background-task skill.
 
 ## 5. Finalize
 
@@ -142,7 +147,8 @@ do this once the app is installed AND its data is populated, so it renders ready
 - **bg-task has no shell:** don't generate \`refresh.sh\` / \`executeCommand\`
   steps for the data agent — it can't run them headlessly.
 - **model:** set a capable model on any data/side-effect bg-task; the default is
-  too weak and will fabricate results.
+  too weak and will fabricate results. Use \`list-models\` to get allowed IDs —
+  don't guess model IDs (unknown ones are rejected as "Model not allowed").
 
 ## Manifest schema (manifest.json)
 

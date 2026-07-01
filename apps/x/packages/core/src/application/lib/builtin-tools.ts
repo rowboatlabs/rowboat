@@ -52,6 +52,7 @@ const PatchBackgroundTaskInput = BackgroundTaskSchema.pick({
     slug: z.string().describe('The slug of the task to update (the folder name under bg-tasks/).'),
     triggers: TriggersSchema.optional().describe('Replace the triggers object. To remove all triggers (make manual-only) pass an empty object.'),
     projectDir: z.string().optional().describe("Point an existing task at a code repo (or change which one) to make it a coding task. Absolute path or ~/… to a local git repository with at least one commit. Same rules as on create."),
+    clearModel: z.boolean().optional().describe("Reset the task's model/provider override so it falls back to the default. Use this to unstick a bad/rejected model value (do not also pass model)."),
 });
 
 // Turn a user-supplied directory into a registered code project id. Reuses the
@@ -93,6 +94,7 @@ import type { ToolContext } from "./exec-tool.js";
 import { generateText } from "ai";
 import { createProvider } from "../../models/models.js";
 import { getDefaultModelAndProvider, resolveProviderConfig } from "../../models/defaults.js";
+import { listGatewayModels } from "../../models/gateway.js";
 import { captureLlmUsage } from "../../analytics/usage.js";
 import { getCurrentUseCase, withUseCase } from "../../analytics/use_case.js";
 import { isSignedIn } from "../../account/account.js";
@@ -1596,6 +1598,25 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
             }
         },
     },
+    'list-models': {
+        description: "List model IDs available for model overrides (e.g. to set a capable model on a background task). Signed-in users get the Rowboat gateway's allowed models; BYOK users get their configured model. Call this BEFORE setting a bg-task `model` so you pick a valid, allowed ID (arbitrary IDs are rejected). Returns { defaultModel, models }.",
+        inputSchema: z.object({}),
+        execute: async () => {
+            try {
+                if (await isSignedIn()) {
+                    const { providers } = await listGatewayModels();
+                    const models = providers.flatMap((p) => p.models.map((m) => m.id));
+                    const { model: defaultModel } = await getDefaultModelAndProvider();
+                    return { signedIn: true, defaultModel, models };
+                }
+                const { model, provider } = await getDefaultModelAndProvider();
+                return { signedIn: false, defaultModel: model, provider, models: [model] };
+            } catch (e) {
+                return { error: e instanceof Error ? e.message : String(e) };
+            }
+        },
+        isAvailable: async () => true,
+    },
     'fetch-url': {
         description: "Fetch an HTTP(S) URL and return the response body as text. Use this to pull data from web APIs or pages (e.g. a JSON endpoint) — especially in background tasks, which have no shell. GET by default; supports POST with a body. Returns { ok, status, statusText, body } (body truncated if very large). For JSON, parse the returned body.",
         inputSchema: z.object({
@@ -1690,7 +1711,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         execute: async (input: z.infer<typeof PatchBackgroundTaskInput>) => {
             try {
                 const { patchTask } = await import("../../background-tasks/fileops.js");
-                const { slug, projectDir, ...partial } = input;
+                const { slug, projectDir, clearModel, ...partial } = input;
                 let warning: string | undefined;
                 if (projectDir) {
                     const r = await resolveCodeProject(projectDir);
@@ -1698,7 +1719,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                     (partial as { projectId?: string }).projectId = r.projectId;
                     warning = r.warning;
                 }
-                const result = await patchTask(slug, partial);
+                const result = await patchTask(slug, partial, clearModel ? ['model', 'provider'] : []);
                 return { success: true, task: result, ...(warning ? { warning } : {}) };
             } catch (err) {
                 return { success: false, error: err instanceof Error ? err.message : String(err) };
