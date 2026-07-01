@@ -8,7 +8,7 @@ import { generateAndWritePrep } from "./meeting_prep_brief.js";
 // synced calendar — a calendar-aware loop fits "N hours before each meeting"
 // better than a fixed cron, and re-reading the calendar each tick means moves
 // and cancellations are picked up automatically.
-const TICK_INTERVAL_MS = 5 * 60_000;
+const TICK_INTERVAL_MS = 15 * 60_000;
 const PREP_LEAD_MS = 6 * 60 * 60_000;
 // Drop state entries older than 24h so the file doesn't grow forever.
 const STATE_TTL_MS = 24 * 60 * 60 * 1000;
