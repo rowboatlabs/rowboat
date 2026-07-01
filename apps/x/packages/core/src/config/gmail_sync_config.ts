@@ -20,10 +20,37 @@ const MAX_MAX_EMAILS = 5000;
 
 interface GmailSyncConfig {
     maxEmails: number;
+    /**
+     * When true, threads the classifier labels as "Everything else" are
+     * automatically marked read as they arrive during sync. Toggling this on
+     * only governs FUTURE mail; existing threads are marked read separately at
+     * toggle time (and are never touched when this is turned off).
+     */
+    autoReadEverythingElse?: boolean;
 }
 
 function clampMaxEmails(value: number): number {
     return Math.max(MIN_MAX_EMAILS, Math.min(MAX_MAX_EMAILS, Math.floor(value)));
+}
+
+function readConfig(): Partial<GmailSyncConfig> {
+    try {
+        if (fs.existsSync(CONFIG_FILE)) {
+            const raw = fs.readFileSync(CONFIG_FILE, 'utf-8');
+            return JSON.parse(raw) as Partial<GmailSyncConfig>;
+        }
+    } catch (err) {
+        console.warn('[GmailSyncConfig] Failed to read gmail_sync.json:', err);
+    }
+    return {};
+}
+
+function writeConfig(config: Partial<GmailSyncConfig>): void {
+    const configDir = path.dirname(CONFIG_FILE);
+    if (!fs.existsSync(configDir)) {
+        fs.mkdirSync(configDir, { recursive: true });
+    }
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
 }
 
 /**
@@ -32,17 +59,9 @@ function clampMaxEmails(value: number): number {
  * or holds an out-of-range value.
  */
 export function getMaxEmails(): number {
-    try {
-        if (fs.existsSync(CONFIG_FILE)) {
-            const raw = fs.readFileSync(CONFIG_FILE, 'utf-8');
-            const parsed = JSON.parse(raw) as Partial<GmailSyncConfig>;
-            const value = Number(parsed?.maxEmails);
-            if (Number.isFinite(value) && value > 0) {
-                return clampMaxEmails(value);
-            }
-        }
-    } catch (err) {
-        console.warn('[GmailSyncConfig] Failed to read gmail_sync.json:', err);
+    const value = Number(readConfig()?.maxEmails);
+    if (Number.isFinite(value) && value > 0) {
+        return clampMaxEmails(value);
     }
     return DEFAULT_MAX_EMAILS;
 }
@@ -52,10 +71,18 @@ export function getMaxEmails(): number {
  * clamped into the supported range before writing.
  */
 export function setMaxEmails(maxEmails: number): void {
-    const configDir = path.dirname(CONFIG_FILE);
-    if (!fs.existsSync(configDir)) {
-        fs.mkdirSync(configDir, { recursive: true });
-    }
-    const config: GmailSyncConfig = { maxEmails: clampMaxEmails(maxEmails) };
-    fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+    writeConfig({ ...readConfig(), maxEmails: clampMaxEmails(maxEmails) });
+}
+
+/**
+ * Whether newly-arriving "Everything else" threads should be auto-marked read
+ * during sync. Defaults to false (off) when unset.
+ */
+export function getAutoReadEverythingElse(): boolean {
+    return readConfig()?.autoReadEverythingElse === true;
+}
+
+/** Persist the "auto-mark Everything else as read" preference. */
+export function setAutoReadEverythingElse(enabled: boolean): void {
+    writeConfig({ ...readConfig(), autoReadEverythingElse: enabled });
 }

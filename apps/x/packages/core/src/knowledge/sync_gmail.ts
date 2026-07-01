@@ -4,7 +4,7 @@ import { google, gmail_v1 as gmail } from 'googleapis';
 import { NodeHtmlMarkdown } from 'node-html-markdown'
 import { OAuth2Client } from 'google-auth-library';
 import { WorkDir } from '../config/config.js';
-import { getMaxEmails } from '../config/gmail_sync_config.js';
+import { getMaxEmails, getAutoReadEverythingElse } from '../config/gmail_sync_config.js';
 import { GoogleClientFactory } from './google-client-factory.js';
 import { serviceLogger, type ServiceRunContext } from '../services/service_logger.js';
 import { limitEventItems } from './limit_event_items.js';
@@ -303,6 +303,8 @@ export interface GmailThreadSnapshot {
             mimeType?: string;
             sizeBytes?: number;
             savedPath: string;
+            messageId?: string;
+            attachmentId?: string;
         }>;
         messageIdHeader?: string;
         isDraft?: boolean;
@@ -458,6 +460,10 @@ interface ExtractedAttachment {
     mimeType?: string;
     sizeBytes?: number;
     savedPath: string;
+    // Gmail identifiers needed to fetch the attachment on demand (e.g. when a
+    // search result's attachment hasn't been downloaded to disk yet).
+    messageId?: string;
+    attachmentId?: string;
 }
 
 /**
@@ -494,6 +500,8 @@ function extractAttachments(msgId: string, payload: gmail.Schema$MessagePart, ht
                     mimeType: part.mimeType ?? undefined,
                     sizeBytes: typeof part.body?.size === 'number' ? part.body.size : undefined,
                     savedPath: `gmail_sync/attachments/${safeName}`,
+                    messageId: msgId,
+                    attachmentId: attId,
                 });
             }
         }
@@ -921,6 +929,23 @@ async function buildAndCacheSnapshot(
         console.warn(`[Gmail] classify failed for ${threadId}:`, err);
     }
 
+    // Auto-mark newly-classified "Everything else" mail as read when the user
+    // has opted in. Governs future mail only — existing threads are handled at
+    // toggle time via markSectionRead.
+    if (snapshot.importance === 'other' && snapshot.unread && getAutoReadEverythingElse()) {
+        try {
+            await gmailClient.users.threads.modify({
+                userId: 'me',
+                id: threadId,
+                requestBody: { removeLabelIds: ['UNREAD'] },
+            });
+            for (const m of snapshot.messages) m.unread = false;
+            snapshot.unread = false;
+        } catch (err) {
+            console.warn(`[Gmail] auto-read (Everything else) failed for ${threadId}:`, err);
+        }
+    }
+
     if (threadData.historyId) {
         writeCachedSnapshot(threadId, threadData.historyId, snapshot);
     }
@@ -1048,6 +1073,83 @@ async function saveAttachment(gmail: gmail.Gmail, userId: string, msgId: string,
         console.error(`Error saving attachment ${filename}:`, e);
     }
     return null;
+}
+
+export interface DownloadAttachmentResult {
+    ok: boolean;
+    error?: string;
+}
+
+/**
+ * Ensure an attachment referenced by a snapshot exists on disk, downloading it
+ * on demand when it doesn't. Inbox attachments are saved during sync, but
+ * search results build snapshots without downloading, so opening one of their
+ * attachments needs this. `savedPath` is the workspace-relative path stored on
+ * the attachment; `attachmentId` (when supplied) is tried first, falling back
+ * to re-fetching the message and locating the part by filename — attachment ids
+ * can go stale on a cached snapshot, whereas the file name is stable.
+ */
+export async function downloadAttachment(args: {
+    messageId: string;
+    savedPath: string;
+    attachmentId?: string;
+}): Promise<DownloadAttachmentResult> {
+    try {
+        const { messageId, savedPath, attachmentId } = args;
+        if (!messageId || !savedPath) return { ok: false, error: 'Missing attachment reference.' };
+
+        const absPath = path.join(WorkDir, savedPath);
+        if (fs.existsSync(absPath)) return { ok: true };
+
+        const gmailClient = await getGmailClientOrThrow();
+        const dir = path.dirname(absPath);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+        const fetchData = async (attId: string): Promise<string | null> => {
+            const res = await gmailClient.users.messages.attachments.get({
+                userId: 'me',
+                messageId,
+                id: attId,
+            });
+            return res.data.data ?? null;
+        };
+
+        let data: string | null = null;
+        if (attachmentId) {
+            try {
+                data = await fetchData(attachmentId);
+            } catch (err) {
+                console.warn(`[Gmail] attachment fetch by id failed for ${messageId}, retrying by filename:`, err);
+            }
+        }
+
+        if (!data) {
+            // Re-fetch the message and locate the attachment part whose derived
+            // saved name matches the requested savedPath.
+            const wanted = path.basename(savedPath);
+            const msg = await gmailClient.users.messages.get({ userId: 'me', id: messageId, format: 'full' });
+            let foundAttId: string | undefined;
+            const walk = (part: gmail.Schema$MessagePart): void => {
+                if (foundAttId) return;
+                const fn = part.filename;
+                const attId = part.body?.attachmentId;
+                if (fn && attId && `${messageId}_${cleanFilename(fn)}` === wanted) {
+                    foundAttId = attId;
+                    return;
+                }
+                if (part.parts) for (const sub of part.parts) walk(sub);
+            };
+            if (msg.data.payload) walk(msg.data.payload);
+            if (!foundAttId) return { ok: false, error: 'Attachment not found in message.' };
+            data = await fetchData(foundAttId);
+        }
+
+        if (!data) return { ok: false, error: 'Attachment had no data.' };
+        fs.writeFileSync(absPath, Buffer.from(data, 'base64'));
+        return { ok: true };
+    } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
 }
 
 // --- Sync Logic ---

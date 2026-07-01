@@ -169,6 +169,25 @@
   color: var(--gm-placeholder);
 }
 
+.gmail-search-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--gm-text-muted);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.gmail-search-clear:hover {
+  background: var(--gm-icon-hover-bg);
+  color: var(--gm-text);
+}
+
 .gmail-icon-button {
   display: inline-flex;
   align-items: center;

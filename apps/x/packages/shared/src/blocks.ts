@@ -107,6 +107,10 @@ export const GmailAttachmentSchema = z.object({
   mimeType: z.string().optional(),
   sizeBytes: z.number().int().nonnegative().optional(),
   savedPath: z.string(),
+  // Gmail identifiers used to fetch the attachment on demand when it hasn't
+  // been downloaded to disk yet (e.g. attachments on search results).
+  messageId: z.string().optional(),
+  attachmentId: z.string().optional(),
 });
 
 export type GmailAttachment = z.infer<typeof GmailAttachmentSchema>;

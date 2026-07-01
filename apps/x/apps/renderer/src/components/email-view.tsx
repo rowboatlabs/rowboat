@@ -499,16 +499,32 @@ function formatAttachmentSize(bytes?: number): string {
 }
 
 function MessageAttachments({ attachments }: { attachments: NonNullable<GmailThreadMessage['attachments']> }) {
-  const openAttachment = (path: string, filename: string) => {
-    void window.ipc
-      .invoke('shell:openPath', { path })
-      .then((result) => {
-        if (result?.error) toast(`Could not open ${filename}: ${result.error}`, 'error')
-      })
-      .catch((err) => {
-        const message = err instanceof Error ? err.message : String(err)
-        toast(`Could not open ${filename}: ${message}`, 'error')
-      })
+  const openAttachment = async (att: NonNullable<GmailThreadMessage['attachments']>[number]) => {
+    try {
+      // Ensure the file is on disk before handing off to the OS opener. Inbox
+      // attachments are saved during sync, but search-result attachments are
+      // only fetched on demand. gmail:downloadAttachment short-circuits when the
+      // file already exists, so calling it first is cheap and guarantees the
+      // file is present — we can't rely on shell:openPath reporting a missing
+      // file as an error (xdg-open on Linux reports success even when the path
+      // doesn't exist, so the old open-then-download fallback never fired).
+      if (att.messageId) {
+        const dl = await window.ipc.invoke('gmail:downloadAttachment', {
+          messageId: att.messageId,
+          savedPath: att.savedPath,
+          attachmentId: att.attachmentId,
+        })
+        if (!dl.ok) {
+          toast(`Could not download ${att.filename}: ${dl.error ?? 'unknown error'}`, 'error')
+          return
+        }
+      }
+      const result = await window.ipc.invoke('shell:openPath', { path: att.savedPath })
+      if (result?.error) toast(`Could not open ${att.filename}: ${result.error}`, 'error')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      toast(`Could not open ${att.filename}: ${message}`, 'error')
+    }
   }
 
   return (
@@ -520,7 +536,7 @@ function MessageAttachments({ attachments }: { attachments: NonNullable<GmailThr
             key={att.savedPath}
             type="button"
             className="gmail-attachment"
-            onClick={() => openAttachment(att.savedPath, att.filename)}
+            onClick={() => void openAttachment(att)}
             title={`Open ${att.filename}`}
           >
             <Paperclip size={13} />
@@ -1975,6 +1991,8 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
   const [searching, setSearching] = useState(false)
   const [searchError, setSearchError] = useState<string | null>(null)
   const searchEpoch = useRef(0)
+  // Persistent preference: auto-mark future "Everything else" mail as read.
+  const [autoReadOther, setAutoReadOther] = useState(false)
   // Gmail sync uses the native Google OAuth connection.
   const [emailConnection, setEmailConnection] = useState<GmailConnectionStatus | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -2025,6 +2043,16 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
     }, 400)
     return () => window.clearTimeout(handle)
   }, [query])
+
+  // Load the persisted "auto-read Everything else" preference on mount.
+  useEffect(() => {
+    let cancelled = false
+    void window.ipc
+      .invoke('gmail:getAutoReadEverythingElse', {})
+      .then((res) => { if (!cancelled) setAutoReadOther(res.enabled) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
 
   const deleteDraftAction = useCallback(async (thread: GmailThread) => {
     const id = thread.draftId
@@ -2154,6 +2182,19 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
       toast(`Could not update read state: ${err instanceof Error ? err.message : String(err)}`, 'error')
     }
   }, [setSection])
+
+  // "Mark as read" toggle for Everything else. Turning it ON persists the
+  // preference AND marks every current "other" thread read; turning it OFF only
+  // clears the preference (future mail), leaving existing threads untouched.
+  const setAutoReadOtherAction = useCallback(async (enabled: boolean) => {
+    setAutoReadOther(enabled)
+    try {
+      await window.ipc.invoke('gmail:setAutoReadEverythingElse', { enabled })
+    } catch (err) {
+      toast(`Could not update preference: ${err instanceof Error ? err.message : String(err)}`, 'error')
+    }
+    if (enabled) await markSectionReadAction('other', true)
+  }, [markSectionReadAction])
 
   const archiveThreadAction = useCallback(async (threadId: string) => {
     try {
@@ -2447,8 +2488,6 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
   const visibleImportant = useMemo(() => filterThreads(important.threads), [important.threads, filterThreads])
   const visibleOther = useMemo(() => filterThreads(other.threads), [other.threads, filterThreads])
   const visibleDrafts = useMemo(() => filterThreads(drafts), [drafts, filterThreads])
-  const importantHasUnread = important.threads.some((t) => t.unread)
-  const otherHasUnread = other.threads.some((t) => t.unread)
 
   const hasAny = important.threads.length > 0 || other.threads.length > 0
   const initialLoading = !hasAny && refreshing
@@ -2570,6 +2609,17 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Search all mail"
             />
+            {query && (
+              <button
+                type="button"
+                className="gmail-search-clear"
+                onClick={() => setQuery('')}
+                title="Clear search"
+                aria-label="Clear search"
+              >
+                <X size={16} />
+              </button>
+            )}
           </div>
           <div className="gmail-topbar-actions">
             <div className="flex items-center rounded-md border border-border p-0.5 text-xs font-medium">
@@ -2642,19 +2692,9 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
               <section className="gmail-section">
                 <div className="gmail-list-header">
                   <span>Important</span>
-                  <div className="flex items-center gap-2.5">
-                    <div className="flex items-center gap-1.5" title={importantHasUnread ? 'Mark all in Important as read' : 'Mark all in Important as unread'}>
-                      <span className="text-xs text-muted-foreground">Read</span>
-                      <Switch
-                        checked={!importantHasUnread}
-                        onCheckedChange={(checked) => void markSectionReadAction('important', checked)}
-                        aria-label="Mark all of Important read or unread"
-                      />
-                    </div>
-                    <span>
-                      {important.threads.length}{important.hasReachedEnd ? '' : '+'} thread{important.threads.length === 1 ? '' : 's'}
-                    </span>
-                  </div>
+                  <span>
+                    {important.threads.length}{important.hasReachedEnd ? '' : '+'} thread{important.threads.length === 1 ? '' : 's'}
+                  </span>
                 </div>
                 {visibleImportant.map(renderRow)}
                 {!important.hasReachedEnd && (
@@ -2671,12 +2711,12 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
                 <div className="gmail-list-header">
                   <span>Everything else</span>
                   <div className="flex items-center gap-2.5">
-                    <div className="flex items-center gap-1.5" title={otherHasUnread ? 'Mark all in Everything else as read' : 'Mark all in Everything else as unread'}>
-                      <span className="text-xs text-muted-foreground">Read</span>
+                    <div className="flex items-center gap-1.5" title="Mark Everything else as read — applies to these and future emails">
+                      <span className="text-xs text-muted-foreground">Mark as read</span>
                       <Switch
-                        checked={!otherHasUnread}
-                        onCheckedChange={(checked) => void markSectionReadAction('other', checked)}
-                        aria-label="Mark all of Everything else read or unread"
+                        checked={autoReadOther}
+                        onCheckedChange={(checked) => void setAutoReadOtherAction(checked)}
+                        aria-label="Mark Everything else as read now and going forward"
                       />
                     </div>
                     <span>
