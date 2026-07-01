@@ -5238,6 +5238,20 @@ function App() {
     return () => window.removeEventListener('email-block:draft-with-assistant', handler)
   }, [])
 
+  // Meeting prep: create a person note for an unmatched attendee via Copilot.
+  useEffect(() => {
+    const handler = () => {
+      const pending = window.__pendingMeetingPrepCreate
+      if (pending) {
+        setPresetMessage(pending.prompt)
+        setIsChatSidebarOpen(true)
+        window.__pendingMeetingPrepCreate = undefined
+      }
+    }
+    window.addEventListener('meeting-prep:create-note', handler)
+    return () => window.removeEventListener('meeting-prep:create-note', handler)
+  }, [])
+
   const resolveWikiFilePath = useCallback((wikiPath: string) => {
     const normalized = normalizeWikiPath(wikiPath)
     const { path: basePath } = splitWikiFragment(normalized)
