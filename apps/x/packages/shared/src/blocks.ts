@@ -124,6 +124,8 @@ export const GmailThreadMessageSchema = z.object({
   bodyHeight: z.number().int().positive().optional(),
   attachments: z.array(GmailAttachmentSchema).optional(),
   messageIdHeader: z.string().optional(),
+  // Set on the unsent draft message within a thread (used by the Drafts view).
+  isDraft: z.boolean().optional(),
 });
 
 export type GmailThreadMessage = z.infer<typeof GmailThreadMessageSchema>;
@@ -134,6 +136,9 @@ export const GmailThreadSchema = EmailBlockSchema.extend({
   unread: z.boolean().optional(),
   importance: z.enum(['important', 'other']).optional(),
   gmail_draft: z.string().optional(),
+  // Gmail-side draft id, present on entries returned by the Drafts list so the
+  // composer can update/delete that exact draft.
+  draftId: z.string().optional(),
   messages: z.array(GmailThreadMessageSchema),
 });
 

@@ -44,6 +44,17 @@ function ensureDefaultConfigs() {
             configured: false
         }, null, 2));
     }
+
+    // Create gmail_sync.json with the default onboarding email count if it
+    // doesn't exist, so the "how many emails to backfill" setting is
+    // discoverable and editable. Keep the default in sync with
+    // DEFAULT_MAX_EMAILS in gmail_sync_config.ts.
+    const gmailSyncConfig = path.join(WorkDir, "config", "gmail_sync.json");
+    if (!fs.existsSync(gmailSyncConfig)) {
+        fs.writeFileSync(gmailSyncConfig, JSON.stringify({
+            maxEmails: 500
+        }, null, 2));
+    }
 }
 
 ensureDirs();
