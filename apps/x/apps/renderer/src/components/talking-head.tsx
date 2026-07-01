@@ -5,6 +5,11 @@ import { cn } from '@/lib/utils'
 
 const POSITION_STORAGE_KEY = 'talking-head-position'
 
+// Must match the overlay's `bottom-28 right-8` anchor classes.
+const ANCHOR_RIGHT_PX = 32
+const ANCHOR_BOTTOM_PX = 112
+const VIEWPORT_MARGIN_PX = 8
+
 // Palette pulled from the mascot artwork: pale lavender body, dark walnut boat.
 const BODY_FILL = '#E8E9F5'
 const BODY_STROKE = '#17171B'
@@ -36,7 +41,8 @@ export function TalkingHead({ ttsState, getLevel, size = 160 }: TalkingHeadProps
   const thinking = ttsState === 'synthesizing'
 
   // Lip sync + oar paddle loop. Writes SVG attributes directly to avoid
-  // re-rendering React at 60fps.
+  // re-rendering React at 60fps. Stops itself once speech has ended and the
+  // mouth has settled closed; restarts when `speaking` flips this effect.
   useEffect(() => {
     let raf = 0
     let t = 0
@@ -45,8 +51,9 @@ export function TalkingHead({ ttsState, getLevel, size = 160 }: TalkingHeadProps
       const prev = smoothedRef.current
       // Fast attack, slower decay reads as natural mouth movement
       const smoothed = target > prev ? prev + (target - prev) * 0.5 : prev + (target - prev) * 0.2
-      smoothedRef.current = smoothed
-      const open = Math.min(1, smoothed * 1.6)
+      const settled = !speaking && smoothed < 0.005
+      smoothedRef.current = settled ? 0 : smoothed
+      const open = settled ? 0 : Math.min(1, smoothed * 1.6)
 
       const mouthOpen = mouthOpenRef.current
       const mouthSmile = mouthSmileRef.current
@@ -73,7 +80,9 @@ export function TalkingHead({ ttsState, getLevel, size = 160 }: TalkingHeadProps
         }
       }
 
-      raf = requestAnimationFrame(tick)
+      if (!settled) {
+        raf = requestAnimationFrame(tick)
+      }
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
@@ -252,6 +261,20 @@ type TalkingHeadOverlayProps = {
   onDismiss?: () => void
 }
 
+// Keep the widget fully on-screen relative to its bottom-right CSS anchor.
+// Falls back to the default render size when the element isn't mounted yet.
+function clampPositionToViewport(pos: { x: number; y: number }, el: HTMLDivElement | null): { x: number; y: number } {
+  const width = el?.offsetWidth ?? 160
+  const height = el?.offsetHeight ?? 160
+  const baseLeft = window.innerWidth - ANCHOR_RIGHT_PX - width
+  const baseTop = window.innerHeight - ANCHOR_BOTTOM_PX - height
+  const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v))
+  return {
+    x: clamp(pos.x, VIEWPORT_MARGIN_PX - baseLeft, window.innerWidth - VIEWPORT_MARGIN_PX - width - baseLeft),
+    y: clamp(pos.y, VIEWPORT_MARGIN_PX - baseTop, window.innerHeight - VIEWPORT_MARGIN_PX - height - baseTop),
+  }
+}
+
 function loadStoredPosition(): { x: number; y: number } {
   try {
     const raw = localStorage.getItem(POSITION_STORAGE_KEY)
@@ -273,9 +296,24 @@ function loadStoredPosition(): { x: number; y: number } {
  * drag position, so it hovers over whatever view is active.
  */
 export function TalkingHeadOverlay({ ttsState, getLevel, onDismiss }: TalkingHeadOverlayProps) {
-  const [offset, setOffset] = useState(loadStoredPosition)
+  // Clamp the stored offset at init so a stale position (e.g. saved on a
+  // bigger window) can't leave the widget stranded off-screen.
+  const [offset, setOffset] = useState(() => clampPositionToViewport(loadStoredPosition(), null))
   const [dragging, setDragging] = useState(false)
   const dragStartRef = useRef<{ pointerX: number; pointerY: number; x: number; y: number } | null>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  const clampToViewport = useCallback(
+    (pos: { x: number; y: number }) => clampPositionToViewport(pos, containerRef.current),
+    []
+  )
+
+  // Re-clamp when the window shrinks
+  useEffect(() => {
+    const handleResize = () => setOffset(prev => clampToViewport(prev))
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [clampToViewport])
 
   const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return
@@ -297,8 +335,9 @@ export function TalkingHeadOverlay({ ttsState, getLevel, onDismiss }: TalkingHea
     if (!dragStartRef.current) return
     dragStartRef.current = null
     setDragging(false)
+    setOffset(prev => clampToViewport(prev))
     e.currentTarget.releasePointerCapture(e.pointerId)
-  }, [])
+  }, [clampToViewport])
 
   useEffect(() => {
     if (dragging) return
@@ -311,13 +350,16 @@ export function TalkingHeadOverlay({ ttsState, getLevel, onDismiss }: TalkingHea
 
   return (
     <div
+      ref={containerRef}
       className={cn(
         'group fixed bottom-28 right-8 z-50 touch-none',
         dragging ? 'cursor-grabbing' : 'cursor-grab'
       )}
       style={{
         transform: `translate(${offset.x}px, ${offset.y}px)`,
-        animation: dragging ? undefined : 'talking-head-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1)',
+        // Constant value so the entrance animation runs once on mount and
+        // never restarts (re-applying it after a drag would replay the pop).
+        animation: 'talking-head-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1)',
       }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}

@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 export type TTSState = 'idle' | 'synthesizing' | 'speaking';
 
@@ -71,12 +71,31 @@ export function useVoiceTTS() {
             }
             const source = ctx.createMediaElementSource(audio);
             source.connect(analyserRef.current!);
+            // Detach once this chunk is done (ended, cancelled via pause, or
+            // failed) so source nodes don't accumulate over a long session.
+            const disconnect = () => {
+                try {
+                    source.disconnect();
+                } catch {
+                    // already disconnected
+                }
+            };
+            audio.addEventListener('ended', disconnect, { once: true });
+            audio.addEventListener('pause', disconnect, { once: true });
+            audio.addEventListener('error', disconnect, { once: true });
         } catch (err) {
             console.error('[tts] analyser hookup failed:', err);
         }
     }, []);
 
     // Current output level, 0..1. Safe to call every animation frame.
+    // Release the audio graph when the owning component unmounts
+    useEffect(() => () => {
+        audioCtxRef.current?.close().catch(() => {});
+        audioCtxRef.current = null;
+        analyserRef.current = null;
+    }, []);
+
     const getLevel = useCallback((): number => {
         const analyser = analyserRef.current;
         if (!analyser) return 0;
