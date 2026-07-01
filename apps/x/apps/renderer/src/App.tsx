@@ -120,6 +120,7 @@ import { toast } from "sonner"
 import { useVoiceMode } from '@/hooks/useVoiceMode'
 import { useVoiceTTS } from '@/hooks/useVoiceTTS'
 import { TalkingHeadOverlay } from '@/components/talking-head'
+import { ProductTour, type TourNavTarget } from '@/components/product-tour'
 import { useMeetingTranscription, type CalendarEventMeta } from '@/hooks/useMeetingTranscription'
 import { useAnalyticsIdentity } from '@/hooks/useAnalyticsIdentity'
 import * as analytics from '@/lib/analytics'
@@ -973,6 +974,7 @@ function App() {
   const [ttsMode, setTtsMode] = useState<'summary' | 'full'>('summary')
   const ttsModeRef = useRef<'summary' | 'full'>('summary')
   const [ttsAvatarEnabled, setTtsAvatarEnabled] = useState(false)
+  const [tourActive, setTourActive] = useState(false)
   const [isRecording, setIsRecording] = useState(false)
   const voiceTextBufferRef = useRef('')
   const spokenIndexRef = useRef(0)
@@ -4941,6 +4943,33 @@ function App() {
     },
   }), [tree, selectedPath, isGraphOpen, selectedBackgroundTask, workspaceRoot, navigateToFile, navigateToView, openFileInNewTab, fileTabs, closeFileTab, removeEditorCacheForPath])
 
+  // Drives the mascot product tour through the app's main sections
+  const handleTourNavigate = useCallback((target: TourNavTarget) => {
+    switch (target) {
+      case 'home':
+        void navigateToView({ type: 'home' })
+        break
+      case 'email':
+        openEmailView()
+        break
+      case 'meetings':
+        openMeetingsView()
+        break
+      case 'code':
+        openCodeView()
+        break
+      case 'knowledge':
+        knowledgeActions.openKnowledgeView()
+        break
+      case 'agents':
+        openBgTasksView()
+        break
+      case 'workspaces':
+        knowledgeActions.openWorkspaceAt()
+        break
+    }
+  }, [navigateToView, openEmailView, openMeetingsView, openCodeView, knowledgeActions, openBgTasksView])
+
   // Handler for when a voice note is created/updated
   const handleVoiceNoteCreated = useCallback(async (notePath: string) => {
     // Refresh the tree to show the new file/folder
@@ -5600,6 +5629,7 @@ function App() {
               onNewChat={handleNewChatTab}
               onToggleBrowser={handleToggleBrowser}
               onVoiceNoteCreated={handleVoiceNoteCreated}
+              onStartTour={() => setTourActive(true)}
               meetingRecordingState={meetingTranscription.state}
               recordingMeetingSource={recordingMeetingSource}
               onToggleMeetingRecording={() => { void handleToggleMeeting() }}
@@ -6423,12 +6453,25 @@ function App() {
                 onComposioConnected={handleComposioConnected}
               />
             )}
-            {/* Talking head hovers over the active view while avatar voice mode is on */}
-            {ttsAvatarEnabled && (
+            {/* Talking head hovers over the active view while avatar voice mode is
+                on (hidden during the tour, which shows its own mascot) */}
+            {ttsAvatarEnabled && !tourActive && (
               <TalkingHeadOverlay
                 ttsState={tts.state}
                 getLevel={tts.getLevel}
                 onDismiss={handleToggleTtsAvatar}
+              />
+            )}
+            {/* Mascot-guided product tour */}
+            {tourActive && (
+              <ProductTour
+                onClose={() => setTourActive(false)}
+                onNavigate={handleTourNavigate}
+                ttsAvailable={ttsAvailable}
+                ttsState={tts.state}
+                speak={tts.speak}
+                cancelSpeech={tts.cancel}
+                getLevel={tts.getLevel}
               />
             )}
             {/* Rendered last so its no-drag region paints over the sidebar drag region */}
