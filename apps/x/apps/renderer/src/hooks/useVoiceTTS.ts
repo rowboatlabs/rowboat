@@ -50,7 +50,7 @@ export function useVoiceTTS() {
     // Web Audio analyser tap for lip-sync (talking head)
     const audioCtxRef = useRef<AudioContext | null>(null);
     const analyserRef = useRef<AnalyserNode | null>(null);
-    const levelBufferRef = useRef<Uint8Array | null>(null);
+    const levelBufferRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
 
     // Route playback through an AnalyserNode so consumers can read the live
     // output level. If Web Audio wiring fails, the element still plays directly.

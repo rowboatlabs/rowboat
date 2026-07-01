@@ -19,10 +19,23 @@ const BOAT_MID = '#54402F'
 const BOAT_LIGHT = '#6B5138'
 const MOUTH_FILL = '#2A1E19'
 
+export type MascotHat =
+  | 'mailcap'
+  | 'headphones'
+  | 'hardhat'
+  | 'gradcap'
+  | 'captain'
+  | 'explorer'
+  | 'party'
+
 type TalkingHeadProps = {
   ttsState: TTSState
   getLevel: () => number
   size?: number
+  /** Costume piece drawn on the head (used by the product tour). */
+  hat?: MascotHat
+  /** Paddle hard: fast bobbing + oar strokes, e.g. while traveling in the tour. */
+  rowing?: boolean
 }
 
 /**
@@ -30,7 +43,7 @@ type TalkingHeadProps = {
  * in a wooden rowboat holding an oar. The mouth is driven every animation
  * frame from the live TTS audio level; eyes blink on a randomized timer.
  */
-export function TalkingHead({ ttsState, getLevel, size = 160 }: TalkingHeadProps) {
+export function TalkingHead({ ttsState, getLevel, size = 160, hat, rowing = false }: TalkingHeadProps) {
   const mouthOpenRef = useRef<SVGEllipseElement>(null)
   const mouthSmileRef = useRef<SVGPathElement>(null)
   const oarRef = useRef<SVGGElement>(null)
@@ -51,7 +64,7 @@ export function TalkingHead({ ttsState, getLevel, size = 160 }: TalkingHeadProps
       const prev = smoothedRef.current
       // Fast attack, slower decay reads as natural mouth movement
       const smoothed = target > prev ? prev + (target - prev) * 0.5 : prev + (target - prev) * 0.2
-      const settled = !speaking && smoothed < 0.005
+      const settled = !speaking && !rowing && smoothed < 0.005
       smoothedRef.current = settled ? 0 : smoothed
       const open = settled ? 0 : Math.min(1, smoothed * 1.6)
 
@@ -71,7 +84,11 @@ export function TalkingHead({ ttsState, getLevel, size = 160 }: TalkingHeadProps
 
       const oar = oarRef.current
       if (oar) {
-        if (speaking) {
+        if (rowing) {
+          t += 0.14
+          const angle = Math.sin(t) * 13
+          oar.setAttribute('transform', `rotate(${angle.toFixed(2)} 128 118)`)
+        } else if (speaking) {
           t += 0.045
           const angle = Math.sin(t) * 7
           oar.setAttribute('transform', `rotate(${angle.toFixed(2)} 128 118)`)
@@ -86,7 +103,7 @@ export function TalkingHead({ ttsState, getLevel, size = 160 }: TalkingHeadProps
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [speaking, getLevel])
+  }, [speaking, rowing, getLevel])
 
   // Randomized blinking
   useEffect(() => {
@@ -116,7 +133,7 @@ export function TalkingHead({ ttsState, getLevel, size = 160 }: TalkingHeadProps
       style={{
         width: size,
         height: size,
-        animationDuration: speaking ? '1.6s' : '3.2s',
+        animationDuration: rowing ? '0.8s' : speaking ? '1.6s' : '3.2s',
       }}
     >
       <style>{`
@@ -214,6 +231,7 @@ export function TalkingHead({ ttsState, getLevel, size = 160 }: TalkingHeadProps
             strokeWidth="3"
             style={{ opacity: 0 }}
           />
+          {hat && <MascotHatArt hat={hat} />}
         </g>
 
         {/* oar (rotates while speaking) */}
@@ -388,6 +406,72 @@ export function TalkingHeadOverlay({ ttsState, getLevel, onDismiss }: TalkingHea
       <TalkingHead ttsState={ttsState} getLevel={getLevel} />
     </div>
   )
+}
+
+/** Costume pieces for the product tour, drawn on the mascot's head. */
+function MascotHatArt({ hat }: { hat: MascotHat }) {
+  const outline = { stroke: BODY_STROKE, strokeWidth: 4, strokeLinejoin: 'round' as const }
+  switch (hat) {
+    case 'mailcap':
+      return (
+        <g>
+          <path d="M 68 36 Q 100 4 132 36 Q 100 26 68 36 Z" fill="#4A7DDB" {...outline} />
+          <path d="M 126 33 Q 148 31 150 39 Q 132 42 124 39 Z" fill="#3D68B8" {...outline} />
+        </g>
+      )
+    case 'headphones':
+      return (
+        <g>
+          <path d="M 64 58 Q 100 2 136 58" fill="none" stroke={BODY_STROKE} strokeWidth="11" strokeLinecap="round" />
+          <path d="M 64 58 Q 100 2 136 58" fill="none" stroke="#4B5563" strokeWidth="6" strokeLinecap="round" />
+          <ellipse cx="64" cy="61" rx="8" ry="11" fill="#4B5563" {...outline} />
+          <ellipse cx="136" cy="61" rx="8" ry="11" fill="#4B5563" {...outline} />
+        </g>
+      )
+    case 'hardhat':
+      return (
+        <g>
+          <path d="M 66 38 Q 100 0 134 38 Z" fill="#F6C445" {...outline} />
+          <path d="M 96 10 Q 94 22 96 36 L 106 36 Q 107 22 105 9 Z" fill="#E0AC2C" stroke="none" />
+          <path d="M 56 38 L 144 38" fill="none" stroke={BODY_STROKE} strokeWidth="9" strokeLinecap="round" />
+          <path d="M 58 38 L 142 38" fill="none" stroke="#F6C445" strokeWidth="5" strokeLinecap="round" />
+        </g>
+      )
+    case 'gradcap':
+      return (
+        <g>
+          <path d="M 80 28 Q 100 42 120 28 L 120 38 Q 100 50 80 38 Z" fill="#232838" {...outline} />
+          <path d="M 100 2 L 144 20 L 100 38 L 56 20 Z" fill="#2E3450" {...outline} />
+          <path d="M 100 20 Q 124 26 136 34" fill="none" stroke="#E8B94A" strokeWidth="3" strokeLinecap="round" />
+          <circle cx="137" cy="38" r="4" fill="#E8B94A" stroke={BODY_STROKE} strokeWidth="3" />
+        </g>
+      )
+    case 'captain':
+      return (
+        <g>
+          <path d="M 68 36 Q 100 -2 132 36 Q 100 28 68 36 Z" fill="#F4F5F9" {...outline} />
+          <path d="M 66 36 Q 100 46 134 36 L 134 42 Q 100 52 66 42 Z" fill="#22262E" {...outline} />
+          <path d="M 122 42 Q 146 42 148 48 Q 130 52 120 48 Z" fill="#22262E" {...outline} />
+          <circle cx="100" cy="38" r="4.5" fill="#E8B94A" stroke={BODY_STROKE} strokeWidth="3" />
+        </g>
+      )
+    case 'explorer':
+      return (
+        <g>
+          <ellipse cx="100" cy="35" rx="46" ry="9" fill="#C9A46B" {...outline} />
+          <path d="M 72 34 Q 100 4 128 34 Z" fill="#C9A46B" {...outline} />
+          <path d="M 76 30 Q 100 38 124 30" fill="none" stroke="#8A6B3D" strokeWidth="4" strokeLinecap="round" />
+        </g>
+      )
+    case 'party':
+      return (
+        <g>
+          <path d="M 100 -2 L 84 34 L 116 34 Z" fill="#F2699C" {...outline} />
+          <path d="M 92 16 L 111 22 M 88 26 L 114 31" fill="none" stroke="#FFD166" strokeWidth="3.5" strokeLinecap="round" />
+          <circle cx="100" cy="0" r="5" fill="#FFD166" stroke={BODY_STROKE} strokeWidth="3" />
+        </g>
+      )
+  }
 }
 
 /** Small static mascot face used as the toolbar toggle icon. */
