@@ -1033,6 +1033,23 @@ const ipcSchemas = {
     req: z.object({ id: z.string() }),
     res: z.object({ data: z.unknown().nullable() }),
   },
+  // Mini Apps: proxy an HTTP request through main (bypasses browser CORS for the
+  // sandboxed app origin). GET/POST to http(s) only.
+  'mini-apps:fetch': {
+    req: z.object({
+      url: z.string(),
+      method: z.string().optional(),
+      headers: z.record(z.string(), z.string()).optional(),
+      body: z.string().optional(),
+    }),
+    res: z.object({
+      ok: z.boolean(),
+      status: z.number(),
+      statusText: z.string(),
+      text: z.string(),
+      error: z.string().optional(),
+    }),
+  },
   'composio:didConnect': {
     req: z.object({
       toolkitSlug: z.string(),

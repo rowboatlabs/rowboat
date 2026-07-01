@@ -15,7 +15,7 @@
  */
 const BRIDGE_SHIM = /* js */ `
 (function () {
-  var data = null, state = null;
+  var data = null, dataLoaded = false, state = null;
   var dataCbs = [], stateCbs = [];
   var pending = {}, seq = 0;
   function post(msg) { parent.postMessage(msg, '*'); }
@@ -26,13 +26,17 @@ const BRIDGE_SHIM = /* js */ `
       post({ type: 'rowboat:mini-app:rpc', id: id, method: method, params: params });
     });
   }
+  // data.json is a served sibling of index.html — apps load it themselves.
+  function loadData() {
+    return fetch('data.json', { cache: 'no-store' })
+      .then(function (r) { return r && r.ok ? r.json() : null; })
+      .then(function (d) { data = d; dataLoaded = true; dataCbs.forEach(function (cb) { try { cb(data); } catch (_) {} }); return data; })
+      .catch(function () { dataLoaded = true; dataCbs.forEach(function (cb) { try { cb(null); } catch (_) {} }); return null; });
+  }
   window.addEventListener('message', function (e) {
     var m = e.data;
     if (!m || typeof m !== 'object') return;
-    if (m.type === 'rowboat:mini-app:data') {
-      data = m.data;
-      dataCbs.forEach(function (cb) { try { cb(data); } catch (_) {} });
-    } else if (m.type === 'rowboat:mini-app:state') {
+    if (m.type === 'rowboat:mini-app:state') {
       state = m.state;
       stateCbs.forEach(function (cb) { try { cb(state); } catch (_) {} });
     } else if (m.type === 'rowboat:mini-app:rpc-result') {
@@ -45,9 +49,10 @@ const BRIDGE_SHIM = /* js */ `
   });
   window.rowboat = {
     getData: function () { return data; },
+    refreshData: function () { return loadData(); },
     onData: function (cb) {
       dataCbs.push(cb);
-      if (data !== null) { try { cb(data); } catch (_) {} }
+      if (dataLoaded) { try { cb(data); } catch (_) {} }
       return function () { var i = dataCbs.indexOf(cb); if (i >= 0) dataCbs.splice(i, 1); };
     },
     getState: function () { return state; },
@@ -70,8 +75,15 @@ const BRIDGE_SHIM = /* js */ `
     isConnected: function (scope) { return rpc('isConnected', { scope: scope }); },
     // Trigger the Composio OAuth flow for the toolkit. Resolves when started.
     connect: function (scope) { return rpc('connect', { scope: scope }); },
+    // CORS-safe HTTP via the main process (for third-party APIs without CORS).
+    // Resolves to { ok, status, text, json } (json = parsed body or null).
+    fetch: function (url, opts) {
+      return rpc('fetch', { url: url, method: (opts && opts.method), headers: (opts && opts.headers), body: (opts && opts.body) })
+        .then(function (r) { var j = null; try { j = JSON.parse(r.text); } catch (_) {} r.json = j; return r; });
+    },
     ready: function () { post({ type: 'rowboat:mini-app:ready' }); },
   };
+  loadData();
 })();
 `
 

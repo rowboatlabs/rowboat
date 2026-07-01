@@ -54,7 +54,7 @@ export type MiniApp = {
  * - isConnected: is the toolkit connected?          params: { scope }
  * - connect:     trigger the Composio OAuth flow     params: { scope }
  */
-export type MiniAppRpcMethod = 'callAction' | 'searchTools' | 'isConnected' | 'connect'
+export type MiniAppRpcMethod = 'callAction' | 'searchTools' | 'isConnected' | 'connect' | 'fetch'
 
 /** Messages sent from the iframe (app) up to the host (renderer). */
 export type MiniAppOutboundMessage =

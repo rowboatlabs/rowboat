@@ -26,6 +26,17 @@ export const MiniAppManifest = z.object({
   entry: z.string().default('dist/index.html'),
   /** Optional associated background-task slug that produces data.json. */
   agent: z.string().optional(),
+  /**
+   * Optional guard on what may be written to data.json (via mini-app-set-data).
+   * Prevents a stray/legacy task from corrupting the app with the wrong shape or
+   * wiping good series with empty ones.
+   */
+  dataContract: z.object({
+    /** Top-level keys that must be present and non-null. */
+    requiredKeys: z.array(z.string()).default([]),
+    /** Top-level keys that must be non-empty arrays. */
+    nonEmptyArrayKeys: z.array(z.string()).default([]),
+  }).optional(),
 });
 
 export type MiniAppManifest = z.infer<typeof MiniAppManifest>;

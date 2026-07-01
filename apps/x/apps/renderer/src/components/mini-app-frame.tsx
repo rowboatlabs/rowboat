@@ -29,6 +29,17 @@ export function MiniAppFrame({ manifest }: { manifest: miniApp.MiniAppManifest }
     }
 
     async function handleRpc(method: string, params: Record<string, unknown>): Promise<unknown> {
+      // fetch is a network proxy, not toolkit-scoped — handle before the scope gate.
+      if (method === 'fetch') {
+        const url = typeof params.url === 'string' ? params.url : ''
+        if (!url) throw new Error('No url specified.')
+        return window.ipc.invoke('mini-apps:fetch', {
+          url,
+          method: typeof params.method === 'string' ? params.method : undefined,
+          headers: (params.headers && typeof params.headers === 'object' ? params.headers : undefined) as Record<string, string> | undefined,
+          body: typeof params.body === 'string' ? params.body : undefined,
+        })
+      }
       const s = typeof params.scope === 'string' ? params.scope : ''
       if (!s || !scope.includes(s)) {
         throw new Error(`This app is not allowed to use "${s || '(none)'}".`)
@@ -62,15 +73,9 @@ export function MiniAppFrame({ manifest }: { manifest: miniApp.MiniAppManifest }
       }
     }
 
-    async function handleReady() {
-      let data: unknown = null
-      try {
-        const r = await window.ipc.invoke('mini-apps:get-data', { id: manifest.id })
-        data = r.data
-      } catch {
-        data = null
-      }
-      postToFrame({ type: MINI_APP_MESSAGE.data, data })
+    // Apps load their own data.json (served sibling) via a relative fetch; the
+    // host only provides per-app UI state on ready.
+    function handleReady() {
       postToFrame({ type: MINI_APP_MESSAGE.state, state: stateRef.current })
     }
 

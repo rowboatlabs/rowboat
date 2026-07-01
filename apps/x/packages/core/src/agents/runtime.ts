@@ -1541,6 +1541,14 @@ If the user's message is clearly NOT a coding request (small talk, an unrelated 
             for (const part of message.content) {
                 if (part.type === "tool-call") {
                     const underlyingTool = agent.tools![part.toolName];
+                    // The model can hallucinate a tool name that isn't declared.
+                    // Skip it here instead of dereferencing undefined (which would
+                    // crash the whole run); the SDK returns an error tool-result
+                    // for the unknown call so the model can self-correct.
+                    if (!underlyingTool) {
+                        loopLogger.log('model called unknown tool, skipping:', part.toolName);
+                        continue;
+                    }
                     if (underlyingTool.type === "builtin" && underlyingTool.name === "ask-human") {
                         loopLogger.log('emitting ask-human-request, toolCallId:', part.toolCallId);
                         const rawOptions = (part.arguments as { options?: unknown }).options;

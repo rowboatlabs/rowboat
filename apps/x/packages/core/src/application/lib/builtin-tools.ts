@@ -1528,8 +1528,13 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 await fs.writeFile(path.join(dir, 'manifest.json'), JSON.stringify(m, null, 2));
                 await fs.writeFile(path.join(dist, 'index.html'), html);
                 if (data !== undefined) {
-                    const dataPath = path.join(dir, 'data.json');
-                    try { await fs.access(dataPath); } catch { await fs.writeFile(dataPath, JSON.stringify(data, null, 2)); }
+                    let payload: unknown = data;
+                    if (typeof payload === 'string') { try { payload = JSON.parse(payload); } catch { payload = undefined; } }
+                    if (payload !== undefined && payload !== null && typeof payload === 'object') {
+                        // sibling of index.html so the app can fetch('data.json')
+                        const dataPath = path.join(dist, 'data.json');
+                        try { await fs.access(dataPath); } catch { await fs.writeFile(dataPath, JSON.stringify(payload, null, 2)); }
+                    }
                 }
                 return { success: true, id: m.id, url: `app://miniapp/${m.id}/index.html` };
             } catch (e) {
@@ -1545,15 +1550,75 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         }),
         execute: async ({ appId, data }: { appId: string; data: unknown }) => {
             try {
+                // Guard the #1 mistake: passing a JSON *string* (JSON.stringify'd)
+                // instead of the object. Auto-parse a string; reject non-objects so
+                // the UI never gets a double-encoded blob it can't read.
+                let payload: unknown = data;
+                if (typeof payload === 'string') {
+                    try { payload = JSON.parse(payload); }
+                    catch { return { success: false, error: 'data must be a JSON object/array — pass the object directly, do NOT JSON.stringify it.' }; }
+                }
+                if (payload === null || typeof payload !== 'object') {
+                    return { success: false, error: 'data must be a JSON object or array.' };
+                }
                 const dir = path.join(WorkDir, 'apps', appId);
-                await fs.mkdir(dir, { recursive: true });
-                const dataPath = path.join(dir, 'data.json');
+                // The app must already exist — never create a stray folder, and load
+                // its dataContract to guard the write.
+                let manifest: z.infer<typeof MiniAppManifest>;
+                try {
+                    manifest = MiniAppManifest.parse(JSON.parse(await fs.readFile(path.join(dir, 'manifest.json'), 'utf-8')));
+                } catch {
+                    return { success: false, error: `No installed Mini App "${appId}". Install it first (mini-app-install).` };
+                }
+                const contract = manifest.dataContract;
+                if (contract && !Array.isArray(payload)) {
+                    const obj = payload as Record<string, unknown>;
+                    const missing = (contract.requiredKeys ?? []).filter((k) => obj[k] === undefined || obj[k] === null);
+                    if (missing.length) {
+                        return { success: false, error: `data is missing required key(s): ${missing.join(', ')}. Match the app's data shape — do NOT write a different shape; keep the last good data.` };
+                    }
+                    const badArrays = (contract.nonEmptyArrayKeys ?? []).filter((k) => !Array.isArray(obj[k]) || (obj[k] as unknown[]).length === 0);
+                    if (badArrays.length) {
+                        return { success: false, error: `these key(s) must be non-empty arrays: ${badArrays.join(', ')}. Don't overwrite good series with empty ones — keep the last good data.` };
+                    }
+                }
+                // data.json is a served sibling of index.html so apps fetch it
+                // via a relative URL (app://miniapp/<id>/data.json).
+                const distDir = path.join(dir, 'dist');
+                await fs.mkdir(distDir, { recursive: true });
+                const dataPath = path.join(distDir, 'data.json');
                 const tmp = `${dataPath}.tmp`;
-                await fs.writeFile(tmp, JSON.stringify(data, null, 2));
+                await fs.writeFile(tmp, JSON.stringify(payload, null, 2));
                 await fs.rename(tmp, dataPath);
                 return { success: true, appId };
             } catch (e) {
                 return { success: false, error: e instanceof Error ? e.message : String(e) };
+            }
+        },
+    },
+    'fetch-url': {
+        description: "Fetch an HTTP(S) URL and return the response body as text. Use this to pull data from web APIs or pages (e.g. a JSON endpoint) — especially in background tasks, which have no shell. GET by default; supports POST with a body. Returns { ok, status, statusText, body } (body truncated if very large). For JSON, parse the returned body.",
+        inputSchema: z.object({
+            url: z.string().describe('The http(s) URL to fetch.'),
+            method: z.enum(['GET', 'POST']).optional().describe('HTTP method (default GET).'),
+            headers: z.record(z.string(), z.string()).optional().describe('Optional request headers.'),
+            body: z.string().optional().describe('Request body (for POST).'),
+        }),
+        execute: async ({ url, method, headers, body }: { url: string; method?: string; headers?: Record<string, string>; body?: string }) => {
+            try {
+                const parsed = new URL(url);
+                if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+                    return { ok: false, status: 0, error: 'Only http(s) URLs are allowed.' };
+                }
+                const m = (method || 'GET').toUpperCase();
+                const res = await fetch(url, { method: m, headers, body: m === 'GET' || m === 'HEAD' ? undefined : body });
+                let text = await res.text();
+                const MAX = 200_000;
+                const truncated = text.length > MAX;
+                if (truncated) text = text.slice(0, MAX);
+                return { ok: res.ok, status: res.status, statusText: res.statusText, body: text, truncated };
+            } catch (e) {
+                return { ok: false, status: 0, error: e instanceof Error ? e.message : String(e) };
             }
         },
     },

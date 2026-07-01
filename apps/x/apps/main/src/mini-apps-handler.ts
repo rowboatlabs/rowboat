@@ -24,7 +24,7 @@ function appDir(id: string): string {
  */
 export const MINIAPP_BRIDGE_JS = `
 (function () {
-  var data = null, state = null;
+  var data = null, dataLoaded = false, state = null;
   var dataCbs = [], stateCbs = [];
   var pending = {}, seq = 0;
   function post(msg) { parent.postMessage(msg, '*'); }
@@ -35,13 +35,18 @@ export const MINIAPP_BRIDGE_JS = `
       post({ type: 'rowboat:mini-app:rpc', id: id, method: method, params: params });
     });
   }
+  // Apps are self-contained: data.json is a served sibling of index.html, loaded
+  // via a relative fetch (same origin, no CORS). Rowboat does not inject it.
+  function loadData() {
+    return fetch('data.json', { cache: 'no-store' })
+      .then(function (r) { return r && r.ok ? r.json() : null; })
+      .then(function (d) { data = d; dataLoaded = true; dataCbs.forEach(function (cb) { try { cb(data); } catch (_) {} }); return data; })
+      .catch(function () { dataLoaded = true; dataCbs.forEach(function (cb) { try { cb(null); } catch (_) {} }); return null; });
+  }
   window.addEventListener('message', function (e) {
     var m = e.data;
     if (!m || typeof m !== 'object') return;
-    if (m.type === 'rowboat:mini-app:data') {
-      data = m.data;
-      dataCbs.forEach(function (cb) { try { cb(data); } catch (_) {} });
-    } else if (m.type === 'rowboat:mini-app:state') {
+    if (m.type === 'rowboat:mini-app:state') {
       state = m.state;
       stateCbs.forEach(function (cb) { try { cb(state); } catch (_) {} });
     } else if (m.type === 'rowboat:mini-app:rpc-result') {
@@ -51,7 +56,8 @@ export const MINIAPP_BRIDGE_JS = `
   });
   window.rowboat = {
     getData: function () { return data; },
-    onData: function (cb) { dataCbs.push(cb); if (data !== null) { try { cb(data); } catch (_) {} } return function () { var i = dataCbs.indexOf(cb); if (i >= 0) dataCbs.splice(i, 1); }; },
+    onData: function (cb) { dataCbs.push(cb); if (dataLoaded) { try { cb(data); } catch (_) {} } return function () { var i = dataCbs.indexOf(cb); if (i >= 0) dataCbs.splice(i, 1); }; },
+    refreshData: function () { return loadData(); },
     getState: function () { return state; },
     onState: function (cb) { stateCbs.push(cb); if (state !== null) { try { cb(state); } catch (_) {} } return function () { var i = stateCbs.indexOf(cb); if (i >= 0) stateCbs.splice(i, 1); }; },
     setState: function (patch) { state = Object.assign({}, state || {}, patch); post({ type: 'rowboat:mini-app:setState', patch: patch }); stateCbs.forEach(function (cb) { try { cb(state); } catch (_) {} }); },
@@ -59,8 +65,15 @@ export const MINIAPP_BRIDGE_JS = `
     searchTools: function (scope, query) { return rpc('searchTools', { scope: scope, query: query }); },
     isConnected: function (scope) { return rpc('isConnected', { scope: scope }); },
     connect: function (scope) { return rpc('connect', { scope: scope }); },
+    // CORS-safe HTTP via the main process. Resolves to { ok, status, text, json }
+    // (json is the parsed body when it's valid JSON, else null).
+    fetch: function (url, opts) {
+      return rpc('fetch', { url: url, method: (opts && opts.method), headers: (opts && opts.headers), body: (opts && opts.body) })
+        .then(function (r) { var j = null; try { j = JSON.parse(r.text); } catch (_) {} r.json = j; return r; });
+    },
     ready: function () { post({ type: 'rowboat:mini-app:ready' }); },
   };
+  loadData();
 })();
 `;
 
@@ -106,6 +119,35 @@ export function listApps(): { manifests: Manifest[] } {
     }
   }
   return { manifests };
+}
+
+/**
+ * Proxy an HTTP request through the main process so Mini Apps can call
+ * third-party APIs that don't send CORS headers (the sandboxed app:// origin
+ * can't fetch them directly). GET/POST over http(s) only.
+ */
+export async function proxyFetch(input: {
+  url: string;
+  method?: string;
+  headers?: Record<string, string>;
+  body?: string;
+}): Promise<{ ok: boolean; status: number; statusText: string; text: string; error?: string }> {
+  try {
+    const parsed = new URL(input.url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return { ok: false, status: 0, statusText: '', text: '', error: 'Only http(s) URLs are allowed.' };
+    }
+    const method = (input.method || 'GET').toUpperCase();
+    const res = await fetch(input.url, {
+      method,
+      headers: input.headers,
+      body: method === 'GET' || method === 'HEAD' ? undefined : input.body,
+    });
+    const text = await res.text();
+    return { ok: res.ok, status: res.status, statusText: res.statusText, text };
+  } catch (e) {
+    return { ok: false, status: 0, statusText: '', text: '', error: e instanceof Error ? e.message : String(e) };
+  }
 }
 
 /** Read an app's latest data.json (agent output), or null if absent/invalid. */

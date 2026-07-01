@@ -35,53 +35,65 @@ const patternFor = (id: string): string => PATTERNS[hash(id + '·pat') % PATTERN
 // Tailwind tokens). Injected once; per-card accent is passed via CSS variables.
 const CARD_CSS = `
 /* Light is the baseline; .dark (set on <html>) overrides the surface tokens.
-   The accent system (badge/pill/glow/pattern via --accent) is identical in both. */
+   The accent system (badge/pill/glow/pattern via --accent) is identical in both.
+   Surfaces are brushed-metal: a base gradient + a diagonal sheen + a hairline
+   top highlight. Sizing responds to the PANE width via container queries. */
 .ma-page {
-  --ma-bg:#f6f6f7;
-  --ma-card-from:#ffffff; --ma-card-to:#fbfbfc;
-  --ma-card-hover-from:#ffffff; --ma-card-hover-to:#f5f5f7;
-  --ma-border:rgba(0,0,0,0.08); --ma-border-hover:rgba(0,0,0,0.14);
-  --ma-shadow:0 1px 2px rgba(0,0,0,0.06);
-  --ma-title:#101013; --ma-desc:rgba(0,0,0,0.62);
-  --ma-h1:#101013; --ma-sub:rgba(0,0,0,0.5); --ma-lastrun:rgba(0,0,0,0.42);
-  --ma-off-bg:rgba(0,0,0,0.05); --ma-off-fg:rgba(0,0,0,0.5); --ma-off-dot:rgba(0,0,0,0.4);
+  container-type: inline-size;
+  --ma-bg:#eceef1;
+  /* metallic silver */
+  --ma-card-from:#ffffff; --ma-card-mid:#f2f3f6; --ma-card-to:#e6e8ee;
+  --ma-card-hover-from:#ffffff; --ma-card-hover-mid:#f5f6f9; --ma-card-hover-to:#eaecf1;
+  --ma-sheen:rgba(255,255,255,0.55); --ma-top-highlight:rgba(255,255,255,0.9);
+  --ma-border:rgba(0,0,0,0.09); --ma-border-hover:rgba(0,0,0,0.15);
+  --ma-shadow:0 1px 2px rgba(0,0,0,0.08);
+  --ma-title:#0d0e11; --ma-desc:rgba(0,0,0,0.6);
+  --ma-h1:#0d0e11; --ma-sub:rgba(0,0,0,0.5); --ma-lastrun:rgba(0,0,0,0.42);
+  --ma-off-bg:rgba(0,0,0,0.05); --ma-off-fg:rgba(0,0,0,0.5);
   --ma-new-border:rgba(0,0,0,0.14); --ma-new-title:rgba(0,0,0,0.6); --ma-new-hint:rgba(0,0,0,0.4);
-  --ma-pat-opacity:0.16; --ma-glow-opacity:0.22; --ma-glow-hover-opacity:0.30;
-  --ma-badge-mix:22%; --ma-pill-mix:18%;
+  --ma-pat-opacity:0.10; --ma-glow-opacity:0.16; --ma-glow-hover-opacity:0.24;
+  --ma-badge-mix:20%; --ma-pill-mix:16%; --ma-tint:16%; --ma-tint-hover:22%;
   height:100%; overflow:auto; background:var(--ma-bg);
 }
 .dark .ma-page {
-  --ma-bg:#0c0c0e;
-  --ma-card-from:#17171B; --ma-card-to:#111114;
-  --ma-card-hover-from:#19191e; --ma-card-hover-to:#121215;
-  --ma-border:rgba(255,255,255,0.06); --ma-border-hover:rgba(255,255,255,0.09);
-  --ma-shadow:0 1px 2px rgba(0,0,0,0.18);
-  --ma-title:#f5f5f5; --ma-desc:rgba(255,255,255,0.68);
-  --ma-h1:#f5f5f5; --ma-sub:rgba(255,255,255,0.55); --ma-lastrun:rgba(255,255,255,0.4);
-  --ma-off-bg:rgba(255,255,255,0.06); --ma-off-fg:rgba(255,255,255,0.5); --ma-off-dot:rgba(255,255,255,0.45);
+  --ma-bg:#0b0b0d;
+  /* metallic gunmetal */
+  --ma-card-from:#262930; --ma-card-mid:#191b21; --ma-card-to:#101116;
+  --ma-card-hover-from:#2b2e36; --ma-card-hover-mid:#1c1e25; --ma-card-hover-to:#131419;
+  --ma-sheen:rgba(255,255,255,0.07); --ma-top-highlight:rgba(255,255,255,0.09);
+  --ma-border:rgba(255,255,255,0.07); --ma-border-hover:rgba(255,255,255,0.12);
+  --ma-shadow:0 1px 2px rgba(0,0,0,0.35);
+  --ma-title:#f4f5f7; --ma-desc:rgba(255,255,255,0.66);
+  --ma-h1:#f4f5f7; --ma-sub:rgba(255,255,255,0.52); --ma-lastrun:rgba(255,255,255,0.38);
+  --ma-off-bg:rgba(255,255,255,0.06); --ma-off-fg:rgba(255,255,255,0.5);
   --ma-new-border:rgba(255,255,255,0.12); --ma-new-title:rgba(255,255,255,0.6); --ma-new-hint:rgba(255,255,255,0.38);
-  --ma-pat-opacity:0.07; --ma-glow-opacity:0.10; --ma-glow-hover-opacity:0.13;
-  --ma-badge-mix:15%; --ma-pill-mix:13%;
+  --ma-pat-opacity:0.05; --ma-glow-opacity:0.10; --ma-glow-hover-opacity:0.16;
+  --ma-badge-mix:15%; --ma-pill-mix:13%; --ma-tint:20%; --ma-tint-hover:26%;
 }
-.ma-inner { max-width:1080px; margin:0 auto; padding:32px 28px 48px; }
-.ma-h1 { font-size:24px; font-weight:600; letter-spacing:-0.02em; color:var(--ma-h1); margin:0 0 4px; }
-.ma-sub { font-size:14px; color:var(--ma-sub); margin:0 0 28px; }
-.ma-grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:28px; }
-@media (max-width:1040px) { .ma-grid { grid-template-columns:repeat(2, 1fr); } }
-@media (max-width:700px) { .ma-grid { grid-template-columns:1fr; } }
+.ma-inner { max-width:1120px; margin:0 auto; padding:clamp(20px,3.5cqw,34px) clamp(16px,3cqw,30px) 48px; }
+.ma-h1 { font-size:clamp(19px,2.6cqw,24px); font-weight:650; letter-spacing:-0.02em; color:var(--ma-h1); margin:0 0 4px; }
+.ma-sub { font-size:clamp(13px,1.5cqw,14px); color:var(--ma-sub); margin:0 0 clamp(18px,2.5cqw,28px); }
+/* Fluid columns: as many ~250px cards as fit the pane; single column when narrow. */
+.ma-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(min(100%,248px),1fr)); gap:clamp(14px,2cqw,24px); }
 
 .ma-card {
-  position:relative; min-height:252px; border-radius:20px;
+  position:relative; min-height:clamp(190px,24cqw,244px); border-radius:18px;
   border:1px solid var(--ma-border);
-  background:linear-gradient(160deg, var(--ma-card-from) 0%, var(--ma-card-to) 100%);
-  padding:22px; text-align:left; cursor:pointer; overflow:hidden;
+  background:
+    linear-gradient(135deg, var(--ma-sheen) 0%, transparent 34%),
+    linear-gradient(158deg, color-mix(in srgb, var(--accent) var(--ma-tint), transparent) 0%, transparent 62%),
+    linear-gradient(158deg, var(--ma-card-from) 0%, var(--ma-card-mid) 52%, var(--ma-card-to) 100%);
+  padding:clamp(15px,2cqw,22px); text-align:left; cursor:pointer; overflow:hidden;
   display:flex; flex-direction:column; isolation:isolate;
-  box-shadow: var(--ma-shadow), 0 6px 18px -20px var(--glow);
-  transition: box-shadow .22s ease, border-color .22s ease, background .22s ease;
+  box-shadow: var(--ma-shadow), inset 0 1px 0 var(--ma-top-highlight), 0 8px 22px -20px var(--glow);
+  transition: box-shadow .22s ease, border-color .22s ease, background .22s ease, transform .22s ease;
 }
 .ma-card:hover {
   border-color: var(--ma-border-hover);
-  background:linear-gradient(160deg, var(--ma-card-hover-from) 0%, var(--ma-card-hover-to) 100%);
+  background:
+    linear-gradient(135deg, var(--ma-sheen) 0%, transparent 36%),
+    linear-gradient(158deg, color-mix(in srgb, var(--accent) var(--ma-tint-hover), transparent) 0%, transparent 64%),
+    linear-gradient(158deg, var(--ma-card-hover-from) 0%, var(--ma-card-hover-mid) 52%, var(--ma-card-hover-to) 100%);
 }
 /* decorative pattern layer (accent-tinted, very low opacity) */
 .ma-card::before {
@@ -110,22 +122,27 @@ const CARD_CSS = `
 }
 .ma-badge.off { color: var(--ma-off-fg); background: var(--ma-off-bg); }
 
-.ma-title { font-size:22px; font-weight:600; letter-spacing:-0.02em; color:var(--ma-title); margin:18px 0 8px; }
+.ma-title { font-size:clamp(17px,2.3cqw,21px); font-weight:600; letter-spacing:-0.02em; color:var(--ma-title); margin:clamp(12px,2cqw,18px) 0 8px; }
 .ma-desc {
-  font-size:15px; font-weight:400; line-height:1.45; color:var(--ma-desc); margin:0;
+  font-size:clamp(13px,1.5cqw,14.5px); font-weight:400; line-height:1.45; color:var(--ma-desc); margin:0;
   display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
 }
-.ma-footer { margin-top:auto; padding-top:22px; display:flex; align-items:center; justify-content:space-between; gap:12px; }
-.ma-source { font-size:12px; font-weight:600; color:var(--accent); background: color-mix(in srgb, var(--accent) var(--ma-pill-mix), transparent); padding:5px 11px; border-radius:999px; }
-.ma-lastrun { font-size:12px; color:var(--ma-lastrun); }
+.ma-footer { margin-top:auto; padding-top:clamp(14px,2cqw,22px); display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.ma-source { font-size:11.5px; font-weight:600; color:var(--accent); background: color-mix(in srgb, var(--accent) var(--ma-pill-mix), transparent); padding:5px 10px; border-radius:999px; white-space:nowrap; }
+.ma-lastrun { font-size:11.5px; color:var(--ma-lastrun); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 
 .ma-new {
-  min-height:252px; border-radius:20px; border:1px dashed var(--ma-new-border);
+  min-height:clamp(190px,24cqw,244px); border-radius:18px; border:1px dashed var(--ma-new-border);
   background:transparent; display:flex; flex-direction:column; align-items:center; justify-content:center;
   gap:8px; color:var(--ma-new-title); cursor:default; transition: border-color .2s ease, color .2s ease;
 }
-.ma-new-title { font-size:15px; font-weight:600; color:var(--ma-new-title); }
-.ma-new-hint { font-size:12px; color:var(--ma-new-hint); }
+.ma-new-title { font-size:14.5px; font-weight:600; color:var(--ma-new-title); }
+.ma-new-hint { font-size:12px; color:var(--ma-new-hint); text-align:center; padding:0 12px; }
+
+/* Very narrow pane: tighten footer so source + last-run don't collide. */
+@container (max-width: 380px) {
+  .ma-footer { flex-direction:column; align-items:flex-start; gap:6px; }
+}
 `
 
 function Card({ app, index, onOpen }: { app: miniApp.MiniAppManifest; index: number; onOpen: () => void }) {

@@ -1324,6 +1324,9 @@ export function setupIpcHandlers() {
     'mini-apps:get-data': async (_event, args) => {
       return miniAppsHandler.getAppData(args.id);
     },
+    'mini-apps:fetch': async (_event, args) => {
+      return miniAppsHandler.proxyFetch(args);
+    },
     // Agent schedule handlers
     'agent-schedule:getConfig': async () => {
       const repo = container.resolve<IAgentScheduleRepo>('agentScheduleRepo');

@@ -63,13 +63,19 @@ bridge: include the shim and code against \`window.rowboat\`:
 \`\`\`
 
 \`window.rowboat\` API:
-- \`getData()\` / \`onData(cb)\` — the app's data (host serves \`data.json\`). Register
-  \`onData\` then call \`ready()\`.
+- \`getData()\` / \`onData(cb)\` / \`refreshData()\` — the app's data. \`data.json\` is a
+  **served sibling of index.html**, so the app is self-contained: \`onData\`
+  fetches \`data.json\` via a relative URL (you can also just \`fetch('data.json')\`
+  yourself). \`refreshData()\` re-fetches. Rowboat does NOT inject data.
 - \`getState()\` / \`setState(patch)\` — per-app persistent UI state.
 - \`isConnected(scope)\` / \`connect(scope)\` — connection status / start OAuth.
 - \`searchTools(scope, query)\` → [{slug,name,description}], and
   \`callAction(scope, toolSlug, args)\` → tool result (rejects on error). Scope is
   enforced against the manifest, so only declared toolkits work.
+- \`fetch(url, opts?)\` → { ok, status, text, json } — a CORS-safe HTTP proxy
+  through the main process. **Use this for any third-party API, never the
+  browser's \`fetch\`** (public APIs rarely send CORS headers, so direct fetch
+  from the app origin fails with "Failed to fetch").
 - \`ready()\` — call once after registering callbacks to receive initial data/state.
 
 Keep it dependency-free (no remote CDNs unless truly needed; the app:// origin
@@ -84,14 +90,25 @@ allows them but offline-safe is better). Render loading / empty / error states.
 ## 4. Data pipeline (agent-backed apps only)
 
 Create a background task with \`create-background-task\` whose instructions:
-- fetch the data via Composio (or browse via the embedded browser for social
-  feeds), and
-- call **\`mini-app-set-data\`** with \`{ appId: "<id>", data: <payload> }\`.
+- fetch the data — via **Composio** if a toolkit exists, otherwise via the
+  builtin **\`fetch-url\`** tool (server-side HTTP, no CORS). **The bg-task agent
+  has NO shell** (\`executeCommand\` is disabled headlessly) and \`rowboat.fetch\`
+  is frontend-only — never tell it to run a \`refresh.sh\`/script; it fetches via
+  \`fetch-url\` or Composio, and
+- call **\`mini-app-set-data\`** with \`{ appId: "<id>", data: <object> }\` —
+  pass the **object directly, never \`JSON.stringify\`** it. If a fetch fails,
+  **keep the last good data** (don't overwrite good series with empty ones).
+
+Set the manifest's **\`dataContract\`** (\`requiredKeys\` + \`nonEmptyArrayKeys\`)
+to the shape the UI needs — \`mini-app-set-data\` enforces it, so a stale or
+buggy run can't corrupt the app with the wrong shape or wipe series with empties.
 
 The agent only RETURNS the data; \`mini-app-set-data\` writes \`data.json\`
 atomically (deterministic path + write — the agent never touches files). Set the
-manifest's \`agent\` field to the task's slug. Give the task a sensible trigger
-(cron/window) from the background-task skill.
+manifest's \`agent\` field to the task's slug, and give the task a **capable model**
+(e.g. a Claude Sonnet / GPT-class model) via its model override — the default
+light model fabricates output and hallucinates tool names on side-effect tasks.
+Give it a sensible trigger (cron/window) from the background-task skill.
 
 ## 5. Finalize
 
@@ -103,6 +120,22 @@ Then **open it for the user**: call \`app-navigation\` with
 \`{ action: "open-app", appId: "<id>" }\`. This opens the app in the middle pane
 (under Mini Apps / its title) and shows an "Opened <app>" card in the chat. Only
 do this once the app is installed AND its data is populated, so it renders ready.
+
+## Common gotchas (read before building)
+
+- **CORS:** third-party APIs usually block browser fetches. From the app UI use
+  \`rowboat.fetch(url)\`, not \`fetch(url)\`. If you don't, it fails with
+  "Failed to fetch" even though curl works.
+- **No Composio toolkit for the data?** That's fine — use \`rowboat.fetch\` from a
+  live app, or a bg-task that fetches with **\`fetch-url\`** and calls
+  \`mini-app-set-data\`. Don't force a toolkit that doesn't exist (e.g. there's no
+  FX/currency toolkit), and don't reach for a shell or MCP server for plain HTTP.
+- **data.json shape:** pass a plain **object** to \`mini-app-set-data\`; never
+  \`JSON.stringify\` it first (double-encoding breaks the UI silently).
+- **bg-task has no shell:** don't generate \`refresh.sh\` / \`executeCommand\`
+  steps for the data agent — it can't run them headlessly.
+- **model:** set a capable model on any data/side-effect bg-task; the default is
+  too weak and will fabricate results.
 
 ## Manifest schema (manifest.json)
 
