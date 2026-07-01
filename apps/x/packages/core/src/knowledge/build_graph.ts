@@ -18,6 +18,9 @@ import { buildKnowledgeIndex, formatIndexForPrompt } from './knowledge_index.js'
 import { limitEventItems } from './limit_event_items.js';
 import { commitAll } from './version_history.js';
 import { getTagDefinitions } from './tag_system.js';
+import { knowledgeSourcesRepo } from './sources/repo.js';
+import { syncSlackKnowledgeSources } from './sources/sync_slack.js';
+import type { KnowledgeSourceConfig } from './sources/types.js';
 
 /**
  * Build obsidian-style knowledge graph by running topic extraction
@@ -35,12 +38,11 @@ const LEGACY_SUGGESTED_TOPICS_KNOWLEDGE_PATH = path.join(WorkDir, 'knowledge', '
 
 // Configuration for the graph builder service
 const SYNC_INTERVAL_MS = 15 * 1000; // 15 seconds
-const SOURCE_FOLDERS = [
-    'gmail_sync',
-    path.join('knowledge', 'Meetings', 'fireflies'),
-    path.join('knowledge', 'Meetings', 'granola'),
-    path.join('knowledge', 'Meetings', 'rowboat'),
-];
+function getEnabledFileSources(): KnowledgeSourceConfig[] {
+    return knowledgeSourcesRepo
+        .listEnabledSources()
+        .filter(source => source.provider !== 'voice_memo');
+}
 
 // Voice memos are now created directly in knowledge/Voice Memos/<date>/
 const VOICE_MEMOS_KNOWLEDGE_DIR = path.join(NOTES_OUTPUT_DIR, 'Voice Memos');
@@ -643,6 +645,15 @@ export async function processAllSources(): Promise<void> {
 
     let anyFilesProcessed = false;
 
+    try {
+        const slackFiles = await syncSlackKnowledgeSources();
+        if (slackFiles.length > 0) {
+            console.log(`[GraphBuilder] Slack sync wrote ${slackFiles.length} artifact files`);
+        }
+    } catch (error) {
+        console.error('[GraphBuilder] Error syncing Slack knowledge sources:', error);
+    }
+
     // Process voice memos first (they get moved to knowledge/)
     try {
         const voiceMemosProcessed = await processVoiceMemosForKnowledge();
@@ -654,12 +665,13 @@ export async function processAllSources(): Promise<void> {
     }
 
     const state = loadState();
-    const folderChanges: { folder: string; sourceDir: string; files: string[] }[] = [];
+    const folderChanges: { source: KnowledgeSourceConfig; sourceDir: string; files: string[] }[] = [];
     const countsByFolder: Record<string, number> = {};
     const allFiles: string[] = [];
+    const fileSources = getEnabledFileSources();
 
-    for (const folder of SOURCE_FOLDERS) {
-        const sourceDir = path.join(WorkDir, folder);
+    for (const source of fileSources) {
+        const sourceDir = path.join(WorkDir, source.artifactDir);
 
         // Skip if folder doesn't exist
         if (!fs.existsSync(sourceDir)) {
@@ -671,7 +683,7 @@ export async function processAllSources(): Promise<void> {
             let filesToProcess = getFilesToProcess(sourceDir, state);
 
             // For gmail_sync, only process emails that have been labeled AND don't have noise filter tags
-            if (folder === 'gmail_sync') {
+            if (source.provider === 'gmail') {
                 filesToProcess = filesToProcess.filter(filePath => {
                     try {
                         const content = fs.readFileSync(filePath, 'utf-8');
@@ -690,13 +702,13 @@ export async function processAllSources(): Promise<void> {
             }
 
             if (filesToProcess.length > 0) {
-                console.log(`[GraphBuilder] Found ${filesToProcess.length} new/changed files in ${folder}`);
-                folderChanges.push({ folder, sourceDir, files: filesToProcess });
-                countsByFolder[folder] = filesToProcess.length;
+                console.log(`[GraphBuilder] Found ${filesToProcess.length} new/changed files in ${source.id}`);
+                folderChanges.push({ source, sourceDir, files: filesToProcess });
+                countsByFolder[source.id] = filesToProcess.length;
                 allFiles.push(...filesToProcess);
             }
         } catch (error) {
-            console.error(`[GraphBuilder] Error processing ${folder}:`, error);
+            console.error(`[GraphBuilder] Error processing ${source.id}:`, error);
             // Continue with other folders even if one fails
         }
     }
@@ -706,7 +718,7 @@ export async function processAllSources(): Promise<void> {
             service: 'graph',
             message: 'Syncing knowledge graph',
             trigger: 'timer',
-            config: { sources: SOURCE_FOLDERS },
+            config: { sources: fileSources.map(source => source.id) },
         });
 
         const relativeFiles = allFiles.map(filePath => path.relative(WorkDir, filePath));
@@ -770,7 +782,8 @@ export async function processAllSources(): Promise<void> {
  */
 export async function init() {
     console.log('[GraphBuilder] Starting Knowledge Graph Builder Service...');
-    console.log(`[GraphBuilder] Monitoring folders: ${SOURCE_FOLDERS.join(', ')}, knowledge/Voice Memos`);
+    const sourceFolders = getEnabledFileSources().map(source => source.artifactDir);
+    console.log(`[GraphBuilder] Monitoring folders: ${sourceFolders.join(', ')}, knowledge/Voice Memos`);
     console.log(`[GraphBuilder] Will check for new content every ${SYNC_INTERVAL_MS / 1000} seconds`);
 
     // Initial run

@@ -1551,9 +1551,9 @@
 /* Compose / draft box */
 .tiptap-editor .ProseMirror .email-gmail-compose {
   margin-top: 4px;
-  border: 1px solid color-mix(in srgb, var(--foreground) 15%, transparent);
+  border: 1px solid var(--border);
   border-radius: 8px;
-  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.08);
+  background: var(--background);
   overflow: hidden;
 }
 
@@ -1562,13 +1562,13 @@
   align-items: center;
   gap: 6px;
   padding: 8px 12px 6px;
-  border-bottom: 1px solid color-mix(in srgb, var(--foreground) 8%, transparent);
+  border-bottom: 1px solid var(--border);
 }
 
 .tiptap-editor .ProseMirror .email-gmail-compose-to-label {
   font-size: 12px;
   font-weight: 500;
-  color: color-mix(in srgb, var(--foreground) 45%, transparent);
+  color: var(--muted-foreground);
 }
 
 .tiptap-editor .ProseMirror .email-gmail-compose-to-addr {
@@ -1592,7 +1592,7 @@
 }
 
 .tiptap-editor .ProseMirror .email-gmail-compose-body::placeholder {
-  color: color-mix(in srgb, var(--foreground) 35%, transparent);
+  color: var(--muted-foreground);
 }
 
 .tiptap-editor .ProseMirror .email-gmail-compose-footer {
@@ -1600,7 +1600,7 @@
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  border-top: 1px solid color-mix(in srgb, var(--foreground) 8%, transparent);
+  border-top: 1px solid var(--border);
 }
 
 /* Action buttons */
@@ -1615,35 +1615,33 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 7px 16px;
-  font-size: 13px;
+  padding: 7px 12px;
+  font-size: 0.8125rem;
   font-weight: 500;
-  color: color-mix(in srgb, var(--foreground) 60%, transparent);
+  color: var(--foreground);
   background: transparent;
-  border: 1px solid color-mix(in srgb, var(--foreground) 20%, transparent);
-  border-radius: 18px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
   cursor: pointer;
-  transition: background-color 0.15s ease, box-shadow 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
   width: fit-content;
-  letter-spacing: 0.01em;
 }
 
 .tiptap-editor .ProseMirror .email-gmail-btn:hover {
-  background: color-mix(in srgb, var(--foreground) 6%, transparent);
-  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.1);
-  color: var(--foreground);
+  background: var(--accent);
+  color: var(--accent-foreground);
 }
 
 .tiptap-editor .ProseMirror .email-gmail-btn-primary {
-  color: #fff;
-  background: #1a73e8;
-  border-color: #1a73e8;
+  color: var(--primary-foreground);
+  background: var(--primary);
+  border-color: var(--primary);
 }
 
 .tiptap-editor .ProseMirror .email-gmail-btn-primary:hover {
-  background: #1765cc;
-  box-shadow: 0 1px 2px 0 rgba(26, 115, 232, 0.45), 0 1px 3px 1px rgba(26, 115, 232, 0.3);
-  color: #fff;
+  background: color-mix(in oklab, var(--primary) 90%, transparent);
+  border-color: color-mix(in oklab, var(--primary) 90%, transparent);
+  color: var(--primary-foreground);
 }
 
 .tiptap-editor .ProseMirror .email-block-error,
@@ -1690,9 +1688,8 @@
 
 /* ---- Emails inbox block (language-emails) ---- */
 
-.tiptap-editor .ProseMirror .email-inbox-card {
-  font-family: 'Google Sans', Roboto, RobotoDraft, Helvetica, Arial, sans-serif;
-}
+/* No font-family override — inherit the editor's app font (ui-sans-serif /
+   system-ui) so the inbox block matches the rest of the Rowboat UI. */
 
 .tiptap-editor .ProseMirror .email-inbox-title {
   font-size: 14px;
@@ -1768,7 +1765,6 @@
 .tiptap-editor .ProseMirror .email-inbox-sender {
   font-size: 14px;
   font-weight: 500;
-  font-family: 'Google Sans', Roboto, RobotoDraft, Helvetica, Arial, sans-serif;
   color: var(--foreground);
   white-space: nowrap;
   overflow: hidden;

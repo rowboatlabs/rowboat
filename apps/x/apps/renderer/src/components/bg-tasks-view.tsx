@@ -4,6 +4,7 @@ import {
     ListChecks, Play, Square, Loader2, Trash2, Plus, X, AlertCircle,
     Repeat, Clock, Zap, ChevronLeft, ChevronDown, ChevronRight,
     Pencil, Check, PanelRightClose, PanelRightOpen, Sparkles,
+    Code2, FolderOpen, LayoutTemplate,
 } from 'lucide-react'
 import type { z } from 'zod'
 import type { BackgroundTask, BackgroundTaskSummary, Triggers } from '@x/shared/dist/background-task.js'
@@ -19,6 +20,7 @@ import type { ConversationItem } from '@/lib/chat-conversation'
 import { runLogToConversation } from '@/lib/run-to-conversation'
 import { CompactConversation } from '@/components/compact-conversation'
 import { RichMarkdownViewer } from '@/components/rich-markdown-viewer'
+import { HtmlFileViewer } from '@/components/html-file-viewer'
 
 // ---------------------------------------------------------------------------
 // Trigger helpers (inlined; extract to shared <TriggersEditor> as a follow-up)
@@ -270,7 +272,16 @@ function TriggersEditor({
 // New Task dialog
 // ---------------------------------------------------------------------------
 
-type DialogMode = 'describe' | 'manual'
+type DialogMode = 'describe' | 'manual' | 'templates' | 'coding'
+
+// Prefills for the "Coding from meetings" preset.
+const CODING_PRESET = {
+    name: 'Implement coding items from meetings',
+    instructions: `After a meeting's notes are ready, scan them for coding action items (bugs to fix, features to build, concrete changes requested) for me or my team.
+
+Conservatively implement the clearly-scoped, self-contained ones in the configured repo using the launch-code-task tool — group related items into one session, split unrelated ones. Note ambiguous, large/architectural, or other-repo items as "needs review" instead of coding them. If nothing is actionable, do nothing.`,
+    eventMatchCriteria: `A meeting's notes or transcript just became available (engineering standup, planning, sprint, or technical discussion) that may contain coding action items, bugs to fix, or features to build.`,
+}
 
 function NewTaskDialog({
     open,
@@ -294,6 +305,9 @@ function NewTaskDialog({
     const [name, setName] = useState('')
     const [instructions, setInstructions] = useState('')
     const [triggers, setTriggers] = useState<Triggers | undefined>(undefined)
+    const [projectId, setProjectId] = useState<string | undefined>(undefined)
+    const [projectName, setProjectName] = useState<string | undefined>(undefined)
+    const [addingProject, setAddingProject] = useState(false)
     const [submitting, setSubmitting] = useState(false)
 
     useEffect(() => {
@@ -303,11 +317,64 @@ function NewTaskDialog({
             setName('')
             setInstructions('')
             setTriggers(undefined)
+            setProjectId(undefined)
+            setProjectName(undefined)
         }
     }, [open, copilotEnabled])
 
+    // Switch into the coding preset: prefill name/instructions/trigger once.
+    const enterCodingMode = () => {
+        setMode('coding')
+        setName(CODING_PRESET.name)
+        setInstructions(CODING_PRESET.instructions)
+        setTriggers({ eventMatchCriteria: CODING_PRESET.eventMatchCriteria })
+    }
+
+    const pickRepo = async () => {
+        setAddingProject(true)
+        try {
+            const res = await window.ipc.invoke('dialog:openDirectory', { title: 'Choose the repository for this task' })
+            const dir = res.path
+            if (!dir) return
+            const added = await window.ipc.invoke('codeProject:add', { path: dir })
+            if (!added.git?.isGitRepo) {
+                toast('That folder is not a git repository — coding tasks need one.', 'error')
+                return
+            }
+            setProjectId(added.project.id)
+            setProjectName(added.project.name)
+        } catch (err) {
+            toast(err instanceof Error ? err.message : String(err), 'error')
+        } finally {
+            setAddingProject(false)
+        }
+    }
+
     const canSubmitDescribe = description.trim().length > 0 && !submitting
     const canSubmitManual = name.trim().length > 0 && instructions.trim().length > 0 && !submitting
+    const canSubmitCoding = name.trim().length > 0 && instructions.trim().length > 0 && !!projectId && !submitting
+
+    const submitCoding = async () => {
+        if (!canSubmitCoding) return
+        setSubmitting(true)
+        try {
+            const result = await window.ipc.invoke('bg-task:create', {
+                name: name.trim(),
+                instructions: instructions.trim(),
+                ...(triggers ? { triggers } : {}),
+                ...(projectId ? { projectId } : {}),
+            })
+            if (result.success && result.slug) {
+                onCreated(result.slug)
+            } else {
+                toast(result.error ?? 'Failed to create task', 'error')
+            }
+        } catch (err) {
+            toast(err instanceof Error ? err.message : String(err), 'error')
+        } finally {
+            setSubmitting(false)
+        }
+    }
 
     const submitDescribe = () => {
         if (!canSubmitDescribe || !onCreateWithCopilot) return
@@ -358,7 +425,116 @@ function NewTaskDialog({
                     </button>
                 </div>
 
-                {mode === 'describe' ? (
+                {(mode === 'describe' || mode === 'manual') && (
+                    <button
+                        type="button"
+                        onClick={() => setMode('templates')}
+                        className="mb-4 flex w-full items-center justify-between gap-2 rounded-md border border-dashed bg-muted/40 px-3 py-2 text-left text-[12px] hover:border-solid hover:bg-accent"
+                    >
+                        <span className="flex items-center gap-2">
+                            <LayoutTemplate className="size-4 shrink-0 text-muted-foreground" />
+                            <span className="font-medium">View available templates</span>
+                        </span>
+                        <ChevronRight className="size-4 text-muted-foreground" />
+                    </button>
+                )}
+
+                {mode === 'templates' ? (
+                    <>
+                        <div className="space-y-2">
+                            {[
+                                {
+                                    id: 'coding-from-meetings',
+                                    title: 'Coding from meetings',
+                                    description: "When a meeting's notes are ready, scan them for coding action items and auto-implement them in a repo — each on its own isolated branch, with a summary.",
+                                    icon: Code2,
+                                    onSelect: enterCodingMode,
+                                },
+                            ].map(preset => (
+                                <button
+                                    key={preset.id}
+                                    type="button"
+                                    onClick={preset.onSelect}
+                                    className="flex w-full items-start gap-2.5 rounded-md border bg-muted/40 px-3 py-2.5 text-left hover:border-foreground/30 hover:bg-accent"
+                                >
+                                    <preset.icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                                    <span className="min-w-0">
+                                        <span className="block text-[12.5px] font-medium">{preset.title}</span>
+                                        <span className="mt-0.5 block text-[11px] leading-snug text-muted-foreground">{preset.description}</span>
+                                    </span>
+                                </button>
+                            ))}
+                        </div>
+
+                        <div className="mt-5 flex items-center justify-between gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setMode(copilotEnabled ? 'describe' : 'manual')}
+                                className="text-[11px] text-muted-foreground hover:text-foreground"
+                            >
+                                ← Back
+                            </button>
+                            <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
+                        </div>
+                    </>
+                ) : mode === 'coding' ? (
+                    <>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Repository</label>
+                                {projectName ? (
+                                    <div className="flex items-center justify-between rounded-md border bg-muted/40 px-3 py-2">
+                                        <span className="flex items-center gap-2 text-[13px]">
+                                            <FolderOpen className="size-4 text-muted-foreground" />
+                                            <span className="font-medium">{projectName}</span>
+                                        </span>
+                                        <button type="button" onClick={pickRepo} className="text-[11px] text-muted-foreground hover:text-foreground" disabled={addingProject}>Change</button>
+                                    </div>
+                                ) : (
+                                    <Button variant="outline" size="sm" onClick={pickRepo} disabled={addingProject}>
+                                        {addingProject ? <Loader2 className="mr-1 size-3 animate-spin" /> : <FolderOpen className="mr-1 size-3" />}
+                                        Choose a git repository…
+                                    </Button>
+                                )}
+                                <p className="mt-1 text-[11px] text-muted-foreground">
+                                    Code changes run full-auto in an isolated git worktree — your working checkout is never touched.
+                                </p>
+                            </div>
+                            <div>
+                                <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Name</label>
+                                <Input value={name} onChange={e => setName(e.target.value)} />
+                            </div>
+                            <div>
+                                <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Instructions</label>
+                                <Textarea value={instructions} onChange={e => setInstructions(e.target.value)} rows={6} className="text-[12.5px] leading-relaxed" />
+                            </div>
+                            <div>
+                                <label className="mb-2 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Triggers</label>
+                                <TriggersEditor value={triggers} onChange={setTriggers} />
+                                <p className="mt-2 text-[11px] text-muted-foreground">
+                                    Prefilled to fire when a meeting's notes become available. Adjust if you want.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div className="mt-5 flex items-center justify-between gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setMode(copilotEnabled ? 'describe' : 'manual')}
+                                className="text-[11px] text-muted-foreground hover:text-foreground"
+                            >
+                                ← Back
+                            </button>
+                            <div className="flex items-center gap-2">
+                                <Button variant="outline" size="sm" onClick={onClose} disabled={submitting}>Cancel</Button>
+                                <Button size="sm" onClick={submitCoding} disabled={!canSubmitCoding}>
+                                    {submitting && <Loader2 className="mr-1 size-3 animate-spin" />}
+                                    Create
+                                </Button>
+                            </div>
+                        </div>
+                    </>
+                ) : mode === 'describe' ? (
                     <>
                         <Textarea
                             value={description}
@@ -502,15 +678,22 @@ function SectionRegion({ label, children }: { label?: string; children: React.Re
 }
 
 // ---------------------------------------------------------------------------
-// Output pane — index.md (main pane content)
+// Output pane — index.html (preferred) or index.md (main pane content)
 //
-// Renders the task's `index.md` like a note: max-width 720px centered, same
-// typography (~16px, 1.5 line-height, generous padding) as the note editor's
-// ProseMirror rule in `editor.css`. No chrome above the body — just the
-// markdown, with a small floating Source ⇄ Rendered toggle in the top-right.
+// A task's agent-owned artifact is either:
+//   - `index.html` — a self-contained, styled web page. Rendered full-bleed in
+//     a sandboxed iframe (via `HtmlFileViewer` / the `app://workspace`
+//     protocol) so CSS, layout, and scripts render faithfully. Preferred when
+//     present and non-empty.
+//   - `index.md`   — a note. Rendered like the note editor: max-width 720px
+//     centered, same typography as `editor.css`, via `RichMarkdownViewer`.
+//
+// In both cases a small floating Source ⇄ Rendered toggle in the top-right
+// swaps the rendered view for the raw file source.
 // ---------------------------------------------------------------------------
 
 function OutputPane({ slug, taskName, refreshKey }: { slug: string; taskName: string; refreshKey: number }) {
+    const [mode, setMode] = useState<'md' | 'html'>('md')
     const [body, setBody] = useState<string>('')
     const [loading, setLoading] = useState(true)
     const [viewSource, setViewSource] = useState(false)
@@ -519,21 +702,33 @@ function OutputPane({ slug, taskName, refreshKey }: { slug: string; taskName: st
         let cancelled = false
         setLoading(true)
         void (async () => {
+            // Prefer index.html when it exists and has content; otherwise fall
+            // back to index.md (the default seeded artifact).
             try {
-                const result = await window.ipc.invoke('workspace:readFile', {
+                const html = await window.ipc.invoke('workspace:readFile', {
+                    path: `bg-tasks/${slug}/index.html`,
+                })
+                if (html.data.trim()) {
+                    if (!cancelled) { setMode('html'); setBody(html.data) }
+                    return
+                }
+            } catch {
+                // No index.html — fall through to markdown.
+            }
+            try {
+                const md = await window.ipc.invoke('workspace:readFile', {
                     path: `bg-tasks/${slug}/index.md`,
                 })
-                if (!cancelled) setBody(result.data)
+                if (!cancelled) { setMode('md'); setBody(md.data) }
             } catch {
-                if (!cancelled) setBody('')
-            } finally {
-                if (!cancelled) setLoading(false)
+                if (!cancelled) { setMode('md'); setBody('') }
             }
-        })()
+        })().finally(() => { if (!cancelled) setLoading(false) })
         return () => { cancelled = true }
     }, [slug, refreshKey])
 
-    const isEmpty = !body.trim() || body.trim() === `# ${taskName}`
+    const isEmpty = mode === 'md' && (!body.trim() || body.trim() === `# ${taskName}`)
+    const showHtml = mode === 'html' && !viewSource
 
     return (
         <div className="relative flex-1 overflow-hidden bg-background">
@@ -542,29 +737,35 @@ function OutputPane({ slug, taskName, refreshKey }: { slug: string; taskName: st
                     type="button"
                     onClick={() => setViewSource(v => !v)}
                     className="absolute right-4 top-3 z-10 rounded-md bg-background/70 px-2 py-0.5 text-[11px] text-muted-foreground backdrop-blur hover:bg-accent hover:text-foreground"
-                    aria-label={viewSource ? 'Show rendered output' : 'Show source markdown'}
+                    aria-label={viewSource ? 'Show rendered output' : 'Show source'}
                 >
                     {viewSource ? 'Rendered' : 'Source'}
                 </button>
             )}
 
-            <div className="h-full overflow-y-auto">
-                <div className="mx-auto max-w-[720px] px-16 py-8">
-                    {loading ? (
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                            <Loader2 className="size-3 animate-spin" /> Loading…
-                        </div>
-                    ) : isEmpty ? (
-                        <p className="text-sm italic text-muted-foreground">
-                            No output yet. Click <span className="font-medium text-foreground">Run now</span> in the sidebar, or wait for a trigger to fire.
-                        </p>
-                    ) : viewSource ? (
-                        <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[13px] leading-relaxed">{body}</pre>
-                    ) : (
-                        <RichMarkdownViewer content={body} />
-                    )}
+            {showHtml ? (
+                // Full-bleed: the iframe fills the pane and scrolls internally.
+                // Remount on refreshKey so a re-run's updated index.html reloads.
+                <HtmlFileViewer key={`${slug}-${refreshKey}`} path={`bg-tasks/${slug}/index.html`} />
+            ) : (
+                <div className="h-full overflow-y-auto">
+                    <div className="mx-auto max-w-[720px] px-16 py-8">
+                        {loading ? (
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                <Loader2 className="size-3 animate-spin" /> Loading…
+                            </div>
+                        ) : isEmpty ? (
+                            <p className="text-sm italic text-muted-foreground">
+                                No output yet. Click <span className="font-medium text-foreground">Run now</span> in the sidebar, or wait for a trigger to fire.
+                            </p>
+                        ) : viewSource ? (
+                            <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[13px] leading-relaxed">{body}</pre>
+                        ) : (
+                            <RichMarkdownViewer content={body} />
+                        )}
+                    </div>
                 </div>
-            </div>
+            )}
         </div>
     )
 }
@@ -1237,6 +1438,8 @@ function TaskDetail({
     const [confirmingDelete, setConfirmingDelete] = useState(false)
     const [sidebarOpen, setSidebarOpen] = useState(true)
     const [outputRefreshKey, setOutputRefreshKey] = useState(0)
+    // Whether we've already chosen the initial sidebar state for this task.
+    const sidebarInitialized = useRef(false)
 
     const agentStatus = useBackgroundTaskAgentStatus()
     const liveStatus = agentStatus.get(slug)
@@ -1252,6 +1455,23 @@ function TaskDetail({
             if (result.success && result.task) {
                 setTask(result.task)
                 setDraft(result.task)
+                // On first open, collapse the details sidebar when the agent
+                // already has output — let the user read it without chrome.
+                // Resolved before `loading` clears so the sidebar never flashes.
+                if (!sidebarInitialized.current) {
+                    sidebarInitialized.current = true
+                    try {
+                        const out = await window.ipc.invoke('workspace:readFile', {
+                            path: `bg-tasks/${slug}/index.md`,
+                        })
+                        const body = (out.data ?? '').trim()
+                        if (body && body !== `# ${result.task.name}`) {
+                            setSidebarOpen(false)
+                        }
+                    } catch {
+                        // No output file yet — keep the sidebar open.
+                    }
+                }
             }
         } finally {
             setLoading(false)

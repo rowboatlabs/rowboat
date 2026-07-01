@@ -1,8 +1,10 @@
 import { getAccessToken } from '../auth/tokens.js';
 import { API_URL } from '../config/env.js';
-import type { BillingInfo, BillingPlan } from '@x/shared/dist/billing.js';
+import type { BillingInfo, BillingPlanId } from '@x/shared/dist/billing.js';
+import { getRowboatConfig } from '../config/rowboat.js';
 
 export async function getBillingInfo(): Promise<BillingInfo> {
+  const config = await getRowboatConfig();
   const accessToken = await getAccessToken();
   const response = await fetch(`${API_URL}/v1/me`, {
     headers: { Authorization: `Bearer ${accessToken}` },
@@ -16,7 +18,7 @@ export async function getBillingInfo(): Promise<BillingInfo> {
       email: string;
     };
     billing: {
-      plan: BillingPlan | null;
+      planId: BillingPlanId | null;
       status: string | null;
       trialExpiresAt: string | null;
       usage: {
@@ -37,9 +39,10 @@ export async function getBillingInfo(): Promise<BillingInfo> {
   return {
     userEmail: body.user.email ?? null,
     userId: body.user.id ?? null,
-    subscriptionPlan: body.billing.plan,
+    subscriptionPlanId: body.billing.planId,
     subscriptionStatus: body.billing.status,
     trialExpiresAt: body.billing.trialExpiresAt ?? null,
+    catalog: config.billing,
     monthly: body.billing.usage.monthly,
     daily: body.billing.usage.daily,
   };

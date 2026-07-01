@@ -5,6 +5,8 @@ import { isConfigured as isComposioConfigured } from "../../composio/client.js";
 import { CURATED_TOOLKITS } from "@x/shared/dist/composio.js";
 import container from "../../di/container.js";
 import type { ICodeModeConfigRepo } from "../../code-mode/repo.js";
+import type { ISlackConfigRepo } from "../../slack/repo.js";
+import { knowledgeSourcesRepo } from "../../knowledge/sources/repo.js";
 
 const runtimeContextPrompt = getRuntimeContextPrompt(getRuntimeContext());
 
@@ -12,7 +14,7 @@ const runtimeContextPrompt = getRuntimeContextPrompt(getRuntimeContext());
  * Generate dynamic instructions section for Composio integrations.
  * Lists connected toolkits and explains the meta-tool discovery flow.
  */
-async function getComposioToolsPrompt(): Promise<string> {
+async function getComposioToolsPrompt(slackConnected: boolean = false): Promise<string> {
     if (!(await isComposioConfigured())) {
         return '';
     }
@@ -22,28 +24,54 @@ async function getComposioToolsPrompt(): Promise<string> {
         ? `**Currently connected:** ${connectedToolkits.map(slug => CURATED_TOOLKITS.find(t => t.slug === slug)?.displayName ?? slug).join(', ')}`
         : `**No services connected yet.** Load the \`composio-integration\` skill to help the user connect one.`;
 
+    // Slack is connected natively, so exclude it from the Composio catch-all.
+    const slackException = slackConnected
+        ? ` Exception: **Slack is connected natively** — use the \`slack\` skill for Slack, not Composio.`
+        : '';
+
     return `
 ## Composio Integrations
 
 ${connectedSection}
 
-Load the \`composio-integration\` skill when the user asks to interact with any third-party service. NEVER say "I can't access [service]" without loading the skill and trying Composio first.
+Load the \`composio-integration\` skill when the user asks to interact with any third-party service. NEVER say "I can't access [service]" without loading the skill and trying Composio first.${slackException}
 `;
 }
 
-function buildStaticInstructions(composioEnabled: boolean, catalog: string, codeModeEnabled: boolean = true): string {
+function buildStaticInstructions(composioEnabled: boolean, catalog: string, codeModeEnabled: boolean = true, slackConnected: boolean = false, slackChannelsHint: string = ''): string {
     // Conditionally include Composio-related instruction sections
     const emailDraftSuffix = composioEnabled
         ? ` Do NOT load this skill for reading, fetching, or checking emails — use the \`composio-integration\` skill for that instead.`
         : ` Do NOT load this skill for reading, fetching, or checking emails.`;
 
+    // When Slack is connected natively (desktop/cURL auth, not Composio), keep it
+    // out of the Composio routing examples so the Copilot doesn't try to connect
+    // it through Composio and wrongly report it as unavailable.
+    const composioServiceExamples = slackConnected
+        ? 'Gmail, GitHub, LinkedIn, Notion, Google Sheets, Jira, etc.'
+        : 'Gmail, GitHub, Slack, LinkedIn, Notion, Google Sheets, Jira, etc.';
+
     const thirdPartyBlock = composioEnabled
-        ? `\n**Third-Party Services:** When users ask to interact with any external service (Gmail, GitHub, Slack, LinkedIn, Notion, Google Sheets, Jira, etc.) — reading emails, listing issues, sending messages, fetching profiles — load the \`composio-integration\` skill first. Do NOT look in local \`gmail_sync/\` or \`calendar_sync/\` folders for live data.\n`
+        ? `\n**Third-Party Services:** When users ask to interact with any external service (${composioServiceExamples}) — reading emails, listing issues, sending messages, fetching profiles — load the \`composio-integration\` skill first. Do NOT look in local \`gmail_sync/\` or \`calendar_sync/\` folders for live data.\n`
+        : '';
+
+    // Slack is connected directly in Rowboat (agent-slack CLI), independent of
+    // Composio. Route every Slack request to the native \`slack\` skill so the
+    // Copilot never claims Slack isn't connected or sends it through Composio.
+    const slackChannelsLine = slackChannelsHint
+        ? ` The user has selected these Slack channels to follow: ${slackChannelsHint}. For broad "what's on my Slack / catch me up / anything new" requests, query THESE channels directly with \`agent-slack message list "#channel" --workspace <url> --oldest <unix-seconds> --limit 100 --resolve-users\` (use \`--oldest\`/\`--latest\` to scope to today/yesterday). Do NOT rely on \`search messages\` or \`unreads\` to answer catch-up questions — they frequently return empty with desktop-imported auth even when channels have messages; direct \`message list\` is authoritative.`
+        : '';
+    const slackBlock = slackConnected
+        ? `\n**Slack (connected):** Slack is connected directly in Rowboat (via the agent-slack CLI, not Composio). For ANY Slack request — summarizing or reading messages, catching up on channels or DMs, searching, listing users, or sending a message — your FIRST action MUST be \`loadSkill('slack')\`, then use the \`agent-slack\` commands it documents via \`executeCommand\` (the selected workspaces are in \`config/slack.json\`). NEVER tell the user Slack isn't connected, and NEVER route Slack through the \`composio-integration\` skill.${slackChannelsLine}\n`
+        : '';
+
+    const slackToolPriority = slackConnected
+        ? ` For Slack specifically, load the \`slack\` skill and use the agent-slack CLI — Slack is connected natively, not via Composio.`
         : '';
 
     const toolPriority = composioEnabled
-        ? `For third-party services (GitHub, Gmail, Slack, etc.), load the \`composio-integration\` skill. For capabilities Composio doesn't cover (web search, file scraping, audio), use MCP tools via the \`mcp-integration\` skill.`
-        : `For capabilities like web search, file scraping, and audio, use MCP tools via the \`mcp-integration\` skill.`;
+        ? `For third-party services (GitHub, Gmail, etc.), load the \`composio-integration\` skill.${slackToolPriority} For capabilities Composio doesn't cover (web search, file scraping, audio), use MCP tools via the \`mcp-integration\` skill.`
+        : `For capabilities like web search, file scraping, and audio, use MCP tools via the \`mcp-integration\` skill.${slackToolPriority}`;
 
     const slackToolsLine = composioEnabled
         ? `- \`slack-checkConnection\`, \`slack-listAvailableTools\`, \`slack-executeAction\` - Slack integration (requires Slack to be connected via Composio). Use \`slack-listAvailableTools\` first to discover available tool slugs, then \`slack-executeAction\` to execute them.\n`
@@ -76,7 +104,7 @@ Rowboat is an agentic assistant for everyday work - emails, meetings, projects, 
 
 **Email Drafting:** When users ask you to **draft** or **compose** emails (e.g., "draft a follow-up to Monica", "write an email to John about the project"), load the \`draft-emails\` skill first.${emailDraftSuffix}
 
-${thirdPartyBlock}**Meeting Prep:** When users ask you to prepare for a meeting, prep for a call, or brief them on attendees, load the \`meeting-prep\` skill first. It provides structured guidance for gathering context about attendees from the knowledge base and creating useful meeting briefs.
+${thirdPartyBlock}${slackBlock}**Meeting Prep:** When users ask you to prepare for a meeting, prep for a call, or brief them on attendees, load the \`meeting-prep\` skill first. It provides structured guidance for gathering context about attendees from the knowledge base and creating useful meeting briefs.
 
 **Create Presentations:** When users ask you to create a presentation, slide deck, pitch deck, or PDF slides, load the \`create-presentations\` skill first. It provides structured guidance for generating PDF presentations using context from the knowledge base.
 
@@ -130,6 +158,8 @@ Unlike other AI assistants that start cold every session, you have access to a l
 When a user asks you to prep them for a call with someone, you already know every prior decision, concerns they've raised, and commitments on both sides - because memory has been accumulating across every email and call, not reconstructed on demand.
 
 ## The Knowledge Graph
+The knowledge graph is the user's **Brain**. If the user says "my brain", "the brain", "look into your brain", "check my brain", "Brain", or similar, they mean the knowledge graph stored in \`knowledge/\`. Treat "Brain" and "knowledge graph" as the same thing.
+
 The knowledge graph is stored as plain markdown with Obsidian-style backlinks in \`knowledge/\` (inside the workspace). The folder is organized into these categories:
 - **Notes/** - Default location for user-authored notes. Create new notes here unless the user specifies a different folder.
 - **People/** - Notes on individuals, tracking relationships, decisions, and commitments
@@ -332,14 +362,41 @@ export async function buildCopilotInstructions(): Promise<string> {
     } catch {
         // repo unavailable — default to disabled
     }
+    let slackConnected = false;
+    let slackChannelsHint = '';
+    try {
+        const slackRepo = container.resolve<ISlackConfigRepo>('slackConfigRepo');
+        const slackConfig = await slackRepo.getConfig();
+        slackConnected = slackConfig.enabled && slackConfig.workspaces.length > 0;
+    } catch {
+        // repo unavailable — default to not connected
+    }
+    if (slackConnected) {
+        try {
+            // Surface the channels the user selected for sync so the Copilot
+            // queries those directly instead of relying on workspace-wide search.
+            const slackSource = knowledgeSourcesRepo.getConfig().sources
+                .find(source => source.provider === 'slack' && source.enabled);
+            const channels = (slackSource?.scopes ?? []).filter(scope => scope.type === 'channel');
+            slackChannelsHint = channels
+                .map(scope => {
+                    const raw = scope.name || scope.id;
+                    const display = raw.startsWith('#') ? raw : `#${raw}`;
+                    return scope.workspaceUrl ? `${display} (${scope.workspaceUrl})` : display;
+                })
+                .join(', ');
+        } catch {
+            // knowledge sources unavailable — fall back to no channel hint
+        }
+    }
     const excludeIds: string[] = [];
     if (!composioEnabled) excludeIds.push('composio-integration');
     if (!codeModeEnabled) excludeIds.push('code-with-agents');
-    // Always build from the live skill set so disk skills added/removed at
-    // runtime (after refreshDiskSkills + cache invalidation) are reflected.
-    const catalog = buildSkillCatalog({ excludeIds });
-    const baseInstructions = buildStaticInstructions(composioEnabled, catalog, codeModeEnabled);
-    const composioPrompt = await getComposioToolsPrompt();
+// Always build from the live skill set so disk skills added/removed at
+        // runtime (after refreshDiskSkills + cache invalidation) are reflected.
+        const catalog = buildSkillCatalog({ excludeIds });
+        const baseInstructions = buildStaticInstructions(composioEnabled, catalog, codeModeEnabled, slackConnected, slackChannelsHint);
+        const composioPrompt = await getComposioToolsPrompt(slackConnected);
     cachedInstructions = composioPrompt
         ? baseInstructions + '\n' + composioPrompt
         : baseInstructions;

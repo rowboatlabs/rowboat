@@ -9,6 +9,7 @@ import { serviceLogger, type ServiceRunContext } from '../services/service_logge
 import { limitEventItems } from './limit_event_items.js';
 import { createEvent } from '../events/producer.js';
 import { classifyThread, getUserEmail } from './classify_thread.js';
+import { notifyIfEnabled } from '../application/notification/notifier.js';
 
 // Configuration
 const SYNC_DIR = path.join(WorkDir, 'gmail_sync');
@@ -218,6 +219,47 @@ function summarizeGmailSync(threads: SyncedThread[]): string {
     }
 
     return lines.join('\n');
+}
+
+/**
+ * A "new email" notification for a message older than this is treated as a
+ * stale backlog item — e.g. Gmail replaying history after the app reopens from
+ * a long offline period — and suppressed, so a reopen doesn't surface day-old
+ * mail as if it just arrived.
+ */
+export const NEW_EMAIL_MAX_AGE_MS = 5 * 60 * 1000;
+
+/**
+ * True when an email is too old to be worth a "new email" ping. A `dateMs` of 0
+ * means the age couldn't be determined, in which case we err toward notifying
+ * rather than risk silently dropping genuinely-new mail.
+ */
+export function isEmailTooOldToNotify(dateMs: number, now: number = Date.now()): boolean {
+    return dateMs > 0 && now - dateMs > NEW_EMAIL_MAX_AGE_MS;
+}
+
+/**
+ * Fire one OS notification per genuinely-new email thread. Only ever called
+ * from the partial-sync (incremental) path, so the first-time connect — which
+ * goes through fullSync — never notifies. Suppressed while the app is focused,
+ * and for stale backlog (see isEmailTooOldToNotify).
+ */
+function notifyNewEmails(threads: SyncedThread[]): void {
+    const now = Date.now();
+    for (const { threadId } of threads) {
+        const snapshot = readCachedSnapshot(threadId)?.snapshot;
+        if (snapshot?.importance !== 'important') continue;
+        if (snapshot && isEmailTooOldToNotify(snapshotDateMs(snapshot), now)) continue;
+        const subject = snapshot?.subject?.trim() || '(no subject)';
+        const from = snapshot?.from?.trim();
+        void notifyIfEnabled('new_email', {
+            title: from ? `New email from ${from}` : 'New email',
+            message: subject,
+            link: `rowboat://open?type=email&threadId=${threadId}`,
+            actionLabel: 'Open',
+            onlyWhenBackground: true,
+        });
+    }
 }
 
 async function publishGmailSyncEvent(threads: SyncedThread[]): Promise<void> {
@@ -574,11 +616,29 @@ export function listEverythingElseThreads(opts: { cursor?: string; limit?: numbe
     return listInboxPage({ section: 'other', ...opts });
 }
 
+// In-memory index of parsed snapshots, keyed by cache filename and validated by
+// file mtime. listInboxPage runs on every inbox open, every "load more", and
+// every throttled live reload during a sync — without this it re-reads and
+// JSON.parses every cached thread (message bodies included) on each call. The
+// cache lets unchanged files skip the read+parse, so e.g. the "Everything else"
+// page right after "Important", reloads mid-sync, and re-opening the inbox cost
+// a cheap stat() per file instead of a full parse of the whole cache.
+interface ListCacheEntry {
+    mtimeMs: number;
+    dateMs: number;
+    section: InboxSection;
+    snapshot: GmailThreadSnapshot;
+}
+const listCache = new Map<string, ListCacheEntry>();
+
 export function listInboxPage(opts: InboxPageOptions): InboxPageResult {
     const limit = Math.max(1, Math.min(100, opts.limit ?? 25));
     const cursor = parseCursor(opts.cursor);
 
-    if (!fs.existsSync(CACHE_DIR)) return { threads: [], nextCursor: null };
+    if (!fs.existsSync(CACHE_DIR)) {
+        listCache.clear();
+        return { threads: [], nextCursor: null };
+    }
 
     let names: string[];
     try {
@@ -587,24 +647,56 @@ export function listInboxPage(opts: InboxPageOptions): InboxPageResult {
         return { threads: [], nextCursor: null };
     }
 
+    const seen = new Set<string>();
     const entries: IndexedEntry[] = [];
     for (const name of names) {
         if (!name.endsWith('.json')) continue;
+        seen.add(name);
         const filePath = path.join(CACHE_DIR, name);
+
+        let mtimeMs: number;
         try {
-            const raw = fs.readFileSync(filePath, 'utf-8');
-            const wrapper = JSON.parse(raw) as SnapshotCacheEntry;
-            const snapshot = wrapper.snapshot;
-            if (!snapshot) continue;
-            if (snapshotImportance(snapshot) !== opts.section) continue;
-            entries.push({
-                threadId: snapshot.threadId,
-                dateMs: snapshotDateMs(snapshot),
-                snapshot,
-            });
-        } catch (err) {
-            console.warn(`[Inbox lists] read failed for ${name}:`, err);
+            mtimeMs = fs.statSync(filePath).mtimeMs;
+        } catch {
+            listCache.delete(name);
+            continue;
         }
+
+        let cached = listCache.get(name);
+        if (!cached || cached.mtimeMs !== mtimeMs) {
+            try {
+                const raw = fs.readFileSync(filePath, 'utf-8');
+                const wrapper = JSON.parse(raw) as SnapshotCacheEntry;
+                const snapshot = wrapper.snapshot;
+                if (!snapshot) {
+                    listCache.delete(name);
+                    continue;
+                }
+                cached = {
+                    mtimeMs,
+                    dateMs: snapshotDateMs(snapshot),
+                    section: snapshotImportance(snapshot),
+                    snapshot,
+                };
+                listCache.set(name, cached);
+            } catch (err) {
+                console.warn(`[Inbox lists] read failed for ${name}:`, err);
+                listCache.delete(name);
+                continue;
+            }
+        }
+
+        if (cached.section !== opts.section) continue;
+        entries.push({
+            threadId: cached.snapshot.threadId,
+            dateMs: cached.dateMs,
+            snapshot: cached.snapshot,
+        });
+    }
+
+    // Evict cache entries for files that are gone (archived/trashed/pruned).
+    for (const key of listCache.keys()) {
+        if (!seen.has(key)) listCache.delete(key);
     }
 
     // Newest first, threadId asc as tiebreak.
@@ -1260,6 +1352,9 @@ async function partialSync(auth: OAuth2Client, startHistoryId: string, syncDir: 
             const result = await processThread(auth, tid, syncDir, attachmentsDir);
             if (result) synced.push(result);
         }
+        // Notify for the history-derived new threads only — before the older
+        // backfilled threads are merged in below, so backfill stays silent.
+        notifyNewEmails(synced);
         const backfilled = await backfillMissingRecentThreads(auth, syncDir, attachmentsDir, stateFile, lookbackDays);
         synced.push(...backfilled);
 
@@ -1382,6 +1477,8 @@ export interface SendReplyOptions {
     bodyText: string;
     inReplyTo?: string;
     references?: string;
+    /** Files to attach. contentBase64 is the raw (unwrapped) base64 of the file bytes. */
+    attachments?: Array<{ filename: string; mimeType: string; contentBase64: string }>;
 }
 
 export interface SendReplyResult {
@@ -1401,6 +1498,44 @@ export async function getAccountEmail(): Promise<string | null> {
     const auth = await GoogleClientFactory.getClient();
     if (!auth) return null;
     return getUserEmail(auth);
+}
+
+let cachedAccountName: string | null | undefined;
+
+/**
+ * The connected account's display name, parsed from the `From` header of a
+ * recent SENT message (which is the user themselves). Cached for the process
+ * lifetime. Uses only the existing gmail.modify scope — no profile/userinfo
+ * scope, so it never triggers a re-consent. Used by the composer to sign off
+ * AI-generated emails with the real name.
+ */
+export async function getAccountName(): Promise<string | null> {
+    if (cachedAccountName !== undefined) return cachedAccountName;
+    try {
+        const auth = await GoogleClientFactory.getClient();
+        if (!auth) return null;
+        const gmailClient = google.gmail({ version: 'v1', auth });
+        const list = await gmailClient.users.messages.list({ userId: 'me', labelIds: ['SENT'], maxResults: 1 });
+        const id = list.data.messages?.[0]?.id;
+        if (!id) {
+            cachedAccountName = null;
+            return null;
+        }
+        const msg = await gmailClient.users.messages.get({
+            userId: 'me',
+            id,
+            format: 'metadata',
+            metadataHeaders: ['From'],
+        });
+        const from = msg.data.payload?.headers?.find((h) => h.name?.toLowerCase() === 'from')?.value || '';
+        // Pull the display name out of `"Name" <email>` / `Name <email>`.
+        const name = from.match(/^\s*"?([^"<]+?)"?\s*</)?.[1]?.trim() || null;
+        cachedAccountName = name;
+        return name;
+    } catch (err) {
+        console.warn('[Gmail] getAccountName failed:', err);
+        return null;
+    }
 }
 
 export async function getConnectionStatus(): Promise<GmailConnectionStatus> {
@@ -1443,6 +1578,17 @@ function encodeMimeBase64(text: string): string {
         ?.join('\r\n') ?? '';
 }
 
+// Re-wrap an already-base64 string into 76-char lines (RFC 2045) and strip any
+// whitespace the renderer may have included.
+function wrapBase64(base64: string): string {
+    return base64.replace(/\s+/g, '').match(/.{1,76}/g)?.join('\r\n') ?? '';
+}
+
+// Quote a filename for a MIME header, dropping characters that would break it.
+function sanitizeAttachmentName(name: string): string {
+    return (name || 'attachment').replace(/[\r\n"\\]/g, '_').trim() || 'attachment';
+}
+
 export async function sendThreadReply(opts: SendReplyOptions): Promise<SendReplyResult> {
     try {
         const auth = await GoogleClientFactory.getClient();
@@ -1462,7 +1608,10 @@ export async function sendThreadReply(opts: SendReplyOptions): Promise<SendReply
             : { bodyHtml: opts.bodyHtml.trim(), bodyText: opts.bodyText.trim() };
         if (!replyBody.bodyText.trim()) return { error: 'Draft is empty.' };
 
-        const boundary = `b_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+        const seed = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+        const altBoundary = `alt_${seed}`;
+        const attachments = (opts.attachments ?? []).filter((a) => a.contentBase64);
+
         const headers: string[] = [];
         headers.push(`From: ${requireSafeHeaderValue('From', userEmail)}`);
         headers.push(`To: ${safeTo}`);
@@ -1472,24 +1621,52 @@ export async function sendThreadReply(opts: SendReplyOptions): Promise<SendReply
         if (safeInReplyTo) headers.push(`In-Reply-To: ${safeInReplyTo}`);
         if (safeReferences) headers.push(`References: ${safeReferences}`);
         headers.push('MIME-Version: 1.0');
-        headers.push(`Content-Type: multipart/alternative; boundary="${boundary}"`);
 
-        const parts: string[] = [];
-        parts.push(`--${boundary}`);
-        parts.push('Content-Type: text/plain; charset="UTF-8"');
-        parts.push('Content-Transfer-Encoding: base64');
-        parts.push('');
-        parts.push(encodeMimeBase64(replyBody.bodyText));
-        parts.push('');
-        parts.push(`--${boundary}`);
-        parts.push('Content-Type: text/html; charset="UTF-8"');
-        parts.push('Content-Transfer-Encoding: base64');
-        parts.push('');
-        parts.push(encodeMimeBase64(replyBody.bodyHtml));
-        parts.push('');
-        parts.push(`--${boundary}--`);
+        // The text+html body as a self-contained multipart/alternative block.
+        const altParts: string[] = [];
+        altParts.push(`--${altBoundary}`);
+        altParts.push('Content-Type: text/plain; charset="UTF-8"');
+        altParts.push('Content-Transfer-Encoding: base64');
+        altParts.push('');
+        altParts.push(encodeMimeBase64(replyBody.bodyText));
+        altParts.push('');
+        altParts.push(`--${altBoundary}`);
+        altParts.push('Content-Type: text/html; charset="UTF-8"');
+        altParts.push('Content-Transfer-Encoding: base64');
+        altParts.push('');
+        altParts.push(encodeMimeBase64(replyBody.bodyHtml));
+        altParts.push('');
+        altParts.push(`--${altBoundary}--`);
 
-        const message = `${headers.join('\r\n')}\r\n\r\n${parts.join('\r\n')}`;
+        let body: string;
+        if (attachments.length) {
+            // Wrap the alternative body plus each attachment in a multipart/mixed.
+            const mixedBoundary = `mixed_${seed}`;
+            headers.push(`Content-Type: multipart/mixed; boundary="${mixedBoundary}"`);
+            const mixed: string[] = [];
+            mixed.push(`--${mixedBoundary}`);
+            mixed.push(`Content-Type: multipart/alternative; boundary="${altBoundary}"`);
+            mixed.push('');
+            mixed.push(altParts.join('\r\n'));
+            for (const att of attachments) {
+                const name = sanitizeAttachmentName(att.filename);
+                const mime = sanitizeAttachmentName(att.mimeType) || 'application/octet-stream';
+                mixed.push(`--${mixedBoundary}`);
+                mixed.push(`Content-Type: ${mime}; name="${name}"`);
+                mixed.push('Content-Transfer-Encoding: base64');
+                mixed.push(`Content-Disposition: attachment; filename="${name}"`);
+                mixed.push('');
+                mixed.push(wrapBase64(att.contentBase64));
+                mixed.push('');
+            }
+            mixed.push(`--${mixedBoundary}--`);
+            body = mixed.join('\r\n');
+        } else {
+            headers.push(`Content-Type: multipart/alternative; boundary="${altBoundary}"`);
+            body = altParts.join('\r\n');
+        }
+
+        const message = `${headers.join('\r\n')}\r\n\r\n${body}`;
         const raw = Buffer.from(message, 'utf8')
             .toString('base64')
             .replace(/\+/g, '-')

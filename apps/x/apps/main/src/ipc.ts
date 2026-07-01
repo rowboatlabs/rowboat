@@ -16,27 +16,45 @@ import { bus } from '@x/core/dist/runs/bus.js';
 import { serviceBus } from '@x/core/dist/services/service_bus.js';
 import type { FSWatcher } from 'chokidar';
 import fs from 'node:fs/promises';
-import { exec } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import z from 'zod';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
+
 import { RunEvent } from '@x/shared/dist/runs.js';
 import { ServiceEvent } from '@x/shared/dist/service-events.js';
 import container from '@x/core/dist/di/container.js';
 import { listOnboardingModels } from '@x/core/dist/models/models-dev.js';
-import { testModelConnection } from '@x/core/dist/models/models.js';
+import { testModelConnection, listModelsForProvider, generateOneShot } from '@x/core/dist/models/models.js';
+import { getDefaultModelAndProvider } from '@x/core/dist/models/defaults.js';
 import { isSignedIn } from '@x/core/dist/account/account.js';
 import { listGatewayModels } from '@x/core/dist/models/gateway.js';
 import type { IModelConfigRepo } from '@x/core/dist/models/repo.js';
 import type { IOAuthRepo } from '@x/core/dist/auth/repo.js';
 import { IGranolaConfigRepo } from '@x/core/dist/knowledge/granola/repo.js';
 import { ICodeModeConfigRepo } from '@x/core/dist/code-mode/repo.js';
+import { CodePermissionRegistry } from '@x/core/dist/code-mode/acp/permission-registry.js';
 import { checkCodeModeAgentStatus } from '@x/core/dist/code-mode/status.js';
+import { ensureEngine } from '@x/core/dist/code-mode/acp/engine-provisioner.js';
+import type { ICodeProjectsRepo } from '@x/core/dist/code-mode/projects/repo.js';
+import type { ICodeSessionsRepo } from '@x/core/dist/code-mode/sessions/repo.js';
+import { CodeSessionService } from '@x/core/dist/code-mode/sessions/service.js';
+import { CodeSessionStatusTracker } from '@x/core/dist/code-mode/sessions/status-tracker.js';
+import type { CodeModeManager } from '@x/core/dist/code-mode/acp/manager.js';
+import * as codeGit from '@x/core/dist/code-mode/git/service.js';
+import { readProjectDir, readProjectFile } from '@x/core/dist/code-mode/projects/fs.js';
+import { ensureTerminal, writeTerminal, resizeTerminal, disposeTerminal } from './terminal.js';
+import type { CodeSession } from '@x/shared/dist/code-sessions.js';
 import { invalidateCopilotInstructionsCache } from '@x/core/dist/application/assistant/instructions.js';
 import { triggerSync as triggerGranolaSync } from '@x/core/dist/knowledge/granola/sync.js';
 import { ISlackConfigRepo } from '@x/core/dist/slack/repo.js';
+import { runAgentSlack, getAgentSlackCliStatus, AgentSlackRunError } from '@x/core/dist/slack/agent-slack-exec.js';
+import { knowledgeSourcesRepo } from '@x/core/dist/knowledge/sources/repo.js';
+import { rankSlackHomeMessages } from '@x/core/dist/knowledge/sources/rank_slack_home.js';
+import { syncSlackKnowledgeSources, triggerSync as triggerSlackKnowledgeSync, getSlackKnowledgeSyncStatus } from '@x/core/dist/knowledge/sources/sync_slack.js';
 import { isOnboardingComplete, markOnboardingComplete } from '@x/core/dist/config/note_creation_config.js';
+import { loadNotificationSettings, saveNotificationSettings } from '@x/core/dist/config/notification_config.js';
 import * as composioHandler from './composio-handler.js';
 import { consumePendingDeepLink } from './deeplink.js';
 import { qualifyAndDisconnectComposioGoogle } from '@x/core/dist/migrations/composio-google-migration.js';
@@ -51,7 +69,11 @@ import { summarizeMeeting } from '@x/core/dist/knowledge/summarize_meeting.js';
 import { getAccessToken } from '@x/core/dist/auth/tokens.js';
 import { getRowboatConfig } from '@x/core/dist/config/rowboat.js';
 import { runLiveNoteAgent } from '@x/core/dist/knowledge/live-note/runner.js';
-import { listImportantThreads, listEverythingElseThreads, saveMessageBodyHeight, triggerSync as triggerGmailSync, sendThreadReply, archiveThread, trashThread, markThreadRead, getAccountEmail, getConnectionStatus as getGmailConnectionStatus } from '@x/core/dist/knowledge/sync_gmail.js';
+import { listImportantThreads, listEverythingElseThreads, saveMessageBodyHeight, triggerSync as triggerGmailSync, sendThreadReply, archiveThread, trashThread, markThreadRead, getAccountEmail, getAccountName, getConnectionStatus as getGmailConnectionStatus } from '@x/core/dist/knowledge/sync_gmail.js';
+import { searchContacts as searchGmailContacts, warmContactIndex } from '@x/core/dist/knowledge/gmail_contacts.js';
+import { searchSentContacts, warmSentContacts } from '@x/core/dist/knowledge/gmail_sent_contacts.js';
+import { getGoogleDocsConnectionStatus, importGoogleDoc, syncGoogleDocDown, syncGoogleDocUp, getGoogleDocLink } from '@x/core/dist/knowledge/google_docs.js';
+import { startManagedGooglePick } from './google-picker-managed.js';
 import { liveNoteBus } from '@x/core/dist/knowledge/live-note/bus.js';
 import { getInstallationId } from '@x/core/dist/analytics/installation.js';
 import { API_URL } from '@x/core/dist/config/env.js';
@@ -72,6 +94,190 @@ import {
   listTasks,
   readRunIds as readTaskRunIds,
 } from '@x/core/dist/background-tasks/fileops.js';
+
+type SlackHomeChannel = {
+  id: string;
+  name: string;
+  workspaceUrl?: string;
+  workspaceName?: string;
+};
+
+type SlackHomeMessage = {
+  id: string;
+  workspaceName?: string;
+  workspaceUrl?: string;
+  channelId?: string;
+  channelName?: string;
+  author?: string;
+  text: string;
+  ts: string;
+  url?: string;
+};
+
+function parseWhoamiWorkspaces(data: unknown): Array<{ url: string; name: string }> {
+  const parsed = (data ?? {}) as { workspaces?: Array<{ workspace_url?: string; workspace_name?: string }> };
+  return (parsed.workspaces || []).map((w) => ({
+    url: w.workspace_url || '',
+    name: w.workspace_name || '',
+  }));
+}
+
+type SlackAuthResult = {
+  ok: boolean;
+  workspaces: Array<{ url: string; name: string }>;
+  error?: string;
+  errorKind?: 'not_installed' | 'timeout' | 'parse_error' | 'not_authed' | 'rate_limited' | 'network' | 'bad_channel' | 'unknown';
+};
+
+// Run `auth import-desktop`, then read back the workspaces via `auth whoami`.
+// Shared by the plain and the quit-Slack-first import handlers.
+async function importDesktopAndReadWorkspaces(): Promise<SlackAuthResult> {
+  const imported = await runAgentSlack(['auth', 'import-desktop'], { timeoutMs: 20000, parseJson: false });
+  if (!imported.ok) {
+    return { ok: false, workspaces: [], error: imported.message, errorKind: imported.kind };
+  }
+  const whoami = await runAgentSlack(['auth', 'whoami'], { timeoutMs: 10000 });
+  if (!whoami.ok) {
+    return { ok: false, workspaces: [], error: whoami.message, errorKind: whoami.kind };
+  }
+  const workspaces = parseWhoamiWorkspaces(whoami.data);
+  if (workspaces.length === 0) {
+    return { ok: false, workspaces: [], error: 'No signed-in Slack workspaces found in the desktop app.', errorKind: 'not_authed' };
+  }
+  return { ok: true, workspaces };
+}
+
+// Windows force-quits Slack so its exclusive Cookies-DB lock releases before
+// desktop import (the EBUSY cause). No-op on mac/Linux, where import works with
+// Slack open. taskkill exits non-zero when nothing matches — that's fine.
+async function quitSlackIfWindows(): Promise<void> {
+  if (process.platform !== 'win32') return;
+  try {
+    await execFileAsync('taskkill', ['/F', '/IM', 'Slack.exe'], { timeout: 10000, windowsHide: true });
+  } catch {
+    // No running Slack process to kill — nothing to do.
+  }
+  // Give Windows a moment to release the file handles before we copy them.
+  await new Promise(resolve => setTimeout(resolve, 800));
+}
+
+function extractArrayPayload(parsed: unknown): unknown[] {
+  if (Array.isArray(parsed)) return parsed;
+  if (parsed && typeof parsed === 'object') {
+    const obj = parsed as Record<string, unknown>;
+    for (const key of ['messages', 'channels', 'items', 'results', 'data']) {
+      if (Array.isArray(obj[key])) return obj[key] as unknown[];
+    }
+  }
+  return [];
+}
+
+function slackMessageText(message: Record<string, unknown>): string {
+  const value = message.text ?? message.body ?? message.content;
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function slackMessageAuthor(message: Record<string, unknown>): string | undefined {
+  const value = message.username ?? message.user ?? message.author;
+  return typeof value === 'string' ? value : undefined;
+}
+
+function extractSlackUserName(raw: unknown): string | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const obj = raw as Record<string, unknown>;
+  const profile = obj.profile && typeof obj.profile === 'object' ? obj.profile as Record<string, unknown> : undefined;
+  const user = obj.user && typeof obj.user === 'object' ? obj.user as Record<string, unknown> : undefined;
+  const userProfile = user?.profile && typeof user.profile === 'object' ? user.profile as Record<string, unknown> : undefined;
+
+  const candidates = [
+    profile?.display_name,
+    profile?.real_name,
+    userProfile?.display_name,
+    userProfile?.real_name,
+    obj.display_name,
+    obj.displayName,
+    obj.real_name,
+    obj.realName,
+    user?.display_name,
+    user?.displayName,
+    user?.real_name,
+    user?.realName,
+    obj.name,
+    user?.name,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+
+  return null;
+}
+
+async function resolveSlackUserName(
+  userId: string,
+  workspaceUrl: string | undefined,
+  cache: Map<string, string>,
+): Promise<string | null> {
+  const key = `${workspaceUrl ?? ''}:${userId}`;
+  if (cache.has(key)) return cache.get(key) ?? null;
+
+  const args = ['user', 'get', userId];
+  if (workspaceUrl) {
+    args.push('--workspace', workspaceUrl);
+  }
+
+  const result = await runAgentSlack(args, { timeoutMs: 10000, maxBuffer: 512 * 1024 });
+  if (result.ok) {
+    const name = extractSlackUserName(result.data ?? {});
+    if (name) {
+      cache.set(key, name);
+      return name;
+    }
+  } else {
+    console.warn(`[Slack] Failed to resolve user ${userId}: ${result.message}`);
+  }
+
+  cache.set(key, userId);
+  return null;
+}
+
+async function resolveSlackMessageText(
+  text: string,
+  workspaceUrl: string | undefined,
+  cache: Map<string, string>,
+): Promise<string> {
+  const matches = Array.from(text.matchAll(/<@([UW][A-Z0-9]+)(?:\|([^>]+))?>|@([UW][A-Z0-9]{6,})\b/g));
+  if (matches.length === 0) return text;
+
+  let resolved = text;
+  for (const match of matches) {
+    const userId = match[1] ?? match[3];
+    if (!userId) continue;
+    const fallback = match[2] ?? match[0];
+    const name = await resolveSlackUserName(userId, workspaceUrl, cache);
+    resolved = resolved.replaceAll(match[0], name ?? fallback);
+  }
+  return resolved;
+}
+
+async function resolveSlackAuthor(
+  author: string | undefined,
+  workspaceUrl: string | undefined,
+  cache: Map<string, string>,
+): Promise<string | undefined> {
+  if (!author) return undefined;
+  if (!/^[UW][A-Z0-9]{6,}$/.test(author)) return author;
+  return await resolveSlackUserName(author, workspaceUrl, cache) ?? author;
+}
+
+function slackMessageUrl(message: Record<string, unknown>, workspaceUrl: string | undefined, channelId: string | undefined, ts: string): string | undefined {
+  const direct = message.permalink ?? message.url;
+  if (typeof direct === 'string' && direct) return direct;
+  if (!workspaceUrl || !channelId) return undefined;
+  return `${workspaceUrl.replace(/\/$/, '')}/archives/${channelId}/p${ts.replace('.', '')}`;
+}
 import { browserIpcHandlers } from './browser/ipc.js';
 
 /**
@@ -371,6 +577,32 @@ export function emitOAuthEvent(event: { provider: string; success: boolean; erro
   }
 }
 
+async function requireCodeSession(sessionId: string): Promise<CodeSession> {
+  const repo = container.resolve<ICodeSessionsRepo>('codeSessionsRepo');
+  const session = await repo.get(sessionId);
+  if (!session) {
+    throw new Error(`Unknown code session: ${sessionId}`);
+  }
+  return session;
+}
+
+let codeSessionStatusWatcher: (() => void) | null = null;
+export async function startCodeSessionStatusWatcher(): Promise<void> {
+  if (codeSessionStatusWatcher) {
+    return;
+  }
+  const tracker = container.resolve<CodeSessionStatusTracker>('codeSessionStatusTracker');
+  await tracker.start();
+  codeSessionStatusWatcher = tracker.onTransition((sessionId, status) => {
+    const windows = BrowserWindow.getAllWindows();
+    for (const win of windows) {
+      if (!win.isDestroyed() && win.webContents) {
+        win.webContents.send('codeSession:status', { sessionId, status });
+      }
+    }
+  });
+}
+
 let runsWatcher: (() => void) | null = null;
 export async function startRunsWatcher(): Promise<void> {
   if (runsWatcher) {
@@ -443,6 +675,13 @@ export function setupIpcHandlers() {
   // Forward knowledge commit events to renderer for panel refresh
   versionHistory.onCommit(() => emitKnowledgeCommitEvent());
 
+  // Pre-warm the Gmail contact indices so the first compose-box keystroke is instant.
+  // - warmContactIndex(): synchronous local-snapshot fallback (instant, narrow coverage).
+  // - warmSentContacts(): kicks off a background Gmail API sync of the SENT label
+  //   for full historical coverage of people you've actually emailed.
+  warmContactIndex();
+  warmSentContacts();
+
   registerIpcHandlers({
     'app:getVersions': async () => {
       // args is null for this channel (no request payload)
@@ -507,6 +746,9 @@ export function setupIpcHandlers() {
     'gmail:getAccountEmail': async () => {
       return { email: await getAccountEmail() };
     },
+    'gmail:getAccountName': async () => {
+      return { name: await getAccountName() };
+    },
     'gmail:archiveThread': async (_event, args) => {
       return archiveThread(args.threadId);
     },
@@ -520,6 +762,22 @@ export function setupIpcHandlers() {
       saveMessageBodyHeight(args.threadId, args.messageId, args.height);
       return {};
     },
+    'gmail:searchContacts': async (_event, args) => {
+      const query = args?.query ?? '';
+      const limit = args?.limit;
+      const excludeEmails = args?.excludeEmails;
+
+      // Primary source: people you've actually sent mail to (Gmail SENT label,
+      // cached + refreshed via the Gmail API). Fallback: local-snapshot index
+      // — used only when the SENT index hasn't been populated yet (very first
+      // launch, before the background sync finishes).
+      const sent = await searchSentContacts(query, { limit, excludeEmails }).catch(() => []);
+      if (sent.length > 0) {
+        return { contacts: sent };
+      }
+      const fallback = await searchGmailContacts(query, { limit, excludeEmails });
+      return { contacts: fallback };
+    },
     'mcp:listTools': async (_event, args) => {
       return mcpCore.listTools(args.serverName, args.cursor);
     },
@@ -530,10 +788,15 @@ export function setupIpcHandlers() {
       return runsCore.createRun(args);
     },
     'runs:createMessage': async (_event, args) => {
-      return { messageId: await runsCore.createMessage(args.runId, args.message, args.voiceInput, args.voiceOutput, args.searchEnabled, args.middlePaneContext, args.codeMode) };
+      return { messageId: await runsCore.createMessage(args.runId, args.message, args.voiceInput, args.voiceOutput, args.searchEnabled, args.middlePaneContext, args.codeMode, args.codeCwd, args.codePolicy) };
     },
     'runs:authorizePermission': async (_event, args) => {
       await runsCore.authorizePermission(args.runId, args.authorization);
+      return { success: true };
+    },
+    'codeRun:resolvePermission': async (_event, args) => {
+      const registry = container.resolve<CodePermissionRegistry>('codePermissionRegistry');
+      registry.resolve(args.requestId, args.decision);
       return { success: true };
     },
     'runs:provideHumanInput': async (_event, args) => {
@@ -549,6 +812,9 @@ export function setupIpcHandlers() {
     },
     'runs:list': async (_event, args) => {
       return runsCore.listRuns(args.cursor);
+    },
+    'runs:listByWorkDir': async (_event, args) => {
+      return runsCore.listRunsByWorkDir(args.dir);
     },
     'runs:delete': async (_event, args) => {
       await runsCore.deleteRun(args.runId);
@@ -591,6 +857,24 @@ export function setupIpcHandlers() {
     },
     'models:test': async (_event, args) => {
       return await testModelConnection(args.provider, args.model);
+    },
+    'models:listForProvider': async (_event, args) => {
+      try {
+        const models = await listModelsForProvider(args.provider);
+        return { success: true, models };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to list models';
+        return { success: false, error: message };
+      }
+    },
+    'llm:getDefaultModel': async () => {
+      return await getDefaultModelAndProvider();
+    },
+    'llm:generate': async (_event, args) => {
+      console.log(`[llm:generate] requested provider=${args.provider ?? '(default)'} model=${args.model ?? '(default)'}`);
+      const result = await generateOneShot(args);
+      console.log(`[llm:generate] -> provider=${result.provider ?? '?'} model=${result.model ?? '?'} chars=${result.text?.length ?? 0}${result.error ? ` error=${result.error}` : ''}`);
+      return result;
     },
     'models:saveConfig': async (_event, args) => {
       const repo = container.resolve<IModelConfigRepo>('modelConfigRepo');
@@ -637,16 +921,148 @@ export function setupIpcHandlers() {
     'codeMode:getConfig': async () => {
       const repo = container.resolve<ICodeModeConfigRepo>('codeModeConfigRepo');
       const config = await repo.getConfig();
-      return { enabled: config.enabled };
+      return { enabled: config.enabled, approvalPolicy: config.approvalPolicy };
     },
     'codeMode:setConfig': async (_event, args) => {
       const repo = container.resolve<ICodeModeConfigRepo>('codeModeConfigRepo');
-      await repo.setConfig({ enabled: args.enabled });
+      await repo.setConfig({ enabled: args.enabled, approvalPolicy: args.approvalPolicy });
       invalidateCopilotInstructionsCache();
       return { success: true };
     },
     'codeMode:checkAgentStatus': async () => {
       return await checkCodeModeAgentStatus();
+    },
+    'codeMode:provisionEngine': async (_event, args) => {
+      // Download + install the agent's engine, streaming progress back to the
+      // requesting window so Settings can show a live bar. 'check' is instant — skip it.
+      try {
+        await ensureEngine(args.agent, {
+          onProgress: (p) => {
+            if (p.phase === 'check') return;
+            _event.sender.send('codeMode:engineProgress', {
+              agent: args.agent,
+              phase: p.phase,
+              receivedBytes: p.receivedBytes,
+              totalBytes: p.totalBytes,
+            });
+          },
+        });
+        return { success: true };
+      } catch (e) {
+        return { success: false, error: e instanceof Error ? e.message : String(e) };
+      }
+    },
+    'codeProject:add': async (_event, args) => {
+      const repo = container.resolve<ICodeProjectsRepo>('codeProjectsRepo');
+      const project = await repo.add(args.path);
+      const git = await codeGit.repoInfo(project.path);
+      return { project, git };
+    },
+    'codeProject:remove': async (_event, args) => {
+      const repo = container.resolve<ICodeProjectsRepo>('codeProjectsRepo');
+      await repo.remove(args.projectId);
+      return { success: true };
+    },
+    'codeProject:list': async () => {
+      const repo = container.resolve<ICodeProjectsRepo>('codeProjectsRepo');
+      const projects = await repo.list();
+      return {
+        projects: await Promise.all(projects.map(async (project) => ({
+          project,
+          git: await codeGit.repoInfo(project.path),
+        }))),
+      };
+    },
+    'codeSession:create': async (_event, args) => {
+      const service = container.resolve<CodeSessionService>('codeSessionService');
+      const session = await service.create(args);
+      return { session };
+    },
+    'codeSession:list': async () => {
+      const repo = container.resolve<ICodeSessionsRepo>('codeSessionsRepo');
+      const tracker = container.resolve<CodeSessionStatusTracker>('codeSessionStatusTracker');
+      return { sessions: await repo.list(), statuses: tracker.getStatuses() };
+    },
+    'codeSession:update': async (_event, args) => {
+      const service = container.resolve<CodeSessionService>('codeSessionService');
+      return { session: await service.update(args.sessionId, args.patch) };
+    },
+    'codeMode:listModelOptions': async (_event, args) => {
+      const manager = container.resolve<CodeModeManager>('codeModeManager');
+      return manager.listModelOptions(args.agent);
+    },
+    'codeSession:delete': async (_event, args) => {
+      const service = container.resolve<CodeSessionService>('codeSessionService');
+      disposeTerminal(args.sessionId);
+      await service.delete(args.sessionId, {
+        removeWorktree: args.removeWorktree,
+        deleteBranch: args.deleteBranch,
+      });
+      return { success: true };
+    },
+    'codeSession:sendMessage': async (_event, args) => {
+      const service = container.resolve<CodeSessionService>('codeSessionService');
+      // Intentionally not awaited: the turn can run for minutes and streams over
+      // runs:events. sendMessage validates synchronously enough that busy/unknown
+      // errors are reported via the run's error events instead.
+      const resultPromise = service.sendMessage(args.sessionId, args.text);
+      // Surface immediate rejections (busy session, unknown id) to the caller.
+      const result = await Promise.race([
+        resultPromise,
+        new Promise<{ accepted: true }>((resolve) => setTimeout(() => resolve({ accepted: true }), 300)),
+      ]);
+      resultPromise.catch((err) => console.error('codeSession:sendMessage failed', err));
+      return result;
+    },
+    'codeSession:stop': async (_event, args) => {
+      const service = container.resolve<CodeSessionService>('codeSessionService');
+      await service.stop(args.sessionId);
+      return { success: true };
+    },
+    'codeSession:gitStatus': async (_event, args) => {
+      const session = await requireCodeSession(args.sessionId);
+      const info = await codeGit.repoInfo(session.cwd);
+      if (!info.isGitRepo) {
+        return { isRepo: false, branch: null, hasCommits: false, files: [] };
+      }
+      let files = await codeGit.status(session.cwd);
+      if (session.worktree && !session.worktree.removedAt && session.worktree.baseBranch) {
+        const branchFiles = await codeGit.changedSinceBase(session.cwd, session.worktree.baseBranch);
+        const byPath = new Map(branchFiles.map((file) => [file.path, file]));
+        for (const file of files) {
+          if (!byPath.has(file.path)) byPath.set(file.path, file);
+        }
+        files = [...byPath.values()];
+      }
+      return { isRepo: true, branch: info.branch, hasCommits: info.hasCommits, files };
+    },
+    'codeSession:fileDiff': async (_event, args) => {
+      const session = await requireCodeSession(args.sessionId);
+      return codeGit.fileDiff(session.cwd, args.path, {
+        baseRef: session.worktree && !session.worktree.removedAt ? session.worktree.baseBranch : null,
+      });
+    },
+    'codeSession:readdir': async (_event, args) => {
+      const session = await requireCodeSession(args.sessionId);
+      return { entries: await readProjectDir(session.cwd, args.relPath) };
+    },
+    'codeSession:readFile': async (_event, args) => {
+      const session = await requireCodeSession(args.sessionId);
+      return readProjectFile(session.cwd, args.relPath);
+    },
+    'codeSession:mergeBack': async (_event, args) => {
+      const service = container.resolve<CodeSessionService>('codeSessionService');
+      return service.mergeBack(args.sessionId);
+    },
+    'codeSession:cleanupWorktree': async (_event, args) => {
+      const service = container.resolve<CodeSessionService>('codeSessionService');
+      try {
+        await service.cleanupWorktree(args.sessionId, args.deleteBranch);
+        return { success: true };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to clean up worktree';
+        return { success: false, error: message };
+      }
     },
     'granola:setConfig': async (_event, args) => {
       const repo = container.resolve<IGranolaConfigRepo>('granolaConfigRepo');
@@ -667,21 +1083,191 @@ export function setupIpcHandlers() {
     'slack:setConfig': async (_event, args) => {
       const repo = container.resolve<ISlackConfigRepo>('slackConfigRepo');
       await repo.setConfig({ enabled: args.enabled, workspaces: args.workspaces });
+      // Connecting/disconnecting Slack changes the Copilot's routing (native
+      // `slack` skill vs. Composio), so rebuild its cached instructions.
+      invalidateCopilotInstructionsCache();
       return { success: true };
     },
+    'slack:cliStatus': async () => {
+      return await getAgentSlackCliStatus();
+    },
+    'slack:knowledgeStatus': async () => {
+      return {
+        cli: await getAgentSlackCliStatus(),
+        sources: getSlackKnowledgeSyncStatus(),
+      };
+    },
     'slack:listWorkspaces': async () => {
-      try {
-        const { stdout } = await execAsync('agent-slack auth whoami', { timeout: 10000 });
-        const parsed = JSON.parse(stdout);
-        const workspaces = (parsed.workspaces || []).map((w: { workspace_url?: string; workspace_name?: string }) => ({
-          url: w.workspace_url || '',
-          name: w.workspace_name || '',
-        }));
-        return { workspaces };
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : 'Failed to list Slack workspaces';
-        return { workspaces: [], error: message };
+      const result = await runAgentSlack(['auth', 'whoami'], { timeoutMs: 10000 });
+      if (!result.ok) {
+        return { workspaces: [], error: result.message, errorKind: result.kind };
       }
+      const workspaces = parseWhoamiWorkspaces(result.data);
+      return { workspaces };
+    },
+    'slack:importDesktopAuth': async () => {
+      // Pull xoxc token(s) + cookie from the running/installed Slack desktop
+      // app into agent-slack's credential store, then read back the workspaces.
+      return await importDesktopAndReadWorkspaces();
+    },
+    'slack:quitAndImportDesktop': async () => {
+      // Windows-only convenience: kill Slack (which locks its Cookies DB) then
+      // run the normal desktop import in one click.
+      await quitSlackIfWindows();
+      return await importDesktopAndReadWorkspaces();
+    },
+    'slack:parseCurlAuth': async (_event, args) => {
+      // Cross-OS fallback to desktop import: the user pastes a "Copy as cURL"
+      // request from a signed-in Slack web tab; parse-curl reads it from stdin
+      // and extracts the xoxc token + xoxd cookie. No leveldb, no OS keychain.
+      const curl = (args.curl ?? '').trim();
+      if (!curl) {
+        return { ok: false, workspaces: [], error: 'Paste the copied cURL command first.', errorKind: 'unknown' as const };
+      }
+      const imported = await runAgentSlack(['auth', 'parse-curl'], { timeoutMs: 15000, parseJson: false, input: curl });
+      if (!imported.ok) {
+        return { ok: false, workspaces: [], error: imported.message, errorKind: imported.kind };
+      }
+      const whoami = await runAgentSlack(['auth', 'whoami'], { timeoutMs: 10000 });
+      if (!whoami.ok) {
+        return { ok: false, workspaces: [], error: whoami.message, errorKind: whoami.kind };
+      }
+      const workspaces = parseWhoamiWorkspaces(whoami.data);
+      if (workspaces.length === 0) {
+        return { ok: false, workspaces: [], error: 'Tokens were saved but no workspace was found. Double-check the copied request.', errorKind: 'not_authed' as const };
+      }
+      return { ok: true, workspaces };
+    },
+    'slack:listChannels': async (_event, args) => {
+      const result = await runAgentSlack(['channel', 'list', '--all', '--workspace', args.workspaceUrl, '--limit', '200'], { timeoutMs: 15000 });
+      if (!result.ok) {
+        return { channels: [], error: result.message };
+      }
+      const rawChannels = extractArrayPayload(result.data) as Array<{
+        id?: string;
+        name?: string;
+        is_private?: boolean;
+        isPrivate?: boolean;
+        is_member?: boolean;
+        isMember?: boolean;
+      }>;
+      const channels = rawChannels.map((ch) => ({
+        id: ch.id || ch.name || '',
+        name: ch.name || ch.id || '',
+        isPrivate: ch.is_private ?? ch.isPrivate,
+        isMember: ch.is_member ?? ch.isMember,
+      })).filter((ch) => ch.id && ch.name);
+      return { channels };
+    },
+    'slack:getRecentMessages': async (_event, args) => {
+      const repo = container.resolve<ISlackConfigRepo>('slackConfigRepo');
+      const config = await repo.getConfig();
+      if (!config.enabled || config.workspaces.length === 0) {
+        return { enabled: false, messages: [] };
+      }
+
+      const limit = Math.min(Math.max(args.limit ?? 5, 1), 20);
+      const messages: SlackHomeMessage[] = [];
+      const userNameCache = new Map<string, string>();
+
+      try {
+        const knowledgeConfig = knowledgeSourcesRepo.getConfig();
+        const slackSource = knowledgeConfig.sources.find(source => source.id === 'slack' && source.provider === 'slack' && source.enabled);
+        let channels: SlackHomeChannel[] = (slackSource?.scopes ?? [])
+          .filter(scope => scope.type === 'channel')
+          .map(scope => ({
+            id: scope.id,
+            name: scope.name ?? scope.id,
+            workspaceUrl: scope.workspaceUrl,
+            workspaceName: config.workspaces.find(workspace => workspace.url === scope.workspaceUrl)?.name,
+          }));
+
+        if (channels.length === 0) {
+          for (const workspace of config.workspaces) {
+            const channelList = await runAgentSlack(['channel', 'list', '--workspace', workspace.url, '--limit', '12'], { timeoutMs: 15000 });
+            if (!channelList.ok) {
+              throw new AgentSlackRunError(channelList.kind, channelList.message);
+            }
+            const rawChannels = extractArrayPayload(channelList.data);
+            for (const raw of rawChannels) {
+              if (!raw || typeof raw !== 'object') continue;
+              const channel = raw as Record<string, unknown>;
+              const id = typeof channel.id === 'string' ? channel.id : undefined;
+              const name = typeof channel.name === 'string' ? channel.name : id;
+              const isMember = channel.is_member ?? channel.isMember;
+              if (!id || !name || isMember === false) continue;
+              channels.push({ id, name, workspaceUrl: workspace.url, workspaceName: workspace.name });
+            }
+          }
+        }
+
+        channels = channels.slice(0, 8);
+
+        for (const channel of channels) {
+          const commandArgs = ['message', 'list', channel.id, '--limit', '5', '--max-body-chars', '500'];
+          if (channel.workspaceUrl) {
+            commandArgs.push('--workspace', channel.workspaceUrl);
+          }
+          const messageList = await runAgentSlack(commandArgs, { timeoutMs: 15000, maxBuffer: 1024 * 1024 });
+          if (!messageList.ok) {
+            console.warn(`[Slack] Failed to load messages for ${channel.name}: ${messageList.message}`);
+            continue;
+          }
+          const rawMessages = extractArrayPayload(messageList.data);
+          for (const raw of rawMessages) {
+            if (!raw || typeof raw !== 'object') continue;
+            const message = raw as Record<string, unknown>;
+            const ts = typeof message.ts === 'string' ? message.ts : undefined;
+            const text = slackMessageText(message);
+            if (!ts || !text) continue;
+            const channelId = typeof message.channel_id === 'string'
+              ? message.channel_id
+              : typeof message.channel === 'string'
+                ? message.channel
+                : channel.id;
+            const resolvedAuthor = await resolveSlackAuthor(slackMessageAuthor(message), channel.workspaceUrl, userNameCache);
+            const resolvedText = await resolveSlackMessageText(text, channel.workspaceUrl, userNameCache);
+            messages.push({
+              id: `${channel.workspaceUrl ?? 'workspace'}:${channelId}:${ts}`,
+              workspaceName: channel.workspaceName,
+              workspaceUrl: channel.workspaceUrl,
+              channelId,
+              channelName: channel.name,
+              author: resolvedAuthor,
+              text: resolvedText,
+              ts,
+              url: slackMessageUrl(message, channel.workspaceUrl, channelId, ts),
+            });
+          }
+        }
+
+        const rankedIds = await rankSlackHomeMessages(messages, limit);
+        const byId = new Map(messages.map(message => [message.id, message]));
+        const rankedMessages = rankedIds
+          .map(id => byId.get(id))
+          .filter((message): message is SlackHomeMessage => Boolean(message));
+        return { enabled: true, messages: rankedMessages };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Failed to load Slack messages';
+        const errorKind = err instanceof AgentSlackRunError ? err.kind : undefined;
+        return { enabled: true, messages: [], error: message, errorKind };
+      }
+    },
+    'knowledgeSources:getConfig': async () => {
+      return knowledgeSourcesRepo.getConfig();
+    },
+    'knowledgeSources:upsert': async (_event, args) => {
+      const config = knowledgeSourcesRepo.upsertSource(args);
+      if (args.provider === 'slack') {
+        // The Copilot prompt lists the selected Slack channels, so refresh it
+        // whenever the channel selection changes.
+        invalidateCopilotInstructionsCache();
+        triggerSlackKnowledgeSync();
+        void syncSlackKnowledgeSources().catch(error => {
+          console.error('[SlackKnowledge] Immediate sync after settings update failed:', error);
+        });
+      }
+      return config;
     },
     'onboarding:getStatus': async () => {
       // Show onboarding if it hasn't been completed yet
@@ -798,6 +1384,30 @@ export function setupIpcHandlers() {
       }
       return { path: result.filePaths[0] ?? null };
     },
+    'terminal:ensure': async (_event, args) => {
+      return ensureTerminal(args.id, args.cwd, args.cols, args.rows);
+    },
+    'terminal:input': async (_event, args) => {
+      writeTerminal(args.id, args.data);
+      return { success: true };
+    },
+    'terminal:resize': async (_event, args) => {
+      resizeTerminal(args.id, args.cols, args.rows);
+      return { success: true };
+    },
+    'terminal:dispose': async (_event, args) => {
+      disposeTerminal(args.id);
+      return { success: true };
+    },
+    'dialog:openFiles': async (event, args) => {
+      const win = BrowserWindow.fromWebContents(event.sender);
+      const result = await dialog.showOpenDialog(win!, {
+        title: args.title ?? 'Attach files',
+        ...(args.defaultPath ? { defaultPath: resolveShellPath(args.defaultPath) } : {}),
+        properties: ['openFile', 'multiSelections'],
+      });
+      return { paths: result.canceled ? [] : result.filePaths };
+    },
     // Knowledge version history handlers
     'knowledge:history': async (_event, args) => {
       const commits = await versionHistory.getFileHistory(args.path);
@@ -810,6 +1420,40 @@ export function setupIpcHandlers() {
     'knowledge:restore': async (_event, args) => {
       await versionHistory.restoreFile(args.path, args.oid);
       return { ok: true };
+    },
+    'google-docs:getStatus': async () => {
+      return getGoogleDocsConnectionStatus();
+    },
+    'google-docs:import': async (_event, args) => {
+      console.log(`[GoogleDocs] import fileId=${args.fileId} -> ${args.targetFolder}`);
+      try {
+        const result = await importGoogleDoc(args.fileId, args.targetFolder);
+        console.log(`[GoogleDocs] import OK -> ${result.path}`);
+        return result;
+      } catch (err) {
+        console.error('[GoogleDocs] import FAILED:', err instanceof Error ? err.message : err);
+        throw err;
+      }
+    },
+    // Managed (rowboat-mode) OAuth-redirect Picker: the Rowboat backend runs the
+    // pick with the company Google client; the desktop opens the start URL,
+    // waits for the deep link, and imports the picked doc with the existing
+    // managed token. No API key, appId, or local credentials.
+    'google-docs:pickViaManaged': async (_event, args) => {
+      console.log(`[GoogleDocs] managed pick -> ${args.targetFolder}`);
+      const result = await startManagedGooglePick(args.targetFolder);
+      if (!result) return null;
+      console.log(`[GoogleDocs] managed pick import OK -> ${result.path}`);
+      return result;
+    },
+    'google-docs:refreshSnapshot': async (_event, args) => {
+      return syncGoogleDocDown(args.path);
+    },
+    'google-docs:sync': async (_event, args) => {
+      return syncGoogleDocUp(args.path, { force: args.force });
+    },
+    'google-docs:getLink': async (_event, args) => {
+      return { link: await getGoogleDocLink(args.path) };
     },
     // Search handler
     'search:query': async (_event, args) => {
@@ -913,6 +1557,24 @@ export function setupIpcHandlers() {
     'voice:synthesize': async (_event, args) => {
       return voice.synthesizeSpeech(args.text);
     },
+    'voice:ensureMicAccess': async () => {
+      if (process.platform !== 'darwin') return { granted: true };
+      const status = systemPreferences.getMediaAccessStatus('microphone');
+      console.log('[voice] Microphone permission status:', status);
+      if (status === 'granted') return { granted: true };
+      // 'not-determined' shows the native TCC prompt and resolves once the
+      // user responds; 'denied'/'restricted' resolve false without prompting.
+      // Awaiting this here means the triggering mic click proceeds to
+      // getUserMedia only after permission is settled — fixing the first
+      // click silently failing while the prompt was still up.
+      try {
+        const granted = await systemPreferences.askForMediaAccess('microphone');
+        console.log('[voice] Microphone permission after prompt:', granted);
+        return { granted };
+      } catch {
+        return { granted: false };
+      }
+    },
     // Live-note handlers
     'live-note:run': async (_event, args) => {
       const result = await runLiveNoteAgent(args.filePath, 'manual', args.context);
@@ -1007,6 +1669,7 @@ export function setupIpcHandlers() {
           name: args.name,
           instructions: args.instructions,
           ...(args.triggers ? { triggers: args.triggers } : {}),
+          ...(args.projectId ? { projectId: args.projectId } : {}),
           ...(args.model ? { model: args.model } : {}),
           ...(args.provider ? { provider: args.provider } : {}),
         });
@@ -1045,6 +1708,13 @@ export function setupIpcHandlers() {
     // Billing handler
     'billing:getInfo': async () => {
       return await getBillingInfo();
+    },
+    'notifications:getSettings': async () => {
+      return loadNotificationSettings();
+    },
+    'notifications:setSettings': async (_event, args) => {
+      saveNotificationSettings(args);
+      return { success: true };
     },
     // Embedded browser handlers (WebContentsView + navigation)
     ...browserIpcHandlers,

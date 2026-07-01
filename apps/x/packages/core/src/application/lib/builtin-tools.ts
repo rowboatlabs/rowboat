@@ -1,8 +1,9 @@
 import { z, ZodType } from "zod";
 import * as path from "path";
+import * as os from "os";
 import * as fs from "fs/promises";
-import { existsSync, readFileSync } from "fs";
 import { executeCommand, executeCommandAbortable } from "./command-executor.js";
+import { agentSlackShimEnv } from "../../slack/agent-slack-exec.js";
 import { resolveSkill, availableSkills } from "../assistant/skills/index.js";
 import { executeTool, listServers, listTools } from "../../mcp/mcp.js";
 import container from "../../di/container.js";
@@ -16,6 +17,12 @@ import { executeAction as executeComposioAction, isConfigured as isComposioConfi
 import { CURATED_TOOLKITS, CURATED_TOOLKIT_SLUGS } from "@x/shared/dist/composio.js";
 import { BrowserControlInputSchema, type BrowserControlInput } from "@x/shared/dist/browser-control.js";
 import { BackgroundTaskSchema, TriggersSchema } from "@x/shared/dist/background-task.js";
+import type { CodeModeManager } from "../../code-mode/acp/manager.js";
+import type { CodePermissionRegistry } from "../../code-mode/acp/permission-registry.js";
+import { ICodeModeConfigRepo } from "../../code-mode/repo.js";
+import type { ApprovalPolicy } from "@x/shared/dist/code-mode.js";
+import type { ICodeProjectsRepo } from "../../code-mode/projects/repo.js";
+import * as gitService from "../../code-mode/git/service.js";
 
 // Inputs for the bg-task builtin tools. Reuse the canonical schema field
 // descriptions; only `triggers` gets a tighter contextual override (the
@@ -28,6 +35,9 @@ const CreateBackgroundTaskInput = BackgroundTaskSchema.pick({
     provider: true,
 }).extend({
     triggers: TriggersSchema.optional().describe('All three sub-fields (cronExpr, windows, eventMatchCriteria) are independently optional — mix freely. No triggers at all = manual-only (user clicks Run).'),
+    projectDir: z.string().optional().describe(
+        "Set this ONLY when the user wants the task to WRITE CODE. An absolute path (or ~/…) to a LOCAL GIT REPOSITORY with at least one commit. It turns this into a *coding task*: each run scans the trigger source for actionable items and implements them autonomously in isolated git worktrees off this repo — never touching the user's checkout. Extract the directory from the user's request (e.g. 'use ~/Work/space/test as the work directory'). Omit for ordinary output/action tasks.",
+    ),
 });
 
 const PatchBackgroundTaskInput = BackgroundTaskSchema.pick({
@@ -40,7 +50,43 @@ const PatchBackgroundTaskInput = BackgroundTaskSchema.pick({
 }).partial().extend({
     slug: z.string().describe('The slug of the task to update (the folder name under bg-tasks/).'),
     triggers: TriggersSchema.optional().describe('Replace the triggers object. To remove all triggers (make manual-only) pass an empty object.'),
+    projectDir: z.string().optional().describe("Point an existing task at a code repo (or change which one) to make it a coding task. Absolute path or ~/… to a local git repository with at least one commit. Same rules as on create."),
 });
+
+// Turn a user-supplied directory into a registered code project id. Reuses the
+// same idempotent registry the Code-section picker writes to (add() validates the
+// dir exists & is a directory, and dedupes by resolved path). Returns a soft
+// `warning` — not an error — when the repo isn't yet worktree-ready, so the task
+// still gets created and the copilot can tell the user what to fix.
+function expandHome(p: string): string {
+    const t = p.trim();
+    if (t === '~') return os.homedir();
+    if (t.startsWith('~/') || t.startsWith(`~${path.sep}`)) return path.join(os.homedir(), t.slice(2));
+    return t;
+}
+
+async function resolveCodeProject(dirPath: string): Promise<
+    { ok: true; projectId: string; path: string; warning?: string } | { ok: false; error: string }
+> {
+    const abs = path.resolve(expandHome(dirPath));
+    const projectsRepo = container.resolve<ICodeProjectsRepo>('codeProjectsRepo');
+    let project: Awaited<ReturnType<ICodeProjectsRepo['add']>>;
+    try {
+        project = await projectsRepo.add(abs);
+    } catch (err) {
+        return { ok: false, error: `Could not use '${dirPath}' as a code directory: ${err instanceof Error ? err.message : String(err)}` };
+    }
+    // Worktree isolation needs a real git repo with at least one commit
+    // (codeSessionService.create throws otherwise). Surface it now as a soft
+    // warning rather than letting the next run fail silently.
+    let warning: string | undefined;
+    try {
+        const info = await gitService.repoInfo(project.path);
+        if (!info.isGitRepo) warning = `${project.path} is not a git repository yet — run \`git init\` and make a commit, or the coding sessions will fail.`;
+        else if (!info.hasCommits) warning = `${project.path} has no commits yet — make an initial commit, or the coding sessions will fail.`;
+    } catch { /* best effort — worktree creation will surface it later */ }
+    return { ok: true, projectId: project.id, path: project.path, ...(warning ? { warning } : {}) };
+}
 import { ensureLoaded as ensureBrowserSkillsLoaded, readSkillContent as readBrowserSkillContent, refreshFromRemote as refreshBrowserSkills } from "../browser-skills/index.js";
 import type { ToolContext } from "./exec-tool.js";
 import { generateText } from "ai";
@@ -53,6 +99,7 @@ import { getAccessToken } from "../../auth/tokens.js";
 import { API_URL } from "../../config/env.js";
 import type { IBrowserControlService } from "../browser-control/service.js";
 import type { INotificationService } from "../notification/service.js";
+import { notifyIfEnabled } from "../notification/notifier.js";
 // Parser libraries are loaded dynamically inside parseFile.execute()
 // to avoid pulling pdfjs-dist's DOM polyfills into the main bundle.
 // Import paths are computed so esbuild cannot statically resolve them.
@@ -90,69 +137,6 @@ const LLMPARSE_MIME_TYPES: Record<string, string> = {
     '.tiff': 'image/tiff',
 };
 
-// Windows-only workaround: the Claude ACP bridge spawns CLAUDE_CODE_EXECUTABLE
-// without `shell: true`, and Node refuses to spawn .cmd files that way (EINVAL).
-// When the LLM invokes acpx via executeCommand, pre-resolve claude's real .exe
-// from the npm-shim layout and inject it via env so the bridge can spawn it.
-function resolveClaudeExeOnWindows(): string | undefined {
-    // Candidate dirs = everything on PATH, plus well-known npm/pnpm/volta global
-    // bin dirs. Electron's runtime PATH can omit these even when the user's shell
-    // includes them, which would otherwise leave us unable to find claude.exe and
-    // force a fallback to claude.cmd (which Node refuses to spawn — EINVAL).
-    const home = process.env.USERPROFILE ?? '';
-    const appData = process.env.APPDATA || (home && path.join(home, 'AppData', 'Roaming'));
-    const localAppData = process.env.LOCALAPPDATA || (home && path.join(home, 'AppData', 'Local'));
-    const programFiles = process.env.ProgramFiles || 'C:\\Program Files';
-    const knownDirs = [
-        appData && path.join(appData, 'npm'),
-        localAppData && path.join(localAppData, 'npm'),
-        appData && path.join(appData, 'pnpm'),
-        localAppData && path.join(localAppData, 'pnpm'),
-        home && path.join(home, '.volta', 'bin'),
-        path.join(programFiles, 'nodejs'),
-    ].filter(Boolean) as string[];
-
-    const pathDirs = (process.env.PATH ?? '').split(';').map((d) => d.trim()).filter(Boolean);
-    const seen = new Set<string>();
-    const candidates = [...pathDirs, ...knownDirs].filter((d) => {
-        const key = d.toLowerCase();
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-    });
-
-    for (const dir of candidates) {
-        // Direct npm-shim layout: <dir>\node_modules\@anthropic-ai\claude-code\bin\claude.exe
-        const exeFromLayout = path.join(dir, 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe');
-        if (existsSync(exeFromLayout)) return exeFromLayout;
-
-        // Otherwise parse the claude.cmd shim for the real exe path.
-        const cmdPath = path.join(dir, 'claude.cmd');
-        if (!existsSync(cmdPath)) continue;
-        try {
-            const content = readFileSync(cmdPath, 'utf-8');
-            const absMatch = content.match(/[A-Z]:[\\/][^\s"]*claude\.exe/i);
-            if (absMatch && existsSync(absMatch[0])) return absMatch[0];
-            const relMatch = content.match(/%~dp0[\\/]?([^\s"%]+claude\.exe)/i);
-            if (relMatch) {
-                const resolved = path.join(dir, relMatch[1]);
-                if (existsSync(resolved)) return resolved;
-            }
-        } catch {
-            // ignore shim parse failures
-        }
-    }
-    return undefined;
-}
-
-function envForCommand(command: string): NodeJS.ProcessEnv | undefined {
-    if (process.platform !== 'win32') return undefined;
-    if (!/\bacpx\b/.test(command)) return undefined;
-    if (process.env.CLAUDE_CODE_EXECUTABLE) return undefined;
-    const exe = resolveClaudeExeOnWindows();
-    if (!exe) return undefined;
-    return { ...process.env, CLAUDE_CODE_EXECUTABLE: exe };
-}
 
 export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
     loadSkill: {
@@ -800,6 +784,9 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
             try {
                 const rootDir = path.resolve(WorkDir);
                 const workingDir = cwd ? path.resolve(rootDir, cwd) : rootDir;
+                // Make `agent-slack` resolvable for skill-authored shell
+                // commands; the shim forwards to the bundled CLI.
+                const env = agentSlackShimEnv(path.join(rootDir, 'bin'));
 
                 // TODO: Re-enable this check
                 // const rootPrefix = rootDir.endsWith(path.sep)
@@ -814,14 +801,12 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 //     };
                 // }
 
-                const envOverride = envForCommand(command);
-
                 // Use abortable version when we have a signal
                 if (ctx?.signal) {
                     const { promise, process: proc } = executeCommandAbortable(command, {
                         cwd: workingDir,
+                        env,
                         signal: ctx.signal,
-                        env: envOverride,
                         onData: (chunk: string) => {
                             ctx.publish({
                                 runId: ctx.runId,
@@ -851,7 +836,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 }
 
                 // Fallback to original for backward compatibility
-                const result = await executeCommand(command, { cwd: workingDir, env: envOverride });
+                const result = await executeCommand(command, { cwd: workingDir, env });
 
                 return {
                     success: result.exitCode === 0,
@@ -867,6 +852,112 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                     message: `Failed to execute command: ${error instanceof Error ? error.message : 'Unknown error'}`,
                     command,
                 };
+            }
+        },
+    },
+
+    code_agent_run: {
+        description: 'Run a coding/software task with the selected on-device coding agent (Claude Code or Codex) inside a project folder. Streams the agent\'s tool calls, file diffs, and plan into the chat and surfaces permission requests inline. Use this for ALL code-mode work (writing/editing/reading code, running tests, debugging, exploring a repo). Reuses one persistent session per chat, so follow-up requests keep context.',
+        inputSchema: z.object({
+            agent: z.enum(['claude', 'codex']).describe('Which coding agent to use: "claude" (Claude Code) or "codex". Set this to the active code-mode chip agent. Note: when the chip is set, the backend uses the chip agent regardless of this value — this only takes effect in the ask-human flow where no chip is set.'),
+            cwd: z.string().describe('Absolute path to the working directory / project folder the agent should operate in.'),
+            prompt: z.string().describe('The full, self-contained coding instruction for the agent (file names, expected behavior, constraints).'),
+        }),
+        execute: async ({ agent, cwd, prompt }: { agent: 'claude' | 'codex', cwd: string, prompt: string }, ctx?: ToolContext) => {
+            if (!ctx) {
+                return { success: false, message: 'code_agent_run requires run context (runId / streaming).' };
+            }
+            // The composer chip is the source of truth for the agent. The model's `agent`
+            // argument is only a fallback for the ask-human flow (code mode not active, no
+            // chip set) — otherwise it can anchor on the thread's earlier agent and ignore a
+            // chip change. Honor the chip so switching it deterministically switches agents.
+            const effectiveAgent = ctx.codeMode ?? agent;
+            // Code-section sessions pin the working directory — never trust the model's
+            // cwd argument over the session's.
+            const effectiveCwd = ctx.codeCwd ?? cwd;
+            const manager = container.resolve<CodeModeManager>('codeModeManager');
+            const registry = container.resolve<CodePermissionRegistry>('codePermissionRegistry');
+
+            // Approval policy: the session's (Code section) wins, else global settings,
+            // else default to asking the user.
+            let policy: ApprovalPolicy = 'ask';
+            if (ctx.codePolicy) {
+                policy = ctx.codePolicy;
+            } else {
+                try {
+                    const cfg = await container.resolve<ICodeModeConfigRepo>('codeModeConfigRepo').getConfig();
+                    if (cfg.approvalPolicy) policy = cfg.approvalPolicy;
+                } catch {
+                    // fall back to 'ask'
+                }
+            }
+
+            // On stop, unblock any pending approval card so the broker stops waiting for
+            // an answer that will never come. The ACP cancel + force-kill backstop that
+            // actually ends the turn is handled inside manager.runPrompt via the signal
+            // we pass below.
+            const onAbort = () => registry.cancelRun(ctx.runId);
+            if (ctx.signal.aborted) onAbort();
+            else ctx.signal.addEventListener('abort', onAbort, { once: true });
+
+            let finalText = '';
+            const changedFiles = new Set<string>();
+            try {
+                const result = await manager.runPrompt({
+                    runId: ctx.runId,
+                    agent: effectiveAgent,
+                    cwd: effectiveCwd,
+                    prompt,
+                    policy,
+                    signal: ctx.signal,
+                    onEvent: (event) => {
+                        if (event.type === 'message' && event.role === 'agent') finalText += event.text;
+                        if (event.type === 'tool_call_update') for (const f of event.diffs) changedFiles.add(f);
+                        void ctx.publish({
+                            runId: ctx.runId,
+                            type: 'code-run-event',
+                            toolCallId: ctx.toolCallId,
+                            event,
+                            subflow: [],
+                        });
+                    },
+                    ask: (permAsk) => registry.request(ctx.runId, (requestId) => {
+                        void ctx.publish({
+                            runId: ctx.runId,
+                            type: 'code-run-permission-request',
+                            toolCallId: ctx.toolCallId,
+                            requestId,
+                            ask: permAsk,
+                            subflow: [],
+                        });
+                    }),
+                });
+                return {
+                    success: result.stopReason === 'end_turn',
+                    stopReason: result.stopReason,
+                    // The agent that actually ran (the chip), so the UI can label the run
+                    // authoritatively rather than trusting the model's `agent` argument.
+                    agent: effectiveAgent,
+                    summary: finalText.trim(),
+                    changedFiles: [...changedFiles],
+                };
+            } catch (error) {
+                // A stop mid-run isn't a failure — report it as a clean cancellation.
+                if (ctx.signal.aborted) {
+                    return {
+                        success: false,
+                        stopReason: 'cancelled',
+                        agent: effectiveAgent,
+                        summary: finalText.trim(),
+                        changedFiles: [...changedFiles],
+                    };
+                }
+                return {
+                    success: false,
+                    message: `Coding agent failed: ${error instanceof Error ? error.message : String(error)}`,
+                };
+            } finally {
+                ctx.signal.removeEventListener('abort', onAbort);
             }
         },
     },
@@ -1442,15 +1533,24 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         inputSchema: CreateBackgroundTaskInput,
         execute: async (input: z.infer<typeof CreateBackgroundTaskInput>) => {
             try {
+                let projectId: string | undefined;
+                let warning: string | undefined;
+                if (input.projectDir) {
+                    const r = await resolveCodeProject(input.projectDir);
+                    if (!r.ok) return { success: false, error: r.error };
+                    projectId = r.projectId;
+                    warning = r.warning;
+                }
                 const { createTask } = await import("../../background-tasks/fileops.js");
                 const result = await createTask({
                     name: input.name,
                     instructions: input.instructions,
                     ...(input.triggers ? { triggers: input.triggers } : {}),
+                    ...(projectId ? { projectId } : {}),
                     ...(input.model ? { model: input.model } : {}),
                     ...(input.provider ? { provider: input.provider } : {}),
                 });
-                return { success: true, slug: result.slug };
+                return { success: true, slug: result.slug, ...(warning ? { warning } : {}) };
             } catch (err) {
                 return { success: false, error: err instanceof Error ? err.message : String(err) };
             }
@@ -1463,9 +1563,16 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         execute: async (input: z.infer<typeof PatchBackgroundTaskInput>) => {
             try {
                 const { patchTask } = await import("../../background-tasks/fileops.js");
-                const { slug, ...partial } = input;
+                const { slug, projectDir, ...partial } = input;
+                let warning: string | undefined;
+                if (projectDir) {
+                    const r = await resolveCodeProject(projectDir);
+                    if (!r.ok) return { success: false, error: r.error };
+                    (partial as { projectId?: string }).projectId = r.projectId;
+                    warning = r.warning;
+                }
                 const result = await patchTask(slug, partial);
-                return { success: true, task: result };
+                return { success: true, task: result, ...(warning ? { warning } : {}) };
             } catch (err) {
                 return { success: false, error: err instanceof Error ? err.message : String(err) };
             }
@@ -1501,6 +1608,35 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         },
     },
 
+    'launch-code-task': {
+        description: "Launch an autonomous coding session that implements a unit of work in the bg-task's pinned code repo. ONLY usable from a coding background task (one with a configured code project). The session runs full-auto in its own isolated git worktree/branch — it never touches the user's checkout — and runs asynchronously: this returns as soon as the session is created, so you can launch several (one per group of related items) in the same run. The tool writes and later updates a row under a `## Code Sessions` section in the task's index.md — do NOT edit that section yourself. Write an excellent, fully self-contained `prompt`: the coding agent has no other context and no human to ask. Group related items into one call; split unrelated items into separate calls.",
+        inputSchema: z.object({
+            taskSlug: z.string().describe("The slug of THIS background task (it's in your run message, e.g. 'implement-meeting-items'). Used to find the pinned repo and to update index.md."),
+            meeting: z.string().min(1).describe("The name/title of the meeting these items came from (e.g. 'Eng Sync — 2026-06-18'). Sessions are grouped under this heading in index.md so the user can see which meeting each change came from."),
+            title: z.string().min(1).max(120).describe("Short human title for this unit of work — one line in index.md (e.g. 'Add retry to upload client')."),
+            items: z.string().min(1).describe("Brief description of the action item(s) this session implements, for the summary row (e.g. 'Fix flaky upload + add retry; raised in standup')."),
+            prompt: z.string().min(1).describe("The full, self-contained coding instruction. Include the concrete goal, relevant context from the meeting, any files/areas to look at, and what 'done' means. The agent runs autonomously with no human — be specific and complete."),
+            context: z.string().optional().describe("Optional extra context, e.g. the relevant excerpt from the meeting."),
+        }),
+        execute: async (input: { taskSlug: string; meeting: string; title: string; items: string; prompt: string; context?: string }, ctx?: ToolContext) => {
+            try {
+                const { launchCodeTask } = await import("../../background-tasks/code-sessions.js");
+                const result = await launchCodeTask({
+                    taskSlug: input.taskSlug,
+                    meeting: input.meeting,
+                    title: input.title,
+                    items: input.items,
+                    prompt: input.prompt,
+                    ...(input.context ? { context: input.context } : {}),
+                    ...(ctx?.runId ? { runId: ctx.runId } : {}),
+                });
+                return result;
+            } catch (err) {
+                return { success: false, error: err instanceof Error ? err.message : String(err) };
+            }
+        },
+    },
+
     'notify-user': {
         description: "Show a native OS notification to the user. Clicking the notification opens the provided link in the default browser, or focuses the Rowboat app if no link is given.",
         inputSchema: z.object({
@@ -1524,13 +1660,44 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 return false;
             }
         },
-        execute: async ({ title, message, link, actionLabel, secondaryActions }: { title?: string; message: string; link?: string; actionLabel?: string; secondaryActions?: Array<{ label: string; link: string }> }) => {
+        execute: async ({ title, message, link, actionLabel, secondaryActions }: { title?: string; message: string; link?: string; actionLabel?: string; secondaryActions?: Array<{ label: string; link: string }> }, ctx?: ToolContext) => {
             try {
                 const service = container.resolve<INotificationService>('notificationService');
                 if (!service.isSupported()) {
                     return { success: false, error: 'Notifications are not supported on this system' };
                 }
-                service.notify({ title, message, link, actionLabel, secondaryActions });
+                let uc = getCurrentUseCase()?.useCase;
+                // ALS doesn't reliably propagate across the run's async generator,
+                // so when the in-context use-case is missing, fall back to the
+                // persisted use case on the run record via ctx.runId.
+                if (!uc && ctx?.runId) {
+                    try {
+                        const { fetchRun } = await import("../../runs/runs.js");
+                        const run = await fetchRun(ctx.runId);
+                        uc = run.useCase;
+                    } catch {
+                        // best effort — fall through to the default branch
+                    }
+                }
+                if (uc === 'background_task_agent') {
+                    // User-configured background agent: gate behind the
+                    // background_task category (toggleable), suppress the reopen
+                    // flood, and default the deep-link to the background tasks
+                    // page if the agent didn't supply its own link.
+                    await notifyIfEnabled('background_task', {
+                        title,
+                        message,
+                        link: link ?? 'rowboat://open?type=bg-tasks',
+                        actionLabel,
+                        secondaryActions,
+                        suppressDuringStartupGrace: true,
+                        onlyWhenBackground: true,
+                    });
+                } else {
+                    // Regular chat (or any other) agent calling notify-user:
+                    // notify directly as before.
+                    service.notify({ title, message, link, actionLabel, secondaryActions });
+                }
                 return { success: true };
             } catch (error) {
                 return {

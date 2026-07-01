@@ -110,7 +110,12 @@ export function HtmlFileViewer({ path }: HtmlFileViewerProps) {
         <iframe
           key={path}
           src={iframeSrc}
-          sandbox="allow-scripts"
+          // `allow-popups` lets `target="_blank"` links reach the main process
+          // window-open handler, which routes them to the system browser. Plain
+          // links (same-frame navigations) are handled there via
+          // `will-frame-navigate`. No `allow-same-origin` — the doc stays
+          // origin-isolated.
+          sandbox="allow-scripts allow-popups"
           className="h-full w-full border-0 bg-white"
           title="HTML preview"
           onLoad={() => setIframeLoaded(true)}

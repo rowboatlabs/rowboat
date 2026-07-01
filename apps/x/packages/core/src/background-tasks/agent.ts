@@ -15,7 +15,8 @@ You are running with **no user present** to clarify, approve, or watch.
 
 Your task folder is \`bg-tasks/<slug>/\` (the path is given in the run message). It contains:
 - \`task.yaml\` — the spec. **Never touch this.** The runtime owns it.
-- \`index.md\` — agent-owned. You read and write this freely via \`file-readText\` / \`file-editText\`.
+- \`index.md\` — the default agent-owned artifact (a note). You read and write it freely via \`file-readText\` / \`file-editText\`.
+- \`index.html\` — optional agent-owned artifact for **visual** output (see OUTPUT MODE). When it exists and is non-empty it is shown to the user instead of \`index.md\`.
 - \`runs/\` — your own run logs (jsonl). You don't write to it directly; the runtime does.
 
 You can also read and write anywhere else under the workspace (\`knowledge/\`, etc.) when your instructions call for it.
@@ -28,6 +29,12 @@ Use when instructions imply a **current state** artifact:
 - "Keep me posted on …" / "What's the latest on …"
 On every run: \`file-readText\` \`index.md\`, decide the smallest patch that brings it into alignment with the instructions, apply with \`file-editText\`. Patch-style discipline: edit one region, re-read, then edit the next. Avoid one-shot rewrites.
 
+Pick the artifact format from what the output needs:
+- **\`index.md\`** (default) — prose, lists, summaries, digests, briefs. Rendered as a styled note. Use patch-style edits as above.
+- **\`index.html\`** — when the output is inherently **visual**: a dashboard, a metrics table with conditional colors, a chart, a styled report — anything where layout/CSS carry meaning that a plain note would lose. Write a single **self-contained** file with \`file-writeText\` (inline all CSS and JS; avoid external/CDN dependencies as they may be blocked; reference only assets you save next to it in the task folder — relative paths resolve against the folder). It renders full-screen in a sandboxed iframe. HTML is typically regenerated wholesale each run, so a one-shot \`file-writeText\` is fine here.
+
+Use ONE format per task — don't maintain both. \`index.html\` wins when present and non-empty. If you move a task from HTML back to a plain note, blank out \`index.html\` (\`file-writeText\` with \`""\`) so \`index.md\` shows again.
+
 ACTION MODE — perform a side-effect, append a journal entry.
 Use when instructions imply a **recurring action**:
 - "Send / draft / post / notify / file / reply / publish / call / forward …"
@@ -39,6 +46,12 @@ On every run: perform the action using the appropriate tool (Slack, email, web-f
     - 2026-05-11 14:00 — No qualifying threads; nothing sent.
 
 If your instructions imply BOTH ("summarize and email it"), do both per run.
+
+CODE MODE — implement code via isolated sessions.
+Only available when the run message contains a **"# Coding task"** block (the task is pinned to a code repository). In that case:
+- Detect actionable coding items from the source (e.g. the meeting notes named in the trigger), conservatively. Only implement clearly-scoped, self-contained items. Ambiguous, large/architectural, or other-repo items → list them in \`index.md\` as "needs review"; do not code them.
+- Group related items, then call \`launch-code-task\` once per group (\`taskSlug\` is your own slug). It runs full-auto in an isolated worktree and **owns the \`## Code Sessions\` section of \`index.md\`** — never edit those rows yourself. Write a complete, self-contained \`prompt\`: the coding agent has no other context and no human to ask.
+- If nothing is actionable, launch nothing and say so in your summary.
 
 # Triggers
 
@@ -69,9 +82,21 @@ The workspace lives at \`${WorkDir}\`.
 `;
 
 export function buildBackgroundTaskAgent(): z.infer<typeof Agent> {
+    // A running bg-task must not manage bg-tasks: re-running itself risks a
+    // recursive cascade, and patch/create can clobber its own task.yaml (a weak
+    // model has done exactly this, dropping the pinned projectId). It implements
+    // code via `launch-code-task`, not by editing task specs.
+    const EXCLUDED = new Set([
+        'executeCommand',       // headless: no interactive approval
+        'code_agent_run',       // headless: needs interactive permission UI
+        'run-background-task-agent',
+        'create-background-task',
+        'patch-background-task',
+    ]);
+
     const tools: Record<string, z.infer<typeof ToolAttachment>> = {};
     for (const name of Object.keys(BuiltinTools)) {
-        if (name === 'executeCommand') continue;
+        if (EXCLUDED.has(name)) continue;
         tools[name] = { type: 'builtin', name };
     }
 

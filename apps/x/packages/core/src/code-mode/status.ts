@@ -3,8 +3,8 @@ import { promisify } from 'util';
 import os from 'os';
 import path from 'path';
 import fs from 'fs/promises';
-import { existsSync } from 'fs';
 import { CodeModeAgentStatus } from './types.js';
+import { isEngineProvisioned } from './acp/engine-provisioner.js';
 
 const execAsync = promisify(exec);
 
@@ -12,7 +12,7 @@ const execAsync = promisify(exec);
 // We scan these directly because Electron's spawned shell sometimes doesn't
 // inherit the user's full PATH (especially on macOS GUI launches, and even on
 // Windows when global npm prefix isn't propagated to system PATH).
-function commonInstallPaths(binary: string): string[] {
+export function commonInstallPaths(binary: string): string[] {
     const home = os.homedir();
     if (process.platform === 'win32') {
         const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
@@ -38,30 +38,6 @@ function commonInstallPaths(binary: string): string[] {
         path.join(home, '.nvm', 'versions', 'node'),  // partial; nvm has versioned subdirs
         path.join(home, 'bin'),
     ].map(dir => path.join(dir, binary));
-}
-
-async function probeShell(binary: string): Promise<boolean> {
-    try {
-        if (process.platform === 'win32') {
-            const { stdout } = await execAsync(`where ${binary}`, { timeout: 5000 });
-            return stdout.trim().length > 0;
-        }
-        // Login shell so ~/.zprofile / ~/.bashrc PATH additions are visible —
-        // essential for Homebrew, nvm, asdf, volta installs on macOS GUI launches.
-        const { stdout } = await execAsync(`/bin/sh -lc 'command -v ${binary}'`, { timeout: 5000 });
-        return stdout.trim().length > 0;
-    } catch {
-        return false;
-    }
-}
-
-async function isInstalled(binary: string): Promise<boolean> {
-    if (await probeShell(binary)) return true;
-    // Fallback: scan well-known install locations directly.
-    for (const candidate of commonInstallPaths(binary)) {
-        if (existsSync(candidate)) return true;
-    }
-    return false;
 }
 
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
@@ -186,14 +162,15 @@ async function checkCodexSignedIn(): Promise<boolean> {
 export { decodeJwtPayload };
 
 export async function checkCodeModeAgentStatus(): Promise<CodeModeAgentStatus> {
-    const [claudeInstalled, codexInstalled, claudeSignedIn, codexSignedIn] = await Promise.all([
-        isInstalled('claude'),
-        isInstalled('codex'),
+    const [claudeSignedIn, codexSignedIn] = await Promise.all([
         checkClaudeSignedIn(),
         checkCodexSignedIn(),
     ]);
+    // `installed` means the engine is provisioned (downloaded) locally — the user has
+    // clicked Enable in Settings → Code Mode. We no longer look for a global claude/codex
+    // CLI on PATH; code mode runs our own pinned engine from ~/.rowboat/engines.
     return {
-        claude: { installed: claudeInstalled, signedIn: claudeSignedIn },
-        codex: { installed: codexInstalled, signedIn: codexSignedIn },
+        claude: { installed: isEngineProvisioned('claude'), signedIn: claudeSignedIn },
+        codex: { installed: isEngineProvisioned('codex'), signedIn: codexSignedIn },
     };
 }

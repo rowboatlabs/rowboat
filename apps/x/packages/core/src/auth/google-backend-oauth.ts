@@ -108,6 +108,29 @@ export async function claimTokensViaBackend(state: string): Promise<OAuthTokens>
 }
 
 /**
+ * Claim what the user selected in the managed OAuth-redirect Picker, parked
+ * under `session` by the webapp picker callback. Returns the picked file ids
+ * plus a fresh drive.file access token — the picker runs a standalone
+ * drive.file authorization (the main connection doesn't carry drive.file), so
+ * the desktop downloads the picked files with this token, not the main one.
+ */
+export async function claimPickedFilesViaBackend(
+    session: string,
+): Promise<{ fileIds: string[]; accessToken: string }> {
+    const res = await postWithBearer("/v1/google-oauth/claim-picked", { session });
+    if (!res.ok) {
+        const err = await readError(res);
+        throw new Error(`claim picked files failed: ${res.status} ${err.error ?? ""}`.trim());
+    }
+    const body = (await res.json()) as { fileIds?: unknown; tokens?: { access_token?: unknown } };
+    const fileIds = Array.isArray(body.fileIds)
+        ? body.fileIds.filter((id): id is string => typeof id === "string" && id.length > 0)
+        : [];
+    const accessToken = typeof body.tokens?.access_token === "string" ? body.tokens.access_token : "";
+    return { fileIds, accessToken };
+}
+
+/**
  * Refresh an access token via the api. Preserves caller's `refreshToken` and
  * `existingScopes` when Google omits them on the refresh response.
  */

@@ -1,5 +1,6 @@
 import { BrowserWindow, Notification, shell } from "electron";
 import type { INotificationService, NotifyInput } from "@x/core/dist/application/notification/service.js";
+import { shouldSuppressDuringStartupGrace } from "@x/core/dist/application/notification/service.js";
 import { dispatchUrl } from "../deeplink.js";
 
 const HTTP_URL = /^https?:\/\//i;
@@ -11,11 +12,35 @@ export class ElectronNotificationService implements INotificationService {
     // gets dropped and macOS clicks just focus the app silently.
     private active = new Set<Notification>();
 
+    // Timestamp the app launched, used to gate grace-eligible notifications (see
+    // NotifyInput.suppressDuringStartupGrace). Captured by the caller in main.ts
+    // so it reflects process start rather than whenever the first notify fires.
+    private readonly launchedAt: number;
+
+    constructor(launchedAt: number = Date.now()) {
+        this.launchedAt = launchedAt;
+    }
+
     isSupported(): boolean {
         return Notification.isSupported();
     }
 
-    notify({ title = "Rowboat", message, link, actionLabel, secondaryActions }: NotifyInput): void {
+    notify({ title = "Rowboat", message, link, actionLabel, secondaryActions, onlyWhenBackground, suppressDuringStartupGrace }: NotifyInput): void {
+        // Startup grace: a reopen replays every background task that completed
+        // while the app was closed, so grace-eligible notifications fired in the
+        // first moments after launch are dropped to avoid a notification flood.
+        if (shouldSuppressDuringStartupGrace({ suppressDuringStartupGrace }, this.launchedAt)) {
+            return;
+        }
+
+        // Ambient notifications are suppressed while the app is in the
+        // foreground — the user is already looking at it. A window counts as
+        // foreground only if it's actually focused (minimized / other-space
+        // windows are not), so this correctly treats those as background.
+        if (onlyWhenBackground && BrowserWindow.getAllWindows().some((w) => w.isFocused())) {
+            return;
+        }
+
         // Build the actions array AND a parallel index → link map.
         // macOS shows actions[0] inline (Banner) or all of them (Alert);
         // additional ones live behind the chevron menu.
