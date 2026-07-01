@@ -3604,6 +3604,13 @@ function App() {
     setPendingPaletteSubmit({ text, mention })
   }, [isChatSidebarOpen, handleNewChatTabInSidebar])
 
+  // Open the chat sidebar on a fresh tab and pre-fill (not send) a builder prompt.
+  const prefillChat = useCallback((text: string) => {
+    if (!isChatSidebarOpen) setIsChatSidebarOpen(true)
+    handleNewChatTabInSidebar()
+    setPresetMessage(text)
+  }, [isChatSidebarOpen, handleNewChatTabInSidebar])
+
   useEffect(() => {
     if (!pendingPaletteSubmit) return
     const fileMention: FileMention | undefined = pendingPaletteSubmit.mention
@@ -5993,7 +6000,11 @@ function App() {
                 </div>
               ) : isAppsOpen ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-                  <MiniAppsView initialAppId={appInitialId} initialVersion={appIdVersion} />
+                  <MiniAppsView
+                    initialAppId={appInitialId}
+                    initialVersion={appIdVersion}
+                    onNewApp={() => prefillChat('Build me a mini-app that ')}
+                  />
                 </div>
               ) : isEmailOpen ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">

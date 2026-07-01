@@ -15,10 +15,18 @@
  */
 const BRIDGE_SHIM = /* js */ `
 (function () {
-  var data = null, dataLoaded = false, state = null;
-  var dataCbs = [], stateCbs = [];
+  var data = null, dataLoaded = false, state = null, theme = 'dark';
+  var dataCbs = [], stateCbs = [], themeCbs = [];
   var pending = {}, seq = 0;
   function post(msg) { parent.postMessage(msg, '*'); }
+  function applyTheme(t) {
+    theme = t === 'light' ? 'light' : 'dark';
+    var el = document.documentElement;
+    el.classList.remove('light', 'dark'); el.classList.add(theme);
+    el.setAttribute('data-theme', theme);
+    el.style.colorScheme = theme;
+    themeCbs.forEach(function (cb) { try { cb(theme); } catch (_) {} });
+  }
   function rpc(method, params) {
     var id = 'r' + (++seq);
     return new Promise(function (resolve, reject) {
@@ -39,6 +47,8 @@ const BRIDGE_SHIM = /* js */ `
     if (m.type === 'rowboat:mini-app:state') {
       state = m.state;
       stateCbs.forEach(function (cb) { try { cb(state); } catch (_) {} });
+    } else if (m.type === 'rowboat:mini-app:theme') {
+      applyTheme(m.theme);
     } else if (m.type === 'rowboat:mini-app:rpc-result') {
       var p = pending[m.id];
       if (p) {
@@ -50,6 +60,8 @@ const BRIDGE_SHIM = /* js */ `
   window.rowboat = {
     getData: function () { return data; },
     refreshData: function () { return loadData(); },
+    getTheme: function () { return theme; },
+    onTheme: function (cb) { themeCbs.push(cb); try { cb(theme); } catch (_) {} return function () { var i = themeCbs.indexOf(cb); if (i >= 0) themeCbs.splice(i, 1); }; },
     onData: function (cb) {
       dataCbs.push(cb);
       if (dataLoaded) { try { cb(data); } catch (_) {} }

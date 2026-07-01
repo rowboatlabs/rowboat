@@ -132,10 +132,11 @@ const CARD_CSS = `
 .ma-lastrun { font-size:11.5px; color:var(--ma-lastrun); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 
 .ma-new {
-  min-height:clamp(190px,24cqw,244px); border-radius:18px; border:1px dashed var(--ma-new-border);
+  width:100%; font:inherit; min-height:clamp(190px,24cqw,244px); border-radius:18px; border:1px dashed var(--ma-new-border);
   background:transparent; display:flex; flex-direction:column; align-items:center; justify-content:center;
-  gap:8px; color:var(--ma-new-title); cursor:default; transition: border-color .2s ease, color .2s ease;
+  gap:8px; color:var(--ma-new-title); cursor:pointer; transition: border-color .2s ease, color .2s ease, background .2s ease;
 }
+.ma-new:hover { border-color:var(--ma-border-hover); background:color-mix(in srgb, var(--accent, #888) 6%, transparent); }
 .ma-new-title { font-size:14.5px; font-weight:600; color:var(--ma-new-title); }
 .ma-new-hint { font-size:12px; color:var(--ma-new-hint); text-align:center; padding:0 12px; }
 
@@ -170,7 +171,7 @@ function Card({ app, index, onOpen }: { app: miniApp.MiniAppManifest; index: num
   )
 }
 
-export function MiniAppsView({ initialAppId, initialVersion }: { initialAppId?: string | null; initialVersion?: number } = {}) {
+export function MiniAppsView({ initialAppId, initialVersion, onNewApp }: { initialAppId?: string | null; initialVersion?: number; onNewApp?: () => void } = {}) {
   const [selectedId, setSelectedId] = useState<string | null>(initialAppId ?? null)
   const [manifests, setManifests] = useState<miniApp.MiniAppManifest[]>([])
 
@@ -230,12 +231,12 @@ export function MiniAppsView({ initialAppId, initialVersion }: { initialAppId?: 
             <Card key={m.id} app={m} index={i} onOpen={() => setSelectedId(m.id)} />
           ))}
 
-          {/* Placeholder for copilot-generated apps (Phase 3). */}
-          <div className="ma-new">
+          {/* Kick off the copilot builder with a pre-filled prompt. */}
+          <button type="button" className="ma-new" onClick={onNewApp}>
             <Plus className="size-5" />
             <div className="ma-new-title">New app</div>
-            <div className="ma-new-hint">Describe one to the copilot (coming soon)</div>
-          </div>
+            <div className="ma-new-hint">Describe one to the copilot</div>
+          </button>
         </div>
       </div>
     </div>

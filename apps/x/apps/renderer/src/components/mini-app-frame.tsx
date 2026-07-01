@@ -28,6 +28,15 @@ export function MiniAppFrame({ manifest }: { manifest: miniApp.MiniAppManifest }
       iframeRef.current?.contentWindow?.postMessage(message, '*')
     }
 
+    const currentTheme = (): 'light' | 'dark' =>
+      document.documentElement.classList.contains('dark') ? 'dark' : 'light'
+
+    // Push host theme changes into the app so it can restyle live.
+    const themeObserver = new MutationObserver(() => {
+      postToFrame({ type: MINI_APP_MESSAGE.theme, theme: currentTheme() })
+    })
+    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
+
     async function handleRpc(method: string, params: Record<string, unknown>): Promise<unknown> {
       // fetch is a network proxy, not toolkit-scoped — handle before the scope gate.
       if (method === 'fetch') {
@@ -74,9 +83,10 @@ export function MiniAppFrame({ manifest }: { manifest: miniApp.MiniAppManifest }
     }
 
     // Apps load their own data.json (served sibling) via a relative fetch; the
-    // host only provides per-app UI state on ready.
+    // host provides per-app UI state and the current theme on ready.
     function handleReady() {
       postToFrame({ type: MINI_APP_MESSAGE.state, state: stateRef.current })
+      postToFrame({ type: MINI_APP_MESSAGE.theme, theme: currentTheme() })
     }
 
     function handleMessage(event: MessageEvent) {
@@ -112,7 +122,10 @@ export function MiniAppFrame({ manifest }: { manifest: miniApp.MiniAppManifest }
     }
 
     window.addEventListener('message', handleMessage)
-    return () => window.removeEventListener('message', handleMessage)
+    return () => {
+      window.removeEventListener('message', handleMessage)
+      themeObserver.disconnect()
+    }
   }, [manifest.id, scope])
 
   return (

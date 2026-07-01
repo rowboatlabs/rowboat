@@ -81,6 +81,13 @@ bridge: include the shim and code against \`window.rowboat\`:
 Keep it dependency-free (no remote CDNs unless truly needed; the app:// origin
 allows them but offline-safe is better). Render loading / empty / error states.
 
+**Support light AND dark.** The bridge applies the host theme to \`<html>\` — it
+sets the class \`dark\` or \`light\` (and \`color-scheme\`) and updates live when the
+user switches. Write CSS for BOTH: style defaults for light, then override under
+\`html.dark { … }\` (or use CSS variables keyed on the theme). Never hard-code a
+dark-only palette. \`rowboat.getTheme()\`/\`onTheme(cb)\` are also available if you
+need JS. Do not build dark-only.
+
 **Who writes this HTML:**
 - If a **coding agent is active** (user toggled the Code chip), delegate authoring
   via the \`code-with-agents\` skill — run it with \`cwd\` = the app's
