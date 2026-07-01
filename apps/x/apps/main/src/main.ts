@@ -31,6 +31,7 @@ import { liveNoteEventConsumer } from "@x/core/dist/knowledge/live-note/event-co
 import { init as initBackgroundTaskScheduler } from "@x/core/dist/background-tasks/scheduler.js";
 import { backgroundTaskEventConsumer } from "@x/core/dist/background-tasks/event-consumer.js";
 import { init as initLocalSites, shutdown as shutdownLocalSites } from "@x/core/dist/local-sites/server.js";
+import { startSkillsWatcher, stopSkillsWatcher } from "@x/core/dist/application/assistant/skills/watcher.js";
 import { shutdown as shutdownAnalytics } from "@x/core/dist/analytics/posthog.js";
 import { identifyIfSignedIn } from "@x/core/dist/analytics/identify.js";
 
@@ -345,6 +346,10 @@ app.whenReady().then(async () => {
   // start bg-task scheduler (cron / window)
   initBackgroundTaskScheduler();
 
+  // start disk-skills watcher: live-reload skills dropped into
+  // ~/.rowboat/skills or ~/.agents/skills without an app restart
+  startSkillsWatcher();
+
   // register event consumers and start the shared event processor
   // (consumes $WorkDir/events/pending/, routes events to all consumers
   // concurrently for Pass-1, then fires each consumer's candidates in parallel)
@@ -416,6 +421,7 @@ app.on("before-quit", () => {
   stopWorkspaceWatcher();
   stopRunsWatcher();
   stopServicesWatcher();
+  stopSkillsWatcher();
   shutdownLocalSites().catch((error) => {
     console.error('[LocalSites] Failed to shut down cleanly:', error);
   });
