@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { google } from 'googleapis';
 import { WorkDir } from '../config/config.js';
-import { runHeadlessAgent } from '../agents/headless.js';
+import { runHeadlessAgent } from '../agents/headless-app.js';
 import { getKgModel } from '../models/defaults.js';
 import { getErrorDetails } from '../agents/utils.js';
 import { serviceLogger } from '../services/service_logger.js';

@@ -49,6 +49,14 @@ import type { ISessionRepo } from "../sessions/repo.js";
 import { EmitterSessionBus, type ISessionBus } from "../sessions/bus.js";
 import { SessionsImpl } from "../sessions/sessions.js";
 import type { ISessions } from "../sessions/api.js";
+import {
+    DefaultModelResolver,
+    type IDefaultModelResolver,
+} from "../models/default-model-resolver.js";
+import {
+    HeadlessAgentRunner,
+    type IHeadlessAgentRunner,
+} from "../agents/headless.js";
 
 const container = createContainer({
     injectionMode: InjectionMode.PROXY,
@@ -115,6 +123,10 @@ container.register({
     sessionRepo: asClass<ISessionRepo>(FSSessionRepo).singleton(),
     sessionBus: asClass<ISessionBus>(EmitterSessionBus).singleton(),
     sessions: asClass<ISessions>(SessionsImpl).singleton(),
+    defaultModelResolver:
+        asClass<IDefaultModelResolver>(DefaultModelResolver).singleton(),
+    headlessAgentRunner:
+        asClass<IHeadlessAgentRunner>(HeadlessAgentRunner).singleton(),
 });
 
 export default container;

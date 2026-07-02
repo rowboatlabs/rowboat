@@ -4,7 +4,7 @@ import { IAgentScheduleRepo } from "./repo.js";
 import { IAgentScheduleStateRepo } from "./state-repo.js";
 import { AgentScheduleConfig, AgentScheduleEntry } from "@x/shared/dist/agent-schedule.js";
 import { AgentScheduleState, AgentScheduleStateEntry } from "@x/shared/dist/agent-schedule-state.js";
-import { startHeadlessAgent } from "../agents/headless.js";
+import { startHeadlessAgent } from "../agents/headless-app.js";
 import { withUseCase } from "../analytics/use_case.js";
 import z from "zod";
 

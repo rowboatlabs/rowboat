@@ -2,7 +2,7 @@ import type { BackgroundTask, BackgroundTaskTriggerType } from '@x/shared/dist/b
 import { PrefixLogger } from '@x/shared/dist/prefix-logger.js';
 import { fetchTask, patchTask, prependRunId } from './fileops.js';
 import { getBackgroundTaskAgentModel } from '../models/defaults.js';
-import { startHeadlessAgent } from '../agents/headless.js';
+import { startHeadlessAgent } from '../agents/headless-app.js';
 import { buildTriggerBlock } from '../agents/build-trigger-block.js';
 import { backgroundTaskBus } from './bus.js';
 import { withUseCase } from '../analytics/use_case.js';

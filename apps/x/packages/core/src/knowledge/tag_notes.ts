@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { WorkDir } from '../config/config.js';
-import { runHeadlessAgent, toolInputPaths } from '../agents/headless.js';
+import { runHeadlessAgent, toolInputPaths } from '../agents/headless-app.js';
 import { getKgModel } from '../models/defaults.js';
 import { getErrorDetails } from '../agents/utils.js';
 import { serviceLogger } from '../services/service_logger.js';

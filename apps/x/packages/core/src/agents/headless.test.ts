@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { z } from "zod";
 import { reduceTurn, type TurnEvent } from "@x/shared/dist/turns.js";
 import type {
@@ -9,11 +9,12 @@ import type {
 } from "../turns/api.js";
 import {
     HeadlessRunError,
+    HeadlessAgentRunner,
     assistantText,
     lastAssistantText,
-    startHeadlessAgent,
     toolInputPaths,
 } from "./headless.js";
+import type { IDefaultModelResolver } from "../models/default-model-resolver.js";
 
 type TEvent = z.infer<typeof TurnEvent>;
 
@@ -166,6 +167,22 @@ const completedOutcome: TurnOutcome = {
     usage: {},
 };
 
+function createRunner(
+    runtime: ITurnRuntime,
+    resolve = vi.fn(async () => ({
+        provider: "default-provider",
+        model: "default-model",
+    })),
+): { runner: HeadlessAgentRunner; resolve: IDefaultModelResolver["resolve"] } {
+    return {
+        runner: new HeadlessAgentRunner({
+            turnRuntime: runtime,
+            defaultModelResolver: { resolve },
+        }),
+        resolve,
+    };
+}
+
 describe("headless agent helpers", () => {
     it("assistantText handles string and parts content", () => {
         expect(assistantText({ role: "assistant", content: "hi" })).toBe("hi");
@@ -206,14 +223,18 @@ describe("headless agent helpers", () => {
     });
 });
 
-describe("startHeadlessAgent", () => {
+describe("HeadlessAgentRunner", () => {
     it("creates a standalone auto-permission turn and returns the id before settling", async () => {
         const runtime = new FakeRuntime(turnLog({ responseText: "the summary" }), completedOutcome);
-        const handle = await startHeadlessAgent(
-            { agentId: "worker", message: "go", model: "m", provider: "fake" },
-            runtime,
-        );
+        const { runner, resolve } = createRunner(runtime);
+        const handle = await runner.start({
+            agentId: "worker",
+            message: "go",
+            model: "m",
+            provider: "fake",
+        });
         expect(handle.turnId).toBe(TURN_ID);
+        expect(resolve).not.toHaveBeenCalled();
         expect(runtime.createInputs[0]).toMatchObject({
             agent: { agentId: "worker", overrides: { model: { provider: "fake", model: "m" } } },
             sessionId: null,
@@ -228,8 +249,24 @@ describe("startHeadlessAgent", () => {
 
     it("omits the model override when neither model nor provider is set", async () => {
         const runtime = new FakeRuntime(turnLog({ responseText: "ok" }), completedOutcome);
-        await startHeadlessAgent({ agentId: "worker", message: "go" }, runtime);
+        const { runner, resolve } = createRunner(runtime);
+        await runner.start({ agentId: "worker", message: "go" });
+        expect(resolve).not.toHaveBeenCalled();
         expect(runtime.createInputs[0].agent.overrides).toBeUndefined();
+    });
+
+    it("uses an injected default only for a partial model override", async () => {
+        const runtime = new FakeRuntime(turnLog({ responseText: "ok" }), completedOutcome);
+        const { runner, resolve } = createRunner(runtime);
+        await runner.start({
+            agentId: "worker",
+            message: "go",
+            model: "custom-model",
+        });
+        expect(resolve).toHaveBeenCalledOnce();
+        expect(runtime.createInputs[0].agent.overrides).toEqual({
+            model: { provider: "default-provider", model: "custom-model" },
+        });
     });
 
     it("throwOnError rejects done with HeadlessRunError on failed outcomes", async () => {
@@ -238,10 +275,12 @@ describe("startHeadlessAgent", () => {
             error: "provider exploded",
             usage: {},
         });
-        const handle = await startHeadlessAgent(
-            { agentId: "worker", message: "go", throwOnError: true },
-            runtime,
-        );
+        const { runner } = createRunner(runtime);
+        const handle = await runner.start({
+            agentId: "worker",
+            message: "go",
+            throwOnError: true,
+        });
         await expect(handle.done).rejects.toThrowError(HeadlessRunError);
         await expect(handle.done).rejects.toThrowError("provider exploded");
     });
@@ -252,7 +291,8 @@ describe("startHeadlessAgent", () => {
             error: "boom",
             usage: {},
         });
-        const handle = await startHeadlessAgent({ agentId: "worker", message: "go" }, runtime);
+        const { runner } = createRunner(runtime);
+        const handle = await runner.start({ agentId: "worker", message: "go" });
         const result = await handle.done;
         expect(result.outcome.status).toBe("failed");
         expect(result.summary).toBeNull();
