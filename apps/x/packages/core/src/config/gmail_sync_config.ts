@@ -20,13 +20,6 @@ const MAX_MAX_EMAILS = 5000;
 
 interface GmailSyncConfig {
     maxEmails: number;
-    /**
-     * When true, threads the classifier labels as "Everything else" are
-     * automatically marked read as they arrive during sync. Toggling this on
-     * only governs FUTURE mail; existing threads are marked read separately at
-     * toggle time (and are never touched when this is turned off).
-     */
-    autoReadEverythingElse?: boolean;
 }
 
 function clampMaxEmails(value: number): number {
@@ -74,15 +67,3 @@ export function setMaxEmails(maxEmails: number): void {
     writeConfig({ ...readConfig(), maxEmails: clampMaxEmails(maxEmails) });
 }
 
-/**
- * Whether newly-arriving "Everything else" threads should be auto-marked read
- * during sync. Defaults to false (off) when unset.
- */
-export function getAutoReadEverythingElse(): boolean {
-    return readConfig()?.autoReadEverythingElse === true;
-}
-
-/** Persist the "auto-mark Everything else as read" preference. */
-export function setAutoReadEverythingElse(enabled: boolean): void {
-    writeConfig({ ...readConfig(), autoReadEverythingElse: enabled });
-}

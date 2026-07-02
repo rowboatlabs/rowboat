@@ -11,7 +11,6 @@ import { useTheme } from '@/contexts/theme-context'
 import { SettingsDialog } from '@/components/settings-dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Switch } from '@/components/ui/switch'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 
 type GmailThread = blocks.GmailThread
@@ -196,6 +195,37 @@ function buildRecipients(
   for (const token of to) ccExclude.add(extractAddress(token).toLowerCase())
   const cc = dedupeRecipients(ccPool, ccExclude)
   return { to, cc }
+}
+
+// Reply-chain headers (and thread placement) for the outgoing message.
+// Replies rebuild the chain from the thread's messages. An edited draft is a
+// single-message pseudo-thread whose own Message-ID must never be referenced
+// (it dies on send, which would break recipients' threading) — reuse the
+// In-Reply-To/References the draft already carries instead. Forwards and new
+// messages start fresh.
+function threadingHeaders(
+  mode: ComposeMode,
+  thread: GmailThread | undefined,
+): { threadId?: string; inReplyTo?: string; references?: string } {
+  if (!thread || mode === 'forward' || mode === 'new') return {}
+  if (mode === 'draft') {
+    const draftMsg = latestMessage(thread)
+    return {
+      // Only a reply draft stays on its thread — a standalone draft's
+      // threadId is the phantom thread holding just the draft itself.
+      threadId: draftMsg?.inReplyToHeader ? thread.threadId : undefined,
+      inReplyTo: draftMsg?.inReplyToHeader,
+      references: draftMsg?.referencesHeader,
+    }
+  }
+  const messageIds = thread.messages
+    .map((m) => m.messageIdHeader)
+    .filter((v): v is string => Boolean(v))
+  return {
+    threadId: thread.threadId,
+    inReplyTo: latestMessage(thread)?.messageIdHeader,
+    references: messageIds.join(' ') || undefined,
+  }
 }
 
 // Subject line for a reply ("Re: …") or forward ("Fwd: …"), avoiding double prefixes.
@@ -408,6 +438,10 @@ function HtmlMessageBody({ message, threadId }: { message: GmailThreadMessage; t
   const [height, setHeight] = useState(message.bodyHeight ?? 80)
   const [hasQuote, setHasQuote] = useState(false)
   const [showQuotes, setShowQuotes] = useState(false)
+  // Read by handleLoad so a reload (theme switch rebuilds srcDoc) restores the
+  // expanded-quotes state on the fresh document.
+  const showQuotesRef = useRef(showQuotes)
+  useEffect(() => { showQuotesRef.current = showQuotes }, [showQuotes])
 
   const adaptToTheme = useMemo(() => !isStyledHtml(message.bodyHtml!), [message.bodyHtml])
   const srcDoc = useMemo(
@@ -420,6 +454,16 @@ function HtmlMessageBody({ message, threadId }: { message: GmailThreadMessage; t
     const doc = iframe?.contentDocument
     if (!doc?.body) return
     setHasQuote(!!doc.querySelector('.gmail_quote, .gmail_attr, blockquote[type="cite"]'))
+    if (showQuotesRef.current) doc.documentElement.dataset.showQuotes = 'true'
+    // Clicking into the email body focuses the iframe document, which would
+    // otherwise swallow every list/thread shortcut (the parent's document
+    // keydown listeners never fire). The sandbox has allow-same-origin but no
+    // allow-scripts, so we forward from out here; the listener dies with the
+    // document on the next load.
+    doc.addEventListener('keydown', (event) => {
+      const clone = new KeyboardEvent('keydown', event)
+      if (!document.dispatchEvent(clone)) event.preventDefault()
+    })
     const measure = () => {
       // Measure off body only. documentElement.scrollHeight stretches to fill
       // the iframe viewport, so once we size the iframe up (e.g. user expanded
@@ -598,8 +642,12 @@ function ComposeToolbarButton({
 }
 
 function ComposeToolbar({ editor, onOpenLink }: { editor: Editor; onOpenLink: () => void }) {
+  // Content-sized (no flex-1: a 0 basis always "fits" the current flex line,
+  // so the toolbar would never wrap — it would get squeezed until its
+  // fixed-size buttons overflowed the neighbors). The inner flex-wrap stacks
+  // the buttons if even a full line is too narrow to hold them.
   return (
-    <div className="flex min-w-0 flex-1 items-center gap-0.5 border-l border-border pl-2.5">
+    <div className="flex flex-wrap items-center gap-0.5 border-l border-border pl-2.5">
       <Button
         type="button"
         variant="ghost"
@@ -771,12 +819,13 @@ function RecipientField({
   )
 
   // Debounced contact search — only runs when the user has actually typed
-  // something. An empty draft (including the post-pick reset) closes the menu.
+  // something. An emptied draft closes the menu via the onChange handler (and
+  // commit() clears it after a pick); here we just invalidate in-flight
+  // queries so a stale response can't reopen it.
   useEffect(() => {
     const trimmed = draft.trim()
     if (!isFocused || !trimmed) {
       queryTokenRef.current++
-      setSuggestions([])
       return
     }
     const token = ++queryTokenRef.current
@@ -901,7 +950,11 @@ function RecipientField({
           ref={inputRef}
           className="h-6 min-w-[80px] flex-1 border-0 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
           value={draft}
-          onChange={(event) => setDraft(event.target.value)}
+          onChange={(event) => {
+            const next = event.target.value
+            setDraft(next)
+            if (!next.trim()) setSuggestions([])
+          }}
           onKeyDown={onKeyDown}
           onFocus={() => setIsFocused(true)}
           onBlur={() => {
@@ -1066,7 +1119,6 @@ const ComposeBox = memo(function ComposeBox({
   const isNew = mode === 'new'
   // Drafts and new messages share the full-modal layout (subject line, AI bar).
   const isModal = isNew || mode === 'draft'
-  const latest = useMemo(() => (thread ? latestMessage(thread) : undefined), [thread])
   const initialRecipients = useMemo(
     () => (thread ? buildRecipients(mode, thread, selfEmail) : { to: [], cc: [] }),
     [mode, thread, selfEmail],
@@ -1372,38 +1424,44 @@ const ComposeBox = memo(function ComposeBox({
     const text = editor.getText().trim()
     if (!text) return null // skip empty/whitespace drafts
     const html = editor.getHTML()
-    const messageIds = (thread?.messages ?? [])
-      .map((m) => m.messageIdHeader)
-      .filter((v): v is string => Boolean(v))
-    const references = messageIds.join(' ')
-    const inReplyTo = latest?.messageIdHeader
-    // Only replies stay on the thread; forwards and new emails start fresh.
-    const isThreaded = Boolean(thread) && mode !== 'forward' && !isNew
+    const { threadId, inReplyTo, references } = threadingHeaders(mode, thread)
     return {
       draftId: draftIdRef.current,
-      threadId: isThreaded ? thread?.threadId : undefined,
+      threadId,
       to: toList.join(', '),
       cc: ccList.length ? ccList.join(', ') : undefined,
       bcc: bccList.length ? bccList.join(', ') : undefined,
       subject: subject.trim() || (thread ? composeSubject(mode, thread.subject) : ''),
       bodyHtml: html,
       bodyText: text,
-      inReplyTo: isThreaded ? inReplyTo : undefined,
-      references: isThreaded ? references || undefined : undefined,
+      inReplyTo,
+      references,
       attachments: attachments.length
         ? attachments.map(({ filename, mimeType, contentBase64 }) => ({ filename, mimeType, contentBase64 }))
         : undefined,
     }
-  }, [editor, thread, mode, isNew, toList, ccList, bccList, subject, attachments, latest])
+  }, [editor, thread, mode, toList, ccList, bccList, subject, attachments])
 
   const saveDraftNow = useCallback(async () => {
     if (sentRef.current || discardedRef.current) return
     if (savingRef.current) { pendingRef.current = true; return }
     const payload = lastPayloadRef.current
-    if (!payload) return
+    if (!payload && !draftIdRef.current) return
     savingRef.current = true
     pendingRef.current = false
     try {
+      if (!payload) {
+        // The composer was deliberately emptied after edits — mirror Gmail and
+        // delete the autosaved draft rather than leaving its stale content.
+        const id = draftIdRef.current
+        if (id && dirtyRef.current) {
+          await window.ipc.invoke('gmail:deleteDraft', { draftId: id })
+          // Only forget the id once the delete succeeded (404/410 count as
+          // success server-side); a thrown failure keeps it for a retry.
+          if (draftIdRef.current === id) draftIdRef.current = undefined
+        }
+        return
+      }
       payload.draftId = draftIdRef.current
       const res = await window.ipc.invoke('gmail:saveDraft', payload)
       if (res?.draftId && !discardedRef.current) draftIdRef.current = res.draftId
@@ -1462,7 +1520,13 @@ const ComposeBox = memo(function ComposeBox({
       if (closedRef.current || sentRef.current || discardedRef.current || savingRef.current) return
       if (!dirtyRef.current) return
       const payload = lastPayloadRef.current
-      if (!payload) return
+      if (!payload) {
+        // Edited down to empty, then torn down — drop the stale draft.
+        if (draftIdRef.current) {
+          void window.ipc.invoke('gmail:deleteDraft', { draftId: draftIdRef.current }).catch(() => {})
+        }
+        return
+      }
       payload.draftId = draftIdRef.current
       void window.ipc.invoke('gmail:saveDraft', payload).catch(() => {})
     }
@@ -1479,6 +1543,10 @@ const ComposeBox = memo(function ComposeBox({
       if (payload) {
         payload.draftId = draftIdRef.current
         void window.ipc.invoke('gmail:saveDraft', payload).catch(() => {})
+      } else if (draftIdRef.current) {
+        // Closed with the body edited down to empty — mirror Gmail and drop
+        // the autosaved draft instead of keeping its stale content.
+        void window.ipc.invoke('gmail:deleteDraft', { draftId: draftIdRef.current }).catch(() => {})
       }
     }
     onClose()
@@ -1512,14 +1580,7 @@ const ComposeBox = memo(function ComposeBox({
       return
     }
 
-    // Build References chain from all known message ids (newest last).
-    const messageIds = (thread?.messages ?? [])
-      .map((m) => m.messageIdHeader)
-      .filter((v): v is string => Boolean(v))
-    const references = messageIds.join(' ')
-    const inReplyTo = latest?.messageIdHeader
-    // Only replies stay on the thread; forwards and new emails start fresh.
-    const isThreaded = Boolean(thread) && mode !== 'forward' && !isNew
+    const { threadId, inReplyTo, references } = threadingHeaders(mode, thread)
 
     // Stop autosave from racing the send (it would leave an orphaned draft), and
     // let any in-flight save settle so we know the draft id to clean up.
@@ -1529,15 +1590,15 @@ const ComposeBox = memo(function ComposeBox({
     await waitForSaveIdle()
     try {
       const result = await window.ipc.invoke('gmail:sendReply', {
-        threadId: isThreaded ? thread?.threadId : undefined,
+        threadId,
         to: toList.join(', '),
         cc: ccList.length ? ccList.join(', ') : undefined,
         bcc: bccList.length ? bccList.join(', ') : undefined,
         subject: subject.trim() || (thread ? composeSubject(mode, thread.subject) : '(No subject)'),
         bodyHtml: html,
         bodyText: text,
-        inReplyTo: isThreaded ? inReplyTo : undefined,
-        references: isThreaded ? references || undefined : undefined,
+        inReplyTo,
+        references,
         attachments: attachments.length
           ? attachments.map(({ filename, mimeType, contentBase64 }) => ({ filename, mimeType, contentBase64 }))
           : undefined,
@@ -1785,8 +1846,11 @@ const ComposeBox = memo(function ComposeBox({
           <Button type="button" variant="outline" size="xs" onClick={cancelLink}>Cancel</Button>
         </div>
       )}
-      <div className="flex items-center gap-3 border-t border-border px-3 py-2.5">
-        <div className="flex shrink-0 items-center gap-2">
+      {/* flex-wrap: every button here is shrink-0, so on a narrow pane the
+          formatting toolbar wraps to its own line instead of overflowing
+          into (and clipping) the Discard button. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-border px-3 py-2.5">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             type="button"
             size="sm"
@@ -1821,10 +1885,18 @@ const ComposeBox = memo(function ComposeBox({
             </Button>
           )}
         </div>
-        {editor && <ComposeToolbar editor={editor} onOpenLink={openLink} />}
-        <Button type="button" variant="ghost" size="sm" className="text-muted-foreground" onClick={handleDiscard}>
-          Discard
-        </Button>
+        {/* Toolbar + Discard share one wrap unit so Discard never strands on
+            a line of its own: wide panes show a single row (unit grows, so
+            ml-auto pins Discard to the right edge); narrow panes wrap the
+            whole unit to a second full-width row with the same alignment.
+            flex-auto (content basis) is what makes the unit wrap at all —
+            a flex-1 zero basis would "fit" forever and squeeze instead. */}
+        <div className="flex flex-auto flex-wrap items-center gap-x-3 gap-y-2">
+          {editor && <ComposeToolbar editor={editor} onOpenLink={openLink} />}
+          <Button type="button" variant="ghost" size="sm" className="ml-auto text-muted-foreground" onClick={handleDiscard}>
+            Discard
+          </Button>
+        </div>
       </div>
     </>
   )
@@ -2329,8 +2401,6 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
   const [searching, setSearching] = useState(false)
   const [searchError, setSearchError] = useState<string | null>(null)
   const searchEpoch = useRef(0)
-  // Persistent preference: auto-mark future "Everything else" mail as read.
-  const [autoReadOther, setAutoReadOther] = useState(false)
   // Gmail sync uses the native Google OAuth connection.
   const [emailConnection, setEmailConnection] = useState<GmailConnectionStatus | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -2406,16 +2476,6 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
     }, 400)
     return () => window.clearTimeout(handle)
   }, [query])
-
-  // Load the persisted "auto-read Everything else" preference on mount.
-  useEffect(() => {
-    let cancelled = false
-    void window.ipc
-      .invoke('gmail:getAutoReadEverythingElse', {})
-      .then((res) => { if (!cancelled) setAutoReadOther(res.enabled) })
-      .catch(() => {})
-    return () => { cancelled = true }
-  }, [])
 
   const deleteDraftAction = useCallback(async (thread: GmailThread) => {
     const id = thread.draftId
@@ -2508,38 +2568,6 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
       console.warn('[Gmail] mark-read failed:', err)
     }
   }, [updateThreadInState])
-
-  // Toggle the read state of a whole category — server-side across the entire
-  // category, not just the rows currently loaded. Optimistically flips the UI.
-  const markSectionReadAction = useCallback(async (section: InboxSection, read: boolean) => {
-    setSection(section, (prev) => ({
-      ...prev,
-      threads: prev.threads.map((t) => ({
-        ...t,
-        unread: !read,
-        messages: t.messages.map((m) => ({ ...m, unread: !read })),
-      })),
-    }))
-    try {
-      const result = await window.ipc.invoke('gmail:markSectionRead', { section, read })
-      if (!result.ok && result.error) toast(`Could not update read state: ${result.error}`, 'error')
-    } catch (err) {
-      toast(`Could not update read state: ${err instanceof Error ? err.message : String(err)}`, 'error')
-    }
-  }, [setSection])
-
-  // "Mark as read" toggle for Everything else. Turning it ON persists the
-  // preference AND marks every current "other" thread read; turning it OFF only
-  // clears the preference (future mail), leaving existing threads untouched.
-  const setAutoReadOtherAction = useCallback(async (enabled: boolean) => {
-    setAutoReadOther(enabled)
-    try {
-      await window.ipc.invoke('gmail:setAutoReadEverythingElse', { enabled })
-    } catch (err) {
-      toast(`Could not update preference: ${err instanceof Error ? err.message : String(err)}`, 'error')
-    }
-    if (enabled) await markSectionReadAction('other', true)
-  }, [markSectionReadAction])
 
   const archiveThreadAction = useCallback(async (threadId: string) => {
     // Start the slide-out right away; the row is removed once both the IPC
@@ -3284,19 +3312,9 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
               <section className="gmail-section">
                 <div className="gmail-list-header">
                   <span>Everything else</span>
-                  <div className="flex items-center gap-2.5">
-                    <div className="flex items-center gap-1.5" title="Mark Everything else as read — applies to these and future emails">
-                      <span className="text-xs text-muted-foreground">Mark as read</span>
-                      <Switch
-                        checked={autoReadOther}
-                        onCheckedChange={(checked) => void setAutoReadOtherAction(checked)}
-                        aria-label="Mark Everything else as read now and going forward"
-                      />
-                    </div>
-                    <span>
-                      {other.threads.length}{other.hasReachedEnd ? '' : '+'} thread{other.threads.length === 1 ? '' : 's'}
-                    </span>
-                  </div>
+                  <span>
+                    {other.threads.length}{other.hasReachedEnd ? '' : '+'} thread{other.threads.length === 1 ? '' : 's'}
+                  </span>
                 </div>
                 {visibleOther.map(renderRow)}
                 {!other.hasReachedEnd && (

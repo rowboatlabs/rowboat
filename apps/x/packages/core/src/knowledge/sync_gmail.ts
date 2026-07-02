@@ -4,7 +4,7 @@ import { google, gmail_v1 as gmail } from 'googleapis';
 import { NodeHtmlMarkdown } from 'node-html-markdown'
 import { OAuth2Client } from 'google-auth-library';
 import { WorkDir } from '../config/config.js';
-import { getMaxEmails, getAutoReadEverythingElse } from '../config/gmail_sync_config.js';
+import { getMaxEmails } from '../config/gmail_sync_config.js';
 import { GoogleClientFactory } from './google-client-factory.js';
 import { serviceLogger, type ServiceRunContext } from '../services/service_logger.js';
 import { limitEventItems } from './limit_event_items.js';
@@ -191,81 +191,6 @@ export async function markThreadRead(threadId: string, read: boolean = true): Pr
     }
 }
 
-export interface MarkSectionReadResult {
-    ok: boolean;
-    count: number;
-    error?: string;
-}
-
-/**
- * Toggle the read state of every thread in a category ('important' or 'other')
- * on the server. The category is our local AI classification, so the set is read
- * from the inbox cache; the change is applied on Gmail via a chunked
- * messages.batchModify (UNREAD removed when read=true, added when read=false),
- * then mirrored into the local cache. Only threads that actually need the change
- * are touched.
- */
-export async function markSectionRead(
-    section: 'important' | 'other',
-    read: boolean = true,
-): Promise<MarkSectionReadResult> {
-    try {
-        const gmailClient = await getGmailClientOrThrow();
-
-        // Gather threads in this category that still need the change.
-        const targets: { file: string; entry: SnapshotCacheEntry; messageIds: string[] }[] = [];
-        if (fs.existsSync(CACHE_DIR)) {
-            let names: string[] = [];
-            try { names = fs.readdirSync(CACHE_DIR); } catch { names = []; }
-            for (const name of names) {
-                if (!name.endsWith('.json')) continue;
-                const file = path.join(CACHE_DIR, name);
-                let entry: SnapshotCacheEntry;
-                try { entry = JSON.parse(fs.readFileSync(file, 'utf-8')) as SnapshotCacheEntry; } catch { continue; }
-                const snap = entry?.snapshot;
-                if (!snap) continue;
-                const isUnread = snap.unread === true;
-                // Marking read: skip already-read. Marking unread: skip already-unread.
-                if (read ? !isUnread : isUnread) continue;
-                // Mirror snapshotImportance: missing importance counts as 'important'.
-                const importance = snap.importance === 'other' ? 'other' : 'important';
-                if (importance !== section) continue;
-                const messageIds = snap.messages.map((m) => m.id).filter((id): id is string => Boolean(id));
-                targets.push({ file, entry, messageIds });
-            }
-        }
-
-        if (targets.length === 0) return { ok: true, count: 0 };
-
-        // Apply on Gmail (batchModify caps at 1000 message ids per call).
-        const allMessageIds = targets.flatMap((t) => t.messageIds);
-        const labelChange = read ? { removeLabelIds: ['UNREAD'] } : { addLabelIds: ['UNREAD'] };
-        for (let i = 0; i < allMessageIds.length; i += 1000) {
-            const ids = allMessageIds.slice(i, i + 1000);
-            if (ids.length === 0) continue;
-            await gmailClient.users.messages.batchModify({
-                userId: 'me',
-                requestBody: { ids, ...labelChange },
-            });
-        }
-
-        // Mirror into the local cache so the UI updates without a full resync.
-        for (const t of targets) {
-            for (const m of t.entry.snapshot.messages) m.unread = !read;
-            t.entry.snapshot.unread = !read;
-            try {
-                fs.writeFileSync(t.file, JSON.stringify(t.entry), 'utf-8');
-            } catch (err) {
-                console.warn(`[Gmail cache] markSectionRead write failed:`, err);
-            }
-        }
-
-        return { ok: true, count: targets.length };
-    } catch (err) {
-        return { ok: false, count: 0, error: err instanceof Error ? err.message : String(err) };
-    }
-}
-
 interface SyncedThread {
     threadId: string;
     markdown: string;
@@ -308,6 +233,14 @@ export interface GmailThreadSnapshot {
         }>;
         messageIdHeader?: string;
         isDraft?: boolean;
+        /**
+         * The draft's own stored In-Reply-To / References headers. Only set
+         * on draft messages (see buildDraftSnapshot) — the composer reuses
+         * them on send since the Drafts pseudo-thread has no other messages
+         * to rebuild the reply chain from.
+         */
+        inReplyToHeader?: string;
+        referencesHeader?: string;
     }>;
 }
 
@@ -929,23 +862,6 @@ async function buildAndCacheSnapshot(
         console.warn(`[Gmail] classify failed for ${threadId}:`, err);
     }
 
-    // Auto-mark newly-classified "Everything else" mail as read when the user
-    // has opted in. Governs future mail only — existing threads are handled at
-    // toggle time via markSectionRead.
-    if (snapshot.importance === 'other' && snapshot.unread && getAutoReadEverythingElse()) {
-        try {
-            await gmailClient.users.threads.modify({
-                userId: 'me',
-                id: threadId,
-                requestBody: { removeLabelIds: ['UNREAD'] },
-            });
-            for (const m of snapshot.messages) m.unread = false;
-            snapshot.unread = false;
-        } catch (err) {
-            console.warn(`[Gmail] auto-read (Everything else) failed for ${threadId}:`, err);
-        }
-    }
-
     if (threadData.historyId) {
         writeCachedSnapshot(threadId, threadData.historyId, snapshot);
     }
@@ -1562,6 +1478,14 @@ async function partialSync(auth: OAuth2Client, startHistoryId: string, syncDir: 
                 for (const item of record.messagesAdded) {
                     const labels = item.message?.labelIds ?? [];
                     if (labels.includes('SPAM') || labels.includes('TRASH')) continue;
+                    // Drafts are not incoming mail: every composer autosave
+                    // (ours or another Gmail client's) adds a DRAFT message.
+                    // Processing it would leak unsent draft bodies into
+                    // gmail_sync/ markdown + knowledge events, fire "New
+                    // email" notifications, and re-run the LLM classifier per
+                    // autosave. The Drafts view reads live via gmail:getDrafts
+                    // instead.
+                    if (labels.includes('DRAFT')) continue;
                     if (item.message?.threadId) {
                         threadIds.add(item.message.threadId);
                     }
@@ -2023,16 +1947,37 @@ export async function saveThreadDraft(opts: SaveDraftOptions): Promise<SaveDraft
                     id: draftId,
                     requestBody: { message },
                 });
-            } catch {
-                // The draft was likely deleted or already sent; start a new one.
+            } catch (err) {
+                const code = (err as { code?: number })?.code
+                    ?? (err as { response?: { status?: number } })?.response?.status;
+                // Recreate only when the draft is actually gone (deleted or
+                // already sent). A transient failure (timeout, 5xx) must NOT
+                // fall back to create — the original draft still exists, so
+                // that would silently pile up duplicates in Gmail.
+                if (code !== 404 && code !== 410) throw err;
                 res = await gmailClient.users.drafts.create({ userId: 'me', requestBody: { message } });
             }
         } else {
             res = await gmailClient.users.drafts.create({ userId: 'me', requestBody: { message } });
         }
 
-        // Wake the sync loop so the local cache reflects the draft.
-        triggerSync();
+        // Mirror the draft body onto the thread's cached snapshot so reopening
+        // the reply composer shows the autosaved text. Surgical, like
+        // markThreadRead — draft messages are filtered out of the history sync
+        // (see partialSync), so no sync pass will refresh this, and waking the
+        // whole sync loop per autosave (md/event writes + LLM reclassification)
+        // is exactly what we're avoiding.
+        if (opts.threadId) {
+            const cached = readCachedSnapshot(opts.threadId);
+            if (cached) {
+                cached.snapshot.gmail_draft = opts.bodyText?.trim() || undefined;
+                try {
+                    fs.writeFileSync(cachePath(opts.threadId), JSON.stringify(cached), 'utf-8');
+                } catch (err) {
+                    console.warn(`[Gmail cache] draft write failed for ${opts.threadId}:`, err);
+                }
+            }
+        }
 
         return { draftId: res.data.id || undefined };
     } catch (err) {
@@ -2091,6 +2036,12 @@ async function buildDraftSnapshot(
     const threadId = msg.threadId || draftId;
     const messageIdHeader =
         headerValue(headers, 'Message-ID') || headerValue(headers, 'Message-Id') || undefined;
+    // The reply chain the draft already carries. The composer must reuse these
+    // on send — this pseudo-thread has no other messages to rebuild them from,
+    // and deriving them from the draft itself would self-reference a
+    // Message-ID that never gets delivered (breaking recipients' threading).
+    const inReplyToHeader = headerValue(headers, 'In-Reply-To') || undefined;
+    const referencesHeader = headerValue(headers, 'References') || undefined;
 
     return {
         threadId,
@@ -2114,6 +2065,8 @@ async function buildDraftSnapshot(
             bodyHtml: parts.html || undefined,
             messageIdHeader,
             isDraft: true,
+            inReplyToHeader,
+            referencesHeader,
         }],
     };
 }

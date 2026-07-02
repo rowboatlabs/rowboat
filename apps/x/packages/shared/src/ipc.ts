@@ -288,10 +288,6 @@ const ipcSchemas = {
     req: z.object({ threadId: z.string().min(1), read: z.boolean().optional() }),
     res: z.object({ ok: z.boolean(), error: z.string().optional() }),
   },
-  'gmail:markSectionRead': {
-    req: z.object({ section: z.enum(['important', 'other']), read: z.boolean() }),
-    res: z.object({ ok: z.boolean(), count: z.number().int().nonnegative(), error: z.string().optional() }),
-  },
   'gmail:downloadAttachment': {
     req: z.object({
       messageId: z.string().min(1),
@@ -299,14 +295,6 @@ const ipcSchemas = {
       attachmentId: z.string().optional(),
     }),
     res: z.object({ ok: z.boolean(), error: z.string().optional() }),
-  },
-  'gmail:getAutoReadEverythingElse': {
-    req: z.object({}),
-    res: z.object({ enabled: z.boolean() }),
-  },
-  'gmail:setAutoReadEverythingElse': {
-    req: z.object({ enabled: z.boolean() }),
-    res: z.object({}),
   },
   'gmail:saveMessageHeight': {
     req: z.object({

@@ -130,6 +130,12 @@ export const GmailThreadMessageSchema = z.object({
   messageIdHeader: z.string().optional(),
   // Set on the unsent draft message within a thread (used by the Drafts view).
   isDraft: z.boolean().optional(),
+  // The draft's own stored In-Reply-To / References headers. Only set on
+  // draft messages: a Drafts-view pseudo-thread contains just the draft, so
+  // the composer can't rebuild the reply chain from thread messages and must
+  // reuse what the draft already carries.
+  inReplyToHeader: z.string().optional(),
+  referencesHeader: z.string().optional(),
 });
 
 export type GmailThreadMessage = z.infer<typeof GmailThreadMessageSchema>;
