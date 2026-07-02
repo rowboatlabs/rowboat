@@ -1,5 +1,9 @@
 import { z } from "zod";
-import { ModelDescriptor, type TurnStatus } from "./turns.js";
+import {
+    ModelDescriptor,
+    type TurnStatus,
+    type TurnStreamEvent,
+} from "./turns.js";
 
 // Durable session contract for the session layer (see
 // packages/core/docs/session-design.md). A session is an append-only chain
@@ -166,6 +170,22 @@ export interface SessionIndexEntry {
     // scan.
     error?: string;
 }
+
+// What the renderer's single feed consumer receives over IPC: live turn
+// stream events (durable events + ephemeral deltas) and index updates.
+// entry: null signals deletion.
+export type SessionBusEvent =
+    | {
+          kind: "turn-event";
+          sessionId: string;
+          turnId: string;
+          event: TurnStreamEvent;
+      }
+    | {
+          kind: "index-changed";
+          sessionId: string;
+          entry: SessionIndexEntry | null;
+      };
 
 export function sessionIndexEntry(
     state: SessionState,
