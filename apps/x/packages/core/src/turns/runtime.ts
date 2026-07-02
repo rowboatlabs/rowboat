@@ -41,6 +41,7 @@ import {
 import type { ITurnLifecycleBus } from "./bus.js";
 import type { IClock } from "./clock.js";
 import { composeModelRequest } from "./compose-model-request.js";
+import type { IUsageReporter } from "./usage-reporter.js";
 import type { IContextResolver } from "./context-resolver.js";
 import type {
     IModelRegistry,
@@ -68,6 +69,7 @@ export interface TurnRuntimeDependencies {
     permissionChecker: IPermissionChecker;
     permissionClassifier: IPermissionClassifier;
     lifecycleBus: ITurnLifecycleBus;
+    usageReporter: IUsageReporter;
 }
 
 // Immutable dependency container: holds no mutable per-turn state. All active
@@ -83,6 +85,7 @@ export class TurnRuntime implements ITurnRuntime {
     private readonly permissionChecker: IPermissionChecker;
     private readonly permissionClassifier: IPermissionClassifier;
     private readonly lifecycleBus: ITurnLifecycleBus;
+    private readonly usageReporter: IUsageReporter;
 
     constructor({
         turnRepo,
@@ -95,6 +98,7 @@ export class TurnRuntime implements ITurnRuntime {
         permissionChecker,
         permissionClassifier,
         lifecycleBus,
+        usageReporter,
     }: TurnRuntimeDependencies) {
         this.turnRepo = turnRepo;
         this.idGenerator = idGenerator;
@@ -106,6 +110,7 @@ export class TurnRuntime implements ITurnRuntime {
         this.permissionChecker = permissionChecker;
         this.permissionClassifier = permissionClassifier;
         this.lifecycleBus = lifecycleBus;
+        this.usageReporter = usageReporter;
     }
 
     async createTurn(input: CreateTurnInput): Promise<string> {
@@ -257,6 +262,7 @@ export class TurnRuntime implements ITurnRuntime {
             resolvedContext,
             resolvedAgent,
             model,
+            usageReporter: this.usageReporter,
             toolsByName,
             signal: controller.signal,
             turnRepo: this.turnRepo,
@@ -285,6 +291,7 @@ class TurnAdvance {
     private readonly resolvedContext: Array<z.infer<typeof ConversationMessage>>;
     private readonly resolvedAgent: z.infer<typeof ResolvedAgent>;
     private readonly model: ResolvedModel;
+    private readonly usageReporter: IUsageReporter;
     private readonly toolsByName: Map<string, RuntimeTool>;
     private readonly signal: AbortSignal;
     private readonly turnRepo: ITurnRepo;
@@ -306,6 +313,7 @@ class TurnAdvance {
         resolvedContext: Array<z.infer<typeof ConversationMessage>>;
         resolvedAgent: z.infer<typeof ResolvedAgent>;
         model: ResolvedModel;
+        usageReporter: IUsageReporter;
         toolsByName: Map<string, RuntimeTool>;
         signal: AbortSignal;
         turnRepo: ITurnRepo;
@@ -320,6 +328,7 @@ class TurnAdvance {
         this.resolvedContext = init.resolvedContext;
         this.resolvedAgent = init.resolvedAgent;
         this.model = init.model;
+        this.usageReporter = init.usageReporter;
         this.toolsByName = init.toolsByName;
         this.signal = init.signal;
         this.turnRepo = init.turnRepo;
@@ -1015,6 +1024,17 @@ class TurnAdvance {
                 ? {}
                 : { providerMetadata: completion.providerMetadata }),
         });
+        // Analytics after the durable barrier; a reporter failure must never
+        // affect the turn.
+        try {
+            this.usageReporter.reportModelUsage({
+                agentId: this.resolvedAgent.agentId,
+                model: this.resolvedAgent.model,
+                usage: completion.usage,
+            });
+        } catch {
+            // best effort
+        }
         return undefined;
     }
 

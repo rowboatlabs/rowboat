@@ -980,6 +980,28 @@ function App() {
   const ttsRef = useRef(tts)
   ttsRef.current = tts
 
+  // Speak newly completed <voice> blocks from the new runtime's live stream
+  // (parity with the legacy text-delta voice extraction below). The store
+  // accumulates completed blocks in chatState.voiceSegments; we speak only
+  // segments that appeared after the current session became active.
+  const spokenVoiceRef = useRef<{ key: string | null; count: number }>({ key: null, count: 0 })
+  const voiceSegments = sessionChat.chatState?.voiceSegments
+  useEffect(() => {
+    if (!voiceSegments) return
+    if (spokenVoiceRef.current.key !== runId) {
+      // Session switch: skip anything already streamed before we arrived.
+      spokenVoiceRef.current = { key: runId, count: voiceSegments.length }
+      return
+    }
+    while (spokenVoiceRef.current.count < voiceSegments.length) {
+      const segment = voiceSegments[spokenVoiceRef.current.count]
+      spokenVoiceRef.current.count += 1
+      if (ttsEnabledRef.current) {
+        ttsRef.current.speak(segment)
+      }
+    }
+  }, [voiceSegments, runId])
+
   const voice = useVoiceMode()
   const voiceRef = useRef(voice)
   voiceRef.current = voice

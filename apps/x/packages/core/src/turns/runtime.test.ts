@@ -308,6 +308,7 @@ function makeRuntime(opts: {
     const checker = opts.checker ?? new FakePermissionChecker();
     const classifier = opts.classifier ?? new FakePermissionClassifier();
     const bus = new FakeBus();
+    const usage = new FakeUsageReporter();
     const runtime = new TurnRuntime({
         turnRepo: repo,
         idGenerator: new FakeIdGen(opts.idStart ?? 0),
@@ -319,8 +320,9 @@ function makeRuntime(opts: {
         permissionChecker: checker,
         permissionClassifier: classifier,
         lifecycleBus: bus,
+        usageReporter: usage,
     });
-    return { runtime, repo, models, checker, classifier, bus };
+    return { runtime, repo, models, checker, classifier, bus, usage };
 }
 
 async function newTurn(
@@ -371,6 +373,21 @@ async function advanceAndSettle(
     return settle(runtime.advanceTurn(turnId, input, options));
 }
 
+class FakeUsageReporter {
+    reports: Array<{
+        agentId: string;
+        model: { provider: string; model: string };
+        usage: Record<string, number | undefined>;
+    }> = [];
+    reportModelUsage(report: {
+        agentId: string;
+        model: { provider: string; model: string };
+        usage: Record<string, number | undefined>;
+    }): void {
+        this.reports.push(report);
+    }
+}
+
 function typesOf(events: Array<{ type: string }>): string[] {
     return events.map((e) => e.type);
 }
@@ -397,7 +414,7 @@ async function persisted(
 
 describe("plain model response (26.1)", () => {
     it("runs one model step to completion with exact persisted request", async () => {
-        const { runtime, repo, models, bus } = makeRuntime({
+        const { runtime, repo, models, bus, usage } = makeRuntime({
             models: [
                 respond(
                     { type: "text_delta", delta: "do" },
@@ -433,6 +450,14 @@ describe("plain model response (26.1)", () => {
         // snapshot tools, encoded messages.
         expect(models.requests[0].systemPrompt).toBe("SYS");
         expect(sentMessages(models.requests[0])).toEqual([user("hello")]);
+        // One usage report per completed model call, after the durable append.
+        expect(usage.reports).toEqual([
+            {
+                agentId: "copilot",
+                model: defaultAgent.model,
+                usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+            },
+        ]);
         // Deltas are streamed but never persisted.
         expect(events.filter((e) => e.type === "text_delta")).toHaveLength(2);
         expect(typesOf(log)).not.toContain("text_delta");

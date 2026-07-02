@@ -34,20 +34,62 @@ export type LiveOverlay = {
   text: string
   reasoning: string
   toolOutput: Record<string, string>
+  // Contents of completed <voice>…</voice> blocks seen while streaming, in
+  // order, monotonically growing for the lifetime of the overlay (i.e. one
+  // active turn). Consumers speak segments beyond what they've already
+  // spoken; the overlay reset on turn switch starts a fresh list.
+  voiceSegments: string[]
+  // Scan cursor into `text` — everything before it has been checked for
+  // complete voice blocks.
+  voiceScanIndex: number
 }
 
-export const emptyOverlay = (): LiveOverlay => ({ text: '', reasoning: '', toolOutput: {} })
+export const emptyOverlay = (): LiveOverlay => ({
+  text: '',
+  reasoning: '',
+  toolOutput: {},
+  voiceSegments: [],
+  voiceScanIndex: 0,
+})
+
+// The model emits <voice>…</voice> around speakable text when voice output
+// is enabled; tags are never shown to the user.
+export function stripVoiceTags(text: string): string {
+  return text.replace(/<\/?voice>/g, '')
+}
+
+const VOICE_BLOCK = /<voice>([\s\S]*?)<\/voice>/g
 
 // Accumulates deltas; canonical durable events supersede the buffers (the
 // committed transcript now contains what was streaming).
 export function applyOverlay(overlay: LiveOverlay, event: TurnStreamEvent): LiveOverlay {
   switch (event.type) {
-    case 'text_delta':
-      return { ...overlay, text: overlay.text + event.delta }
+    case 'text_delta': {
+      const text = overlay.text + event.delta
+      // Extract complete voice blocks past the scan cursor. Incomplete
+      // blocks (opening tag seen, closing not yet) stay unconsumed until a
+      // later delta completes them.
+      const segments: string[] = []
+      let scanIndex = overlay.voiceScanIndex
+      VOICE_BLOCK.lastIndex = scanIndex
+      for (let m = VOICE_BLOCK.exec(text); m; m = VOICE_BLOCK.exec(text)) {
+        const content = m[1].trim()
+        if (content) segments.push(content)
+        scanIndex = m.index + m[0].length
+      }
+      return {
+        ...overlay,
+        text,
+        ...(segments.length > 0
+          ? { voiceSegments: [...overlay.voiceSegments, ...segments] }
+          : {}),
+        voiceScanIndex: scanIndex,
+      }
+    }
     case 'reasoning_delta':
       return { ...overlay, reasoning: overlay.reasoning + event.delta }
     case 'model_call_completed':
-      return { ...overlay, text: '', reasoning: '' }
+      return { ...overlay, text: '', reasoning: '', voiceScanIndex: 0 }
     case 'tool_progress': {
       const progress = event.progress
       if (
@@ -140,13 +182,16 @@ export function buildTurnConversation(state: TurnState): ConversationItem[] {
   for (const call of state.modelCalls) {
     if (call.response === undefined) continue
     const content = call.response.content
-    const text =
+    // Voice tags are model-facing markup, never shown (parity with the
+    // legacy path's display-time strip).
+    const text = stripVoiceTags(
       typeof content === 'string'
         ? content
         : content
             .map((part) => (part.type === 'text' ? part.text : ''))
             .filter(Boolean)
-            .join('\n')
+            .join('\n'),
+    )
     if (text) {
       items.push({
         id: `${turnId}:a${call.index}`,
@@ -192,6 +237,8 @@ type PermMeta = z.infer<typeof ToolPermissionMetadata>
 export type SessionChatState = {
   conversation: ConversationItem[]
   currentAssistantMessage: string
+  // See LiveOverlay.voiceSegments.
+  voiceSegments: string[]
   pendingAskHumanRequests: Map<string, z.infer<typeof AskHumanRequestEvent>>
   allPermissionRequests: Map<string, z.infer<typeof ToolPermissionRequestEvent>>
   permissionResponses: Map<string, PermissionResponse>
@@ -289,7 +336,8 @@ export function buildSessionChatState(
   const settled = status === 'completed' || status === 'failed' || status === 'cancelled'
   return {
     conversation,
-    currentAssistantMessage: overlay.text,
+    currentAssistantMessage: stripVoiceTags(overlay.text),
+    voiceSegments: overlay.voiceSegments,
     pendingAskHumanRequests,
     allPermissionRequests,
     permissionResponses,

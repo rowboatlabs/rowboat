@@ -13,3 +13,4 @@ export * from "./repo.js";
 export * from "./runtime.js";
 export * from "./stream.js";
 export * from "./tool-registry.js";
+export * from "./usage-reporter.js";

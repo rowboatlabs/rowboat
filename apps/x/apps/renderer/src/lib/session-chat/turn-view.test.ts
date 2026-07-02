@@ -82,6 +82,49 @@ describe('applyOverlay', () => {
   })
 })
 
+describe('voice output', () => {
+  const delta = (d: string): Parameters<typeof applyOverlay>[1] =>
+    ({ type: 'text_delta', turnId: T1, modelCallIndex: 0, delta: d })
+
+  it('extracts completed <voice> blocks across split deltas', () => {
+    let overlay = emptyOverlay()
+    overlay = applyOverlay(overlay, delta('Sure! <voi'))
+    expect(overlay.voiceSegments).toEqual([])
+    overlay = applyOverlay(overlay, delta('ce>hello there</voice> and <voice>bye'))
+    expect(overlay.voiceSegments).toEqual(['hello there'])
+    overlay = applyOverlay(overlay, delta('</voice> done'))
+    expect(overlay.voiceSegments).toEqual(['hello there', 'bye'])
+  })
+
+  it('keeps segments but resets the scan on model_call_completed', () => {
+    let overlay = emptyOverlay()
+    overlay = applyOverlay(overlay, delta('<voice>one</voice>'))
+    overlay = applyOverlay(overlay, completed(T1, 0, assistantText('<voice>one</voice>')))
+    expect(overlay.voiceSegments).toEqual(['one'])
+    expect(overlay.text).toBe('')
+    overlay = applyOverlay(overlay, delta('<voice>two</voice>'))
+    expect(overlay.voiceSegments).toEqual(['one', 'two'])
+  })
+
+  it('strips voice tags from the streaming message and exposes segments on state', () => {
+    const turn = reduceTurn([created(T1, S1), requested(T1, 0)])
+    let overlay = emptyOverlay()
+    overlay = applyOverlay(overlay, delta('Plan: <voice>speak this</voice> rest'))
+    const state = buildSessionChatState([turn], overlay)
+    expect(state.currentAssistantMessage).toBe('Plan: speak this rest')
+    expect(state.voiceSegments).toEqual(['speak this'])
+  })
+
+  it('strips voice tags from persisted assistant messages', () => {
+    const state = reduceTurn(
+      completedTurnLog(T1, S1, 'q', 'Sure. <voice>Here you go.</voice> Done.'),
+    )
+    const items = buildTurnConversation(state)
+    const assistant = items.find((i) => isChatMessage(i) && i.role === 'assistant')
+    expect(isChatMessage(assistant!) && assistant.content).toBe('Sure. Here you go. Done.')
+  })
+})
+
 describe('buildTurnConversation', () => {
   it('maps user input, assistant text, and settled tool calls', () => {
     const call = assistantCalls(toolCallPart('tc1', 'echo', { x: 1 }))

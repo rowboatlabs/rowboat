@@ -31,6 +31,8 @@ import { FSTurnRepo } from "../turns/fs-repo.js";
 import type { ITurnRepo } from "../turns/repo.js";
 import { TurnRepoContextResolver, type IContextResolver } from "../turns/context-resolver.js";
 import { EmitterTurnLifecycleBus, type ITurnLifecycleBus } from "../turns/bus.js";
+import { RealUsageReporter } from "../turns/bridges/real-usage-reporter.js";
+import type { IUsageReporter } from "../turns/usage-reporter.js";
 import { TurnRuntime } from "../turns/runtime.js";
 import type { ITurnRuntime } from "../turns/api.js";
 import type { IAgentResolver } from "../turns/agent-resolver.js";
@@ -103,6 +105,7 @@ container.register({
     turnRepo: asClass<ITurnRepo>(FSTurnRepo).singleton(),
     contextResolver: asClass<IContextResolver>(TurnRepoContextResolver).singleton(),
     lifecycleBus: asClass<ITurnLifecycleBus>(EmitterTurnLifecycleBus).singleton(),
+    usageReporter: asClass<IUsageReporter>(RealUsageReporter).singleton(),
     agentResolver: asFunction<IAgentResolver>(() => new RealAgentResolver()).singleton(),
     modelRegistry: asFunction<IModelRegistry>(() => new RealModelRegistry()).singleton(),
     toolRegistry: asFunction<IToolRegistry>(() => new RealToolRegistry()).singleton(),
