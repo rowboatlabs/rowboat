@@ -5,10 +5,15 @@
     "main": "./dist/index.js",
     "types": "./dist/index.d.ts",
     "scripts": {
-      "build": "rm -rf dist && tsc",
-      "dev": "tsc -w"
+      "build": "rm -rf dist && tsc -p tsconfig.build.json",
+      "dev": "tsc -w",
+      "test": "vitest run",
+      "test:watch": "vitest"
     },
     "dependencies": {
       "zod": "^4.2.1"
+    },
+    "devDependencies": {
+      "vitest": "catalog:"
     }
 }
