@@ -115,6 +115,7 @@ export class SessionChatStore {
       this.emit()
     } catch (error) {
       if (generation !== this.generation) return
+      console.error('[session-chat] failed to load session', sessionId, error)
       this.loading = false
       this.error = error instanceof Error ? error.message : String(error)
       this.emit()
@@ -164,8 +165,9 @@ export class SessionChatStore {
       }
       this.latestEvents = turn.events
       this.emit()
-    } catch {
+    } catch (error) {
       // The next snapshot-worthy event will retry.
+      console.error('[session-chat] failed to reload turn', turnId, error)
     }
   }
 

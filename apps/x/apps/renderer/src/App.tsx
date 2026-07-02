@@ -2728,6 +2728,13 @@ function App() {
     handlePromptSubmitRef.current?.({ text: `${name} connected successfully.`, files: [] })
   }, [])
 
+  // A failed session load must be visible, not a blank chat.
+  const sessionLoadErrorItems = React.useMemo<ConversationItem[]>(() => (
+    sessionChat.error
+      ? [{ id: 'session-load-error', kind: 'error', message: `Failed to load chat: ${sessionChat.error}`, timestamp: 0 }]
+      : []
+  ), [sessionChat.error])
+
   // Active tab renders from the sessions hook; background tabs keep the
   // legacy cached view state until stage 7 retires it.
   const chatTabStatesForRender = React.useMemo(() => {
@@ -6303,7 +6310,7 @@ function App() {
                 }}
                 onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
                 onOpenFullScreen={toggleRightPaneMaximize}
-                conversation={sessionChat.chatState?.conversation ?? conversation}
+                conversation={sessionChat.chatState?.conversation ?? (sessionLoadErrorItems.length > 0 ? sessionLoadErrorItems : conversation)}
                 currentAssistantMessage={sessionChat.chatState?.currentAssistantMessage ?? currentAssistantMessage}
                 chatTabStates={chatTabStatesForRender}
                 viewportAnchors={chatViewportAnchorByTab}
@@ -6338,10 +6345,11 @@ function App() {
                     ? { title: activeCodeSession.session.title }
                     : null
                 }
-                pendingAskHumanRequests={pendingAskHumanRequests}
-                allPermissionRequests={allPermissionRequests}
-                permissionResponses={permissionResponses}
-                autoPermissionDecisions={autoPermissionDecisions}
+                pendingAskHumanRequests={sessionChat.chatState?.pendingAskHumanRequests ?? pendingAskHumanRequests}
+                allPermissionRequests={sessionChat.chatState?.allPermissionRequests ?? allPermissionRequests}
+                permissionResponses={sessionChat.chatState?.permissionResponses ?? permissionResponses}
+                autoPermissionDecisions={sessionChat.chatState?.autoPermissionDecisions ?? autoPermissionDecisions}
+                isThinking={sessionChat.chatState?.isThinking}
                 onPermissionResponse={handlePermissionResponse}
                 onAskHumanResponse={handleAskHumanResponse}
                 isToolOpenForTab={isToolOpenForTab}

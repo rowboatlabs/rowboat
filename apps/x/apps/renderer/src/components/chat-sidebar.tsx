@@ -142,6 +142,10 @@ interface ChatSidebarProps {
   chatTabStates?: Record<string, ChatTabViewState>
   viewportAnchors?: Record<string, ChatViewportAnchorState>
   isProcessing: boolean
+  // Actively working (sessions runtime). When provided, drives the shimmer
+  // instead of isProcessing so waiting on a permission/ask-human doesn't
+  // render a "Thinking…" under the card.
+  isThinking?: boolean
   isStopping?: boolean
   onStop?: () => void
   onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => void
@@ -211,6 +215,7 @@ export function ChatSidebar({
   chatTabStates = {},
   viewportAnchors = {},
   isProcessing,
+  isThinking,
   isStopping,
   onStop,
   onSubmit,
@@ -754,7 +759,7 @@ export function ChatSidebar({
                                 </Message>
                               )}
 
-                              {isActive && isProcessing && !tabState.currentAssistantMessage && (
+                              {isActive && (isThinking ?? isProcessing) && !tabState.currentAssistantMessage && (
                                 <Message from="assistant">
                                   <MessageContent>
                                     <Shimmer duration={1}>Thinking...</Shimmer>
