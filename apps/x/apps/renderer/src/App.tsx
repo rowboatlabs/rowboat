@@ -6470,6 +6470,7 @@ function App() {
                 ttsAvailable={ttsAvailable}
                 ttsState={tts.state}
                 speak={tts.speak}
+                speakUrl={tts.speakUrl}
                 cancelSpeech={tts.cancel}
                 getLevel={tts.getLevel}
               />

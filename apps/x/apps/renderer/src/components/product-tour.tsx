@@ -7,6 +7,17 @@ import { AgentsFleet, MascotVignette, type TourVignetteKind } from '@/components
 import { TourSounds } from '@/lib/tour-sounds'
 import type { TTSState } from '@/hooks/useVoiceTTS'
 import { cn } from '@/lib/utils'
+import tourClipWelcome from '@/assets/tour/welcome.mp3'
+import tourClipHome from '@/assets/tour/home.mp3'
+import tourClipEmail from '@/assets/tour/email.mp3'
+import tourClipMeetings from '@/assets/tour/meetings.mp3'
+import tourClipCode from '@/assets/tour/code.mp3'
+import tourClipKnowledge from '@/assets/tour/knowledge.mp3'
+import tourClipAgents from '@/assets/tour/agents.mp3'
+import tourClipWorkspaces from '@/assets/tour/workspaces.mp3'
+import tourClipChats from '@/assets/tour/chats.mp3'
+import tourClipComposer from '@/assets/tour/composer.mp3'
+import tourClipDone from '@/assets/tour/done.mp3'
 
 export type TourNavTarget =
   | 'home'
@@ -116,6 +127,23 @@ const TOUR_STEPS: TourStep[] = [
   },
 ]
 
+// Pre-recorded narration bundled with the app (no TTS API call, works
+// offline/signed-out). Regenerate with scripts/generate-tour-audio.mjs after
+// editing any step's text. Steps without a clip fall back to live TTS.
+const TOUR_CLIPS: Record<string, string> = {
+  welcome: tourClipWelcome,
+  home: tourClipHome,
+  email: tourClipEmail,
+  meetings: tourClipMeetings,
+  code: tourClipCode,
+  knowledge: tourClipKnowledge,
+  agents: tourClipAgents,
+  workspaces: tourClipWorkspaces,
+  chats: tourClipChats,
+  composer: tourClipComposer,
+  done: tourClipDone,
+}
+
 const MASCOT_SIZE = 120
 const VIEWPORT_MARGIN = 16
 const BUBBLE_WIDTH = 288
@@ -214,6 +242,7 @@ type ProductTourProps = {
   ttsAvailable: boolean
   ttsState: TTSState
   speak: (text: string) => void
+  speakUrl: (url: string) => void
   cancelSpeech: () => void
   getLevel: () => number
 }
@@ -234,6 +263,7 @@ export function ProductTour({
   ttsAvailable,
   ttsState,
   speak,
+  speakUrl,
   cancelSpeech,
   getLevel,
 }: ProductTourProps) {
@@ -279,6 +309,7 @@ export function ProductTour({
   const onCloseRef = useRef(onClose)
   const onNavigateRef = useRef(onNavigate)
   const speakRef = useRef(speak)
+  const speakUrlRef = useRef(speakUrl)
   const cancelSpeechRef = useRef(cancelSpeech)
   const ttsAvailableRef = useRef(ttsAvailable)
 
@@ -289,6 +320,7 @@ export function ProductTour({
     onCloseRef.current = onClose
     onNavigateRef.current = onNavigate
     speakRef.current = speak
+    speakUrlRef.current = speakUrl
     cancelSpeechRef.current = cancelSpeech
     ttsAvailableRef.current = ttsAvailable
   })
@@ -482,7 +514,10 @@ export function ProductTour({
         setArrived(true)
         soundsRef.current?.bump()
         cancelSpeechRef.current()
-        if (ttsAvailableRef.current) {
+        const clip = TOUR_CLIPS[step.id]
+        if (clip) {
+          speakUrlRef.current(clip)
+        } else if (ttsAvailableRef.current) {
           speakRef.current(step.text)
         }
         if (stepIndex === TOUR_STEPS.length - 1) {

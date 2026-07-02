@@ -44,10 +44,13 @@ function playAudio(
     });
 }
 
+/** A queue entry: text to synthesize, or a ready-to-play audio URL (e.g. a bundled clip). */
+type QueueItem = { text: string } | { url: string };
+
 export function useVoiceTTS() {
     const [state, setState] = useState<TTSState>('idle');
     const audioRef = useRef<HTMLAudioElement | null>(null);
-    const queueRef = useRef<string[]>([]);
+    const queueRef = useRef<QueueItem[]>([]);
     const processingRef = useRef(false);
     // Pre-fetched audio ready to play immediately
     const prefetchedRef = useRef<Promise<SynthesizedAudio> | null>(null);
@@ -128,20 +131,23 @@ export function useVoiceTTS() {
         const gen = generationRef.current;
 
         while (queueRef.current.length > 0) {
-            const text = queueRef.current.shift()!;
-            if (!text.trim()) continue;
+            const item = queueRef.current.shift()!;
+            if ('text' in item && !item.text.trim()) continue;
 
             try {
-                // Use pre-fetched result if available, otherwise synthesize now
+                // Pre-recorded URL plays as-is; text uses the pre-fetched
+                // result if available, otherwise synthesizes now.
                 let audioPromise: Promise<SynthesizedAudio>;
-                if (prefetchedRef.current) {
+                if ('url' in item) {
+                    audioPromise = Promise.resolve({ dataUrl: item.url });
+                } else if (prefetchedRef.current) {
                     console.log('[tts] using pre-fetched audio');
                     audioPromise = prefetchedRef.current;
                     prefetchedRef.current = null;
                 } else {
                     setState('synthesizing');
-                    console.log('[tts] synthesizing:', text.substring(0, 80));
-                    audioPromise = synthesize(text);
+                    console.log('[tts] synthesizing:', item.text.substring(0, 80));
+                    audioPromise = synthesize(item.text);
                 }
 
                 const audio = await audioPromise;
@@ -151,10 +157,10 @@ export function useVoiceTTS() {
                 setState('speaking');
 
                 // Kick off pre-fetch for next chunk while this one plays
-                const nextText = queueRef.current[0];
-                if (nextText?.trim()) {
-                    console.log('[tts] pre-fetching next:', nextText.substring(0, 80));
-                    prefetchedRef.current = synthesize(nextText);
+                const next = queueRef.current[0];
+                if (next && 'text' in next && next.text.trim()) {
+                    console.log('[tts] pre-fetching next:', next.text.substring(0, 80));
+                    prefetchedRef.current = synthesize(next.text);
                 }
 
                 await playAudio(audio.dataUrl, audioRef, connectAnalyser);
@@ -174,7 +180,15 @@ export function useVoiceTTS() {
 
     const speak = useCallback((text: string) => {
         console.log('[tts] speak() called:', text.substring(0, 80));
-        queueRef.current.push(text);
+        queueRef.current.push({ text });
+        processQueue();
+    }, [processQueue]);
+
+    // Play a pre-recorded clip (e.g. bundled tour narration) through the same
+    // queue, so lip-sync levels, state, and cancel() all work unchanged.
+    const speakUrl = useCallback((url: string) => {
+        console.log('[tts] speakUrl() called:', url.substring(0, 120));
+        queueRef.current.push({ url });
         processQueue();
     }, [processQueue]);
 
@@ -190,5 +204,5 @@ export function useVoiceTTS() {
         setState('idle');
     }, []);
 
-    return { state, speak, cancel, getLevel };
+    return { state, speak, speakUrl, cancel, getLevel };
 }

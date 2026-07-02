@@ -40,7 +40,7 @@ export async function synthesizeSpeech(text: string): Promise<{ audioBase64: str
     let headers: Record<string, string>;
 
     if (signedIn) {
-        const voiceId = config.elevenlabs?.voiceId || 'UgBBYS2sOqTuMpoF3BR0';
+        const voiceId = config.elevenlabs?.voiceId || 's3TPKV1kjDlVtZbl4Ksh';
         const accessToken = await getAccessToken();
         url = `${API_URL}/v1/voice/text-to-speech/${voiceId}`;
         headers = {
@@ -52,7 +52,7 @@ export async function synthesizeSpeech(text: string): Promise<{ audioBase64: str
         if (!config.elevenlabs) {
             throw new Error(`ElevenLabs not configured. Create ${path.join(WorkDir, 'config', 'elevenlabs.json')} with { "apiKey": "<your-key>" }`);
         }
-        const voiceId = config.elevenlabs.voiceId || 'UgBBYS2sOqTuMpoF3BR0';
+        const voiceId = config.elevenlabs.voiceId || 's3TPKV1kjDlVtZbl4Ksh';
         url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`;
         headers = {
             'xi-api-key': config.elevenlabs.apiKey,
