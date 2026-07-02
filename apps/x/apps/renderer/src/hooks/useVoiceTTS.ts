@@ -27,6 +27,10 @@ function playAudio(
             console.log('[tts] audio ended');
             resolve();
         };
+        // pause() (from cancel) must settle this promise too, or the queue
+        // loop stays parked on it forever. Natural end also fires 'pause'
+        // just before 'ended'; double-resolve is harmless.
+        audio.onpause = () => resolve();
         audio.onerror = (e) => {
             console.error('[tts] audio error:', e);
             reject(new Error('Audio playback failed'));
@@ -47,6 +51,10 @@ export function useVoiceTTS() {
     const processingRef = useRef(false);
     // Pre-fetched audio ready to play immediately
     const prefetchedRef = useRef<Promise<SynthesizedAudio> | null>(null);
+    // Bumped by cancel(). A queue loop that awaited across a cancel sees a
+    // stale generation and exits instead of playing audio that was cancelled
+    // while still synthesizing (which would overlap the next utterance).
+    const generationRef = useRef(0);
     // Web Audio analyser tap for lip-sync (talking head)
     const audioCtxRef = useRef<AudioContext | null>(null);
     const analyserRef = useRef<AnalyserNode | null>(null);
@@ -117,6 +125,7 @@ export function useVoiceTTS() {
     const processQueue = useCallback(async () => {
         if (processingRef.current) return;
         processingRef.current = true;
+        const gen = generationRef.current;
 
         while (queueRef.current.length > 0) {
             const text = queueRef.current.shift()!;
@@ -136,6 +145,9 @@ export function useVoiceTTS() {
                 }
 
                 const audio = await audioPromise;
+                // Cancelled while synthesizing — cancel() already reset all
+                // state (and a new loop may be running), so just bail.
+                if (generationRef.current !== gen) return;
                 setState('speaking');
 
                 // Kick off pre-fetch for next chunk while this one plays
@@ -146,7 +158,9 @@ export function useVoiceTTS() {
                 }
 
                 await playAudio(audio.dataUrl, audioRef, connectAnalyser);
+                if (generationRef.current !== gen) return;
             } catch (err) {
+                if (generationRef.current !== gen) return;
                 console.error('[tts] error:', err);
                 prefetchedRef.current = null;
             }
@@ -165,6 +179,7 @@ export function useVoiceTTS() {
     }, [processQueue]);
 
     const cancel = useCallback(() => {
+        generationRef.current++;
         queueRef.current = [];
         prefetchedRef.current = null;
         if (audioRef.current) {

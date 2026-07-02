@@ -439,6 +439,9 @@ export function ProductTour({
       finish()
       return
     }
+    // Silence the current step's narration right away — not on arrival —
+    // so it can't talk over (or into) the next step's speech.
+    cancelSpeechRef.current()
     setStepIndex(index)
   }, [finish])
 
