@@ -479,11 +479,12 @@ Every AI SDK `streamText` invocation performs exactly one model step. Tool
 execution is controlled manually by the turn loop.
 
 ```ts
-type ModelRequestMessageRef =
-  | { kind: "context" }                          // the inline context block
-  | { kind: "input" }                            // the turn's user message
-  | { kind: "assistant"; modelCallIndex: number } // → model_call_completed
-  | { kind: "toolResult"; toolCallId: string };   // → tool_result
+// Compact string refs, so raw JSONL reads naturally:
+//   "context"                  the inline context block
+//   "input"                    the turn's user message
+//   "assistant:<index>"        → that model_call_completed's message
+//   "toolResult:<toolCallId>"  → that tool_result
+type ModelRequestMessageRef = string;
 
 interface ModelRequest {
   contextRef?: { previousTurnId: string };  // call 0 only (cross-turn prefix)
@@ -503,10 +504,11 @@ agent model call in the turn.
 
 `request` is a list of references into the turn's own events: every
 referenced byte exists exactly once in the file. A request records only what
-is new since the previous model call — call 0 is `[{context}?, {input}]`
+is new since the previous model call — call 0 is `["context"?, "input"]`
 (context only when inline and nonempty; cross-turn prefixes ride
-`contextRef`); call N is `[{assistant: N-1}, …that batch's toolResults in
-source order]`; a re-issued call after an interruption is `[]`. The system
+`contextRef`); call N is `["assistant:N-1", …that batch's
+"toolResult:<id>" refs in source order]`; a re-issued call after an
+interruption is `[]`. The system
 prompt and tool set are not repeated: they are byte-identical to
 `turn_created.agent.resolved` by construction.
 

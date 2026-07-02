@@ -60,8 +60,8 @@ function completedTurnLog(
                 ...(Array.isArray(context) ? {} : { contextRef: context }),
                 messages:
                     Array.isArray(context) && context.length > 0
-                        ? [{ kind: "context" as const }, { kind: "input" as const }]
-                        : [{ kind: "input" as const }],
+                        ? ["context", "input"]
+                        : ["input"],
                 parameters: {},
             },
         },
@@ -138,7 +138,7 @@ function limitFailedTurnLog(turnId: string): TEvent[] {
             ts,
             modelCallIndex: 0,
             request: {
-                messages: [{ kind: "input" as const }],
+                messages: ["input"],
                 parameters: {},
             },
         },

@@ -86,7 +86,7 @@ function turnLog(
         turnId,
         ts: TS,
         modelCallIndex: 0,
-        request: { messages: [{ kind: 'input' as const }], parameters: {} },
+        request: { messages: ['input'], parameters: {} },
     };
     switch (status) {
         case "idle":

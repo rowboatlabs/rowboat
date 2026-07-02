@@ -130,15 +130,39 @@ export const TurnCreated = z.object({
 // identical to turn_created.agent.resolved by construction. The exact
 // provider payload is rebuilt deterministically by the request composer
 // (core), which is the same code path the loop sends through.
-export const ModelRequestMessageRef = z.discriminatedUnion("kind", [
-    z.object({ kind: z.literal("context") }),
-    z.object({ kind: z.literal("input") }),
-    z.object({
-        kind: z.literal("assistant"),
-        modelCallIndex: z.number().int().nonnegative(),
-    }),
-    z.object({ kind: z.literal("toolResult"), toolCallId: z.string() }),
-]);
+// Compact string refs so raw JSONL reads naturally:
+//   "context" | "input" | "assistant:<modelCallIndex>" | "toolResult:<toolCallId>"
+export const ModelRequestMessageRef = z
+    .string()
+    .regex(/^(context|input|assistant:\d+|toolResult:.+)$/);
+
+export type ParsedRequestRef =
+    | { kind: "context" }
+    | { kind: "input" }
+    | { kind: "assistant"; modelCallIndex: number }
+    | { kind: "toolResult"; toolCallId: string };
+
+export const assistantRef = (modelCallIndex: number): string =>
+    `assistant:${modelCallIndex}`;
+export const toolResultRef = (toolCallId: string): string =>
+    `toolResult:${toolCallId}`;
+
+export function parseRequestRef(ref: string): ParsedRequestRef {
+    if (ref === "context" || ref === "input") {
+        return { kind: ref };
+    }
+    if (ref.startsWith("assistant:")) {
+        const modelCallIndex = Number(ref.slice("assistant:".length));
+        if (!Number.isInteger(modelCallIndex) || modelCallIndex < 0) {
+            throw new Error(`malformed request ref: ${ref}`);
+        }
+        return { kind: "assistant", modelCallIndex };
+    }
+    if (ref.startsWith("toolResult:")) {
+        return { kind: "toolResult", toolCallId: ref.slice("toolResult:".length) };
+    }
+    throw new Error(`malformed request ref: ${ref}`);
+}
 
 export const ModelRequest = z.object({
     contextRef: TurnContextRef.optional(),
@@ -505,21 +529,18 @@ function applyModelCallRequested(
     }
 
     const context = state.definition.context;
-    let expectedRefs: Array<z.infer<typeof ModelRequestMessageRef>>;
+    let expectedRefs: string[];
     if (event.modelCallIndex === 0) {
         if (isContextRef(context)) {
             if (event.request.contextRef?.previousTurnId !== context.previousTurnId) {
                 fail("model request contextRef inconsistent with turn context");
             }
-            expectedRefs = [{ kind: "input" }];
+            expectedRefs = ["input"];
         } else {
             if (event.request.contextRef !== undefined) {
                 fail("model request has contextRef but turn context is inline");
             }
-            expectedRefs =
-                context.length > 0
-                    ? [{ kind: "context" }, { kind: "input" }]
-                    : [{ kind: "input" }];
+            expectedRefs = context.length > 0 ? ["context", "input"] : ["input"];
         }
     } else {
         if (event.request.contextRef !== undefined) {
@@ -529,11 +550,10 @@ function applyModelCallRequested(
         expectedRefs =
             previous.response !== undefined
                 ? [
-                      { kind: "assistant", modelCallIndex: previous.index },
-                      ...batchToolCalls(state, previous.index).map((tc) => ({
-                          kind: "toolResult" as const,
-                          toolCallId: tc.toolCallId,
-                      })),
+                      assistantRef(previous.index),
+                      ...batchToolCalls(state, previous.index).map((tc) =>
+                          toolResultRef(tc.toolCallId),
+                      ),
                   ]
                 : []; // re-issue after an interrupted call adds nothing new
     }
@@ -988,7 +1008,8 @@ export function requestMessagesFor(
     if (!call) {
         throw new Error(`no model call at index ${modelCallIndex}`);
     }
-    return call.request.messages.flatMap((ref) => {
+    return call.request.messages.flatMap((raw) => {
+        const ref = parseRequestRef(raw);
         switch (ref.kind) {
             case "context": {
                 const context = state.definition.context;

@@ -6,7 +6,8 @@ import {
     type JsonValue,
     type ModelCallFailed,
     type ModelRequest,
-    type ModelRequestMessageRef,
+    assistantRef,
+    toolResultRef,
     type ToolCallState,
     type ToolDescriptor,
     type ToolInvocationRequested,
@@ -856,25 +857,22 @@ class TurnAdvance {
         const index = this.state.modelCalls.length;
         const context = this.definition.context;
         const isRef = !Array.isArray(context);
-        let refs: Array<z.infer<typeof ModelRequestMessageRef>>;
+        let refs: string[];
         if (index === 0) {
             refs =
                 !isRef && context.length > 0
-                    ? [{ kind: "context" }, { kind: "input" }]
-                    : [{ kind: "input" }];
+                    ? ["context", "input"]
+                    : ["input"];
         } else {
             const previous = this.state.modelCalls[index - 1];
             refs =
                 previous.response !== undefined
                     ? [
-                          { kind: "assistant", modelCallIndex: previous.index },
+                          assistantRef(previous.index),
                           ...this.state.toolCalls
                               .filter((tc) => tc.modelCallIndex === previous.index)
                               .sort((a, b) => a.order - b.order)
-                              .map((tc) => ({
-                                  kind: "toolResult" as const,
-                                  toolCallId: tc.toolCallId,
-                              })),
+                              .map((tc) => toolResultRef(tc.toolCallId)),
                       ]
                     : []; // re-issue after an interrupted call adds nothing new
         }

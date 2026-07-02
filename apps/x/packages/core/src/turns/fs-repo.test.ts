@@ -41,7 +41,7 @@ function requested(turnId = TURN_ID): z.infer<typeof TurnEvent> {
         ts: "2026-07-02T10:00:01Z",
         modelCallIndex: 0,
         request: {
-            messages: [{ kind: "input" }],
+            messages: ["input"],
             parameters: {},
         },
     };

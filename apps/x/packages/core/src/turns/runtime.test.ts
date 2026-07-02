@@ -3,7 +3,6 @@ import type { z } from "zod";
 import {
     MODEL_CALL_LIMIT_ERROR_CODE,
     type JsonValue,
-    type ModelRequestMessageRef,
     type ResolvedAgent,
     type ToolDescriptor,
     type TurnEvent,
@@ -422,7 +421,7 @@ describe("plain model response (26.1)", () => {
         const request = log[1];
         expect(request).toMatchObject({
             modelCallIndex: 0,
-            request: { messages: [{ kind: "input" }] },
+            request: { messages: ["input"] },
         });
         // The model received the composed payload: resolved system prompt,
         // snapshot tools, encoded messages.
@@ -525,11 +524,11 @@ describe("mixed sync and async tools (26.2)", () => {
                 ? secondRequest.request.messages
                 : [],
         ).toEqual([
-            { kind: "assistant", modelCallIndex: 0 },
-            { kind: "toolResult", toolCallId: "A" },
-            { kind: "toolResult", toolCallId: "B" },
-            { kind: "toolResult", toolCallId: "C" },
-            { kind: "toolResult", toolCallId: "D" },
+            "assistant:0",
+            "toolResult:A",
+            "toolResult:B",
+            "toolResult:C",
+            "toolResult:D",
         ]);
         // The live model call saw the results in source order.
         expect(
@@ -1166,7 +1165,7 @@ describe("crash recovery (26.7)", () => {
 
     function seedRequested(
         index: number,
-        refs: z.infer<typeof ModelRequestMessageRef>[] = [{ kind: "input" }],
+        refs: string[] = ["input"],
     ): z.infer<typeof TurnEvent> {
         return {
             type: "model_call_requested",

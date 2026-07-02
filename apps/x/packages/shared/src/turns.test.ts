@@ -346,13 +346,13 @@ function syncToolSequence(): TEvent[] {
     const call0 = assistantCalls(toolCallPart("tc1", "echo"));
     return [
         created(),
-        requested(0, [{ kind: "input" }]),
+        requested(0, ["input"]),
         completed(0, call0),
         permRequired("tc1", "echo"),
         permResolved("tc1", "allow"),
         invocation("tc1"),
         result("tc1", "echo"),
-        requested(1, [{ kind: "assistant", modelCallIndex: 0 }, { kind: "toolResult", toolCallId: "tc1" }]),
+        requested(1, ["assistant:0", "toolResult:tc1"]),
         completed(1, assistantText("done")),
         turnCompletedEv(),
     ];
@@ -393,7 +393,7 @@ describe("plain completion", () => {
     it("reduces a plain model response to a completed turn", () => {
         const state = reduceTurn([
             created(),
-            requested(0, [{ kind: "input" }]),
+            requested(0, ["input"]),
             stepEvent(0),
             completed(0, assistantText("done")),
             turnCompletedEv(),
@@ -418,7 +418,7 @@ describe("plain completion", () => {
     it("leaves usage fields undefined when never reported", () => {
         const state = reduceTurn([
             created(),
-            requested(0, [{ kind: "input" }]),
+            requested(0, ["input"]),
             completed(0, assistantText("a"), { inputTokens: 5 }),
         ]);
         expect(state.usage).toEqual({ inputTokens: 5 });
@@ -434,7 +434,7 @@ describe("tool execution", () => {
         );
         const state = reduceTurn([
             created(),
-            requested(0, [{ kind: "input" }]),
+            requested(0, ["input"]),
             completed(0, call0),
         ]);
         expect(state.toolCalls).toHaveLength(2);
@@ -457,7 +457,7 @@ describe("tool execution", () => {
     it("leaves identity undefined for tools missing from the agent snapshot", () => {
         const state = reduceTurn([
             created(),
-            requested(0, [{ kind: "input" }]),
+            requested(0, ["input"]),
             completed(0, assistantCalls(toolCallPart("x1", "unknown-tool"))),
             result("x1", "unknown-tool", "runtime", "No such tool", true),
         ]);
@@ -480,7 +480,7 @@ describe("tool execution", () => {
         const call0 = assistantCalls(toolCallPart("tc1", "echo"));
         const state = reduceTurn([
             created({ config: { autoPermission: true, humanAvailable: true, maxModelCalls: 20 } }),
-            requested(0, [{ kind: "input" }]),
+            requested(0, ["input"]),
             completed(0, call0),
             permRequired("tc1", "echo"),
             permClassified("tc1", "allow"),
@@ -497,7 +497,7 @@ describe("tool execution", () => {
         const call0 = assistantCalls(toolCallPart("tc1", "echo"));
         const state = reduceTurn([
             created(),
-            requested(0, [{ kind: "input" }]),
+            requested(0, ["input"]),
             completed(0, call0),
             permRequired("tc1", "echo"),
             permClassificationFailed(["tc1"]),
@@ -512,7 +512,7 @@ describe("tool execution", () => {
         const call0 = assistantCalls(toolCallPart("tc1", "echo"));
         const state = reduceTurn([
             created(),
-            requested(0, [{ kind: "input" }]),
+            requested(0, ["input"]),
             completed(0, call0),
             invocation("tc1"),
             progress("tc1"),
@@ -526,7 +526,7 @@ describe("tool execution", () => {
         const call0 = assistantCalls(toolCallPart("tc1", "echo"));
         const state = reduceTurn([
             created(),
-            requested(0, [{ kind: "input" }]),
+            requested(0, ["input"]),
             completed(0, call0),
             permRequired("tc1", "echo"),
             permResolved("tc1", "deny"),
@@ -541,7 +541,7 @@ describe("context references", () => {
     it("accepts a referenced context with matching contextRef on requests", () => {
         const state = reduceTurn([
             created({ context: { previousTurnId: PREV_TURN_ID } }),
-            requested(0, [{ kind: "input" }], {
+            requested(0, ["input"], {
                 contextRef: { previousTurnId: PREV_TURN_ID },
             }),
             completed(0, assistantText("done")),
@@ -554,7 +554,7 @@ describe("context references", () => {
         expectCorruption(
             [
                 created({ context: { previousTurnId: PREV_TURN_ID } }),
-                requested(0, [{ kind: "input" }]),
+                requested(0, ["input"]),
             ],
             /contextRef inconsistent/,
         );
@@ -564,7 +564,7 @@ describe("context references", () => {
         expectCorruption(
             [
                 created({ context: { previousTurnId: PREV_TURN_ID } }),
-                requested(0, [{ kind: "input" }], {
+                requested(0, ["input"], {
                     contextRef: { previousTurnId: "some-other-turn" },
                 }),
             ],
@@ -576,7 +576,7 @@ describe("context references", () => {
         expectCorruption(
             [
                 created(),
-                requested(0, [{ kind: "input" }], {
+                requested(0, ["input"], {
                     contextRef: { previousTurnId: PREV_TURN_ID },
                 }),
             ],
@@ -592,13 +592,13 @@ describe("context references", () => {
         ];
         const state = reduceTurn([
             created({ context }),
-            requested(0, [{ kind: "context" }, { kind: "input" }]),
+            requested(0, ["context", "input"]),
             completed(0, assistantText("done")),
             turnCompletedEv(),
         ]);
         expect(deriveTurnStatus(state)).toBe("completed");
         expectCorruption(
-            [created({ context }), requested(0, [{ kind: "input" }])],
+            [created({ context }), requested(0, ["input"])],
             /references do not match/,
         );
     });
@@ -607,7 +607,7 @@ describe("context references", () => {
         expectCorruption(
             [
                 created({ context: { previousTurnId: PREV_TURN_ID } }),
-                requested(0, [{ kind: "input" }], {
+                requested(0, ["input"], {
                     contextRef: { previousTurnId: PREV_TURN_ID },
                 }),
                 completed(0, assistantCalls(toolCallPart("tc1", "echo"))),
@@ -616,8 +616,8 @@ describe("context references", () => {
                 requested(
                     1,
                     [
-                        { kind: "assistant", modelCallIndex: 0 },
-                        { kind: "toolResult", toolCallId: "tc1" },
+                        "assistant:0",
+                        "toolResult:tc1",
                     ],
                     { contextRef: { previousTurnId: PREV_TURN_ID } },
                 ),
@@ -635,7 +635,7 @@ describe("suspension", () => {
         );
         const state = reduceTurn([
             created(),
-            requested(0, [{ kind: "input" }]),
+            requested(0, ["input"]),
             completed(0, call0),
             permRequired("tc1", "echo"),
             invocation("a1", fetchTool),
@@ -653,7 +653,7 @@ describe("suspension", () => {
         );
         const state = reduceTurn([
             created(),
-            requested(0, [{ kind: "input" }]),
+            requested(0, ["input"]),
             completed(0, call0),
             permRequired("tc1", "echo"),
             invocation("a1", fetchTool),
@@ -673,7 +673,7 @@ describe("suspension", () => {
         );
         const state = reduceTurn([
             created(),
-            requested(0, [{ kind: "input" }]),
+            requested(0, ["input"]),
             completed(0, call0),
             invocation("a1", fetchTool),
             invocation("a2", fetchTool),
@@ -682,9 +682,9 @@ describe("suspension", () => {
             suspendedEv([], [{ id: "a1", tool: fetchTool }]),
             result("a1", "fetch", "async", "first"),
             requested(1, [
-                { kind: "assistant", modelCallIndex: 0 },
-                { kind: "toolResult", toolCallId: "a1" },
-                { kind: "toolResult", toolCallId: "a2" },
+                "assistant:0",
+                "toolResult:a1",
+                "toolResult:a2",
             ]),
             completed(1, assistantText("done")),
             turnCompletedEv(),
@@ -697,7 +697,7 @@ describe("suspension", () => {
         expectCorruption(
             [
                 created(),
-                requested(0, [{ kind: "input" }]),
+                requested(0, ["input"]),
                 completed(0, call0),
                 permRequired("tc1", "echo"),
                 permResolved("tc1", "allow"),
@@ -717,7 +717,7 @@ describe("suspension", () => {
         expectCorruption(
             [
                 created(),
-                requested(0, [{ kind: "input" }]),
+                requested(0, ["input"]),
                 completed(0, call0),
                 permRequired("tc1", "echo"),
                 invocation("a1", fetchTool),
@@ -731,7 +731,7 @@ describe("suspension", () => {
         expectCorruption(
             [
                 created(),
-                requested(0, [{ kind: "input" }]),
+                requested(0, ["input"]),
                 suspendedEv([{ id: "tc1", name: "echo" }], []),
             ],
             /suspension while a model call is unsettled/,
@@ -743,7 +743,7 @@ describe("recovery-shaped histories", () => {
     it("accepts an interrupted model call closed and re-issued (§23 fix)", () => {
         const state = reduceTurn([
             created(),
-            requested(0, [{ kind: "input" }]),
+            requested(0, ["input"]),
             callFailed(0, "interrupted by process restart"),
             requested(1, []),
             completed(1, assistantText("done")),
@@ -760,7 +760,7 @@ describe("recovery-shaped histories", () => {
                 created({
                     config: { autoPermission: false, humanAvailable: true, maxModelCalls: 1 },
                 }),
-                requested(0, [{ kind: "input" }]),
+                requested(0, ["input"]),
                 callFailed(0, "interrupted"),
                 requested(1, []),
             ],
@@ -772,7 +772,7 @@ describe("recovery-shaped histories", () => {
         const call0 = assistantCalls(toolCallPart("tc1", "echo"));
         const state = reduceTurn([
             created(),
-            requested(0, [{ kind: "input" }]),
+            requested(0, ["input"]),
             completed(0, call0),
             invocation("tc1"),
             result(
@@ -782,7 +782,7 @@ describe("recovery-shaped histories", () => {
                 "Tool execution was interrupted; its outcome is unknown and it was not retried.",
                 true,
             ),
-            requested(1, [{ kind: "assistant", modelCallIndex: 0 }, { kind: "toolResult", toolCallId: "tc1" }]),
+            requested(1, ["assistant:0", "toolResult:tc1"]),
             completed(1, assistantText("done")),
             turnCompletedEv(),
         ]);
@@ -794,7 +794,7 @@ describe("recovery-shaped histories", () => {
         const call0 = assistantCalls(toolCallPart("a1", "fetch"));
         const state = reduceTurn([
             created(),
-            requested(0, [{ kind: "input" }]),
+            requested(0, ["input"]),
             completed(0, call0),
             invocation("a1", fetchTool),
             suspendedEv([], [{ id: "a1", tool: fetchTool }]),
@@ -808,7 +808,7 @@ describe("recovery-shaped histories", () => {
     it("accepts a live model failure closing the turn", () => {
         const state = reduceTurn([
             created(),
-            requested(0, [{ kind: "input" }]),
+            requested(0, ["input"]),
             callFailed(0),
             turnFailedEv("provider exploded"),
         ]);
@@ -821,7 +821,7 @@ describe("recovery-shaped histories", () => {
             created({
                 config: { autoPermission: false, humanAvailable: true, maxModelCalls: 1 },
             }),
-            requested(0, [{ kind: "input" }]),
+            requested(0, ["input"]),
             completed(0, call0),
             invocation("tc1"),
             result("tc1", "echo"),
@@ -840,7 +840,7 @@ describe("invariants", () => {
     });
 
     it("rejects a log not starting with turn_created", () => {
-        expectCorruption([requested(0, [{ kind: "input" }])], /first event must be turn_created/);
+        expectCorruption([requested(0, ["input"])], /first event must be turn_created/);
     });
 
     it("rejects duplicate turn_created", () => {
@@ -849,7 +849,7 @@ describe("invariants", () => {
 
     it("rejects mismatched turn ids", () => {
         expectCorruption(
-            [created(), { ...requested(0, [{ kind: "input" }]), turnId: "other" }],
+            [created(), { ...requested(0, ["input"]), turnId: "other" }],
             /does not match turn/,
         );
     });
@@ -882,9 +882,9 @@ describe("invariants", () => {
         expectCorruption(
             [
                 created(),
-                requested(0, [{ kind: "input" }]),
+                requested(0, ["input"]),
                 completed(0, assistantText("a")),
-                requested(0, [{ kind: "input" }]),
+                requested(0, ["input"]),
             ],
             /out of order/,
         );
@@ -892,7 +892,7 @@ describe("invariants", () => {
 
     it("rejects concurrent unresolved model requests", () => {
         expectCorruption(
-            [created(), requested(0, [{ kind: "input" }]), requested(1, [])],
+            [created(), requested(0, ["input"]), requested(1, [])],
             /concurrent unresolved model call requests/,
         );
     });
@@ -912,7 +912,7 @@ describe("invariants", () => {
         expectCorruption(
             [
                 created(),
-                requested(0, [{ kind: "input" }]),
+                requested(0, ["input"]),
                 completed(0, assistantText("a")),
                 completed(0, assistantText("b")),
             ],
@@ -924,7 +924,7 @@ describe("invariants", () => {
         expectCorruption(
             [
                 created(),
-                requested(0, [{ kind: "input" }]),
+                requested(0, ["input"]),
                 callFailed(0),
                 completed(0, assistantText("a")),
             ],
@@ -937,9 +937,9 @@ describe("invariants", () => {
         expectCorruption(
             [
                 created(),
-                requested(0, [{ kind: "input" }]),
+                requested(0, ["input"]),
                 completed(0, call0),
-                requested(1, [{ kind: "assistant", modelCallIndex: 0 }]),
+                requested(1, ["assistant:0"]),
             ],
             /while tool calls are unresolved/,
         );
@@ -952,11 +952,11 @@ describe("invariants", () => {
                 created({
                     config: { autoPermission: false, humanAvailable: true, maxModelCalls: 1 },
                 }),
-                requested(0, [{ kind: "input" }]),
+                requested(0, ["input"]),
                 completed(0, call0),
                 invocation("tc1"),
                 result("tc1", "echo"),
-                requested(1, [{ kind: "assistant", modelCallIndex: 0 }, { kind: "toolResult", toolCallId: "tc1" }]),
+                requested(1, ["assistant:0", "toolResult:tc1"]),
             ],
             /exceeds maxModelCalls/,
         );
@@ -966,7 +966,7 @@ describe("invariants", () => {
         expectCorruption(
             [
                 created(),
-                requested(0, [{ kind: "input" }]),
+                requested(0, ["input"]),
                 completed(
                     0,
                     assistantCalls(toolCallPart("tc1", "echo"), toolCallPart("tc1", "echo")),
@@ -981,11 +981,11 @@ describe("invariants", () => {
         expectCorruption(
             [
                 created(),
-                requested(0, [{ kind: "input" }]),
+                requested(0, ["input"]),
                 completed(0, call0),
                 invocation("tc1"),
                 result("tc1", "echo"),
-                requested(1, [{ kind: "assistant", modelCallIndex: 0 }, { kind: "toolResult", toolCallId: "tc1" }]),
+                requested(1, ["assistant:0", "toolResult:tc1"]),
                 completed(1, assistantCalls(toolCallPart("tc1", "echo"))),
             ],
             /duplicate tool call id/,
@@ -1000,16 +1000,16 @@ describe("invariants", () => {
         expectCorruption(
             [
                 created(),
-                requested(0, [{ kind: "input" }]),
+                requested(0, ["input"]),
                 completed(0, call0),
                 invocation("tc1"),
                 result("tc1", "echo"),
                 invocation("tc2"),
                 result("tc2", "echo"),
                 requested(1, [
-                    { kind: "assistant", modelCallIndex: 0 },
-                    { kind: "toolResult", toolCallId: "tc2" },
-                    { kind: "toolResult", toolCallId: "tc1" },
+                    "assistant:0",
+                    "toolResult:tc2",
+                    "toolResult:tc1",
                 ]),
             ],
             /references do not match/,
@@ -1018,7 +1018,7 @@ describe("invariants", () => {
 
     it("rejects permission records targeting unknown tool calls", () => {
         expectCorruption(
-            [created(), requested(0, [{ kind: "input" }]), completed(0, assistantText("a")), permRequired("ghost", "echo")],
+            [created(), requested(0, ["input"]), completed(0, assistantText("a")), permRequired("ghost", "echo")],
             /unknown tool call/,
         );
     });
@@ -1028,7 +1028,7 @@ describe("invariants", () => {
         expectCorruption(
             [
                 created(),
-                requested(0, [{ kind: "input" }]),
+                requested(0, ["input"]),
                 completed(0, call0),
                 permRequired("tc1", "echo"),
                 permRequired("tc1", "echo"),
@@ -1042,7 +1042,7 @@ describe("invariants", () => {
         expectCorruption(
             [
                 created(),
-                requested(0, [{ kind: "input" }]),
+                requested(0, ["input"]),
                 completed(0, call0),
                 permClassified("tc1", "allow"),
             ],
@@ -1055,7 +1055,7 @@ describe("invariants", () => {
         expectCorruption(
             [
                 created(),
-                requested(0, [{ kind: "input" }]),
+                requested(0, ["input"]),
                 completed(0, call0),
                 permResolved("tc1", "allow"),
             ],
@@ -1068,7 +1068,7 @@ describe("invariants", () => {
         expectCorruption(
             [
                 created(),
-                requested(0, [{ kind: "input" }]),
+                requested(0, ["input"]),
                 completed(0, call0),
                 permRequired("tc1", "echo"),
                 permResolved("tc1", "allow"),
@@ -1083,7 +1083,7 @@ describe("invariants", () => {
         expectCorruption(
             [
                 created(),
-                requested(0, [{ kind: "input" }]),
+                requested(0, ["input"]),
                 completed(0, call0),
                 permRequired("tc1", "echo"),
                 invocation("tc1"),
@@ -1097,7 +1097,7 @@ describe("invariants", () => {
         expectCorruption(
             [
                 created(),
-                requested(0, [{ kind: "input" }]),
+                requested(0, ["input"]),
                 completed(0, call0),
                 permRequired("tc1", "echo"),
                 permResolved("tc1", "deny"),
@@ -1112,7 +1112,7 @@ describe("invariants", () => {
         expectCorruption(
             [
                 created(),
-                requested(0, [{ kind: "input" }]),
+                requested(0, ["input"]),
                 completed(0, call0),
                 invocation("tc1"),
                 invocation("tc1"),
@@ -1126,7 +1126,7 @@ describe("invariants", () => {
         expectCorruption(
             [
                 created(),
-                requested(0, [{ kind: "input" }]),
+                requested(0, ["input"]),
                 completed(0, call0),
                 invocation("tc1", echoTool, { execution: "async" }),
             ],
@@ -1137,7 +1137,7 @@ describe("invariants", () => {
     it("rejects progress without invocation", () => {
         const call0 = assistantCalls(toolCallPart("tc1", "echo"));
         expectCorruption(
-            [created(), requested(0, [{ kind: "input" }]), completed(0, call0), progress("tc1")],
+            [created(), requested(0, ["input"]), completed(0, call0), progress("tc1")],
             /progress without invocation/,
         );
     });
@@ -1147,7 +1147,7 @@ describe("invariants", () => {
         expectCorruption(
             [
                 created(),
-                requested(0, [{ kind: "input" }]),
+                requested(0, ["input"]),
                 completed(0, call0),
                 invocation("tc1"),
                 result("tc1", "echo"),
@@ -1162,7 +1162,7 @@ describe("invariants", () => {
         expectCorruption(
             [
                 created(),
-                requested(0, [{ kind: "input" }]),
+                requested(0, ["input"]),
                 completed(0, call0),
                 invocation("tc1"),
                 result("tc1", "echo"),
@@ -1175,7 +1175,7 @@ describe("invariants", () => {
     it("rejects sync-sourced results without invocation", () => {
         const call0 = assistantCalls(toolCallPart("tc1", "echo"));
         expectCorruption(
-            [created(), requested(0, [{ kind: "input" }]), completed(0, call0), result("tc1", "echo", "sync")],
+            [created(), requested(0, ["input"]), completed(0, call0), result("tc1", "echo", "sync")],
             /sync tool result without invocation/,
         );
     });
@@ -1185,7 +1185,7 @@ describe("invariants", () => {
         expectCorruption(
             [
                 created(),
-                requested(0, [{ kind: "input" }]),
+                requested(0, ["input"]),
                 completed(0, call0),
                 invocation("tc1"),
                 result("tc1", "echo", "async"),
@@ -1199,7 +1199,7 @@ describe("invariants", () => {
         expectCorruption(
             [
                 created(),
-                requested(0, [{ kind: "input" }]),
+                requested(0, ["input"]),
                 completed(0, assistantText("a")),
                 stepEvent(0),
             ],
@@ -1210,7 +1210,7 @@ describe("invariants", () => {
     it("rejects completion while tool calls remain unresolved", () => {
         const call0 = assistantCalls(toolCallPart("tc1", "echo"));
         expectCorruption(
-            [created(), requested(0, [{ kind: "input" }]), completed(0, call0), turnCompletedEv()],
+            [created(), requested(0, ["input"]), completed(0, call0), turnCompletedEv()],
             /completion while tool calls lack terminal results/,
         );
     });
@@ -1220,7 +1220,7 @@ describe("invariants", () => {
         expectCorruption(
             [
                 created(),
-                requested(0, [{ kind: "input" }]),
+                requested(0, ["input"]),
                 completed(0, call0),
                 invocation("tc1"),
                 result("tc1", "echo"),
@@ -1237,14 +1237,14 @@ describe("invariants", () => {
     it("rejects terminal failure while tool calls remain unresolved", () => {
         const call0 = assistantCalls(toolCallPart("tc1", "echo"));
         expectCorruption(
-            [created(), requested(0, [{ kind: "input" }]), completed(0, call0), turnFailedEv()],
+            [created(), requested(0, ["input"]), completed(0, call0), turnFailedEv()],
             /failure while tool calls lack terminal results/,
         );
     });
 
     it("rejects terminal events while a model call is unsettled", () => {
         expectCorruption(
-            [created(), requested(0, [{ kind: "input" }]), turnCancelledEv()],
+            [created(), requested(0, ["input"]), turnCancelledEv()],
             /cancellation while a model call is unsettled/,
         );
     });
@@ -1252,7 +1252,7 @@ describe("invariants", () => {
     it("rejects any event after a terminal event", () => {
         const base = [
             created(),
-            requested(0, [{ kind: "input" }]),
+            requested(0, ["input"]),
             completed(0, assistantText("a")),
         ];
         for (const terminal of [turnCompletedEv(), turnFailedEv(), turnCancelledEv()]) {
@@ -1267,7 +1267,7 @@ describe("invariants", () => {
         expectCorruption(
             [
                 created(),
-                requested(0, [{ kind: "input" }]),
+                requested(0, ["input"]),
                 completed(0, assistantText("a")),
                 turnCompletedEv(),
                 turnFailedEv(),
@@ -1282,14 +1282,14 @@ describe("derivations", () => {
         const call0 = assistantCalls(toolCallPart("tc1", "echo"));
         const pending = reduceTurn([
             created(),
-            requested(0, [{ kind: "input" }]),
+            requested(0, ["input"]),
             completed(0, call0),
             permRequired("tc1", "echo"),
             suspendedEv([{ id: "tc1", name: "echo" }], []),
         ]);
         expect(deriveTurnStatus(pending)).toBe("suspended");
 
-        const idle = reduceTurn([created(), requested(0, [{ kind: "input" }]), completed(0, call0)]);
+        const idle = reduceTurn([created(), requested(0, ["input"]), completed(0, call0)]);
         expect(deriveTurnStatus(idle)).toBe("idle");
     });
 
@@ -1300,16 +1300,16 @@ describe("derivations", () => {
         );
         const state = reduceTurn([
             created(),
-            requested(0, [{ kind: "input" }]),
+            requested(0, ["input"]),
             completed(0, call0),
             invocation("tc1"),
             invocation("tc2"),
             result("tc2", "echo", "sync", { n: 2 }),
             result("tc1", "echo", "sync", "plain text"),
             requested(1, [
-                { kind: "assistant", modelCallIndex: 0 },
-                { kind: "toolResult", toolCallId: "tc1" },
-                { kind: "toolResult", toolCallId: "tc2" },
+                "assistant:0",
+                "toolResult:tc1",
+                "toolResult:tc2",
             ]),
             completed(1, assistantText("done")),
             turnCompletedEv(),
@@ -1326,7 +1326,7 @@ describe("derivations", () => {
     it("omits failed model calls from the transcript", () => {
         const state = reduceTurn([
             created(),
-            requested(0, [{ kind: "input" }]),
+            requested(0, ["input"]),
             callFailed(0, "interrupted"),
             requested(1, []),
             completed(1, assistantText("done")),
@@ -1338,7 +1338,7 @@ describe("derivations", () => {
     it("transcript excludes the context prefix", () => {
         const state = reduceTurn([
             created({ context: { previousTurnId: PREV_TURN_ID } }),
-            requested(0, [{ kind: "input" }], {
+            requested(0, ["input"], {
                 contextRef: { previousTurnId: PREV_TURN_ID },
             }),
             completed(0, assistantText("done")),
@@ -1352,7 +1352,7 @@ describe("derivations", () => {
         const call0 = assistantCalls(toolCallPart("tc1", "echo"));
         const state = reduceTurn([
             created(),
-            requested(0, [{ kind: "input" }]),
+            requested(0, ["input"]),
             completed(0, call0),
         ]);
         expect(() => turnTranscript(state)).toThrowError(/unresolved/);
