@@ -25,6 +25,7 @@ import type {
     IPermissionClassifier,
     PermissionCheckInput,
     PermissionClassification,
+    PermissionClassificationBatch,
     PermissionClassificationInput,
 } from "./permission.js";
 import { TurnRuntime } from "./runtime.js";
@@ -221,6 +222,7 @@ class FakePermissionChecker implements IPermissionChecker {
 
 class FakePermissionClassifier implements IPermissionClassifier {
     batches: PermissionClassificationInput[][] = [];
+    contexts: Array<{ turnId: string; messageCount: number }> = [];
 
     constructor(
         private readonly impl?: (
@@ -230,16 +232,20 @@ class FakePermissionClassifier implements IPermissionClassifier {
     ) {}
 
     async classify(
-        requests: PermissionClassificationInput[],
+        batch: PermissionClassificationBatch,
     ): Promise<PermissionClassification[]> {
-        this.batches.push(requests);
+        this.batches.push(batch.requests);
+        this.contexts.push({
+            turnId: batch.turnId,
+            messageCount: batch.messages.length,
+        });
         if (this.throws) {
             throw new Error(this.throws);
         }
         if (!this.impl) {
             throw new Error("classifier must not be called in this test");
         }
-        return this.impl(requests);
+        return this.impl(batch.requests);
     }
 }
 
@@ -302,7 +308,7 @@ function makeRuntime(opts: {
         contextResolver: new TurnRepoContextResolver({ turnRepo: repo }),
         permissionChecker: checker,
         permissionClassifier: classifier,
-        bus,
+        lifecycleBus: bus,
     });
     return { runtime, repo, models, checker, classifier, bus };
 }
@@ -668,6 +674,11 @@ describe("automatic permission classification (26.4)", () => {
             "CD",
             "CF",
         ]);
+        // Conversation context reaches the classifier: input + batch response.
+        expect(classifier.contexts[0]).toEqual({
+            turnId,
+            messageCount: 2,
+        });
 
         const log = await persisted(repo, turnId);
         // Classifier provenance and effective decisions are distinct records.

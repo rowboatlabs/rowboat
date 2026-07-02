@@ -247,6 +247,12 @@ interface RequestedAgent {
   agentId: string;
   overrides?: {
     model?: ModelDescriptor;
+    // Opaque composition hints interpreted by the agent resolver (e.g.
+    // work-dir id, voice/search/code modes). Persisted verbatim for audit.
+    // The resolver decides which keys affect system-prompt bytes; callers
+    // should keep prompt-affecting inputs session-sticky to preserve
+    // provider prefix caching across turns.
+    composition?: JsonValue;
   };
 }
 ```
@@ -608,9 +614,17 @@ interface PermissionClassification {
   reason: string;
 }
 
+interface PermissionClassificationBatch {
+  turnId: string;
+  // Conversation context: resolved context plus current-turn settled
+  // messages (the pending batch's tool results are not yet terminal).
+  messages: ConversationMessage[];
+  requests: PermissionClassificationInput[];
+}
+
 interface IPermissionClassifier {
   classify(
-    requests: PermissionClassificationInput[],
+    batch: PermissionClassificationBatch,
     signal: AbortSignal,
   ): Promise<PermissionClassification[]>;
 }
@@ -710,6 +724,8 @@ Sync and async execution are immutable tool metadata:
 
 ```ts
 interface ToolExecutionContext {
+  turnId: string;
+  toolCallId: string;
   signal: AbortSignal;
   reportProgress(progress: JsonValue): Promise<void>;
 }
@@ -1125,7 +1141,7 @@ interface TurnRuntimeDependencies {
   contextResolver: IContextResolver;
   permissionChecker: IPermissionChecker;
   permissionClassifier: IPermissionClassifier;
-  bus: IBus;
+  lifecycleBus: ITurnLifecycleBus;
 }
 
 class TurnRuntime implements ITurnRuntime {
@@ -1139,7 +1155,7 @@ class TurnRuntime implements ITurnRuntime {
     contextResolver,
     permissionChecker,
     permissionClassifier,
-    bus,
+    lifecycleBus,
   }: TurnRuntimeDependencies);
 }
 ```

@@ -6,6 +6,8 @@ import type {
 } from "@x/shared/dist/turns.js";
 
 export interface ToolExecutionContext {
+    turnId: string;
+    toolCallId: string;
     signal: AbortSignal;
     // The loop appends a durable tool_progress event before resolving.
     reportProgress(progress: JsonValue): Promise<void>;

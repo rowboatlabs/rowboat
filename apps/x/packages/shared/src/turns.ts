@@ -32,6 +32,12 @@ export const RequestedAgent = z.object({
     overrides: z
         .object({
             model: ModelDescriptor.optional(),
+            // Opaque composition hints interpreted by the agent resolver
+            // (e.g. work-dir id, voice/search/code modes). Persisted verbatim
+            // for audit. The resolver decides which keys affect the system
+            // prompt; keeping prompt-affecting inputs session-sticky is what
+            // preserves provider prefix caching across turns.
+            composition: z.json().optional(),
         })
         .optional(),
 });

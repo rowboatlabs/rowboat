@@ -1,4 +1,5 @@
-import type { JsonValue } from "@x/shared/dist/turns.js";
+import type { z } from "zod";
+import type { ConversationMessage, JsonValue } from "@x/shared/dist/turns.js";
 
 export interface PermissionCheckInput {
     turnId: string;
@@ -41,12 +42,20 @@ export interface PermissionClassification {
     reason: string;
 }
 
+export interface PermissionClassificationBatch {
+    turnId: string;
+    // Conversation context for the classifier: the turn's resolved context
+    // plus current-turn settled messages.
+    messages: Array<z.infer<typeof ConversationMessage>>;
+    requests: PermissionClassificationInput[];
+}
+
 // Handles all permission-required calls from one model response in one batch
 // when automatic permission is enabled. Internal model calls are opaque to
 // the turn loop. Failures and omitted decisions normalize to defer.
 export interface IPermissionClassifier {
     classify(
-        requests: PermissionClassificationInput[],
+        batch: PermissionClassificationBatch,
         signal: AbortSignal,
     ): Promise<PermissionClassification[]>;
 }

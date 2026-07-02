@@ -306,7 +306,7 @@ function makeSessions(opts: { repo?: ISessionRepo; fake?: FakeTurnRuntime } = {}
         turnRuntime: fake,
         idGenerator: new FakeIdGen(),
         clock: new FakeClock(),
-        bus,
+        sessionBus: bus,
     });
     return { sessions, repo, fake, bus };
 }

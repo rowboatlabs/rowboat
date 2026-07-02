@@ -39,7 +39,7 @@ export interface SessionsDependencies {
     turnRuntime: ITurnRuntime;
     idGenerator: IMonotonicallyIncreasingIdGenerator;
     clock: IClock;
-    bus: ISessionBus;
+    sessionBus: ISessionBus;
 }
 
 // The session layer per session-design.md: owns conversations as ordered
@@ -52,7 +52,7 @@ export class SessionsImpl implements ISessions {
     private readonly turnRuntime: ITurnRuntime;
     private readonly idGenerator: IMonotonicallyIncreasingIdGenerator;
     private readonly clock: IClock;
-    private readonly bus: ISessionBus;
+    private readonly sessionBus: ISessionBus;
 
     private readonly index = new SessionIndex();
     // Ephemeral: executions this process started, for stopTurn's abort path.
@@ -66,13 +66,13 @@ export class SessionsImpl implements ISessions {
         turnRuntime,
         idGenerator,
         clock,
-        bus,
+        sessionBus,
     }: SessionsDependencies) {
         this.sessionRepo = sessionRepo;
         this.turnRuntime = turnRuntime;
         this.idGenerator = idGenerator;
         this.clock = clock;
-        this.bus = bus;
+        this.sessionBus = sessionBus;
     }
 
     // §8.2: scan session files, read each session's latest turn for status.
@@ -293,7 +293,7 @@ export class SessionsImpl implements ISessions {
         await this.sessionRepo.withLock(sessionId, async () => {
             await this.sessionRepo.delete(sessionId);
             this.index.remove(sessionId);
-            this.bus.publish({ kind: "index-changed", sessionId, entry: null });
+            this.sessionBus.publish({ kind: "index-changed", sessionId, entry: null });
         });
     }
 
@@ -348,7 +348,7 @@ export class SessionsImpl implements ISessions {
             try {
                 for await (const event of execution.events) {
                     if (sessionId !== null) {
-                        this.bus.publish({
+                        this.sessionBus.publish({
                             kind: "turn-event",
                             sessionId,
                             turnId,
@@ -391,7 +391,7 @@ export class SessionsImpl implements ISessions {
 
     private publishEntry(entry: SessionIndexEntry): void {
         this.index.upsert(entry);
-        this.bus.publish({
+        this.sessionBus.publish({
             kind: "index-changed",
             sessionId: entry.sessionId,
             entry,

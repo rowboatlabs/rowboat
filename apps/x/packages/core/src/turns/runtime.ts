@@ -63,7 +63,7 @@ export interface TurnRuntimeDependencies {
     contextResolver: IContextResolver;
     permissionChecker: IPermissionChecker;
     permissionClassifier: IPermissionClassifier;
-    bus: ITurnLifecycleBus;
+    lifecycleBus: ITurnLifecycleBus;
 }
 
 // Immutable dependency container: holds no mutable per-turn state. All active
@@ -78,7 +78,7 @@ export class TurnRuntime implements ITurnRuntime {
     private readonly contextResolver: IContextResolver;
     private readonly permissionChecker: IPermissionChecker;
     private readonly permissionClassifier: IPermissionClassifier;
-    private readonly bus: ITurnLifecycleBus;
+    private readonly lifecycleBus: ITurnLifecycleBus;
 
     constructor({
         turnRepo,
@@ -90,7 +90,7 @@ export class TurnRuntime implements ITurnRuntime {
         contextResolver,
         permissionChecker,
         permissionClassifier,
-        bus,
+        lifecycleBus,
     }: TurnRuntimeDependencies) {
         this.turnRepo = turnRepo;
         this.idGenerator = idGenerator;
@@ -101,7 +101,7 @@ export class TurnRuntime implements ITurnRuntime {
         this.contextResolver = contextResolver;
         this.permissionChecker = permissionChecker;
         this.permissionClassifier = permissionClassifier;
-        this.bus = bus;
+        this.lifecycleBus = lifecycleBus;
     }
 
     async createTurn(input: CreateTurnInput): Promise<string> {
@@ -154,11 +154,11 @@ export class TurnRuntime implements ITurnRuntime {
         externalSignal: AbortSignal | undefined,
         stream: HotStream<TurnStreamEvent, TurnOutcome>,
     ): Promise<TurnOutcome> {
-        this.bus.publish({ type: "turn-processing-start", turnId });
+        this.lifecycleBus.publish({ type: "turn-processing-start", turnId });
         try {
             return await this.advance(turnId, input, externalSignal, stream);
         } finally {
-            this.bus.publish({ type: "turn-processing-end", turnId });
+            this.lifecycleBus.publish({ type: "turn-processing-end", turnId });
         }
     }
 
@@ -551,6 +551,21 @@ class TurnAdvance {
         }
     }
 
+    // Conversation context for the classifier: resolved context, the turn
+    // input, and completed assistant responses (the current batch's tool
+    // results are not yet terminal, so tool messages are omitted).
+    private conversationSoFar(): Array<z.infer<typeof ConversationMessage>> {
+        const messages: Array<z.infer<typeof ConversationMessage>> = [
+            this.state.definition.input,
+        ];
+        for (const call of this.state.modelCalls) {
+            if (call.response !== undefined) {
+                messages.push(call.response);
+            }
+        }
+        return [...this.resolvedContext, ...messages];
+    }
+
     // §9.3: one classifier batch per model response in auto mode.
     // Checker-error calls and previously failed classifications skip the
     // classifier and go straight to the human/deny fallback.
@@ -573,13 +588,17 @@ class TurnAdvance {
         let decisions;
         try {
             decisions = await this.permissionClassifier.classify(
-                candidates.map((tc) => ({
-                    toolCallId: tc.toolCallId,
-                    toolName: tc.toolName,
-                    input: tc.input,
-                    request: (tc.permission as NonNullable<ToolCallState["permission"]>)
-                        .required.request,
-                })),
+                {
+                    turnId: this.turnId,
+                    messages: this.conversationSoFar(),
+                    requests: candidates.map((tc) => ({
+                        toolCallId: tc.toolCallId,
+                        toolName: tc.toolName,
+                        input: tc.input,
+                        request: (tc.permission as NonNullable<ToolCallState["permission"]>)
+                            .required.request,
+                    })),
+                },
                 this.signal,
             );
         } catch (error) {
@@ -708,6 +727,8 @@ class TurnAdvance {
             const syncTool = tool as SyncRuntimeTool;
             try {
                 const result = await syncTool.execute(tc.input, {
+                    turnId: this.turnId,
+                    toolCallId: tc.toolCallId,
                     signal: this.signal,
                     reportProgress: async (progress) => {
                         await this.append({
