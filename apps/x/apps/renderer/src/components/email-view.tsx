@@ -551,6 +551,19 @@ function MessageAttachments({ attachments }: { attachments: NonNullable<GmailThr
 
 type ComposeMode = 'reply' | 'replyAll' | 'forward' | 'new' | 'draft'
 
+// Platform-aware modifier: Cmd on macOS, Ctrl on Windows/Linux (App.tsx pattern).
+const isMac = typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac')
+
+// True when a keyboard event originated in a text-entry context, so
+// single-letter shortcuts must stay inert.
+function isEditableTarget(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null
+  return Boolean(
+    el &&
+    (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)
+  )
+}
+
 function ComposeToolbarButton({
   editor,
   command,
@@ -724,12 +737,15 @@ function RecipientField({
   onChange,
   autoFocus,
   trailing,
+  focusSignal,
 }: {
   label: string
   value: string[]
   onChange: (next: string[]) => void
   autoFocus?: boolean
   trailing?: React.ReactNode
+  /** Bump to move focus into this field (e.g. after a Cc/Bcc shortcut). */
+  focusSignal?: number
 }) {
   const [draft, setDraft] = useState('')
   const [suggestions, setSuggestions] = useState<ContactSuggestion[]>([])
@@ -744,6 +760,10 @@ function RecipientField({
   useEffect(() => {
     if (autoFocus) inputRef.current?.focus()
   }, [autoFocus])
+
+  useEffect(() => {
+    if (focusSignal) inputRef.current?.focus()
+  }, [focusSignal])
 
   const excludeEmails = useMemo(
     () => value.map((token) => extractAddress(token).toLowerCase()).filter(Boolean),
@@ -803,6 +823,12 @@ function RecipientField({
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     const hasSuggestions = suggestions.length > 0
+    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+      // Cmd/Ctrl+Enter is "send" — commit any half-typed address on the way
+      // and let the event bubble to the composer's send handler.
+      if (draft.trim()) commit(draft)
+      return
+    }
     if (event.key === 'ArrowDown' && hasSuggestions) {
       event.preventDefault()
       setActiveIndex((i) => (i + 1) % suggestions.length)
@@ -815,6 +841,7 @@ function RecipientField({
     }
     if (event.key === 'Escape' && hasSuggestions) {
       event.preventDefault()
+      event.stopPropagation()
       setSuggestions([])
       return
     }
@@ -846,7 +873,10 @@ function RecipientField({
   const showSuggestions = isFocused && suggestions.length > 0
 
   return (
-    <div className="flex items-start gap-2 border-b border-border px-3 py-1.5 text-sm">
+    <div
+      className="flex items-start gap-2 border-b border-border px-3 py-1.5 text-sm"
+      data-suggestions-open={showSuggestions || undefined}
+    >
       <span className="min-w-7 pt-1.5 text-muted-foreground">{label}</span>
       <div className="relative flex min-w-0 flex-1 flex-wrap items-center gap-1" ref={fieldRef}>
         {value.map((token, index) => (
@@ -1047,6 +1077,9 @@ const ComposeBox = memo(function ComposeBox({
   const [bccList, setBccList] = useState<string[]>([])
   const [showCc, setShowCc] = useState<boolean>(initialRecipients.cc.length > 0)
   const [showBcc, setShowBcc] = useState<boolean>(false)
+  // Bumped by the Cc/Bcc shortcuts so the freshly revealed field grabs focus.
+  const [ccFocusSignal, setCcFocusSignal] = useState(0)
+  const [bccFocusSignal, setBccFocusSignal] = useState(0)
   const [subject, setSubject] = useState<string>(() => (thread ? composeSubject(mode, thread.subject) : ''))
   const modeLabel = mode === 'draft' ? 'Draft' : isNew ? 'New message' : mode === 'forward' ? 'Forward' : mode === 'replyAll' ? 'Reply All' : 'Reply'
 
@@ -1067,6 +1100,10 @@ const ComposeBox = memo(function ComposeBox({
       .join('')
   }, [mode, thread])
 
+  // Ref so the Tiptap keydown handler (captured once at editor creation)
+  // always calls the latest send closure; assigned below sendInGmail.
+  const sendRef = useRef<() => void>(() => {})
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ link: false }),
@@ -1077,6 +1114,13 @@ const ComposeBox = memo(function ComposeBox({
     ],
     editorProps: {
       attributes: { class: 'compose-content' },
+      handleKeyDown: (_view, event) => {
+        if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && !event.shiftKey) {
+          sendRef.current()
+          return true
+        }
+        return false
+      },
     },
     content: initialContent,
   })
@@ -1520,6 +1564,44 @@ const ComposeBox = memo(function ComposeBox({
       setSending(false)
     }
   }
+  sendRef.current = () => { void sendInGmail() }
+
+  // Composer-level shortcuts, on the wrapper so they work from any field.
+  // Inner handlers (recipient menu, link bar, AI Enter) preventDefault first
+  // and keep priority via the defaultPrevented check.
+  const onComposerKeyDown = (e: React.KeyboardEvent) => {
+    if (e.defaultPrevented) return
+    const mod = e.metaKey || e.ctrlKey
+    if (mod && e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      e.stopPropagation()
+      // Deferred one tick: a recipient field may have just committed a
+      // half-typed address, and send must read the re-rendered list.
+      window.setTimeout(() => sendRef.current(), 0)
+      return
+    }
+    if (mod && e.shiftKey && e.key.toLowerCase() === 'c') {
+      e.preventDefault()
+      e.stopPropagation()
+      setShowCc(true)
+      setCcFocusSignal((n) => n + 1)
+      return
+    }
+    if (mod && e.shiftKey && e.key.toLowerCase() === 'b') {
+      e.preventDefault()
+      e.stopPropagation()
+      setShowBcc(true)
+      setBccFocusSignal((n) => n + 1)
+      return
+    }
+    // The modal variant closes via Radix's own Escape handling.
+    if (!isModal && e.key === 'Escape') {
+      e.preventDefault()
+      e.stopPropagation()
+      if (linkOpen) cancelLink()
+      else handleClose()
+    }
+  }
 
   const refineWithCopilot = () => {
     if (!editor || !thread) return
@@ -1578,8 +1660,8 @@ const ComposeBox = memo(function ComposeBox({
           </div>
         }
       />
-      {showCc && <RecipientField label="Cc" value={ccList} onChange={setCcList} />}
-      {showBcc && <RecipientField label="Bcc" value={bccList} onChange={setBccList} />}
+      {showCc && <RecipientField label="Cc" value={ccList} onChange={setCcList} focusSignal={ccFocusSignal} />}
+      {showBcc && <RecipientField label="Bcc" value={bccList} onChange={setBccList} focusSignal={bccFocusSignal} />}
       <div className="flex items-center gap-2 border-b border-border px-3 py-2">
         <Input
           className="h-8"
@@ -1592,7 +1674,8 @@ const ComposeBox = memo(function ComposeBox({
               : 'Describe your reply and let AI write it…'}
           disabled={generating}
           onKeyDown={(event) => {
-            if (event.key === 'Enter') {
+            // Plain Enter runs the AI writer; Cmd/Ctrl+Enter bubbles to send.
+            if (event.key === 'Enter' && !event.metaKey && !event.ctrlKey) {
               event.preventDefault()
               void runAiBar()
             }
@@ -1753,6 +1836,19 @@ const ComposeBox = memo(function ComposeBox({
           showCloseButton={false}
           aria-describedby={undefined}
           className="flex h-[min(720px,calc(100vh-4rem))] flex-col gap-0 overflow-hidden p-0 font-sans sm:max-w-[840px]"
+          onKeyDown={onComposerKeyDown}
+          onEscapeKeyDown={(event) => {
+            // Radix's Escape runs document-capture, before the inner fields
+            // can claim it — let the link bar and an open recipient-suggestion
+            // menu win; only a bare Escape closes the whole composer.
+            if (linkOpen) {
+              event.preventDefault()
+              cancelLink()
+              return
+            }
+            const target = event.target as HTMLElement | null
+            if (target?.closest('[data-suggestions-open]')) event.preventDefault()
+          }}
         >
           <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-3">
             <DialogTitle className="flex-1 text-sm font-medium text-foreground">{modeLabel}</DialogTitle>
@@ -1774,7 +1870,10 @@ const ComposeBox = memo(function ComposeBox({
   }
 
   return (
-    <div className="ml-10 max-w-[720px] overflow-hidden rounded-lg border border-border bg-background font-sans">
+    <div
+      className="gmail-compose-inline ml-10 max-w-[720px] overflow-hidden rounded-lg border border-border bg-background font-sans"
+      onKeyDown={onComposerKeyDown}
+    >
       <div className="flex h-8 items-center justify-between border-b border-border px-3">
         <span className="text-xs font-medium text-muted-foreground">{modeLabel}</span>
         <Button
@@ -1797,10 +1896,16 @@ function ThreadDetail({
   thread,
   onClose,
   hidden,
+  keysDisabled,
+  onComposingChange,
 }: {
   thread: GmailThread
   onClose: () => void
   hidden?: boolean
+  /** True while a dialog is open above the inbox; suspends the reply keys. */
+  keysDisabled?: boolean
+  /** Reports whether the inline composer is open, so list shortcuts pause. */
+  onComposingChange?: (composing: boolean) => void
 }) {
   const [composeMode, setComposeMode] = useState<ComposeMode | null>(null)
   const [selfEmail, setSelfEmail] = useState<string>('')
@@ -1837,6 +1942,46 @@ function ThreadDetail({
       return next
     })
   }, [])
+
+  // Let EmailView pause its list shortcuts while our composer is open. The
+  // cleanup resets on hide/unmount so a hidden-but-mounted detail (up to 5 are
+  // kept alive) can't block them.
+  useEffect(() => {
+    if (hidden) return
+    onComposingChange?.(composeMode !== null)
+    return () => onComposingChange?.(false)
+  }, [hidden, composeMode, onComposingChange])
+
+  // Superhuman-style reply keys for the visible thread. Scoped by `hidden` so
+  // only the on-screen ThreadDetail listens. Escape closes the inline composer
+  // first; with none open it falls through to EmailView's close-thread.
+  useEffect(() => {
+    if (hidden || keysDisabled) return
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.isComposing || e.defaultPrevented) return
+      if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return
+      if (e.key === 'Escape') {
+        if (composeMode !== null) {
+          e.preventDefault()
+          setComposeMode(null)
+        }
+        return
+      }
+      if (composeMode !== null || isEditableTarget(e.target)) return
+      if (e.key === 'r') {
+        e.preventDefault()
+        setComposeMode('reply')
+      } else if (e.key === 'a') {
+        e.preventDefault()
+        setComposeMode(canReplyAll ? 'replyAll' : 'reply')
+      } else if (e.key === 'f') {
+        e.preventDefault()
+        setComposeMode('forward')
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [hidden, keysDisabled, composeMode, canReplyAll])
 
   return (
     <div className={cn('gmail-detail gmail-detail-inline', hidden && 'gmail-detail-hidden')}>
@@ -1922,8 +2067,200 @@ function ThreadDetail({
   )
 }
 
+// One inbox/search row (plus its kept-alive ThreadDetail). Memoized so cursor
+// moves and page appends only re-render the rows whose props actually changed
+// — re-rendering the whole list mid-scroll is what janks the frame.
+const ThreadRow = memo(function ThreadRow({
+  thread,
+  isSelected,
+  isFocused,
+  isMounted,
+  isLeaving,
+  keysDisabled,
+  onToggle,
+  onMarkRead,
+  onArchive,
+  onTrash,
+  onHoverIn,
+  onHoverOut,
+  onCloseThread,
+  onComposingChange,
+}: {
+  thread: GmailThread
+  isSelected: boolean
+  isFocused: boolean
+  isMounted: boolean
+  isLeaving: boolean
+  keysDisabled: boolean
+  onToggle: (thread: GmailThread) => void
+  onMarkRead: (threadId: string, read?: boolean) => Promise<void>
+  onArchive: (threadId: string) => Promise<void>
+  onTrash: (threadId: string) => Promise<void>
+  onHoverIn: (thread: GmailThread) => void
+  onHoverOut: () => void
+  onCloseThread: () => void
+  onComposingChange: (composing: boolean) => void
+}) {
+  const latest = latestMessage(thread)
+  const isUnread = thread.unread === true
+  const stop = (e: React.MouseEvent | React.KeyboardEvent) => {
+    e.stopPropagation()
+  }
+  return (
+    <div className={cn('gmail-row-group', !isMounted && 'gmail-row-group-cv', isLeaving && 'gmail-row-group-leaving')}>
+      <div
+        className={cn('gmail-row-shell', isSelected && 'gmail-row-shell-selected')}
+        data-thread-id={thread.threadId}
+        onMouseEnter={() => onHoverIn(thread)}
+        onMouseLeave={onHoverOut}
+      >
+        <button
+          type="button"
+          className={cn('gmail-row', isSelected && 'gmail-row-selected', isUnread && 'gmail-row-unread', isFocused && 'gmail-row-focused')}
+          onClick={() => onToggle(thread)}
+        >
+          <span className="gmail-row-dot" aria-hidden />
+          <span className="gmail-row-sender">{extractName(latest?.from || thread.from)}</span>
+          <span className="gmail-row-content">
+            <strong>{thread.summary || thread.subject || '(No subject)'}</strong>
+            <span>{thread.summary ? thread.subject : snippet(latest?.body || thread.latest_email)}</span>
+          </span>
+          <span className="gmail-row-date">{formatInboxTime(latest?.date || thread.date)}</span>
+        </button>
+        <div className="gmail-row-actions" onMouseDown={stop} onClick={stop}>
+          <button
+            type="button"
+            className="gmail-row-action"
+            title={isUnread ? 'Mark as read' : 'Mark as unread'}
+            aria-label={isUnread ? 'Mark as read' : 'Mark as unread'}
+            onClick={(e) => { stop(e); void onMarkRead(thread.threadId, isUnread) }}
+          >
+            {isUnread ? <CheckCheck size={15} /> : <Mail size={15} />}
+          </button>
+          <button
+            type="button"
+            className="gmail-row-action"
+            title="Archive"
+            aria-label="Archive"
+            onClick={(e) => { stop(e); void onArchive(thread.threadId) }}
+          >
+            <Archive size={15} />
+          </button>
+          <button
+            type="button"
+            className="gmail-row-action gmail-row-action-danger"
+            title="Delete"
+            aria-label="Delete"
+            onClick={(e) => { stop(e); void onTrash(thread.threadId) }}
+          >
+            <Trash2 size={15} />
+          </button>
+        </div>
+      </div>
+      {/* Drop the detail as soon as the row starts leaving — the collapse
+          keyframe assumes row height, and the thread is being removed anyway. */}
+      {isMounted && !isLeaving && (
+        <ThreadDetail
+          thread={thread}
+          onClose={onCloseThread}
+          hidden={!isSelected}
+          keysDisabled={keysDisabled}
+          onComposingChange={onComposingChange}
+        />
+      )}
+    </div>
+  )
+})
+
+function ShortcutKey({ children }: { children: React.ReactNode }) {
+  return (
+    <kbd className="inline-flex h-5 min-w-5 items-center justify-center rounded border border-border bg-muted px-1.5 font-mono text-[11px] font-medium text-foreground">
+      {children}
+    </kbd>
+  )
+}
+
+// One shortcut line: `combo` keys render as adjacent chips (a chord or a
+// two-key sequence); `alt` is an equivalent alternative shown after "or".
+function ShortcutRow({ combo, alt, label }: { combo: string[]; alt?: string[]; label: string }) {
+  return (
+    <div className="flex items-center justify-between gap-4 py-1">
+      <span className="text-sm text-muted-foreground">{label}</span>
+      <span className="flex shrink-0 items-center gap-1">
+        {combo.map((key) => <ShortcutKey key={key}>{key}</ShortcutKey>)}
+        {alt && (
+          <>
+            <span className="px-0.5 text-xs text-muted-foreground">or</span>
+            {alt.map((key) => <ShortcutKey key={key}>{key}</ShortcutKey>)}
+          </>
+        )}
+      </span>
+    </div>
+  )
+}
+
+function ShortcutSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</div>
+      {children}
+    </div>
+  )
+}
+
+// The "?" cheat sheet. Static list — keep in sync with the handlers in
+// EmailView, ThreadDetail, and ComposeBox.
+function ShortcutsHelpDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+  const mod = isMac ? '⌘' : 'Ctrl'
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent aria-describedby={undefined} className="font-sans sm:max-w-[620px]">
+        <DialogTitle className="text-base font-semibold">Keyboard shortcuts</DialogTitle>
+        <div className="grid grid-cols-1 gap-x-10 gap-y-5 sm:grid-cols-2">
+          <ShortcutSection title="Inbox">
+            <ShortcutRow combo={['J']} alt={['↓']} label="Next thread" />
+            <ShortcutRow combo={['K']} alt={['↑']} label="Previous thread" />
+            <ShortcutRow combo={['Enter']} alt={['O']} label="Open / close thread" />
+            <ShortcutRow combo={['Esc']} label="Close thread / clear search" />
+            <ShortcutRow combo={['E']} label="Archive" />
+            <ShortcutRow combo={['#']} label="Move to trash" />
+            <ShortcutRow combo={['U']} label="Mark read / unread" />
+            <ShortcutRow combo={['C']} alt={['N']} label="New message" />
+            <ShortcutRow combo={['/']} label="Search" />
+            <ShortcutRow combo={['G', 'I']} label="Go to inbox" />
+            <ShortcutRow combo={['G', 'D']} label="Go to drafts" />
+            <ShortcutRow combo={['?']} label="Keyboard shortcuts" />
+          </ShortcutSection>
+          <div className="flex flex-col gap-5">
+            <ShortcutSection title="Thread">
+              <ShortcutRow combo={['R']} label="Reply" />
+              <ShortcutRow combo={['A']} label="Reply all" />
+              <ShortcutRow combo={['F']} label="Forward" />
+            </ShortcutSection>
+            <ShortcutSection title="Composer">
+              <ShortcutRow combo={[mod, 'Enter']} label="Send" />
+              <ShortcutRow combo={[mod, 'Shift', 'C']} label="Add Cc" />
+              <ShortcutRow combo={[mod, 'Shift', 'B']} label="Add Bcc" />
+              <ShortcutRow combo={['Esc']} label="Close (saves draft)" />
+            </ShortcutSection>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 const MAX_KEPT_OPEN = 5
 const PAGE_SIZE = 25
+// Duration of the row slide-out on archive/trash — matches gmail-row-leave.
+const ROW_LEAVE_MS = 160
+// Sticky .gmail-list-header height — rows scrolled to the top stay clear of it.
+const LIST_STICKY_HEADER_PX = 32
+
+function listScrollerFor(row: HTMLElement): HTMLElement | null {
+  const list = row.closest('.gmail-list')
+  return list instanceof HTMLElement ? list : null
+}
 type InboxSection = 'important' | 'other'
 
 interface SectionState {
@@ -1967,6 +2304,7 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
   const [openedThreadIds, setOpenedThreadIds] = useState<string[]>(initialThreadId ? [initialThreadId] : [])
   useEffect(() => {
     setSelectedThreadId(initialThreadId ?? null)
+    setFocusedThreadId(initialThreadId ?? null)
     if (initialThreadId) {
       setOpenedThreadIds((prev) => {
         const without = prev.filter((id) => id !== initialThreadId)
@@ -1996,6 +2334,31 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
   // Gmail sync uses the native Google OAuth connection.
   const [emailConnection, setEmailConnection] = useState<GmailConnectionStatus | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // Keyboard navigation: the j/k focus cursor over the visible rows, plus the
+  // "?" shortcuts overlay. lastFocusedIndexRef remembers the cursor's position
+  // so it can re-anchor when the focused row disappears (archive/trash/reload).
+  const [focusedThreadId, setFocusedThreadId] = useState<string | null>(null)
+  const [helpOpen, setHelpOpen] = useState(false)
+  // Set while the visible ThreadDetail's inline composer is open; list
+  // shortcuts stay inert so typing a reply can't archive threads.
+  const [activeThreadComposing, setActiveThreadComposing] = useState(false)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const lastFocusedIndexRef = useRef(0)
+  const listModeRef = useRef<string | null>(null)
+  // Timestamp of a pending "g" for the two-key g→i / g→d sequences.
+  const gPendingRef = useRef(0)
+  // Rows currently animating out (archive/trash/draft-delete in flight).
+  const [leavingThreadIds, setLeavingThreadIds] = useState<ReadonlySet<string>>(() => new Set())
+  const markLeaving = useCallback((rowId: string, leaving: boolean) => {
+    setLeavingThreadIds((prev) => {
+      if (prev.has(rowId) === leaving) return prev
+      const next = new Set(prev)
+      if (leaving) next.add(rowId)
+      else next.delete(rowId)
+      return next
+    })
+  }, [])
 
   const loadDrafts = useCallback(async () => {
     setDraftsLoading(true)
@@ -2057,14 +2420,18 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
   const deleteDraftAction = useCallback(async (thread: GmailThread) => {
     const id = thread.draftId
     if (!id) return
+    // Slide the row out before dropping it from the list.
+    markLeaving(id, true)
+    await new Promise((resolve) => window.setTimeout(resolve, ROW_LEAVE_MS))
     setDrafts((prev) => prev.filter((d) => d.draftId !== id))
+    markLeaving(id, false)
     try {
       await window.ipc.invoke('gmail:deleteDraft', { draftId: id })
     } catch (err) {
       toast(`Could not delete draft: ${err instanceof Error ? err.message : String(err)}`, 'error')
       void loadDrafts()
     }
-  }, [loadDrafts])
+  }, [loadDrafts, markLeaving])
 
   // Closing the draft composer may have edited/sent/deleted it — refresh.
   const closeDraftEditor = useCallback(() => {
@@ -2097,30 +2464,6 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
     }
   }, [])
 
-  // Gmail-style "n" to start a new message. EmailView only mounts while the
-  // inbox is open, so this is naturally scoped to that view. Ignored while
-  // typing in any field or when a dialog (compose/settings) is already up.
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== 'n' || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || e.isComposing) return
-      if (composeOpen || settingsOpen || editingDraft) return
-      const target = e.target as HTMLElement | null
-      if (
-        target &&
-        (target.tagName === 'INPUT' ||
-          target.tagName === 'TEXTAREA' ||
-          target.tagName === 'SELECT' ||
-          target.isContentEditable)
-      ) {
-        return
-      }
-      e.preventDefault()
-      setComposeOpen(true)
-    }
-    document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [composeOpen, settingsOpen, editingDraft])
-
   useEffect(() => { persistedImportant = important }, [important])
   useEffect(() => { persistedOther = other }, [other])
   useEffect(() => { persistedDrafts = drafts }, [drafts])
@@ -2137,6 +2480,7 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
     })
     setImportant(mapSection)
     setOther(mapSection)
+    setSearchResults((prev) => prev.map((t) => (t.threadId === threadId ? updater(t) : t)))
   }, [])
 
   const removeThreadFromState = useCallback((threadId: string) => {
@@ -2146,6 +2490,7 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
     })
     setImportant(filterSection)
     setOther(filterSection)
+    setSearchResults((prev) => prev.filter((t) => t.threadId !== threadId))
     setSelectedThreadId((current) => (current === threadId ? null : current))
     setOpenedThreadIds((prev) => prev.filter((id) => id !== threadId))
   }, [])
@@ -2197,8 +2542,14 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
   }, [markSectionReadAction])
 
   const archiveThreadAction = useCallback(async (threadId: string) => {
+    // Start the slide-out right away; the row is removed once both the IPC
+    // and the animation have finished. A failure clears the flag → snap back.
+    markLeaving(threadId, true)
     try {
-      const result = await window.ipc.invoke('gmail:archiveThread', { threadId })
+      const [result] = await Promise.all([
+        window.ipc.invoke('gmail:archiveThread', { threadId }),
+        new Promise((resolve) => window.setTimeout(resolve, ROW_LEAVE_MS)),
+      ])
       if (result.ok) {
         removeThreadFromState(threadId)
       } else if (result.error) {
@@ -2206,12 +2557,18 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
       }
     } catch (err) {
       toast(`Archive failed: ${err instanceof Error ? err.message : String(err)}`, 'error')
+    } finally {
+      markLeaving(threadId, false)
     }
-  }, [removeThreadFromState])
+  }, [removeThreadFromState, markLeaving])
 
   const trashThreadAction = useCallback(async (threadId: string) => {
+    markLeaving(threadId, true)
     try {
-      const result = await window.ipc.invoke('gmail:trashThread', { threadId })
+      const [result] = await Promise.all([
+        window.ipc.invoke('gmail:trashThread', { threadId }),
+        new Promise((resolve) => window.setTimeout(resolve, ROW_LEAVE_MS)),
+      ])
       if (result.ok) {
         removeThreadFromState(threadId)
       } else if (result.error) {
@@ -2219,10 +2576,13 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
       }
     } catch (err) {
       toast(`Delete failed: ${err instanceof Error ? err.message : String(err)}`, 'error')
+    } finally {
+      markLeaving(threadId, false)
     }
-  }, [removeThreadFromState])
+  }, [removeThreadFromState, markLeaving])
 
   const toggleThread = useCallback((thread: GmailThread) => {
+    setFocusedThreadId(thread.threadId)
     setSelectedThreadId((current) => {
       const next = current === thread.threadId ? null : thread.threadId
       if (next) {
@@ -2489,89 +2849,295 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
   const visibleOther = useMemo(() => filterThreads(other.threads), [other.threads, filterThreads])
   const visibleDrafts = useMemo(() => filterThreads(drafts), [drafts, filterThreads])
 
+  // ── Keyboard shortcuts (Superhuman-style) ───────────────────────────────────
+  // EmailView only mounts while the email tab is open, so these are naturally
+  // scoped to that view. Single-letter keys stay inert while typing in any
+  // field, while a dialog is up, or while the inline reply composer is open.
+
+  const listMode: 'search' | 'drafts' | 'inbox' = query.trim() ? 'search' : view === 'drafts' ? 'drafts' : 'inbox'
+  const anyModalOpen = composeOpen || settingsOpen || Boolean(editingDraft) || helpOpen
+
+  // Row identity for the focus cursor — must match each row's data-thread-id.
+  const rowIdOf = useCallback((thread: GmailThread) => (
+    listMode === 'drafts' ? (thread.draftId || thread.threadId) : thread.threadId
+  ), [listMode])
+
+  // Flattened, ordered list of the rows currently on screen — the domain of
+  // the j/k cursor. Mirrors the render branches below: search results, drafts,
+  // or Important followed by Everything else (which only renders once
+  // Important is exhausted).
+  const visibleList = useMemo<GmailThread[]>(() => {
+    if (query.trim()) return searchResults
+    if (view === 'drafts') return visibleDrafts
+    if (important.hasReachedEnd && other.threads.length > 0) return [...visibleImportant, ...visibleOther]
+    return visibleImportant
+  }, [query, searchResults, view, visibleDrafts, visibleImportant, visibleOther, important.hasReachedEnd, other.threads.length])
+
+  // Keep the cursor valid as the list changes: switching between inbox,
+  // search, and drafts resets it; if the focused row vanished (archived,
+  // trashed, or replaced by a live reload), re-anchor to the same position.
+  useEffect(() => {
+    if (listModeRef.current !== listMode) {
+      const isFirstRun = listModeRef.current === null
+      listModeRef.current = listMode
+      if (!isFirstRun) {
+        lastFocusedIndexRef.current = 0
+        setFocusedThreadId(null)
+        return
+      }
+    }
+    if (!focusedThreadId || visibleList.length === 0) return
+    const idx = visibleList.findIndex((t) => rowIdOf(t) === focusedThreadId)
+    if (idx >= 0) {
+      lastFocusedIndexRef.current = idx
+      return
+    }
+    const fallback = visibleList[Math.min(lastFocusedIndexRef.current, visibleList.length - 1)]
+    setFocusedThreadId(fallback ? rowIdOf(fallback) : null)
+  }, [visibleList, focusedThreadId, listMode, rowIdOf])
+
+  // ── Smooth list scrolling ──────────────────────────────────────────────────
+  // Short ease-out scroll instead of native behavior:'smooth' — it finishes in
+  // ~140ms and retargets cleanly under key-repeat, where the native animation
+  // lags behind and rubber-bands.
+  const scrollAnimRef = useRef<number | null>(null)
+  const smoothScrollTo = useCallback((container: HTMLElement, top: number) => {
+    if (scrollAnimRef.current !== null) window.cancelAnimationFrame(scrollAnimRef.current)
+    const from = container.scrollTop
+    const max = container.scrollHeight - container.clientHeight
+    const target = Math.min(Math.max(top, 0), max)
+    const delta = target - from
+    if (delta === 0) return
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      container.scrollTop = target
+      return
+    }
+    const start = performance.now()
+    const duration = 140
+    const step = (now: number) => {
+      const t = Math.min(1, (now - start) / duration)
+      const eased = 1 - (1 - t) ** 3
+      container.scrollTop = from + delta * eased
+      scrollAnimRef.current = t < 1 ? window.requestAnimationFrame(step) : null
+    }
+    scrollAnimRef.current = window.requestAnimationFrame(step)
+  }, [])
+
+  useEffect(() => () => {
+    if (scrollAnimRef.current !== null) window.cancelAnimationFrame(scrollAnimRef.current)
+  }, [])
+
+  const rowElementFor = useCallback((rowId: string) => {
+    const el = rootRef.current?.querySelector(`[data-thread-id="${CSS.escape(rowId)}"]`)
+    return el instanceof HTMLElement ? el : null
+  }, [])
+
+  // Keep the focused row on screen during keyboard navigation — "nearest"
+  // semantics with the animated scroll, minding the sticky section header.
+  useEffect(() => {
+    if (!focusedThreadId) return
+    const row = rowElementFor(focusedThreadId)
+    const list = row ? listScrollerFor(row) : null
+    if (!row || !list) return
+    const listRect = list.getBoundingClientRect()
+    const rowRect = row.getBoundingClientRect()
+    const topEdge = listRect.top + LIST_STICKY_HEADER_PX
+    if (rowRect.top < topEdge) {
+      smoothScrollTo(list, list.scrollTop + rowRect.top - topEdge)
+    } else if (rowRect.bottom > listRect.bottom) {
+      smoothScrollTo(list, list.scrollTop + rowRect.bottom - listRect.bottom)
+    }
+  }, [focusedThreadId, rowElementFor, smoothScrollTo])
+
+  // Opening a thread glides its row to the top of the list so the expanded
+  // conversation gets the full viewport. Runs after the focus effect above and
+  // cancels its animation via the shared ref, so on open this scroll wins.
+  useEffect(() => {
+    if (!selectedThreadId) return
+    const row = rowElementFor(selectedThreadId)
+    const list = row ? listScrollerFor(row) : null
+    if (!row || !list) return
+    const rowTop = list.scrollTop + row.getBoundingClientRect().top - list.getBoundingClientRect().top
+    smoothScrollTo(list, rowTop - LIST_STICKY_HEADER_PX)
+  }, [selectedThreadId, rowElementFor, smoothScrollTo])
+
+  // While the list is scrolling, flag the shell so CSS turns off row pointer
+  // events (see .gmail-shell[data-scrolling]) — otherwise every row passing
+  // under the cursor restyles for :hover and schedules a prefetch timer,
+  // stealing frame time. The attribute is toggled straight on the DOM node so
+  // scrolling itself never causes a React render.
+  useEffect(() => {
+    const root = rootRef.current
+    if (!root) return
+    let timer: number | null = null
+    const onScroll = (event: Event) => {
+      const target = event.target
+      if (!(target instanceof Element) || !target.classList.contains('gmail-list')) return
+      if (timer === null) root.setAttribute('data-scrolling', '')
+      else window.clearTimeout(timer)
+      timer = window.setTimeout(() => {
+        timer = null
+        root.removeAttribute('data-scrolling')
+      }, 150)
+    }
+    // Capture phase: scroll events don't bubble, so listen above the scroller.
+    root.addEventListener('scroll', onScroll, { capture: true, passive: true })
+    return () => {
+      root.removeEventListener('scroll', onScroll, { capture: true })
+      if (timer !== null) window.clearTimeout(timer)
+    }
+  }, [])
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.isComposing || e.defaultPrevented) return
+      // All list keys are unmodified. Shift is allowed through because "#" and
+      // "?" need it; shifted letters produce uppercase e.key and match nothing.
+      if (e.ctrlKey || e.metaKey || e.altKey) return
+      const inEditable = isEditableTarget(e.target)
+
+      if (e.key === 'Escape') {
+        // The search input, recipient fields, and composers own their Escape;
+        // this level only closes the open thread or clears the search.
+        if (inEditable || anyModalOpen || activeThreadComposing) return
+        if (selectedThreadId) {
+          e.preventDefault()
+          setSelectedThreadId(null)
+          return
+        }
+        if (query.trim()) {
+          e.preventDefault()
+          setQuery('')
+        }
+        return
+      }
+
+      if (inEditable || anyModalOpen || activeThreadComposing) return
+
+      // Two-key "go to" sequences: g then i (inbox) / g then d (drafts).
+      if (gPendingRef.current && Date.now() - gPendingRef.current < 1000) {
+        gPendingRef.current = 0
+        if (e.key === 'i' || e.key === 'd') {
+          e.preventDefault()
+          setQuery('')
+          setView(e.key === 'i' ? 'inbox' : 'drafts')
+          return
+        }
+        // Any other key cancels the sequence and is handled normally below.
+      }
+      if (e.key === 'g') {
+        gPendingRef.current = Date.now()
+        return
+      }
+
+      const focusedIndex = focusedThreadId
+        ? visibleList.findIndex((t) => rowIdOf(t) === focusedThreadId)
+        : -1
+
+      const moveFocus = (delta: number) => {
+        if (visibleList.length === 0) return
+        e.preventDefault() // stop arrow keys from also scrolling the list
+        const next = visibleList[Math.min(Math.max(focusedIndex + delta, 0), visibleList.length - 1)]
+        if (next) setFocusedThreadId(rowIdOf(next))
+      }
+
+      switch (e.key) {
+        case 'j':
+        case 'ArrowDown':
+          moveFocus(1)
+          return
+        case 'k':
+        case 'ArrowUp':
+          moveFocus(-1)
+          return
+        case 'Enter':
+        case 'o': {
+          const focused = focusedIndex >= 0 ? visibleList[focusedIndex] : undefined
+          if (!focused) return
+          e.preventDefault()
+          if (listMode === 'drafts') setEditingDraft(focused)
+          else toggleThread(focused)
+          return
+        }
+        case 'c':
+        case 'n':
+          e.preventDefault()
+          setComposeOpen(true)
+          return
+        case '/':
+          e.preventDefault()
+          searchInputRef.current?.focus()
+          return
+        case '?':
+          e.preventDefault()
+          setHelpOpen(true)
+          return
+        case 'e':
+        case '#':
+        case 'u': {
+          if (listMode === 'drafts') return // drafts have no archive/trash/read state
+          // The open thread takes precedence over the cursor.
+          const targetId = selectedThreadId ?? (focusedIndex >= 0 ? visibleList[focusedIndex]?.threadId : undefined)
+          const target = targetId ? visibleList.find((t) => t.threadId === targetId) : undefined
+          if (!target) return
+          e.preventDefault()
+          if (e.key === 'u') void markThreadReadAction(target.threadId, target.unread === true)
+          else if (e.key === 'e') void archiveThreadAction(target.threadId)
+          else void trashThreadAction(target.threadId)
+          return
+        }
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [
+    visibleList, focusedThreadId, selectedThreadId, query, listMode, anyModalOpen,
+    activeThreadComposing, rowIdOf, toggleThread, markThreadReadAction,
+    archiveThreadAction, trashThreadAction,
+  ])
+
   const hasAny = important.threads.length > 0 || other.threads.length > 0
   const initialLoading = !hasAny && refreshing
   const needsEmailConnect = emailConnection?.connected === false
   const needsEmailReconnect = emailConnection?.connected === true && !emailConnection.hasRequiredScope
 
+  const closeThread = useCallback(() => setSelectedThreadId(null), [])
+
   const renderRow = (thread: GmailThread) => {
-    const latest = latestMessage(thread)
-    const isSelected = thread.threadId === selectedThreadId
-    const isUnread = thread.unread === true
     const isMounted = openedThreadIds.includes(thread.threadId)
-    const stop = (e: React.MouseEvent | React.KeyboardEvent) => {
-      e.stopPropagation()
-    }
     return (
-      <div key={thread.threadId} className="gmail-row-group">
-        <div
-          className={cn('gmail-row-shell', isSelected && 'gmail-row-shell-selected')}
-          onMouseEnter={() => scheduleHoverPrefetch(thread)}
-          onMouseLeave={cancelHoverPrefetch}
-        >
-          <button
-            type="button"
-            className={cn('gmail-row', isSelected && 'gmail-row-selected', isUnread && 'gmail-row-unread')}
-            onClick={() => toggleThread(thread)}
-          >
-            <span className="gmail-row-dot" aria-hidden />
-            <span className="gmail-row-sender">{extractName(latest?.from || thread.from)}</span>
-            <span className="gmail-row-content">
-              <strong>{thread.summary || thread.subject || '(No subject)'}</strong>
-              <span>{thread.summary ? thread.subject : snippet(latest?.body || thread.latest_email)}</span>
-            </span>
-            <span className="gmail-row-date">{formatInboxTime(latest?.date || thread.date)}</span>
-          </button>
-          <div className="gmail-row-actions" onMouseDown={stop} onClick={stop}>
-            <button
-              type="button"
-              className="gmail-row-action"
-              title={isUnread ? 'Mark as read' : 'Mark as unread'}
-              aria-label={isUnread ? 'Mark as read' : 'Mark as unread'}
-              onClick={(e) => { stop(e); void markThreadReadAction(thread.threadId, isUnread) }}
-            >
-              {isUnread ? <CheckCheck size={15} /> : <Mail size={15} />}
-            </button>
-            <button
-              type="button"
-              className="gmail-row-action"
-              title="Archive"
-              aria-label="Archive"
-              onClick={(e) => { stop(e); void archiveThreadAction(thread.threadId) }}
-            >
-              <Archive size={15} />
-            </button>
-            <button
-              type="button"
-              className="gmail-row-action gmail-row-action-danger"
-              title="Delete"
-              aria-label="Delete"
-              onClick={(e) => { stop(e); void trashThreadAction(thread.threadId) }}
-            >
-              <Trash2 size={15} />
-            </button>
-          </div>
-        </div>
-        {isMounted && (
-          <ThreadDetail
-            thread={thread}
-            onClose={() => setSelectedThreadId(null)}
-            hidden={!isSelected}
-          />
-        )}
-      </div>
+      <ThreadRow
+        key={thread.threadId}
+        thread={thread}
+        isSelected={thread.threadId === selectedThreadId}
+        isFocused={thread.threadId === focusedThreadId}
+        isMounted={isMounted}
+        isLeaving={leavingThreadIds.has(thread.threadId)}
+        keysDisabled={isMounted && anyModalOpen}
+        onToggle={toggleThread}
+        onMarkRead={markThreadReadAction}
+        onArchive={archiveThreadAction}
+        onTrash={trashThreadAction}
+        onHoverIn={scheduleHoverPrefetch}
+        onHoverOut={cancelHoverPrefetch}
+        onCloseThread={closeThread}
+        onComposingChange={setActiveThreadComposing}
+      />
     )
   }
 
   const renderDraftRow = (thread: GmailThread) => {
     const stop = (e: React.MouseEvent | React.KeyboardEvent) => { e.stopPropagation() }
     const recipient = thread.to ? extractName(thread.to) : 'No recipient'
+    const rowId = thread.draftId || thread.threadId
+    const isFocused = rowId === focusedThreadId
+    const isLeaving = leavingThreadIds.has(rowId)
     return (
-      <div key={thread.draftId || thread.threadId} className="gmail-row-group">
-        <div className="gmail-row-shell">
+      <div key={rowId} className={cn('gmail-row-group', 'gmail-row-group-cv', isLeaving && 'gmail-row-group-leaving')}>
+        <div className="gmail-row-shell" data-thread-id={rowId}>
           <button
             type="button"
-            className="gmail-row"
+            className={cn('gmail-row', isFocused && 'gmail-row-focused')}
             onClick={() => setEditingDraft(thread)}
           >
             <span className="gmail-row-dot" aria-hidden />
@@ -2599,15 +3165,23 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
   }
 
   return (
-    <div className="gmail-shell">
+    <div className="gmail-shell" ref={rootRef}>
       <div className="gmail-main">
         <div className="gmail-topbar">
           <div className="gmail-search">
             <Search size={18} />
             <input
+              ref={searchInputRef}
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Search all mail"
+              onKeyDown={(event) => {
+                if (event.key !== 'Escape') return
+                event.preventDefault()
+                event.stopPropagation()
+                if (query) setQuery('')
+                else event.currentTarget.blur()
+              }}
             />
             {query && (
               <button
@@ -2768,6 +3342,7 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
         />
       )}
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} defaultTab="connections" />
+      <ShortcutsHelpDialog open={helpOpen} onOpenChange={setHelpOpen} />
     </div>
   )
 }
