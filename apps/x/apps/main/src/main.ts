@@ -2,7 +2,7 @@ import { app, BrowserWindow, desktopCapturer, protocol, net, shell, session, typ
 import path from "node:path";
 import {
   setupIpcHandlers,
-  startRunsWatcher,
+  startRunsWatcher, startSessionsWatcher,
   startCodeSessionStatusWatcher,
   startServicesWatcher,
   startLiveNoteAgentWatcher,
@@ -45,6 +45,7 @@ import { execFileSync } from "node:child_process";
 import { init as initChromeSync } from "@x/core/dist/knowledge/chrome-extension/server/server.js";
 import container, { registerBrowserControlService, registerNotificationService } from "@x/core/dist/di/container.js";
 import type { CodeModeManager } from "@x/core/dist/code-mode/acp/manager.js";
+import type { ISessions } from "@x/core/dist/sessions/index.js";
 import { browserViewManager, BROWSER_PARTITION } from "./browser/view.js";
 import { setupBrowserEventForwarding } from "./browser/ipc.js";
 import { ElectronBrowserControlService } from "./browser/control-service.js";
@@ -387,6 +388,11 @@ app.whenReady().then(async () => {
 
   // start runs watcher
   startRunsWatcher();
+
+  // New runtime: build the in-memory session index (startup scan) before the
+  // renderer can list sessions, then forward the session bus to windows.
+  await container.resolve<ISessions>('sessions').initialize();
+  startSessionsWatcher();
 
   // start code-session status tracker (derives working/needs-you/idle + notifications)
   startCodeSessionStatusWatcher();

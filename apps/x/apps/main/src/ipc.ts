@@ -24,6 +24,8 @@ const execFileAsync = promisify(execFile);
 
 import { RunEvent } from '@x/shared/dist/runs.js';
 import { ServiceEvent } from '@x/shared/dist/service-events.js';
+import type { SessionBusEvent } from '@x/shared/dist/sessions.js';
+import type { ISessions, EmitterSessionBus } from '@x/core/dist/sessions/index.js';
 import container from '@x/core/dist/di/container.js';
 import { listOnboardingModels } from '@x/core/dist/models/models-dev.js';
 import { testModelConnection, listModelsForProvider, generateOneShot } from '@x/core/dist/models/models.js';
@@ -634,6 +636,25 @@ export async function startRunsWatcher(): Promise<void> {
   });
 }
 
+// New runtime: session bus → renderer windows (session-design.md §10).
+function emitSessionEvent(event: SessionBusEvent): void {
+  const windows = BrowserWindow.getAllWindows();
+  for (const win of windows) {
+    if (!win.isDestroyed() && win.webContents) {
+      win.webContents.send('sessions:events', event);
+    }
+  }
+}
+
+let sessionsWatcher: (() => void) | null = null;
+export function startSessionsWatcher(): void {
+  if (sessionsWatcher) {
+    return;
+  }
+  const sessionBus = container.resolve<EmitterSessionBus>('sessionBus');
+  sessionsWatcher = sessionBus.subscribe((event) => emitSessionEvent(event));
+}
+
 let servicesWatcher: (() => void) | null = null;
 export async function startServicesWatcher(): Promise<void> {
   if (servicesWatcher) {
@@ -839,6 +860,51 @@ export function setupIpcHandlers() {
     },
     'runs:delete': async (_event, args) => {
       await runsCore.deleteRun(args.runId);
+      return { success: true };
+    },
+    // ── New runtime: sessions + turns ─────────────────────────
+    // Thin pass-throughs to the sessions service. sendMessage returns the
+    // turnId immediately; the turn advances in the background and the
+    // renderer reconciles via the sessions:events feed. Input-routing calls
+    // settle with that advance's outcome (the renderer fire-and-forgets).
+    'sessions:create': async (_event, args) => {
+      const sessionId = await container.resolve<ISessions>('sessions').createSession(args);
+      return { sessionId };
+    },
+    'sessions:list': async () => {
+      return { sessions: container.resolve<ISessions>('sessions').listSessions() };
+    },
+    'sessions:get': async (_event, args) => {
+      return container.resolve<ISessions>('sessions').getSession(args.sessionId);
+    },
+    'sessions:getTurn': async (_event, args) => {
+      return container.resolve<ISessions>('sessions').getTurn(args.turnId);
+    },
+    'sessions:sendMessage': async (_event, args) => {
+      return container.resolve<ISessions>('sessions').sendMessage(args.sessionId, args.input, args.config);
+    },
+    'sessions:respondToPermission': async (_event, args) => {
+      await container.resolve<ISessions>('sessions').respondToPermission(args.turnId, args.toolCallId, args.decision, args.metadata);
+      return { success: true };
+    },
+    'sessions:respondToAskHuman': async (_event, args) => {
+      await container.resolve<ISessions>('sessions').respondToAskHuman(args.turnId, args.toolCallId, args.answer);
+      return { success: true };
+    },
+    'sessions:stopTurn': async (_event, args) => {
+      await container.resolve<ISessions>('sessions').stopTurn(args.turnId, args.reason);
+      return { success: true };
+    },
+    'sessions:resumeTurn': async (_event, args) => {
+      await container.resolve<ISessions>('sessions').resumeTurn(args.sessionId);
+      return { success: true };
+    },
+    'sessions:setTitle': async (_event, args) => {
+      await container.resolve<ISessions>('sessions').setTitle(args.sessionId, args.title);
+      return { success: true };
+    },
+    'sessions:delete': async (_event, args) => {
+      await container.resolve<ISessions>('sessions').deleteSession(args.sessionId);
       return { success: true };
     },
     'runs:downloadLog': async (event, args) => {
