@@ -378,7 +378,14 @@ export function ChatSidebar({
     }
 
     try {
-      const result = await window.ipc.invoke('runs:downloadLog', { runId: activeRunId })
+      // Session-first (new runtime); legacy runs fallback covers old
+      // background tabs until stage 7 removes the runs runtime.
+      let result: { success: boolean; error?: string }
+      try {
+        result = await window.ipc.invoke('sessions:downloadLog', { sessionId: activeRunId })
+      } catch {
+        result = await window.ipc.invoke('runs:downloadLog', { runId: activeRunId })
+      }
       if (result.success) {
         toast.success('Chat log saved')
       } else if (result.error) {

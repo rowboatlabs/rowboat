@@ -907,6 +907,37 @@ export function setupIpcHandlers() {
       await container.resolve<ISessions>('sessions').deleteSession(args.sessionId);
       return { success: true };
     },
+    'sessions:downloadLog': async (event, args) => {
+      // Concatenate the session's turn logs into one JSONL for debugging.
+      const sessions = container.resolve<ISessions>('sessions');
+      const state = await sessions.getSession(args.sessionId);
+      const win = BrowserWindow.fromWebContents(event.sender);
+      const result = await dialog.showSaveDialog(win!, {
+        defaultPath: `${args.sessionId}.jsonl.log`,
+        filters: [
+          { name: 'Chat Log', extensions: ['log'] },
+          { name: 'JSONL', extensions: ['jsonl'] },
+          { name: 'All Files', extensions: ['*'] },
+        ],
+      });
+      if (result.canceled || !result.filePath) {
+        return { success: false };
+      }
+      try {
+        const lines: string[] = [];
+        for (const ref of state.turns) {
+          const turn = await sessions.getTurn(ref.turnId);
+          for (const turnEvent of turn.events) {
+            lines.push(JSON.stringify(turnEvent));
+          }
+        }
+        await fs.writeFile(result.filePath, lines.join('\n') + '\n');
+        return { success: true };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to download chat log';
+        return { success: false, error: message };
+      }
+    },
     'runs:downloadLog': async (event, args) => {
       const runFileName = `${args.runId}.jsonl`;
       if (path.basename(runFileName) !== runFileName) {

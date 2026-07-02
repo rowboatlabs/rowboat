@@ -442,6 +442,14 @@ const ipcSchemas = {
     req: z.object({ sessionId: z.string(), title: z.string() }),
     res: z.object({ success: z.literal(true) }),
   },
+  'sessions:downloadLog': {
+    // Concatenates the session's turn logs into one JSONL for debugging.
+    req: z.object({ sessionId: z.string() }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
   'sessions:delete': {
     req: z.object({ sessionId: z.string() }),
     res: z.object({ success: z.literal(true) }),
