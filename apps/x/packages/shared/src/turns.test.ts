@@ -506,6 +506,7 @@ describe("tool execution", () => {
             permResolved("tc1", "deny", "human"),
             result("tc1", "echo", "runtime", "Permission denied", true),
         ]);
+        expect(state.toolCalls[0].permission?.classificationFailed).toBe(true);
         expect(state.toolCalls[0].result?.result.isError).toBe(true);
     });
 

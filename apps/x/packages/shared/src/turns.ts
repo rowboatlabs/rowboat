@@ -382,6 +382,9 @@ export interface ToolCallState {
     permission?: {
         required: z.infer<typeof ToolPermissionRequired>;
         classification?: z.infer<typeof ToolPermissionClassified>;
+        // Set when a tool_permission_classification_failed event named this
+        // call; such calls are treated as defer and never re-classified.
+        classificationFailed?: boolean;
         resolved?: z.infer<typeof ToolPermissionResolved>;
     };
     invocation?: z.infer<typeof ToolInvocationRequested>;
@@ -635,8 +638,8 @@ function applyToolPermissionClassificationFailed(
         if (toolCall.permission.resolved) {
             fail(`classification failure after permission resolution: ${toolCallId}`);
         }
+        toolCall.permission.classificationFailed = true;
     }
-    // Recorded for the audit trail; does not currently affect derived state.
 }
 
 function applyToolPermissionResolved(
