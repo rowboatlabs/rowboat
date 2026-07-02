@@ -730,7 +730,7 @@ export function ChatSidebar({
                                             onApproveSession={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'session')}
                                             onApproveAlways={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'always')}
                                             onDeny={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
-                                            isProcessing={isActive && isProcessing}
+                                            isProcessing={isActive && (isThinking ?? isProcessing)}
                                             response={response}
                                           />
                                         )}
@@ -747,7 +747,7 @@ export function ChatSidebar({
                                   key={request.toolCallId}
                                   query={request.query}
                                   onResponse={(response) => onAskHumanResponse(request.toolCallId, request.subflow, response)}
-                                  isProcessing={isActive && isProcessing}
+                                  isProcessing={isActive && (isThinking ?? isProcessing)}
                                 />
                               ))}
 

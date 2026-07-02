@@ -949,6 +949,18 @@ function App() {
   const streamingBuffersRef = useRef<Map<string, { assistant: string }>>(new Map())
   const [isStopping, setIsStopping] = useState(false)
   const [, setStopClickedAt] = useState<number | null>(null)
+  // Sessions runtime: hook-derived activity for the ACTIVE chat.
+  // activeIsProcessing blocks the composer until the turn settles;
+  // activeIsThinking ("actively working") drives shimmers and disables
+  // permission/ask-human buttons — false while waiting on the user.
+  const activeIsProcessing = sessionChat.chatState?.isProcessing ?? isProcessing
+  const activeIsThinking = sessionChat.chatState ? sessionChat.chatState.isThinking : isProcessing
+  // A failed session load must be visible, not a blank chat.
+  const sessionLoadErrorItems = React.useMemo<ConversationItem[]>(() => (
+    sessionChat.error
+      ? [{ id: 'session-load-error', kind: 'error', message: `Failed to load chat: ${sessionChat.error}`, timestamp: 0 }]
+      : []
+  ), [sessionChat.error])
   const [agentId] = useState<string>('copilot')
   const [presetMessage, setPresetMessage] = useState<string | undefined>(undefined)
 
@@ -2545,7 +2557,7 @@ function App() {
     codeMode?: 'claude' | 'codex',
     permissionMode?: PermissionMode,
   ) => {
-    if (isProcessing) return
+    if (activeIsProcessing) return
 
     const submitTabId = activeChatTabIdRef.current
     const { text } = message
@@ -2727,23 +2739,6 @@ function App() {
     const name = composioDisplayNames[toolkitSlug] || toolkitSlug
     handlePromptSubmitRef.current?.({ text: `${name} connected successfully.`, files: [] })
   }, [])
-
-  // A failed session load must be visible, not a blank chat.
-  const sessionLoadErrorItems = React.useMemo<ConversationItem[]>(() => (
-    sessionChat.error
-      ? [{ id: 'session-load-error', kind: 'error', message: `Failed to load chat: ${sessionChat.error}`, timestamp: 0 }]
-      : []
-  ), [sessionChat.error])
-
-  // Active tab renders from the sessions hook; background tabs keep the
-  // legacy cached view state until stage 7 retires it.
-  const chatTabStatesForRender = React.useMemo(() => {
-    if (!sessionChat.chatState) return chatViewStateByTab
-    return {
-      ...chatViewStateByTab,
-      [activeChatTabId]: { runId, ...sessionChat.chatState },
-    }
-  }, [chatViewStateByTab, sessionChat.chatState, activeChatTabId, runId])
 
   // The composer's stop state clears when the active turn settles.
   useEffect(() => {
@@ -5443,16 +5438,24 @@ function App() {
     return null
   }
 
-  const activeChatTabState = React.useMemo<ChatTabViewState>(() => ({
+  // The active chat's view state, backed by the sessions hook (legacy
+  // standalone states remain only as the pre-load fallback until stage 7).
+  const activeChatTabState = React.useMemo<ChatTabViewState>(() => (
+    sessionChat.chatState
+      ? { runId, ...sessionChat.chatState }
+      : {
+          runId,
+          conversation: sessionLoadErrorItems.length > 0 ? sessionLoadErrorItems : conversation,
+          currentAssistantMessage,
+          pendingAskHumanRequests,
+          allPermissionRequests,
+          permissionResponses,
+          autoPermissionDecisions,
+        }
+  ), [
     runId,
-    conversation,
-    currentAssistantMessage,
-    pendingAskHumanRequests,
-    allPermissionRequests,
-    permissionResponses,
-    autoPermissionDecisions,
-  }), [
-    runId,
+    sessionChat.chatState,
+    sessionLoadErrorItems,
     conversation,
     currentAssistantMessage,
     pendingAskHumanRequests,
@@ -5465,6 +5468,10 @@ function App() {
     if (tabId === activeChatTabId) return activeChatTabState
     return chatViewStateByTab[tabId] ?? emptyChatTabState
   }, [activeChatTabId, activeChatTabState, chatViewStateByTab, emptyChatTabState])
+  const chatTabStatesForRender = React.useMemo(() => ({
+    ...chatViewStateByTab,
+    [activeChatTabId]: activeChatTabState,
+  }), [chatViewStateByTab, activeChatTabId, activeChatTabState])
   const selectedTask = selectedBackgroundTask
     ? backgroundTasks.find(t => t.name === selectedBackgroundTask)
     : null
@@ -6162,7 +6169,7 @@ function App() {
                                               onApproveSession={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'session')}
                                               onApproveAlways={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'always')}
                                               onDeny={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
-                                              isProcessing={isActive && isProcessing}
+                                              isProcessing={isActive && activeIsThinking}
                                               response={response}
                                             />
                                           )}
@@ -6180,7 +6187,7 @@ function App() {
                                     query={request.query}
                                     options={request.options}
                                     onResponse={(response) => handleAskHumanResponse(request.toolCallId, request.subflow, response)}
-                                    isProcessing={isActive && isProcessing}
+                                    isProcessing={isActive && activeIsThinking}
                                   />
                                 ))}
 
@@ -6192,7 +6199,7 @@ function App() {
                                   </Message>
                                 )}
 
-                                {isActive && isProcessing && !tabState.currentAssistantMessage && (
+                                {isActive && activeIsThinking && !tabState.currentAssistantMessage && (
                                   <Message from="assistant">
                                     <MessageContent>
                                       <Shimmer duration={1}>Thinking...</Shimmer>
@@ -6228,7 +6235,7 @@ function App() {
                             visibleFiles={visibleKnowledgeFiles}
                             onSubmit={handlePromptSubmit}
                             onStop={handleStop}
-                            isProcessing={isActive && isProcessing}
+                            isProcessing={isActive && activeIsProcessing}
                             isStopping={isActive && isStopping}
                             isActive={isActive}
                             presetMessage={isActive ? presetMessage : undefined}
@@ -6310,11 +6317,11 @@ function App() {
                 }}
                 onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
                 onOpenFullScreen={toggleRightPaneMaximize}
-                conversation={sessionChat.chatState?.conversation ?? (sessionLoadErrorItems.length > 0 ? sessionLoadErrorItems : conversation)}
-                currentAssistantMessage={sessionChat.chatState?.currentAssistantMessage ?? currentAssistantMessage}
+                conversation={activeChatTabState.conversation}
+                currentAssistantMessage={activeChatTabState.currentAssistantMessage}
                 chatTabStates={chatTabStatesForRender}
                 viewportAnchors={chatViewportAnchorByTab}
-                isProcessing={sessionChat.chatState ? sessionChat.chatState.isProcessing : isProcessing}
+                isProcessing={activeIsProcessing}
                 isStopping={isStopping}
                 onStop={handleStop}
                 onSubmit={handlePromptSubmit}
@@ -6345,11 +6352,11 @@ function App() {
                     ? { title: activeCodeSession.session.title }
                     : null
                 }
-                pendingAskHumanRequests={sessionChat.chatState?.pendingAskHumanRequests ?? pendingAskHumanRequests}
-                allPermissionRequests={sessionChat.chatState?.allPermissionRequests ?? allPermissionRequests}
-                permissionResponses={sessionChat.chatState?.permissionResponses ?? permissionResponses}
-                autoPermissionDecisions={sessionChat.chatState?.autoPermissionDecisions ?? autoPermissionDecisions}
-                isThinking={sessionChat.chatState?.isThinking}
+                pendingAskHumanRequests={activeChatTabState.pendingAskHumanRequests}
+                allPermissionRequests={activeChatTabState.allPermissionRequests}
+                permissionResponses={activeChatTabState.permissionResponses}
+                autoPermissionDecisions={activeChatTabState.autoPermissionDecisions}
+                isThinking={activeIsThinking}
                 onPermissionResponse={handlePermissionResponse}
                 onAskHumanResponse={handleAskHumanResponse}
                 isToolOpenForTab={isToolOpenForTab}
