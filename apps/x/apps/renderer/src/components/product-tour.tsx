@@ -40,6 +40,8 @@ type TourStep = {
   vignette?: TourVignetteKind
   title: string
   text: string
+  /** Spoken narration, when it should differ from the bubble text. */
+  voiceText?: string
 }
 
 const TOUR_STEPS: TourStep[] = [
@@ -47,6 +49,7 @@ const TOUR_STEPS: TourStep[] = [
     id: 'welcome',
     title: 'All aboard! ⚓',
     text: "I'm your captain for the next minute. The lights are down and the water's in — let me row you across Rowboat, one stop at a time. Use Next or your arrow keys.",
+    voiceText: "I'm your captain for the next minute. The lights are down and the water's in — let me row you across Rowboat, one stop at a time.",
   },
   {
     id: 'home',
@@ -518,7 +521,7 @@ export function ProductTour({
         if (clip) {
           speakUrlRef.current(clip)
         } else if (ttsAvailableRef.current) {
-          speakRef.current(step.text)
+          speakRef.current(step.voiceText ?? step.text)
         }
         if (stepIndex === TOUR_STEPS.length - 1) {
           setConfettiOn(true)
