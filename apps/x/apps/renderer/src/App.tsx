@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { useCallback, useEffect, useLayoutEffect, useState, useRef } from 'react'
 import { workspace } from '@x/shared';
-import { RunEvent, ListRunsResponse } from '@x/shared/src/runs.js';
+import { RunEvent } from '@x/shared/src/runs.js';
 import type { LanguageModelUsage, ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
@@ -9,6 +9,7 @@ import { CheckIcon, LoaderIcon, PanelLeftIcon, ArrowLeft, ArrowRight, MessageSqu
 import { cn } from '@/lib/utils';
 import { MarkdownEditor, type MarkdownEditorHandle } from './components/markdown-editor';
 import { ChatSidebar } from './components/chat-sidebar';
+import { useSessionChat } from '@/hooks/useSessionChat';
 import { ChatHeader } from './components/chat-header';
 import { ChatEmptyState } from './components/chat-empty-state';
 import { ChatInputWithMentions, type PermissionMode, type StagedAttachment } from './components/chat-input-with-mentions';
@@ -96,7 +97,6 @@ import {
   type ChatViewportAnchorState,
   type ChatTabViewState,
   type ConversationItem,
-  type ToolCall,
   createEmptyChatTabViewState,
   getWebSearchCardData,
   getAppActionCardData,
@@ -126,7 +126,6 @@ import { useTheme } from '@/contexts/theme-context'
 
 type DirEntry = z.infer<typeof workspace.DirEntry>
 type RunEventType = z.infer<typeof RunEvent>
-type ListRunsResponseType = z.infer<typeof ListRunsResponse>
 
 interface TreeNode extends DirEntry {
   children?: TreeNode[]
@@ -938,6 +937,10 @@ function App() {
   }, [conversation])
   const [, setModelUsage] = useState<LanguageModelUsage | null>(null)
   const [runId, setRunId] = useState<string | null>(null)
+  // New runtime: the active session's chat data + actions. All logic lives in
+  // SessionChatStore (tested headlessly); the hook is a thin subscription.
+  // runId IS the session id in the sessions runtime.
+  const sessionChat = useSessionChat(runId)
   const runIdRef = useRef<string | null>(null)
   const loadRunRequestIdRef = useRef(0)
   const [isProcessing, setIsProcessing] = useState(false)
@@ -945,7 +948,19 @@ function App() {
   const processingRunIdsRef = useRef<Set<string>>(new Set())
   const streamingBuffersRef = useRef<Map<string, { assistant: string }>>(new Map())
   const [isStopping, setIsStopping] = useState(false)
-  const [stopClickedAt, setStopClickedAt] = useState<number | null>(null)
+  const [, setStopClickedAt] = useState<number | null>(null)
+  // Sessions runtime: hook-derived activity for the ACTIVE chat.
+  // activeIsProcessing blocks the composer until the turn settles;
+  // activeIsThinking ("actively working") drives shimmers and disables
+  // permission/ask-human buttons — false while waiting on the user.
+  const activeIsProcessing = sessionChat.chatState?.isProcessing ?? isProcessing
+  const activeIsThinking = sessionChat.chatState ? sessionChat.chatState.isThinking : isProcessing
+  // A failed session load must be visible, not a blank chat.
+  const sessionLoadErrorItems = React.useMemo<ConversationItem[]>(() => (
+    sessionChat.error
+      ? [{ id: 'session-load-error', kind: 'error', message: `Failed to load chat: ${sessionChat.error}`, timestamp: 0 }]
+      : []
+  ), [sessionChat.error])
   const [agentId] = useState<string>('copilot')
   const [presetMessage, setPresetMessage] = useState<string | undefined>(undefined)
 
@@ -964,6 +979,28 @@ function App() {
   const tts = useVoiceTTS()
   const ttsRef = useRef(tts)
   ttsRef.current = tts
+
+  // Speak newly completed <voice> blocks from the new runtime's live stream
+  // (parity with the legacy text-delta voice extraction below). The store
+  // accumulates completed blocks in chatState.voiceSegments; we speak only
+  // segments that appeared after the current session became active.
+  const spokenVoiceRef = useRef<{ key: string | null; count: number }>({ key: null, count: 0 })
+  const voiceSegments = sessionChat.chatState?.voiceSegments
+  useEffect(() => {
+    if (!voiceSegments) return
+    if (spokenVoiceRef.current.key !== runId) {
+      // Session switch: skip anything already streamed before we arrived.
+      spokenVoiceRef.current = { key: runId, count: voiceSegments.length }
+      return
+    }
+    while (spokenVoiceRef.current.count < voiceSegments.length) {
+      const segment = voiceSegments[spokenVoiceRef.current.count]
+      spokenVoiceRef.current.count += 1
+      if (ttsEnabledRef.current) {
+        ttsRef.current.speak(segment)
+      }
+    }
+  }, [voiceSegments, runId])
 
   const voice = useVoiceMode()
   const voiceRef = useRef(voice)
@@ -1960,21 +1997,16 @@ function App() {
   // Load runs list (all pages)
   const loadRuns = useCallback(async () => {
     try {
-      const allRuns: RunListItem[] = []
-      let cursor: string | undefined = undefined
-
-      // Fetch all pages
-      do {
-        const result: ListRunsResponseType = await window.ipc.invoke('runs:list', { cursor })
-        allRuns.push(...result.runs)
-        cursor = result.nextCursor
-      } while (cursor)
-
-      // Filter for copilot chats only (Code-section sessions live in the Code view)
-      const copilotRuns = allRuns.filter((run: RunListItem) => run.agentId === 'copilot' && run.useCase !== 'code_session')
-      setRuns(copilotRuns)
+      const { sessions } = await window.ipc.invoke('sessions:list', {})
+      setRuns(sessions.map((entry) => ({
+        id: entry.sessionId,
+        title: entry.title ?? 'New chat',
+        createdAt: entry.createdAt,
+        modifiedAt: entry.updatedAt,
+        agentId: entry.lastAgentId ?? 'copilot',
+      })))
     } catch (err) {
-      console.error('Failed to load runs:', err)
+      console.error('Failed to load sessions:', err)
     }
   }, [])
 
@@ -2073,193 +2105,30 @@ function App() {
     }
   }, [backgroundTasks, loadBackgroundTasks])
 
-  // Load a specific run and populate conversation
+  // Switch the active session. The useSessionChat hook loads and follows the
+  // conversation; this only resets composer/tab state.
   const loadRun = useCallback(async (id: string) => {
     const requestId = (loadRunRequestIdRef.current += 1)
+    setConversation([])
+    setCurrentAssistantMessage('')
+    setRunId(id)
+    setMessage('')
+    setIsProcessing(false)
+    setIsStopping(false)
+    setStopClickedAt(null)
+    setPendingPermissionRequests(new Map())
+    setPendingAskHumanRequests(new Map())
+    setAllPermissionRequests(new Map())
+    setPermissionResponses(new Map())
+    setAutoPermissionDecisions(new Map())
     try {
-      const run = await window.ipc.invoke('runs:fetch', { runId: id })
-      if (loadRunRequestIdRef.current !== requestId) return
-
-      // Parse the log events into conversation items
-      const items: ConversationItem[] = []
-      const toolCallMap = new Map<string, ToolCall>()
-
-      for (const event of run.log) {
-        switch (event.type) {
-          case 'message': {
-            const msg = event.message
-            if (msg.role === 'user' || msg.role === 'assistant') {
-              // Extract text content from message
-              let textContent = ''
-              let msgAttachments: ChatMessage['attachments'] = undefined
-              if (typeof msg.content === 'string') {
-                textContent = msg.content
-              } else if (Array.isArray(msg.content)) {
-                const contentParts = msg.content as Array<{
-                  type: string
-                  text?: string
-                  path?: string
-                  filename?: string
-                  mimeType?: string
-                  size?: number
-                  toolCallId?: string
-                  toolName?: string
-                  arguments?: ToolUIPart['input']
-                }>
-
-                textContent = contentParts
-                  .filter((part) => part.type === 'text')
-                  .map((part) => part.text || '')
-                  .join('')
-
-                const attachmentParts = contentParts.filter((part) => part.type === 'attachment' && part.path)
-                if (attachmentParts.length > 0) {
-                  msgAttachments = attachmentParts.map((part) => ({
-                    path: part.path!,
-                    filename: part.filename || part.path!.split('/').pop() || part.path!,
-                    mimeType: part.mimeType || 'application/octet-stream',
-                    size: part.size,
-                  }))
-                }
-
-                // Also extract tool-call parts from assistant messages
-                if (msg.role === 'assistant') {
-                  for (const part of contentParts) {
-                    if (part.type === 'tool-call' && part.toolCallId && part.toolName) {
-                      const toolCall: ToolCall = {
-                        id: part.toolCallId,
-                        name: part.toolName,
-                        input: normalizeToolInput(part.arguments),
-                        status: 'pending',
-                        timestamp: event.ts ? new Date(event.ts).getTime() : Date.now(),
-                      }
-                      toolCallMap.set(toolCall.id, toolCall)
-                      items.push(toolCall)
-                    }
-                  }
-                }
-              }
-              if (textContent || msgAttachments) {
-                items.push({
-                  id: event.messageId,
-                  role: msg.role,
-                  content: textContent,
-                  attachments: msgAttachments,
-                  timestamp: event.ts ? new Date(event.ts).getTime() : Date.now(),
-                })
-              }
-            }
-            break
-          }
-          case 'tool-invocation': {
-            // Update existing tool call status or create new one
-            const existingTool = event.toolCallId ? toolCallMap.get(event.toolCallId) : null
-            if (existingTool) {
-              existingTool.input = normalizeToolInput(event.input)
-              existingTool.status = 'running'
-            } else {
-              const toolCall: ToolCall = {
-                id: event.toolCallId || `tool-${Date.now()}-${Math.random()}`,
-                name: event.toolName,
-                input: normalizeToolInput(event.input),
-                status: 'running',
-                timestamp: event.ts ? new Date(event.ts).getTime() : Date.now(),
-              }
-              toolCallMap.set(toolCall.id, toolCall)
-              items.push(toolCall)
-            }
-            break
-          }
-          case 'tool-result': {
-            const existingTool = event.toolCallId ? toolCallMap.get(event.toolCallId) : null
-            if (existingTool) {
-              existingTool.result = event.result
-              existingTool.status = 'completed'
-            }
-            break
-          }
-          case 'error': {
-            items.push({
-              id: `error-${Date.now()}-${Math.random()}`,
-              kind: 'error',
-              message: event.error,
-              timestamp: event.ts ? new Date(event.ts).getTime() : Date.now(),
-            })
-            break
-          }
-          case 'llm-stream-event': {
-            // We don't need to reconstruct streaming events for history
-            // Reasoning is captured in the final message
-            break
-          }
-        }
-      }
-      if (loadRunRequestIdRef.current !== requestId) return
-
-      // Track permission requests and responses from history
-      const allPermissionRequests = new Map<string, z.infer<typeof ToolPermissionRequestEvent>>()
-      const permResponseMap = new Map<string, 'approve' | 'deny'>()
-      const autoPermissionDecisions = new Map<string, z.infer<typeof ToolPermissionAutoDecisionEvent>>()
-      const askHumanRequests = new Map<string, z.infer<typeof AskHumanRequestEvent>>()
-      const respondedAskHumanIds = new Set<string>()
-
-      for (const event of run.log) {
-        if (event.type === 'tool-permission-request') {
-          allPermissionRequests.set(event.toolCall.toolCallId, event)
-        } else if (event.type === 'tool-permission-response') {
-          permResponseMap.set(event.toolCallId, event.response)
-        } else if (event.type === 'tool-permission-auto-decision') {
-          autoPermissionDecisions.set(event.toolCallId, event)
-        } else if (event.type === 'ask-human-request') {
-          askHumanRequests.set(event.toolCallId, event)
-        } else if (event.type === 'ask-human-response') {
-          respondedAskHumanIds.add(event.toolCallId)
-        }
-      }
-      if (loadRunRequestIdRef.current !== requestId) return
-
-      // Separate pending vs responded permission requests
-      const pendingPerms = new Map<string, z.infer<typeof ToolPermissionRequestEvent>>()
-      for (const [id, req] of allPermissionRequests.entries()) {
-        if (!permResponseMap.has(id)) {
-          pendingPerms.set(id, req)
-        }
-      }
-
-      const pendingAsks = new Map<string, z.infer<typeof AskHumanRequestEvent>>()
-      for (const [id, req] of askHumanRequests.entries()) {
-        if (!respondedAskHumanIds.has(id)) {
-          pendingAsks.set(id, req)
-        }
-      }
-      if (loadRunRequestIdRef.current !== requestId) return
-
-      // Set the conversation and runId
-      setConversation(items)
-      setRunId(id)
-      setMessage('')
-      // Reconcile composer state with THIS run. Loading a run while another one
-      // is mid-turn (e.g. binding a code session steals the single chat tab)
-      // must not leave isProcessing/isStopping pointing at the old run — that
-      // wedges the composer: stop targets the new run (a no-op) while the old
-      // run's processing-end arrives flagged as non-active and clears nothing.
-      setIsProcessing(processingRunIdsRef.current.has(id))
-      setIsStopping(false)
-      setStopClickedAt(null)
-      setCurrentAssistantMessage(streamingBuffersRef.current.get(id)?.assistant ?? '')
-      setPendingPermissionRequests(pendingPerms)
-      setPendingAskHumanRequests(pendingAsks)
-      setAllPermissionRequests(allPermissionRequests)
-      setPermissionResponses(permResponseMap)
-      setAutoPermissionDecisions(autoPermissionDecisions)
-
-      // Restore the run's per-chat work directory into the tab it was loaded into.
+      // Restore the session's per-chat work directory into the active tab.
       const tabId = activeChatTabIdRef.current
       const wd = await loadRunWorkDir(id)
       if (loadRunRequestIdRef.current !== requestId) return
       setWorkDirByTab((prev) => ({ ...prev, [tabId]: wd }))
     } catch (err) {
-      console.error('Failed to load run:', err)
+      console.error('Failed to load session work dir:', err)
     }
   }, [loadRunWorkDir])
 
@@ -2710,7 +2579,7 @@ function App() {
     codeMode?: 'claude' | 'codex',
     permissionMode?: PermissionMode,
   ) => {
-    if (isProcessing) return
+    if (activeIsProcessing) return
 
     const submitTabId = activeChatTabIdRef.current
     const { text } = message
@@ -2743,15 +2612,11 @@ function App() {
       let currentRunId = runId
       let isNewRun = false
       let newRunCreatedAt: string | null = null
+      const selected = selectedModelByTabRef.current.get(submitTabId)
       if (!currentRunId) {
-        const selected = selectedModelByTabRef.current.get(submitTabId)
-        const run = await window.ipc.invoke('runs:create', {
-          agentId,
-          ...(selected ? { model: selected.model, provider: selected.provider } : {}),
-          permissionMode: permissionMode ?? 'manual',
-        })
-        currentRunId = run.id
-        newRunCreatedAt = run.createdAt
+        const createdSession = await window.ipc.invoke('sessions:create', {})
+        currentRunId = createdSession.sessionId
+        newRunCreatedAt = new Date().toISOString()
         setRunId(currentRunId)
         analytics.chatSessionCreated(currentRunId)
         // Update active chat tab's runId to the new run
@@ -2769,6 +2634,30 @@ function App() {
 
       let titleSource = userMessage
       const hasMentions = (mentions?.length ?? 0) > 0
+
+      // Per-message turn config. Composition inputs land in the system prompt
+      // via the agent resolver; keep them session-sticky where possible so the
+      // provider prefix cache survives across turns.
+      const sendConfig = {
+        agent: {
+          agentId,
+          overrides: {
+            ...(selected ? { model: { provider: selected.provider, model: selected.model } } : {}),
+            composition: {
+              workDirId: currentRunId,
+              ...(pendingVoiceInputRef.current ? { voiceInput: true } : {}),
+              ...(ttsEnabledRef.current ? { voiceOutput: ttsModeRef.current } : {}),
+              ...(searchEnabled ? { searchEnabled: true } : {}),
+              ...(codeMode ? { codeMode } : {}),
+            },
+          },
+        },
+        autoPermission: (permissionMode ?? 'manual') === 'auto',
+      }
+      const userMessageContextFor = (middlePane: Awaited<ReturnType<typeof buildMiddlePaneContext>>) => ({
+        currentDateTime: new Date().toISOString(),
+        middlePane: middlePane ?? { kind: 'empty' as const },
+      })
 
       if (hasAttachments || hasMentions) {
         type ContentPart =
@@ -2812,17 +2701,15 @@ function App() {
           titleSource = stagedAttachments[0]?.filename ?? mentions?.[0]?.displayName ?? mentions?.[0]?.path ?? ''
         }
 
-        // Shared IPC payload types can lag until package rebuilds; runtime validation still enforces schema.
-        const attachmentPayload = contentParts as unknown as string
         const middlePaneContext = await buildMiddlePaneContext()
-        await window.ipc.invoke('runs:createMessage', {
-          runId: currentRunId,
-          message: attachmentPayload,
-          voiceInput: pendingVoiceInputRef.current || undefined,
-          voiceOutput: ttsEnabledRef.current ? ttsModeRef.current : undefined,
-          searchEnabled: searchEnabled || undefined,
-          codeMode: codeMode || undefined,
-          middlePaneContext,
+        await window.ipc.invoke('sessions:sendMessage', {
+          sessionId: currentRunId,
+          input: {
+            role: 'user',
+            content: contentParts,
+            userMessageContext: userMessageContextFor(middlePaneContext),
+          },
+          config: sendConfig,
         })
         analytics.chatMessageSent({
           voiceInput: pendingVoiceInputRef.current || undefined,
@@ -2831,14 +2718,14 @@ function App() {
         })
       } else {
         const middlePaneContext = await buildMiddlePaneContext()
-        await window.ipc.invoke('runs:createMessage', {
-          runId: currentRunId,
-          message: userMessage,
-          voiceInput: pendingVoiceInputRef.current || undefined,
-          voiceOutput: ttsEnabledRef.current ? ttsModeRef.current : undefined,
-          searchEnabled: searchEnabled || undefined,
-          codeMode: codeMode || undefined,
-          middlePaneContext,
+        await window.ipc.invoke('sessions:sendMessage', {
+          sessionId: currentRunId,
+          input: {
+            role: 'user',
+            content: userMessage,
+            userMessageContext: userMessageContextFor(middlePaneContext),
+          },
+          config: sendConfig,
         })
         analytics.chatMessageSent({
           voiceInput: pendingVoiceInputRef.current || undefined,
@@ -2875,20 +2762,24 @@ function App() {
     handlePromptSubmitRef.current?.({ text: `${name} connected successfully.`, files: [] })
   }, [])
 
+  // The composer's stop state clears when the active turn settles.
+  useEffect(() => {
+    if (sessionChat.chatState && !sessionChat.chatState.isProcessing) {
+      setIsStopping(false)
+      setStopClickedAt(null)
+    }
+  }, [sessionChat.chatState])
+
   const handleStop = useCallback(async () => {
     if (!runId) return
-    const now = Date.now()
-    const isForce = isStopping && stopClickedAt !== null && (now - stopClickedAt) < 2000
-
-    setStopClickedAt(now)
+    setStopClickedAt(Date.now())
     setIsStopping(true)
-
     try {
-      await window.ipc.invoke('runs:stop', { runId, force: isForce })
+      await sessionChat.stop()
     } catch (error) {
-      console.error('Failed to stop run:', error)
+      console.error('Failed to stop turn:', error)
     }
-  }, [runId, isStopping, stopClickedAt])
+  }, [runId, sessionChat])
 
   const handlePermissionResponse = useCallback(async (
     toolCallId: string,
@@ -2898,33 +2789,17 @@ function App() {
   ) => {
     if (!runId) return
 
-    // Optimistically update the UI immediately
-    setPermissionResponses(prev => {
-      const next = new Map(prev)
-      next.set(toolCallId, response)
-      return next
-    })
-    setPendingPermissionRequests(prev => {
-      const next = new Map(prev)
-      next.delete(toolCallId)
-      return next
-    })
-
+    void subflow // subflows retired with the runs runtime
     try {
-      await window.ipc.invoke('runs:authorizePermission', {
-        runId,
-        authorization: { subflow, toolCallId, response, scope }
-      })
+      await sessionChat.respondToPermission(
+        toolCallId,
+        response === 'approve' ? 'allow' : 'deny',
+        scope ? { scope } : undefined,
+      )
     } catch (error) {
       console.error('Failed to authorize permission:', error)
-      // Revert the optimistic update on error
-      setPermissionResponses(prev => {
-        const next = new Map(prev)
-        next.delete(toolCallId)
-        return next
-      })
     }
-  }, [runId])
+  }, [runId, sessionChat])
 
   // Answer a mid-run permission request from a code_agent_run coding turn. The
   // pending ask lives on the tool call itself, so we optimistically clear it and
@@ -2948,15 +2823,13 @@ function App() {
 
   const handleAskHumanResponse = useCallback(async (toolCallId: string, subflow: string[], response: string) => {
     if (!runId) return
+    void subflow // subflows retired with the runs runtime
     try {
-      await window.ipc.invoke('runs:provideHumanInput', {
-        runId,
-        reply: { subflow, toolCallId, response }
-      })
+      await sessionChat.answerAskHuman(toolCallId, response)
     } catch (error) {
       console.error('Failed to provide human input:', error)
     }
-  }, [runId])
+  }, [runId, sessionChat])
 
   const dismissBrowserOverlay = useCallback(() => {
     setIsBrowserOpen(false)
@@ -5238,6 +5111,20 @@ function App() {
     return () => window.removeEventListener('email-block:draft-with-assistant', handler)
   }, [])
 
+  // Meeting prep: create a person note for an unmatched attendee via Copilot.
+  useEffect(() => {
+    const handler = () => {
+      const pending = window.__pendingMeetingPrepCreate
+      if (pending) {
+        setPresetMessage(pending.prompt)
+        setIsChatSidebarOpen(true)
+        window.__pendingMeetingPrepCreate = undefined
+      }
+    }
+    window.addEventListener('meeting-prep:create-note', handler)
+    return () => window.removeEventListener('meeting-prep:create-note', handler)
+  }, [])
+
   const resolveWikiFilePath = useCallback((wikiPath: string) => {
     const normalized = normalizeWikiPath(wikiPath)
     const { path: basePath } = splitWikiFragment(normalized)
@@ -5573,16 +5460,24 @@ function App() {
     return null
   }
 
-  const activeChatTabState = React.useMemo<ChatTabViewState>(() => ({
+  // The active chat's view state, backed by the sessions hook (legacy
+  // standalone states remain only as the pre-load fallback until stage 7).
+  const activeChatTabState = React.useMemo<ChatTabViewState>(() => (
+    sessionChat.chatState
+      ? { runId, ...sessionChat.chatState }
+      : {
+          runId,
+          conversation: sessionLoadErrorItems.length > 0 ? sessionLoadErrorItems : conversation,
+          currentAssistantMessage,
+          pendingAskHumanRequests,
+          allPermissionRequests,
+          permissionResponses,
+          autoPermissionDecisions,
+        }
+  ), [
     runId,
-    conversation,
-    currentAssistantMessage,
-    pendingAskHumanRequests,
-    allPermissionRequests,
-    permissionResponses,
-    autoPermissionDecisions,
-  }), [
-    runId,
+    sessionChat.chatState,
+    sessionLoadErrorItems,
     conversation,
     currentAssistantMessage,
     pendingAskHumanRequests,
@@ -5595,6 +5490,10 @@ function App() {
     if (tabId === activeChatTabId) return activeChatTabState
     return chatViewStateByTab[tabId] ?? emptyChatTabState
   }, [activeChatTabId, activeChatTabState, chatViewStateByTab, emptyChatTabState])
+  const chatTabStatesForRender = React.useMemo(() => ({
+    ...chatViewStateByTab,
+    [activeChatTabId]: activeChatTabState,
+  }), [chatViewStateByTab, activeChatTabId, activeChatTabState])
   const selectedTask = selectedBackgroundTask
     ? backgroundTasks.find(t => t.name === selectedBackgroundTask)
     : null
@@ -5993,7 +5892,7 @@ function App() {
                     onSelectRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
                     onDeleteRun={async (rid) => {
                       try {
-                        await window.ipc.invoke('runs:delete', { runId: rid })
+                        await window.ipc.invoke('sessions:delete', { sessionId: rid })
                         await loadRuns()
                       } catch (err) {
                         console.error('Failed to delete run:', err)
@@ -6292,7 +6191,7 @@ function App() {
                                               onApproveSession={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'session')}
                                               onApproveAlways={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'always')}
                                               onDeny={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
-                                              isProcessing={isActive && isProcessing}
+                                              isProcessing={isActive && activeIsThinking}
                                               response={response}
                                             />
                                           )}
@@ -6310,7 +6209,7 @@ function App() {
                                     query={request.query}
                                     options={request.options}
                                     onResponse={(response) => handleAskHumanResponse(request.toolCallId, request.subflow, response)}
-                                    isProcessing={isActive && isProcessing}
+                                    isProcessing={isActive && activeIsThinking}
                                   />
                                 ))}
 
@@ -6322,7 +6221,7 @@ function App() {
                                   </Message>
                                 )}
 
-                                {isActive && isProcessing && !tabState.currentAssistantMessage && (
+                                {isActive && activeIsThinking && !tabState.currentAssistantMessage && (
                                   <Message from="assistant">
                                     <MessageContent>
                                       <Shimmer duration={1}>Thinking...</Shimmer>
@@ -6358,7 +6257,7 @@ function App() {
                             visibleFiles={visibleKnowledgeFiles}
                             onSubmit={handlePromptSubmit}
                             onStop={handleStop}
-                            isProcessing={isActive && isProcessing}
+                            isProcessing={isActive && activeIsProcessing}
                             isStopping={isActive && isStopping}
                             isActive={isActive}
                             presetMessage={isActive ? presetMessage : undefined}
@@ -6440,11 +6339,11 @@ function App() {
                 }}
                 onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
                 onOpenFullScreen={toggleRightPaneMaximize}
-                conversation={conversation}
-                currentAssistantMessage={currentAssistantMessage}
-                chatTabStates={chatViewStateByTab}
+                conversation={activeChatTabState.conversation}
+                currentAssistantMessage={activeChatTabState.currentAssistantMessage}
+                chatTabStates={chatTabStatesForRender}
                 viewportAnchors={chatViewportAnchorByTab}
-                isProcessing={isProcessing}
+                isProcessing={activeIsProcessing}
                 isStopping={isStopping}
                 onStop={handleStop}
                 onSubmit={handlePromptSubmit}
@@ -6475,10 +6374,11 @@ function App() {
                     ? { title: activeCodeSession.session.title }
                     : null
                 }
-                pendingAskHumanRequests={pendingAskHumanRequests}
-                allPermissionRequests={allPermissionRequests}
-                permissionResponses={permissionResponses}
-                autoPermissionDecisions={autoPermissionDecisions}
+                pendingAskHumanRequests={activeChatTabState.pendingAskHumanRequests}
+                allPermissionRequests={activeChatTabState.allPermissionRequests}
+                permissionResponses={activeChatTabState.permissionResponses}
+                autoPermissionDecisions={activeChatTabState.autoPermissionDecisions}
+                isThinking={activeIsThinking}
                 onPermissionResponse={handlePermissionResponse}
                 onAskHumanResponse={handleAskHumanResponse}
                 isToolOpenForTab={isToolOpenForTab}

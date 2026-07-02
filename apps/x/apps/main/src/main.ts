@@ -2,7 +2,7 @@ import { app, BrowserWindow, desktopCapturer, protocol, net, shell, session, typ
 import path from "node:path";
 import {
   setupIpcHandlers,
-  startRunsWatcher,
+  startRunsWatcher, startSessionsWatcher,
   startCodeSessionStatusWatcher,
   startServicesWatcher,
   startLiveNoteAgentWatcher,
@@ -27,6 +27,7 @@ import { init as initInlineTasks } from "@x/core/dist/knowledge/inline_tasks.js"
 import { init as initAgentRunner } from "@x/core/dist/agent-schedule/runner.js";
 import { init as initAgentNotes } from "@x/core/dist/knowledge/agent_notes.js";
 import { init as initCalendarNotifications } from "@x/core/dist/knowledge/notify_calendar_meetings.js";
+import { init as initMeetingPrep } from "@x/core/dist/knowledge/meeting_prep_scheduler.js";
 import { init as initLiveNoteScheduler } from "@x/core/dist/knowledge/live-note/scheduler.js";
 import { init as initEventProcessor, registerConsumer } from "@x/core/dist/events/init.js";
 import { liveNoteEventConsumer } from "@x/core/dist/knowledge/live-note/event-consumer.js";
@@ -45,6 +46,7 @@ import { execFileSync } from "node:child_process";
 import { init as initChromeSync } from "@x/core/dist/knowledge/chrome-extension/server/server.js";
 import container, { registerBrowserControlService, registerNotificationService } from "@x/core/dist/di/container.js";
 import type { CodeModeManager } from "@x/core/dist/code-mode/acp/manager.js";
+import type { ISessions } from "@x/core/dist/sessions/index.js";
 import { browserViewManager, BROWSER_PARTITION } from "./browser/view.js";
 import { setupBrowserEventForwarding } from "./browser/ipc.js";
 import { ElectronBrowserControlService } from "./browser/control-service.js";
@@ -388,6 +390,11 @@ app.whenReady().then(async () => {
   // start runs watcher
   startRunsWatcher();
 
+  // New runtime: build the in-memory session index (startup scan) before the
+  // renderer can list sessions, then forward the session bus to windows.
+  await container.resolve<ISessions>('sessions').initialize();
+  startSessionsWatcher();
+
   // start code-session status tracker (derives working/needs-you/idle + notifications)
   startCodeSessionStatusWatcher();
 
@@ -454,6 +461,9 @@ app.whenReady().then(async () => {
 
   // start calendar meeting notification service (fires 1-minute warnings)
   initCalendarNotifications();
+
+  // start meeting prep scheduler (generates prep notes ~6h before a meeting)
+  void initMeetingPrep();
 
   // start chrome extension sync server
   initChromeSync();

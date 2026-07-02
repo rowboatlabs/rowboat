@@ -142,6 +142,10 @@ interface ChatSidebarProps {
   chatTabStates?: Record<string, ChatTabViewState>
   viewportAnchors?: Record<string, ChatViewportAnchorState>
   isProcessing: boolean
+  // Actively working (sessions runtime). When provided, drives the shimmer
+  // instead of isProcessing so waiting on a permission/ask-human doesn't
+  // render a "Thinking…" under the card.
+  isThinking?: boolean
   isStopping?: boolean
   onStop?: () => void
   onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => void
@@ -211,6 +215,7 @@ export function ChatSidebar({
   chatTabStates = {},
   viewportAnchors = {},
   isProcessing,
+  isThinking,
   isStopping,
   onStop,
   onSubmit,
@@ -373,7 +378,14 @@ export function ChatSidebar({
     }
 
     try {
-      const result = await window.ipc.invoke('runs:downloadLog', { runId: activeRunId })
+      // Session-first (new runtime); legacy runs fallback covers old
+      // background tabs until stage 7 removes the runs runtime.
+      let result: { success: boolean; error?: string }
+      try {
+        result = await window.ipc.invoke('sessions:downloadLog', { sessionId: activeRunId })
+      } catch {
+        result = await window.ipc.invoke('runs:downloadLog', { runId: activeRunId })
+      }
       if (result.success) {
         toast.success('Chat log saved')
       } else if (result.error) {
@@ -725,7 +737,7 @@ export function ChatSidebar({
                                             onApproveSession={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'session')}
                                             onApproveAlways={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'always')}
                                             onDeny={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
-                                            isProcessing={isActive && isProcessing}
+                                            isProcessing={isActive && (isThinking ?? isProcessing)}
                                             response={response}
                                           />
                                         )}
@@ -742,7 +754,7 @@ export function ChatSidebar({
                                   key={request.toolCallId}
                                   query={request.query}
                                   onResponse={(response) => onAskHumanResponse(request.toolCallId, request.subflow, response)}
-                                  isProcessing={isActive && isProcessing}
+                                  isProcessing={isActive && (isThinking ?? isProcessing)}
                                 />
                               ))}
 
@@ -754,7 +766,7 @@ export function ChatSidebar({
                                 </Message>
                               )}
 
-                              {isActive && isProcessing && !tabState.currentAssistantMessage && (
+                              {isActive && (isThinking ?? isProcessing) && !tabState.currentAssistantMessage && (
                                 <Message from="assistant">
                                   <MessageContent>
                                     <Shimmer duration={1}>Thinking...</Shimmer>

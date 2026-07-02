@@ -24,6 +24,8 @@ const execFileAsync = promisify(execFile);
 
 import { RunEvent } from '@x/shared/dist/runs.js';
 import { ServiceEvent } from '@x/shared/dist/service-events.js';
+import type { SessionBusEvent } from '@x/shared/dist/sessions.js';
+import type { ISessions, EmitterSessionBus } from '@x/core/dist/sessions/index.js';
 import container from '@x/core/dist/di/container.js';
 import { listOnboardingModels } from '@x/core/dist/models/models-dev.js';
 import { testModelConnection, listModelsForProvider, generateOneShot } from '@x/core/dist/models/models.js';
@@ -62,6 +64,9 @@ import { IAgentScheduleRepo } from '@x/core/dist/agent-schedule/repo.js';
 import { IAgentScheduleStateRepo } from '@x/core/dist/agent-schedule/state-repo.js';
 import { triggerRun as triggerAgentScheduleRun } from '@x/core/dist/agent-schedule/runner.js';
 import { search } from '@x/core/dist/search/search.js';
+import { resolveMeetingPrep } from '@x/core/dist/knowledge/meeting_prep.js';
+import { readPrepNoteForEvent } from '@x/core/dist/knowledge/meeting_prep_brief.js';
+import { invalidateKnowledgeIndex } from '@x/core/dist/knowledge/knowledge_index.js';
 import { versionHistory, voice } from '@x/core';
 import { classifySchedule, processRowboatInstruction } from '@x/core/dist/knowledge/inline_tasks.js';
 import { getBillingInfo } from '@x/core/dist/billing/billing.js';
@@ -507,7 +512,25 @@ function queueChange(relPath: string): void {
 /**
  * Handle workspace change event from core watcher
  */
+function touchesKnowledge(event: z.infer<typeof workspaceShared.WorkspaceChangeEvent>): boolean {
+  const hit = (p: string | undefined) => typeof p === 'string' && p.startsWith('knowledge/');
+  switch (event.type) {
+    case 'created':
+    case 'changed':
+    case 'deleted':
+      return hit(event.path);
+    case 'moved':
+      return hit(event.from) || hit(event.to);
+    case 'bulkChanged':
+      return !event.paths || event.paths.some(hit);
+    default:
+      return false;
+  }
+}
+
 function handleWorkspaceChange(event: z.infer<typeof workspaceShared.WorkspaceChangeEvent>): void {
+  // Any knowledge-base change drops the cached index so the next read rebuilds.
+  if (touchesKnowledge(event)) invalidateKnowledgeIndex();
   // Debounce 'changed' events, emit others immediately
   if (event.type === 'changed' && event.path) {
     queueChange(event.path);
@@ -611,6 +634,25 @@ export async function startRunsWatcher(): Promise<void> {
   runsWatcher = await bus.subscribe('*', async (event) => {
     emitRunEvent(event);
   });
+}
+
+// New runtime: session bus → renderer windows (session-design.md §10).
+function emitSessionEvent(event: SessionBusEvent): void {
+  const windows = BrowserWindow.getAllWindows();
+  for (const win of windows) {
+    if (!win.isDestroyed() && win.webContents) {
+      win.webContents.send('sessions:events', event);
+    }
+  }
+}
+
+let sessionsWatcher: (() => void) | null = null;
+export function startSessionsWatcher(): void {
+  if (sessionsWatcher) {
+    return;
+  }
+  const sessionBus = container.resolve<EmitterSessionBus>('sessionBus');
+  sessionsWatcher = sessionBus.subscribe((event) => emitSessionEvent(event));
 }
 
 let servicesWatcher: (() => void) | null = null;
@@ -819,6 +861,82 @@ export function setupIpcHandlers() {
     'runs:delete': async (_event, args) => {
       await runsCore.deleteRun(args.runId);
       return { success: true };
+    },
+    // ── New runtime: sessions + turns ─────────────────────────
+    // Thin pass-throughs to the sessions service. sendMessage returns the
+    // turnId immediately; the turn advances in the background and the
+    // renderer reconciles via the sessions:events feed. Input-routing calls
+    // settle with that advance's outcome (the renderer fire-and-forgets).
+    'sessions:create': async (_event, args) => {
+      const sessionId = await container.resolve<ISessions>('sessions').createSession(args);
+      return { sessionId };
+    },
+    'sessions:list': async () => {
+      return { sessions: container.resolve<ISessions>('sessions').listSessions() };
+    },
+    'sessions:get': async (_event, args) => {
+      return container.resolve<ISessions>('sessions').getSession(args.sessionId);
+    },
+    'sessions:getTurn': async (_event, args) => {
+      return container.resolve<ISessions>('sessions').getTurn(args.turnId);
+    },
+    'sessions:sendMessage': async (_event, args) => {
+      return container.resolve<ISessions>('sessions').sendMessage(args.sessionId, args.input, args.config);
+    },
+    'sessions:respondToPermission': async (_event, args) => {
+      await container.resolve<ISessions>('sessions').respondToPermission(args.turnId, args.toolCallId, args.decision, args.metadata);
+      return { success: true };
+    },
+    'sessions:respondToAskHuman': async (_event, args) => {
+      await container.resolve<ISessions>('sessions').respondToAskHuman(args.turnId, args.toolCallId, args.answer);
+      return { success: true };
+    },
+    'sessions:stopTurn': async (_event, args) => {
+      await container.resolve<ISessions>('sessions').stopTurn(args.turnId, args.reason);
+      return { success: true };
+    },
+    'sessions:resumeTurn': async (_event, args) => {
+      await container.resolve<ISessions>('sessions').resumeTurn(args.sessionId);
+      return { success: true };
+    },
+    'sessions:setTitle': async (_event, args) => {
+      await container.resolve<ISessions>('sessions').setTitle(args.sessionId, args.title);
+      return { success: true };
+    },
+    'sessions:delete': async (_event, args) => {
+      await container.resolve<ISessions>('sessions').deleteSession(args.sessionId);
+      return { success: true };
+    },
+    'sessions:downloadLog': async (event, args) => {
+      // Concatenate the session's turn logs into one JSONL for debugging.
+      const sessions = container.resolve<ISessions>('sessions');
+      const state = await sessions.getSession(args.sessionId);
+      const win = BrowserWindow.fromWebContents(event.sender);
+      const result = await dialog.showSaveDialog(win!, {
+        defaultPath: `${args.sessionId}.jsonl.log`,
+        filters: [
+          { name: 'Chat Log', extensions: ['log'] },
+          { name: 'JSONL', extensions: ['jsonl'] },
+          { name: 'All Files', extensions: ['*'] },
+        ],
+      });
+      if (result.canceled || !result.filePath) {
+        return { success: false };
+      }
+      try {
+        const lines: string[] = [];
+        for (const ref of state.turns) {
+          const turn = await sessions.getTurn(ref.turnId);
+          for (const turnEvent of turn.events) {
+            lines.push(JSON.stringify(turnEvent));
+          }
+        }
+        await fs.writeFile(result.filePath, lines.join('\n') + '\n');
+        return { success: true };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to download chat log';
+        return { success: false, error: message };
+      }
     },
     'runs:downloadLog': async (event, args) => {
       const runFileName = `${args.runId}.jsonl`;
@@ -1543,6 +1661,11 @@ export function setupIpcHandlers() {
     'meeting:summarize': async (_event, args) => {
       const notes = await summarizeMeeting(args.transcript, args.meetingStartTime, args.calendarEventJson);
       return { notes };
+    },
+    'meeting-prep:resolve': async (_event, args) => {
+      const result = await resolveMeetingPrep(args.attendees);
+      const prepNote = args.eventId ? await readPrepNoteForEvent(args.eventId) : null;
+      return { ...result, prepNote };
     },
     'inline-task:classifySchedule': async (_event, args) => {
       const schedule = await classifySchedule(args.instruction);
