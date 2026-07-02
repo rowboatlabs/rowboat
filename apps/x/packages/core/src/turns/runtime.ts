@@ -2,16 +2,17 @@ import type { z } from "zod";
 import {
     DEFAULT_MAX_MODEL_CALLS,
     MODEL_CALL_LIMIT_ERROR_CODE,
+    type ConversationMessage,
     type JsonValue,
     type ModelCallFailed,
     type ModelRequest,
     type ToolCallState,
-    type ToolInvocationRequested,
-    ToolResultData,
     type ToolDescriptor,
+    type ToolInvocationRequested,
     type ToolPermissionRequired,
     type ToolPermissionResolved,
     type ToolResult,
+    ToolResultData,
     TurnCreated,
     type TurnEvent,
     type TurnState,
@@ -37,7 +38,11 @@ import {
 import type { ITurnLifecycleBus } from "./bus.js";
 import type { IClock } from "./clock.js";
 import type { IContextResolver } from "./context-resolver.js";
-import type { IModelRegistry, LlmStreamEvent } from "./model-registry.js";
+import type {
+    IModelRegistry,
+    LlmStreamEvent,
+    ResolvedModel,
+} from "./model-registry.js";
 import type { IPermissionChecker, IPermissionClassifier } from "./permission.js";
 import type { ITurnRepo } from "./repo.js";
 import { HotStream } from "./stream.js";
@@ -157,6 +162,10 @@ export class TurnRuntime implements ITurnRuntime {
         }
     }
 
+    // §18 steps 4–7: read, reduce, short-circuit terminal turns, materialize
+    // context, and validate live dependencies — all before any mutation.
+    // Failures here are infrastructure errors: the execution rejects and the
+    // turn is left unchanged.
     private async advance(
         turnId: string,
         input: TurnExternalInput | undefined,
@@ -164,21 +173,16 @@ export class TurnRuntime implements ITurnRuntime {
         stream: HotStream<TurnStreamEvent, TurnOutcome>,
     ): Promise<TurnOutcome> {
         const events = await this.turnRepo.read(turnId);
-        let state = reduceTurn(events);
+        const state = reduceTurn(events);
 
         if (state.terminal) {
             if (input) {
-                throw new TurnInputError(
-                    `turn ${turnId} is terminal; input rejected`,
-                );
+                throw new TurnInputError(`turn ${turnId} is terminal; input rejected`);
             }
             return outcomeFromTerminal(state);
         }
 
         const definition = state.definition;
-
-        // Materialize context and live dependencies. Failures here are
-        // infrastructure errors: the execution rejects, the turn is unchanged.
         const resolvedContext = await this.contextResolver.resolve(
             definition.context,
         );
@@ -211,573 +215,761 @@ export class TurnRuntime implements ITurnRuntime {
             }
         }
 
-        let appended = false;
-        const append = async (...batch: TEvent[]): Promise<void> => {
-            await this.turnRepo.append(turnId, batch);
-            events.push(...batch);
-            state = reduceTurn(events);
-            appended = true;
-            for (const event of batch) {
-                stream.push(event);
-            }
-        };
-        const now = () => this.clock.now();
-        // Checker "allowed" outcomes are deliberately not durable: after a
-        // crash the checker is simply re-consulted.
-        const checkerAllowed = new Set<string>();
-        let cancelReason: string | undefined;
-
-        const cancelTurn = async (): Promise<TurnOutcome> => {
-            const open = state.modelCalls.find(
-                (c) => c.response === undefined && c.error === undefined,
-            );
-            if (open) {
-                await append(
-                    modelCallFailedEvent(turnId, now(), open.index, "model call was cancelled"),
-                );
-            }
-            for (const tc of state.toolCalls.filter((t) => !t.result)) {
-                await append(
-                    runtimeResultEvent(turnId, now(), tc, {
-                        output: "Tool call was cancelled before completion.",
-                        isError: true,
-                    }),
-                );
-            }
-            await append({
-                type: "turn_cancelled",
-                turnId,
-                ts: now(),
-                ...(cancelReason === undefined ? {} : { reason: cancelReason }),
-                usage: state.usage,
-            });
-            return {
-                status: "cancelled",
-                ...(cancelReason === undefined ? {} : { reason: cancelReason }),
-                usage: state.usage,
-            };
-        };
-
+        const run = new TurnAdvance({
+            turnId,
+            events,
+            state,
+            stream,
+            resolvedContext,
+            model,
+            toolsByName,
+            signal: controller.signal,
+            turnRepo: this.turnRepo,
+            clock: this.clock,
+            permissionChecker: this.permissionChecker,
+            permissionClassifier: this.permissionClassifier,
+        });
         try {
-            // Apply the optional single external input against durable
-            // pending state.
-            if (input) {
-                switch (input.type) {
-                    case "cancel":
-                        cancelReason = input.reason;
-                        return await cancelTurn();
-                    case "permission_decision": {
-                        const tc = state.toolCalls.find(
-                            (t) => t.toolCallId === input.toolCallId,
-                        );
-                        if (!tc?.permission || tc.permission.resolved || tc.result) {
-                            throw new TurnInputError(
-                                `no pending permission for tool call ${input.toolCallId}`,
-                            );
-                        }
-                        await append({
-                            type: "tool_permission_resolved",
-                            turnId,
-                            ts: now(),
-                            toolCallId: input.toolCallId,
-                            decision: input.decision,
-                            source: "human",
-                            ...(input.metadata === undefined
-                                ? {}
-                                : { metadata: input.metadata }),
-                        });
-                        if (input.decision === "deny") {
-                            await append(
-                                runtimeResultEvent(turnId, now(), tc, {
-                                    output: "Permission denied by user.",
-                                    isError: true,
-                                }),
-                            );
-                        }
-                        break;
-                    }
-                    case "async_tool_progress": {
-                        const tc = requirePendingAsync(state, input.toolCallId);
-                        await append({
-                            type: "tool_progress",
-                            turnId,
-                            ts: now(),
-                            toolCallId: tc.toolCallId,
-                            source: "async",
-                            progress: input.progress,
-                        });
-                        break;
-                    }
-                    case "async_tool_result": {
-                        const tc = requirePendingAsync(state, input.toolCallId);
-                        await append({
-                            type: "tool_result",
-                            turnId,
-                            ts: now(),
-                            toolCallId: tc.toolCallId,
-                            toolName: tc.toolName,
-                            source: "async",
-                            result: input.result,
-                        });
-                        break;
-                    }
-                }
-            }
-
-            for (;;) {
-                if (controller.signal.aborted) {
-                    return await cancelTurn();
-                }
-
-                // Recovery: close a model call interrupted by a crash, then
-                // re-issue it as a new call (counts against the budget).
-                const open = state.modelCalls.find(
-                    (c) => c.response === undefined && c.error === undefined,
-                );
-                if (open) {
-                    await append(
-                        modelCallFailedEvent(
-                            turnId,
-                            now(),
-                            open.index,
-                            "model call was interrupted before a response was recorded",
-                        ),
-                    );
-                    continue;
-                }
-
-                // Recovery: close sync invocations interrupted by a crash
-                // with an indeterminate result; the turn continues.
-                const interruptedSync = state.toolCalls.filter(
-                    (tc) => tc.invocation && tc.execution === "sync" && !tc.result,
-                );
-                if (interruptedSync.length > 0) {
-                    for (const tc of interruptedSync) {
-                        await append(
-                            runtimeResultEvent(turnId, now(), tc, {
-                                output: INTERRUPTED_TOOL_MESSAGE,
-                                isError: true,
-                            }),
-                        );
-                    }
-                    continue;
-                }
-
-                // Permission requirements for freshly extracted tool calls.
-                const fresh = state.toolCalls.filter(
-                    (tc) =>
-                        !tc.result &&
-                        !tc.invocation &&
-                        !tc.permission &&
-                        !checkerAllowed.has(tc.toolCallId),
-                );
-                for (const tc of fresh) {
-                    if (controller.signal.aborted) {
-                        break;
-                    }
-                    const tool = toolsByName.get(tc.toolName);
-                    if (!tool) {
-                        await append(
-                            runtimeResultEvent(turnId, now(), tc, {
-                                output: `Unknown tool: ${tc.toolName}`,
-                                isError: true,
-                            }),
-                        );
-                        continue;
-                    }
-                    if (
-                        tool.descriptor.requiresHuman &&
-                        !definition.config.humanAvailable
-                    ) {
-                        await append(
-                            invocationEvent(turnId, now(), tc, tool.descriptor),
-                        );
-                        await append(
-                            runtimeResultEvent(turnId, now(), tc, {
-                                output: "Human input is unavailable for this turn.",
-                                isError: true,
-                            }),
-                        );
-                        continue;
-                    }
-                    try {
-                        const check = await this.permissionChecker.check({
-                            turnId,
-                            toolCallId: tc.toolCallId,
-                            toolId: tool.descriptor.toolId,
-                            toolName: tc.toolName,
-                            input: tc.input,
-                        });
-                        if (!check.required) {
-                            checkerAllowed.add(tc.toolCallId);
-                        } else {
-                            await append(
-                                permissionRequiredEvent(
-                                    turnId,
-                                    now(),
-                                    tc,
-                                    check.request,
-                                ),
-                            );
-                        }
-                    } catch (error) {
-                        // Checker failure fails closed: record it and route
-                        // to a human (or denial below); never execute.
-                        await append(
-                            permissionRequiredEvent(turnId, now(), tc, {}, errorMessage(error)),
-                        );
-                    }
-                }
-                if (controller.signal.aborted) {
-                    return await cancelTurn();
-                }
-
-                // Automatic classification, one batch. Checker-error calls
-                // and previously failed classifications go straight to the
-                // human/deny fallback.
-                if (definition.config.autoPermission) {
-                    const candidates = state.toolCalls.filter(
-                        (tc) =>
-                            tc.permission &&
-                            !tc.permission.resolved &&
-                            !tc.permission.classification &&
-                            !tc.permission.classificationFailed &&
-                            tc.permission.required.checkerError === undefined &&
-                            !tc.result,
-                    );
-                    if (candidates.length > 0) {
-                        try {
-                            const decisions = await this.permissionClassifier.classify(
-                                candidates.map((tc) => ({
-                                    toolCallId: tc.toolCallId,
-                                    toolName: tc.toolName,
-                                    input: tc.input,
-                                    request: tc.permission!.required.request,
-                                })),
-                                controller.signal,
-                            );
-                            for (const tc of candidates) {
-                                const decision = decisions.find(
-                                    (d) => d.toolCallId === tc.toolCallId,
-                                );
-                                if (!decision) {
-                                    await append({
-                                        type: "tool_permission_classification_failed",
-                                        turnId,
-                                        ts: now(),
-                                        toolCallIds: [tc.toolCallId],
-                                        error: "classifier returned no decision",
-                                    });
-                                    continue;
-                                }
-                                await append({
-                                    type: "tool_permission_classified",
-                                    turnId,
-                                    ts: now(),
-                                    toolCallId: tc.toolCallId,
-                                    decision: decision.decision,
-                                    reason: decision.reason,
-                                });
-                                if (decision.decision === "allow") {
-                                    await append(
-                                        resolvedEvent(turnId, now(), tc.toolCallId, "allow", "classifier", decision.reason),
-                                    );
-                                } else if (decision.decision === "deny") {
-                                    await append(
-                                        resolvedEvent(turnId, now(), tc.toolCallId, "deny", "classifier", decision.reason),
-                                    );
-                                    await append(
-                                        runtimeResultEvent(turnId, now(), tc, {
-                                            output: `Permission denied: ${decision.reason}`,
-                                            isError: true,
-                                        }),
-                                    );
-                                }
-                                // "defer" falls through to human/deny fallback.
-                            }
-                        } catch (error) {
-                            if (controller.signal.aborted) {
-                                return await cancelTurn();
-                            }
-                            await append({
-                                type: "tool_permission_classification_failed",
-                                turnId,
-                                ts: now(),
-                                toolCallIds: candidates.map((c) => c.toolCallId),
-                                error: errorMessage(error),
-                            });
-                        }
-                    }
-                }
-
-                // No human available: deny whatever remains unresolved.
-                if (!definition.config.humanAvailable) {
-                    const unresolved = state.toolCalls.filter(
-                        (tc) => tc.permission && !tc.permission.resolved && !tc.result,
-                    );
-                    for (const tc of unresolved) {
-                        await append(
-                            resolvedEvent(turnId, now(), tc.toolCallId, "deny", "human_unavailable"),
-                        );
-                        await append(
-                            runtimeResultEvent(turnId, now(), tc, {
-                                output: "Permission denied: no human is available for this turn.",
-                                isError: true,
-                            }),
-                        );
-                    }
-                }
-
-                // Execute allowed sync tools sequentially; expose allowed
-                // async tools. Source order.
-                const executable = state.toolCalls.filter(
-                    (tc) =>
-                        !tc.result &&
-                        !tc.invocation &&
-                        (checkerAllowed.has(tc.toolCallId) ||
-                            tc.permission?.resolved?.decision === "allow"),
-                );
-                for (const tc of executable) {
-                    if (controller.signal.aborted) {
-                        break;
-                    }
-                    const tool = toolsByName.get(tc.toolName);
-                    if (!tool) {
-                        await append(
-                            runtimeResultEvent(turnId, now(), tc, {
-                                output: `Unknown tool: ${tc.toolName}`,
-                                isError: true,
-                            }),
-                        );
-                        continue;
-                    }
-                    await append(invocationEvent(turnId, now(), tc, tool.descriptor));
-                    if (tool.descriptor.execution === "async") {
-                        continue;
-                    }
-                    const syncTool = tool as SyncRuntimeTool;
-                    try {
-                        const result = await syncTool.execute(tc.input, {
-                            signal: controller.signal,
-                            reportProgress: async (progress) => {
-                                await append({
-                                    type: "tool_progress",
-                                    turnId,
-                                    ts: now(),
-                                    toolCallId: tc.toolCallId,
-                                    source: "sync",
-                                    progress,
-                                });
-                            },
-                        });
-                        await append({
-                            type: "tool_result",
-                            turnId,
-                            ts: now(),
-                            toolCallId: tc.toolCallId,
-                            toolName: tc.toolName,
-                            source: "sync",
-                            result: ToolResultData.parse(result),
-                        });
-                    } catch (error) {
-                        if (controller.signal.aborted) {
-                            await append(
-                                runtimeResultEvent(turnId, now(), tc, {
-                                    output: "Tool execution was cancelled.",
-                                    isError: true,
-                                }),
-                            );
-                            break;
-                        }
-                        // A tool failure is conversational, not terminal.
-                        await append({
-                            type: "tool_result",
-                            turnId,
-                            ts: now(),
-                            toolCallId: tc.toolCallId,
-                            toolName: tc.toolName,
-                            source: "sync",
-                            result: { output: errorMessage(error), isError: true },
-                        });
-                    }
-                }
-                if (controller.signal.aborted) {
-                    return await cancelTurn();
-                }
-
-                // Suspend while external work remains outstanding.
-                const pendingPerms = outstandingPermissions(state);
-                const pendingAsync = outstandingAsyncTools(state);
-                if (pendingPerms.length + pendingAsync.length > 0) {
-                    const last = events[events.length - 1];
-                    if (appended || last.type !== "turn_suspended") {
-                        await append({
-                            type: "turn_suspended",
-                            turnId,
-                            ts: now(),
-                            pendingPermissions: permissionsSnapshot(pendingPerms),
-                            pendingAsyncTools: asyncSnapshot(pendingAsync),
-                            usage: state.usage,
-                        });
-                    }
-                    return {
-                        status: "suspended",
-                        pendingPermissions: permissionsSnapshot(pendingPerms),
-                        pendingAsyncTools: asyncSnapshot(pendingAsync),
-                        usage: state.usage,
-                    };
-                }
-
-                // Tool batch complete. Completion, budget, or the next call.
-                const lastCall = state.modelCalls[state.modelCalls.length - 1];
-                if (
-                    lastCall?.response !== undefined &&
-                    state.toolCalls.every((tc) => tc.modelCallIndex !== lastCall.index)
-                ) {
-                    const output = lastCall.response;
-                    const finishReason = lastCall.finishReason ?? "unknown";
-                    await append({
-                        type: "turn_completed",
-                        turnId,
-                        ts: now(),
-                        output,
-                        finishReason,
-                        usage: state.usage,
-                    });
-                    return {
-                        status: "completed",
-                        output,
-                        finishReason,
-                        usage: state.usage,
-                    };
-                }
-
-                if (state.modelCalls.length >= definition.config.maxModelCalls) {
-                    const error = `Model call limit of ${definition.config.maxModelCalls} reached before the turn completed.`;
-                    await append({
-                        type: "turn_failed",
-                        turnId,
-                        ts: now(),
-                        error,
-                        code: MODEL_CALL_LIMIT_ERROR_CODE,
-                        usage: state.usage,
-                    });
-                    return {
-                        status: "failed",
-                        error,
-                        code: MODEL_CALL_LIMIT_ERROR_CODE,
-                        usage: state.usage,
-                    };
-                }
-
-                // One model step. The durable request barrier precedes the
-                // provider call; step events persist before the next provider
-                // stream read; deltas bypass storage.
-                const index = state.modelCalls.length;
-                const transcript = turnTranscript(state);
-                const isRef = !Array.isArray(definition.context);
-                const request: z.infer<typeof ModelRequest> = {
-                    systemPrompt: definition.agent.resolved.systemPrompt,
-                    ...(isRef ? { contextRef: definition.context as { previousTurnId: string } } : {}),
-                    messages: isRef
-                        ? transcript
-                        : [...(definition.context as typeof transcript), ...transcript],
-                    tools: definition.agent.resolved.tools,
-                    parameters: {},
-                };
-                await append({
-                    type: "model_call_requested",
-                    turnId,
-                    ts: now(),
-                    modelCallIndex: index,
-                    request,
-                });
-
-                let completion: Extract<
-                    LlmStreamEvent,
-                    { type: "completed" }
-                > | null = null;
-                try {
-                    for await (const event of model.stream({
-                        systemPrompt: request.systemPrompt,
-                        messages: [...resolvedContext, ...transcript],
-                        tools: request.tools,
-                        parameters: request.parameters,
-                        signal: controller.signal,
-                    })) {
-                        switch (event.type) {
-                            case "text_delta":
-                                stream.push({
-                                    type: "text_delta",
-                                    turnId,
-                                    modelCallIndex: index,
-                                    delta: event.delta,
-                                });
-                                break;
-                            case "reasoning_delta":
-                                stream.push({
-                                    type: "reasoning_delta",
-                                    turnId,
-                                    modelCallIndex: index,
-                                    delta: event.delta,
-                                });
-                                break;
-                            case "step_event":
-                                await append({
-                                    type: "model_step_event",
-                                    turnId,
-                                    ts: now(),
-                                    modelCallIndex: index,
-                                    event: event.event,
-                                });
-                                break;
-                            case "completed":
-                                completion = event;
-                                break;
-                        }
-                    }
-                    if (!completion) {
-                        throw new Error(
-                            "model stream ended without a completed response",
-                        );
-                    }
-                } catch (error) {
-                    if (controller.signal.aborted) {
-                        await append(
-                            modelCallFailedEvent(turnId, now(), index, "model call was cancelled"),
-                        );
-                        return await cancelTurn();
-                    }
-                    const message = errorMessage(error);
-                    await append(modelCallFailedEvent(turnId, now(), index, message));
-                    await append({
-                        type: "turn_failed",
-                        turnId,
-                        ts: now(),
-                        error: message,
-                        usage: state.usage,
-                    });
-                    return { status: "failed", error: message, usage: state.usage };
-                }
-
-                await append({
-                    type: "model_call_completed",
-                    turnId,
-                    ts: now(),
-                    modelCallIndex: index,
-                    message: completion.message,
-                    finishReason: completion.finishReason,
-                    usage: completion.usage,
-                    ...(completion.providerMetadata === undefined
-                        ? {}
-                        : { providerMetadata: completion.providerMetadata }),
-                });
-            }
+            return await run.run(input);
         } finally {
             if (externalSignal) {
                 externalSignal.removeEventListener("abort", forwardAbort);
             }
         }
+    }
+}
+
+// One advanceTurn invocation. Owns the per-invocation context and implements
+// the §18 main loop as one method per phase. All state it acts on is derived
+// from the durable log via the shared reducer after every append.
+class TurnAdvance {
+    private readonly turnId: string;
+    private readonly events: TEvent[];
+    private state: TurnState;
+    private readonly stream: HotStream<TurnStreamEvent, TurnOutcome>;
+    private readonly resolvedContext: Array<z.infer<typeof ConversationMessage>>;
+    private readonly model: ResolvedModel;
+    private readonly toolsByName: Map<string, RuntimeTool>;
+    private readonly signal: AbortSignal;
+    private readonly turnRepo: ITurnRepo;
+    private readonly clock: IClock;
+    private readonly permissionChecker: IPermissionChecker;
+    private readonly permissionClassifier: IPermissionClassifier;
+
+    // Checker "allowed" outcomes are deliberately not durable: after a crash
+    // the checker is simply re-consulted.
+    private readonly checkerAllowed = new Set<string>();
+    private appended = false;
+    private cancelReason: string | undefined;
+
+    constructor(init: {
+        turnId: string;
+        events: TEvent[];
+        state: TurnState;
+        stream: HotStream<TurnStreamEvent, TurnOutcome>;
+        resolvedContext: Array<z.infer<typeof ConversationMessage>>;
+        model: ResolvedModel;
+        toolsByName: Map<string, RuntimeTool>;
+        signal: AbortSignal;
+        turnRepo: ITurnRepo;
+        clock: IClock;
+        permissionChecker: IPermissionChecker;
+        permissionClassifier: IPermissionClassifier;
+    }) {
+        this.turnId = init.turnId;
+        this.events = init.events;
+        this.state = init.state;
+        this.stream = init.stream;
+        this.resolvedContext = init.resolvedContext;
+        this.model = init.model;
+        this.toolsByName = init.toolsByName;
+        this.signal = init.signal;
+        this.turnRepo = init.turnRepo;
+        this.clock = init.clock;
+        this.permissionChecker = init.permissionChecker;
+        this.permissionClassifier = init.permissionClassifier;
+    }
+
+    private get definition(): TurnState["definition"] {
+        return this.state.definition;
+    }
+
+    private now(): string {
+        return this.clock.now();
+    }
+
+    // Durable barrier: persist, re-reduce (the reducer doubles as a runtime
+    // assertion that the appended history is legal), then stream.
+    private async append(...batch: TEvent[]): Promise<void> {
+        await this.turnRepo.append(this.turnId, batch);
+        this.events.push(...batch);
+        this.state = reduceTurn(this.events);
+        this.appended = true;
+        for (const event of batch) {
+            this.stream.push(event);
+        }
+    }
+
+    // §18 step 8: repeatedly advance deterministic work. Each phase either
+    // appends durable facts and lets the loop continue, or produces the
+    // invocation's outcome.
+    async run(input: TurnExternalInput | undefined): Promise<TurnOutcome> {
+        if (input) {
+            const cancelled = await this.applyInput(input);
+            if (cancelled) {
+                return cancelled;
+            }
+        }
+        for (;;) {
+            if (this.signal.aborted) {
+                return this.cancel();
+            }
+            if (await this.closeInterruptedModelCall()) {
+                continue;
+            }
+            if (await this.closeInterruptedSyncTools()) {
+                continue;
+            }
+            await this.evaluatePermissions();
+            if (this.signal.aborted) {
+                return this.cancel();
+            }
+            await this.classifyBatch();
+            if (this.signal.aborted) {
+                return this.cancel();
+            }
+            await this.denyUnresolvedWithoutHuman();
+            await this.executeAllowedTools();
+            if (this.signal.aborted) {
+                return this.cancel();
+            }
+            const suspended = await this.suspendIfPending();
+            if (suspended) {
+                return suspended;
+            }
+            const completed = await this.completeIfFinished();
+            if (completed) {
+                return completed;
+            }
+            const exhausted = await this.failIfExhausted();
+            if (exhausted) {
+                return exhausted;
+            }
+            const settled = await this.runModelStep();
+            if (settled) {
+                return settled;
+            }
+        }
+    }
+
+    // §11.2: exactly one input, validated against durable pending state.
+    // Returns an outcome only for cancel inputs.
+    private async applyInput(
+        input: TurnExternalInput,
+    ): Promise<TurnOutcome | undefined> {
+        switch (input.type) {
+            case "cancel":
+                this.cancelReason = input.reason;
+                return this.cancel();
+            case "permission_decision": {
+                const tc = this.state.toolCalls.find(
+                    (t) => t.toolCallId === input.toolCallId,
+                );
+                if (!tc?.permission || tc.permission.resolved || tc.result) {
+                    throw new TurnInputError(
+                        `no pending permission for tool call ${input.toolCallId}`,
+                    );
+                }
+                await this.append({
+                    type: "tool_permission_resolved",
+                    turnId: this.turnId,
+                    ts: this.now(),
+                    toolCallId: input.toolCallId,
+                    decision: input.decision,
+                    source: "human",
+                    ...(input.metadata === undefined
+                        ? {}
+                        : { metadata: input.metadata }),
+                });
+                if (input.decision === "deny") {
+                    await this.append(
+                        runtimeResultEvent(this.turnId, this.now(), tc, {
+                            output: "Permission denied by user.",
+                            isError: true,
+                        }),
+                    );
+                }
+                return undefined;
+            }
+            case "async_tool_progress": {
+                const tc = this.requirePendingAsync(input.toolCallId);
+                await this.append({
+                    type: "tool_progress",
+                    turnId: this.turnId,
+                    ts: this.now(),
+                    toolCallId: tc.toolCallId,
+                    source: "async",
+                    progress: input.progress,
+                });
+                return undefined;
+            }
+            case "async_tool_result": {
+                const tc = this.requirePendingAsync(input.toolCallId);
+                await this.append({
+                    type: "tool_result",
+                    turnId: this.turnId,
+                    ts: this.now(),
+                    toolCallId: tc.toolCallId,
+                    toolName: tc.toolName,
+                    source: "async",
+                    result: input.result,
+                });
+                return undefined;
+            }
+        }
+    }
+
+    private requirePendingAsync(toolCallId: string): ToolCallState {
+        const tc = this.state.toolCalls.find((t) => t.toolCallId === toolCallId);
+        if (!tc?.invocation || tc.execution !== "async" || tc.result) {
+            throw new TurnInputError(`no pending async tool call ${toolCallId}`);
+        }
+        return tc;
+    }
+
+    // §23: a model call interrupted by a crash is closed as failed and later
+    // re-issued by the normal model step (counting against the budget).
+    private async closeInterruptedModelCall(): Promise<boolean> {
+        const open = this.state.modelCalls.find(
+            (c) => c.response === undefined && c.error === undefined,
+        );
+        if (!open) {
+            return false;
+        }
+        await this.append(
+            modelCallFailedEvent(
+                this.turnId,
+                this.now(),
+                open.index,
+                "model call was interrupted before a response was recorded",
+            ),
+        );
+        return true;
+    }
+
+    // §23: a sync invocation interrupted by a crash gets an indeterminate
+    // error result; the turn continues (tool problems are conversational).
+    private async closeInterruptedSyncTools(): Promise<boolean> {
+        const interrupted = this.state.toolCalls.filter(
+            (tc) => tc.invocation && tc.execution === "sync" && !tc.result,
+        );
+        if (interrupted.length === 0) {
+            return false;
+        }
+        for (const tc of interrupted) {
+            await this.append(
+                runtimeResultEvent(this.turnId, this.now(), tc, {
+                    output: INTERRUPTED_TOOL_MESSAGE,
+                    isError: true,
+                }),
+            );
+        }
+        return true;
+    }
+
+    // §9/§10: for freshly extracted tool calls — unknown tools and
+    // human-dependent tools settle immediately; everything else is checked.
+    // A checker throw fails closed (recorded, never auto-executed).
+    private async evaluatePermissions(): Promise<void> {
+        const fresh = this.state.toolCalls.filter(
+            (tc) =>
+                !tc.result &&
+                !tc.invocation &&
+                !tc.permission &&
+                !this.checkerAllowed.has(tc.toolCallId),
+        );
+        for (const tc of fresh) {
+            if (this.signal.aborted) {
+                return;
+            }
+            const tool = this.toolsByName.get(tc.toolName);
+            if (!tool) {
+                await this.append(
+                    runtimeResultEvent(this.turnId, this.now(), tc, {
+                        output: `Unknown tool: ${tc.toolName}`,
+                        isError: true,
+                    }),
+                );
+                continue;
+            }
+            if (
+                tool.descriptor.requiresHuman &&
+                !this.definition.config.humanAvailable
+            ) {
+                await this.append(
+                    invocationEvent(this.turnId, this.now(), tc, tool.descriptor),
+                );
+                await this.append(
+                    runtimeResultEvent(this.turnId, this.now(), tc, {
+                        output: "Human input is unavailable for this turn.",
+                        isError: true,
+                    }),
+                );
+                continue;
+            }
+            try {
+                const check = await this.permissionChecker.check({
+                    turnId: this.turnId,
+                    toolCallId: tc.toolCallId,
+                    toolId: tool.descriptor.toolId,
+                    toolName: tc.toolName,
+                    input: tc.input,
+                });
+                if (!check.required) {
+                    this.checkerAllowed.add(tc.toolCallId);
+                } else {
+                    await this.append(
+                        permissionRequiredEvent(
+                            this.turnId,
+                            this.now(),
+                            tc,
+                            check.request,
+                        ),
+                    );
+                }
+            } catch (error) {
+                await this.append(
+                    permissionRequiredEvent(
+                        this.turnId,
+                        this.now(),
+                        tc,
+                        {},
+                        errorMessage(error),
+                    ),
+                );
+            }
+        }
+    }
+
+    // §9.3: one classifier batch per model response in auto mode.
+    // Checker-error calls and previously failed classifications skip the
+    // classifier and go straight to the human/deny fallback.
+    private async classifyBatch(): Promise<void> {
+        if (!this.definition.config.autoPermission) {
+            return;
+        }
+        const candidates = this.state.toolCalls.filter(
+            (tc) =>
+                tc.permission &&
+                !tc.permission.resolved &&
+                !tc.permission.classification &&
+                !tc.permission.classificationFailed &&
+                tc.permission.required.checkerError === undefined &&
+                !tc.result,
+        );
+        if (candidates.length === 0) {
+            return;
+        }
+        let decisions;
+        try {
+            decisions = await this.permissionClassifier.classify(
+                candidates.map((tc) => ({
+                    toolCallId: tc.toolCallId,
+                    toolName: tc.toolName,
+                    input: tc.input,
+                    request: (tc.permission as NonNullable<ToolCallState["permission"]>)
+                        .required.request,
+                })),
+                this.signal,
+            );
+        } catch (error) {
+            if (this.signal.aborted) {
+                return;
+            }
+            await this.append({
+                type: "tool_permission_classification_failed",
+                turnId: this.turnId,
+                ts: this.now(),
+                toolCallIds: candidates.map((c) => c.toolCallId),
+                error: errorMessage(error),
+            });
+            return;
+        }
+        for (const tc of candidates) {
+            const decision = decisions.find((d) => d.toolCallId === tc.toolCallId);
+            if (!decision) {
+                await this.append({
+                    type: "tool_permission_classification_failed",
+                    turnId: this.turnId,
+                    ts: this.now(),
+                    toolCallIds: [tc.toolCallId],
+                    error: "classifier returned no decision",
+                });
+                continue;
+            }
+            await this.append({
+                type: "tool_permission_classified",
+                turnId: this.turnId,
+                ts: this.now(),
+                toolCallId: tc.toolCallId,
+                decision: decision.decision,
+                reason: decision.reason,
+            });
+            if (decision.decision === "allow") {
+                await this.append(
+                    resolvedEvent(
+                        this.turnId,
+                        this.now(),
+                        tc.toolCallId,
+                        "allow",
+                        "classifier",
+                        decision.reason,
+                    ),
+                );
+            } else if (decision.decision === "deny") {
+                await this.append(
+                    resolvedEvent(
+                        this.turnId,
+                        this.now(),
+                        tc.toolCallId,
+                        "deny",
+                        "classifier",
+                        decision.reason,
+                    ),
+                );
+                await this.append(
+                    runtimeResultEvent(this.turnId, this.now(), tc, {
+                        output: `Permission denied: ${decision.reason}`,
+                        isError: true,
+                    }),
+                );
+            }
+            // "defer" falls through to the human/deny fallback.
+        }
+    }
+
+    // §9.3 matrix, humanAvailable = false: deny whatever remains unresolved.
+    private async denyUnresolvedWithoutHuman(): Promise<void> {
+        if (this.definition.config.humanAvailable) {
+            return;
+        }
+        const unresolved = this.state.toolCalls.filter(
+            (tc) => tc.permission && !tc.permission.resolved && !tc.result,
+        );
+        for (const tc of unresolved) {
+            await this.append(
+                resolvedEvent(
+                    this.turnId,
+                    this.now(),
+                    tc.toolCallId,
+                    "deny",
+                    "human_unavailable",
+                ),
+            );
+            await this.append(
+                runtimeResultEvent(this.turnId, this.now(), tc, {
+                    output: "Permission denied: no human is available for this turn.",
+                    isError: true,
+                }),
+            );
+        }
+    }
+
+    // §10.5: execute allowed sync tools sequentially and expose allowed async
+    // tools, in source order. Tool failures are conversational, not terminal.
+    private async executeAllowedTools(): Promise<void> {
+        const executable = this.state.toolCalls.filter(
+            (tc) =>
+                !tc.result &&
+                !tc.invocation &&
+                (this.checkerAllowed.has(tc.toolCallId) ||
+                    tc.permission?.resolved?.decision === "allow"),
+        );
+        for (const tc of executable) {
+            if (this.signal.aborted) {
+                return;
+            }
+            const tool = this.toolsByName.get(tc.toolName);
+            if (!tool) {
+                await this.append(
+                    runtimeResultEvent(this.turnId, this.now(), tc, {
+                        output: `Unknown tool: ${tc.toolName}`,
+                        isError: true,
+                    }),
+                );
+                continue;
+            }
+            await this.append(
+                invocationEvent(this.turnId, this.now(), tc, tool.descriptor),
+            );
+            if (tool.descriptor.execution === "async") {
+                continue; // exposed; the result arrives through advanceTurn
+            }
+            const syncTool = tool as SyncRuntimeTool;
+            try {
+                const result = await syncTool.execute(tc.input, {
+                    signal: this.signal,
+                    reportProgress: async (progress) => {
+                        await this.append({
+                            type: "tool_progress",
+                            turnId: this.turnId,
+                            ts: this.now(),
+                            toolCallId: tc.toolCallId,
+                            source: "sync",
+                            progress,
+                        });
+                    },
+                });
+                await this.append({
+                    type: "tool_result",
+                    turnId: this.turnId,
+                    ts: this.now(),
+                    toolCallId: tc.toolCallId,
+                    toolName: tc.toolName,
+                    source: "sync",
+                    result: ToolResultData.parse(result),
+                });
+            } catch (error) {
+                if (this.signal.aborted) {
+                    await this.append(
+                        runtimeResultEvent(this.turnId, this.now(), tc, {
+                            output: "Tool execution was cancelled.",
+                            isError: true,
+                        }),
+                    );
+                    return;
+                }
+                await this.append({
+                    type: "tool_result",
+                    turnId: this.turnId,
+                    ts: this.now(),
+                    toolCallId: tc.toolCallId,
+                    toolName: tc.toolName,
+                    source: "sync",
+                    result: { output: errorMessage(error), isError: true },
+                });
+            }
+        }
+    }
+
+    // §11.1: settle suspended while external work remains. A no-input
+    // re-advance of an already-snapshotted suspension appends nothing.
+    private async suspendIfPending(): Promise<TurnOutcome | undefined> {
+        const pendingPerms = outstandingPermissions(this.state);
+        const pendingAsync = outstandingAsyncTools(this.state);
+        if (pendingPerms.length + pendingAsync.length === 0) {
+            return undefined;
+        }
+        const last = this.events[this.events.length - 1];
+        if (this.appended || last.type !== "turn_suspended") {
+            await this.append({
+                type: "turn_suspended",
+                turnId: this.turnId,
+                ts: this.now(),
+                pendingPermissions: permissionsSnapshot(pendingPerms),
+                pendingAsyncTools: asyncSnapshot(pendingAsync),
+                usage: this.state.usage,
+            });
+        }
+        return {
+            status: "suspended",
+            pendingPermissions: permissionsSnapshot(pendingPerms),
+            pendingAsyncTools: asyncSnapshot(pendingAsync),
+            usage: this.state.usage,
+        };
+    }
+
+    // §8.5: a completed response without tool calls completes the turn.
+    private async completeIfFinished(): Promise<TurnOutcome | undefined> {
+        const lastCall = this.state.modelCalls[this.state.modelCalls.length - 1];
+        if (
+            lastCall?.response === undefined ||
+            this.state.toolCalls.some((tc) => tc.modelCallIndex === lastCall.index)
+        ) {
+            return undefined;
+        }
+        const output = lastCall.response;
+        const finishReason = lastCall.finishReason ?? "unknown";
+        await this.append({
+            type: "turn_completed",
+            turnId: this.turnId,
+            ts: this.now(),
+            output,
+            finishReason,
+            usage: this.state.usage,
+        });
+        return { status: "completed", output, finishReason, usage: this.state.usage };
+    }
+
+    // §20: limit exhaustion is a distinguishable outcome; the transcript is
+    // structurally complete, so sessions can offer continuation.
+    private async failIfExhausted(): Promise<TurnOutcome | undefined> {
+        if (this.state.modelCalls.length < this.definition.config.maxModelCalls) {
+            return undefined;
+        }
+        const error = `Model call limit of ${this.definition.config.maxModelCalls} reached before the turn completed.`;
+        await this.append({
+            type: "turn_failed",
+            turnId: this.turnId,
+            ts: this.now(),
+            error,
+            code: MODEL_CALL_LIMIT_ERROR_CODE,
+            usage: this.state.usage,
+        });
+        return {
+            status: "failed",
+            error,
+            code: MODEL_CALL_LIMIT_ERROR_CODE,
+            usage: this.state.usage,
+        };
+    }
+
+    // §8.3/§18h–l: one model step. The durable request barrier precedes the
+    // provider call; step events persist before the next provider read;
+    // deltas bypass storage. Returns an outcome only on failure/cancel.
+    private async runModelStep(): Promise<TurnOutcome | undefined> {
+        const index = this.state.modelCalls.length;
+        const transcript = turnTranscript(this.state);
+        const context = this.definition.context;
+        const isRef = !Array.isArray(context);
+        const request: z.infer<typeof ModelRequest> = {
+            systemPrompt: this.definition.agent.resolved.systemPrompt,
+            ...(isRef ? { contextRef: context } : {}),
+            messages: isRef ? transcript : [...context, ...transcript],
+            tools: this.definition.agent.resolved.tools,
+            parameters: {},
+        };
+        await this.append({
+            type: "model_call_requested",
+            turnId: this.turnId,
+            ts: this.now(),
+            modelCallIndex: index,
+            request,
+        });
+
+        let completion: Extract<LlmStreamEvent, { type: "completed" }> | null =
+            null;
+        try {
+            for await (const event of this.model.stream({
+                systemPrompt: request.systemPrompt,
+                messages: [...this.resolvedContext, ...transcript],
+                tools: request.tools,
+                parameters: request.parameters,
+                signal: this.signal,
+            })) {
+                switch (event.type) {
+                    case "text_delta":
+                        this.stream.push({
+                            type: "text_delta",
+                            turnId: this.turnId,
+                            modelCallIndex: index,
+                            delta: event.delta,
+                        });
+                        break;
+                    case "reasoning_delta":
+                        this.stream.push({
+                            type: "reasoning_delta",
+                            turnId: this.turnId,
+                            modelCallIndex: index,
+                            delta: event.delta,
+                        });
+                        break;
+                    case "step_event":
+                        await this.append({
+                            type: "model_step_event",
+                            turnId: this.turnId,
+                            ts: this.now(),
+                            modelCallIndex: index,
+                            event: event.event,
+                        });
+                        break;
+                    case "completed":
+                        completion = event;
+                        break;
+                }
+            }
+            if (!completion) {
+                throw new Error("model stream ended without a completed response");
+            }
+        } catch (error) {
+            if (this.signal.aborted) {
+                await this.append(
+                    modelCallFailedEvent(
+                        this.turnId,
+                        this.now(),
+                        index,
+                        "model call was cancelled",
+                    ),
+                );
+                return this.cancel();
+            }
+            const message = errorMessage(error);
+            await this.append(
+                modelCallFailedEvent(this.turnId, this.now(), index, message),
+            );
+            await this.append({
+                type: "turn_failed",
+                turnId: this.turnId,
+                ts: this.now(),
+                error: message,
+                usage: this.state.usage,
+            });
+            return { status: "failed", error: message, usage: this.state.usage };
+        }
+
+        await this.append({
+            type: "model_call_completed",
+            turnId: this.turnId,
+            ts: this.now(),
+            modelCallIndex: index,
+            message: completion.message,
+            finishReason: completion.finishReason,
+            usage: completion.usage,
+            ...(completion.providerMetadata === undefined
+                ? {}
+                : { providerMetadata: completion.providerMetadata }),
+        });
+        return undefined;
+    }
+
+    // §22: close any open model call, give synthetic results to unresolved
+    // calls, and append the terminal cancellation.
+    private async cancel(): Promise<TurnOutcome> {
+        const open = this.state.modelCalls.find(
+            (c) => c.response === undefined && c.error === undefined,
+        );
+        if (open) {
+            await this.append(
+                modelCallFailedEvent(
+                    this.turnId,
+                    this.now(),
+                    open.index,
+                    "model call was cancelled",
+                ),
+            );
+        }
+        for (const tc of this.state.toolCalls.filter((t) => !t.result)) {
+            await this.append(
+                runtimeResultEvent(this.turnId, this.now(), tc, {
+                    output: "Tool call was cancelled before completion.",
+                    isError: true,
+                }),
+            );
+        }
+        await this.append({
+            type: "turn_cancelled",
+            turnId: this.turnId,
+            ts: this.now(),
+            ...(this.cancelReason === undefined
+                ? {}
+                : { reason: this.cancelReason }),
+            usage: this.state.usage,
+        });
+        return {
+            status: "cancelled",
+            ...(this.cancelReason === undefined ? {} : { reason: this.cancelReason }),
+            usage: this.state.usage,
+        };
     }
 }
 
@@ -812,16 +1004,6 @@ function outcomeFromTerminal(state: TurnState): TurnOutcome {
                 usage: terminal.usage,
             };
     }
-}
-
-function requirePendingAsync(state: TurnState, toolCallId: string): ToolCallState {
-    const tc = state.toolCalls.find((t) => t.toolCallId === toolCallId);
-    if (!tc?.invocation || tc.execution !== "async" || tc.result) {
-        throw new TurnInputError(
-            `no pending async tool call ${toolCallId}`,
-        );
-    }
-    return tc;
 }
 
 function permissionsSnapshot(
