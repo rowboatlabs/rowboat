@@ -39,7 +39,8 @@ export interface SessionChatStoreDeps {
 // hook is a thin useSyncExternalStore subscription over it.
 export class SessionChatStore {
   private readonly client: SessionsClient
-  private readonly unsubscribeFeed: () => void
+  private readonly subscribeFeed: (listener: SessionFeedListener) => () => void
+  private feedDisconnect: (() => void) | null = null
   private readonly listeners = new Set<() => void>()
 
   private sessionId: string | null = null
@@ -63,12 +64,20 @@ export class SessionChatStore {
 
   constructor(deps: SessionChatStoreDeps) {
     this.client = deps.client
-    this.unsubscribeFeed = deps.subscribeFeed(this.onFeedEvent)
+    this.subscribeFeed = deps.subscribeFeed
   }
 
-  dispose(): void {
-    this.unsubscribeFeed()
-    this.listeners.clear()
+  // Feed attachment is effect-managed and idempotent so React StrictMode's
+  // mount -> cleanup -> mount cycle re-attaches cleanly (a constructor-made
+  // subscription would be torn down by the first cleanup and never restored).
+  connect(): () => void {
+    if (!this.feedDisconnect) {
+      this.feedDisconnect = this.subscribeFeed(this.onFeedEvent)
+    }
+    return () => {
+      this.feedDisconnect?.()
+      this.feedDisconnect = null
+    }
   }
 
   subscribe = (onChange: () => void): (() => void) => {
@@ -241,7 +250,8 @@ export interface SessionListSnapshot {
 
 export class SessionListStore {
   private readonly client: SessionsClient
-  private readonly unsubscribeFeed: () => void
+  private readonly subscribeFeed: (listener: SessionFeedListener) => () => void
+  private feedDisconnect: (() => void) | null = null
   private readonly listeners = new Set<() => void>()
   private entries = new Map<string, SessionIndexEntry>()
   private loading = true
@@ -249,12 +259,17 @@ export class SessionListStore {
 
   constructor(deps: SessionChatStoreDeps) {
     this.client = deps.client
-    this.unsubscribeFeed = deps.subscribeFeed(this.onFeedEvent)
+    this.subscribeFeed = deps.subscribeFeed
   }
 
-  dispose(): void {
-    this.unsubscribeFeed()
-    this.listeners.clear()
+  connect(): () => void {
+    if (!this.feedDisconnect) {
+      this.feedDisconnect = this.subscribeFeed(this.onFeedEvent)
+    }
+    return () => {
+      this.feedDisconnect?.()
+      this.feedDisconnect = null
+    }
   }
 
   subscribe = (onChange: () => void): (() => void) => {

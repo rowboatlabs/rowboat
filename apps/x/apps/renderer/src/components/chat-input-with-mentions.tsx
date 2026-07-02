@@ -342,22 +342,15 @@ function ChatInputInner({
     }
   })
 
-  // When a run exists, freeze the dropdown to the run's resolved model+provider.
+  // Sessions runtime: model and permission mode are per-message turn config,
+  // so nothing is frozen for an existing chat — the picker stays live.
   useEffect(() => {
     if (!runId) {
       setLockedModel(null)
       setPermissionMode('auto')
       return
     }
-    let cancelled = false
-    window.ipc.invoke('runs:fetch', { runId }).then((run) => {
-      if (cancelled) return
-      if (run.provider && run.model) {
-        setLockedModel({ provider: run.provider, model: run.model })
-      }
-      setPermissionMode(run.permissionMode ?? 'manual')
-    }).catch(() => { /* legacy run or fetch failure — leave unlocked */ })
-    return () => { cancelled = true }
+    setLockedModel(null)
   }, [runId])
 
   useEffect(() => {

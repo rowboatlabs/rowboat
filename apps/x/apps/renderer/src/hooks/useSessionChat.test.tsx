@@ -1,3 +1,4 @@
+import { StrictMode } from 'react'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { SessionBusEvent } from '@x/shared/src/sessions.js'
@@ -69,7 +70,7 @@ function makeDeps() {
 describe('useSessionChat', () => {
   it('seeds from the session, follows live events, and routes actions', async () => {
     const { deps, calls, emit } = makeDeps()
-    const { result } = renderHook(() => useSessionChat(S1, deps))
+    const { result } = renderHook(() => useSessionChat(S1, deps), { wrapper: StrictMode })
 
     await waitFor(() => {
       expect(result.current.latestTurnId).toBe('turn-1')
@@ -109,10 +110,14 @@ describe('useSessionChat', () => {
     ])
   })
 
-  it('unsubscribes from the feed on unmount', async () => {
+  it('unsubscribes from the feed on unmount (StrictMode double-mounts included)', async () => {
     const { deps, getUnsubscribed } = makeDeps()
-    const { unmount } = renderHook(() => useSessionChat(S1, deps))
+    const { unmount } = renderHook(() => useSessionChat(S1, deps), {
+      wrapper: StrictMode,
+    })
     unmount()
-    expect(getUnsubscribed()).toBe(1)
+    // StrictMode's simulated cleanup plus the real unmount: every subscribe
+    // was matched by an unsubscribe.
+    expect(getUnsubscribed()).toBe(2)
   })
 })

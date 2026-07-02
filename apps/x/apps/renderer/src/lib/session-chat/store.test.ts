@@ -86,20 +86,26 @@ class FakeClient implements SessionsClient {
 function makeStore() {
   const client = new FakeClient()
   let emit: SessionFeedListener = () => undefined
+  let subscribed = 0
   let unsubscribed = 0
   const store = new SessionChatStore({
     client,
     subscribeFeed: (listener) => {
+      subscribed += 1
       emit = listener
       return () => {
         unsubscribed += 1
+        emit = () => undefined
       }
     },
   })
+  const disconnect = store.connect()
   return {
     client,
     store,
+    disconnect,
     emit: (event: SessionBusEvent) => emit(event),
+    getSubscribed: () => subscribed,
     getUnsubscribed: () => unsubscribed,
   }
 }
@@ -245,12 +251,36 @@ describe('SessionChatStore', () => {
     expect(store.getSnapshot().chatState?.conversation).toEqual([])
   })
 
-  it('surfaces load errors and disposes its feed subscription', async () => {
-    const { store, getUnsubscribed } = makeStore()
+  it('surfaces load errors and disconnects its feed subscription', async () => {
+    const { store, disconnect, getUnsubscribed } = makeStore()
     await store.setSession('missing-session')
     expect(store.getSnapshot().error).toMatch(/session not found/)
-    store.dispose()
+    disconnect()
     expect(getUnsubscribed()).toBe(1)
+    void store
+  })
+
+  it('survives a StrictMode-style connect -> cleanup -> connect cycle', async () => {
+    // React StrictMode runs every effect's mount/cleanup/mount cycle in dev;
+    // the feed must re-attach or the store goes permanently deaf (the bug
+    // this test pins: a constructor-made subscription torn down by the first
+    // cleanup was never restored, leaving the chat stuck at "Thinking…").
+    const { client, store, disconnect, emit, getSubscribed } = makeStore()
+    client.sessions.set(S1, sessionState(S1, []))
+    disconnect()
+    const disconnect2 = store.connect()
+    expect(getSubscribed()).toBe(2)
+
+    await store.setSession(S1)
+    emit(turnEvent(S1, 'turn-1', created('turn-1', S1, user('go'))))
+    emit(turnEvent(S1, 'turn-1', requested('turn-1', 0, [user('go')])))
+    emit(turnEvent(S1, 'turn-1', completed('turn-1', 0, assistantText('done'))))
+    emit(turnEvent(S1, 'turn-1', turnCompleted('turn-1')))
+    expect(store.getSnapshot().chatState?.isProcessing).toBe(false)
+    expect(
+      store.getSnapshot().chatState?.conversation.filter(isChatMessage).map((m) => m.content),
+    ).toEqual(['go', 'done'])
+    disconnect2()
   })
 })
 
@@ -267,6 +297,7 @@ describe('SessionListStore', () => {
         return () => undefined
       },
     })
+    store.connect()
     await store.load()
     expect(store.getSnapshot().sessions.map((s) => s.sessionId).sort()).toEqual(['a', 'b'])
 

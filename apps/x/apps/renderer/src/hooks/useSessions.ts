@@ -13,8 +13,9 @@ const defaultDeps: SessionChatStoreDeps = {
 export function useSessions(deps: SessionChatStoreDeps = defaultDeps) {
   const [store] = useState(() => new SessionListStore(deps))
   useEffect(() => {
+    const disconnect = store.connect()
     void store.load()
-    return () => store.dispose()
+    return disconnect
   }, [store])
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot)
   const client = deps.client

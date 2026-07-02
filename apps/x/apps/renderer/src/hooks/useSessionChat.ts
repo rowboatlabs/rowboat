@@ -16,7 +16,7 @@ export function useSessionChat(
   deps: SessionChatStoreDeps = defaultDeps,
 ) {
   const [store] = useState(() => new SessionChatStore(deps))
-  useEffect(() => () => store.dispose(), [store])
+  useEffect(() => store.connect(), [store])
   useEffect(() => {
     void store.setSession(sessionId)
   }, [store, sessionId])
