@@ -1,8 +1,8 @@
 # Turn Runtime Technical Specification
 
-Status: design complete for the turn layer, amended after review for session
-integration: context references, revised crash-recovery semantics, and a
-distinguishable model-call-limit outcome. No implementation exists yet. The
+Status: implemented and live. All chat, background, and knowledge callers
+run on this runtime; the legacy runs runtime remains only for code-mode
+sessions (see the carve-out section in the repo-root `AGENTS.md`). The
 companion session layer is specified in `session-design.md`.
 
 This document specifies a new turn-oriented agent loop for `@x/core`. It is

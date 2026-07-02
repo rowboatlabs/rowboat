@@ -58,6 +58,33 @@ session ids are auto-detected. This is the intended way to see "what did the
 model actually receive" — the raw JSONL deliberately stores structural facts
 and references, never the derived wire form.
 
+## The legacy runs runtime is code-mode-only
+
+The old runs runtime (`packages/core/src/runs/`, `AgentRuntime`/`streamAgent`
+in `packages/core/src/agents/runtime.ts`, the `runs:*` IPC channels, and the
+renderer's legacy chat-tab state machine in `App.tsx`) remains in the tree
+**solely for code-mode sessions** — a deliberate, documented carve-out:
+
+- A code session IS a run (`sessionId === runId`). Direct-mode prompts drive
+  an external ACP agent and hand-assemble `code-run-event`s into the run log
+  (`code-mode/sessions/service.ts`); rowboat-mode code tabs go through
+  `runs:createMessage` → the old `AgentRuntime` loop.
+- Everything else — main chat, background tasks, live notes, knowledge
+  pipelines, scheduled agents — runs on turns/sessions. Do NOT add new
+  callers of `createRun`/`createMessage`/`streamAgent`; headless work uses
+  `packages/core/src/agents/headless.ts` (`startHeadlessAgent`/
+  `runHeadlessAgent`).
+- Temporary bridges that die when code-mode is unified: the renderer
+  transcript loader's `runs:fetch` fallback (`lib/agent-transcript.ts`), the
+  `runs:downloadLog` fallback in the chat sidebar, and the `notify-user`
+  gate's `fetchRun` fallback (`application/lib/builtin-tools.ts`).
+- The remaining migration (designed but deferred): port code sessions onto
+  sessions/turns — rowboat-mode prompts become normal turns with
+  `codeMode`/`codeCwd` composition (already supported by the agent
+  resolver's composition overrides), direct-mode prompts become a delegated
+  turn kind carrying opaque code events. That project deletes `runs/`
+  entirely.
+
 ## Invariants to respect
 
 - Turn/session files are **append-only**; reducers reject impossible
