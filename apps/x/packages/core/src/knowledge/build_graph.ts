@@ -2,9 +2,8 @@ import fs from 'fs';
 import path from 'path';
 import { WorkDir } from '../config/config.js';
 import { getKgModel } from '../models/defaults.js';
-import { createRun, createMessage } from '../runs/runs.js';
-import { bus } from '../runs/bus.js';
-import { getErrorDetails, waitForRunCompletion } from '../agents/utils.js';
+import { runHeadlessAgent, toolInputPaths } from '../agents/headless.js';
+import { getErrorDetails } from '../agents/utils.js';
 import { serviceLogger, type ServiceRunContext } from '../services/service_logger.js';
 import {
     loadState,
@@ -89,14 +88,6 @@ function hasNoiseLabels(content: string): boolean {
     return false;
 }
 
-function extractPathFromToolInput(input: string): string | null {
-    try {
-        const parsed = JSON.parse(input) as { path?: string };
-        return typeof parsed.path === 'string' ? parsed.path : null;
-    } catch {
-        return null;
-    }
-}
 
 function ensureSuggestedTopicsFileLocation(): string {
     if (fs.existsSync(SUGGESTED_TOPICS_PATH)) {
@@ -252,13 +243,6 @@ async function createNotesFromBatch(
         fs.mkdirSync(NOTES_OUTPUT_DIR, { recursive: true });
     }
 
-    // Create a run for the note creation agent
-    const run = await createRun({
-        agentId: NOTE_CREATION_AGENT,
-        model: await getKgModel(),
-        useCase: 'knowledge_sync',
-        subUseCase: 'build_graph',
-    });
     const suggestedTopicsContent = readSuggestedTopicsFile();
 
     // Build message with index and all files in the batch
@@ -293,37 +277,19 @@ async function createNotesFromBatch(
         message += `\n\n---\n\n`;
     });
 
-    const notesCreated = new Set<string>();
-    const notesModified = new Set<string>();
-
-    const unsubscribe = await bus.subscribe(run.id, async (event) => {
-        if (event.type !== "tool-invocation") {
-            return;
-        }
-        if (event.toolName !== "file-writeText" && event.toolName !== "file-editText") {
-            return;
-        }
-        const toolPath = extractPathFromToolInput(event.input);
-        if (!toolPath) {
-            return;
-        }
-        if (event.toolName === "file-writeText") {
-            notesCreated.add(toolPath);
-        } else if (event.toolName === "file-editText") {
-            notesModified.add(toolPath);
-        }
+    const { turnId, state } = await runHeadlessAgent({
+        agentId: NOTE_CREATION_AGENT,
+        message,
+        model: await getKgModel(),
+        throwOnError: true,
     });
 
-    await createMessage(run.id, message);
+    // Created/modified paths come from the durable turn state instead of
+    // streaming bus subscriptions.
+    const notesCreated = toolInputPaths(state, ["file-writeText"]);
+    const notesModified = toolInputPaths(state, ["file-editText"]);
 
-    // Wait for the run to complete
-    try {
-        await waitForRunCompletion(run.id, { throwOnError: true });
-    } finally {
-        unsubscribe();
-    }
-
-    return { runId: run.id, notesCreated, notesModified };
+    return { runId: turnId, notesCreated, notesModified };
 }
 
 /**

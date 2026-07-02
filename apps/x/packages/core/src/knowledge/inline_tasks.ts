@@ -3,13 +3,12 @@ import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
 import { generateText } from 'ai';
 import { WorkDir } from '../config/config.js';
-import { createRun, createMessage, fetchRun } from '../runs/runs.js';
+import { runHeadlessAgent } from '../agents/headless.js';
 import { getKgModel } from '../models/defaults.js';
 import container from '../di/container.js';
 import type { IModelConfigRepo } from '../models/repo.js';
 import { createProvider } from '../models/models.js';
 import { inlineTask } from '@x/shared';
-import { extractAgentResponse, waitForRunCompletion } from '../agents/utils.js';
 import { captureLlmUsage } from '../analytics/usage.js';
 import { withUseCase } from '../analytics/use_case.js';
 
@@ -470,13 +469,6 @@ async function processInlineTasks(): Promise<void> {
             console.log(`[InlineTasks] Running task: "${task.instruction.slice(0, 80)}..."`);
 
             try {
-                const run = await createRun({
-                    agentId: INLINE_TASK_AGENT,
-                    model: await getKgModel(),
-                    useCase: 'knowledge_sync',
-                    subUseCase: 'inline_task_run',
-                });
-
                 const message = [
                     `Execute the following instruction from the note "${relativePath}":`,
                     '',
@@ -488,10 +480,11 @@ async function processInlineTasks(): Promise<void> {
                     '```',
                 ].join('\n');
 
-                await createMessage(run.id, message);
-                await waitForRunCompletion(run.id);
-
-                const result = await extractAgentResponse(run.id);
+                const { summary: result } = await runHeadlessAgent({
+                    agentId: INLINE_TASK_AGENT,
+                    message,
+                    model: await getKgModel(),
+                });
                 if (result) {
                     if (task.targetId) {
                         // Recurring task with target region — replace content inside the region
@@ -555,13 +548,6 @@ export async function processRowboatInstruction(
     scheduleLabel: string | null;
     response: string | null;
 }> {
-    const run = await createRun({
-        agentId: INLINE_TASK_AGENT,
-        model: await getKgModel(),
-        useCase: 'knowledge_sync',
-        subUseCase: 'inline_task_run',
-    });
-
     const message = [
         `Process the following @rowboat instruction from the note "${notePath}":`,
         '',
@@ -573,10 +559,11 @@ export async function processRowboatInstruction(
         '```',
     ].join('\n');
 
-    await createMessage(run.id, message);
-    await waitForRunCompletion(run.id);
-
-    const rawResponse = await extractAgentResponse(run.id);
+    const { summary: rawResponse } = await runHeadlessAgent({
+        agentId: INLINE_TASK_AGENT,
+        message,
+        model: await getKgModel(),
+    });
     if (!rawResponse) {
         return { instruction, schedule: null, scheduleLabel: null, response: null };
     }

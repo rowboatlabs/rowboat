@@ -1,9 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import { WorkDir } from '../config/config.js';
-import { createRun, createMessage } from '../runs/runs.js';
+import { runHeadlessAgent } from '../agents/headless.js';
 import { getKgModel } from '../models/defaults.js';
-import { waitForRunCompletion } from '../agents/utils.js';
 import {
     loadConfig,
     loadState,
@@ -38,15 +37,6 @@ async function runAgent(agentName: string): Promise<void> {
     }
 
     try {
-        // Create a run for the agent
-        // The agent file is expected to be in the agents directory with the same name
-        const run = await createRun({
-            agentId: agentName,
-            model: await getKgModel(),
-            useCase: 'knowledge_sync',
-            subUseCase: 'pre_built',
-        });
-
         // Build trigger message with user context
         const message = `Run your scheduled task.
 
@@ -59,10 +49,14 @@ async function runAgent(agentName: string): Promise<void> {
 
 Process new items and use the user context above to identify yourself when drafting responses.`;
 
-        await createMessage(run.id, message);
-
-        // Wait for completion
-        await waitForRunCompletion(run.id);
+        // The agent file is expected to be in the agents directory with
+        // the same name. Waits for the turn to settle (errors tolerated,
+        // matching the old no-throwOnError wait).
+        await runHeadlessAgent({
+            agentId: agentName,
+            message,
+            model: await getKgModel(),
+        });
 
         // Update last run time
         setLastRunTime(agentName, new Date());

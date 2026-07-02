@@ -2,13 +2,10 @@ import { CronExpressionParser } from "cron-parser";
 import container from "../di/container.js";
 import { IAgentScheduleRepo } from "./repo.js";
 import { IAgentScheduleStateRepo } from "./state-repo.js";
-import { IRunsRepo } from "../runs/repo.js";
-import { IAgentRuntime } from "../agents/runtime.js";
-import { IMonotonicallyIncreasingIdGenerator } from "../application/lib/id-gen.js";
 import { AgentScheduleConfig, AgentScheduleEntry } from "@x/shared/dist/agent-schedule.js";
 import { AgentScheduleState, AgentScheduleStateEntry } from "@x/shared/dist/agent-schedule-state.js";
-import { MessageEvent } from "@x/shared/dist/runs.js";
-import { createRun } from "../runs/runs.js";
+import { startHeadlessAgent } from "../agents/headless.js";
+import { withUseCase } from "../analytics/use_case.js";
 import z from "zod";
 
 const DEFAULT_STARTING_MESSAGE = "go";
@@ -147,10 +144,7 @@ function shouldRunNow(
 async function runAgent(
     agentName: string,
     entry: z.infer<typeof AgentScheduleEntry>,
-    stateRepo: IAgentScheduleStateRepo,
-    runsRepo: IRunsRepo,
-    agentRuntime: IAgentRuntime,
-    idGenerator: IMonotonicallyIncreasingIdGenerator
+    stateRepo: IAgentScheduleStateRepo
 ): Promise<void> {
     console.log(`[AgentRunner] Starting agent: ${agentName}`);
 
@@ -163,31 +157,24 @@ async function runAgent(
     });
 
     try {
-        // Create a new run via core (resolves agent + default model+provider).
-        const run = await createRun({
-            agentId: agentName,
-            useCase: 'copilot_chat',
-            subUseCase: 'scheduled',
-        });
-        console.log(`[AgentRunner] Created run ${run.id} for agent ${agentName}`);
-
-        // Add the starting message as a user message
+        // Start a standalone turn (resolves agent + default model/provider).
+        // Fire-and-forget like the old trigger(): the schedule state machine
+        // below runs on wall-clock; completion is observed only for logging.
+        // The signal caps a hung turn at the same TIMEOUT_MS the state-based
+        // watchdog uses.
         const startingMessage = entry.startingMessage ?? DEFAULT_STARTING_MESSAGE;
-        const messageEvent: z.infer<typeof MessageEvent> = {
-            runId: run.id,
-            type: "message",
-            messageId: await idGenerator.next(),
-            message: {
-                role: "user",
-                content: startingMessage,
-            },
-            subflow: [],
-        };
-        await runsRepo.appendEvents(run.id, [messageEvent]);
-        console.log(`[AgentRunner] Sent starting message to agent ${agentName}: "${startingMessage}"`);
-
-        // Trigger the run
-        await agentRuntime.trigger(run.id);
+        const handle = await withUseCase(
+            { useCase: 'copilot_chat', subUseCase: 'scheduled' },
+            () => startHeadlessAgent({
+                agentId: agentName,
+                message: startingMessage,
+                signal: AbortSignal.timeout(TIMEOUT_MS),
+            }),
+        );
+        console.log(`[AgentRunner] Started turn ${handle.turnId} for agent ${agentName}: "${startingMessage}"`);
+        void handle.done
+            .then((result) => console.log(`[AgentRunner] Turn ${handle.turnId} (${agentName}) settled: ${result.outcome.status}`))
+            .catch((error) => console.error(`[AgentRunner] Turn ${handle.turnId} (${agentName}) errored:`, error instanceof Error ? error.message : error));
 
         // Calculate next run time
         const nextRunAt = calculateNextRunAt(entry.schedule);
@@ -264,9 +251,6 @@ async function checkForTimeouts(
 async function pollAndRun(): Promise<void> {
     const scheduleRepo = container.resolve<IAgentScheduleRepo>("agentScheduleRepo");
     const stateRepo = container.resolve<IAgentScheduleStateRepo>("agentScheduleStateRepo");
-    const runsRepo = container.resolve<IRunsRepo>("runsRepo");
-    const agentRuntime = container.resolve<IAgentRuntime>("agentRuntime");
-    const idGenerator = container.resolve<IMonotonicallyIncreasingIdGenerator>("idGenerator");
 
     // Load config and state
     let config: z.infer<typeof AgentScheduleConfig>;
@@ -314,7 +298,7 @@ async function pollAndRun(): Promise<void> {
 
         if (shouldRunNow(entry, agentState)) {
             // Run agent (don't await - let it run in background)
-            runAgent(agentName, entry, stateRepo, runsRepo, agentRuntime, idGenerator).catch((error) => {
+            runAgent(agentName, entry, stateRepo).catch((error) => {
                 console.error(`[AgentRunner] Unhandled error in runAgent for ${agentName}:`, error);
             });
         }
