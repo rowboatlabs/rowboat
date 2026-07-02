@@ -479,11 +479,15 @@ Every AI SDK `streamText` invocation performs exactly one model step. Tool
 execution is controlled manually by the turn loop.
 
 ```ts
+type ModelRequestMessageRef =
+  | { kind: "context" }                          // the inline context block
+  | { kind: "input" }                            // the turn's user message
+  | { kind: "assistant"; modelCallIndex: number } // → model_call_completed
+  | { kind: "toolResult"; toolCallId: string };   // → tool_result
+
 interface ModelRequest {
-  systemPrompt: string;
-  contextRef?: { previousTurnId: string };
-  messages: ConversationMessage[];
-  tools: ToolDescriptor[];
+  contextRef?: { previousTurnId: string };  // call 0 only (cross-turn prefix)
+  messages: ModelRequestMessageRef[];       // what is NEW since the previous call
   parameters: Record<string, JsonValue>;
 }
 
@@ -497,24 +501,26 @@ interface ModelCallRequested extends BaseTurnEvent {
 `modelCallIndex` starts at `0` and increments monotonically for each primary
 agent model call in the turn.
 
-`request` records the exact model input with one substitution: when the
-turn's context is a reference, the resolved prefix is not re-inlined.
-`contextRef` repeats the reference and `messages` contains only current-turn
-messages — the turn input, this turn's prior assistant responses, and ordered
-tool results — captured byte-for-byte as assembled immediately before
-provider invocation. When the turn's context is inline, `contextRef` is
-absent and `messages` begins with that inline context. The full request is
-deterministically materializable because referenced turns are immutable; a
-`materializeRequest(turnId, modelCallIndex)` debug utility composes resolver
-output with the persisted messages.
+`request` is a list of references into the turn's own events: every
+referenced byte exists exactly once in the file. A request records only what
+is new since the previous model call — call 0 is `[{context}?, {input}]`
+(context only when inline and nonempty; cross-turn prefixes ride
+`contextRef`); call N is `[{assistant: N-1}, …that batch's toolResults in
+source order]`; a re-issued call after an interruption is `[]`. The system
+prompt and tool set are not repeated: they are byte-identical to
+`turn_created.agent.resolved` by construction.
 
-Within-turn duplication is deliberate: each request restates the current
-turn's accumulated messages even though they also exist as earlier events in
-the same file. The persisted `messages` are the ground truth of what the loop
-actually assembled and sent — including any assembly bugs — which a derived
-reconstruction would mask.
+The exact provider payload is rebuilt by the request composer
+(`composeModelRequest` in core): resolved system prompt, wrapped tool
+definitions, the materialized cross-turn prefix, and every request's
+references resolved against the turn's events, all passed through the model
+bridge's `encodeMessages` (the deterministic structural→wire conversion —
+user-message context weaving, attachment rendering, tool-result enveloping).
+The loop transmits exactly the composer's output, and debugging/audit calls
+the same function, so the durable file plus the composer reproduce the wire
+bytes and the two views cannot diverge.
 
-`request` excludes credentials, auth headers, functions, model objects, and
+Requests exclude credentials, auth headers, functions, model objects, and
 transport objects.
 
 The name `requested` is intentional. The event proves durable intent, not that
@@ -1526,7 +1532,11 @@ but the first turn implementation does not enforce it.
 - Any event after a terminal turn event.
 - Mutation of immutable turn definition data.
 - `model_call_requested.contextRef` values inconsistent with the turn
-  definition's context.
+  definition's context, or present on a non-initial model call.
+- Request references that do not match the transcript: call 0 must be
+  `[{context}?, {input}]`; call N must reference the previous completed
+  call's response and its batch's tool results in source order (or nothing,
+  after an interrupted call).
 
 The reducer validates `context` structurally but treats it as opaque; it
 never resolves references (section 6.6).
@@ -1755,8 +1765,8 @@ tests for:
   closure results.
 - A reference to a missing or corrupt turn file is an infrastructure error
   and appends nothing.
-- `materializeRequest` output equals resolver output plus persisted
-  current-turn request messages.
+- The composed request equals what the loop sent (byte-for-byte property:
+  durable file + composer reproduce the provider payload).
 - The reducer never resolves references.
 
 ## 28. Suggested module layout

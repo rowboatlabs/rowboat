@@ -82,7 +82,7 @@ describe('useSessionChat', () => {
     // A new turn streams in over the feed.
     act(() => {
       emit({ kind: 'turn-event', sessionId: S1, turnId: 'turn-2', event: created('turn-2', S1, user('q2')) })
-      emit({ kind: 'turn-event', sessionId: S1, turnId: 'turn-2', event: requested('turn-2', 0, [user('q2')]) })
+      emit({ kind: 'turn-event', sessionId: S1, turnId: 'turn-2', event: requested('turn-2', 0) })
       emit({
         kind: 'turn-event',
         sessionId: S1,

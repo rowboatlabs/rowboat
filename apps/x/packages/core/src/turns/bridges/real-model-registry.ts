@@ -64,6 +64,12 @@ export class RealModelRegistry implements IModelRegistry {
         const model = provider.languageModel(descriptor.model);
         return {
             descriptor,
+            // The structural -> wire conversion the app uses today: weaves
+            // userMessageContext into the user text, renders attachments,
+            // wraps tool output as tool-result parts. Deterministic and
+            // per-message, so composed requests are byte-stable.
+            encodeMessages: (messages) =>
+                convertFromMessages(messages) as unknown as JsonValue[],
             stream: (request) => this.run(model, request),
         };
     }
@@ -90,7 +96,7 @@ export class RealModelRegistry implements IModelRegistry {
         const result = this.invoke({
             model,
             system: request.systemPrompt,
-            messages: convertFromMessages(request.messages),
+            messages: request.messages as ModelMessage[],
             tools,
             abortSignal: request.signal,
         });

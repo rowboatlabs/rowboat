@@ -143,7 +143,7 @@ describe('SessionChatStore', () => {
     await store.setSession(S1)
 
     emit(turnEvent(S1, 'turn-1', created('turn-1', S1, user('go'))))
-    emit(turnEvent(S1, 'turn-1', requested('turn-1', 0, [user('go')])))
+    emit(turnEvent(S1, 'turn-1', requested('turn-1', 0)))
     expect(store.getSnapshot().chatState?.isThinking).toBe(true)
 
     emit(turnEvent(S1, 'turn-1', completed('turn-1', 0, assistantText('done'))))
@@ -161,7 +161,7 @@ describe('SessionChatStore', () => {
     client.sessions.set(S1, sessionState(S1, []))
     await store.setSession(S1)
     emit(turnEvent(S1, 'turn-1', created('turn-1', S1, user('go'))))
-    emit(turnEvent(S1, 'turn-1', requested('turn-1', 0, [user('go')])))
+    emit(turnEvent(S1, 'turn-1', requested('turn-1', 0)))
     emit(turnEvent(S1, 'turn-1', { type: 'text_delta', turnId: 'turn-1', modelCallIndex: 0, delta: 'he' }))
     emit(turnEvent(S1, 'turn-1', { type: 'text_delta', turnId: 'turn-1', modelCallIndex: 0, delta: 'y' }))
     expect(store.getSnapshot().chatState?.currentAssistantMessage).toBe('hey')
@@ -199,7 +199,7 @@ describe('SessionChatStore', () => {
     // The feed attached mid-turn: we never saw turn_created for turn-9.
     client.turns.set('turn-9', [
       created('turn-9', S1, user('missed')),
-      requested('turn-9', 0, [user('missed')]),
+      requested('turn-9', 0),
     ])
     emit(turnEvent(S1, 'turn-9', completed('turn-9', 0, assistantText('caught up'))))
     await Promise.resolve()
@@ -273,7 +273,7 @@ describe('SessionChatStore', () => {
 
     await store.setSession(S1)
     emit(turnEvent(S1, 'turn-1', created('turn-1', S1, user('go'))))
-    emit(turnEvent(S1, 'turn-1', requested('turn-1', 0, [user('go')])))
+    emit(turnEvent(S1, 'turn-1', requested('turn-1', 0)))
     emit(turnEvent(S1, 'turn-1', completed('turn-1', 0, assistantText('done'))))
     emit(turnEvent(S1, 'turn-1', turnCompleted('turn-1')))
     expect(store.getSnapshot().chatState?.isProcessing).toBe(false)

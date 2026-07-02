@@ -2,6 +2,7 @@ export * from "./api.js";
 export * from "./agent-resolver.js";
 export * from "./bus.js";
 export * from "./clock.js";
+export * from "./compose-model-request.js";
 export * from "./context-resolver.js";
 export * from "./fs-repo.js";
 export * from "./in-memory-turn-repo.js";

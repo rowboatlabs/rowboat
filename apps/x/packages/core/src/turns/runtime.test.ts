@@ -3,10 +3,12 @@ import type { z } from "zod";
 import {
     MODEL_CALL_LIMIT_ERROR_CODE,
     type JsonValue,
+    type ModelRequestMessageRef,
     type ResolvedAgent,
     type ToolDescriptor,
     type TurnEvent,
     type TurnStreamEvent,
+    reduceTurn,
 } from "@x/shared/dist/turns.js";
 import type { IAgentResolver } from "./agent-resolver.js";
 import type { TurnExecution, TurnOutcome } from "./api.js";
@@ -28,6 +30,7 @@ import type {
     PermissionClassificationBatch,
     PermissionClassificationInput,
 } from "./permission.js";
+import { composeModelRequest } from "./compose-model-request.js";
 import { TurnRuntime } from "./runtime.js";
 import type {
     IToolRegistry,
@@ -153,6 +156,8 @@ class FakeModelRegistry implements IModelRegistry {
     ): Promise<ResolvedModel> {
         return {
             descriptor,
+            // Identity encoding: tests assert on structural messages directly.
+            encodeMessages: (messages) => messages as unknown as JsonValue[],
             stream: (request) => {
                 this.requests.push(request);
                 const call = this.calls[this.next++];
@@ -365,6 +370,15 @@ function typesOf(events: Array<{ type: string }>): string[] {
     return events.map((e) => e.type);
 }
 
+// The fake model's identity encoding passes structural messages through.
+function sentMessages(request: ModelStreamRequest) {
+    return request.messages as Array<{
+        role: string;
+        content?: unknown;
+        toolCallId?: string;
+    }>;
+}
+
 async function persisted(
     repo: InMemoryTurnRepo,
     turnId: string,
@@ -378,7 +392,7 @@ async function persisted(
 
 describe("plain model response (26.1)", () => {
     it("runs one model step to completion with exact persisted request", async () => {
-        const { runtime, repo, bus } = makeRuntime({
+        const { runtime, repo, models, bus } = makeRuntime({
             models: [
                 respond(
                     { type: "text_delta", delta: "do" },
@@ -408,11 +422,12 @@ describe("plain model response (26.1)", () => {
         const request = log[1];
         expect(request).toMatchObject({
             modelCallIndex: 0,
-            request: {
-                systemPrompt: "SYS",
-                messages: [user("hello")],
-            },
+            request: { messages: [{ kind: "input" }] },
         });
+        // The model received the composed payload: resolved system prompt,
+        // snapshot tools, encoded messages.
+        expect(models.requests[0].systemPrompt).toBe("SYS");
+        expect(sentMessages(models.requests[0])).toEqual([user("hello")]);
         // Deltas are streamed but never persisted.
         expect(events.filter((e) => e.type === "text_delta")).toHaveLength(2);
         expect(typesOf(log)).not.toContain("text_delta");
@@ -505,19 +520,39 @@ describe("mixed sync and async tools (26.2)", () => {
             (e) => e.type === "model_call_requested" && e.modelCallIndex === 1,
         );
         expect(secondRequest).toBeDefined();
-        const toolMessages =
-            secondRequest?.type === "model_call_requested"
-                ? secondRequest.request.messages.filter((m) => m.role === "tool")
-                : [];
-        expect(toolMessages.map((m) => (m.role === "tool" ? m.toolCallId : ""))).toEqual(
-            ["A", "B", "C", "D"],
-        );
-        // The live model call saw the same ordering.
         expect(
-            models.requests[1].messages
+            secondRequest?.type === "model_call_requested"
+                ? secondRequest.request.messages
+                : [],
+        ).toEqual([
+            { kind: "assistant", modelCallIndex: 0 },
+            { kind: "toolResult", toolCallId: "A" },
+            { kind: "toolResult", toolCallId: "B" },
+            { kind: "toolResult", toolCallId: "C" },
+            { kind: "toolResult", toolCallId: "D" },
+        ]);
+        // The live model call saw the results in source order.
+        expect(
+            sentMessages(models.requests[1])
                 .filter((m) => m.role === "tool")
-                .map((m) => (m.role === "tool" ? m.toolCallId : "")),
+                .map((m) => m.toolCallId),
         ).toEqual(["A", "B", "C", "D"]);
+        // Byte-for-byte property: the durable file plus the shared composer
+        // reproduces exactly what the model received.
+        const state = reduceTurn(log);
+        for (const index of [0, 1]) {
+            const composed = composeModelRequest(state, index, [], (m) => m as never);
+            expect(composed.messages).toEqual(models.requests[index].messages);
+            expect(composed.systemPrompt).toBe(models.requests[index].systemPrompt);
+            expect(composed.tools).toEqual(models.requests[index].tools);
+        }
+        // Size guard: request events stay reference-sized — the transcript
+        // duplication this design removes must not creep back.
+        for (const event of log) {
+            if (event.type === "model_call_requested") {
+                expect(JSON.stringify(event).length).toBeLessThan(2048);
+            }
+        }
     });
 
     it("rejects async results for calls that are not pending", async () => {
@@ -1129,16 +1164,17 @@ describe("crash recovery (26.7)", () => {
         };
     }
 
-    function seedRequested(index: number, messages: Array<ReturnType<typeof user> | ReturnType<typeof assistantCalls> | { role: "assistant"; content: string } | { role: "tool"; content: string; toolCallId: string; toolName: string }>): z.infer<typeof TurnEvent> {
+    function seedRequested(
+        index: number,
+        refs: z.infer<typeof ModelRequestMessageRef>[] = [{ kind: "input" }],
+    ): z.infer<typeof TurnEvent> {
         return {
             type: "model_call_requested",
             turnId: SEED_ID,
             ts: TS,
             modelCallIndex: index,
             request: {
-                systemPrompt: "SYS",
-                messages,
-                tools: defaultAgent.tools,
+                messages: refs,
                 parameters: {},
             },
         };
@@ -1169,7 +1205,7 @@ describe("crash recovery (26.7)", () => {
 
     it("an unmatched model request is closed as interrupted and re-issued", async () => {
         const repo = new InMemoryTurnRepo();
-        repo.seed([seedCreated(), seedRequested(0, [user("hello")])]);
+        repo.seed([seedCreated(), seedRequested(0)]);
         const { runtime, models } = makeRuntime({
             repo,
             models: [respond(completedResp(assistantText("done")))],
@@ -1197,7 +1233,7 @@ describe("crash recovery (26.7)", () => {
                 humanAvailable: true,
                 maxModelCalls: 1,
             }),
-            seedRequested(0, [user("hello")]),
+            seedRequested(0),
         ]);
         const { runtime } = makeRuntime({ repo });
         const { outcome } = await advanceAndSettle(runtime, SEED_ID);
@@ -1212,7 +1248,7 @@ describe("crash recovery (26.7)", () => {
         const batch = assistantCalls(toolCallPart("S", "echo"));
         repo.seed([
             seedCreated(),
-            seedRequested(0, [user("hello")]),
+            seedRequested(0),
             seedCompleted(0, batch),
             {
                 type: "tool_invocation_requested",
@@ -1248,7 +1284,7 @@ describe("crash recovery (26.7)", () => {
         const batch = assistantCalls(toolCallPart("B", "fetch"));
         repo.seed([
             seedCreated(),
-            seedRequested(0, [user("hello")]),
+            seedRequested(0),
             seedCompleted(0, batch),
             {
                 type: "tool_invocation_requested",
@@ -1288,7 +1324,7 @@ describe("crash recovery (26.7)", () => {
         const batch = assistantCalls(toolCallPart("S", "echo"));
         repo.seed([
             seedCreated(),
-            seedRequested(0, [user("hello")]),
+            seedRequested(0),
             seedCompleted(0, batch),
             {
                 type: "tool_invocation_requested",
@@ -1317,7 +1353,7 @@ describe("crash recovery (26.7)", () => {
         const { outcome } = await advanceAndSettle(runtime, SEED_ID);
         expect(outcome?.status).toBe("completed");
         expect(
-            models.requests[0].messages.filter((m) => m.role === "tool"),
+            sentMessages(models.requests[0]).filter((m) => m.role === "tool"),
         ).toHaveLength(1);
     });
 
@@ -1326,7 +1362,7 @@ describe("crash recovery (26.7)", () => {
         const batch = assistantCalls(toolCallPart("P", "echo"));
         repo.seed([
             seedCreated(),
-            seedRequested(0, [user("hello")]),
+            seedRequested(0),
             seedCompleted(0, batch),
             {
                 type: "tool_permission_required",

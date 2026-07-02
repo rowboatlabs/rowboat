@@ -87,14 +87,13 @@ describe('buildTurnConversation', () => {
     const call = assistantCalls(toolCallPart('tc1', 'echo', { x: 1 }))
     const state = reduceTurn([
       created(T1, S1, user('run it')),
-      requested(T1, 0, [user('run it')]),
+      requested(T1, 0),
       completed(T1, 0, call),
       invocation(T1, 'tc1', 'echo'),
       toolResult(T1, 'tc1', 'echo', { echoed: true }),
       requested(T1, 1, [
-        user('run it'),
-        call,
-        { role: 'tool', content: '{"echoed":true}', toolCallId: 'tc1', toolName: 'echo' },
+        { kind: 'assistant', modelCallIndex: 0 },
+        { kind: 'toolResult', toolCallId: 'tc1' },
       ]),
       completed(T1, 1, assistantText('all done')),
       turnCompleted(T1, 'all done'),
@@ -113,7 +112,7 @@ describe('buildTurnConversation', () => {
   it('marks permission-pending tools pending and running tools running', () => {
     const state = reduceTurn([
       created(T1, S1),
-      requested(T1, 0, [user('hello')]),
+      requested(T1, 0),
       completed(T1, 0, assistantCalls(toolCallPart('p1', 'executeCommand'), toolCallPart('r1', 'echo'))),
       {
         type: 'tool_permission_required',
@@ -139,7 +138,7 @@ describe('buildTurnConversation', () => {
     }
     const state = reduceTurn([
       created(T1, S1, input as never),
-      requested(T1, 0, [input]),
+      requested(T1, 0),
       { type: 'model_call_failed', turnId: T1, ts: TS, modelCallIndex: 0, error: 'boom' },
       { type: 'turn_failed', turnId: T1, ts: TS, error: 'boom', usage: {} },
     ])
@@ -154,7 +153,7 @@ describe('buildSessionChatState', () => {
     const prior = reduceTurn(completedTurnLog('turn-1', S1, 'first?', 'first answer'))
     const latest = reduceTurn([
       created('turn-2', S1, user('second?')),
-      requested('turn-2', 0, [user('second?')]),
+      requested('turn-2', 0),
     ])
     const state = buildSessionChatState([prior, latest], emptyOverlay())
     expect(
@@ -174,7 +173,7 @@ describe('buildSessionChatState', () => {
   it('exposes pending permissions as request events; waiting is not thinking', () => {
     const turn = reduceTurn([
       created(T1, S1),
-      requested(T1, 0, [user('hello')]),
+      requested(T1, 0),
       completed(T1, 0, assistantCalls(toolCallPart('p1', 'executeCommand', { command: 'rm -rf /' }))),
       {
         type: 'tool_permission_required',
@@ -209,7 +208,7 @@ describe('buildSessionChatState', () => {
   it('maps human decisions to responses and classifier decisions to auto-decisions', () => {
     const turn = reduceTurn([
       created(T1, S1),
-      requested(T1, 0, [user('hello')]),
+      requested(T1, 0),
       completed(T1, 0, assistantCalls(toolCallPart('h1', 'echo'), toolCallPart('c1', 'echo'))),
       { type: 'tool_permission_required', turnId: T1, ts: TS, toolCallId: 'h1', toolName: 'echo', request: { kind: 'command', commandNames: ['x'] } },
       { type: 'tool_permission_required', turnId: T1, ts: TS, toolCallId: 'c1', toolName: 'echo', request: { kind: 'command', commandNames: ['y'] } },
@@ -230,7 +229,7 @@ describe('buildSessionChatState', () => {
   it('exposes pending ask-human calls with question and options', () => {
     const turn = reduceTurn([
       created(T1, S1),
-      requested(T1, 0, [user('hello')]),
+      requested(T1, 0),
       completed(T1, 0, assistantCalls(toolCallPart('ah1', 'ask-human', { question: 'Deploy?', options: ['Yes', 'No'] }))),
       {
         type: 'tool_invocation_requested',
@@ -254,7 +253,7 @@ describe('buildSessionChatState', () => {
   it('stitches live tool output onto the matching tool item', () => {
     const turn = reduceTurn([
       created(T1, S1),
-      requested(T1, 0, [user('hello')]),
+      requested(T1, 0),
       completed(T1, 0, assistantCalls(toolCallPart('tc1', 'executeCommand'))),
       invocation(T1, 'tc1', 'executeCommand'),
     ])
@@ -265,7 +264,7 @@ describe('buildSessionChatState', () => {
   })
 
   it('surfaces streaming text as currentAssistantMessage', () => {
-    const turn = reduceTurn([created(T1, S1), requested(T1, 0, [user('hello')])])
+    const turn = reduceTurn([created(T1, S1), requested(T1, 0)])
     const state = buildSessionChatState([turn], { ...emptyOverlay(), text: 'typing…' })
     expect(state.currentAssistantMessage).toBe('typing…')
   })

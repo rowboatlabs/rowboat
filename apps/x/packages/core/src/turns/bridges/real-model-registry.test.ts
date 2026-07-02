@@ -26,7 +26,7 @@ function makeRegistry(parts: Array<Record<string, unknown>>, capture: InvokerOpt
 function request(overrides: Partial<ModelStreamRequest> = {}): ModelStreamRequest {
     return {
         systemPrompt: "SYS",
-        messages: [{ role: "user", content: "hello" }],
+        messages: [{ role: "user", content: "hello" }] as ModelStreamRequest["messages"],
         tools: [
             {
                 toolId: "builtin:echo",
@@ -107,9 +107,10 @@ describe("RealModelRegistry", () => {
             },
         });
 
-        // The invoker received the system prompt, converted messages, and tools.
+        // The invoker received the system prompt, the pre-encoded messages
+        // verbatim (encoding is the composer's job), and the wrapped tools.
         expect(capture[0].system).toBe("SYS");
-        expect(capture[0].messages[0]).toMatchObject({ role: "user" });
+        expect(capture[0].messages).toEqual([{ role: "user", content: "hello" }]);
         expect(Object.keys(capture[0].tools)).toEqual(["echo"]);
     });
 
@@ -150,6 +151,41 @@ describe("RealModelRegistry", () => {
                 }
             })(),
         ).rejects.toThrowError("rate limited");
+    });
+
+    it("encodeMessages produces the LLM-facing wire form (context woven, tool results enveloped)", async () => {
+        const registry = makeRegistry([], []);
+        const model = await registry.resolve({ provider: "openai", model: "gpt-test" });
+        const encoded = model.encodeMessages([
+            {
+                role: "user",
+                content: "list my downloads",
+                userMessageContext: {
+                    currentDateTime: "2026-07-02T10:30:00Z",
+                    middlePane: { kind: "empty" },
+                },
+            },
+            { role: "tool", content: "[…files…]", toolCallId: "tc1", toolName: "file-list" },
+        ]) as Array<{ role: string; content: unknown }>;
+
+        // The user message is the woven wire text, not the internal structure.
+        expect(encoded[0].role).toBe("user");
+        const userText = String(encoded[0].content);
+        expect(userText).toContain("2026-07-02T10:30:00Z");
+        expect(userText).toContain("list my downloads");
+        expect(userText).not.toContain("userMessageContext");
+
+        // Tool output rides the AI SDK tool-result envelope.
+        expect(encoded[1]).toMatchObject({
+            role: "tool",
+            content: [
+                {
+                    type: "tool-result",
+                    toolCallId: "tc1",
+                    output: { type: "text", value: "[…files…]" },
+                },
+            ],
+        });
     });
 
     it("stops promptly when the signal aborts mid-stream", async () => {

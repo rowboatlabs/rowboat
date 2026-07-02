@@ -27,7 +27,10 @@ export type LlmStreamEvent =
 
 export interface ModelStreamRequest {
     systemPrompt: string;
-    messages: Array<z.infer<typeof ConversationMessage>>;
+    // Provider wire-form messages: the output of encodeMessages. The loop
+    // builds these through the shared request composer, so what is sent is
+    // exactly what composeModelRequest reproduces from the durable log.
+    messages: JsonValue[];
     tools: Array<z.infer<typeof ToolDescriptor>>;
     parameters: Record<string, JsonValue>;
     signal: AbortSignal;
@@ -35,6 +38,11 @@ export interface ModelStreamRequest {
 
 export interface ResolvedModel {
     descriptor: z.infer<typeof ModelDescriptor>;
+    // Deterministic per-message structural -> wire conversion (e.g. weaving
+    // userMessageContext into the user text, tool-result enveloping).
+    encodeMessages(
+        messages: Array<z.infer<typeof ConversationMessage>>,
+    ): JsonValue[];
     stream(request: ModelStreamRequest): AsyncIterable<LlmStreamEvent>;
 }
 

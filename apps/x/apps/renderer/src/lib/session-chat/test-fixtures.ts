@@ -46,16 +46,24 @@ export function created(
   }
 }
 
-export function requested(turnId: string, index: number, messages: unknown[]): TEvent {
+type RequestRef =
+  | { kind: 'context' }
+  | { kind: 'input' }
+  | { kind: 'assistant'; modelCallIndex: number }
+  | { kind: 'toolResult'; toolCallId: string }
+
+export function requested(
+  turnId: string,
+  index: number,
+  refs: RequestRef[] = [{ kind: 'input' }],
+): TEvent {
   return {
     type: 'model_call_requested',
     turnId,
     ts: TS,
     modelCallIndex: index,
     request: {
-      systemPrompt: 'SYS',
-      messages: messages as never,
-      tools: [],
+      messages: refs,
       parameters: {},
     },
   }
@@ -127,7 +135,7 @@ export function completedTurnLog(
 ): TEvent[] {
   return [
     created(turnId, sessionId, user(question)),
-    requested(turnId, 0, [user(question)]),
+    requested(turnId, 0),
     completed(turnId, 0, assistantText(answer)),
     turnCompleted(turnId, answer),
   ]

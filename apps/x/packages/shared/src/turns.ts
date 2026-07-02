@@ -119,16 +119,30 @@ export const TurnCreated = z.object({
     }),
 });
 
-// `messages` contains current-turn messages only; when the turn's context is
-// a reference, `contextRef` repeats it and the resolved prefix is implicit
-// (deterministically materializable because referenced turns are immutable).
-// When context is inline, `contextRef` is absent and `messages` begins with
-// the inline context.
+// A model request is a list of REFERENCES into the turn's own events; every
+// referenced byte exists exactly once in the file. The request records only
+// what is NEW since the previous model call:
+//   call 0:  [{context}?, {input}]      (context only when inline and nonempty;
+//                                        cross-turn prefixes ride contextRef)
+//   call N:  [{assistant: N-1}, ...that batch's toolResults in source order]
+//   re-issue after an interrupted call: []
+// The system prompt and tool set are NOT repeated here — they are byte-
+// identical to turn_created.agent.resolved by construction. The exact
+// provider payload is rebuilt deterministically by the request composer
+// (core), which is the same code path the loop sends through.
+export const ModelRequestMessageRef = z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("context") }),
+    z.object({ kind: z.literal("input") }),
+    z.object({
+        kind: z.literal("assistant"),
+        modelCallIndex: z.number().int().nonnegative(),
+    }),
+    z.object({ kind: z.literal("toolResult"), toolCallId: z.string() }),
+]);
+
 export const ModelRequest = z.object({
-    systemPrompt: z.string(),
     contextRef: TurnContextRef.optional(),
-    messages: z.array(ConversationMessage),
-    tools: z.array(ToolDescriptor),
+    messages: z.array(ModelRequestMessageRef),
     parameters: z.record(z.string(), z.json()),
 });
 
@@ -491,32 +505,44 @@ function applyModelCallRequested(
     }
 
     const context = state.definition.context;
-    if (isContextRef(context)) {
-        if (event.request.contextRef?.previousTurnId !== context.previousTurnId) {
-            fail("model request contextRef inconsistent with turn context");
+    let expectedRefs: Array<z.infer<typeof ModelRequestMessageRef>>;
+    if (event.modelCallIndex === 0) {
+        if (isContextRef(context)) {
+            if (event.request.contextRef?.previousTurnId !== context.previousTurnId) {
+                fail("model request contextRef inconsistent with turn context");
+            }
+            expectedRefs = [{ kind: "input" }];
+        } else {
+            if (event.request.contextRef !== undefined) {
+                fail("model request has contextRef but turn context is inline");
+            }
+            expectedRefs =
+                context.length > 0
+                    ? [{ kind: "context" }, { kind: "input" }]
+                    : [{ kind: "input" }];
         }
-    } else if (event.request.contextRef !== undefined) {
-        fail("model request has contextRef but turn context is inline");
+    } else {
+        if (event.request.contextRef !== undefined) {
+            fail("model request has contextRef on a non-initial model call");
+        }
+        const previous = state.modelCalls[event.modelCallIndex - 1];
+        expectedRefs =
+            previous.response !== undefined
+                ? [
+                      { kind: "assistant", modelCallIndex: previous.index },
+                      ...batchToolCalls(state, previous.index).map((tc) => ({
+                          kind: "toolResult" as const,
+                          toolCallId: tc.toolCallId,
+                      })),
+                  ]
+                : []; // re-issue after an interrupted call adds nothing new
     }
-
-    // Model-facing tool-result order must match original call order: the tool
-    // messages in the request (past any inline context prefix) must be the
-    // concatenated batches of prior completed calls, in source order.
-    const prefixLength = isContextRef(context) ? 0 : context.length;
-    const toolMessageIds = event.request.messages
-        .slice(prefixLength)
-        .filter((m) => m.role === "tool")
-        .map((m) => m.toolCallId);
-    const expectedIds = state.modelCalls
-        .filter((call) => call.response !== undefined)
-        .flatMap((call) =>
-            batchToolCalls(state, call.index).map((tc) => tc.toolCallId),
+    if (JSON.stringify(event.request.messages) !== JSON.stringify(expectedRefs)) {
+        fail(
+            `model request references do not match the transcript: expected ${JSON.stringify(
+                expectedRefs,
+            )}, got ${JSON.stringify(event.request.messages)}`,
         );
-    if (
-        toolMessageIds.length !== expectedIds.length ||
-        toolMessageIds.some((id, i) => id !== expectedIds[i])
-    ) {
-        fail("model request tool-result order differs from original call order");
     }
 
     state.modelCalls.push({
@@ -932,6 +958,69 @@ function toolResultContent(result: z.infer<typeof ToolResult>): string {
     return typeof output === "string" ? output : JSON.stringify(output);
 }
 
+// The canonical model-facing tool message for a resolved tool call.
+export function toolResultMessage(
+    toolCall: ToolCallState,
+): z.infer<typeof ConversationMessage> {
+    if (!toolCall.result) {
+        throw new Error(
+            `tool call ${toolCall.toolCallId} has no terminal result`,
+        );
+    }
+    return {
+        role: "tool",
+        content: toolResultContent(toolCall.result),
+        toolCallId: toolCall.toolCallId,
+        toolName: toolCall.toolName,
+    };
+}
+
+// Resolves one model call's request references to structural messages (the
+// NEW portion that call added relative to the previous one). Concatenating
+// calls 0..N yields the full current-turn conversation for call N; the
+// request composer (core) prepends the resolved cross-turn prefix and
+// encodes to the provider wire form.
+export function requestMessagesFor(
+    state: TurnState,
+    modelCallIndex: number,
+): Array<z.infer<typeof ConversationMessage>> {
+    const call = state.modelCalls[modelCallIndex];
+    if (!call) {
+        throw new Error(`no model call at index ${modelCallIndex}`);
+    }
+    return call.request.messages.flatMap((ref) => {
+        switch (ref.kind) {
+            case "context": {
+                const context = state.definition.context;
+                if (!Array.isArray(context)) {
+                    throw new Error("context ref on a turn without inline context");
+                }
+                return context;
+            }
+            case "input":
+                return [state.definition.input];
+            case "assistant": {
+                const response = state.modelCalls[ref.modelCallIndex]?.response;
+                if (response === undefined) {
+                    throw new Error(
+                        `assistant ref to unsettled model call ${ref.modelCallIndex}`,
+                    );
+                }
+                return [response];
+            }
+            case "toolResult": {
+                const toolCall = state.toolCalls.find(
+                    (tc) => tc.toolCallId === ref.toolCallId,
+                );
+                if (!toolCall) {
+                    throw new Error(`toolResult ref to unknown call ${ref.toolCallId}`);
+                }
+                return [toolResultMessage(toolCall)];
+            }
+        }
+    });
+}
+
 // The messages this turn contributed to the conversation: its input plus, per
 // completed model call, the assistant response and its tool results in source
 // order. Failed model calls contribute nothing. The turn's context prefix is
@@ -955,12 +1044,7 @@ export function turnTranscript(
                     `turnTranscript requires terminal tool results; ${toolCall.toolCallId} is unresolved`,
                 );
             }
-            messages.push({
-                role: "tool",
-                content: toolResultContent(toolCall.result),
-                toolCallId: toolCall.toolCallId,
-                toolName: toolCall.toolName,
-            });
+            messages.push(toolResultMessage(toolCall));
         }
     }
     return messages;

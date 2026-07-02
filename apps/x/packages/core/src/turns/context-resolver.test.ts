@@ -57,12 +57,11 @@ function completedTurnLog(
             ts,
             modelCallIndex: 0,
             request: {
-                systemPrompt: "SYS",
                 ...(Array.isArray(context) ? {} : { contextRef: context }),
-                messages: Array.isArray(context)
-                    ? [...context, user(inputText)]
-                    : [user(inputText)],
-                tools: [],
+                messages:
+                    Array.isArray(context) && context.length > 0
+                        ? [{ kind: "context" as const }, { kind: "input" as const }]
+                        : [{ kind: "input" as const }],
                 parameters: {},
             },
         },
@@ -139,9 +138,7 @@ function limitFailedTurnLog(turnId: string): TEvent[] {
             ts,
             modelCallIndex: 0,
             request: {
-                systemPrompt: "SYS",
-                messages: [user("do it")],
-                tools: [echo],
+                messages: [{ kind: "input" as const }],
                 parameters: {},
             },
         },

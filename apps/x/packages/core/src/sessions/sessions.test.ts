@@ -86,7 +86,7 @@ function turnLog(
         turnId,
         ts: TS,
         modelCallIndex: 0,
-        request: { systemPrompt: "SYS", messages: [user("hi")], tools: [], parameters: {} },
+        request: { messages: [{ kind: 'input' as const }], parameters: {} },
     };
     switch (status) {
         case "idle":

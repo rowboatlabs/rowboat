@@ -6,6 +6,7 @@ import {
     type JsonValue,
     type ModelCallFailed,
     type ModelRequest,
+    type ModelRequestMessageRef,
     type ToolCallState,
     type ToolDescriptor,
     type ToolInvocationRequested,
@@ -21,7 +22,6 @@ import {
     outstandingAsyncTools,
     outstandingPermissions,
     reduceTurn,
-    turnTranscript,
 } from "@x/shared/dist/turns.js";
 import type { IMonotonicallyIncreasingIdGenerator } from "../application/lib/id-gen.js";
 import type { IAgentResolver } from "./agent-resolver.js";
@@ -37,6 +37,7 @@ import {
 } from "./api.js";
 import type { ITurnLifecycleBus } from "./bus.js";
 import type { IClock } from "./clock.js";
+import { composeModelRequest } from "./compose-model-request.js";
 import type { IContextResolver } from "./context-resolver.js";
 import type {
     IModelRegistry,
@@ -847,17 +848,39 @@ class TurnAdvance {
 
     // §8.3/§18h–l: one model step. The durable request barrier precedes the
     // provider call; step events persist before the next provider read;
-    // deltas bypass storage. Returns an outcome only on failure/cancel.
+    // deltas bypass storage. The request records only REFERENCES to what is
+    // new since the previous call; the payload actually sent is built by the
+    // shared composer over the durable state, so file + composer reproduce
+    // the wire bytes exactly. Returns an outcome only on failure/cancel.
     private async runModelStep(): Promise<TurnOutcome | undefined> {
         const index = this.state.modelCalls.length;
-        const transcript = turnTranscript(this.state);
         const context = this.definition.context;
         const isRef = !Array.isArray(context);
+        let refs: Array<z.infer<typeof ModelRequestMessageRef>>;
+        if (index === 0) {
+            refs =
+                !isRef && context.length > 0
+                    ? [{ kind: "context" }, { kind: "input" }]
+                    : [{ kind: "input" }];
+        } else {
+            const previous = this.state.modelCalls[index - 1];
+            refs =
+                previous.response !== undefined
+                    ? [
+                          { kind: "assistant", modelCallIndex: previous.index },
+                          ...this.state.toolCalls
+                              .filter((tc) => tc.modelCallIndex === previous.index)
+                              .sort((a, b) => a.order - b.order)
+                              .map((tc) => ({
+                                  kind: "toolResult" as const,
+                                  toolCallId: tc.toolCallId,
+                              })),
+                      ]
+                    : []; // re-issue after an interrupted call adds nothing new
+        }
         const request: z.infer<typeof ModelRequest> = {
-            systemPrompt: this.definition.agent.resolved.systemPrompt,
-            ...(isRef ? { contextRef: context } : {}),
-            messages: isRef ? transcript : [...context, ...transcript],
-            tools: this.definition.agent.resolved.tools,
+            ...(isRef && index === 0 ? { contextRef: context } : {}),
+            messages: refs,
             parameters: {},
         };
         await this.append({
@@ -868,14 +891,21 @@ class TurnAdvance {
             request,
         });
 
+        const composed = composeModelRequest(
+            this.state,
+            index,
+            this.resolvedContext,
+            (messages) => this.model.encodeMessages(messages),
+        );
+
         let completion: Extract<LlmStreamEvent, { type: "completed" }> | null =
             null;
         try {
             for await (const event of this.model.stream({
-                systemPrompt: request.systemPrompt,
-                messages: [...this.resolvedContext, ...transcript],
-                tools: request.tools,
-                parameters: request.parameters,
+                systemPrompt: composed.systemPrompt,
+                messages: composed.messages,
+                tools: composed.tools,
+                parameters: composed.parameters,
                 signal: this.signal,
             })) {
                 switch (event.type) {
