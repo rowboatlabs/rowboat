@@ -36,6 +36,7 @@ import { backgroundTaskEventConsumer } from "@x/core/dist/background-tasks/event
 import { init as initLocalSites, shutdown as shutdownLocalSites } from "@x/core/dist/local-sites/server.js";
 import { shutdown as shutdownAnalytics } from "@x/core/dist/analytics/posthog.js";
 import { identifyIfSignedIn } from "@x/core/dist/analytics/identify.js";
+import { migrateRuns } from "@x/core/dist/migrations/runs/migrate.js";
 
 import { initConfigs } from "@x/core/dist/config/initConfigs.js";
 import { getAgentSlackCliStatus } from "@x/core/dist/slack/agent-slack-exec.js";
@@ -388,6 +389,25 @@ app.whenReady().then(async () => {
 
   // start runs watcher
   startRunsWatcher();
+
+  // One-time: port legacy runs/*.jsonl into the new turn/session runtime.
+  // Must run BEFORE the session index is built so migrated sessions are picked
+  // up by the startup scan. Fully defensive — never blocks boot.
+  try {
+    const migration = migrateRuns();
+    if (migration.scanned > 0) {
+      console.log(
+        `[runs-migration] migrated ${migration.migratedTurns} turn(s) across ` +
+        `${migration.migratedSessions} session(s) from ${migration.scanned} run(s) ` +
+        `(${migration.skipped} skipped, ${migration.failed.length} failed)`,
+      );
+      for (const failure of migration.failed) {
+        console.warn(`[runs-migration] left in place (failed): ${failure.file} — ${failure.error}`);
+      }
+    }
+  } catch (error) {
+    console.error('[runs-migration] pass failed:', error);
+  }
 
   // New runtime: build the in-memory session index (startup scan) before the
   // renderer can list sessions, then forward the session bus to windows.
