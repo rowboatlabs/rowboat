@@ -18,7 +18,7 @@ import { RequestedAgent, type TurnEvent } from './turns.js';
 import type { SessionBusEvent, SessionIndexEntry, SessionState } from './sessions.js';
 import { RowboatApiConfig } from './rowboat-account.js';
 import { ZListToolkitsResponse } from './composio.js';
-import { BrowserStateSchema } from './browser-control.js';
+import { BrowserStateSchema, HttpAuthRequestSchema } from './browser-control.js';
 import { BillingInfoSchema } from './billing.js';
 import { EmailBlockSchema, GmailThreadSchema } from './blocks.js';
 import { PermissionDecision, ApprovalPolicy, CodingAgent } from './code-mode.js';
@@ -1666,6 +1666,30 @@ const ipcSchemas = {
   'browser:didUpdateState': {
     req: BrowserStateSchema,
     res: z.null(),
+  },
+  // HTTP basic/proxy auth challenge from a page in the embedded browser
+  // (main → renderer push). The renderer shows a credential prompt and
+  // answers via browser:httpAuthResponse.
+  'browser:httpAuthRequest': {
+    req: HttpAuthRequestSchema,
+    res: z.null(),
+  },
+  // Main → renderer: a pending auth challenge was resolved without the
+  // renderer answering (timed out, or its tab/window was destroyed), so the
+  // renderer must drop the corresponding dialog from its queue.
+  'browser:httpAuthResolved': {
+    req: z.object({ requestId: z.string() }),
+    res: z.null(),
+  },
+  // Renderer → main. Omit username to cancel the challenge; provide it (even
+  // empty, for token-style auth) to submit credentials.
+  'browser:httpAuthResponse': {
+    req: z.object({
+      requestId: z.string(),
+      username: z.string().optional(),
+      password: z.string().optional(),
+    }),
+    res: z.object({ ok: z.boolean() }),
   },
   // Billing channels
   'billing:getInfo': {
