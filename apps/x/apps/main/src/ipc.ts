@@ -74,7 +74,7 @@ import { summarizeMeeting } from '@x/core/dist/knowledge/summarize_meeting.js';
 import { getAccessToken } from '@x/core/dist/auth/tokens.js';
 import { getRowboatConfig } from '@x/core/dist/config/rowboat.js';
 import { runLiveNoteAgent } from '@x/core/dist/knowledge/live-note/runner.js';
-import { listImportantThreads, listEverythingElseThreads, saveMessageBodyHeight, triggerSync as triggerGmailSync, sendThreadReply, archiveThread, trashThread, markThreadRead, getAccountEmail, getAccountName, getConnectionStatus as getGmailConnectionStatus } from '@x/core/dist/knowledge/sync_gmail.js';
+import { listImportantThreads, listEverythingElseThreads, saveMessageBodyHeight, triggerSync as triggerGmailSync, sendThreadReply, saveThreadDraft, deleteThreadDraft, listDraftThreads, searchThreads, archiveThread, trashThread, markThreadRead, downloadAttachment, getAccountEmail, getAccountName, getConnectionStatus as getGmailConnectionStatus } from '@x/core/dist/knowledge/sync_gmail.js';
 import { searchContacts as searchGmailContacts, warmContactIndex } from '@x/core/dist/knowledge/gmail_contacts.js';
 import { searchSentContacts, warmSentContacts } from '@x/core/dist/knowledge/gmail_sent_contacts.js';
 import { getGoogleDocsConnectionStatus, importGoogleDoc, syncGoogleDocDown, syncGoogleDocUp, getGoogleDocLink } from '@x/core/dist/knowledge/google_docs.js';
@@ -782,6 +782,18 @@ export function setupIpcHandlers() {
     'gmail:sendReply': async (_event, args) => {
       return sendThreadReply(args);
     },
+    'gmail:saveDraft': async (_event, args) => {
+      return saveThreadDraft(args);
+    },
+    'gmail:deleteDraft': async (_event, args) => {
+      return deleteThreadDraft(args.draftId);
+    },
+    'gmail:getDrafts': async () => {
+      return listDraftThreads();
+    },
+    'gmail:search': async (_event, args) => {
+      return searchThreads(args.query, { limit: args.limit });
+    },
     'gmail:getConnectionStatus': async () => {
       return getGmailConnectionStatus();
     },
@@ -798,7 +810,10 @@ export function setupIpcHandlers() {
       return trashThread(args.threadId);
     },
     'gmail:markThreadRead': async (_event, args) => {
-      return markThreadRead(args.threadId);
+      return markThreadRead(args.threadId, args.read);
+    },
+    'gmail:downloadAttachment': async (_event, args) => {
+      return downloadAttachment(args);
     },
     'gmail:saveMessageHeight': async (_event, args) => {
       saveMessageBodyHeight(args.threadId, args.messageId, args.height);

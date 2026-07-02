@@ -207,6 +207,56 @@ const ipcSchemas = {
       error: z.string().optional(),
     }),
   },
+  'gmail:saveDraft': {
+    req: z.object({
+      // Existing Gmail draft to update; omitted on first save (creates a new one).
+      draftId: z.string().min(1).optional(),
+      threadId: z.string().min(1).optional(),
+      // Recipients may be blank for a draft (unlike a send).
+      to: z.string().optional(),
+      cc: z.string().optional(),
+      bcc: z.string().optional(),
+      subject: z.string(),
+      bodyHtml: z.string(),
+      bodyText: z.string(),
+      inReplyTo: z.string().optional(),
+      references: z.string().optional(),
+      attachments: z
+        .array(
+          z.object({
+            filename: z.string(),
+            mimeType: z.string(),
+            contentBase64: z.string(),
+          }),
+        )
+        .optional(),
+    }),
+    res: z.object({
+      draftId: z.string().optional(),
+      error: z.string().optional(),
+    }),
+  },
+  'gmail:deleteDraft': {
+    req: z.object({ draftId: z.string().min(1) }),
+    res: z.object({ ok: z.boolean(), error: z.string().optional() }),
+  },
+  'gmail:getDrafts': {
+    req: z.object({}),
+    res: z.object({
+      threads: z.array(GmailThreadSchema),
+      error: z.string().optional(),
+    }),
+  },
+  'gmail:search': {
+    req: z.object({
+      query: z.string(),
+      limit: z.number().int().positive().optional(),
+    }),
+    res: z.object({
+      threads: z.array(GmailThreadSchema),
+      error: z.string().optional(),
+    }),
+  },
   'gmail:getConnectionStatus': {
     req: z.object({}),
     res: z.object({
@@ -237,7 +287,15 @@ const ipcSchemas = {
     res: z.object({ ok: z.boolean(), error: z.string().optional() }),
   },
   'gmail:markThreadRead': {
-    req: z.object({ threadId: z.string().min(1) }),
+    req: z.object({ threadId: z.string().min(1), read: z.boolean().optional() }),
+    res: z.object({ ok: z.boolean(), error: z.string().optional() }),
+  },
+  'gmail:downloadAttachment': {
+    req: z.object({
+      messageId: z.string().min(1),
+      savedPath: z.string().min(1),
+      attachmentId: z.string().optional(),
+    }),
     res: z.object({ ok: z.boolean(), error: z.string().optional() }),
   },
   'gmail:saveMessageHeight': {
