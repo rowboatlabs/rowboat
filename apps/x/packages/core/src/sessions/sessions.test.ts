@@ -187,6 +187,9 @@ class FakeTurnRuntime implements ITurnRuntime {
     logs = new Map<string, TEvent[]>();
     createError?: Error;
     script?: AdvanceScript;
+    // When set, session turns get an inherited agent snapshot (like the real
+    // runtime does for identical predecessors).
+    inheritSnapshots = false;
     private n = 0;
 
     async createTurn(input: CreateTurnInput): Promise<string> {
@@ -196,7 +199,22 @@ class FakeTurnRuntime implements ITurnRuntime {
         this.createTurnInputs.push(input);
         this.n += 1;
         const turnId = `2026-07-02T10-00-00Z-${String(this.n).padStart(7, "0")}-000`;
-        this.logs.set(turnId, [createdEvent(turnId, input)]);
+        const created = createdEvent(turnId, input);
+        if (
+            this.inheritSnapshots &&
+            created.type === "turn_created" &&
+            !Array.isArray(input.context)
+        ) {
+            created.agent = {
+                ...created.agent,
+                resolved: {
+                    agentId: FIXTURE_AGENT.agentId,
+                    model: FIXTURE_MODEL,
+                    inheritedFrom: input.context.previousTurnId,
+                },
+            };
+        }
+        this.logs.set(turnId, [created]);
         return turnId;
     }
 
@@ -428,6 +446,31 @@ describe("sendMessage (13.3)", () => {
             });
             latest = result.turnId;
         }
+    });
+
+    it("denormalizes the model correctly for inherited agent snapshots", async () => {
+        const { sessions, repo, fake } = makeSessions();
+        fake.inheritSnapshots = true;
+        const sessionId = await sessions.createSession();
+        const first = await sessions.sendMessage(sessionId, user("one"), {
+            agent: { agentId: "copilot" },
+        });
+        fake.setLog(first.turnId, turnLog(first.turnId, sessionId, "completed"));
+
+        const second = await sessions.sendMessage(sessionId, user("two"), {
+            agent: { agentId: "copilot" },
+        });
+        // The second turn's created event carries an inherited snapshot; the
+        // session still denormalizes the concrete model onto turn_appended,
+        // and status derivation reduces the inherited log fine.
+        const created = fake.logs.get(second.turnId)?.[0];
+        expect(
+            created?.type === "turn_created" && "inheritedFrom" in created.agent.resolved,
+        ).toBe(true);
+        const events = await (repo as InMemorySessionRepo).read(sessionId);
+        const appended = events.filter((e) => e.type === "turn_appended");
+        expect(appended[1]).toMatchObject({ model: FIXTURE_MODEL });
+        expect(sessions.listSessions()[0].lastModel).toEqual(FIXTURE_MODEL);
     });
 
     it("serializes concurrent sends: exactly one wins", async () => {

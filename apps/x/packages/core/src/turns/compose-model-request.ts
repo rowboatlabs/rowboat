@@ -2,6 +2,7 @@ import type { z } from "zod";
 import {
     type ConversationMessage,
     type JsonValue,
+    type ResolvedAgent,
     type ToolDescriptor,
     type TurnState,
     requestMessagesFor,
@@ -29,6 +30,9 @@ export function composeModelRequest(
     // The materialized cross-turn prefix (contextResolver output). Ignored
     // for inline-context turns, whose context rides the {context} ref.
     resolvedPrefix: Array<z.infer<typeof ConversationMessage>>,
+    // The materialized agent snapshot (contextResolver.resolveAgent output —
+    // inherited snapshots must be resolved before composing).
+    agent: z.infer<typeof ResolvedAgent>,
     encode: (messages: Array<z.infer<typeof ConversationMessage>>) => JsonValue[],
 ): ComposedModelRequest {
     const call = state.modelCalls[modelCallIndex];
@@ -41,9 +45,9 @@ export function composeModelRequest(
         structural.push(...requestMessagesFor(state, index));
     }
     return {
-        systemPrompt: state.definition.agent.resolved.systemPrompt,
+        systemPrompt: agent.systemPrompt,
         messages: encode(structural),
-        tools: state.definition.agent.resolved.tools,
+        tools: agent.tools,
         parameters: call.request.parameters,
     };
 }
@@ -57,5 +61,8 @@ export async function materializeModelRequest(
     encode: (messages: Array<z.infer<typeof ConversationMessage>>) => JsonValue[],
 ): Promise<ComposedModelRequest> {
     const prefix = await contextResolver.resolve(state.definition.context);
-    return composeModelRequest(state, modelCallIndex, prefix, encode);
+    const agent = await contextResolver.resolveAgent(
+        state.definition.agent.resolved,
+    );
+    return composeModelRequest(state, modelCallIndex, prefix, agent, encode);
 }

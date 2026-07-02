@@ -6,6 +6,8 @@ import {
     type JsonValue,
     type ModelCallFailed,
     type ModelRequest,
+    type ResolvedAgent,
+    type ResolvedAgentSnapshot,
     assistantRef,
     toolResultRef,
     type ToolCallState,
@@ -109,13 +111,42 @@ export class TurnRuntime implements ITurnRuntime {
     async createTurn(input: CreateTurnInput): Promise<string> {
         const resolved = await this.agentResolver.resolve(input.agent);
         const turnId = await this.idGenerator.next();
+        // Inherit the heavy snapshot fields (system prompt + tools) when they
+        // are byte-identical to the context predecessor's materialized
+        // snapshot — the same reference mechanism as context and requests.
+        // The model stays concrete for the session index and so a model
+        // switch never blocks inheritance.
+        let snapshot: z.infer<typeof ResolvedAgentSnapshot> = resolved;
+        if (!Array.isArray(input.context)) {
+            try {
+                const previousEvents = await this.turnRepo.read(
+                    input.context.previousTurnId,
+                );
+                const previous = await this.contextResolver.resolveAgent(
+                    reduceTurn(previousEvents).definition.agent.resolved,
+                );
+                if (
+                    previous.systemPrompt === resolved.systemPrompt &&
+                    JSON.stringify(previous.tools) === JSON.stringify(resolved.tools)
+                ) {
+                    snapshot = {
+                        agentId: resolved.agentId,
+                        model: resolved.model,
+                        inheritedFrom: input.context.previousTurnId,
+                    };
+                }
+            } catch {
+                // Unreadable predecessor: persist the full snapshot; context
+                // resolution surfaces the real problem at advance time.
+            }
+        }
         const event = TurnCreated.parse({
             type: "turn_created",
             schemaVersion: 1,
             turnId,
             ts: this.clock.now(),
             sessionId: input.sessionId ?? null,
-            agent: { requested: input.agent, resolved },
+            agent: { requested: input.agent, resolved: snapshot },
             context: input.context,
             input: input.input,
             config: {
@@ -188,11 +219,12 @@ export class TurnRuntime implements ITurnRuntime {
         const resolvedContext = await this.contextResolver.resolve(
             definition.context,
         );
-        const model = await this.modelRegistry.resolve(
-            definition.agent.resolved.model,
+        const resolvedAgent = await this.contextResolver.resolveAgent(
+            definition.agent.resolved,
         );
+        const model = await this.modelRegistry.resolve(resolvedAgent.model);
         const toolsByName = new Map<string, RuntimeTool>();
-        for (const descriptor of definition.agent.resolved.tools) {
+        for (const descriptor of resolvedAgent.tools) {
             const tool = await this.toolRegistry.resolve(descriptor);
             if (
                 tool.descriptor.toolId !== descriptor.toolId ||
@@ -223,6 +255,7 @@ export class TurnRuntime implements ITurnRuntime {
             state,
             stream,
             resolvedContext,
+            resolvedAgent,
             model,
             toolsByName,
             signal: controller.signal,
@@ -250,6 +283,7 @@ class TurnAdvance {
     private state: TurnState;
     private readonly stream: HotStream<TurnStreamEvent, TurnOutcome>;
     private readonly resolvedContext: Array<z.infer<typeof ConversationMessage>>;
+    private readonly resolvedAgent: z.infer<typeof ResolvedAgent>;
     private readonly model: ResolvedModel;
     private readonly toolsByName: Map<string, RuntimeTool>;
     private readonly signal: AbortSignal;
@@ -270,6 +304,7 @@ class TurnAdvance {
         state: TurnState;
         stream: HotStream<TurnStreamEvent, TurnOutcome>;
         resolvedContext: Array<z.infer<typeof ConversationMessage>>;
+        resolvedAgent: z.infer<typeof ResolvedAgent>;
         model: ResolvedModel;
         toolsByName: Map<string, RuntimeTool>;
         signal: AbortSignal;
@@ -283,6 +318,7 @@ class TurnAdvance {
         this.state = init.state;
         this.stream = init.stream;
         this.resolvedContext = init.resolvedContext;
+        this.resolvedAgent = init.resolvedAgent;
         this.model = init.model;
         this.toolsByName = init.toolsByName;
         this.signal = init.signal;
@@ -893,6 +929,7 @@ class TurnAdvance {
             this.state,
             index,
             this.resolvedContext,
+            this.resolvedAgent,
             (messages) => this.model.encodeMessages(messages),
         );
 

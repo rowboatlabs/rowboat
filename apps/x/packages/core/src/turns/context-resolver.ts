@@ -1,8 +1,11 @@
 import type { z } from "zod";
 import {
     type ConversationMessage,
+    type ResolvedAgent,
+    type ResolvedAgentSnapshot,
     type TurnContext,
     TurnCorruptionError,
+    isInheritedSnapshot,
     reduceTurn,
     turnTranscript,
 } from "@x/shared/dist/turns.js";
@@ -17,6 +20,12 @@ export interface IContextResolver {
     resolve(
         context: z.infer<typeof TurnContext>,
     ): Promise<Array<z.infer<typeof ConversationMessage>>>;
+    // Materializes an inherited agent snapshot by walking inheritedFrom to
+    // the nearest concrete snapshot (same discipline as context references:
+    // deterministic, from durable state, cycle-checked).
+    resolveAgent(
+        resolved: z.infer<typeof ResolvedAgentSnapshot>,
+    ): Promise<z.infer<typeof ResolvedAgent>>;
 }
 
 export class TurnRepoContextResolver implements IContextResolver {
@@ -51,5 +60,29 @@ export class TurnRepoContextResolver implements IContextResolver {
         segments.push(current);
         segments.reverse();
         return segments.flat();
+    }
+
+    async resolveAgent(
+        resolved: z.infer<typeof ResolvedAgentSnapshot>,
+    ): Promise<z.infer<typeof ResolvedAgent>> {
+        if (!isInheritedSnapshot(resolved)) {
+            return resolved;
+        }
+        const visited = new Set<string>();
+        let current: z.infer<typeof ResolvedAgentSnapshot> = resolved;
+        while (isInheritedSnapshot(current)) {
+            const turnId = current.inheritedFrom;
+            if (visited.has(turnId)) {
+                throw new TurnCorruptionError(
+                    `cyclic agent snapshot inheritance at turn ${turnId}`,
+                );
+            }
+            visited.add(turnId);
+            const events = await this.turnRepo.read(turnId);
+            current = reduceTurn(events).definition.agent.resolved;
+        }
+        // Only the heavy fields inherit; the turn's own concrete identity
+        // (agentId, model — a mid-session model switch) always wins.
+        return { ...current, agentId: resolved.agentId, model: resolved.model };
     }
 }

@@ -390,6 +390,35 @@ Rules:
   It rejects the execution and does not append `turn_failed`.
 - The reducer treats `context` as opaque data and never resolves references.
 
+### 6.7 Agent snapshot inheritance
+
+Session turns whose resolved system prompt and tool set are byte-identical
+to the context predecessor's materialized snapshot persist an inherited
+form instead of repeating ~tens of KB per turn:
+
+```ts
+type ResolvedAgentSnapshot =
+  | ResolvedAgent
+  | { agentId: string; model: ModelDescriptor; inheritedFrom: string };
+```
+
+Rules:
+
+- Inheritance is decided at `createTurn` by comparing against the
+  predecessor's materialized snapshot; any difference in system prompt or
+  tools persists the full snapshot. An unreadable predecessor falls back to
+  the full snapshot.
+- The model stays concrete: it is small, the session index denormalizes it,
+  and a mid-session model switch must not block inheritance. On
+  materialization the inherited record's own `agentId`/`model` win; only the
+  heavy fields come from the chain base.
+- `inheritedFrom` must equal the turn's `context.previousTurnId` (reducer
+  invariant); materialization walks the chain with cycle detection
+  (`IContextResolver.resolveAgent`), exactly like context references.
+- The reducer treats inherited snapshots as opaque: tool identity for
+  extraction arrives via `tool_invocation_requested` events instead of the
+  descriptor lookup.
+
 ## 7. Turn creation schema
 
 The authoritative initial event is:

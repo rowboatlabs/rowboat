@@ -58,6 +58,30 @@ export const ResolvedAgent = z.object({
     tools: z.array(ToolDescriptor),
 });
 
+// Session turns whose system prompt and tool set are byte-identical to the
+// previous turn's materialized snapshot inherit it by reference instead of
+// re-persisting ~tens of KB per turn (same mechanism as context references).
+// The model stays concrete: it is tiny, the session index denormalizes it,
+// and a mid-session model switch must not block inheritance. Written only
+// when equality holds at creation; materialization walks inheritedFrom to
+// the nearest concrete snapshot.
+export const InheritedAgentSnapshot = z.object({
+    agentId: z.string(),
+    model: ModelDescriptor,
+    inheritedFrom: z.string(),
+});
+
+export const ResolvedAgentSnapshot = z.union([
+    ResolvedAgent,
+    InheritedAgentSnapshot,
+]);
+
+export function isInheritedSnapshot(
+    resolved: z.infer<typeof ResolvedAgentSnapshot>,
+): resolved is z.infer<typeof InheritedAgentSnapshot> {
+    return "inheritedFrom" in resolved;
+}
+
 // ---------------------------------------------------------------------------
 // Context
 // ---------------------------------------------------------------------------
@@ -108,7 +132,7 @@ export const TurnCreated = z.object({
     sessionId: z.string().nullable(),
     agent: z.object({
         requested: RequestedAgent,
-        resolved: ResolvedAgent,
+        resolved: ResolvedAgentSnapshot,
     }),
     context: TurnContext,
     input: UserMessage,
@@ -614,9 +638,12 @@ function applyModelCallCompleted(
         if (state.toolCalls.some((tc) => tc.toolCallId === part.toolCallId)) {
             fail(`duplicate tool call id: ${part.toolCallId}`);
         }
-        const descriptor = state.definition.agent.resolved.tools.find(
-            (tool) => tool.name === part.toolName,
-        );
+        const resolved = state.definition.agent.resolved;
+        // Inherited snapshots resolve outside the reducer; identity fields
+        // then arrive via tool_invocation_requested events.
+        const descriptor = isInheritedSnapshot(resolved)
+            ? undefined
+            : resolved.tools.find((tool) => tool.name === part.toolName);
         state.toolCalls.push({
             modelCallIndex: event.modelCallIndex,
             order: order++,
@@ -848,6 +875,18 @@ export function reduceTurn(
     }
     if (first.schemaVersion !== 1) {
         fail(`unsupported turn schema version: ${String(first.schemaVersion)}`);
+    }
+
+    if (isInheritedSnapshot(first.agent.resolved)) {
+        const context = first.context;
+        if (
+            Array.isArray(context) ||
+            context.previousTurnId !== first.agent.resolved.inheritedFrom
+        ) {
+            fail(
+                "inherited agent snapshot must reference the turn's context predecessor",
+            );
+        }
     }
 
     const state: TurnState = {

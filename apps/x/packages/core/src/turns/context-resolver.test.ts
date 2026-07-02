@@ -241,6 +241,82 @@ describe("TurnRepoContextResolver", () => {
         ).rejects.toThrowError(/turn not found/);
     });
 
+    it("resolveAgent materializes inherited snapshots through the chain", async () => {
+        const repo = new InMemoryTurnRepo();
+        repo.seed(completedTurnLog(T1, [], "q1", "a1")); // concrete base
+        const inheritedLog = completedTurnLog(T2, { previousTurnId: T1 }, "q2", "a2").map(
+            (event) =>
+                event.type === "turn_created"
+                    ? {
+                          ...event,
+                          agent: {
+                              ...event.agent,
+                              resolved: {
+                                  agentId: "copilot",
+                                  model: { provider: "fake", model: "m" },
+                                  inheritedFrom: T1,
+                              },
+                          },
+                      }
+                    : event,
+        );
+        repo.seed(inheritedLog);
+        const resolver = new TurnRepoContextResolver({ turnRepo: repo });
+
+        const concrete = await resolver.resolveAgent({
+            agentId: "copilot",
+            systemPrompt: "SYS",
+            model: { provider: "fake", model: "m" },
+            tools: [],
+        });
+        expect(concrete.systemPrompt).toBe("SYS"); // passthrough
+
+        const materialized = await resolver.resolveAgent({
+            agentId: "copilot",
+            model: { provider: "fake", model: "m2" },
+            inheritedFrom: T2, // hops T2 -> T1
+        });
+        expect(materialized.systemPrompt).toBe("SYS");
+        expect(materialized.tools).toEqual([]);
+        // The inherited record's own model wins over the chain base's model.
+        expect(materialized.model).toEqual({ provider: "fake", model: "m2" });
+    });
+
+    it("resolveAgent rejects cyclic inheritance as corruption", async () => {
+        const repo = new InMemoryTurnRepo();
+        const cyclic = completedTurnLog(T1, [], "q1", "a1").map((event) =>
+            event.type === "turn_created"
+                ? {
+                      ...event,
+                      context: { previousTurnId: T1 },
+                      agent: {
+                          ...event.agent,
+                          resolved: {
+                              agentId: "copilot",
+                              model: { provider: "fake", model: "m" },
+                              inheritedFrom: T1,
+                          },
+                      },
+                  }
+                : event,
+        );
+        // Fix the request contextRef to match the now-ref context.
+        const fixed = cyclic.map((event) =>
+            event.type === "model_call_requested"
+                ? { ...event, request: { ...event.request, contextRef: { previousTurnId: T1 } } }
+                : event,
+        );
+        repo.seed(fixed);
+        const resolver = new TurnRepoContextResolver({ turnRepo: repo });
+        await expect(
+            resolver.resolveAgent({
+                agentId: "copilot",
+                model: { provider: "fake", model: "m" },
+                inheritedFrom: T1,
+            }),
+        ).rejects.toThrowError(TurnCorruptionError);
+    });
+
     it("rejects cyclic reference chains as corruption", async () => {
         const repo = new InMemoryTurnRepo();
         // Two turns referencing each other (only constructable by corruption).

@@ -627,6 +627,67 @@ describe("context references", () => {
     });
 });
 
+describe("inherited agent snapshots", () => {
+    const inherited = {
+        agentId: "copilot",
+        model: { provider: "openai", model: "gpt-test" },
+        inheritedFrom: PREV_TURN_ID,
+    };
+
+    it("accepts inheritance referencing the context predecessor; identity arrives via invocation", () => {
+        const call0 = assistantCalls(toolCallPart("tc1", "echo"));
+        const state = reduceTurn([
+            created({
+                context: { previousTurnId: PREV_TURN_ID },
+                agent: { requested: { agentId: "copilot" }, resolved: inherited },
+            }),
+            requested(0, ["input"], { contextRef: { previousTurnId: PREV_TURN_ID } }),
+            completed(0, call0),
+        ]);
+        // No descriptor lookup without the concrete snapshot…
+        expect(state.toolCalls[0].toolId).toBeUndefined();
+        expect(state.toolCalls[0].execution).toBeUndefined();
+
+        // …until tool_invocation_requested supplies identity.
+        const withInvocation = reduceTurn([
+            created({
+                context: { previousTurnId: PREV_TURN_ID },
+                agent: { requested: { agentId: "copilot" }, resolved: inherited },
+            }),
+            requested(0, ["input"], { contextRef: { previousTurnId: PREV_TURN_ID } }),
+            completed(0, call0),
+            invocation("tc1"),
+            result("tc1", "echo"),
+        ]);
+        expect(withInvocation.toolCalls[0].toolId).toBe("tool.echo");
+        expect(withInvocation.toolCalls[0].execution).toBe("sync");
+    });
+
+    it("rejects an inherited snapshot on an inline-context turn", () => {
+        expectCorruption(
+            [
+                created({
+                    context: [],
+                    agent: { requested: { agentId: "copilot" }, resolved: inherited },
+                }),
+            ],
+            /inherited agent snapshot must reference the turn's context predecessor/,
+        );
+    });
+
+    it("rejects an inherited snapshot pointing at a different turn than the context", () => {
+        expectCorruption(
+            [
+                created({
+                    context: { previousTurnId: "some-other-turn" },
+                    agent: { requested: { agentId: "copilot" }, resolved: inherited },
+                }),
+            ],
+            /inherited agent snapshot must reference the turn's context predecessor/,
+        );
+    });
+});
+
 describe("suspension", () => {
     it("accepts a snapshot matching pending permissions and async tools", () => {
         const call0 = assistantCalls(

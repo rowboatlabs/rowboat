@@ -146,6 +146,7 @@ function hangUntilAbort(onStarted?: () => void): ScriptedCall {
 
 class FakeModelRegistry implements IModelRegistry {
     requests: ModelStreamRequest[] = [];
+    resolved: Array<ResolvedModel["descriptor"]> = [];
     private next = 0;
 
     constructor(private readonly calls: ScriptedCall[]) {}
@@ -153,6 +154,7 @@ class FakeModelRegistry implements IModelRegistry {
     async resolve(
         descriptor: ResolvedModel["descriptor"],
     ): Promise<ResolvedModel> {
+        this.resolved.push(descriptor);
         return {
             descriptor,
             // Identity encoding: tests assert on structural messages directly.
@@ -275,7 +277,10 @@ class FakeBus {
 }
 
 class FakeIdGen {
-    private n = 0;
+    private n: number;
+    constructor(start = 0) {
+        this.n = start;
+    }
     async next(): Promise<string> {
         this.n += 1;
         return `2026-07-02T10-00-00Z-${String(this.n).padStart(7, "0")}-000`;
@@ -296,6 +301,7 @@ function makeRuntime(opts: {
     agent?: z.infer<typeof ResolvedAgent>;
     agentError?: string;
     repo?: InMemoryTurnRepo;
+    idStart?: number;
 } = {}) {
     const repo = opts.repo ?? new InMemoryTurnRepo();
     const models = new FakeModelRegistry(opts.models ?? []);
@@ -304,7 +310,7 @@ function makeRuntime(opts: {
     const bus = new FakeBus();
     const runtime = new TurnRuntime({
         turnRepo: repo,
-        idGenerator: new FakeIdGen(),
+        idGenerator: new FakeIdGen(opts.idStart ?? 0),
         clock: new FakeClock(),
         agentResolver: new FakeAgentResolver(opts.agent ?? defaultAgent, opts.agentError),
         modelRegistry: models,
@@ -540,7 +546,7 @@ describe("mixed sync and async tools (26.2)", () => {
         // reproduces exactly what the model received.
         const state = reduceTurn(log);
         for (const index of [0, 1]) {
-            const composed = composeModelRequest(state, index, [], (m) => m as never);
+            const composed = composeModelRequest(state, index, [], defaultAgent, (m) => m as never);
             expect(composed.messages).toEqual(models.requests[index].messages);
             expect(composed.systemPrompt).toBe(models.requests[index].systemPrompt);
             expect(composed.tools).toEqual(models.requests[index].tools);
@@ -1419,6 +1425,193 @@ describe("crash recovery (26.7)", () => {
 // ---------------------------------------------------------------------------
 // §26.8 Historical and live reconstruction
 // ---------------------------------------------------------------------------
+
+describe("agent snapshot inheritance", () => {
+    it("inherits system prompt + tools from an identical context predecessor", async () => {
+        const { runtime, repo, models } = makeRuntime({
+            models: [
+                respond(completedResp(assistantText("first"))),
+                respond(completedResp(assistantText("second"))),
+            ],
+        });
+        const first = await newTurn(runtime, { sessionId: "S" });
+        await advanceAndSettle(runtime, first);
+
+        const second = await runtime.createTurn({
+            agent: { agentId: "copilot" },
+            sessionId: "S",
+            context: { previousTurnId: first },
+            input: user("again"),
+            config: { humanAvailable: true },
+        });
+        const created = (await persisted(repo, second))[0];
+        expect(created.type === "turn_created" ? created.agent.resolved : null).toEqual({
+            agentId: "copilot",
+            model: defaultAgent.model,
+            inheritedFrom: first,
+        });
+
+        // The inherited turn still sends the full materialized snapshot.
+        const { outcome } = await advanceAndSettle(runtime, second);
+        expect(outcome?.status).toBe("completed");
+        expect(models.requests[1].systemPrompt).toBe("SYS");
+        expect(models.requests[1].tools).toEqual(defaultAgent.tools);
+    });
+
+    it("a model switch still inherits the prompt and tools (model stays concrete)", async () => {
+        const repo = new InMemoryTurnRepo();
+        const a = makeRuntime({
+            repo,
+            models: [respond(completedResp(assistantText("first")))],
+        });
+        const first = await newTurn(a.runtime, { sessionId: "S" });
+        await advanceAndSettle(a.runtime, first);
+
+        const switched = {
+            ...defaultAgent,
+            model: { provider: "anthropic", model: "claude-x" },
+        };
+        const b = makeRuntime({
+            repo,
+            agent: switched,
+            idStart: 200,
+            models: [respond(completedResp(assistantText("second")))],
+        });
+        const second = await b.runtime.createTurn({
+            agent: { agentId: "copilot" },
+            sessionId: "S",
+            context: { previousTurnId: first },
+            input: user("again"),
+            config: { humanAvailable: true },
+        });
+        const created = (await persisted(repo, second))[0];
+        expect(created.type === "turn_created" ? created.agent.resolved : null).toEqual({
+            agentId: "copilot",
+            model: { provider: "anthropic", model: "claude-x" },
+            inheritedFrom: first,
+        });
+        const { outcome } = await advanceAndSettle(b.runtime, second);
+        expect(outcome?.status).toBe("completed");
+        // The switched model was resolved; prompt/tools came through the chain.
+        expect(b.models.resolved[0]).toEqual({ provider: "anthropic", model: "claude-x" });
+        expect(b.models.requests[0].systemPrompt).toBe("SYS");
+        expect(b.models.requests[0].tools).toEqual(defaultAgent.tools);
+    });
+
+    it("a tools difference forces a full snapshot", async () => {
+        const repo = new InMemoryTurnRepo();
+        const a = makeRuntime({
+            repo,
+            models: [respond(completedResp(assistantText("first")))],
+        });
+        const first = await newTurn(a.runtime, { sessionId: "S" });
+        await advanceAndSettle(a.runtime, first);
+
+        const fewerTools = { ...defaultAgent, tools: [echoDescriptor] };
+        const b = makeRuntime({ repo, agent: fewerTools, idStart: 300 });
+        const second = await b.runtime.createTurn({
+            agent: { agentId: "copilot" },
+            sessionId: "S",
+            context: { previousTurnId: first },
+            input: user("again"),
+            config: { humanAvailable: true },
+        });
+        const created = (await persisted(repo, second))[0];
+        expect(
+            created.type === "turn_created" && "tools" in created.agent.resolved
+                ? created.agent.resolved.tools
+                : null,
+        ).toEqual([echoDescriptor]);
+    });
+
+    it("inheritance chains across turns and materializes through multiple hops", async () => {
+        const { runtime, repo, models } = makeRuntime({
+            models: [
+                respond(completedResp(assistantText("one"))),
+                respond(completedResp(assistantText("two"))),
+                respond(completedResp(assistantText("three"))),
+            ],
+        });
+        const t1 = await newTurn(runtime, { sessionId: "S" });
+        await advanceAndSettle(runtime, t1);
+        const t2 = await runtime.createTurn({
+            agent: { agentId: "copilot" },
+            sessionId: "S",
+            context: { previousTurnId: t1 },
+            input: user("two"),
+            config: { humanAvailable: true },
+        });
+        await advanceAndSettle(runtime, t2);
+        const t3 = await runtime.createTurn({
+            agent: { agentId: "copilot" },
+            sessionId: "S",
+            context: { previousTurnId: t2 },
+            input: user("three"),
+            config: { humanAvailable: true },
+        });
+        const created3 = (await persisted(repo, t3))[0];
+        // t3 inherits from t2, which itself inherits from t1 (the concrete base).
+        expect(
+            created3.type === "turn_created" && "inheritedFrom" in created3.agent.resolved
+                ? created3.agent.resolved.inheritedFrom
+                : null,
+        ).toBe(t2);
+        const { outcome } = await advanceAndSettle(runtime, t3);
+        expect(outcome?.status).toBe("completed");
+        expect(models.requests[2].systemPrompt).toBe("SYS");
+        expect(models.requests[2].tools).toEqual(defaultAgent.tools);
+    });
+
+    it("standalone (inline-context) turns always persist a full snapshot", async () => {
+        const { runtime, repo } = makeRuntime();
+        const turnId = await newTurn(runtime);
+        const created = (await persisted(repo, turnId))[0];
+        expect(
+            created.type === "turn_created" && "systemPrompt" in created.agent.resolved,
+        ).toBe(true);
+    });
+
+    it("falls back to a full snapshot when the predecessor is unreadable", async () => {
+        const { runtime, repo } = makeRuntime();
+        const turnId = await runtime.createTurn({
+            agent: { agentId: "copilot" },
+            sessionId: "S",
+            context: { previousTurnId: "2026-07-02T09-00-00Z-0000404-000" },
+            input: user("orphan ref"),
+            config: { humanAvailable: true },
+        });
+        const created = (await persisted(repo, turnId))[0];
+        expect(
+            created.type === "turn_created" && "systemPrompt" in created.agent.resolved,
+        ).toBe(true);
+    });
+
+    it("persists a full snapshot when the resolved agent differs", async () => {
+        const repo = new InMemoryTurnRepo();
+        const a = makeRuntime({
+            repo,
+            models: [respond(completedResp(assistantText("first")))],
+        });
+        const first = await newTurn(a.runtime, { sessionId: "S" });
+        await advanceAndSettle(a.runtime, first);
+
+        const changedAgent = { ...defaultAgent, systemPrompt: "SYS v2" };
+        const b = makeRuntime({ repo, agent: changedAgent, idStart: 100 });
+        const second = await b.runtime.createTurn({
+            agent: { agentId: "copilot" },
+            sessionId: "S",
+            context: { previousTurnId: first },
+            input: user("again"),
+            config: { humanAvailable: true },
+        });
+        const created = (await persisted(repo, second))[0];
+        expect(
+            created.type === "turn_created" && "systemPrompt" in created.agent.resolved
+                ? created.agent.resolved.systemPrompt
+                : null,
+        ).toBe("SYS v2");
+    });
+});
 
 describe("historical and live reconstruction (26.8)", () => {
     it("getTurn is read-only and matches live durable events", async () => {
