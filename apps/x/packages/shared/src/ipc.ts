@@ -13,7 +13,9 @@ import {
     BackgroundTaskSummarySchema,
     TriggersSchema,
 } from './background-task.js';
-import { UserMessageContent } from './message.js';
+import { UserMessage, UserMessageContent } from './message.js';
+import { RequestedAgent, type TurnEvent } from './turns.js';
+import type { SessionBusEvent, SessionIndexEntry, SessionState } from './sessions.js';
 import { RowboatApiConfig } from './rowboat-account.js';
 import { ZListToolkitsResponse } from './composio.js';
 import { BrowserStateSchema } from './browser-control.js';
@@ -373,6 +375,90 @@ const ipcSchemas = {
   },
   'runs:events': {
     req: z.null(),
+    res: z.null(),
+  },
+  // ── New runtime: sessions + turns (session-design.md) ────────────────────
+  // Turn-mutating calls return quickly; the renderer follows progress through
+  // the sessions:events feed and the shared reduceTurn reducer.
+  'sessions:create': {
+    req: z.object({ title: z.string().optional() }),
+    res: z.object({ sessionId: z.string() }),
+  },
+  'sessions:list': {
+    req: z.object({}),
+    res: z.object({ sessions: z.array(z.custom<SessionIndexEntry>()) }),
+  },
+  'sessions:get': {
+    req: z.object({ sessionId: z.string() }),
+    res: z.custom<SessionState>(),
+  },
+  'sessions:getTurn': {
+    // Events are strictly validated at the repository read; typed via
+    // z.custom to avoid re-validating potentially large logs per IPC hop.
+    req: z.object({ turnId: z.string() }),
+    res: z.custom<{ turnId: string; events: Array<z.infer<typeof TurnEvent>> }>(),
+  },
+  'sessions:sendMessage': {
+    req: z.object({
+      sessionId: z.string(),
+      input: UserMessage,
+      config: z.object({
+        agent: RequestedAgent,
+        autoPermission: z.boolean().optional(),
+        maxModelCalls: z.number().int().positive().optional(),
+      }),
+    }),
+    res: z.object({ turnId: z.string() }),
+  },
+  'sessions:respondToPermission': {
+    req: z.object({
+      turnId: z.string(),
+      toolCallId: z.string(),
+      decision: z.enum(['allow', 'deny']),
+      metadata: z.json().optional(),
+    }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  'sessions:respondToAskHuman': {
+    req: z.object({
+      turnId: z.string(),
+      toolCallId: z.string(),
+      answer: z.string(),
+    }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  'sessions:stopTurn': {
+    req: z.object({
+      turnId: z.string(),
+      reason: z.string().optional(),
+    }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  'sessions:resumeTurn': {
+    req: z.object({ sessionId: z.string() }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  'sessions:setTitle': {
+    req: z.object({ sessionId: z.string(), title: z.string() }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  'sessions:downloadLog': {
+    // Concatenates the session's turn logs into one JSONL for debugging.
+    req: z.object({ sessionId: z.string() }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  'sessions:delete': {
+    req: z.object({ sessionId: z.string() }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  'sessions:events': {
+    // Typed via z.custom so the renderer's `on` handler is typed without
+    // runtime validation (the broadcast path bypasses preload validation,
+    // like runs:events).
+    req: z.custom<SessionBusEvent>(),
     res: z.null(),
   },
   'services:events': {

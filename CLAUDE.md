@@ -110,6 +110,7 @@ Long-form docs for specific features. Read the relevant file before making chang
 |---------|-----|
 | Live Notes — single `live:` frontmatter block (one objective + optional cron / windows / eventMatchCriteria) that turns a note into a self-updating artifact, panel UI, Copilot skill, prompts catalog | `apps/x/LIVE_NOTE.md` |
 | Analytics — PostHog event catalog, person properties, use-case taxonomy, how to add a new event | `apps/x/ANALYTICS.md` |
+| Turn/session runtime — event-sourced storage, reference model, the `npm run inspect` debugger | `AGENTS.md` (repo root), `apps/x/packages/core/docs/turn-runtime-design.md`, `session-design.md` |
 
 ## Common Tasks
 
