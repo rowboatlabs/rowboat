@@ -46,16 +46,10 @@ export function created(
   }
 }
 
-type RequestRef =
-  | { kind: 'context' }
-  | { kind: 'input' }
-  | { kind: 'assistant'; modelCallIndex: number }
-  | { kind: 'toolResult'; toolCallId: string }
-
 export function requested(
   turnId: string,
   index: number,
-  refs: RequestRef[] = [{ kind: 'input' }],
+  refs: string[] = ['input'],
 ): TEvent {
   return {
     type: 'model_call_requested',

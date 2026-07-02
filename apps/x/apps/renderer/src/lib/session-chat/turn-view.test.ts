@@ -92,8 +92,8 @@ describe('buildTurnConversation', () => {
       invocation(T1, 'tc1', 'echo'),
       toolResult(T1, 'tc1', 'echo', { echoed: true }),
       requested(T1, 1, [
-        { kind: 'assistant', modelCallIndex: 0 },
-        { kind: 'toolResult', toolCallId: 'tc1' },
+        'assistant:0',
+        'toolResult:tc1',
       ]),
       completed(T1, 1, assistantText('all done')),
       turnCompleted(T1, 'all done'),
