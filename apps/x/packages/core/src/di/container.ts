@@ -18,6 +18,7 @@ import { IAbortRegistry, InMemoryAbortRegistry } from "../runs/abort-registry.js
 import { FSAgentScheduleRepo, IAgentScheduleRepo } from "../agent-schedule/repo.js";
 import { FSAgentScheduleStateRepo, IAgentScheduleStateRepo } from "../agent-schedule/state-repo.js";
 import { FSSlackConfigRepo, ISlackConfigRepo } from "../slack/repo.js";
+import { FSChannelsConfigRepo, IChannelsConfigRepo } from "../channels/repo.js";
 import { CodeModeManager } from "../code-mode/acp/manager.js";
 import { CodePermissionRegistry } from "../code-mode/acp/permission-registry.js";
 import { FSCodeProjectsRepo, ICodeProjectsRepo } from "../code-mode/projects/repo.js";
@@ -90,6 +91,7 @@ container.register({
     agentScheduleRepo: asClass<IAgentScheduleRepo>(FSAgentScheduleRepo).singleton(),
     agentScheduleStateRepo: asClass<IAgentScheduleStateRepo>(FSAgentScheduleStateRepo).singleton(),
     slackConfigRepo: asClass<ISlackConfigRepo>(FSSlackConfigRepo).singleton(),
+    channelsConfigRepo: asClass<IChannelsConfigRepo>(FSChannelsConfigRepo).singleton(),
 
     // ACP code-mode engine: the manager holds a live agent connection per chat only
     // around an active turn (torn down after a short idle grace; resumed via

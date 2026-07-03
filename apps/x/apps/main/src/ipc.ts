@@ -51,6 +51,8 @@ import type { CodeSession } from '@x/shared/dist/code-sessions.js';
 import { invalidateCopilotInstructionsCache } from '@x/core/dist/application/assistant/instructions.js';
 import { triggerSync as triggerGranolaSync } from '@x/core/dist/knowledge/granola/sync.js';
 import { ISlackConfigRepo } from '@x/core/dist/slack/repo.js';
+import { IChannelsConfigRepo } from '@x/core/dist/channels/repo.js';
+import { applyChannelsConfig, getChannelsStatus, logoutWhatsApp, subscribeChannelsStatus } from '@x/core/dist/channels/service.js';
 import { runAgentSlack, getAgentSlackCliStatus, AgentSlackRunError } from '@x/core/dist/slack/agent-slack-exec.js';
 import { knowledgeSourcesRepo } from '@x/core/dist/knowledge/sources/repo.js';
 import { rankSlackHomeMessages } from '@x/core/dist/knowledge/sources/rank_slack_home.js';
@@ -646,6 +648,20 @@ function emitSessionEvent(event: SessionBusEvent): void {
   }
 }
 
+// Mobile channels: status changes (QR pairing, connect/disconnect) → renderer.
+let channelsWatcher: (() => void) | null = null;
+export function startChannelsWatcher(): void {
+  if (channelsWatcher) return;
+  channelsWatcher = subscribeChannelsStatus((status) => {
+    const windows = BrowserWindow.getAllWindows();
+    for (const win of windows) {
+      if (!win.isDestroyed() && win.webContents) {
+        win.webContents.send('channels:status', status);
+      }
+    }
+  });
+}
+
 let sessionsWatcher: (() => void) | null = null;
 export function startSessionsWatcher(): void {
   if (sessionsWatcher) {
@@ -1206,6 +1222,22 @@ export function setupIpcHandlers() {
         triggerGranolaSync();
       }
 
+      return { success: true };
+    },
+    // ── Mobile channels (WhatsApp / Telegram bridge) ─────────────
+    'channels:getConfig': async () => {
+      return container.resolve<IChannelsConfigRepo>('channelsConfigRepo').getConfig();
+    },
+    'channels:setConfig': async (_event, args) => {
+      await container.resolve<IChannelsConfigRepo>('channelsConfigRepo').setConfig(args);
+      await applyChannelsConfig(args);
+      return { success: true };
+    },
+    'channels:getStatus': async () => {
+      return getChannelsStatus();
+    },
+    'channels:whatsappLogout': async () => {
+      await logoutWhatsApp();
       return { success: true };
     },
     'slack:getConfig': async () => {
