@@ -26,10 +26,17 @@ On top of any mode:
   no webcam frames are captured; tiles show a silhouette avatar.
 - **Mascot dismissal** (meeting view): swaps the animated mascot for a
   Meet-style letter avatar ("R").
-- **Popout**: while screen sharing, if the app window loses focus (the user
-  switched to the app they're sharing), a small always-on-top frameless
-  window pops out with the user + mascot mini-tiles; refocusing dismisses it.
-  Its expand button focuses the main window (`video:focusMain`).
+- **Popout**: starting a screen share immediately pops the mini-call out into
+  a small always-on-top frameless window (user + mascot tiles, live caption,
+  control bar) that floats over every app — including Rowboat itself, since
+  the shared screen may be Rowboat. It stays for the whole share (surviving
+  app switches) and disappears when sharing stops or video mode ends. While
+  sharing it is THE call surface: the in-app PiP hides, and presenting from
+  the full-screen meeting collapses the meeting into it (restored when the
+  share ends). Control-bar actions (camera toggle / stop share / end call)
+  round-trip `video:popoutAction` → main → `video:popout-action` → app
+  window, which owns the mic/camera/capture. The expand button focuses the
+  main window (`video:focusMain`).
 
 `call`/`meeting` options are disabled unless both voice input (Deepgram) and
 voice output (TTS) are configured. Entering a call saves the user's TTS
@@ -95,7 +102,8 @@ disabled while a call owns the mic.
 
 ## Popout window
 
-- Renderer asks `video:setPopout {show}` (main handler:
+- Shown iff `videoChatMode !== 'off' && screenState === 'live'` (effect in
+  `App.tsx`). Renderer asks `video:setPopout {show}` (main handler:
   `apps/main/src/ipc.ts:1742`); main creates a frameless, `alwaysOnTop`
   ('floating'), all-workspaces BrowserWindow at the top-right of the primary
   display, loading the renderer bundle with `#video-popout`

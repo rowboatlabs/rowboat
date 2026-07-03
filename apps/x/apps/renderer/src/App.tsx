@@ -1221,15 +1221,35 @@ function App() {
     voiceRef.current.setPaused(activeIsProcessing || tts.state !== 'idle')
   }, [videoChatMode, activeIsProcessing, tts.state])
 
+  // Presenting from the full-screen call collapses it into the floating
+  // popout (the user needs their screen — possibly Rowboat itself — free to
+  // navigate while sharing). When the share ends, return to full screen.
+  const returnToMeetingAfterShareRef = useRef(false)
+
   // Screen sharing (any video mode): frames of the shared screen ride along
   // with each message next to the webcam frames.
   const handleToggleScreenShare = useCallback(async () => {
     if (video.screenState === 'live') {
       video.stopScreenShare()
     } else {
-      await video.startScreenShare()
+      const ok = await video.startScreenShare()
+      if (ok && videoChatModeRef.current === 'meeting') {
+        returnToMeetingAfterShareRef.current = true
+        void handleVideoModeChange('call')
+      }
     }
-  }, [video])
+  }, [video, handleVideoModeChange])
+
+  // Share ended (from the popout, the PiP, or the OS): restore the
+  // full-screen call if that's where the share was started from.
+  useEffect(() => {
+    if (video.screenState === 'live') return
+    if (!returnToMeetingAfterShareRef.current) return
+    returnToMeetingAfterShareRef.current = false
+    if (videoChatModeRef.current === 'call') {
+      void handleVideoModeChange('meeting')
+    }
+  }, [video.screenState, handleVideoModeChange])
 
   // Meet-style camera mute: video mode (and any screen share) stays on, but
   // no webcam frames are captured while the camera is off.
@@ -1247,40 +1267,39 @@ function App() {
           : 'listening'
       : null
 
-  // Meet-style popout: while screen sharing, losing app focus (the user
-  // switched to the app they're sharing) pops the mini-call out into an
-  // always-on-top window; refocusing Rowboat dismisses it. The short show
-  // delay keeps a quick cmd-tab pass-through from flashing a window.
-  const [appFocused, setAppFocused] = useState(true)
+  // Meet-style popout: the floating always-on-top mini-call appears the
+  // moment screen sharing starts and stays for the whole share — including
+  // over Rowboat itself (the shared screen may BE Rowboat), and across app
+  // switches. It disappears when sharing stops or video mode ends.
   useEffect(() => {
-    const onFocus = () => setAppFocused(true)
-    const onBlur = () => setAppFocused(false)
-    window.addEventListener('focus', onFocus)
-    window.addEventListener('blur', onBlur)
-    return () => {
-      window.removeEventListener('focus', onFocus)
-      window.removeEventListener('blur', onBlur)
-    }
-  }, [])
-  useEffect(() => {
-    const shouldShow = videoChatMode !== 'off' && video.screenState === 'live' && !appFocused
-    if (shouldShow) {
-      const timer = setTimeout(() => {
-        void window.ipc.invoke('video:setPopout', { show: true }).catch(() => {})
-      }, 300)
-      return () => clearTimeout(timer)
-    }
-    void window.ipc.invoke('video:setPopout', { show: false }).catch(() => {})
-  }, [videoChatMode, video.screenState, appFocused])
+    const shouldShow = videoChatMode !== 'off' && video.screenState === 'live'
+    void window.ipc.invoke('video:setPopout', { show: shouldShow }).catch(() => {})
+  }, [videoChatMode, video.screenState])
 
-  // Keep the popout's mascot/status/camera mirror of the call fresh. The main
-  // process caches the latest state and replays it when the popout loads.
+  // Keep the popout's mascot/status/camera/caption mirror of the call fresh.
+  // The main process caches the latest state and replays it when the popout
+  // loads.
   useEffect(() => {
     if (videoChatMode === 'off') return
     void window.ipc
-      .invoke('video:popoutState', { ttsState: tts.state, status: videoCallStatus, cameraOn: video.cameraOn })
+      .invoke('video:popoutState', {
+        ttsState: tts.state,
+        status: videoCallStatus,
+        cameraOn: video.cameraOn,
+        interimText: videoCallStatus ? voice.interimText || null : null,
+      })
       .catch(() => {})
-  }, [videoChatMode, tts.state, videoCallStatus, video.cameraOn])
+  }, [videoChatMode, tts.state, videoCallStatus, video.cameraOn, voice.interimText])
+
+  // Execute popout control-bar actions (the popout window has no access to
+  // the call's mic/camera/capture — they live here).
+  useEffect(() => {
+    return window.ipc.on('video:popout-action', ({ action }) => {
+      if (action === 'toggle-camera') handleToggleCamera()
+      else if (action === 'stop-share') video.stopScreenShare()
+      else if (action === 'end-call') void handleVideoModeChange('off')
+    })
+  }, [handleToggleCamera, video, handleVideoModeChange])
 
   // Enter to submit voice input, Escape to cancel
   useEffect(() => {
@@ -6644,9 +6663,10 @@ function App() {
                 onComposioConnected={handleComposioConnected}
               />
             )}
-            {/* Webcam PiP preview while video chat mode is on (the full-screen
-                meeting view replaces it) */}
-            {(videoChatMode === 'chat' || videoChatMode === 'call') && (
+            {/* Webcam PiP preview while video chat mode is on. Hidden while
+                screen sharing (the floating popout is the call surface then)
+                and in the full-screen meeting view (which replaces it). */}
+            {(videoChatMode === 'chat' || videoChatMode === 'call') && video.screenState !== 'live' && (
               <VideoPreviewOverlay
                 streamRef={video.streamRef}
                 onTurnOff={() => handleVideoModeChange('off')}
@@ -6660,7 +6680,6 @@ function App() {
                     : undefined
                 }
                 interimText={videoChatMode === 'call' ? voice.interimText : undefined}
-                isScreenSharing={video.screenState === 'live'}
                 onToggleScreenShare={handleToggleScreenShare}
                 cameraOn={video.cameraOn}
                 onToggleCamera={handleToggleCamera}

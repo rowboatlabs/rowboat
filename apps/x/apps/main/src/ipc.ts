@@ -382,15 +382,28 @@ type InvokeHandlers = {
   [K in InvokeChannels]: InvokeHandler<K>;
 };
 
-// Video-mode popout window (shown while screen sharing when the app loses
-// focus) and the last call state pushed by the main window — replayed to the
-// popout when it finishes loading.
+// Video-mode popout window (shown for the whole duration of a screen share,
+// floating over every app including Rowboat itself) and the last call state
+// pushed by the main window — replayed to the popout when it finishes loading.
 let videoPopoutWin: BrowserWindow | null = null;
 let lastVideoPopoutState: {
   ttsState: 'idle' | 'synthesizing' | 'speaking';
   status: 'listening' | 'thinking' | 'speaking' | null;
   cameraOn: boolean;
+  interimText: string | null;
 } | null = null;
+
+// Match only real app windows — getAllWindows() can also contain the popout
+// itself and hidden utility windows (e.g. PDF-export renderers), which must
+// not be shown, focused, or sent app events.
+function findMainAppWindow(): BrowserWindow | undefined {
+  return BrowserWindow.getAllWindows().find((w) => {
+    if (w === videoPopoutWin || w.isDestroyed()) return false;
+    const url = w.webContents.getURL();
+    const isAppWindow = url.startsWith('app://') || url.startsWith('http://localhost');
+    return isAppWindow && !url.includes('#video-popout');
+  });
+}
 
 /**
  * Register all IPC handlers with type safety and runtime validation
@@ -1749,7 +1762,7 @@ export function setupIpcHandlers() {
 
       const workArea = screen.getPrimaryDisplay().workArea;
       const width = 340;
-      const height = 148;
+      const height = 184;
       const ipcDir = path.dirname(fileURLToPath(import.meta.url));
       const preloadPath = app.isPackaged
         ? path.join(ipcDir, '../preload/dist/preload.js')
@@ -1804,20 +1817,18 @@ export function setupIpcHandlers() {
       return {};
     },
     'video:focusMain': async () => {
-      // Match only real app windows — getAllWindows() can also contain the
-      // popout itself and hidden utility windows (e.g. PDF-export renderers),
-      // which must not be shown or focused.
-      const main = BrowserWindow.getAllWindows().find((w) => {
-        if (w === videoPopoutWin || w.isDestroyed()) return false;
-        const url = w.webContents.getURL();
-        const isAppWindow = url.startsWith('app://') || url.startsWith('http://localhost');
-        return isAppWindow && !url.includes('#video-popout');
-      });
+      const main = findMainAppWindow();
       if (main) {
         if (main.isMinimized()) main.restore();
         main.show();
         main.focus();
       }
+      return {};
+    },
+    'video:popoutAction': async (_event, args) => {
+      // Relay a popout control-bar action to the app window, which owns the
+      // call (mic, camera, screen capture) and executes it there.
+      findMainAppWindow()?.webContents.send('video:popout-action', args);
       return {};
     },
     // Live-note handlers

@@ -1380,8 +1380,9 @@ const ipcSchemas = {
       granted: z.boolean(),
     }),
   },
-  // Video-mode popout: show/hide a small always-on-top window (user + mascot
-  // tiles) while screen sharing when the main window loses focus, Meet-style.
+  // Video-mode popout: show/hide the small always-on-top window (user +
+  // mascot tiles) that floats over everything for the duration of a screen
+  // share, Meet-style.
   'video:setPopout': {
     req: z.object({ show: z.boolean() }),
     res: z.object({}),
@@ -1393,6 +1394,8 @@ const ipcSchemas = {
       ttsState: z.enum(['idle', 'synthesizing', 'speaking']),
       status: z.enum(['listening', 'thinking', 'speaking']).nullable(),
       cameraOn: z.boolean(),
+      // Live transcript of the in-progress utterance (hands-free call only).
+      interimText: z.string().nullable(),
     }),
     res: z.object({}),
   },
@@ -1401,12 +1404,28 @@ const ipcSchemas = {
     req: z.null(),
     res: z.object({}),
   },
+  // Popout control bar → main process → relayed to the app window, which
+  // executes the action on the live call.
+  'video:popoutAction': {
+    req: z.object({
+      action: z.enum(['toggle-camera', 'stop-share', 'end-call']),
+    }),
+    res: z.object({}),
+  },
   // Push channel: main → popout window with the latest call state.
   'video:popout-state': {
     req: z.object({
       ttsState: z.enum(['idle', 'synthesizing', 'speaking']),
       status: z.enum(['listening', 'thinking', 'speaking']).nullable(),
       cameraOn: z.boolean(),
+      interimText: z.string().nullable(),
+    }),
+    res: z.null(),
+  },
+  // Push channel: main → app window with a popout control-bar action.
+  'video:popout-action': {
+    req: z.object({
+      action: z.enum(['toggle-camera', 'stop-share', 'end-call']),
     }),
     res: z.null(),
   },
