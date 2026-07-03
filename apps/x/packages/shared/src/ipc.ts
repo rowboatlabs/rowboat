@@ -24,6 +24,7 @@ import { EmailBlockSchema, GmailThreadSchema } from './blocks.js';
 import { PermissionDecision, ApprovalPolicy, CodingAgent } from './code-mode.js';
 import { NotificationSettingsSchema } from './notification-settings.js';
 import { CodeProject, CodeSession, CodeSessionMode, CodeSessionStatus, GitRepoInfo, GitStatusFile, CodeAgentModelOptions } from './code-sessions.js';
+import { ChannelsConfig, ChannelsStatus } from './channels.js';
 
 // ============================================================================
 // Runtime Validation Schemas (Single Source of Truth)
@@ -949,6 +950,28 @@ const ipcSchemas = {
     res: z.object({
       success: z.literal(true),
     }),
+  },
+  // ── Mobile channels (WhatsApp / Telegram bridge) ─────────────
+  'channels:getConfig': {
+    req: z.null(),
+    res: ChannelsConfig,
+  },
+  'channels:setConfig': {
+    req: ChannelsConfig,
+    res: z.object({ success: z.literal(true) }),
+  },
+  'channels:getStatus': {
+    req: z.null(),
+    res: ChannelsStatus,
+  },
+  'channels:whatsappLogout': {
+    req: z.null(),
+    res: z.object({ success: z.literal(true) }),
+  },
+  // Push: main → renderer status updates (QR rotation, connect/disconnect).
+  'channels:status': {
+    req: ChannelsStatus,
+    res: z.null(),
   },
   'slack:getConfig': {
     req: z.null(),

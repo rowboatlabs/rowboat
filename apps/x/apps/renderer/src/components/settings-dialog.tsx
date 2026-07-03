@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Bug, Terminal, AlertTriangle, RefreshCw, PanelRight, Bell } from "lucide-react"
+import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Bug, Terminal, AlertTriangle, RefreshCw, PanelRight, Bell, Smartphone } from "lucide-react"
 
 import {
   Dialog,
@@ -25,10 +25,11 @@ import { useTheme } from "@/contexts/theme-context"
 import { toast } from "sonner"
 import { AccountSettings } from "@/components/settings/account-settings"
 import { ConnectedAccountsSettings } from "@/components/settings/connected-accounts-settings"
+import { MobileChannelsSettings } from "@/components/settings/mobile-channels-settings"
 import type { ApprovalPolicy } from "@x/shared/src/code-mode.js"
 import { startProvisioning, useProvisioning, enabledOptimistic, type AgentStatus, type CodeModeAgentStatus } from "@/lib/code-mode-provisioning"
 
-type ConfigTab = "account" | "connections" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "notifications" | "note-tagging" | "help"
+type ConfigTab = "account" | "connections" | "mobile" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "notifications" | "note-tagging" | "help"
 
 interface TabConfig {
   id: ConfigTab
@@ -50,6 +51,12 @@ const tabs: TabConfig[] = [
     label: "Connections",
     icon: Plug,
     description: "Manage accounts and tools",
+  },
+  {
+    id: "mobile",
+    label: "Mobile",
+    icon: Smartphone,
+    description: "Chat with Rowboat from WhatsApp or Telegram",
   },
   {
     id: "models",
@@ -2216,7 +2223,7 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
             </div>
 
             {/* Content */}
-            <div className={cn("flex-1 p-4 min-h-0", (activeTab === "models" || activeTab === "connections" || activeTab === "account" || activeTab === "code-mode" || activeTab === "notifications") ? "overflow-y-auto" : activeTab === "note-tagging" ? "overflow-hidden flex flex-col" : "overflow-hidden")}>
+            <div className={cn("flex-1 p-4 min-h-0", (activeTab === "models" || activeTab === "connections" || activeTab === "mobile" || activeTab === "account" || activeTab === "code-mode" || activeTab === "notifications") ? "overflow-y-auto" : activeTab === "note-tagging" ? "overflow-hidden flex flex-col" : "overflow-hidden")}>
               {activeTab === "account" ? (
                 <AccountSettings dialogOpen={open} />
               ) : activeTab === "connections" ? (
@@ -2231,6 +2238,8 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
                     <ToolsLibrarySettings dialogOpen={open} rowboatConnected={rowboatConnected} />
                   </div>
                 </div>
+              ) : activeTab === "mobile" ? (
+                <MobileChannelsSettings dialogOpen={open} />
               ) : activeTab === "models" ? (
                 rowboatConnected
                   ? <RowboatModelSettings dialogOpen={open} />

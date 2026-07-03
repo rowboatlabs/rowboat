@@ -3,6 +3,7 @@ import path from "node:path";
 import {
   setupIpcHandlers,
   startRunsWatcher, startSessionsWatcher,
+  startChannelsWatcher,
   startCodeSessionStatusWatcher,
   startServicesWatcher,
   startLiveNoteAgentWatcher,
@@ -25,6 +26,7 @@ import { init as initEmailLabeling } from "@x/core/dist/knowledge/label_emails.j
 import { init as initNoteTagging } from "@x/core/dist/knowledge/tag_notes.js";
 import { init as initInlineTasks } from "@x/core/dist/knowledge/inline_tasks.js";
 import { init as initAgentRunner } from "@x/core/dist/agent-schedule/runner.js";
+import { init as initChannels } from "@x/core/dist/channels/service.js";
 import { init as initAgentNotes } from "@x/core/dist/knowledge/agent_notes.js";
 import { init as initCalendarNotifications } from "@x/core/dist/knowledge/notify_calendar_meetings.js";
 import { init as initMeetingPrep } from "@x/core/dist/knowledge/meeting_prep_scheduler.js";
@@ -413,6 +415,13 @@ app.whenReady().then(async () => {
   // renderer can list sessions, then forward the session bus to windows.
   await container.resolve<ISessions>('sessions').initialize();
   startSessionsWatcher();
+
+  // Mobile channels (WhatsApp/Telegram bridge): needs the session index, so
+  // start after initialize(). Failures must never block boot.
+  startChannelsWatcher();
+  initChannels().catch((error) => {
+    console.error('[Channels] Failed to start mobile channels:', error);
+  });
 
   // start code-session status tracker (derives working/needs-you/idle + notifications)
   startCodeSessionStatusWatcher();
