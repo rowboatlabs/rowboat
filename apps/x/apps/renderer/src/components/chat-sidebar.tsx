@@ -194,8 +194,9 @@ interface ChatSidebarProps {
   onTtsModeChange?: (mode: 'summary' | 'full') => void
   ttsAvatarEnabled?: boolean
   onToggleTtsAvatar?: () => void
-  videoEnabled?: boolean
-  onToggleVideo?: () => void
+  videoChatMode?: 'off' | 'chat' | 'call'
+  onVideoModeChange?: (mode: 'off' | 'chat' | 'call') => void
+  videoCallAvailable?: boolean
   onComposioConnected?: (toolkitSlug: string) => void
 }
 
@@ -262,8 +263,9 @@ export function ChatSidebar({
   onTtsModeChange,
   ttsAvatarEnabled,
   onToggleTtsAvatar,
-  videoEnabled,
-  onToggleVideo,
+  videoChatMode,
+  onVideoModeChange,
+  videoCallAvailable,
   onComposioConnected,
 }: ChatSidebarProps) {
   const { state: sidebarState } = useSidebar()
@@ -840,8 +842,9 @@ export function ChatSidebar({
                           onTtsModeChange={isActive ? onTtsModeChange : undefined}
                           ttsAvatarEnabled={ttsAvatarEnabled}
                           onToggleTtsAvatar={isActive ? onToggleTtsAvatar : undefined}
-                          videoEnabled={videoEnabled}
-                          onToggleVideo={isActive ? onToggleVideo : undefined}
+                          videoChatMode={videoChatMode}
+                          onVideoModeChange={isActive ? onVideoModeChange : undefined}
+                          videoCallAvailable={videoCallAvailable}
                         />
                       </div>
                     )

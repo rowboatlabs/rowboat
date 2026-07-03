@@ -1013,21 +1013,16 @@ function App() {
   voiceRef.current = voice
 
   // Video chat mode: while on, the webcam runs and frames are attached to
-  // every outgoing message so the assistant can see the user.
+  // every outgoing message so the assistant can see the user. 'chat' keeps
+  // the normal composer; 'call' is fully hands-free — continuous listening,
+  // auto-submitted utterances, spoken responses (handler defined below, after
+  // the voice/submit plumbing it drives).
   const video = useVideoMode()
-  const [videoEnabled, setVideoEnabled] = useState(false)
-  const videoEnabledRef = useRef(false)
-  const handleToggleVideo = useCallback(async () => {
-    if (videoEnabledRef.current) {
-      video.stop()
-      videoEnabledRef.current = false
-      setVideoEnabled(false)
-    } else {
-      const ok = await video.start()
-      videoEnabledRef.current = ok
-      setVideoEnabled(ok)
-    }
-  }, [video])
+  const [videoChatMode, setVideoChatMode] = useState<'off' | 'chat' | 'call'>('off')
+  const videoChatModeRef = useRef<'off' | 'chat' | 'call'>('off')
+  // TTS settings to restore when a hands-free call ends (a call forces
+  // full-read-aloud TTS for its duration).
+  const preCallTtsRef = useRef<{ enabled: boolean; mode: 'summary' | 'full' } | null>(null)
 
   const handleToggleMeetingRef = useRef<(() => void) | undefined>(undefined)
   const meetingTranscription = useMeetingTranscription(() => {
@@ -1087,6 +1082,8 @@ function App() {
   }, [])
 
   const handleStartRecording = useCallback(() => {
+    // Hands-free call mode owns the mic — ignore push-to-talk while it's on.
+    if (videoChatModeRef.current === 'call') return
     setIsRecording(true)
     isRecordingRef.current = true
     voice.start()
@@ -1147,6 +1144,69 @@ function App() {
     setIsRecording(false)
     isRecordingRef.current = false
   }, [voice])
+
+  // Video chat mode transitions. 'chat' just runs the camera; 'call' also
+  // listens continuously (auto-submitting each utterance as a voice message)
+  // and forces full read-aloud TTS so the assistant answers out loud.
+  const handleVideoModeChange = useCallback(async (mode: 'off' | 'chat' | 'call') => {
+    const prev = videoChatModeRef.current
+    if (mode === prev) return
+
+    // Leaving a call: release the mic and restore the pre-call TTS settings.
+    if (prev === 'call') {
+      voiceRef.current.cancel()
+      const saved = preCallTtsRef.current
+      preCallTtsRef.current = null
+      const restoreEnabled = saved?.enabled ?? false
+      setTtsEnabled(restoreEnabled)
+      ttsEnabledRef.current = restoreEnabled
+      if (saved) {
+        setTtsMode(saved.mode)
+        ttsModeRef.current = saved.mode
+      }
+      if (!restoreEnabled) ttsRef.current.cancel()
+    }
+
+    if (mode === 'off') {
+      video.stop()
+      videoChatModeRef.current = 'off'
+      setVideoChatMode('off')
+      return
+    }
+
+    if (prev === 'off') {
+      const ok = await video.start()
+      if (!ok) return // camera denied/unavailable — stay off
+    }
+
+    if (mode === 'call') {
+      // A manual push-to-talk recording can't coexist with the call's mic.
+      if (isRecordingRef.current) {
+        voiceRef.current.cancel()
+        setIsRecording(false)
+        isRecordingRef.current = false
+      }
+      preCallTtsRef.current = { enabled: ttsEnabledRef.current, mode: ttsModeRef.current }
+      setTtsEnabled(true)
+      ttsEnabledRef.current = true
+      setTtsMode('full')
+      ttsModeRef.current = 'full'
+      void voiceRef.current.startContinuous((text) => {
+        pendingVoiceInputRef.current = true
+        handlePromptSubmitRef.current?.({ text, files: [] })
+      })
+    }
+
+    videoChatModeRef.current = mode
+    setVideoChatMode(mode)
+  }, [video])
+
+  // During a call, mute the mic while the assistant is thinking or speaking
+  // so its own TTS (or a half-turn) never gets transcribed back at it.
+  useEffect(() => {
+    if (videoChatMode !== 'call') return
+    voiceRef.current.setPaused(activeIsProcessing || tts.state !== 'idle')
+  }, [videoChatMode, activeIsProcessing, tts.state])
 
   // Enter to submit voice input, Escape to cancel
   useEffect(() => {
@@ -2629,7 +2689,7 @@ function App() {
 
     // Video chat mode: drain the webcam frames buffered since the last send
     // so they ride along with this message as inline image parts.
-    const videoFrames = videoEnabledRef.current ? video.collectFrames() : []
+    const videoFrames = videoChatModeRef.current !== 'off' ? video.collectFrames() : []
 
     const userMessageId = `user-${Date.now()}`
     const displayAttachments: ChatMessage['attachments'] = hasAttachments || videoFrames.length > 0
@@ -2700,7 +2760,7 @@ function App() {
               ...(ttsEnabledRef.current ? { voiceOutput: ttsModeRef.current } : {}),
               ...(searchEnabled ? { searchEnabled: true } : {}),
               ...(codeMode ? { codeMode } : {}),
-              ...(videoEnabledRef.current ? { videoMode: true } : {}),
+              ...(videoChatModeRef.current !== 'off' ? { videoMode: true } : {}),
             },
           },
         },
@@ -6387,8 +6447,9 @@ function App() {
                             onTtsModeChange={isActive ? handleTtsModeChange : undefined}
                             ttsAvatarEnabled={ttsAvatarEnabled}
                             onToggleTtsAvatar={isActive ? handleToggleTtsAvatar : undefined}
-                            videoEnabled={videoEnabled}
-                            onToggleVideo={isActive ? handleToggleVideo : undefined}
+                            videoChatMode={videoChatMode}
+                            onVideoModeChange={isActive ? handleVideoModeChange : undefined}
+                            videoCallAvailable={voiceAvailable && ttsAvailable}
                           />
                         </div>
                       )
@@ -6502,14 +6563,28 @@ function App() {
                 onTtsModeChange={handleTtsModeChange}
                 ttsAvatarEnabled={ttsAvatarEnabled}
                 onToggleTtsAvatar={handleToggleTtsAvatar}
-                videoEnabled={videoEnabled}
-                onToggleVideo={handleToggleVideo}
+                videoChatMode={videoChatMode}
+                onVideoModeChange={handleVideoModeChange}
+                videoCallAvailable={voiceAvailable && ttsAvailable}
                 onComposioConnected={handleComposioConnected}
               />
             )}
             {/* Webcam PiP preview while video chat mode is on */}
-            {videoEnabled && (
-              <VideoPreviewOverlay streamRef={video.streamRef} onTurnOff={handleToggleVideo} />
+            {videoChatMode !== 'off' && (
+              <VideoPreviewOverlay
+                streamRef={video.streamRef}
+                onTurnOff={() => handleVideoModeChange('off')}
+                callStatus={
+                  videoChatMode === 'call'
+                    ? tts.state !== 'idle'
+                      ? 'speaking'
+                      : activeIsProcessing
+                        ? 'thinking'
+                        : 'listening'
+                    : undefined
+                }
+                interimText={videoChatMode === 'call' ? voice.interimText : undefined}
+              />
             )}
             {/* Talking head hovers over the active view while avatar voice mode is
                 on (hidden during the tour, which shows its own mascot) */}

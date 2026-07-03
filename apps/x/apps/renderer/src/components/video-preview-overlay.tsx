@@ -5,6 +5,16 @@ interface VideoPreviewOverlayProps {
   /** Live camera stream from useVideoMode — attached to the preview element. */
   streamRef: React.MutableRefObject<MediaStream | null>
   onTurnOff: () => void
+  /** Hands-free call mode: current phase of the conversation loop. */
+  callStatus?: 'listening' | 'thinking' | 'speaking'
+  /** Hands-free call mode: live transcript of the in-progress utterance. */
+  interimText?: string
+}
+
+const CALL_STATUS_DISPLAY: Record<NonNullable<VideoPreviewOverlayProps['callStatus']>, { label: string; dotClass: string }> = {
+  listening: { label: 'Listening', dotClass: 'bg-green-500 animate-pulse' },
+  thinking: { label: 'Thinking…', dotClass: 'bg-amber-400' },
+  speaking: { label: 'Speaking', dotClass: 'bg-sky-400 animate-pulse' },
 }
 
 /**
@@ -12,7 +22,7 @@ interface VideoPreviewOverlayProps {
  * on. Mirrored like a selfie camera so the user's movements feel natural.
  * Sits above the composer dock, mirroring the talking-head overlay's corner.
  */
-export function VideoPreviewOverlay({ streamRef, onTurnOff }: VideoPreviewOverlayProps) {
+export function VideoPreviewOverlay({ streamRef, onTurnOff, callStatus, interimText }: VideoPreviewOverlayProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
 
   useEffect(() => {
@@ -52,9 +62,25 @@ export function VideoPreviewOverlay({ streamRef, onTurnOff }: VideoPreviewOverla
         style={{ transform: 'scaleX(-1)' }}
       />
       <span className="pointer-events-none absolute bottom-1.5 left-1.5 flex items-center gap-1 rounded-full bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white">
-        <span className="block h-1.5 w-1.5 animate-pulse rounded-full bg-red-500" />
-        Video on
+        {callStatus ? (
+          <>
+            <span className={`block h-1.5 w-1.5 rounded-full ${CALL_STATUS_DISPLAY[callStatus].dotClass}`} />
+            {CALL_STATUS_DISPLAY[callStatus].label}
+          </>
+        ) : (
+          <>
+            <span className="block h-1.5 w-1.5 animate-pulse rounded-full bg-red-500" />
+            Video on
+          </>
+        )}
       </span>
+      {callStatus && interimText && (
+        <div className="pointer-events-none absolute inset-x-0 -bottom-1 translate-y-full pt-1">
+          <div className="max-h-16 overflow-hidden rounded-lg bg-black/60 px-2 py-1 text-[11px] leading-snug text-white/90">
+            {interimText}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
