@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { X } from 'lucide-react'
+import { MonitorUp, X } from 'lucide-react'
 
 interface VideoPreviewOverlayProps {
   /** Live camera stream from useVideoMode — attached to the preview element. */
@@ -9,6 +9,8 @@ interface VideoPreviewOverlayProps {
   callStatus?: 'listening' | 'thinking' | 'speaking'
   /** Hands-free call mode: live transcript of the in-progress utterance. */
   interimText?: string
+  isScreenSharing?: boolean
+  onToggleScreenShare?: () => void
 }
 
 const CALL_STATUS_DISPLAY: Record<NonNullable<VideoPreviewOverlayProps['callStatus']>, { label: string; dotClass: string }> = {
@@ -22,7 +24,7 @@ const CALL_STATUS_DISPLAY: Record<NonNullable<VideoPreviewOverlayProps['callStat
  * on. Mirrored like a selfie camera so the user's movements feel natural.
  * Sits above the composer dock, mirroring the talking-head overlay's corner.
  */
-export function VideoPreviewOverlay({ streamRef, onTurnOff, callStatus, interimText }: VideoPreviewOverlayProps) {
+export function VideoPreviewOverlay({ streamRef, onTurnOff, callStatus, interimText, isScreenSharing, onToggleScreenShare }: VideoPreviewOverlayProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
 
   useEffect(() => {
@@ -54,6 +56,21 @@ export function VideoPreviewOverlay({ streamRef, onTurnOff, callStatus, interimT
       >
         <X className="h-3 w-3" />
       </button>
+      {onToggleScreenShare && (
+        <button
+          type="button"
+          onClick={onToggleScreenShare}
+          className={`absolute -left-1.5 -top-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-full border shadow-sm transition-opacity ${
+            isScreenSharing
+              ? 'border-sky-500 bg-sky-600 text-white opacity-100'
+              : 'border-border bg-background text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100'
+          }`}
+          aria-label={isScreenSharing ? 'Stop sharing screen' : 'Share your screen'}
+          title={isScreenSharing ? 'Stop sharing screen' : 'Share your screen'}
+        >
+          <MonitorUp className="h-3 w-3" />
+        </button>
+      )}
       <video
         ref={videoRef}
         muted

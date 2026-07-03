@@ -43,6 +43,7 @@ export function runLogToConversation(log: RunLog): ConversationItem[] {
             size?: number
             data?: string
             mediaType?: string
+            source?: string
             toolCallId?: string
             toolName?: string
             arguments?: unknown
@@ -66,7 +67,7 @@ export function runLogToConversation(log: RunLog): ConversationItem[] {
               })),
               ...imageParts.map((p, index) => ({
                 path: '',
-                filename: `camera-frame-${index + 1}.jpg`,
+                filename: `${p.source === 'screen' ? 'screen' : 'camera'}-frame-${index + 1}.jpg`,
                 mimeType: p.mediaType || 'image/jpeg',
                 thumbnailUrl: `data:${p.mediaType || 'image/jpeg'};base64,${p.data}`,
                 isVideoFrame: true,

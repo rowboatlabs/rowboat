@@ -1221,6 +1221,16 @@ function App() {
     voiceRef.current.setPaused(activeIsProcessing || tts.state !== 'idle')
   }, [videoChatMode, activeIsProcessing, tts.state])
 
+  // Screen sharing (any video mode): frames of the shared screen ride along
+  // with each message next to the webcam frames.
+  const handleToggleScreenShare = useCallback(async () => {
+    if (video.screenState === 'live') {
+      video.stopScreenShare()
+    } else {
+      await video.startScreenShare()
+    }
+  }, [video])
+
   // Enter to submit voice input, Escape to cancel
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -2717,7 +2727,7 @@ function App() {
           })),
           ...videoFrames.map((frame, index) => ({
             path: '',
-            filename: `camera-frame-${index + 1}.jpg`,
+            filename: `${frame.source}-frame-${index + 1}.jpg`,
             mimeType: frame.mediaType,
             thumbnailUrl: frame.dataUrl,
             isVideoFrame: true,
@@ -2800,7 +2810,7 @@ function App() {
               type: 'image'
               data: string
               mediaType: string
-              source: 'camera'
+              source: 'camera' | 'screen'
               capturedAt: string
             }
 
@@ -2839,7 +2849,7 @@ function App() {
             type: 'image',
             data: frame.data,
             mediaType: frame.mediaType,
-            source: 'camera',
+            source: frame.source,
             capturedAt: frame.capturedAt,
           })
         }
@@ -6599,12 +6609,17 @@ function App() {
                     : undefined
                 }
                 interimText={videoChatMode === 'call' ? voice.interimText : undefined}
+                isScreenSharing={video.screenState === 'live'}
+                onToggleScreenShare={handleToggleScreenShare}
               />
             )}
             {/* Full-screen Meet-style call: user tile + animated mascot tile */}
             {videoChatMode === 'meeting' && (
               <VideoCallView
                 streamRef={video.streamRef}
+                screenStreamRef={video.screenStreamRef}
+                isScreenSharing={video.screenState === 'live'}
+                onToggleScreenShare={handleToggleScreenShare}
                 ttsState={tts.state}
                 getTtsLevel={tts.getLevel}
                 status={

@@ -52,7 +52,7 @@ export const UserImagePart = z.object({
     type: z.literal("image"),
     data: z.string(),                    // base64-encoded image bytes (no data: prefix)
     mediaType: z.string(),               // MIME type ("image/jpeg")
-    source: z.enum(["camera"]).optional(),
+    source: z.enum(["camera", "screen"]).optional(),
     capturedAt: z.string().optional(),   // ISO timestamp of capture
 });
 

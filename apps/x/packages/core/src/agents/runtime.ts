@@ -392,6 +392,12 @@ How to use the frames:
 - When the user practices something performative (a pitch, presentation, interview, talk) or asks for delivery feedback, give specific, actionable coaching grounded in what you actually see — cite concrete observations ("in the last few frames you looked down and away from the camera") rather than generic advice. Cover posture, eye contact, facial expressiveness, gesturing, and visible energy.
 - If they show something to the camera (an object, document, whiteboard), read or describe it and respond accordingly.
 
+Screen sharing:
+- The user may also share their screen. Screen-share frames arrive in a separately labeled group after the webcam frames; they show the user's screen, not the user.
+- When screen frames are present, treat them as the primary subject: the user is usually asking about, or working on, what's visible there. Read the screen carefully — code, documents, error messages, UI state — and help with it concretely.
+- The LAST screen frame is the most current view of their screen; earlier ones show how it changed while they spoke.
+- Frames are downscaled captures: small text may be hard to read. If something crucial is illegible, say what you need ("zoom into the error message" / "make that panel bigger") rather than guessing.
+
 Etiquette:
 - Do not narrate or list what you see in every response. Bring up visual observations only when relevant to the user's request or clearly worth mentioning.
 - Never comment on the user's physical appearance, attractiveness, or personal attributes — visual feedback is strictly about delivery, expression, and body language.
@@ -961,11 +967,15 @@ export function convertFromMessages(messages: z.infer<typeof Message>[]): ModelM
                     });
                 } else {
                     // New content parts array — collapse text/attachments to text
-                    // for the LLM; inline image parts (video-mode webcam frames)
-                    // are passed through as real multimodal image parts.
+                    // for the LLM; inline image parts (video-mode webcam and
+                    // screen-share frames) are passed through as real multimodal
+                    // image parts, grouped under labeled text headers so the
+                    // model knows which images show the user vs their screen.
                     const textSegments: string[] = userMessageContextPrefix ? [userMessageContextPrefix] : [];
                     const attachmentLines: string[] = [];
-                    const imageParts: Array<{ type: "image"; image: string; mediaType: string }> = [];
+                    type EncodedImagePart = { type: "image"; image: string; mediaType: string };
+                    const cameraParts: EncodedImagePart[] = [];
+                    const screenParts: EncodedImagePart[] = [];
                     const frameTimes: string[] = [];
 
                     for (const part of msg.content) {
@@ -974,7 +984,8 @@ export function convertFromMessages(messages: z.infer<typeof Message>[]): ModelM
                             const lineStr = part.lineNumber ? ` (line ${part.lineNumber})` : '';
                             attachmentLines.push(`- ${part.filename} (${part.mimeType}${sizeStr}) at ${part.path}${lineStr}`);
                         } else if (part.type === "image") {
-                            imageParts.push({ type: "image", image: part.data, mediaType: part.mediaType });
+                            const target = part.source === "screen" ? screenParts : cameraParts;
+                            target.push({ type: "image", image: part.data, mediaType: part.mediaType });
                             if (part.capturedAt) frameTimes.push(part.capturedAt);
                         } else {
                             textSegments.push(part.text);
@@ -989,19 +1000,29 @@ export function convertFromMessages(messages: z.infer<typeof Message>[]): ModelM
                         }
                     }
 
-                    if (imageParts.length > 0) {
+                    const imageCount = cameraParts.length + screenParts.length;
+                    if (imageCount > 0) {
                         const span = frameTimes.length >= 2
                             ? ` spanning ${frameTimes[0]} to ${frameTimes[frameTimes.length - 1]}`
                             : frameTimes.length === 1
                                 ? ` captured at ${frameTimes[0]}`
                                 : '';
-                        textSegments.push(`[Video mode: ${imageParts.length} live webcam frame${imageParts.length === 1 ? '' : 's'} of the user attached below, oldest to newest,${span ? span + ',' : ''} recorded while they composed this message.]`);
+                        const kinds: string[] = [];
+                        if (cameraParts.length > 0) kinds.push(`${cameraParts.length} live webcam frame${cameraParts.length === 1 ? '' : 's'} of the user`);
+                        if (screenParts.length > 0) kinds.push(`${screenParts.length} frame${screenParts.length === 1 ? '' : 's'} of the user's shared screen`);
+                        textSegments.push(`[Video mode: ${kinds.join(' and ')} attached below, each group oldest to newest,${span ? span + ',' : ''} recorded while they composed this message.]`);
+                        const content: Array<{ type: "text"; text: string } | EncodedImagePart> = [
+                            { type: "text", text: textSegments.join("\n") },
+                        ];
+                        if (cameraParts.length > 0) {
+                            content.push({ type: "text", text: "Webcam frames (oldest to newest):" }, ...cameraParts);
+                        }
+                        if (screenParts.length > 0) {
+                            content.push({ type: "text", text: "Screen-share frames (oldest to newest):" }, ...screenParts);
+                        }
                         result.push({
                             role: "user",
-                            content: [
-                                { type: "text", text: textSegments.join("\n") },
-                                ...imageParts,
-                            ],
+                            content,
                             providerOptions,
                         });
                     } else {
