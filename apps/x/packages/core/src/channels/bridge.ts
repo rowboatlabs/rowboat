@@ -1,6 +1,8 @@
 import type { SessionIndexEntry } from "@x/shared/dist/sessions.js";
 import { reduceTurn, type TurnStreamEvent } from "@x/shared/dist/turns.js";
 import { assistantText, lastAssistantText } from "../agents/headless.js";
+import { TurnInputError } from "../turns/api.js";
+import { ASK_HUMAN_TOOL } from "../turns/bridges/real-agent-resolver.js";
 import { TurnNotSettledError, type ISessions } from "../sessions/api.js";
 import type { EmitterSessionBus } from "../sessions/bus.js";
 
@@ -17,6 +19,8 @@ const LIST_LIMIT = 10;
 // are chunked, then truncated — the desktop app has the full text.
 const REPLY_CHUNK_SIZE = 3500;
 const MAX_REPLY_CHUNKS = 3;
+
+const ASK_HUMAN_TOOL_ID = `builtin:${ASK_HUMAN_TOOL}`;
 
 const HELP_TEXT = [
     "🤖 Rowboat commands:",
@@ -57,13 +61,13 @@ function settleOf(event: TurnStreamEvent): Settled | null {
             return { kind: "cancelled" };
         case "turn_suspended": {
             const ask = event.pendingAsyncTools.find(
-                (t) => t.toolId === "builtin:ask-human" || t.toolName === "ask-human",
+                (t) => t.toolId === ASK_HUMAN_TOOL_ID || t.toolName === ASK_HUMAN_TOOL,
             );
             if (ask) {
-                const input = ask.input as { query?: unknown; options?: unknown } | null;
+                const input = ask.input as { question?: unknown; options?: unknown } | null;
                 const query =
-                    typeof input?.query === "string" && input.query
-                        ? input.query
+                    typeof input?.question === "string" && input.question
+                        ? input.question
                         : "The agent needs your input.";
                 const options = Array.isArray(input?.options)
                     ? input.options.filter((o): o is string => typeof o === "string")
@@ -106,6 +110,11 @@ function chunkReply(text: string): string[] {
         parts[parts.length - 1] += "\n… (truncated — open Rowboat for the full reply)";
     }
     return parts;
+}
+
+interface TurnWatcher {
+    waitFor(turnId: string, timeoutMs: number): Promise<Settled>;
+    dispose(): void;
 }
 
 export class ChannelBridge {
@@ -175,15 +184,20 @@ export class ChannelBridge {
         return state;
     }
 
-    private sortedSessions(): SessionIndexEntry[] {
+    private sessionEntry(sessionId: string): SessionIndexEntry | undefined {
+        return this.deps.sessions.listSessions().find((e) => e.sessionId === sessionId);
+    }
+
+    private recentSessions(): SessionIndexEntry[] {
         return this.deps.sessions
             .listSessions()
             .filter((e) => !e.error)
-            .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+            .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+            .slice(0, LIST_LIMIT);
     }
 
     private renderList(state: SenderState): string {
-        const entries = this.sortedSessions().slice(0, LIST_LIMIT);
+        const entries = this.recentSessions();
         if (entries.length === 0) {
             return "No chats yet — just send a message to start one.";
         }
@@ -205,9 +219,7 @@ export class ChannelBridge {
 
     private resumeSession(state: SenderState, index: number): string {
         if (state.lastList.length === 0) {
-            state.lastList = this.sortedSessions()
-                .slice(0, LIST_LIMIT)
-                .map((e) => e.sessionId);
+            state.lastList = this.recentSessions().map((e) => e.sessionId);
         }
         const sessionId = state.lastList[index - 1];
         if (!sessionId) {
@@ -215,7 +227,7 @@ export class ChannelBridge {
         }
         state.activeSessionId = sessionId;
         state.pendingAsk = null;
-        const entry = this.sortedSessions().find((e) => e.sessionId === sessionId);
+        const entry = this.sessionEntry(sessionId);
         return `▶️ Resumed "${entry?.title ?? "Untitled"}" — send a message to continue.`;
     }
 
@@ -223,9 +235,7 @@ export class ChannelBridge {
         if (!state.activeSessionId) {
             return "No current chat — your next message starts a new one.";
         }
-        const entry = this.sortedSessions().find(
-            (e) => e.sessionId === state.activeSessionId,
-        );
+        const entry = this.sessionEntry(state.activeSessionId);
         if (!entry) return "Current chat no longer exists — send a message to start fresh.";
         const status = state.busy
             ? "working"
@@ -238,9 +248,7 @@ export class ChannelBridge {
     private async stopActive(state: SenderState): Promise<string> {
         state.pendingAsk = null;
         if (!state.activeSessionId) return "Nothing to stop.";
-        const entry = this.deps.sessions
-            .listSessions()
-            .find((e) => e.sessionId === state.activeSessionId);
+        const entry = this.sessionEntry(state.activeSessionId);
         if (!entry?.latestTurnId) return "Nothing to stop.";
         if (
             entry.latestTurnStatus === "completed" ||
@@ -259,30 +267,18 @@ export class ChannelBridge {
             return;
         }
         state.busy = true;
-        // Subscribe before advancing so no settle event can slip past.
-        const watcher = this.watchBus();
         try {
-            let turnId: string;
+            await reply("⏳ Working on it…");
             if (state.pendingAsk) {
                 const ask = state.pendingAsk;
                 state.pendingAsk = null;
-                turnId = ask.turnId;
-                await reply("⏳ Working on it…");
-                await this.deps.sessions.respondToAskHuman(ask.turnId, ask.toolCallId, text);
-            } else {
-                if (!state.activeSessionId) {
-                    state.activeSessionId = await this.deps.sessions.createSession();
-                }
-                await reply("⏳ Working on it…");
-                const sent = await this.deps.sessions.sendMessage(
-                    state.activeSessionId,
-                    { role: "user", content: text },
-                    { agent: { agentId: AGENT_ID }, autoPermission: true },
-                );
-                turnId = sent.turnId;
+                const answered = await this.answerAsk(state, ask, text, reply);
+                if (answered) return;
+                // The ask was already resolved elsewhere (e.g. answered in the
+                // desktop UI) or the turn is terminal — treat the text as a
+                // normal message instead of discarding it.
             }
-            const settled = await watcher.waitFor(turnId, TURN_TIMEOUT_MS);
-            await this.deliverSettled(state, turnId, settled, reply);
+            await this.sendToSession(state, text, reply);
         } catch (error) {
             if (error instanceof TurnNotSettledError) {
                 await reply(
@@ -292,8 +288,58 @@ export class ChannelBridge {
             }
             throw error;
         } finally {
-            watcher.dispose();
             state.busy = false;
+        }
+    }
+
+    private async sendToSession(state: SenderState, text: string, reply: ReplyFn): Promise<void> {
+        // Subscribe before advancing so no settle event can slip past.
+        const watcher = this.watchBus();
+        try {
+            if (!state.activeSessionId) {
+                state.activeSessionId = await this.deps.sessions.createSession();
+            }
+            const sent = await this.deps.sessions.sendMessage(
+                state.activeSessionId,
+                { role: "user", content: text },
+                { agent: { agentId: AGENT_ID }, autoPermission: true },
+            );
+            const settled = await watcher.waitFor(sent.turnId, TURN_TIMEOUT_MS);
+            await this.deliverSettled(state, sent.turnId, settled, reply);
+        } finally {
+            watcher.dispose();
+        }
+    }
+
+    // Returns false when the ask was stale (already answered on the desktop /
+    // turn terminal) — the caller then routes the text as a normal message.
+    private async answerAsk(
+        state: SenderState,
+        ask: { turnId: string; toolCallId: string },
+        text: string,
+        reply: ReplyFn,
+    ): Promise<boolean> {
+        const watcher = this.watchBus();
+        try {
+            const settledPromise = watcher.waitFor(ask.turnId, TURN_TIMEOUT_MS);
+            // respondToAskHuman resolves only when the whole advance settles,
+            // so it must not be awaited ahead of the watcher (that would
+            // bypass TURN_TIMEOUT_MS). Race instead: its rejection (stale
+            // ask) must beat the 30-minute timeout; its success defers to the
+            // settle event.
+            const settled = await Promise.race([
+                settledPromise,
+                this.deps.sessions
+                    .respondToAskHuman(ask.turnId, ask.toolCallId, text)
+                    .then(() => settledPromise),
+            ]);
+            await this.deliverSettled(state, ask.turnId, settled, reply);
+            return true;
+        } catch (error) {
+            if (error instanceof TurnInputError) return false;
+            throw error;
+        } finally {
+            watcher.dispose();
         }
     }
 
@@ -350,38 +396,35 @@ export class ChannelBridge {
         }
     }
 
-    // Buffers turn events from the moment of subscription so a settle that
-    // fires between sendMessage() returning and waitFor() attaching is never
-    // lost. One watcher per in-flight message; disposed in runMessage.
-    private watchBus() {
-        const buffered: Array<{ turnId: string; event: TurnStreamEvent }> = [];
+    // Buffers settle-relevant events (≈1 per turn) from the moment of
+    // subscription so a settle firing between advance-start and waitFor() is
+    // never lost — without retaining the per-token delta stream of every
+    // concurrent session. One watcher per in-flight message.
+    private watchBus(): TurnWatcher {
+        const buffered: Array<{ turnId: string; settled: Settled }> = [];
         let waiter: { turnId: string; resolve: (settled: Settled) => void } | null = null;
+        let cancelTimer: (() => void) | null = null;
         const unsubscribe = this.deps.sessionBus.subscribe((event) => {
             if (event.kind !== "turn-event") return;
+            const settled = settleOf(event.event);
+            if (!settled) return;
             if (waiter) {
-                if (event.turnId !== waiter.turnId) return;
-                const settled = settleOf(event.event);
-                if (settled) waiter.resolve(settled);
+                if (event.turnId === waiter.turnId) waiter.resolve(settled);
                 return;
             }
-            buffered.push({ turnId: event.turnId, event: event.event });
+            buffered.push({ turnId: event.turnId, settled });
         });
         return {
             waitFor: (turnId: string, timeoutMs: number): Promise<Settled> =>
                 new Promise<Settled>((resolve) => {
-                    for (const b of buffered) {
-                        if (b.turnId !== turnId) continue;
-                        const settled = settleOf(b.event);
-                        if (settled) {
-                            resolve(settled);
-                            return;
-                        }
+                    const hit = buffered.find((b) => b.turnId === turnId);
+                    if (hit) {
+                        resolve(hit.settled);
+                        return;
                     }
                     buffered.length = 0;
-                    const timer = setTimeout(
-                        () => resolve({ kind: "timeout" }),
-                        timeoutMs,
-                    );
+                    const timer = setTimeout(() => resolve({ kind: "timeout" }), timeoutMs);
+                    cancelTimer = () => clearTimeout(timer);
                     waiter = {
                         turnId,
                         resolve: (settled) => {
@@ -390,7 +433,10 @@ export class ChannelBridge {
                         },
                     };
                 }),
-            dispose: unsubscribe,
+            dispose: () => {
+                unsubscribe();
+                cancelTimer?.();
+            },
         };
     }
 }

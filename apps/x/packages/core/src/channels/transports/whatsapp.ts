@@ -6,7 +6,6 @@ import makeWASocket, {
     jidDecode,
     useMultiFileAuthState,
 } from "baileys";
-import type { ReplyFn } from "../bridge.js";
 
 // WhatsApp transport via Baileys: the app links to the user's own WhatsApp
 // account as a linked device (QR pairing, same as WhatsApp Web) over an
@@ -34,7 +33,9 @@ export interface WhatsAppTransportStatus {
 export interface WhatsAppTransportOptions {
     authDir: string;
     allowFrom: string[];
-    onInbound: (senderKey: string, text: string, reply: ReplyFn) => void;
+    // chatJid is the address to reply to; the caller owns reply routing so a
+    // reply can go through whichever transport instance is current by then.
+    onInbound: (senderKey: string, chatJid: string, text: string) => void;
     onStatus: (status: WhatsAppTransportStatus) => void;
 }
 
@@ -45,7 +46,13 @@ interface TextishMessage {
 }
 
 interface InboundWAMessage {
-    key?: { remoteJid?: string | null; fromMe?: boolean | null; id?: string | null };
+    key?: {
+        remoteJid?: string | null;
+        // Phone-number JID when remoteJid is a LID (anonymized) JID.
+        remoteJidAlt?: string | null;
+        fromMe?: boolean | null;
+        id?: string | null;
+    };
     message?: unknown;
 }
 
@@ -60,6 +67,11 @@ function messageText(message: unknown): string | null {
 export class WhatsAppTransport {
     private sock: WASocket | null = null;
     private stopped = false;
+    // Bumped on every connect/stop/logout; handlers close over their own
+    // generation and go inert the moment they are superseded, so a stop()
+    // racing an await inside connect() cannot leave a zombie socket
+    // processing messages alongside its replacement.
+    private generation = 0;
     private sentIds = new Set<string>();
 
     constructor(private readonly opts: WhatsAppTransportOptions) {}
@@ -72,6 +84,7 @@ export class WhatsAppTransport {
 
     async stop(): Promise<void> {
         this.stopped = true;
+        this.generation++;
         try {
             this.sock?.end(undefined);
         } catch {
@@ -85,6 +98,7 @@ export class WhatsAppTransport {
     // local credentials so the next start shows a fresh QR.
     async logout(): Promise<void> {
         this.stopped = true;
+        this.generation++;
         try {
             await this.sock?.logout();
         } catch {
@@ -97,18 +111,22 @@ export class WhatsAppTransport {
 
     private async connect(): Promise<void> {
         if (this.stopped) return;
+        const generation = ++this.generation;
         const { state, saveCreds } = await useMultiFileAuthState(this.opts.authDir);
+        if (this.stopped || generation !== this.generation) return;
         const sock = makeWASocket({
             auth: state,
             syncFullHistory: false,
             markOnlineOnConnect: false,
         });
         this.sock = sock;
+        const isCurrent = () =>
+            !this.stopped && generation === this.generation && this.sock === sock;
 
         sock.ev.on("creds.update", saveCreds);
 
         sock.ev.on("connection.update", (update) => {
-            if (this.stopped) return;
+            if (!isCurrent()) return;
             if (update.qr) {
                 this.opts.onStatus({ state: "qr", qr: update.qr });
             }
@@ -129,6 +147,7 @@ export class WhatsAppTransport {
                     return;
                 }
                 setTimeout(() => {
+                    if (!isCurrent()) return;
                     this.connect().catch((error) => {
                         this.opts.onStatus({
                             state: "error",
@@ -140,7 +159,7 @@ export class WhatsAppTransport {
         });
 
         sock.ev.on("messages.upsert", ({ messages, type }) => {
-            if (type !== "notify") return;
+            if (!isCurrent() || type !== "notify") return;
             for (const msg of messages) {
                 this.handleMessage(sock, msg);
             }
@@ -155,24 +174,37 @@ export class WhatsAppTransport {
         const text = messageText(msg.message);
         if (!text || text.startsWith(REPLY_MARKER)) return;
 
-        const selfIds = [sock.user?.id, (sock.user as { lid?: string } | undefined)?.lid].filter(
-            (v): v is string => Boolean(v),
+        // LID-addressed chats put the anonymized id in remoteJid and (when
+        // the server supplies it) the real phone-number JID in remoteJidAlt.
+        // Identity checks must consider both.
+        const altJid: string | undefined = msg.key?.remoteJidAlt ?? undefined;
+        const chatJids = altJid ? [jid, altJid] : [jid];
+        const user = sock.user as { id?: string; lid?: string } | undefined;
+        const selfIds = [user?.id, user?.lid].filter((v): v is string => Boolean(v));
+        const isSelfChat = chatJids.some((j) =>
+            selfIds.some((selfId) => areJidsSameUser(j, selfId)),
         );
-        const isSelfChat = selfIds.some((selfId) => areJidsSameUser(jid, selfId));
-        const senderNumber = jidDecode(jid)?.user ?? "";
+        const senderNumbers = chatJids.flatMap((j) => {
+            const decoded = jidDecode(j)?.user;
+            return decoded ? [decoded] : [];
+        });
 
         // Self-chat is the owner by definition. Anyone else must be
         // allowlisted — this bridge is remote control over the desktop agent.
         if (!isSelfChat) {
             if (msg.key?.fromMe) return;
-            if (!this.opts.allowFrom.includes(senderNumber)) return;
+            if (!senderNumbers.some((n) => this.opts.allowFrom.includes(n))) return;
         }
 
-        const reply: ReplyFn = (replyText) => this.send(jid, replyText);
-        this.opts.onInbound(`whatsapp:${senderNumber || jid}`, text, reply);
+        // Prefer the phone number (altJid decodes to it when present) as the
+        // stable sender identity.
+        const senderId = altJid
+            ? (jidDecode(altJid)?.user ?? senderNumbers[0] ?? jid)
+            : (senderNumbers[0] ?? jid);
+        this.opts.onInbound(`whatsapp:${senderId}`, jid, text);
     }
 
-    private async send(jid: string, text: string): Promise<void> {
+    async send(jid: string, text: string): Promise<void> {
         const sock = this.sock;
         if (!sock) throw new Error("WhatsApp is not connected");
         const sent = await sock.sendMessage(jid, { text: `${REPLY_MARKER}${text}` });
@@ -180,11 +212,7 @@ export class WhatsAppTransport {
         if (id) {
             this.sentIds.add(id);
             if (this.sentIds.size > 500) {
-                // Trim oldest; Set iteration order is insertion order.
-                for (const old of this.sentIds) {
-                    this.sentIds.delete(old);
-                    if (this.sentIds.size <= 250) break;
-                }
+                this.sentIds = new Set(Array.from(this.sentIds).slice(-250));
             }
         }
     }

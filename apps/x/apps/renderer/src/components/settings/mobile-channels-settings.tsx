@@ -13,11 +13,13 @@ import type { ChannelsConfig, ChannelsStatus } from "@x/shared/src/channels.js"
 type Config = z.infer<typeof ChannelsConfig>
 type Status = z.infer<typeof ChannelsStatus>
 
-// Comma/space/newline separated ids ↔ list.
+// Comma/newline separated entries; each entry keeps digits only, so a
+// formatted number like "+1 (415) 555-1234" survives as one entry instead of
+// being shattered at the spaces.
 function parseIdList(draft: string): string[] {
   return draft
-    .split(/[\s,]+/)
-    .map((s) => s.replace(/[^\d]/g, ""))
+    .split(/[,;\n]+/)
+    .map((s) => s.replace(/\D/g, ""))
     .filter(Boolean)
 }
 
