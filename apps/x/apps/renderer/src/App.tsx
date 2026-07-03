@@ -12,7 +12,7 @@ import { ChatSidebar } from './components/chat-sidebar';
 import { useSessionChat } from '@/hooks/useSessionChat';
 import { ChatHeader } from './components/chat-header';
 import { ChatEmptyState } from './components/chat-empty-state';
-import { ChatInputWithMentions, type PermissionMode, type StagedAttachment } from './components/chat-input-with-mentions';
+import { ChatInputWithMentions, type PermissionMode, type StagedAttachment, type VideoChatMode } from './components/chat-input-with-mentions';
 import { ChatMessageAttachments } from '@/components/chat-message-attachments'
 import { GraphView, type GraphEdge, type GraphNode } from '@/components/graph-view';
 import { BasesView, type BaseConfig, DEFAULT_BASE_CONFIG } from '@/components/bases-view';
@@ -122,6 +122,7 @@ import { useVideoMode } from '@/hooks/useVideoMode'
 import { useVoiceTTS } from '@/hooks/useVoiceTTS'
 import { TalkingHeadOverlay } from '@/components/talking-head'
 import { VideoPreviewOverlay } from '@/components/video-preview-overlay'
+import { VideoCallView } from '@/components/video-call-view'
 import { ProductTour, type TourNavTarget } from '@/components/product-tour'
 import { useMeetingTranscription, type CalendarEventMeta } from '@/hooks/useMeetingTranscription'
 import { useAnalyticsIdentity } from '@/hooks/useAnalyticsIdentity'
@@ -986,6 +987,13 @@ function App() {
   const ttsRef = useRef(tts)
   ttsRef.current = tts
 
+  // Latest assistant line handed to TTS — shown as the caption in the
+  // full-screen call view while the assistant is speaking.
+  const [assistantCaption, setAssistantCaption] = useState('')
+  useEffect(() => {
+    if (tts.state === 'idle') setAssistantCaption('')
+  }, [tts.state])
+
   // Speak newly completed <voice> blocks from the new runtime's live stream
   // (parity with the legacy text-delta voice extraction below). The store
   // accumulates completed blocks in chatState.voiceSegments; we speak only
@@ -1004,6 +1012,7 @@ function App() {
       spokenVoiceRef.current.count += 1
       if (ttsEnabledRef.current) {
         ttsRef.current.speak(segment)
+        setAssistantCaption(segment)
       }
     }
   }, [voiceSegments, runId])
@@ -1018,8 +1027,8 @@ function App() {
   // auto-submitted utterances, spoken responses (handler defined below, after
   // the voice/submit plumbing it drives).
   const video = useVideoMode()
-  const [videoChatMode, setVideoChatMode] = useState<'off' | 'chat' | 'call'>('off')
-  const videoChatModeRef = useRef<'off' | 'chat' | 'call'>('off')
+  const [videoChatMode, setVideoChatMode] = useState<VideoChatMode>('off')
+  const videoChatModeRef = useRef<VideoChatMode>('off')
   // TTS settings to restore when a hands-free call ends (a call forces
   // full-read-aloud TTS for its duration).
   const preCallTtsRef = useRef<{ enabled: boolean; mode: 'summary' | 'full' } | null>(null)
@@ -1083,7 +1092,7 @@ function App() {
 
   const handleStartRecording = useCallback(() => {
     // Hands-free call mode owns the mic — ignore push-to-talk while it's on.
-    if (videoChatModeRef.current === 'call') return
+    if (videoChatModeRef.current === 'call' || videoChatModeRef.current === 'meeting') return
     setIsRecording(true)
     isRecordingRef.current = true
     voice.start()
@@ -1145,15 +1154,18 @@ function App() {
     isRecordingRef.current = false
   }, [voice])
 
-  // Video chat mode transitions. 'chat' just runs the camera; 'call' also
-  // listens continuously (auto-submitting each utterance as a voice message)
-  // and forces full read-aloud TTS so the assistant answers out loud.
-  const handleVideoModeChange = useCallback(async (mode: 'off' | 'chat' | 'call') => {
+  // Video chat mode transitions. 'chat' just runs the camera; 'call' and
+  // 'meeting' also listen continuously (auto-submitting each utterance as a
+  // voice message) and force full read-aloud TTS so the assistant answers out
+  // loud. 'meeting' is the same pipeline presented as a full-screen call.
+  const handleVideoModeChange = useCallback(async (mode: VideoChatMode) => {
     const prev = videoChatModeRef.current
     if (mode === prev) return
+    const wasHandsFree = prev === 'call' || prev === 'meeting'
+    const isHandsFree = mode === 'call' || mode === 'meeting'
 
-    // Leaving a call: release the mic and restore the pre-call TTS settings.
-    if (prev === 'call') {
+    // Leaving hands-free: release the mic and restore the pre-call TTS settings.
+    if (wasHandsFree && !isHandsFree) {
       voiceRef.current.cancel()
       const saved = preCallTtsRef.current
       preCallTtsRef.current = null
@@ -1179,7 +1191,8 @@ function App() {
       if (!ok) return // camera denied/unavailable — stay off
     }
 
-    if (mode === 'call') {
+    // Entering hands-free (call ↔ meeting switches keep the mic/TTS as-is).
+    if (isHandsFree && !wasHandsFree) {
       // A manual push-to-talk recording can't coexist with the call's mic.
       if (isRecordingRef.current) {
         voiceRef.current.cancel()
@@ -1204,7 +1217,7 @@ function App() {
   // During a call, mute the mic while the assistant is thinking or speaking
   // so its own TTS (or a half-turn) never gets transcribed back at it.
   useEffect(() => {
-    if (videoChatMode !== 'call') return
+    if (videoChatMode !== 'call' && videoChatMode !== 'meeting') return
     voiceRef.current.setPaused(activeIsProcessing || tts.state !== 'idle')
   }, [videoChatMode, activeIsProcessing, tts.state])
 
@@ -2332,6 +2345,7 @@ function App() {
               console.log('[voice] extracted voice tag:', voiceContent)
               if (voiceContent && ttsEnabledRef.current) {
                 ttsRef.current.speak(voiceContent)
+                setAssistantCaption(voiceContent)
               }
               spokenIndexRef.current += voiceMatch.index + voiceMatch[0].length
             }
@@ -6569,8 +6583,9 @@ function App() {
                 onComposioConnected={handleComposioConnected}
               />
             )}
-            {/* Webcam PiP preview while video chat mode is on */}
-            {videoChatMode !== 'off' && (
+            {/* Webcam PiP preview while video chat mode is on (the full-screen
+                meeting view replaces it) */}
+            {(videoChatMode === 'chat' || videoChatMode === 'call') && (
               <VideoPreviewOverlay
                 streamRef={video.streamRef}
                 onTurnOff={() => handleVideoModeChange('off')}
@@ -6584,6 +6599,24 @@ function App() {
                     : undefined
                 }
                 interimText={videoChatMode === 'call' ? voice.interimText : undefined}
+              />
+            )}
+            {/* Full-screen Meet-style call: user tile + animated mascot tile */}
+            {videoChatMode === 'meeting' && (
+              <VideoCallView
+                streamRef={video.streamRef}
+                ttsState={tts.state}
+                getTtsLevel={tts.getLevel}
+                status={
+                  tts.state === 'speaking'
+                    ? 'speaking'
+                    : tts.state === 'synthesizing' || activeIsProcessing
+                      ? 'thinking'
+                      : 'listening'
+                }
+                interimText={voice.interimText}
+                assistantCaption={assistantCaption}
+                onLeave={() => handleVideoModeChange('off')}
               />
             )}
             {/* Talking head hovers over the active view while avatar voice mode is

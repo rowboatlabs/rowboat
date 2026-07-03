@@ -212,6 +212,8 @@ function compactWorkDirPath(path: string) {
   return path.replace(/^\/Users\/[^/]+/, '~')
 }
 
+export type VideoChatMode = 'off' | 'chat' | 'call' | 'meeting'
+
 interface ChatInputInnerProps {
   onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => void
   onStop?: () => void
@@ -239,10 +241,11 @@ interface ChatInputInnerProps {
   onTtsModeChange?: (mode: 'summary' | 'full') => void
   ttsAvatarEnabled?: boolean
   onToggleTtsAvatar?: () => void
-  /** Video chat mode: 'chat' attaches webcam frames to messages; 'call' is
-   *  fully hands-free — continuous listening, spoken responses. */
-  videoChatMode?: 'off' | 'chat' | 'call'
-  onVideoModeChange?: (mode: 'off' | 'chat' | 'call') => void
+  /** Video chat mode: 'chat' attaches webcam frames to messages; 'call' and
+   *  'meeting' are fully hands-free — continuous listening, spoken responses
+   *  ('meeting' additionally takes over the whole screen, Meet-style). */
+  videoChatMode?: VideoChatMode
+  onVideoModeChange?: (mode: VideoChatMode) => void
   /** Hands-free call needs both voice input (STT) and voice output (TTS). */
   videoCallAvailable?: boolean
   /** Fired when the user picks a different model in the dropdown (only when no run exists yet). */
@@ -1404,11 +1407,14 @@ function ChatInputInner({
                 <DropdownMenuContent align="end">
                   <DropdownMenuRadioGroup
                     value={videoChatMode}
-                    onValueChange={(v) => onVideoModeChange(v as 'chat' | 'call')}
+                    onValueChange={(v) => onVideoModeChange(v as VideoChatMode)}
                   >
                     <DropdownMenuRadioItem value="chat">Video + chat</DropdownMenuRadioItem>
                     <DropdownMenuRadioItem value="call" disabled={!videoCallAvailable}>
                       Video call (hands-free)
+                    </DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="meeting" disabled={!videoCallAvailable}>
+                      Video call (full screen)
                     </DropdownMenuRadioItem>
                   </DropdownMenuRadioGroup>
                 </DropdownMenuContent>
@@ -1592,8 +1598,8 @@ export interface ChatInputWithMentionsProps {
   onTtsModeChange?: (mode: 'summary' | 'full') => void
   ttsAvatarEnabled?: boolean
   onToggleTtsAvatar?: () => void
-  videoChatMode?: 'off' | 'chat' | 'call'
-  onVideoModeChange?: (mode: 'off' | 'chat' | 'call') => void
+  videoChatMode?: VideoChatMode
+  onVideoModeChange?: (mode: VideoChatMode) => void
   videoCallAvailable?: boolean
   onSelectedModelChange?: (model: SelectedModel | null) => void
   workDir?: string | null

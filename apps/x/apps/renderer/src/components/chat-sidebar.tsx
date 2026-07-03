@@ -37,7 +37,7 @@ import { MarkdownPreOverride } from '@/components/ai-elements/markdown-code-over
 import { defaultRemarkPlugins } from 'streamdown'
 import remarkBreaks from 'remark-breaks'
 import { type ChatTab } from '@/components/tab-bar'
-import { ChatInputWithMentions, type PermissionMode, type StagedAttachment, type SelectedModel } from '@/components/chat-input-with-mentions'
+import { ChatInputWithMentions, type PermissionMode, type StagedAttachment, type SelectedModel, type VideoChatMode } from '@/components/chat-input-with-mentions'
 import { ChatMessageAttachments } from '@/components/chat-message-attachments'
 import { useSidebar } from '@/components/ui/sidebar'
 import { wikiLabel } from '@/lib/wiki-links'
@@ -194,8 +194,8 @@ interface ChatSidebarProps {
   onTtsModeChange?: (mode: 'summary' | 'full') => void
   ttsAvatarEnabled?: boolean
   onToggleTtsAvatar?: () => void
-  videoChatMode?: 'off' | 'chat' | 'call'
-  onVideoModeChange?: (mode: 'off' | 'chat' | 'call') => void
+  videoChatMode?: VideoChatMode
+  onVideoModeChange?: (mode: VideoChatMode) => void
   videoCallAvailable?: boolean
   onComposioConnected?: (toolkitSlug: string) => void
 }
