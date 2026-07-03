@@ -118,8 +118,10 @@ import { AgentScheduleConfig } from '@x/shared/dist/agent-schedule.js'
 import { AgentScheduleState } from '@x/shared/dist/agent-schedule-state.js'
 import { toast } from "sonner"
 import { useVoiceMode } from '@/hooks/useVoiceMode'
+import { useVideoMode } from '@/hooks/useVideoMode'
 import { useVoiceTTS } from '@/hooks/useVoiceTTS'
 import { TalkingHeadOverlay } from '@/components/talking-head'
+import { VideoPreviewOverlay } from '@/components/video-preview-overlay'
 import { ProductTour, type TourNavTarget } from '@/components/product-tour'
 import { useMeetingTranscription, type CalendarEventMeta } from '@/hooks/useMeetingTranscription'
 import { useAnalyticsIdentity } from '@/hooks/useAnalyticsIdentity'
@@ -1009,6 +1011,23 @@ function App() {
   const voice = useVoiceMode()
   const voiceRef = useRef(voice)
   voiceRef.current = voice
+
+  // Video chat mode: while on, the webcam runs and frames are attached to
+  // every outgoing message so the assistant can see the user.
+  const video = useVideoMode()
+  const [videoEnabled, setVideoEnabled] = useState(false)
+  const videoEnabledRef = useRef(false)
+  const handleToggleVideo = useCallback(async () => {
+    if (videoEnabledRef.current) {
+      video.stop()
+      videoEnabledRef.current = false
+      setVideoEnabled(false)
+    } else {
+      const ok = await video.start()
+      videoEnabledRef.current = ok
+      setVideoEnabled(ok)
+    }
+  }, [video])
 
   const handleToggleMeetingRef = useRef<(() => void) | undefined>(undefined)
   const meetingTranscription = useMeetingTranscription(() => {
@@ -2608,15 +2627,28 @@ function App() {
 
     setMessage('')
 
+    // Video chat mode: drain the webcam frames buffered since the last send
+    // so they ride along with this message as inline image parts.
+    const videoFrames = videoEnabledRef.current ? video.collectFrames() : []
+
     const userMessageId = `user-${Date.now()}`
-    const displayAttachments: ChatMessage['attachments'] = hasAttachments
-      ? stagedAttachments.map((attachment) => ({
-          path: attachment.path,
-          filename: attachment.filename,
-          mimeType: attachment.mimeType,
-          size: attachment.size,
-          thumbnailUrl: attachment.thumbnailUrl,
-        }))
+    const displayAttachments: ChatMessage['attachments'] = hasAttachments || videoFrames.length > 0
+      ? [
+          ...stagedAttachments.map((attachment) => ({
+            path: attachment.path,
+            filename: attachment.filename,
+            mimeType: attachment.mimeType,
+            size: attachment.size,
+            thumbnailUrl: attachment.thumbnailUrl,
+          })),
+          ...videoFrames.map((frame, index) => ({
+            path: '',
+            filename: `camera-frame-${index + 1}.jpg`,
+            mimeType: frame.mediaType,
+            thumbnailUrl: frame.dataUrl,
+            isVideoFrame: true,
+          })),
+        ]
       : undefined
     setConversation((prev) => [...prev, {
       id: userMessageId,
@@ -2668,6 +2700,7 @@ function App() {
               ...(ttsEnabledRef.current ? { voiceOutput: ttsModeRef.current } : {}),
               ...(searchEnabled ? { searchEnabled: true } : {}),
               ...(codeMode ? { codeMode } : {}),
+              ...(videoEnabledRef.current ? { videoMode: true } : {}),
             },
           },
         },
@@ -2678,7 +2711,7 @@ function App() {
         middlePane: middlePane ?? { kind: 'empty' as const },
       })
 
-      if (hasAttachments || hasMentions) {
+      if (hasAttachments || hasMentions || videoFrames.length > 0) {
         type ContentPart =
           | { type: 'text'; text: string }
           | {
@@ -2688,6 +2721,13 @@ function App() {
               mimeType: string
               size?: number
               lineNumber?: number
+            }
+          | {
+              type: 'image'
+              data: string
+              mediaType: string
+              source: 'camera'
+              capturedAt: string
             }
 
         const contentParts: ContentPart[] = []
@@ -2718,6 +2758,16 @@ function App() {
           contentParts.push({ type: 'text', text: userMessage })
         } else {
           titleSource = stagedAttachments[0]?.filename ?? mentions?.[0]?.displayName ?? mentions?.[0]?.path ?? ''
+        }
+
+        for (const frame of videoFrames) {
+          contentParts.push({
+            type: 'image',
+            data: frame.data,
+            mediaType: frame.mediaType,
+            source: 'camera',
+            capturedAt: frame.capturedAt,
+          })
         }
 
         const middlePaneContext = await buildMiddlePaneContext()
@@ -6337,6 +6387,8 @@ function App() {
                             onTtsModeChange={isActive ? handleTtsModeChange : undefined}
                             ttsAvatarEnabled={ttsAvatarEnabled}
                             onToggleTtsAvatar={isActive ? handleToggleTtsAvatar : undefined}
+                            videoEnabled={videoEnabled}
+                            onToggleVideo={isActive ? handleToggleVideo : undefined}
                           />
                         </div>
                       )
@@ -6450,8 +6502,14 @@ function App() {
                 onTtsModeChange={handleTtsModeChange}
                 ttsAvatarEnabled={ttsAvatarEnabled}
                 onToggleTtsAvatar={handleToggleTtsAvatar}
+                videoEnabled={videoEnabled}
+                onToggleVideo={handleToggleVideo}
                 onComposioConnected={handleComposioConnected}
               />
+            )}
+            {/* Webcam PiP preview while video chat mode is on */}
+            {videoEnabled && (
+              <VideoPreviewOverlay streamRef={video.streamRef} onTurnOff={handleToggleVideo} />
             )}
             {/* Talking head hovers over the active view while avatar voice mode is
                 on (hidden during the tour, which shows its own mascot) */}

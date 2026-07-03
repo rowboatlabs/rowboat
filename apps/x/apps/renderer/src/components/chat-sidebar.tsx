@@ -194,6 +194,8 @@ interface ChatSidebarProps {
   onTtsModeChange?: (mode: 'summary' | 'full') => void
   ttsAvatarEnabled?: boolean
   onToggleTtsAvatar?: () => void
+  videoEnabled?: boolean
+  onToggleVideo?: () => void
   onComposioConnected?: (toolkitSlug: string) => void
 }
 
@@ -260,6 +262,8 @@ export function ChatSidebar({
   onTtsModeChange,
   ttsAvatarEnabled,
   onToggleTtsAvatar,
+  videoEnabled,
+  onToggleVideo,
   onComposioConnected,
 }: ChatSidebarProps) {
   const { state: sidebarState } = useSidebar()
@@ -836,6 +840,8 @@ export function ChatSidebar({
                           onTtsModeChange={isActive ? onTtsModeChange : undefined}
                           ttsAvatarEnabled={ttsAvatarEnabled}
                           onToggleTtsAvatar={isActive ? onToggleTtsAvatar : undefined}
+                          videoEnabled={videoEnabled}
+                          onToggleVideo={isActive ? onToggleVideo : undefined}
                         />
                       </div>
                     )

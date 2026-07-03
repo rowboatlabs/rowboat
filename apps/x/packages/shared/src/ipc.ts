@@ -1372,6 +1372,14 @@ const ipcSchemas = {
       granted: z.boolean(),
     }),
   },
+  // Same as ensureMicAccess but for the camera — settles the macOS TCC
+  // permission before video mode calls getUserMedia({ video: true }).
+  'voice:ensureCameraAccess': {
+    req: z.null(),
+    res: z.object({
+      granted: z.boolean(),
+    }),
+  },
   'meeting:checkScreenPermission': {
     req: z.null(),
     res: z.object({

@@ -25,6 +25,7 @@ import {
   ShieldCheck,
   Square,
   Terminal,
+  Video,
   X,
 } from 'lucide-react'
 
@@ -238,6 +239,9 @@ interface ChatInputInnerProps {
   onTtsModeChange?: (mode: 'summary' | 'full') => void
   ttsAvatarEnabled?: boolean
   onToggleTtsAvatar?: () => void
+  /** Video chat mode: live webcam frames are attached to each message. */
+  videoEnabled?: boolean
+  onToggleVideo?: () => void
   /** Fired when the user picks a different model in the dropdown (only when no run exists yet). */
   onSelectedModelChange?: (model: SelectedModel | null) => void
   /** Work directory for this chat (per-chat). Null when none is set. */
@@ -278,6 +282,8 @@ function ChatInputInner({
   onTtsModeChange,
   ttsAvatarEnabled,
   onToggleTtsAvatar,
+  videoEnabled,
+  onToggleVideo,
   onSelectedModelChange,
   workDir = null,
   onWorkDirChange,
@@ -1350,6 +1356,33 @@ function ChatInputInner({
             </TooltipContent>
           </Tooltip>
         )}
+        {onToggleVideo && (
+          <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={onToggleVideo}
+                className={cn(
+                  'relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors',
+                  videoEnabled
+                    ? 'text-red-500 hover:bg-muted'
+                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                )}
+                aria-label={videoEnabled ? 'Turn off video chat' : 'Turn on video chat'}
+              >
+                <Video className="h-4 w-4" />
+                {!videoEnabled && (
+                  <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <span className="block h-[1.5px] w-5 -rotate-45 rounded-full bg-muted-foreground" />
+                  </span>
+                )}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              {videoEnabled ? 'Video chat on — frames are shared with the assistant' : 'Video chat off'}
+            </TooltipContent>
+          </Tooltip>
+        )}
         {voiceAvailable && onStartRecording && (
           <button
             type="button"
@@ -1526,6 +1559,8 @@ export interface ChatInputWithMentionsProps {
   onTtsModeChange?: (mode: 'summary' | 'full') => void
   ttsAvatarEnabled?: boolean
   onToggleTtsAvatar?: () => void
+  videoEnabled?: boolean
+  onToggleVideo?: () => void
   onSelectedModelChange?: (model: SelectedModel | null) => void
   workDir?: string | null
   onWorkDirChange?: (value: string | null) => void
@@ -1562,6 +1597,8 @@ export function ChatInputWithMentions({
   onTtsModeChange,
   ttsAvatarEnabled,
   onToggleTtsAvatar,
+  videoEnabled,
+  onToggleVideo,
   onSelectedModelChange,
   workDir,
   onWorkDirChange,
@@ -1595,6 +1632,8 @@ export function ChatInputWithMentions({
         onTtsModeChange={onTtsModeChange}
         ttsAvatarEnabled={ttsAvatarEnabled}
         onToggleTtsAvatar={onToggleTtsAvatar}
+        videoEnabled={videoEnabled}
+        onToggleVideo={onToggleVideo}
         onSelectedModelChange={onSelectedModelChange}
         workDir={workDir}
         onWorkDirChange={onWorkDirChange}

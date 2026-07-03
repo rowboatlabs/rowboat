@@ -10,6 +10,9 @@ export interface MessageAttachment {
   mimeType: string
   size?: number
   thumbnailUrl?: string
+  /** Live webcam frame from video chat mode — rendered as a compact filmstrip.
+   *  Carries no path; thumbnailUrl holds the frame as a data: URL. */
+  isVideoFrame?: boolean
 }
 
 export interface ChatMessage {

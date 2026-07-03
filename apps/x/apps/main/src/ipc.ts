@@ -1713,6 +1713,21 @@ export function setupIpcHandlers() {
         return { granted: false };
       }
     },
+    'voice:ensureCameraAccess': async () => {
+      if (process.platform !== 'darwin') return { granted: true };
+      const status = systemPreferences.getMediaAccessStatus('camera');
+      console.log('[video] Camera permission status:', status);
+      if (status === 'granted') return { granted: true };
+      // Same flow as the microphone: settle the native TCC prompt before the
+      // renderer's getUserMedia so the first video click doesn't silently fail.
+      try {
+        const granted = await systemPreferences.askForMediaAccess('camera');
+        console.log('[video] Camera permission after prompt:', granted);
+        return { granted };
+      } catch {
+        return { granted: false };
+      }
+    },
     // Live-note handlers
     'live-note:run': async (_event, args) => {
       const result = await runLiveNoteAgent(args.filePath, 'manual', args.context);
