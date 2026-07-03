@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { MonitorUp, PhoneOff } from 'lucide-react'
+import { MonitorUp, PhoneOff, User, Video, VideoOff } from 'lucide-react'
 
 import { MascotFaceIcon, TalkingHead } from '@/components/talking-head'
 import type { TTSState } from '@/hooks/useVoiceTTS'
@@ -14,6 +14,8 @@ interface VideoCallViewProps {
   screenStreamRef: React.MutableRefObject<MediaStream | null>
   isScreenSharing: boolean
   onToggleScreenShare: () => void
+  cameraOn: boolean
+  onToggleCamera: () => void
   ttsState: TTSState
   /** Live TTS output level — drives the mascot's mouth animation. */
   getTtsLevel: () => number
@@ -76,6 +78,8 @@ export function VideoCallView({
   screenStreamRef,
   isScreenSharing,
   onToggleScreenShare,
+  cameraOn,
+  onToggleCamera,
   ttsState,
   getTtsLevel,
   status,
@@ -102,7 +106,19 @@ export function VideoCallView({
         isScreenSharing && 'aspect-video w-full'
       )}
     >
-      <StreamVideo streamRef={streamRef} mirrored className="h-full w-full object-cover" />
+      {cameraOn ? (
+        <StreamVideo streamRef={streamRef} mirrored className="h-full w-full object-cover" />
+      ) : (
+        <span
+          className={cn(
+            'flex items-center justify-center rounded-full bg-neutral-700 text-neutral-400',
+            isScreenSharing ? 'h-16 w-16' : 'h-40 w-40'
+          )}
+          aria-label="Camera off"
+        >
+          <User className={isScreenSharing ? 'h-8 w-8' : 'h-20 w-20'} />
+        </span>
+      )}
       <span className="absolute bottom-3 left-3 rounded-md bg-black/50 px-2 py-0.5 text-sm text-white">
         You
       </span>
@@ -182,6 +198,20 @@ export function VideoCallView({
           <span className={cn('block h-2 w-2 rounded-full', STATUS_DISPLAY[status].dotClass)} />
           {STATUS_DISPLAY[status].label}
         </span>
+        <button
+          type="button"
+          onClick={onToggleCamera}
+          className={cn(
+            'flex h-10 w-10 items-center justify-center rounded-full transition-colors',
+            cameraOn
+              ? 'bg-neutral-800 text-white/90 hover:bg-neutral-700'
+              : 'bg-red-600 text-white hover:bg-red-500'
+          )}
+          aria-label={cameraOn ? 'Turn off camera' : 'Turn on camera'}
+          title={cameraOn ? 'Turn off camera' : 'Turn on camera'}
+        >
+          {cameraOn ? <Video className="h-5 w-5" /> : <VideoOff className="h-5 w-5" />}
+        </button>
         <button
           type="button"
           onClick={onToggleScreenShare}

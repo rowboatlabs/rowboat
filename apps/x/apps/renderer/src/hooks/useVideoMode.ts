@@ -151,6 +151,9 @@ function drainPipe(pipe: CapturePipe, max: number, source: CapturedVideoFrame['s
 export function useVideoMode() {
     const [state, setState] = useState<VideoModeState>('idle');
     const [screenState, setScreenState] = useState<ScreenShareState>('idle');
+    // Camera can be turned off mid-session (Meet-style) while the mode — and
+    // any screen share — keeps running. Resets to on for the next session.
+    const [cameraOn, setCameraOn] = useState(true);
     const cameraPipeRef = useRef<CapturePipe>(emptyPipe());
     const screenPipeRef = useRef<CapturePipe>(emptyPipe());
     // Stable stream refs for preview components (<video srcObject>).
@@ -179,13 +182,13 @@ export function useVideoMode() {
         teardownPipe(cameraPipeRef.current);
         streamRef.current = null;
         setState('idle');
+        setCameraOn(true);
         stopScreenShare();
     }, [stopScreenShare]);
 
-    const start = useCallback(async (): Promise<boolean> => {
-        if (stateRef.current !== 'idle') return true;
-        setState('starting');
-
+    // Acquire the webcam and start its capture pipeline. Shared by start()
+    // and by re-enabling the camera mid-session.
+    const acquireCamera = useCallback(async (): Promise<boolean> => {
         // Settle the macOS TCC camera permission before getUserMedia, same as
         // voice mode does for the mic — otherwise the first click silently
         // fails while the native prompt is still up.
@@ -194,7 +197,6 @@ export function useVideoMode() {
             .catch(() => ({ granted: true }));
         if (!access.granted) {
             console.error('[video] Camera access denied');
-            setState('idle');
             return false;
         }
 
@@ -206,15 +208,44 @@ export function useVideoMode() {
             });
         } catch (err) {
             console.error('[video] Camera access failed:', err);
-            setState('idle');
             return false;
         }
 
         streamRef.current = stream;
         attachPipeSource(cameraPipeRef.current, stream, captureCameraFrame);
-        setState('live');
         return true;
     }, [captureCameraFrame]);
+
+    /**
+     * Turn the camera off/on without leaving video mode (Meet-style). While
+     * off, no webcam frames are captured or attached; screen-share frames
+     * (if presenting) keep flowing.
+     */
+    const setCameraEnabled = useCallback(async (enabled: boolean): Promise<boolean> => {
+        if (stateRef.current !== 'live') return false;
+        if (enabled) {
+            const ok = await acquireCamera();
+            if (ok) setCameraOn(true);
+            return ok;
+        }
+        teardownPipe(cameraPipeRef.current);
+        streamRef.current = null;
+        setCameraOn(false);
+        return true;
+    }, [acquireCamera]);
+
+    const start = useCallback(async (): Promise<boolean> => {
+        if (stateRef.current !== 'idle') return true;
+        setState('starting');
+        const ok = await acquireCamera();
+        if (!ok) {
+            setState('idle');
+            return false;
+        }
+        setCameraOn(true);
+        setState('live');
+        return true;
+    }, [acquireCamera]);
 
     /**
      * Share the screen. The main process auto-approves getDisplayMedia with
@@ -270,5 +301,5 @@ export function useVideoMode() {
     // Release the camera/screen if the component unmounts with video mode on.
     useEffect(() => stop, [stop]);
 
-    return { state, screenState, streamRef, screenStreamRef, start, stop, startScreenShare, stopScreenShare, collectFrames };
+    return { state, screenState, cameraOn, streamRef, screenStreamRef, start, stop, startScreenShare, stopScreenShare, setCameraEnabled, collectFrames };
 }

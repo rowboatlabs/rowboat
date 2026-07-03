@@ -1231,6 +1231,57 @@ function App() {
     }
   }, [video])
 
+  // Meet-style camera mute: video mode (and any screen share) stays on, but
+  // no webcam frames are captured while the camera is off.
+  const handleToggleCamera = useCallback(() => {
+    void video.setCameraEnabled(!video.cameraOn)
+  }, [video])
+
+  // Current phase of a hands-free call (null outside call/meeting modes).
+  const videoCallStatus: 'listening' | 'thinking' | 'speaking' | null =
+    videoChatMode === 'call' || videoChatMode === 'meeting'
+      ? tts.state === 'speaking'
+        ? 'speaking'
+        : tts.state === 'synthesizing' || activeIsProcessing
+          ? 'thinking'
+          : 'listening'
+      : null
+
+  // Meet-style popout: while screen sharing, losing app focus (the user
+  // switched to the app they're sharing) pops the mini-call out into an
+  // always-on-top window; refocusing Rowboat dismisses it. The short show
+  // delay keeps a quick cmd-tab pass-through from flashing a window.
+  const [appFocused, setAppFocused] = useState(true)
+  useEffect(() => {
+    const onFocus = () => setAppFocused(true)
+    const onBlur = () => setAppFocused(false)
+    window.addEventListener('focus', onFocus)
+    window.addEventListener('blur', onBlur)
+    return () => {
+      window.removeEventListener('focus', onFocus)
+      window.removeEventListener('blur', onBlur)
+    }
+  }, [])
+  useEffect(() => {
+    const shouldShow = videoChatMode !== 'off' && video.screenState === 'live' && !appFocused
+    if (shouldShow) {
+      const timer = setTimeout(() => {
+        void window.ipc.invoke('video:setPopout', { show: true }).catch(() => {})
+      }, 300)
+      return () => clearTimeout(timer)
+    }
+    void window.ipc.invoke('video:setPopout', { show: false }).catch(() => {})
+  }, [videoChatMode, video.screenState, appFocused])
+
+  // Keep the popout's mascot/status/camera mirror of the call fresh. The main
+  // process caches the latest state and replays it when the popout loads.
+  useEffect(() => {
+    if (videoChatMode === 'off') return
+    void window.ipc
+      .invoke('video:popoutState', { ttsState: tts.state, status: videoCallStatus, cameraOn: video.cameraOn })
+      .catch(() => {})
+  }, [videoChatMode, tts.state, videoCallStatus, video.cameraOn])
+
   // Enter to submit voice input, Escape to cancel
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -6611,6 +6662,8 @@ function App() {
                 interimText={videoChatMode === 'call' ? voice.interimText : undefined}
                 isScreenSharing={video.screenState === 'live'}
                 onToggleScreenShare={handleToggleScreenShare}
+                cameraOn={video.cameraOn}
+                onToggleCamera={handleToggleCamera}
               />
             )}
             {/* Full-screen Meet-style call: user tile + animated mascot tile */}
@@ -6620,6 +6673,8 @@ function App() {
                 screenStreamRef={video.screenStreamRef}
                 isScreenSharing={video.screenState === 'live'}
                 onToggleScreenShare={handleToggleScreenShare}
+                cameraOn={video.cameraOn}
+                onToggleCamera={handleToggleCamera}
                 ttsState={tts.state}
                 getTtsLevel={tts.getLevel}
                 status={

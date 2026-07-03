@@ -1380,6 +1380,36 @@ const ipcSchemas = {
       granted: z.boolean(),
     }),
   },
+  // Video-mode popout: show/hide a small always-on-top window (user + mascot
+  // tiles) while screen sharing when the main window loses focus, Meet-style.
+  'video:setPopout': {
+    req: z.object({ show: z.boolean() }),
+    res: z.object({}),
+  },
+  // Main-window renderer pushes the current call state; the main process
+  // caches it and relays to the popout window (replayed on popout load).
+  'video:popoutState': {
+    req: z.object({
+      ttsState: z.enum(['idle', 'synthesizing', 'speaking']),
+      status: z.enum(['listening', 'thinking', 'speaking']).nullable(),
+      cameraOn: z.boolean(),
+    }),
+    res: z.object({}),
+  },
+  // Popout window → bring the main app window back to the foreground.
+  'video:focusMain': {
+    req: z.null(),
+    res: z.object({}),
+  },
+  // Push channel: main → popout window with the latest call state.
+  'video:popout-state': {
+    req: z.object({
+      ttsState: z.enum(['idle', 'synthesizing', 'speaking']),
+      status: z.enum(['listening', 'thinking', 'speaking']).nullable(),
+      cameraOn: z.boolean(),
+    }),
+    res: z.null(),
+  },
   'meeting:checkScreenPermission': {
     req: z.null(),
     res: z.object({

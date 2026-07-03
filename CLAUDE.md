@@ -109,6 +109,7 @@ Long-form docs for specific features. Read the relevant file before making chang
 | Feature | Doc |
 |---------|-----|
 | Live Notes — single `live:` frontmatter block (one objective + optional cron / windows / eventMatchCriteria) that turns a note into a self-updating artifact, panel UI, Copilot skill, prompts catalog | `apps/x/LIVE_NOTE.md` |
+| Video mode — webcam + screen-share frames to the model (video+chat / hands-free call / full-screen Meet-style call), continuous voice loop, camera mute, popout window, prompts catalog | `apps/x/VIDEO_MODE.md` |
 | Analytics — PostHog event catalog, person properties, use-case taxonomy, how to add a new event | `apps/x/ANALYTICS.md` |
 | Turn/session runtime — event-sourced storage, reference model, the `npm run inspect` debugger | `AGENTS.md` (repo root), `apps/x/packages/core/docs/turn-runtime-design.md`, `session-design.md` |
 

@@ -1,7 +1,8 @@
-import { ipcMain, BrowserWindow, shell, dialog, systemPreferences, desktopCapturer, app } from 'electron';
+import { ipcMain, BrowserWindow, shell, dialog, systemPreferences, desktopCapturer, app, screen } from 'electron';
 import { ipc } from '@x/shared';
 import path from 'node:path';
 import os from 'node:os';
+import { fileURLToPath } from 'node:url';
 import {
   connectProvider,
   disconnectProvider,
@@ -381,9 +382,19 @@ type InvokeHandlers = {
   [K in InvokeChannels]: InvokeHandler<K>;
 };
 
+// Video-mode popout window (shown while screen sharing when the app loses
+// focus) and the last call state pushed by the main window — replayed to the
+// popout when it finishes loading.
+let videoPopoutWin: BrowserWindow | null = null;
+let lastVideoPopoutState: {
+  ttsState: 'idle' | 'synthesizing' | 'speaking';
+  status: 'listening' | 'thinking' | 'speaking' | null;
+  cameraOn: boolean;
+} | null = null;
+
 /**
  * Register all IPC handlers with type safety and runtime validation
- * 
+ *
  * This function ensures:
  * 1. All invoke channels have handlers (exhaustiveness checking)
  * 2. Handler signatures match channel definitions
@@ -1727,6 +1738,87 @@ export function setupIpcHandlers() {
       } catch {
         return { granted: false };
       }
+    },
+    'video:setPopout': async (_event, args) => {
+      if (!args.show) {
+        if (videoPopoutWin && !videoPopoutWin.isDestroyed()) videoPopoutWin.destroy();
+        videoPopoutWin = null;
+        return {};
+      }
+      if (videoPopoutWin && !videoPopoutWin.isDestroyed()) return {};
+
+      const workArea = screen.getPrimaryDisplay().workArea;
+      const width = 340;
+      const height = 148;
+      const ipcDir = path.dirname(fileURLToPath(import.meta.url));
+      const preloadPath = app.isPackaged
+        ? path.join(ipcDir, '../preload/dist/preload.js')
+        : path.join(ipcDir, '../../../preload/dist/preload.js');
+      const win = new BrowserWindow({
+        width,
+        height,
+        x: workArea.x + workArea.width - width - 24,
+        y: workArea.y + 24,
+        frame: false,
+        resizable: false,
+        alwaysOnTop: true,
+        skipTaskbar: true,
+        show: false,
+        hasShadow: true,
+        backgroundColor: '#171717',
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true,
+          sandbox: true,
+          preload: preloadPath,
+        },
+      });
+      // Float above other apps (and fullscreen spaces on macOS) — the whole
+      // point is being visible while the user works elsewhere.
+      win.setAlwaysOnTop(true, 'floating');
+      win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+      win.webContents.once('did-finish-load', () => {
+        if (lastVideoPopoutState) {
+          win.webContents.send('video:popout-state', lastVideoPopoutState);
+        }
+        // showInactive: appearing must not steal focus from the app the user
+        // switched to — that would immediately re-hide the popout.
+        if (!win.isDestroyed()) win.showInactive();
+      });
+      win.on('closed', () => {
+        if (videoPopoutWin === win) videoPopoutWin = null;
+      });
+      videoPopoutWin = win;
+      if (app.isPackaged) {
+        win.loadURL('app://-/index.html#video-popout');
+      } else {
+        win.loadURL('http://localhost:5173/#video-popout');
+      }
+      return {};
+    },
+    'video:popoutState': async (_event, args) => {
+      lastVideoPopoutState = args;
+      if (videoPopoutWin && !videoPopoutWin.isDestroyed()) {
+        videoPopoutWin.webContents.send('video:popout-state', args);
+      }
+      return {};
+    },
+    'video:focusMain': async () => {
+      // Match only real app windows — getAllWindows() can also contain the
+      // popout itself and hidden utility windows (e.g. PDF-export renderers),
+      // which must not be shown or focused.
+      const main = BrowserWindow.getAllWindows().find((w) => {
+        if (w === videoPopoutWin || w.isDestroyed()) return false;
+        const url = w.webContents.getURL();
+        const isAppWindow = url.startsWith('app://') || url.startsWith('http://localhost');
+        return isAppWindow && !url.includes('#video-popout');
+      });
+      if (main) {
+        if (main.isMinimized()) main.restore();
+        main.show();
+        main.focus();
+      }
+      return {};
     },
     // Live-note handlers
     'live-note:run': async (_event, args) => {

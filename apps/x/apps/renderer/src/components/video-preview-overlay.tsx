@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { MonitorUp, X } from 'lucide-react'
+import { MonitorUp, User, VideoOff, X } from 'lucide-react'
 
 interface VideoPreviewOverlayProps {
   /** Live camera stream from useVideoMode — attached to the preview element. */
@@ -11,6 +11,8 @@ interface VideoPreviewOverlayProps {
   interimText?: string
   isScreenSharing?: boolean
   onToggleScreenShare?: () => void
+  cameraOn?: boolean
+  onToggleCamera?: () => void
 }
 
 const CALL_STATUS_DISPLAY: Record<NonNullable<VideoPreviewOverlayProps['callStatus']>, { label: string; dotClass: string }> = {
@@ -24,10 +26,11 @@ const CALL_STATUS_DISPLAY: Record<NonNullable<VideoPreviewOverlayProps['callStat
  * on. Mirrored like a selfie camera so the user's movements feel natural.
  * Sits above the composer dock, mirroring the talking-head overlay's corner.
  */
-export function VideoPreviewOverlay({ streamRef, onTurnOff, callStatus, interimText, isScreenSharing, onToggleScreenShare }: VideoPreviewOverlayProps) {
+export function VideoPreviewOverlay({ streamRef, onTurnOff, callStatus, interimText, isScreenSharing, onToggleScreenShare, cameraOn = true, onToggleCamera }: VideoPreviewOverlayProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
 
   useEffect(() => {
+    if (!cameraOn) return
     const videoEl = videoRef.current
     if (!videoEl) return
     videoEl.srcObject = streamRef.current
@@ -35,7 +38,7 @@ export function VideoPreviewOverlay({ streamRef, onTurnOff, callStatus, interimT
     return () => {
       videoEl.srcObject = null
     }
-  }, [streamRef])
+  }, [streamRef, cameraOn])
 
   return (
     <div
@@ -71,13 +74,36 @@ export function VideoPreviewOverlay({ streamRef, onTurnOff, callStatus, interimT
           <MonitorUp className="h-3 w-3" />
         </button>
       )}
-      <video
-        ref={videoRef}
-        muted
-        playsInline
-        className="h-32 w-auto rounded-xl border border-border/70 bg-black shadow-lg"
-        style={{ transform: 'scaleX(-1)' }}
-      />
+      {cameraOn ? (
+        <video
+          ref={videoRef}
+          muted
+          playsInline
+          className="h-32 w-auto rounded-xl border border-border/70 bg-black shadow-lg"
+          style={{ transform: 'scaleX(-1)' }}
+        />
+      ) : (
+        <div className="flex h-32 w-48 items-center justify-center rounded-xl border border-border/70 bg-black shadow-lg">
+          <span className="flex h-14 w-14 items-center justify-center rounded-full bg-neutral-700 text-neutral-400">
+            <User className="h-7 w-7" />
+          </span>
+        </div>
+      )}
+      {onToggleCamera && (
+        <button
+          type="button"
+          onClick={onToggleCamera}
+          className={`absolute -left-1.5 top-4 z-10 flex h-5 w-5 items-center justify-center rounded-full border shadow-sm transition-opacity ${
+            cameraOn
+              ? 'border-border bg-background text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100'
+              : 'border-red-500 bg-red-600 text-white opacity-100'
+          }`}
+          aria-label={cameraOn ? 'Turn off camera' : 'Turn on camera'}
+          title={cameraOn ? 'Turn off camera' : 'Turn on camera'}
+        >
+          <VideoOff className="h-3 w-3" />
+        </button>
+      )}
       <span className="pointer-events-none absolute bottom-1.5 left-1.5 flex items-center gap-1 rounded-full bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white">
         {callStatus ? (
           <>
