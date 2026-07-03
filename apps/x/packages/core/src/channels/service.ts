@@ -6,7 +6,10 @@ import container from "../di/container.js";
 import { WorkDir } from "../config/config.js";
 import type { ISessions } from "../sessions/api.js";
 import type { EmitterSessionBus } from "../sessions/bus.js";
-import { ChannelBridge } from "./bridge.js";
+import { isSignedIn } from "../account/account.js";
+import { listGatewayModels } from "../models/gateway.js";
+import { listOnboardingModels } from "../models/models-dev.js";
+import { ChannelBridge, type ModelChoice } from "./bridge.js";
 import type { IChannelsConfigRepo } from "./repo.js";
 import { TelegramTransport } from "./transports/telegram.js";
 // Type-only: the real module (which pulls the ~9MB baileys dependency) is
@@ -77,11 +80,26 @@ export function subscribeChannelsStatus(listener: (status: Status) => void): () 
     return () => statusListeners.delete(listener);
 }
 
+// Same catalog the desktop model picker uses (models:list IPC).
+async function listBridgeModels(): Promise<ModelChoice[]> {
+    const catalog = (await isSignedIn())
+        ? await listGatewayModels()
+        : await listOnboardingModels();
+    return catalog.providers.flatMap((provider) =>
+        provider.models.map((m) => ({
+            provider: provider.id,
+            model: m.id,
+            label: `${m.name ?? m.id} — ${provider.name}`,
+        })),
+    );
+}
+
 function ensureBridge(): ChannelBridge {
     if (!bridge) {
         bridge = new ChannelBridge({
             sessions: container.resolve<ISessions>("sessions"),
             sessionBus: container.resolve<EmitterSessionBus>("sessionBus"),
+            listModels: listBridgeModels,
         });
     }
     return bridge;

@@ -27,18 +27,31 @@ const HELP_TEXT = [
     "• list — recent chats",
     "• resume N — continue chat N from the list",
     "• new [message] — start a fresh chat",
+    "• model [N or name] — pick the model (\"model default\" resets)",
     "• status — current chat and what it's doing",
     "• stop — cancel the running task",
     "",
     "Anything else is sent to the current chat.",
 ].join("\n");
 
+const MODEL_LIST_LIMIT = 20;
+
 export type ReplyFn = (text: string) => Promise<void>;
+
+export interface ModelChoice {
+    provider: string;
+    model: string;
+    label: string;
+}
 
 interface SenderState {
     activeSessionId: string | null;
     // sessionIds as last shown by `list` (1-based indexing for `resume N`).
     lastList: string[];
+    // Choices as last shown by `model` (1-based indexing for `model N`).
+    lastModels: ModelChoice[];
+    // Per-sender override passed on every turn; null = app default model.
+    model: { provider: string; model: string } | null;
     pendingAsk: { turnId: string; toolCallId: string } | null;
     busy: boolean;
 }
@@ -124,6 +137,7 @@ export class ChannelBridge {
         private readonly deps: {
             sessions: ISessions;
             sessionBus: EmitterSessionBus;
+            listModels: () => Promise<ModelChoice[]>;
         },
     ) {}
 
@@ -145,6 +159,15 @@ export class ChannelBridge {
             const resume = /^(?:resume|open)\s+(\d+)$/.exec(lower);
             if (resume) {
                 await reply(this.resumeSession(state, Number(resume[1])));
+                return;
+            }
+            if (lower === "model" || lower === "models") {
+                await reply(await this.renderModelList(state));
+                return;
+            }
+            const model = /^model\s+(.+)$/i.exec(trimmed);
+            if (model) {
+                await reply(await this.selectModel(state, model[1].trim()));
                 return;
             }
             if (lower === "status") {
@@ -178,10 +201,79 @@ export class ChannelBridge {
     private senderState(senderKey: string): SenderState {
         let state = this.senders.get(senderKey);
         if (!state) {
-            state = { activeSessionId: null, lastList: [], pendingAsk: null, busy: false };
+            state = {
+                activeSessionId: null,
+                lastList: [],
+                lastModels: [],
+                model: null,
+                pendingAsk: null,
+                busy: false,
+            };
             this.senders.set(senderKey, state);
         }
         return state;
+    }
+
+    private isCurrentModel(state: SenderState, choice: ModelChoice): boolean {
+        return (
+            state.model?.provider === choice.provider && state.model?.model === choice.model
+        );
+    }
+
+    private async renderModelList(state: SenderState): Promise<string> {
+        const choices = await this.deps.listModels();
+        if (choices.length === 0) {
+            return "No models available — configure one in Rowboat → Settings → Models.";
+        }
+        state.lastModels = choices;
+        const shown = choices.slice(0, MODEL_LIST_LIMIT);
+        const lines = shown.map((c, i) => {
+            const current = this.isCurrentModel(state, c) ? " ← current" : "";
+            return `${i + 1}. ${c.label}${current}`;
+        });
+        if (choices.length > shown.length) {
+            lines.push(`… and ${choices.length - shown.length} more — pick by name.`);
+        }
+        return [
+            `Models${state.model ? "" : " (using app default)"}:`,
+            ...lines,
+            "",
+            `Reply "model N" or "model <name>" to switch, "model default" to reset.`,
+        ].join("\n");
+    }
+
+    private async selectModel(state: SenderState, arg: string): Promise<string> {
+        const lower = arg.toLowerCase();
+        if (lower === "default" || lower === "reset") {
+            state.model = null;
+            return "✅ Using the app default model.";
+        }
+        if (state.lastModels.length === 0) {
+            state.lastModels = await this.deps.listModels();
+        }
+        let choice: ModelChoice | undefined;
+        if (/^\d+$/.test(lower)) {
+            choice = state.lastModels[Number(lower) - 1];
+            if (!choice) {
+                return `No model #${lower} — send "model" to see the list.`;
+            }
+        } else {
+            const matches = state.lastModels.filter(
+                (c) =>
+                    c.label.toLowerCase().includes(lower) ||
+                    c.model.toLowerCase().includes(lower),
+            );
+            if (matches.length === 0) {
+                return `No model matching "${arg}" — send "model" to see the list.`;
+            }
+            if (matches.length > 1) {
+                const preview = matches.slice(0, 5).map((c) => `• ${c.label}`);
+                return [`"${arg}" matches ${matches.length} models:`, ...preview, "", "Be more specific."].join("\n");
+            }
+            choice = matches[0];
+        }
+        state.model = { provider: choice.provider, model: choice.model };
+        return `✅ Model set to ${choice.label} for your chats from here.`;
     }
 
     private sessionEntry(sessionId: string): SessionIndexEntry | undefined {
@@ -302,7 +394,13 @@ export class ChannelBridge {
             const sent = await this.deps.sessions.sendMessage(
                 state.activeSessionId,
                 { role: "user", content: text },
-                { agent: { agentId: AGENT_ID }, autoPermission: true },
+                {
+                    agent: {
+                        agentId: AGENT_ID,
+                        ...(state.model ? { overrides: { model: state.model } } : {}),
+                    },
+                    autoPermission: true,
+                },
             );
             const settled = await watcher.waitFor(sent.turnId, TURN_TIMEOUT_MS);
             await this.deliverSettled(state, sent.turnId, settled, reply);

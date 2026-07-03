@@ -4,7 +4,7 @@ import type { TurnStreamEvent } from "@x/shared/dist/turns.js";
 import { EmitterSessionBus } from "../sessions/bus.js";
 import { TurnInputError } from "../turns/api.js";
 import type { ISessions } from "../sessions/api.js";
-import { ChannelBridge } from "./bridge.js";
+import { ChannelBridge, type ModelChoice } from "./bridge.js";
 
 const SENDER = "test:1";
 
@@ -61,8 +61,15 @@ interface Harness {
         getTurn: ReturnType<typeof vi.fn>;
         listSessions: ReturnType<typeof vi.fn>;
     };
+    listModels: ReturnType<typeof vi.fn>;
     publish: (turnId: string, event: TurnStreamEvent) => void;
 }
+
+const MODELS: ModelChoice[] = [
+    { provider: "anthropic", model: "claude-fable-5", label: "Fable 5 — Anthropic" },
+    { provider: "anthropic", model: "claude-sonnet-5", label: "Sonnet 5 — Anthropic" },
+    { provider: "openai", model: "gpt-5", label: "GPT-5 — OpenAI" },
+];
 
 function harness(entries: SessionIndexEntry[] = []): Harness {
     const bus = new EmitterSessionBus();
@@ -76,15 +83,17 @@ function harness(entries: SessionIndexEntry[] = []): Harness {
         getTurn: vi.fn(async () => ({ turnId: "t1", events: [] })),
         listSessions: vi.fn(() => entries),
     };
+    const listModels = vi.fn(async () => MODELS);
     const bridge = new ChannelBridge({
         sessions: sessions as unknown as ISessions,
         sessionBus: bus,
+        listModels,
     });
     const replies: string[] = [];
     const reply = async (text: string) => {
         replies.push(text);
     };
-    return { bridge, bus, replies, reply, sessions, publish };
+    return { bridge, bus, replies, reply, sessions, listModels, publish };
 }
 
 // Settle the turn as soon as sendMessage is called: the watcher subscribes
@@ -130,6 +139,67 @@ describe("ChannelBridge commands", () => {
         const h = harness([entry({ sessionId: "s1", title: "Only chat" })]);
         await h.bridge.handleInbound(SENDER, "resume 5", h.reply);
         expect(h.replies[0]).toContain("No chat #5");
+    });
+});
+
+describe("ChannelBridge model selection", () => {
+    it("lists models and applies a by-index selection to later turns", async () => {
+        const h = harness();
+        await h.bridge.handleInbound(SENDER, "model", h.reply);
+        expect(h.replies[0]).toContain("1. Fable 5 — Anthropic");
+        expect(h.replies[0]).toContain("app default");
+
+        await h.bridge.handleInbound(SENDER, "model 3", h.reply);
+        expect(h.replies[1]).toContain("GPT-5");
+
+        settleOnSend(h, completedEvent("t1", "done"));
+        await h.bridge.handleInbound(SENDER, "hello", h.reply);
+        expect(h.sessions.sendMessage).toHaveBeenCalledWith(
+            "s1",
+            expect.anything(),
+            expect.objectContaining({
+                agent: {
+                    agentId: "copilot",
+                    overrides: { model: { provider: "openai", model: "gpt-5" } },
+                },
+            }),
+        );
+    });
+
+    it("selects by unique name match and resets on 'model default'", async () => {
+        const h = harness();
+        await h.bridge.handleInbound(SENDER, "model fable", h.reply);
+        expect(h.replies[0]).toContain("Fable 5");
+
+        settleOnSend(h, completedEvent("t1", "done"));
+        await h.bridge.handleInbound(SENDER, "hi", h.reply);
+        expect(h.sessions.sendMessage).toHaveBeenCalledWith(
+            "s1",
+            expect.anything(),
+            expect.objectContaining({
+                agent: expect.objectContaining({
+                    overrides: { model: { provider: "anthropic", model: "claude-fable-5" } },
+                }),
+            }),
+        );
+
+        await h.bridge.handleInbound(SENDER, "model default", h.reply);
+        settleOnSend(h, completedEvent("t2", "done"), "t2");
+        await h.bridge.handleInbound(SENDER, "hi again", h.reply);
+        expect(h.sessions.sendMessage).toHaveBeenLastCalledWith(
+            "s1",
+            expect.anything(),
+            expect.objectContaining({ agent: { agentId: "copilot" } }),
+        );
+    });
+
+    it("asks for disambiguation on an ambiguous name and rejects unknown ones", async () => {
+        const h = harness();
+        await h.bridge.handleInbound(SENDER, "model claude", h.reply);
+        expect(h.replies[0]).toContain("matches 2 models");
+
+        await h.bridge.handleInbound(SENDER, "model llama", h.reply);
+        expect(h.replies[1]).toContain('No model matching "llama"');
     });
 });
 
