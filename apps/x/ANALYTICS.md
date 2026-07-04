@@ -93,6 +93,7 @@ All in `apps/renderer/src/lib/analytics.ts`:
 - `oauth_connected` / `oauth_disconnected` — `{ provider }`
 - `voice_input_started` — no properties
 - `call_started` — `{ preset: 'voice' | 'video' | 'share' | 'practice' }` — a hands-free call began (see `apps/x/VIDEO_MODE.md`)
+- `call_turn_latency` — `{ endpoint_to_submit_ms, submit_to_speak_ms, speak_to_audio_ms, total_ms }` — voice-to-voice latency breakdown for one call turn (utterance accepted → submitted → first TTS speak → audio playing)
 - `search_executed` — `{ types: string[] }`
 - `note_exported` — `{ format }`
 

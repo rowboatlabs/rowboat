@@ -125,6 +125,7 @@ import { ProductTour, type TourNavTarget } from '@/components/product-tour'
 import { useMeetingTranscription, type CalendarEventMeta } from '@/hooks/useMeetingTranscription'
 import { useAnalyticsIdentity } from '@/hooks/useAnalyticsIdentity'
 import * as analytics from '@/lib/analytics'
+import { playAckCue } from '@/lib/call-sounds'
 import { useTheme } from '@/contexts/theme-context'
 
 type DirEntry = z.infer<typeof workspace.DirEntry>
@@ -973,6 +974,10 @@ function App() {
   // TTS plays only during calls now (the standing read-aloud toggle was
   // retired; a per-message "read aloud" action may replace it later).
   const ttsEnabledRef = useRef(false)
+  // Voice-to-voice latency marks for the current call turn (performance.now):
+  // t0 = utterance accepted, submit = message sent, speak = first TTS
+  // speak(). Emitted as call_turn_latency when audio actually starts.
+  const callTurnMarksRef = useRef<{ t0: number; submit?: number; speak?: number } | null>(null)
   // Read-aloud style: 'summary' for typed chat, forced to 'full' during a
   // call and restored after. Context decides — the user never picks it.
   const ttsModeRef = useRef<'summary' | 'full'>('summary')
@@ -1010,11 +1015,28 @@ function App() {
       const segment = voiceSegments[spokenVoiceRef.current.count]
       spokenVoiceRef.current.count += 1
       if (ttsEnabledRef.current) {
+        const marks = callTurnMarksRef.current
+        if (marks && marks.speak === undefined) marks.speak = performance.now()
         ttsRef.current.speak(segment)
         setAssistantCaption(segment)
       }
     }
   }, [voiceSegments, runId])
+
+  // Emit the turn's voice-to-voice latency breakdown once audio is audible.
+  useEffect(() => {
+    if (tts.state !== 'speaking') return
+    const marks = callTurnMarksRef.current
+    if (!marks || marks.submit === undefined || marks.speak === undefined) return
+    callTurnMarksRef.current = null
+    const now = performance.now()
+    analytics.callTurnLatency({
+      endpointToSubmitMs: marks.submit - marks.t0,
+      submitToSpeakMs: marks.speak - marks.submit,
+      speakToAudioMs: now - marks.speak,
+      totalMs: now - marks.t0,
+    })
+  }, [tts.state])
 
   const voice = useVoiceMode()
   const voiceRef = useRef(voice)
@@ -1160,6 +1182,9 @@ function App() {
     ttsEnabledRef.current = true
     ttsModeRef.current = 'full'
     void voiceRef.current.startContinuous((text) => {
+      // Instant "heard you" feedback + start of the latency clock.
+      playAckCue()
+      callTurnMarksRef.current = { t0: performance.now() }
       pendingVoiceInputRef.current = true
       handlePromptSubmitRef.current?.({ text, files: [] })
     })
@@ -1179,6 +1204,7 @@ function App() {
     ttsEnabledRef.current = false
     ttsModeRef.current = 'summary'
     ttsRef.current.cancel()
+    callTurnMarksRef.current = null
     video.stop()
     setPracticeMode(false)
     practiceModeRef.current = false
@@ -2781,6 +2807,11 @@ function App() {
 
     // Video chat mode: drain the webcam frames buffered since the last send
     // so they ride along with this message as inline image parts.
+    const marks = callTurnMarksRef.current
+    if (inCallRef.current && marks && marks.submit === undefined) {
+      marks.submit = performance.now()
+    }
+
     const videoFrames = inCallRef.current ? video.collectFrames() : []
 
     const userMessageId = `user-${Date.now()}`

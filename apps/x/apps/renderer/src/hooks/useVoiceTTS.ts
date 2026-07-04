@@ -47,6 +47,8 @@ function playAudio(
 /** A queue entry: text to synthesize, or a ready-to-play audio URL (e.g. a bundled clip). */
 type QueueItem = { text: string } | { url: string };
 
+type TtsChunkMsg = { requestId: string; chunkBase64?: string; done: boolean; error?: string };
+
 export function useVoiceTTS() {
     const [state, setState] = useState<TTSState>('idle');
     const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -54,6 +56,10 @@ export function useVoiceTTS() {
     const processingRef = useRef(false);
     // Pre-fetched audio ready to play immediately
     const prefetchedRef = useRef<Promise<SynthesizedAudio> | null>(null);
+    // Streaming synthesis: per-request chunk handlers + the in-flight request
+    // id (so cancel() can abort the main-process fetch).
+    const streamHandlersRef = useRef<Map<string, (msg: TtsChunkMsg) => void>>(new Map());
+    const activeStreamIdRef = useRef<string | null>(null);
     // Bumped by cancel(). A queue loop that awaited across a cancel sees a
     // stale generation and exits instead of playing audio that was cancelled
     // while still synthesizing (which would overlap the next utterance).
@@ -107,6 +113,127 @@ export function useVoiceTTS() {
         analyserRef.current = null;
     }, []);
 
+    // Route streaming TTS chunks to whichever request is waiting for them.
+    useEffect(() => {
+        return window.ipc.on('voice:tts-chunk', (msg) => {
+            streamHandlersRef.current.get(msg.requestId)?.(msg);
+        });
+    }, []);
+
+    /**
+     * Streaming synthesis + playback via MediaSource: audio starts on the
+     * first chunk instead of after the full body. Rejects (for caller
+     * fallback to non-streaming synth) if the stream fails before any audio
+     * arrived; resolves when playback finishes.
+     */
+    const streamSynthesizeAndPlay = useCallback((text: string, onStarted: () => void): Promise<void> => {
+        return new Promise<void>((resolve, reject) => {
+            if (typeof MediaSource === 'undefined' || !MediaSource.isTypeSupported('audio/mpeg')) {
+                reject(new Error('MSE audio/mpeg unsupported'));
+                return;
+            }
+            const requestId = `tts-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+            const mediaSource = new MediaSource();
+            const audio = new Audio();
+            audio.src = URL.createObjectURL(mediaSource);
+            audioRef.current = audio;
+            connectAnalyser(audio);
+            activeStreamIdRef.current = requestId;
+
+            let sourceBuffer: SourceBuffer | null = null;
+            const pending: Uint8Array[] = [];
+            let streamDone = false;
+            let gotAudio = false;
+            let settled = false;
+
+            const cleanup = () => {
+                streamHandlersRef.current.delete(requestId);
+                if (activeStreamIdRef.current === requestId) activeStreamIdRef.current = null;
+                URL.revokeObjectURL(audio.src);
+            };
+            const finish = (err?: Error) => {
+                if (settled) return;
+                settled = true;
+                cleanup();
+                if (err) reject(err);
+                else resolve();
+            };
+
+            // Drain pending chunks into the SourceBuffer one at a time
+            // (appendBuffer is async; only one append may be in flight).
+            const pump = () => {
+                if (!sourceBuffer || sourceBuffer.updating || settled) return;
+                const chunk = pending.shift();
+                if (chunk) {
+                    try {
+                        sourceBuffer.appendBuffer(chunk as BufferSource);
+                    } catch (e) {
+                        finish(e as Error);
+                    }
+                    return;
+                }
+                if (streamDone && mediaSource.readyState === 'open') {
+                    try {
+                        mediaSource.endOfStream();
+                    } catch { /* already ended */ }
+                }
+            };
+
+            mediaSource.addEventListener('sourceopen', () => {
+                try {
+                    sourceBuffer = mediaSource.addSourceBuffer('audio/mpeg');
+                } catch (e) {
+                    finish(e as Error);
+                    return;
+                }
+                sourceBuffer.addEventListener('updateend', pump);
+                pump();
+            }, { once: true });
+
+            streamHandlersRef.current.set(requestId, (msg) => {
+                if (msg.error && !gotAudio) {
+                    streamDone = true;
+                    finish(new Error(msg.error));
+                    return;
+                }
+                if (msg.chunkBase64) {
+                    gotAudio = true;
+                    const bin = atob(msg.chunkBase64);
+                    const bytes = new Uint8Array(bin.length);
+                    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+                    pending.push(bytes);
+                    pump();
+                }
+                if (msg.done) {
+                    streamDone = true;
+                    pump();
+                }
+            });
+
+            audio.addEventListener('playing', () => onStarted(), { once: true });
+            audio.onended = () => finish();
+            // pause() (from cancel) must settle this promise too; natural end
+            // also fires 'pause' just before 'ended'; double-settle is a no-op.
+            audio.onpause = () => finish();
+            audio.onerror = () => finish(new Error('stream playback failed'));
+
+            window.ipc
+                .invoke('voice:synthesizeStreamStart', { requestId, text })
+                .then((res) => {
+                    if (!res.ok) finish(new Error(res.error || 'stream start failed'));
+                })
+                .catch((e) => finish(e as Error));
+
+            // Starts as soon as the first appended data is decodable.
+            audio.play().catch(() => { /* surfaced via onerror / chunk error */ });
+
+            // Nothing arrived at all — bail so the caller can fall back.
+            setTimeout(() => {
+                if (!gotAudio && !settled) finish(new Error('stream timeout'));
+            }, 10_000);
+        });
+    }, [connectAnalyser]);
+
     const getLevel = useCallback((): number => {
         const analyser = analyserRef.current;
         if (!analyser) return 0;
@@ -130,9 +257,40 @@ export function useVoiceTTS() {
         processingRef.current = true;
         const gen = generationRef.current;
 
+        // Kick off full-body pre-fetch for the next queued text while the
+        // current one plays — keeps sentence-to-sentence playback gapless.
+        const prefetchNext = () => {
+            const next = queueRef.current[0];
+            if (next && 'text' in next && next.text.trim() && !prefetchedRef.current) {
+                console.log('[tts] pre-fetching next:', next.text.substring(0, 80));
+                prefetchedRef.current = synthesize(next.text);
+            }
+        };
+
         while (queueRef.current.length > 0) {
             const item = queueRef.current.shift()!;
             if ('text' in item && !item.text.trim()) continue;
+
+            // Cold start (nothing playing, nothing pre-fetched): stream the
+            // synthesis so audio begins on the first chunk instead of after
+            // the full body — this is where first-response latency lives.
+            if ('text' in item && !prefetchedRef.current) {
+                setState('synthesizing');
+                console.log('[tts] stream-synthesizing:', item.text.substring(0, 80));
+                try {
+                    await streamSynthesizeAndPlay(item.text, () => {
+                        if (generationRef.current !== gen) return;
+                        setState('speaking');
+                        prefetchNext();
+                    });
+                    if (generationRef.current !== gen) return;
+                    continue;
+                } catch (err) {
+                    if (generationRef.current !== gen) return;
+                    console.error('[tts] stream failed, falling back to full synth:', err);
+                    // fall through to the non-streaming path below
+                }
+            }
 
             try {
                 // Pre-recorded URL plays as-is; text uses the pre-fetched
@@ -156,12 +314,7 @@ export function useVoiceTTS() {
                 if (generationRef.current !== gen) return;
                 setState('speaking');
 
-                // Kick off pre-fetch for next chunk while this one plays
-                const next = queueRef.current[0];
-                if (next && 'text' in next && next.text.trim()) {
-                    console.log('[tts] pre-fetching next:', next.text.substring(0, 80));
-                    prefetchedRef.current = synthesize(next.text);
-                }
+                prefetchNext();
 
                 await playAudio(audio.dataUrl, audioRef, connectAnalyser);
                 if (generationRef.current !== gen) return;
@@ -176,7 +329,7 @@ export function useVoiceTTS() {
         prefetchedRef.current = null;
         processingRef.current = false;
         setState('idle');
-    }, [connectAnalyser]);
+    }, [connectAnalyser, streamSynthesizeAndPlay]);
 
     const speak = useCallback((text: string) => {
         console.log('[tts] speak() called:', text.substring(0, 80));
@@ -196,6 +349,13 @@ export function useVoiceTTS() {
         generationRef.current++;
         queueRef.current = [];
         prefetchedRef.current = null;
+        // Abort any in-flight streaming synthesis in the main process.
+        if (activeStreamIdRef.current) {
+            void window.ipc
+                .invoke('voice:synthesizeStreamCancel', { requestId: activeStreamIdRef.current })
+                .catch(() => {});
+            activeStreamIdRef.current = null;
+        }
         if (audioRef.current) {
             audioRef.current.pause();
             audioRef.current = null;

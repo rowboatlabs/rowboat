@@ -167,6 +167,28 @@ Voice input/output prompt sections (`# Voice Input`, `# Voice Output`) are
 reused untouched — calls set `voiceInput` per utterance and force
 `voiceOutput: 'full'`.
 
+## Latency
+
+Voice-to-voice latency (user stops talking → assistant audio) is engineered
+at four points; the `call_turn_latency` PostHog event measures the real
+distribution (utterance → submit → first speak → audio playing):
+
+- **Smart endpointing** (`useVoiceMode.ts`): Deepgram endpoints at 600ms and
+  the client decides — a transcript ending in terminal punctuation fires
+  immediately (~600ms after last word); a mid-thought trail holds another
+  1.2s (resumed speech cancels the hold). Complete sentences turn around
+  ~1.2s faster than the old fixed 1800ms endpoint.
+- **Streaming TTS** (`voice:synthesizeStreamStart` → `voice:tts-chunk` →
+  MediaSource playback in `useVoiceTTS.ts`): the first segment of an idle
+  queue plays from the first MP3 chunk instead of after the full body
+  (ElevenLabs `/stream`, flash model). Follow-up segments keep the gapless
+  full-body prefetch path. Falls back to non-streaming on any failure.
+- **Early clause speech** (`turn-view.ts` `applyOverlay`): a still-open
+  `<voice>` block ≥60 chars emits its last complete clause immediately, so
+  speech starts while the rest of the sentence generates.
+- **Acknowledgment cue** (`lib/call-sounds.ts`): a soft blip the instant an
+  utterance is accepted — perceived latency matters as much as measured.
+
 ## Cost notes
 
 Webcam frames ≈ 250–350 tokens each (≤12/message ≈ 3–4k); screen frames ≈

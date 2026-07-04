@@ -69,6 +69,22 @@ export function callStarted(preset: 'voice' | 'video' | 'share' | 'practice') {
   posthog.capture('call_started', { preset })
 }
 
+// Voice-to-voice latency breakdown for one call turn (all milliseconds):
+// utterance accepted → message submitted → first TTS speak() → audio playing.
+export function callTurnLatency(props: {
+  endpointToSubmitMs: number
+  submitToSpeakMs: number
+  speakToAudioMs: number
+  totalMs: number
+}) {
+  posthog.capture('call_turn_latency', {
+    endpoint_to_submit_ms: Math.round(props.endpointToSubmitMs),
+    submit_to_speak_ms: Math.round(props.submitToSpeakMs),
+    speak_to_audio_ms: Math.round(props.speakToAudioMs),
+    total_ms: Math.round(props.totalMs),
+  })
+}
+
 export function searchExecuted(types: string[]) {
   posthog.capture('search_executed', { types })
 }

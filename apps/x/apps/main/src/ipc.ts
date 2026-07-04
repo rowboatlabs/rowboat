@@ -382,6 +382,9 @@ type InvokeHandlers = {
   [K in InvokeChannels]: InvokeHandler<K>;
 };
 
+// In-flight streaming TTS requests, keyed by renderer-chosen requestId.
+const activeTtsStreams = new Map<string, AbortController>();
+
 // Video-mode popout window (shown for the whole duration of a screen share,
 // floating over every app including Rowboat itself) and the last call state
 // pushed by the main window — replayed to the popout when it finishes loading.
@@ -1719,6 +1722,51 @@ export function setupIpcHandlers() {
     },
     'voice:synthesize': async (_event, args) => {
       return voice.synthesizeSpeech(args.text);
+    },
+    'voice:synthesizeStreamStart': async (event, args) => {
+      const { requestId, text } = args;
+      const sender = event.sender;
+      const controller = new AbortController();
+      activeTtsStreams.set(requestId, controller);
+      // Fire-and-forget: chunks are pushed to the renderer as they arrive so
+      // playback can begin immediately; the invoke returns once started.
+      void voice
+        .synthesizeSpeechStream(
+          text,
+          (chunk) => {
+            if (!sender.isDestroyed()) {
+              sender.send('voice:tts-chunk', {
+                requestId,
+                chunkBase64: chunk.toString('base64'),
+                done: false,
+              });
+            }
+          },
+          controller.signal,
+        )
+        .then(() => {
+          if (!sender.isDestroyed()) {
+            sender.send('voice:tts-chunk', { requestId, done: true });
+          }
+        })
+        .catch((err: unknown) => {
+          if (!sender.isDestroyed() && !controller.signal.aborted) {
+            sender.send('voice:tts-chunk', {
+              requestId,
+              done: true,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        })
+        .finally(() => {
+          activeTtsStreams.delete(requestId);
+        });
+      return { ok: true };
+    },
+    'voice:synthesizeStreamCancel': async (_event, args) => {
+      activeTtsStreams.get(args.requestId)?.abort();
+      activeTtsStreams.delete(args.requestId);
+      return {};
     },
     'voice:ensureMicAccess': async () => {
       if (process.platform !== 'darwin') return { granted: true };

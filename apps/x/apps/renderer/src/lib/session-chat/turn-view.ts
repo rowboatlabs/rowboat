@@ -34,14 +34,20 @@ export type LiveOverlay = {
   text: string
   reasoning: string
   toolOutput: Record<string, string>
-  // Contents of completed <voice>…</voice> blocks seen while streaming, in
-  // order, monotonically growing for the lifetime of the overlay (i.e. one
-  // active turn). Consumers speak segments beyond what they've already
-  // spoken; the overlay reset on turn switch starts a fresh list.
+  // Speakable segments seen while streaming, in order, monotonically growing
+  // for the lifetime of the overlay (i.e. one active turn). Usually the
+  // contents of completed <voice>…</voice> blocks, but a long still-open
+  // block may emit an early clause (see EARLY_SPEECH_MIN_CHARS) so speech
+  // can start before the sentence finishes generating. Consumers speak
+  // segments beyond what they've already spoken; the overlay reset on turn
+  // switch starts a fresh list.
   voiceSegments: string[]
   // Scan cursor into `text` — everything before it has been checked for
   // complete voice blocks.
   voiceScanIndex: number
+  // Chars of the currently-open voice block's content already emitted as an
+  // early clause — the block's remainder (on close) excludes them.
+  voicePartialConsumed: number
 }
 
 export const emptyOverlay = (): LiveOverlay => ({
@@ -50,6 +56,7 @@ export const emptyOverlay = (): LiveOverlay => ({
   toolOutput: {},
   voiceSegments: [],
   voiceScanIndex: 0,
+  voicePartialConsumed: 0,
 })
 
 // The model emits <voice>…</voice> around speakable text when voice output
@@ -59,6 +66,17 @@ export function stripVoiceTags(text: string): string {
 }
 
 const VOICE_BLOCK = /<voice>([\s\S]*?)<\/voice>/g
+const VOICE_OPEN_TAG = '<voice>'
+
+// Early speech: once an open block has this many unconsumed chars, its last
+// complete clause is emitted immediately instead of waiting for </voice> —
+// TTS starts on the first clause while the rest of the sentence generates.
+const EARLY_SPEECH_MIN_CHARS = 60
+// ...but never emit a fragment shorter than this (prosody suffers).
+const EARLY_SPEECH_MIN_EMIT = 30
+// Clause boundaries (punctuation, optionally inside closing quote/paren,
+// followed by whitespace or end-of-buffer).
+const CLAUSE_BOUNDARY = /[,;:.!?…—]["')\]]*(?=\s|$)/g
 
 // Accumulates deltas; canonical durable events supersede the buffers (the
 // committed transcript now contains what was streaming).
@@ -68,15 +86,43 @@ export function applyOverlay(overlay: LiveOverlay, event: TurnStreamEvent): Live
       const text = overlay.text + event.delta
       // Extract complete voice blocks past the scan cursor. Incomplete
       // blocks (opening tag seen, closing not yet) stay unconsumed until a
-      // later delta completes them.
+      // later delta completes them. The first complete block may have had an
+      // early clause emitted while it was open — skip those chars.
       const segments: string[] = []
       let scanIndex = overlay.voiceScanIndex
+      let partialConsumed = overlay.voicePartialConsumed
       VOICE_BLOCK.lastIndex = scanIndex
       for (let m = VOICE_BLOCK.exec(text); m; m = VOICE_BLOCK.exec(text)) {
-        const content = m[1].trim()
+        const content = m[1].slice(partialConsumed).trim()
+        partialConsumed = 0
         if (content) segments.push(content)
         scanIndex = m.index + m[0].length
       }
+
+      // Early speech: if a voice block is still open and has accumulated a
+      // long unconsumed run, emit its last complete clause now — speech can
+      // start while the rest of the sentence is still generating.
+      const openIdx = text.indexOf(VOICE_OPEN_TAG, scanIndex)
+      if (openIdx !== -1) {
+        const unconsumed = text.slice(openIdx + VOICE_OPEN_TAG.length + partialConsumed)
+        if (unconsumed.length >= EARLY_SPEECH_MIN_CHARS) {
+          let lastBoundaryEnd = -1
+          CLAUSE_BOUNDARY.lastIndex = 0
+          for (let b = CLAUSE_BOUNDARY.exec(unconsumed); b; b = CLAUSE_BOUNDARY.exec(unconsumed)) {
+            lastBoundaryEnd = b.index + b[0].length
+          }
+          if (lastBoundaryEnd >= EARLY_SPEECH_MIN_EMIT) {
+            const clause = unconsumed.slice(0, lastBoundaryEnd).trim()
+            if (clause) segments.push(clause)
+            partialConsumed += lastBoundaryEnd
+          }
+        }
+      } else {
+        // No open block — any partial bookkeeping belongs to a block that
+        // has since closed.
+        partialConsumed = 0
+      }
+
       return {
         ...overlay,
         text,
@@ -84,12 +130,13 @@ export function applyOverlay(overlay: LiveOverlay, event: TurnStreamEvent): Live
           ? { voiceSegments: [...overlay.voiceSegments, ...segments] }
           : {}),
         voiceScanIndex: scanIndex,
+        voicePartialConsumed: partialConsumed,
       }
     }
     case 'reasoning_delta':
       return { ...overlay, reasoning: overlay.reasoning + event.delta }
     case 'model_call_completed':
-      return { ...overlay, text: '', reasoning: '', voiceScanIndex: 0 }
+      return { ...overlay, text: '', reasoning: '', voiceScanIndex: 0, voicePartialConsumed: 0 }
     case 'tool_progress': {
       const progress = event.progress
       if (

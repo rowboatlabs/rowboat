@@ -19,13 +19,23 @@ const DEEPGRAM_PARAMS = new URLSearchParams({
     endpointing: '100',
     no_delay: 'true',
 });
-// Hands-free (continuous) mode uses a much longer endpoint than push-to-talk:
-// speech_final fires only after this much silence, so a thinking pause doesn't
-// cut the user off mid-sentence during a call.
-const CONTINUOUS_ENDPOINTING_MS = 1800;
+// Hands-free (continuous) mode: Deepgram's endpoint fires FAST (600ms of
+// silence) and we apply smart hold logic on our side — if the transcript
+// already reads as a complete thought (terminal punctuation) the utterance
+// fires immediately, otherwise we hold INCOMPLETE_HOLD_MS longer in case the
+// user was mid-thought. Net effect: complete sentences turn around ~1.2s
+// faster than the old fixed 1800ms endpoint, while thinking pauses still get
+// the same total grace (~1.8s).
+const CONTINUOUS_ENDPOINTING_MS = 600;
+const INCOMPLETE_HOLD_MS = 1200;
 // While the mic is paused (assistant speaking), keep the idle Deepgram socket
 // alive — it closes after ~10s without audio otherwise.
 const KEEPALIVE_INTERVAL_MS = 5000;
+
+// Deepgram punctuates finals (punctuate=true) — a transcript ending in
+// terminal punctuation (optionally inside a closing quote/paren) is treated
+// as a complete thought.
+const COMPLETE_THOUGHT_RE = /[.!?…]["')\]]*\s*$/;
 
 function deepgramParams(continuous: boolean): URLSearchParams {
     if (!continuous) return DEEPGRAM_PARAMS;
@@ -35,7 +45,7 @@ function deepgramParams(continuous: boolean): URLSearchParams {
     // on a result with an empty transcript, or never fires when background
     // noise keeps the endpointer engaged). UtteranceEnd is word-timing based
     // and arrives as its own message type, so we listen for both.
-    params.set('utterance_end_ms', '2000');
+    params.set('utterance_end_ms', '1000');
     return params;
 }
 
@@ -76,6 +86,8 @@ export function useVoiceMode() {
     // While true (assistant is speaking), mic audio is dropped instead of streamed.
     const pausedRef = useRef(false);
     const keepAliveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    // Pending mid-thought hold (smart endpointing) — see maybeEndUtterance.
+    const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // Refresh cached auth details (called on warmup, not on mic click)
     const refreshAuth = useCallback(async () => {
@@ -95,10 +107,13 @@ export function useVoiceMode() {
     }, [refreshRowboatAccount]);
 
     // Hands-free mode: flush the accumulated utterance to the callback.
-    // Called on either end-of-speech signal (speech_final or UtteranceEnd);
-    // both may fire for the same utterance — the second finds an empty
-    // buffer and is a no-op.
+    // Both end-of-speech signals may fire for the same utterance — the second
+    // finds an empty buffer and is a no-op.
     const fireContinuousUtterance = useCallback(() => {
+        if (holdTimerRef.current) {
+            clearTimeout(holdTimerRef.current);
+            holdTimerRef.current = null;
+        }
         if (!continuousCbRef.current || pausedRef.current) return;
         const utterance = transcriptBufferRef.current.trim();
         transcriptBufferRef.current = '';
@@ -106,6 +121,25 @@ export function useVoiceMode() {
         setInterimText('');
         if (utterance) continuousCbRef.current(utterance);
     }, []);
+
+    // Smart endpoint: Deepgram's endpoint fires fast (600ms). If the
+    // transcript reads as a complete thought, hand it off immediately; if it
+    // trails off mid-sentence ("so what I want is…"), hold a little longer —
+    // resumed speech cancels the hold and the utterance keeps growing.
+    const maybeEndUtterance = useCallback(() => {
+        if (!continuousCbRef.current || pausedRef.current) return;
+        const buffered = transcriptBufferRef.current.trim();
+        if (!buffered) return;
+        if (COMPLETE_THOUGHT_RE.test(buffered)) {
+            fireContinuousUtterance();
+            return;
+        }
+        if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+        holdTimerRef.current = setTimeout(() => {
+            holdTimerRef.current = null;
+            fireContinuousUtterance();
+        }, INCOMPLETE_HOLD_MS);
+    }, [fireContinuousUtterance]);
 
     // Create and connect a Deepgram WebSocket using cached auth.
     // Starts the connection and returns immediately (does not wait for open).
@@ -143,12 +177,19 @@ export function useVoiceMode() {
 
             // Hands-free mode: word-timing based end-of-speech marker.
             if (data.type === 'UtteranceEnd') {
-                fireContinuousUtterance();
+                maybeEndUtterance();
                 return;
             }
 
             if (!data.channel?.alternatives?.[0]) return;
             const transcript = data.channel.alternatives[0].transcript;
+
+            // The user resumed speaking — cancel any pending mid-thought hold
+            // so the utterance keeps growing instead of firing under them.
+            if (transcript && holdTimerRef.current) {
+                clearTimeout(holdTimerRef.current);
+                holdTimerRef.current = null;
+            }
 
             if (data.is_final) {
                 // NOTE: the endpoint marker (speech_final) usually arrives on a
@@ -159,10 +200,11 @@ export function useVoiceMode() {
                     transcriptBufferRef.current += (transcriptBufferRef.current ? ' ' : '') + transcript;
                     interimRef.current = '';
                 }
-                // Hands-free mode: an endpoint completes the utterance — hand
-                // it off and reset for the next one.
+                // Hands-free mode: an endpoint may complete the utterance —
+                // immediately for complete thoughts, after a short hold for
+                // mid-sentence trails.
                 if (continuousCbRef.current && data.speech_final) {
-                    fireContinuousUtterance();
+                    maybeEndUtterance();
                     return;
                 }
                 if (transcript) {
@@ -193,7 +235,7 @@ export function useVoiceMode() {
                 }, 1000);
             }
         };
-    }, [refreshAuth, fireContinuousUtterance]);
+    }, [refreshAuth, maybeEndUtterance]);
 
     const waitForWsOpen = useCallback(async (timeoutMs = 1500): Promise<boolean> => {
         const ws = wsRef.current;
@@ -258,6 +300,10 @@ export function useVoiceMode() {
         }
         continuousCbRef.current = null;
         pausedRef.current = false;
+        if (holdTimerRef.current) {
+            clearTimeout(holdTimerRef.current);
+            holdTimerRef.current = null;
+        }
         if (keepAliveTimerRef.current) {
             clearInterval(keepAliveTimerRef.current);
             keepAliveTimerRef.current = null;
@@ -415,6 +461,10 @@ export function useVoiceMode() {
         if (pausedRef.current === paused) return;
         pausedRef.current = paused;
         if (paused) {
+            if (holdTimerRef.current) {
+                clearTimeout(holdTimerRef.current);
+                holdTimerRef.current = null;
+            }
             transcriptBufferRef.current = '';
             interimRef.current = '';
             setInterimText('');

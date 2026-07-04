@@ -1362,6 +1362,34 @@ const ipcSchemas = {
       mimeType: z.string(),
     }),
   },
+  // Streaming TTS: main starts the synthesis and pushes audio chunks over
+  // 'voice:tts-chunk' as they arrive, so playback can begin on the first
+  // chunk instead of after the full body (~0.5-1s earlier first-audio).
+  'voice:synthesizeStreamStart': {
+    req: z.object({
+      requestId: z.string(),
+      text: z.string(),
+    }),
+    res: z.object({
+      ok: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  'voice:synthesizeStreamCancel': {
+    req: z.object({ requestId: z.string() }),
+    res: z.object({}),
+  },
+  // Push channel: main → renderer with streaming TTS audio. `done: true`
+  // (possibly with a final chunk) ends the stream; `error` aborts it.
+  'voice:tts-chunk': {
+    req: z.object({
+      requestId: z.string(),
+      chunkBase64: z.string().optional(),
+      done: z.boolean(),
+      error: z.string().optional(),
+    }),
+    res: z.null(),
+  },
   // Ensures the OS-level microphone permission is settled before capturing.
   // On first-ever use (macOS) the permission is 'not-determined'; resolving
   // the native prompt up front prevents the in-flight getUserMedia from
