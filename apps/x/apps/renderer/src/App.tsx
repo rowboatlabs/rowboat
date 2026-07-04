@@ -970,7 +970,8 @@ function App() {
   // Voice mode state
   const [voiceAvailable, setVoiceAvailable] = useState(false)
   const [ttsAvailable, setTtsAvailable] = useState(false)
-  const [ttsEnabled, setTtsEnabled] = useState(false)
+  // TTS plays only during calls now (the standing read-aloud toggle was
+  // retired; a per-message "read aloud" action may replace it later).
   const ttsEnabledRef = useRef(false)
   // Read-aloud style: 'summary' for typed chat, forced to 'full' during a
   // call and restored after. Context decides — the user never picks it.
@@ -1032,8 +1033,6 @@ function App() {
   // Practice preset: adds the coaching persona to the system prompt.
   const [practiceMode, setPracticeMode] = useState(false)
   const practiceModeRef = useRef(false)
-  // TTS settings to restore when a call ends (a call forces full read-aloud).
-  const preCallTtsRef = useRef<{ enabled: boolean; mode: 'summary' | 'full' } | null>(null)
 
   const handleToggleMeetingRef = useRef<(() => void) | undefined>(undefined)
   const meetingTranscription = useMeetingTranscription(() => {
@@ -1119,17 +1118,6 @@ function App() {
     }
   }, [voice])
 
-  const handleToggleTts = useCallback(() => {
-    setTtsEnabled(prev => {
-      const next = !prev
-      ttsEnabledRef.current = next
-      if (!next) {
-        ttsRef.current.cancel()
-      }
-      return next
-    })
-  }, [])
-
   const handleCancelRecording = useCallback(() => {
     voice.cancel()
     setIsRecording(false)
@@ -1169,8 +1157,6 @@ function App() {
       setIsRecording(false)
       isRecordingRef.current = false
     }
-    preCallTtsRef.current = { enabled: ttsEnabledRef.current, mode: ttsModeRef.current }
-    setTtsEnabled(true)
     ttsEnabledRef.current = true
     ttsModeRef.current = 'full'
     void voiceRef.current.startContinuous((text) => {
@@ -1190,15 +1176,9 @@ function App() {
   const endCall = useCallback(() => {
     if (!inCallRef.current) return
     voiceRef.current.cancel()
-    const saved = preCallTtsRef.current
-    preCallTtsRef.current = null
-    const restoreEnabled = saved?.enabled ?? false
-    setTtsEnabled(restoreEnabled)
-    ttsEnabledRef.current = restoreEnabled
-    if (saved) {
-      ttsModeRef.current = saved.mode
-    }
-    if (!restoreEnabled) ttsRef.current.cancel()
+    ttsEnabledRef.current = false
+    ttsModeRef.current = 'summary'
+    ttsRef.current.cancel()
     video.stop()
     setPracticeMode(false)
     practiceModeRef.current = false
@@ -6553,9 +6533,6 @@ function App() {
                             onSubmitRecording={isActive ? handleSubmitRecording : undefined}
                             onCancelRecording={isActive ? handleCancelRecording : undefined}
                             voiceAvailable={isActive && voiceAvailable}
-                            ttsAvailable={isActive && ttsAvailable}
-                            ttsEnabled={ttsEnabled}
-                            onToggleTts={isActive ? handleToggleTts : undefined}
                             inCall={inCall}
                             onStartCall={isActive ? startCall : undefined}
                             onEndCall={isActive ? endCall : undefined}
@@ -6666,9 +6643,6 @@ function App() {
                 onSubmitRecording={handleSubmitRecording}
                 onCancelRecording={handleCancelRecording}
                 voiceAvailable={voiceAvailable}
-                ttsAvailable={ttsAvailable}
-                ttsEnabled={ttsEnabled}
-                onToggleTts={handleToggleTts}
                 inCall={inCall}
                 onStartCall={startCall}
                 onEndCall={endCall}

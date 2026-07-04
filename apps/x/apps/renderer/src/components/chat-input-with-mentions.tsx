@@ -15,7 +15,6 @@ import {
   FolderCog,
   FolderOpen,
   Globe,
-  Headphones,
   ImagePlus,
   LoaderIcon,
   Lock,
@@ -246,9 +245,6 @@ interface ChatInputInnerProps {
   onSubmitRecording?: () => void | Promise<void>
   onCancelRecording?: () => void
   voiceAvailable?: boolean
-  ttsAvailable?: boolean
-  ttsEnabled?: boolean
-  onToggleTts?: () => void
   /** A call is live (hands-free voice loop + spoken responses). */
   inCall?: boolean
   /** Start a call with the given preset's device defaults. */
@@ -289,9 +285,6 @@ function ChatInputInner({
   onSubmitRecording,
   onCancelRecording,
   voiceAvailable,
-  ttsAvailable,
-  ttsEnabled,
-  onToggleTts,
   inCall,
   onStartCall,
   onEndCall,
@@ -1294,33 +1287,6 @@ function ChatInputInner({
             </DropdownMenuContent>
           </DropdownMenu>
         ) : null}
-        {onToggleTts && ttsAvailable && (
-          <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={onToggleTts}
-                className={cn(
-                  'relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors',
-                  ttsEnabled
-                    ? 'text-foreground hover:bg-muted'
-                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                )}
-                aria-label={ttsEnabled ? 'Disable read-aloud' : 'Enable read-aloud'}
-              >
-                <Headphones className="h-4 w-4" />
-                {!ttsEnabled && (
-                  <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                    <span className="block h-[1.5px] w-5 -rotate-45 rounded-full bg-muted-foreground" />
-                  </span>
-                )}
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="top">
-              {ttsEnabled ? 'Read responses aloud: on' : 'Read responses aloud: off'}
-            </TooltipContent>
-          </Tooltip>
-        )}
         {onStartCall && (
           <div className="flex shrink-0 items-center">
             <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
@@ -1555,9 +1521,6 @@ export interface ChatInputWithMentionsProps {
   onSubmitRecording?: () => void | Promise<void>
   onCancelRecording?: () => void
   voiceAvailable?: boolean
-  ttsAvailable?: boolean
-  ttsEnabled?: boolean
-  onToggleTts?: () => void
   inCall?: boolean
   onStartCall?: (preset: CallPreset) => void
   onEndCall?: () => void
@@ -1591,9 +1554,6 @@ export function ChatInputWithMentions({
   onSubmitRecording,
   onCancelRecording,
   voiceAvailable,
-  ttsAvailable,
-  ttsEnabled,
-  onToggleTts,
   inCall,
   onStartCall,
   onEndCall,
@@ -1624,9 +1584,6 @@ export function ChatInputWithMentions({
         onSubmitRecording={onSubmitRecording}
         onCancelRecording={onCancelRecording}
         voiceAvailable={voiceAvailable}
-        ttsAvailable={ttsAvailable}
-        ttsEnabled={ttsEnabled}
-        onToggleTts={onToggleTts}
         inCall={inCall}
         onStartCall={onStartCall}
         onEndCall={onEndCall}

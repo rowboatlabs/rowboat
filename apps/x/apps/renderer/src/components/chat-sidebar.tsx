@@ -187,9 +187,6 @@ interface ChatSidebarProps {
   onSubmitRecording?: () => void | Promise<void>
   onCancelRecording?: () => void
   voiceAvailable?: boolean
-  ttsAvailable?: boolean
-  ttsEnabled?: boolean
-  onToggleTts?: () => void
   inCall?: boolean
   onStartCall?: (preset: CallPreset) => void
   onEndCall?: () => void
@@ -253,9 +250,6 @@ export function ChatSidebar({
   onSubmitRecording,
   onCancelRecording,
   voiceAvailable,
-  ttsAvailable,
-  ttsEnabled,
-  onToggleTts,
   inCall,
   onStartCall,
   onEndCall,
@@ -829,9 +823,6 @@ export function ChatSidebar({
                           onSubmitRecording={isActive ? onSubmitRecording : undefined}
                           onCancelRecording={isActive ? onCancelRecording : undefined}
                           voiceAvailable={isActive && voiceAvailable}
-                          ttsAvailable={isActive && ttsAvailable}
-                          ttsEnabled={ttsEnabled}
-                          onToggleTts={isActive ? onToggleTts : undefined}
                           inCall={inCall}
                           onStartCall={isActive ? onStartCall : undefined}
                           onEndCall={isActive ? onEndCall : undefined}

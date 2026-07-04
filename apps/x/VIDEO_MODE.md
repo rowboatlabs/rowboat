@@ -50,11 +50,12 @@ avatar while off, no webcam frames captured), screen share toggle, mascot ⇄
 assistant's spoken line run along the bottom. Typing in the composer still
 works mid-call; frames ride along with typed messages too.
 
-Outside calls the composer keeps exactly two voice affordances: the **mic
-button** (push-to-talk dictation, untouched) and the **read-aloud toggle**
-(headphones; summary-style for typed chat — calls force full read-aloud and
-restore the prior setting on hang-up). The old video dropdown, talking-head
-toggle, and summary/full TTS dropdown are retired.
+Outside calls the composer keeps exactly one voice affordance: the **mic
+button** (push-to-talk dictation, untouched). Spoken responses exist only
+inside calls (forced full read-aloud, off on hang-up). The old video
+dropdown, talking-head toggle, read-aloud headphones toggle, and summary/full
+TTS dropdown are all retired — a per-message "read aloud" action on assistant
+messages is the planned replacement for text-in/voice-out.
 
 The call button is disabled unless both voice input (Deepgram) and voice
 output (TTS) are configured. `call_started` (with `preset`) is captured in
