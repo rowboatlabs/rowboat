@@ -54,6 +54,11 @@ const MIME_TYPES: Record<string, string> = {
 // ---------------------------------------------------------------------------
 
 let server: Server | null = null;
+// IPv6 loopback listener. REQUIRED on macOS: the OS resolver maps
+// *.apps.localhost to ::1 (only), so Electron's iframe connects to [::1]:3210 —
+// binding just 127.0.0.1 makes in-app requests fail (blank app) while external
+// browsers succeed via their own IPv4 fallback.
+let server6: Server | null = null;
 let startPromise: Promise<void> | null = null;
 let watcher: FSWatcher | null = null;
 let serverError: string | null = null;
@@ -708,8 +713,9 @@ export async function init(): Promise<void> {
         try {
             await fsp.mkdir(APPS_DIR, { recursive: true });
             await startWatcher();
+            const expressApp = createApp();
             await new Promise<void>((resolve, reject) => {
-                const s = createApp().listen(APPS_PORT, '127.0.0.1', () => {
+                const s = expressApp.listen(APPS_PORT, '127.0.0.1', () => {
                     server = s;
                     serverError = null;
                     console.log(`[Apps] server on 127.0.0.1:${APPS_PORT} (host suffix ${APPS_HOST_SUFFIX}), dir ${APPS_DIR}`);
@@ -722,6 +728,18 @@ export async function init(): Promise<void> {
                         return;
                     }
                     reject(error);
+                });
+            });
+            // Dual-stack loopback: also listen on ::1 (see server6 note above).
+            // Best-effort — some machines have IPv6 disabled.
+            await new Promise<void>((resolve) => {
+                const s6 = expressApp.listen(APPS_PORT, '::1', () => {
+                    server6 = s6;
+                    resolve();
+                });
+                s6.on('error', (error: NodeJS.ErrnoException) => {
+                    console.warn(`[Apps] IPv6 loopback listen failed (${error.code}); continuing IPv4-only`);
+                    resolve();
                 });
             });
         } catch (error) {
@@ -752,6 +770,14 @@ export async function shutdown(): Promise<void> {
         }
     }
     eventClients.clear();
+
+    const s6 = server6;
+    server6 = null;
+    if (s6) {
+        await new Promise<void>((resolve) => {
+            s6.close(() => resolve());
+        });
+    }
 
     const s = server;
     server = null;
