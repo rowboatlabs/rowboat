@@ -199,6 +199,7 @@ module.exports = {
         ],
         extendInfo: {
             NSAudioCaptureUsageDescription: 'Rowboat needs access to system audio to transcribe meetings from other apps (Zoom, Meet, etc.)',
+            NSCameraUsageDescription: 'Rowboat uses your camera in video chat mode so the assistant can see you and give feedback (e.g. pitch practice).',
         },
         osxSign: {
             batchCodesignCalls: true,
