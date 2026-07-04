@@ -12,7 +12,7 @@ import { ChatSidebar } from './components/chat-sidebar';
 import { useSessionChat } from '@/hooks/useSessionChat';
 import { ChatHeader } from './components/chat-header';
 import { ChatEmptyState } from './components/chat-empty-state';
-import { ChatInputWithMentions, type PermissionMode, type StagedAttachment } from './components/chat-input-with-mentions';
+import { ChatInputWithMentions, type CallPreset, type PermissionMode, type StagedAttachment } from './components/chat-input-with-mentions';
 import { ChatMessageAttachments } from '@/components/chat-message-attachments'
 import { GraphView, type GraphEdge, type GraphNode } from '@/components/graph-view';
 import { BasesView, type BaseConfig, DEFAULT_BASE_CONFIG } from '@/components/bases-view';
@@ -97,6 +97,7 @@ import {
   type ChatViewportAnchorState,
   type ChatTabViewState,
   type ConversationItem,
+  type ToolCall,
   createEmptyChatTabViewState,
   getWebSearchCardData,
   getAppActionCardData,
@@ -118,12 +119,14 @@ import { AgentScheduleConfig } from '@x/shared/dist/agent-schedule.js'
 import { AgentScheduleState } from '@x/shared/dist/agent-schedule-state.js'
 import { toast } from "sonner"
 import { useVoiceMode } from '@/hooks/useVoiceMode'
+import { useVideoMode } from '@/hooks/useVideoMode'
 import { useVoiceTTS } from '@/hooks/useVoiceTTS'
-import { TalkingHeadOverlay } from '@/components/talking-head'
+import { VideoCallView } from '@/components/video-call-view'
 import { ProductTour, type TourNavTarget } from '@/components/product-tour'
 import { useMeetingTranscription, type CalendarEventMeta } from '@/hooks/useMeetingTranscription'
 import { useAnalyticsIdentity } from '@/hooks/useAnalyticsIdentity'
 import * as analytics from '@/lib/analytics'
+import { playAckCue } from '@/lib/call-sounds'
 import { useTheme } from '@/contexts/theme-context'
 
 type DirEntry = z.infer<typeof workspace.DirEntry>
@@ -969,11 +972,19 @@ function App() {
   // Voice mode state
   const [voiceAvailable, setVoiceAvailable] = useState(false)
   const [ttsAvailable, setTtsAvailable] = useState(false)
-  const [ttsEnabled, setTtsEnabled] = useState(false)
+  // TTS plays only during calls now (the standing read-aloud toggle was
+  // retired; a per-message "read aloud" action may replace it later).
   const ttsEnabledRef = useRef(false)
-  const [ttsMode, setTtsMode] = useState<'summary' | 'full'>('summary')
+  // Voice-to-voice latency marks for the current call turn (performance.now):
+  // t0 = utterance accepted, submit = message sent, speak = first TTS
+  // speak(). Emitted as call_turn_latency when audio actually starts.
+  const callTurnMarksRef = useRef<{ t0: number; submit?: number; speak?: number } | null>(null)
+  // Late-bound handle to handleStop (defined much further down) so early
+  // call handlers can stop the run without reordering the component.
+  const stopRunRef = useRef<(() => Promise<void>) | null>(null)
+  // Read-aloud style: 'summary' for typed chat, forced to 'full' during a
+  // call and restored after. Context decides — the user never picks it.
   const ttsModeRef = useRef<'summary' | 'full'>('summary')
-  const [ttsAvatarEnabled, setTtsAvatarEnabled] = useState(false)
   const [tourActive, setTourActive] = useState(false)
   const [isRecording, setIsRecording] = useState(false)
   const voiceTextBufferRef = useRef('')
@@ -983,6 +994,13 @@ function App() {
   const tts = useVoiceTTS()
   const ttsRef = useRef(tts)
   ttsRef.current = tts
+
+  // Latest assistant line handed to TTS — shown as the caption in the
+  // full-screen call view while the assistant is speaking.
+  const [assistantCaption, setAssistantCaption] = useState('')
+  useEffect(() => {
+    if (tts.state === 'idle') setAssistantCaption('')
+  }, [tts.state])
 
   // Speak newly completed <voice> blocks from the new runtime's live stream
   // (parity with the legacy text-delta voice extraction below). The store
@@ -1001,14 +1019,46 @@ function App() {
       const segment = voiceSegments[spokenVoiceRef.current.count]
       spokenVoiceRef.current.count += 1
       if (ttsEnabledRef.current) {
+        const marks = callTurnMarksRef.current
+        if (marks && marks.speak === undefined) marks.speak = performance.now()
         ttsRef.current.speak(segment)
+        setAssistantCaption(segment)
       }
     }
   }, [voiceSegments, runId])
 
+  // Emit the turn's voice-to-voice latency breakdown once audio is audible.
+  useEffect(() => {
+    if (tts.state !== 'speaking') return
+    const marks = callTurnMarksRef.current
+    if (!marks || marks.submit === undefined || marks.speak === undefined) return
+    callTurnMarksRef.current = null
+    const now = performance.now()
+    analytics.callTurnLatency({
+      endpointToSubmitMs: marks.submit - marks.t0,
+      submitToSpeakMs: marks.speak - marks.submit,
+      speakToAudioMs: now - marks.speak,
+      totalMs: now - marks.t0,
+    })
+  }, [tts.state])
+
   const voice = useVoiceMode()
   const voiceRef = useRef(voice)
   voiceRef.current = voice
+
+  // Calls: one engine (hands-free voice loop + forced read-aloud TTS + frame
+  // capture), started via presets that only differ in device defaults. The
+  // presentation is DERIVED from devices, never picked: screen sharing →
+  // floating popout; camera on → full-screen call; camera off → popout
+  // (mascot pill). Handlers live below the voice/submit plumbing they drive.
+  const video = useVideoMode()
+  const [inCall, setInCall] = useState(false)
+  const inCallRef = useRef(false)
+  // User explicitly shrank the full-screen call to the floating pill.
+  const [callMinimized, setCallMinimized] = useState(false)
+  // Practice preset: adds the coaching persona to the system prompt.
+  const [practiceMode, setPracticeMode] = useState(false)
+  const practiceModeRef = useRef(false)
 
   const handleToggleMeetingRef = useRef<(() => void) | undefined>(undefined)
   const meetingTranscription = useMeetingTranscription(() => {
@@ -1068,6 +1118,8 @@ function App() {
   }, [])
 
   const handleStartRecording = useCallback(() => {
+    // A live call owns the mic — ignore push-to-talk while one is running.
+    if (inCallRef.current) return
     setIsRecording(true)
     isRecordingRef.current = true
     voice.start()
@@ -1092,42 +1144,206 @@ function App() {
     }
   }, [voice])
 
-  const handleToggleTts = useCallback(() => {
-    setTtsEnabled(prev => {
-      const next = !prev
-      ttsEnabledRef.current = next
-      if (!next) {
-        ttsRef.current.cancel()
-        setTtsAvatarEnabled(false)
-      }
-      return next
-    })
-  }, [])
-
-  // Talking-head mode implies voice output: enabling it turns TTS on,
-  // disabling it turns both off.
-  const handleToggleTtsAvatar = useCallback(() => {
-    setTtsAvatarEnabled(prev => {
-      const next = !prev
-      setTtsEnabled(next)
-      ttsEnabledRef.current = next
-      if (!next) {
-        ttsRef.current.cancel()
-      }
-      return next
-    })
-  }, [])
-
-  const handleTtsModeChange = useCallback((mode: 'summary' | 'full') => {
-    setTtsMode(mode)
-    ttsModeRef.current = mode
-  }, [])
-
   const handleCancelRecording = useCallback(() => {
     voice.cancel()
     setIsRecording(false)
     isRecordingRef.current = false
   }, [voice])
+
+  // Start a call. Presets only differ in device defaults — the engine
+  // (continuous listening, auto-submitted utterances, forced read-aloud TTS,
+  // frame capture) is identical for all of them. The default entry ('share',
+  // the call button's main click) is "work together": screen shared, camera
+  // off, floating pill — the user keeps working while the assistant watches
+  // along. 'video'/'practice' open face-to-face full screen instead.
+  const startCall = useCallback(async (preset: CallPreset) => {
+    if (inCallRef.current) return
+    const camera = preset === 'video' || preset === 'practice'
+    const ok = await video.start({ camera })
+    if (!ok) return // camera denied/unavailable — stay out of the call
+    if (preset === 'share') {
+      // If screen capture fails (usually the macOS Screen Recording
+      // permission), continue as a voice call — sharing is one tap away on
+      // the pill once permission is granted.
+      const shared = await video.startScreenShare()
+      if (!shared) {
+        toast("Couldn't share your screen", {
+          description: 'Grant Rowboat Screen Recording access, then tap the share button on the call.',
+          action: {
+            label: 'Open Settings',
+            onClick: () => void window.ipc.invoke('meeting:openScreenRecordingSettings', null).catch(() => {}),
+          },
+        })
+      }
+    }
+
+    // A manual push-to-talk recording can't coexist with the call's mic.
+    if (isRecordingRef.current) {
+      voiceRef.current.cancel()
+      setIsRecording(false)
+      isRecordingRef.current = false
+    }
+    ttsEnabledRef.current = true
+    ttsModeRef.current = 'full'
+    void voiceRef.current.startContinuous((text) => {
+      // Instant "heard you" feedback + start of the latency clock.
+      playAckCue()
+      callTurnMarksRef.current = { t0: performance.now() }
+      pendingVoiceInputRef.current = true
+      handlePromptSubmitRef.current?.({ text, files: [] })
+    })
+
+    setPracticeMode(preset === 'practice')
+    practiceModeRef.current = preset === 'practice'
+    // Pill-first presets start minimized; face-to-face presets start expanded.
+    setCallMinimized(preset === 'voice' || preset === 'share')
+    inCallRef.current = true
+    setInCall(true)
+    analytics.callStarted(preset)
+  }, [video])
+
+  const endCall = useCallback(() => {
+    if (!inCallRef.current) return
+    voiceRef.current.cancel()
+    ttsEnabledRef.current = false
+    ttsModeRef.current = 'summary'
+    ttsRef.current.cancel()
+    callTurnMarksRef.current = null
+    video.stop()
+    setPracticeMode(false)
+    practiceModeRef.current = false
+    setCallMinimized(false)
+    inCallRef.current = false
+    setInCall(false)
+  }, [video])
+
+  // During a call, mute the mic while the assistant is thinking or speaking
+  // so its own TTS (or a half-turn) never gets transcribed back at it.
+  useEffect(() => {
+    if (!inCall) return
+    voiceRef.current.setPaused(activeIsProcessing || tts.state !== 'idle')
+  }, [inCall, activeIsProcessing, tts.state])
+
+  // Screen sharing: frames of the shared screen ride along with each message
+  // next to the webcam frames. The surface change (full screen → pill) falls
+  // out of the derivation below.
+  const handleToggleScreenShare = useCallback(async () => {
+    if (video.screenState === 'live') {
+      video.stopScreenShare()
+    } else {
+      await video.startScreenShare()
+    }
+  }, [video])
+
+  // Meet-style camera mute: the call (and any screen share) stays on, but no
+  // webcam frames are captured while the camera is off. Deliberately does NOT
+  // change the surface — turning your camera on from the pill puts your video
+  // IN the pill; expanding to full screen is its own explicit action.
+  const handleToggleCamera = useCallback(() => {
+    void video.setCameraEnabled(!video.cameraOn)
+  }, [video])
+
+  // Minimizing the full-screen call drops you back to working — and the pill
+  // exists to work *together*, so sharing starts automatically (the symmetric
+  // twin of expand, which stops it). If capture fails (permission), the call
+  // still minimizes as a plain pill. `callMinimized` is also set so stopping
+  // the share from the pill keeps you in the pill rather than snapping back
+  // to full screen.
+  const handleMinimizeCall = useCallback(async () => {
+    setCallMinimized(true)
+    await video.startScreenShare()
+  }, [video])
+
+  // Interrupt the assistant: silence TTS immediately, skip anything already
+  // queued from the in-flight turn, and stop the run if it's still
+  // generating (if it already finished, stopping the speech is all there is
+  // to do). Wired to the Stop control next to the mascot on both surfaces.
+  const handleInterruptAssistant = useCallback(() => {
+    ttsRef.current.cancel()
+    setAssistantCaption('')
+    if (voiceSegments) {
+      spokenVoiceRef.current.count = voiceSegments.length
+    }
+    if (activeIsProcessing) {
+      void stopRunRef.current?.()
+    }
+  }, [voiceSegments, activeIsProcessing])
+
+  // Current phase of the call (null when not in one).
+  const videoCallStatus: 'listening' | 'thinking' | 'speaking' | null =
+    inCall
+      ? tts.state === 'speaking'
+        ? 'speaking'
+        : tts.state === 'synthesizing' || activeIsProcessing
+          ? 'thinking'
+          : 'listening'
+      : null
+
+  // The call's surface follows one rule: full screen and screen sharing are
+  // mutually exclusive (a full-screen call covers the screen — sharing it
+  // would show the call itself). Sharing → floating pill, always. Not
+  // sharing → full screen unless the user shrank it (`callMinimized`).
+  // Expanding the pill auto-stops any share; presenting from full screen
+  // auto-collapses to the pill.
+  const callSurface: 'fullscreen' | 'popout' | null = !inCall
+    ? null
+    : video.screenState === 'live' || callMinimized
+      ? 'popout'
+      : 'fullscreen'
+
+  useEffect(() => {
+    void window.ipc.invoke('video:setPopout', { show: callSurface === 'popout' }).catch(() => {})
+  }, [callSurface])
+
+  // Consent surface for screen sharing: an unmissable toast the moment any
+  // share starts (auto-started calls included), with one-tap stop. The pill
+  // also carries a persistent "Sharing screen" badge, and macOS shows its
+  // purple recording indicator.
+  const prevScreenStateRef = useRef(video.screenState)
+  useEffect(() => {
+    const prev = prevScreenStateRef.current
+    prevScreenStateRef.current = video.screenState
+    if (video.screenState === 'live' && prev !== 'live') {
+      toast('Your screen is being shared', {
+        description: 'The assistant sees snapshots of it along with what you say.',
+        action: { label: 'Stop sharing', onClick: () => video.stopScreenShare() },
+        duration: 6000,
+      })
+    }
+  }, [video.screenState, video])
+
+  // Keep the popout's mascot/status/devices/caption mirror of the call fresh.
+  // The main process caches the latest state and replays it when the popout
+  // loads.
+  useEffect(() => {
+    if (!inCall) return
+    void window.ipc
+      .invoke('video:popoutState', {
+        ttsState: tts.state,
+        status: videoCallStatus,
+        cameraOn: video.cameraOn,
+        screenSharing: video.screenState === 'live',
+        interimText: voice.interimText || null,
+      })
+      .catch(() => {})
+  }, [inCall, tts.state, videoCallStatus, video.cameraOn, video.screenState, voice.interimText])
+
+  // Execute popout control-bar actions (the popout window has no access to
+  // the call's mic/camera/capture — they live here). 'expand' goes full
+  // screen, which by the exclusivity rule stops any running share; the main
+  // process already refocused the app window.
+  useEffect(() => {
+    return window.ipc.on('video:popout-action', ({ action }) => {
+      if (action === 'toggle-camera') handleToggleCamera()
+      else if (action === 'toggle-share') void handleToggleScreenShare()
+      else if (action === 'stop-speaking') handleInterruptAssistant()
+      else if (action === 'end-call') endCall()
+      else if (action === 'expand') {
+        if (video.screenState === 'live') video.stopScreenShare()
+        setCallMinimized(false)
+      }
+    })
+  }, [handleToggleCamera, handleToggleScreenShare, handleInterruptAssistant, endCall, video])
 
   // Enter to submit voice input, Escape to cancel
   useEffect(() => {
@@ -2253,6 +2469,7 @@ function App() {
               console.log('[voice] extracted voice tag:', voiceContent)
               if (voiceContent && ttsEnabledRef.current) {
                 ttsRef.current.speak(voiceContent)
+                setAssistantCaption(voiceContent)
               }
               spokenIndexRef.current += voiceMatch.index + voiceMatch[0].length
             }
@@ -2608,15 +2825,33 @@ function App() {
 
     setMessage('')
 
+    // Video chat mode: drain the webcam frames buffered since the last send
+    // so they ride along with this message as inline image parts.
+    const marks = callTurnMarksRef.current
+    if (inCallRef.current && marks && marks.submit === undefined) {
+      marks.submit = performance.now()
+    }
+
+    const videoFrames = inCallRef.current ? video.collectFrames() : []
+
     const userMessageId = `user-${Date.now()}`
-    const displayAttachments: ChatMessage['attachments'] = hasAttachments
-      ? stagedAttachments.map((attachment) => ({
-          path: attachment.path,
-          filename: attachment.filename,
-          mimeType: attachment.mimeType,
-          size: attachment.size,
-          thumbnailUrl: attachment.thumbnailUrl,
-        }))
+    const displayAttachments: ChatMessage['attachments'] = hasAttachments || videoFrames.length > 0
+      ? [
+          ...stagedAttachments.map((attachment) => ({
+            path: attachment.path,
+            filename: attachment.filename,
+            mimeType: attachment.mimeType,
+            size: attachment.size,
+            thumbnailUrl: attachment.thumbnailUrl,
+          })),
+          ...videoFrames.map((frame, index) => ({
+            path: '',
+            filename: `${frame.source}-frame-${index + 1}.jpg`,
+            mimeType: frame.mediaType,
+            thumbnailUrl: frame.dataUrl,
+            isVideoFrame: true,
+          })),
+        ]
       : undefined
     setConversation((prev) => [...prev, {
       id: userMessageId,
@@ -2668,6 +2903,8 @@ function App() {
               ...(ttsEnabledRef.current ? { voiceOutput: ttsModeRef.current } : {}),
               ...(searchEnabled ? { searchEnabled: true } : {}),
               ...(codeMode ? { codeMode } : {}),
+              ...(inCallRef.current && (video.cameraOn || video.screenState === 'live') ? { videoMode: true } : {}),
+              ...(practiceModeRef.current ? { coachMode: true } : {}),
             },
           },
         },
@@ -2678,7 +2915,7 @@ function App() {
         middlePane: middlePane ?? { kind: 'empty' as const },
       })
 
-      if (hasAttachments || hasMentions) {
+      if (hasAttachments || hasMentions || videoFrames.length > 0) {
         type ContentPart =
           | { type: 'text'; text: string }
           | {
@@ -2688,6 +2925,13 @@ function App() {
               mimeType: string
               size?: number
               lineNumber?: number
+            }
+          | {
+              type: 'image'
+              data: string
+              mediaType: string
+              source: 'camera' | 'screen'
+              capturedAt: string
             }
 
         const contentParts: ContentPart[] = []
@@ -2718,6 +2962,16 @@ function App() {
           contentParts.push({ type: 'text', text: userMessage })
         } else {
           titleSource = stagedAttachments[0]?.filename ?? mentions?.[0]?.displayName ?? mentions?.[0]?.path ?? ''
+        }
+
+        for (const frame of videoFrames) {
+          contentParts.push({
+            type: 'image',
+            data: frame.data,
+            mediaType: frame.mediaType,
+            source: frame.source,
+            capturedAt: frame.capturedAt,
+          })
         }
 
         const middlePaneContext = await buildMiddlePaneContext()
@@ -2793,12 +3047,18 @@ function App() {
     if (!runId) return
     setStopClickedAt(Date.now())
     setIsStopping(true)
+    // Stopping the run must also silence it — the TTS queue holds segments
+    // that were already extracted from the stream and would keep playing
+    // long after the turn is aborted.
+    ttsRef.current.cancel()
+    setAssistantCaption('')
     try {
       await sessionChat.stop()
     } catch (error) {
       console.error('Failed to stop turn:', error)
     }
   }, [runId, sessionChat])
+  stopRunRef.current = handleStop
 
   const handlePermissionResponse = useCallback(async (
     toolCallId: string,
@@ -4310,22 +4570,61 @@ function App() {
   // External search set by app-navigation tool (passed to BasesView)
   const [externalBaseSearch, setExternalBaseSearch] = useState<string | undefined>(undefined)
 
-  // Process pending app-navigation results
-  useEffect(() => {
-    const result = pendingAppNavRef.current
-    if (!result) return
-    pendingAppNavRef.current = null
+  // Apply an app-navigation tool result to the UI. Shared by both event
+  // paths (legacy runs:events and the session-chat turn runtime).
+  const applyAppNavigation = useCallback((result: Record<string, unknown>) => {
+    // During a call, navigation must be VISIBLE: the full-screen call view
+    // would cover the very thing being shown — collapse it to the pill —
+    // and if the user is in another app, bring Rowboat forward.
+    const visibleActions = ['open-note', 'open-view', 'read-view', 'open-item', 'update-base-view', 'create-base']
+    if (inCallRef.current && visibleActions.includes(result.action as string)) {
+      setCallMinimized(true)
+      void window.ipc.invoke('app:focusMainWindow', null).catch(() => {})
+    }
+
+    // Views the assistant can open (or auto-open while reading them via
+    // read-view — the user should SEE what's being read).
+    const navigateToNamedView = (view: string) => {
+      switch (view) {
+        case 'graph': void navigateToView({ type: 'graph' }); break
+        case 'bases': void navigateToView({ type: 'file', path: BASES_DEFAULT_TAB_PATH }); break
+        case 'home': void navigateToView({ type: 'home' }); break
+        case 'email': void navigateToView({ type: 'email' }); break
+        case 'meetings': void navigateToView({ type: 'meetings' }); break
+        case 'live-notes': void navigateToView({ type: 'live-notes' }); break
+        case 'bg-tasks': void navigateToView({ type: 'bg-tasks' }); break
+        case 'chat-history': void navigateToView({ type: 'chat-history' }); break
+        case 'knowledge': void navigateToView({ type: 'knowledge-view' }); break
+        case 'workspace': void navigateToView({ type: 'workspace' }); break
+        case 'code': void navigateToView({ type: 'code' }); break
+      }
+    }
 
     switch (result.action) {
       case 'open-note':
         navigateToFile(result.path as string)
         break
       case 'open-view':
-        if (result.view === 'graph') void navigateToView({ type: 'graph' })
-        if (result.view === 'bases') {
-          void navigateToView({ type: 'file', path: BASES_DEFAULT_TAB_PATH })
+      case 'read-view':
+        navigateToNamedView(result.view as string)
+        break
+      case 'open-item': {
+        switch (result.kind) {
+          case 'email-thread':
+            void navigateToView({ type: 'email', threadId: result.threadId as string })
+            break
+          case 'note':
+            navigateToFile(result.path as string)
+            break
+          case 'bg-task':
+            void navigateToView({ type: 'task', name: result.taskName as string })
+            break
+          case 'session':
+            void navigateToView({ type: 'chat', runId: result.sessionId as string })
+            break
         }
         break
+      }
       case 'update-base-view': {
         // Navigate to bases if not already there
         const targetPath = selectedPath && isBaseFilePath(selectedPath) ? selectedPath : BASES_DEFAULT_TAB_PATH
@@ -4405,7 +4704,40 @@ function App() {
         }
         break
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navigateToFile, navigateToView, selectedPath])
+
+  // Legacy runs:events path: handleRunEvent stashes the result in a ref;
+  // polled every render (the triggering event always causes one).
+  useEffect(() => {
+    const result = pendingAppNavRef.current
+    if (!result) return
+    pendingAppNavRef.current = null
+    applyAppNavigation(result)
   })
+
+  // Turn-runtime path: the session-chat store surfaces tool results in the
+  // conversation; apply newly completed app-navigation calls exactly once.
+  // On session switch/load, everything already in the transcript happened in
+  // the past — seed as processed without replaying navigations.
+  const processedAppNavRef = useRef<{ key: string | null; ids: Set<string> }>({ key: null, ids: new Set() })
+  useEffect(() => {
+    const conversation = sessionChat.chatState?.conversation
+    if (!conversation) return
+    const completed = conversation.filter(
+      (item): item is ToolCall => isToolCall(item) && item.name === 'app-navigation' && item.status === 'completed'
+    )
+    if (processedAppNavRef.current.key !== runId) {
+      processedAppNavRef.current = { key: runId, ids: new Set(completed.map((t) => t.id)) }
+      return
+    }
+    for (const tool of completed) {
+      if (processedAppNavRef.current.ids.has(tool.id)) continue
+      processedAppNavRef.current.ids.add(tool.id)
+      const result = tool.result as Record<string, unknown> | undefined
+      if (result && result.success) applyAppNavigation(result)
+    }
+  }, [sessionChat.chatState?.conversation, runId, applyAppNavigation])
 
   const navigateToFullScreenChat = useCallback(() => {
     // Only treat this as navigation when coming from another view
@@ -6330,13 +6662,10 @@ function App() {
                             onSubmitRecording={isActive ? handleSubmitRecording : undefined}
                             onCancelRecording={isActive ? handleCancelRecording : undefined}
                             voiceAvailable={isActive && voiceAvailable}
-                            ttsAvailable={isActive && ttsAvailable}
-                            ttsEnabled={ttsEnabled}
-                            ttsMode={ttsMode}
-                            onToggleTts={isActive ? handleToggleTts : undefined}
-                            onTtsModeChange={isActive ? handleTtsModeChange : undefined}
-                            ttsAvatarEnabled={ttsAvatarEnabled}
-                            onToggleTtsAvatar={isActive ? handleToggleTtsAvatar : undefined}
+                            inCall={inCall}
+                            onStartCall={isActive ? startCall : undefined}
+                            onEndCall={isActive ? endCall : undefined}
+                            callAvailable={voiceAvailable && ttsAvailable}
                           />
                         </div>
                       )
@@ -6443,23 +6772,32 @@ function App() {
                 onSubmitRecording={handleSubmitRecording}
                 onCancelRecording={handleCancelRecording}
                 voiceAvailable={voiceAvailable}
-                ttsAvailable={ttsAvailable}
-                ttsEnabled={ttsEnabled}
-                ttsMode={ttsMode}
-                onToggleTts={handleToggleTts}
-                onTtsModeChange={handleTtsModeChange}
-                ttsAvatarEnabled={ttsAvatarEnabled}
-                onToggleTtsAvatar={handleToggleTtsAvatar}
+                inCall={inCall}
+                onStartCall={startCall}
+                onEndCall={endCall}
+                callAvailable={voiceAvailable && ttsAvailable}
                 onComposioConnected={handleComposioConnected}
               />
             )}
-            {/* Talking head hovers over the active view while avatar voice mode is
-                on (hidden during the tour, which shows its own mascot) */}
-            {ttsAvatarEnabled && !tourActive && (
-              <TalkingHeadOverlay
+            {/* Full-screen call: user tile + animated mascot tile. Shown only
+                when the derived surface says so (camera on, no screen share,
+                not minimized) — otherwise the call lives in the floating
+                popout window. */}
+            {callSurface === 'fullscreen' && (
+              <VideoCallView
+                streamRef={video.streamRef}
+                onToggleScreenShare={handleToggleScreenShare}
+                cameraOn={video.cameraOn}
+                onToggleCamera={handleToggleCamera}
+                practiceMode={practiceMode}
+                onMinimize={() => void handleMinimizeCall()}
+                onInterrupt={handleInterruptAssistant}
                 ttsState={tts.state}
-                getLevel={tts.getLevel}
-                onDismiss={handleToggleTtsAvatar}
+                getTtsLevel={tts.getLevel}
+                status={videoCallStatus ?? 'listening'}
+                interimText={voice.interimText}
+                assistantCaption={assistantCaption}
+                onLeave={endCall}
               />
             )}
             {/* Mascot-guided product tour */}

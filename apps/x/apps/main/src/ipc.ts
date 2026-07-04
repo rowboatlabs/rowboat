@@ -1,7 +1,8 @@
-import { ipcMain, BrowserWindow, shell, dialog, systemPreferences, desktopCapturer, app } from 'electron';
+import { ipcMain, BrowserWindow, shell, dialog, systemPreferences, desktopCapturer, app, screen } from 'electron';
 import { ipc } from '@x/shared';
 import path from 'node:path';
 import os from 'node:os';
+import { fileURLToPath } from 'node:url';
 import {
   connectProvider,
   disconnectProvider,
@@ -383,9 +384,36 @@ type InvokeHandlers = {
   [K in InvokeChannels]: InvokeHandler<K>;
 };
 
+// In-flight streaming TTS requests, keyed by renderer-chosen requestId.
+const activeTtsStreams = new Map<string, AbortController>();
+
+// Video-mode popout window (shown for the whole duration of a screen share,
+// floating over every app including Rowboat itself) and the last call state
+// pushed by the main window — replayed to the popout when it finishes loading.
+let videoPopoutWin: BrowserWindow | null = null;
+let lastVideoPopoutState: {
+  ttsState: 'idle' | 'synthesizing' | 'speaking';
+  status: 'listening' | 'thinking' | 'speaking' | null;
+  cameraOn: boolean;
+  screenSharing: boolean;
+  interimText: string | null;
+} | null = null;
+
+// Match only real app windows — getAllWindows() can also contain the popout
+// itself and hidden utility windows (e.g. PDF-export renderers), which must
+// not be shown, focused, or sent app events.
+function findMainAppWindow(): BrowserWindow | undefined {
+  return BrowserWindow.getAllWindows().find((w) => {
+    if (w === videoPopoutWin || w.isDestroyed()) return false;
+    const url = w.webContents.getURL();
+    const isAppWindow = url.startsWith('app://') || url.startsWith('http://localhost');
+    return isAppWindow && !url.includes('#video-popout');
+  });
+}
+
 /**
  * Register all IPC handlers with type safety and runtime validation
- * 
+ *
  * This function ensures:
  * 1. All invoke channels have handlers (exhaustiveness checking)
  * 2. Handler signatures match channel definitions
@@ -1727,6 +1755,51 @@ export function setupIpcHandlers() {
     'voice:synthesize': async (_event, args) => {
       return voice.synthesizeSpeech(args.text);
     },
+    'voice:synthesizeStreamStart': async (event, args) => {
+      const { requestId, text } = args;
+      const sender = event.sender;
+      const controller = new AbortController();
+      activeTtsStreams.set(requestId, controller);
+      // Fire-and-forget: chunks are pushed to the renderer as they arrive so
+      // playback can begin immediately; the invoke returns once started.
+      void voice
+        .synthesizeSpeechStream(
+          text,
+          (chunk) => {
+            if (!sender.isDestroyed()) {
+              sender.send('voice:tts-chunk', {
+                requestId,
+                chunkBase64: chunk.toString('base64'),
+                done: false,
+              });
+            }
+          },
+          controller.signal,
+        )
+        .then(() => {
+          if (!sender.isDestroyed()) {
+            sender.send('voice:tts-chunk', { requestId, done: true });
+          }
+        })
+        .catch((err: unknown) => {
+          if (!sender.isDestroyed() && !controller.signal.aborted) {
+            sender.send('voice:tts-chunk', {
+              requestId,
+              done: true,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        })
+        .finally(() => {
+          activeTtsStreams.delete(requestId);
+        });
+      return { ok: true };
+    },
+    'voice:synthesizeStreamCancel': async (_event, args) => {
+      activeTtsStreams.get(args.requestId)?.abort();
+      activeTtsStreams.delete(args.requestId);
+      return {};
+    },
     'voice:ensureMicAccess': async () => {
       if (process.platform !== 'darwin') return { granted: true };
       const status = systemPreferences.getMediaAccessStatus('microphone');
@@ -1744,6 +1817,113 @@ export function setupIpcHandlers() {
       } catch {
         return { granted: false };
       }
+    },
+    'voice:ensureCameraAccess': async () => {
+      if (process.platform !== 'darwin') return { granted: true };
+      const status = systemPreferences.getMediaAccessStatus('camera');
+      console.log('[video] Camera permission status:', status);
+      if (status === 'granted') return { granted: true };
+      // Same flow as the microphone: settle the native TCC prompt before the
+      // renderer's getUserMedia so the first video click doesn't silently fail.
+      try {
+        const granted = await systemPreferences.askForMediaAccess('camera');
+        console.log('[video] Camera permission after prompt:', granted);
+        return { granted };
+      } catch {
+        return { granted: false };
+      }
+    },
+    'video:setPopout': async (_event, args) => {
+      if (!args.show) {
+        if (videoPopoutWin && !videoPopoutWin.isDestroyed()) videoPopoutWin.destroy();
+        videoPopoutWin = null;
+        return {};
+      }
+      if (videoPopoutWin && !videoPopoutWin.isDestroyed()) return {};
+
+      const workArea = screen.getPrimaryDisplay().workArea;
+      const width = 340;
+      const height = 184;
+      const ipcDir = path.dirname(fileURLToPath(import.meta.url));
+      const preloadPath = app.isPackaged
+        ? path.join(ipcDir, '../preload/dist/preload.js')
+        : path.join(ipcDir, '../../../preload/dist/preload.js');
+      const win = new BrowserWindow({
+        width,
+        height,
+        x: workArea.x + workArea.width - width - 24,
+        y: workArea.y + 24,
+        frame: false,
+        resizable: false,
+        alwaysOnTop: true,
+        skipTaskbar: true,
+        show: false,
+        hasShadow: true,
+        backgroundColor: '#171717',
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true,
+          sandbox: true,
+          preload: preloadPath,
+        },
+      });
+      // Float above other apps on every workspace. Deliberately NOT
+      // `visibleOnFullScreen: true`: on macOS that flag hides the app's Dock
+      // icon for as long as such a window exists (the app becomes an
+      // "agent" app), which reads as Rowboat having vanished. The trade-off
+      // is the popout won't hover over other apps' fullscreen Spaces.
+      win.setAlwaysOnTop(true, 'floating');
+      win.setVisibleOnAllWorkspaces(true);
+      win.webContents.once('did-finish-load', () => {
+        if (lastVideoPopoutState) {
+          win.webContents.send('video:popout-state', lastVideoPopoutState);
+        }
+        // showInactive: appearing must not steal focus from the app the user
+        // switched to — that would immediately re-hide the popout.
+        if (!win.isDestroyed()) win.showInactive();
+      });
+      win.on('closed', () => {
+        if (videoPopoutWin === win) videoPopoutWin = null;
+      });
+      videoPopoutWin = win;
+      if (app.isPackaged) {
+        win.loadURL('app://-/index.html#video-popout');
+      } else {
+        win.loadURL('http://localhost:5173/#video-popout');
+      }
+      return {};
+    },
+    'video:popoutState': async (_event, args) => {
+      lastVideoPopoutState = args;
+      if (videoPopoutWin && !videoPopoutWin.isDestroyed()) {
+        videoPopoutWin.webContents.send('video:popout-state', args);
+      }
+      return {};
+    },
+    'app:focusMainWindow': async () => {
+      const main = findMainAppWindow();
+      if (main) {
+        if (main.isMinimized()) main.restore();
+        main.show();
+        main.focus();
+      }
+      return {};
+    },
+    'video:getPopoutState': async () => {
+      return { state: lastVideoPopoutState };
+    },
+    'video:popoutAction': async (_event, args) => {
+      // Relay a popout control-bar action to the app window, which owns the
+      // call (mic, camera, screen capture) and executes it there. 'expand'
+      // additionally brings the app window back to the foreground.
+      const main = findMainAppWindow();
+      if (args.action === 'expand' && main) {
+        if (main.isMinimized()) main.restore();
+        main.show();
+        main.focus();
+      }
+      main?.webContents.send('video:popout-action', args);
+      return {};
     },
     // Live-note handlers
     'live-note:run': async (_event, args) => {

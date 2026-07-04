@@ -44,8 +44,20 @@ export const UserAttachmentPart = z.object({
     lineNumber: z.number().int().min(1).optional(),  // 1-indexed line in source file (for editor-context references)
 });
 
-// Any single part of a user message (text or attachment)
-export const UserContentPart = z.union([UserTextPart, UserAttachmentPart]);
+// An inline image within a content array (e.g. a live webcam frame from
+// video mode). Unlike attachments, image parts carry their data inline as
+// base64 and are sent to the model as real multimodal image parts rather
+// than a file-path reference.
+export const UserImagePart = z.object({
+    type: z.literal("image"),
+    data: z.string(),                    // base64-encoded image bytes (no data: prefix)
+    mediaType: z.string(),               // MIME type ("image/jpeg")
+    source: z.enum(["camera", "screen"]).optional(),
+    capturedAt: z.string().optional(),   // ISO timestamp of capture
+});
+
+// Any single part of a user message (text, attachment, or inline image)
+export const UserContentPart = z.union([UserTextPart, UserAttachmentPart, UserImagePart]);
 
 // Named type for user message content — used everywhere instead of repeating the union
 export const UserMessageContent = z.union([z.string(), z.array(UserContentPart)]);

@@ -650,6 +650,12 @@ const ipcSchemas = {
     }),
     res: z.null(),
   },
+  // Bring the main app window to the foreground (e.g. the assistant navigated
+  // the UI during a call while the user was in another app).
+  'app:focusMainWindow': {
+    req: z.null(),
+    res: z.object({}),
+  },
   'app:takeMeetingNotes': {
     req: z.object({
       // Pass the raw calendar event JSON through; renderer adapts to its existing flow.
@@ -1385,6 +1391,34 @@ const ipcSchemas = {
       mimeType: z.string(),
     }),
   },
+  // Streaming TTS: main starts the synthesis and pushes audio chunks over
+  // 'voice:tts-chunk' as they arrive, so playback can begin on the first
+  // chunk instead of after the full body (~0.5-1s earlier first-audio).
+  'voice:synthesizeStreamStart': {
+    req: z.object({
+      requestId: z.string(),
+      text: z.string(),
+    }),
+    res: z.object({
+      ok: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  'voice:synthesizeStreamCancel': {
+    req: z.object({ requestId: z.string() }),
+    res: z.object({}),
+  },
+  // Push channel: main → renderer with streaming TTS audio. `done: true`
+  // (possibly with a final chunk) ends the stream; `error` aborts it.
+  'voice:tts-chunk': {
+    req: z.object({
+      requestId: z.string(),
+      chunkBase64: z.string().optional(),
+      done: z.boolean(),
+      error: z.string().optional(),
+    }),
+    res: z.null(),
+  },
   // Ensures the OS-level microphone permission is settled before capturing.
   // On first-ever use (macOS) the permission is 'not-determined'; resolving
   // the native prompt up front prevents the in-flight getUserMedia from
@@ -1394,6 +1428,79 @@ const ipcSchemas = {
     res: z.object({
       granted: z.boolean(),
     }),
+  },
+  // Same as ensureMicAccess but for the camera — settles the macOS TCC
+  // permission before video mode calls getUserMedia({ video: true }).
+  'voice:ensureCameraAccess': {
+    req: z.null(),
+    res: z.object({
+      granted: z.boolean(),
+    }),
+  },
+  // Video-mode popout: show/hide the small always-on-top window (user +
+  // mascot tiles) that floats over everything for the duration of a screen
+  // share, Meet-style.
+  'video:setPopout': {
+    req: z.object({ show: z.boolean() }),
+    res: z.object({}),
+  },
+  // Main-window renderer pushes the current call state; the main process
+  // caches it and relays to the popout window (replayed on popout load).
+  'video:popoutState': {
+    req: z.object({
+      ttsState: z.enum(['idle', 'synthesizing', 'speaking']),
+      status: z.enum(['listening', 'thinking', 'speaking']).nullable(),
+      cameraOn: z.boolean(),
+      screenSharing: z.boolean(),
+      // Live transcript of the in-progress utterance.
+      interimText: z.string().nullable(),
+    }),
+    res: z.object({}),
+  },
+  // Popout window → fetch the latest cached call state on mount. The
+  // did-finish-load replay can race the React listener registration, and the
+  // popout must never guess (a wrong camera-on default flashes the user's
+  // video before the first state push corrects it).
+  'video:getPopoutState': {
+    req: z.null(),
+    res: z.object({
+      state: z
+        .object({
+          ttsState: z.enum(['idle', 'synthesizing', 'speaking']),
+          status: z.enum(['listening', 'thinking', 'speaking']).nullable(),
+          cameraOn: z.boolean(),
+          screenSharing: z.boolean(),
+          interimText: z.string().nullable(),
+        })
+        .nullable(),
+    }),
+  },
+  // Popout control bar → main process → relayed to the app window, which
+  // executes the action on the live call. 'expand' additionally focuses the
+  // main app window (handled in the main process).
+  'video:popoutAction': {
+    req: z.object({
+      action: z.enum(['toggle-camera', 'toggle-share', 'stop-speaking', 'end-call', 'expand']),
+    }),
+    res: z.object({}),
+  },
+  // Push channel: main → popout window with the latest call state.
+  'video:popout-state': {
+    req: z.object({
+      ttsState: z.enum(['idle', 'synthesizing', 'speaking']),
+      status: z.enum(['listening', 'thinking', 'speaking']).nullable(),
+      cameraOn: z.boolean(),
+      screenSharing: z.boolean(),
+      interimText: z.string().nullable(),
+    }),
+    res: z.null(),
+  },
+  // Push channel: main → app window with a popout control-bar action.
+  'video:popout-action': {
+    req: z.object({
+      action: z.enum(['toggle-camera', 'toggle-share', 'stop-speaking', 'end-call', 'expand']),
+    }),
+    res: z.null(),
   },
   'meeting:checkScreenPermission': {
     req: z.null(),

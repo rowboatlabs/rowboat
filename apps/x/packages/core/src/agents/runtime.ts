@@ -337,6 +337,9 @@ export interface ComposeSystemInstructionsInput {
     searchEnabled: boolean;
     codeMode: 'claude' | 'codex' | null;
     codeCwd: string | null;
+    // Optional so legacy callers (old streamAgent path) are unaffected.
+    videoMode?: boolean;
+    coachMode?: boolean;
 }
 
 // System-prompt assembly, extracted verbatim from streamAgent so the new turn
@@ -351,6 +354,8 @@ export function composeSystemInstructions({
     searchEnabled,
     codeMode,
     codeCwd,
+    videoMode,
+    coachMode,
 }: ComposeSystemInstructionsInput): string {
     let instructionsWithDateTime = `${instructions}\n\n${USER_CONTEXT_SYSTEM_INSTRUCTIONS}`;
         if (agentNotesContext) {
@@ -378,6 +383,43 @@ Do not announce the work directory unless it's relevant. Just use it.`;
         }
         if (voiceInput) {
             instructionsWithDateTime += `\n\n# Voice Input\nThe user's message was transcribed from speech. Be aware that:\n- There may be transcription errors. Silently correct obvious ones (e.g. homophones, misheard words). If an error is genuinely ambiguous, briefly mention your interpretation (e.g. "I'm assuming you meant X").\n- Spoken messages are often long-winded. The user may ramble, repeat themselves, or correct something they said earlier in the same message. Focus on their final intent, not every word verbatim.`;
+        }
+        if (videoMode) {
+            instructionsWithDateTime += `\n\n# Video Mode (Live Camera)
+The user has turned on video mode: their webcam is on, and their messages arrive with a series of live webcam frames (ordered oldest to newest) captured while they were speaking or typing. The frames are a live view of the user themselves — not a document or file to analyze.
+
+How to use the frames:
+- Use them for what visual awareness genuinely adds: the user's expressions, body language, posture, gestures, eye contact with the camera, visible energy, anything they hold up to the camera, and their surroundings when relevant.
+- Compare across frames to notice change over time within a message (e.g. increasingly slouched, started smiling, looked away for most of the message).
+- When the user practices something performative (a pitch, presentation, interview, talk) or asks for delivery feedback, give specific, actionable coaching grounded in what you actually see — cite concrete observations ("in the last few frames you looked down and away from the camera") rather than generic advice. Cover posture, eye contact, facial expressiveness, gesturing, and visible energy.
+- If they show something to the camera (an object, document, whiteboard), read or describe it and respond accordingly.
+
+Driving the app:
+- You can control the Rowboat app the user is looking at via the app-navigation tool (load the app-navigation skill first): open views, READ a view's contents as data (emails, background agents, chat history), and open specific items on their screen.
+- When the user asks about anything that lives inside Rowboat ("what emails do I have?", "what agents are running?", "open the one from Arjun"), prefer driving over describing: read-view shows the view on their screen while returning its data, then answer out loud briefly; open-item when they pick one. Narrate as you act ("pulling up your inbox…"). Reading a view's data beats squinting at screen-share frames — it's exact.
+
+Screen sharing:
+- The user may also share their screen. Screen-share frames arrive in a separately labeled group after the webcam frames; they show the user's screen, not the user.
+- When screen frames are present, treat them as the primary subject: the user is usually asking about, or working on, what's visible there. Read the screen carefully — code, documents, error messages, UI state — and help with it concretely.
+- The LAST screen frame is the most current view of their screen; earlier ones show how it changed while they spoke.
+- Frames are downscaled captures: small text may be hard to read. If something crucial is illegible, say what you need ("zoom into the error message" / "make that panel bigger") rather than guessing.
+
+Etiquette:
+- Do not narrate or list what you see in every response. Bring up visual observations only when relevant to the user's request or clearly worth mentioning.
+- Never comment on the user's physical appearance, attractiveness, or personal attributes — visual feedback is strictly about delivery, expression, and body language.
+- Frames are periodic snapshots, not continuous video; moments between frames are missing. Don't claim certainty about motion you couldn't have seen.`;
+        }
+        if (coachMode) {
+            instructionsWithDateTime += `\n\n# Practice Session (Coach Mode)
+The user started a practice session: they are rehearsing something performative — a pitch, presentation, interview answer, or talk — and want live coaching. You are their coach for this session.
+
+How to coach:
+- Watch and listen for delivery: pacing, filler words, rambling, structure, and (from the webcam frames) posture, eye contact with the camera, facial expressiveness, gesturing, and visible energy.
+- After each take or answer, give brief, specific, actionable feedback: 2-3 concrete observations, quoting what you actually saw or heard ("you looked down during the ask", "the opening 'um, so, basically' undercuts your hook"). Then let them go again.
+- If they are clearly mid-flow, keep any interjection to one short sentence — or stay silent and save it for the break.
+- Ask what they're practicing for at the start if it isn't obvious (investor pitch? interview? conference talk?) and tailor feedback to that audience.
+- When they say they're done or wrap up, give a structured debrief: what's working, the top 3 things to improve, and one concrete drill or reframe to try next time.
+- Be encouraging but honest — vague praise wastes their rehearsal time. Never comment on physical appearance; delivery, expression, and body language only.`;
         }
         if (voiceOutput === 'summary') {
             instructionsWithDateTime += `\n\n# Voice Output (MANDATORY — READ THIS FIRST)\nThe user has voice output enabled. THIS IS YOUR #1 PRIORITY: you MUST start your response with <voice></voice> tags. If your response does not begin with <voice> tags, the user will hear nothing — which is a broken experience. NEVER skip this.\n\nRules:\n1. YOUR VERY FIRST OUTPUT MUST BE A <voice> TAG. No exceptions. Do not start with markdown, headings, or any other text. The literal first characters of your response must be "<voice>".\n2. Place ALL <voice> tags at the BEGINNING of your response, before any detailed content. Do NOT intersperse <voice> tags throughout the response.\n3. Wrap EACH spoken sentence in its own separate <voice> tag so it can be spoken incrementally. Do NOT wrap everything in a single <voice> block.\n4. Use voice as a TL;DR and navigation aid — do NOT read the entire response aloud.\n5. After all <voice> tags, you may include detailed written content (markdown, tables, code, etc.) that will be shown visually but not spoken.\n\n## Examples\n\nExample 1 — User asks: "what happened in my meeting with Alex yesterday?"\n\n<voice>Your meeting with Alex covered three main things: the Q2 roadmap timeline, hiring for the backend role, and the client demo next week.</voice>\n<voice>I've pulled out the key details and action items below — the demo prep notes are at the end.</voice>\n\n## Meeting with Alex — March 11\n### Roadmap\n- Agreed to push Q2 launch to April 15...\n(detailed written content continues)\n\nExample 2 — User asks: "summarize my emails"\n\n<voice>You have five new emails since this morning.</voice>\n<voice>Two are from your team — Jordan sent the RFC you requested and Taylor flagged a contract issue.</voice>\n<voice>There's also a warm intro from a VC partner connecting you with someone at a prospective customer.</voice>\n<voice>I've drafted responses for three of them. The details and drafts are below.</voice>\n\n(email blocks, tables, and detailed content follow)\n\nExample 3 — User asks: "what's on my calendar today?"\n\n<voice>You've got a pretty packed day — seven meetings starting with standup at 9.</voice>\n<voice>The big ones are your investor call at 11, lunch with a partner from your lead VC at 12:30, and a customer call at 4.</voice>\n<voice>Your only free block for deep work is 2:30 to 4.</voice>\n\n(calendar block with full event details follows)\n\nExample 4 — User asks: "draft an email to Sam with our metrics"\n\n<voice>Done — I've drafted the email to Sam with your latest WAU and churn numbers.</voice>\n<voice>Take a look at the draft below and send it when you're ready.</voice>\n\n(email block with draft follows)\n\nREMEMBER: If you do not start with <voice> tags, the user hears silence. Always speak first, then write.`;
@@ -942,15 +984,27 @@ export function convertFromMessages(messages: z.infer<typeof Message>[]): ModelM
                         providerOptions,
                     });
                 } else {
-                    // New content parts array — collapse to text for LLM
+                    // New content parts array — collapse text/attachments to text
+                    // for the LLM; inline image parts (video-mode webcam and
+                    // screen-share frames) are passed through as real multimodal
+                    // image parts, grouped under labeled text headers so the
+                    // model knows which images show the user vs their screen.
                     const textSegments: string[] = userMessageContextPrefix ? [userMessageContextPrefix] : [];
                     const attachmentLines: string[] = [];
+                    type EncodedImagePart = { type: "image"; image: string; mediaType: string };
+                    const cameraParts: EncodedImagePart[] = [];
+                    const screenParts: EncodedImagePart[] = [];
+                    const frameTimes: string[] = [];
 
                     for (const part of msg.content) {
                         if (part.type === "attachment") {
                             const sizeStr = part.size ? `, ${formatBytes(part.size)}` : '';
                             const lineStr = part.lineNumber ? ` (line ${part.lineNumber})` : '';
                             attachmentLines.push(`- ${part.filename} (${part.mimeType}${sizeStr}) at ${part.path}${lineStr}`);
+                        } else if (part.type === "image") {
+                            const target = part.source === "screen" ? screenParts : cameraParts;
+                            target.push({ type: "image", image: part.data, mediaType: part.mediaType });
+                            if (part.capturedAt) frameTimes.push(part.capturedAt);
                         } else {
                             textSegments.push(part.text);
                         }
@@ -964,11 +1018,38 @@ export function convertFromMessages(messages: z.infer<typeof Message>[]): ModelM
                         }
                     }
 
-                    result.push({
-                        role: "user",
-                        content: textSegments.join("\n"),
-                        providerOptions,
-                    });
+                    const imageCount = cameraParts.length + screenParts.length;
+                    if (imageCount > 0) {
+                        const span = frameTimes.length >= 2
+                            ? ` spanning ${frameTimes[0]} to ${frameTimes[frameTimes.length - 1]}`
+                            : frameTimes.length === 1
+                                ? ` captured at ${frameTimes[0]}`
+                                : '';
+                        const kinds: string[] = [];
+                        if (cameraParts.length > 0) kinds.push(`${cameraParts.length} live webcam frame${cameraParts.length === 1 ? '' : 's'} of the user`);
+                        if (screenParts.length > 0) kinds.push(`${screenParts.length} frame${screenParts.length === 1 ? '' : 's'} of the user's shared screen`);
+                        textSegments.push(`[Video mode: ${kinds.join(' and ')} attached below, each group oldest to newest,${span ? span + ',' : ''} recorded while they composed this message.]`);
+                        const content: Array<{ type: "text"; text: string } | EncodedImagePart> = [
+                            { type: "text", text: textSegments.join("\n") },
+                        ];
+                        if (cameraParts.length > 0) {
+                            content.push({ type: "text", text: "Webcam frames (oldest to newest):" }, ...cameraParts);
+                        }
+                        if (screenParts.length > 0) {
+                            content.push({ type: "text", text: "Screen-share frames (oldest to newest):" }, ...screenParts);
+                        }
+                        result.push({
+                            role: "user",
+                            content,
+                            providerOptions,
+                        });
+                    } else {
+                        result.push({
+                            role: "user",
+                            content: textSegments.join("\n"),
+                            providerOptions,
+                        });
+                    }
                 }
                 break;
             }

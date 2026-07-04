@@ -19,7 +19,35 @@ const DEEPGRAM_PARAMS = new URLSearchParams({
     endpointing: '100',
     no_delay: 'true',
 });
-const DEEPGRAM_LISTEN_URL = `wss://api.deepgram.com/v1/listen?${DEEPGRAM_PARAMS.toString()}`;
+// Hands-free (continuous) mode: Deepgram's endpoint fires FAST (600ms of
+// silence) and we apply smart hold logic on our side — if the transcript
+// already reads as a complete thought (terminal punctuation) the utterance
+// fires immediately, otherwise we hold INCOMPLETE_HOLD_MS longer in case the
+// user was mid-thought. Net effect: complete sentences turn around ~1.2s
+// faster than the old fixed 1800ms endpoint, while thinking pauses still get
+// the same total grace (~1.8s).
+const CONTINUOUS_ENDPOINTING_MS = 600;
+const INCOMPLETE_HOLD_MS = 1200;
+// While the mic is paused (assistant speaking), keep the idle Deepgram socket
+// alive — it closes after ~10s without audio otherwise.
+const KEEPALIVE_INTERVAL_MS = 5000;
+
+// Deepgram punctuates finals (punctuate=true) — a transcript ending in
+// terminal punctuation (optionally inside a closing quote/paren) is treated
+// as a complete thought.
+const COMPLETE_THOUGHT_RE = /[.!?…]["')\]]*\s*$/;
+
+function deepgramParams(continuous: boolean): URLSearchParams {
+    if (!continuous) return DEEPGRAM_PARAMS;
+    const params = new URLSearchParams(DEEPGRAM_PARAMS);
+    params.set('endpointing', String(CONTINUOUS_ENDPOINTING_MS));
+    // Second end-of-speech signal: speech_final can be missed (it often rides
+    // on a result with an empty transcript, or never fires when background
+    // noise keeps the endpointer engaged). UtteranceEnd is word-timing based
+    // and arrives as its own message type, so we listen for both.
+    params.set('utterance_end_ms', '1000');
+    return params;
+}
 
 // Cap on retained per-frame amplitude samples (~64ms/frame ⇒ ~5 min of history).
 // The waveform only ever displays the most recent window, so older samples are dropped.
@@ -53,6 +81,13 @@ export function useVoiceMode() {
     const audioLevelsRef = useRef<number[]>([]);
     // Running peak amplitude for the waveform auto-gain (see PEAK_DECAY/MIN_PEAK).
     const audioPeakRef = useRef(0);
+    // Hands-free mode: invoked with each completed utterance (speech_final).
+    const continuousCbRef = useRef<((text: string) => void) | null>(null);
+    // While true (assistant is speaking), mic audio is dropped instead of streamed.
+    const pausedRef = useRef(false);
+    const keepAliveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    // Pending mid-thought hold (smart endpointing) — see maybeEndUtterance.
+    const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // Refresh cached auth details (called on warmup, not on mic click)
     const refreshAuth = useCallback(async () => {
@@ -71,9 +106,44 @@ export function useVoiceMode() {
         }
     }, [refreshRowboatAccount]);
 
+    // Hands-free mode: flush the accumulated utterance to the callback.
+    // Both end-of-speech signals may fire for the same utterance — the second
+    // finds an empty buffer and is a no-op.
+    const fireContinuousUtterance = useCallback(() => {
+        if (holdTimerRef.current) {
+            clearTimeout(holdTimerRef.current);
+            holdTimerRef.current = null;
+        }
+        if (!continuousCbRef.current || pausedRef.current) return;
+        const utterance = transcriptBufferRef.current.trim();
+        transcriptBufferRef.current = '';
+        interimRef.current = '';
+        setInterimText('');
+        if (utterance) continuousCbRef.current(utterance);
+    }, []);
+
+    // Smart endpoint: Deepgram's endpoint fires fast (600ms). If the
+    // transcript reads as a complete thought, hand it off immediately; if it
+    // trails off mid-sentence ("so what I want is…"), hold a little longer —
+    // resumed speech cancels the hold and the utterance keeps growing.
+    const maybeEndUtterance = useCallback(() => {
+        if (!continuousCbRef.current || pausedRef.current) return;
+        const buffered = transcriptBufferRef.current.trim();
+        if (!buffered) return;
+        if (COMPLETE_THOUGHT_RE.test(buffered)) {
+            fireContinuousUtterance();
+            return;
+        }
+        if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+        holdTimerRef.current = setTimeout(() => {
+            holdTimerRef.current = null;
+            fireContinuousUtterance();
+        }, INCOMPLETE_HOLD_MS);
+    }, [fireContinuousUtterance]);
+
     // Create and connect a Deepgram WebSocket using cached auth.
     // Starts the connection and returns immediately (does not wait for open).
-    const connectWs = useCallback(async () => {
+    const connectWs = useCallback(async (continuous = false) => {
         if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) return;
 
         // Refresh auth if we don't have it cached yet
@@ -82,12 +152,13 @@ export function useVoiceMode() {
         }
         if (!cachedAuth) return;
 
+        const params = deepgramParams(continuous);
         let ws: WebSocket;
         if (cachedAuth.type === 'rowboat') {
-            const listenUrl = buildDeepgramListenUrl(cachedAuth.url, DEEPGRAM_PARAMS);
+            const listenUrl = buildDeepgramListenUrl(cachedAuth.url, params);
             ws = new WebSocket(listenUrl, ['bearer', cachedAuth.token]);
         } else {
-            ws = new WebSocket(DEEPGRAM_LISTEN_URL, ['token', cachedAuth.apiKey]);
+            ws = new WebSocket(`wss://api.deepgram.com/v1/listen?${params.toString()}`, ['token', cachedAuth.apiKey]);
         }
         wsRef.current = ws;
 
@@ -103,16 +174,43 @@ export function useVoiceMode() {
 
         ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
-            if (!data.channel?.alternatives?.[0]) return;
 
+            // Hands-free mode: word-timing based end-of-speech marker.
+            if (data.type === 'UtteranceEnd') {
+                maybeEndUtterance();
+                return;
+            }
+
+            if (!data.channel?.alternatives?.[0]) return;
             const transcript = data.channel.alternatives[0].transcript;
-            if (!transcript) return;
+
+            // The user resumed speaking — cancel any pending mid-thought hold
+            // so the utterance keeps growing instead of firing under them.
+            if (transcript && holdTimerRef.current) {
+                clearTimeout(holdTimerRef.current);
+                holdTimerRef.current = null;
+            }
 
             if (data.is_final) {
-                transcriptBufferRef.current += (transcriptBufferRef.current ? ' ' : '') + transcript;
-                interimRef.current = '';
-                setInterimText(transcriptBufferRef.current);
-            } else {
+                // NOTE: the endpoint marker (speech_final) usually arrives on a
+                // result whose transcript is EMPTY — the silence after the user
+                // stops talking. Empty finals must still reach the speech_final
+                // check below or hands-free utterances never complete.
+                if (transcript) {
+                    transcriptBufferRef.current += (transcriptBufferRef.current ? ' ' : '') + transcript;
+                    interimRef.current = '';
+                }
+                // Hands-free mode: an endpoint may complete the utterance —
+                // immediately for complete thoughts, after a short hold for
+                // mid-sentence trails.
+                if (continuousCbRef.current && data.speech_final) {
+                    maybeEndUtterance();
+                    return;
+                }
+                if (transcript) {
+                    setInterimText(transcriptBufferRef.current);
+                }
+            } else if (transcript) {
                 interimRef.current = transcript;
                 setInterimText(transcriptBufferRef.current + (transcriptBufferRef.current ? ' ' : '') + transcript);
             }
@@ -127,8 +225,17 @@ export function useVoiceMode() {
         ws.onclose = () => {
             console.log('[voice] WebSocket closed');
             wsRef.current = null;
+            // A hands-free call is long-lived — if the socket drops while the
+            // call is still on, reconnect instead of silently going deaf.
+            if (continuousCbRef.current) {
+                setTimeout(() => {
+                    if (continuousCbRef.current && !wsRef.current) {
+                        void connectWs(true);
+                    }
+                }, 1000);
+            }
         };
-    }, [refreshAuth]);
+    }, [refreshAuth, maybeEndUtterance]);
 
     const waitForWsOpen = useCallback(async (timeoutMs = 1500): Promise<boolean> => {
         const ws = wsRef.current;
@@ -191,6 +298,16 @@ export function useVoiceMode() {
             wsRef.current.close();
             wsRef.current = null;
         }
+        continuousCbRef.current = null;
+        pausedRef.current = false;
+        if (holdTimerRef.current) {
+            clearTimeout(holdTimerRef.current);
+            holdTimerRef.current = null;
+        }
+        if (keepAliveTimerRef.current) {
+            clearInterval(keepAliveTimerRef.current);
+            keepAliveTimerRef.current = null;
+        }
         audioBufferRef.current = [];
         audioLevelsRef.current = [];
         audioPeakRef.current = 0;
@@ -200,7 +317,7 @@ export function useVoiceMode() {
         setState('idle');
     }, [stopInputCapture]);
 
-    const start = useCallback(async () => {
+    const start = useCallback(async (continuous = false) => {
         if (state !== 'idle') return;
 
         transcriptBufferRef.current = '';
@@ -235,7 +352,7 @@ export function useVoiceMode() {
                 console.error('Microphone access denied:', err);
                 return null;
             }),
-            connectWs(),
+            connectWs(continuous),
         ]);
 
         if (!stream) {
@@ -259,6 +376,9 @@ export function useVoiceMode() {
         processorRef.current = processor;
 
         processor.onaudioprocess = (e) => {
+            // Paused (assistant is speaking in a call): drop mic audio so the
+            // assistant's own TTS never gets transcribed back at it.
+            if (pausedRef.current) return;
             const float32 = e.inputBuffer.getChannelData(0);
             const int16 = new Int16Array(float32.length);
             let sumSquares = 0;
@@ -283,8 +403,13 @@ export function useVoiceMode() {
             if (wsRef.current?.readyState === WebSocket.OPEN) {
                 wsRef.current.send(buffer);
             } else {
-                // WebSocket still connecting — buffer the audio
+                // WebSocket still connecting (or reconnecting mid-call) —
+                // buffer the audio, bounded so an unreachable server during a
+                // long call can't grow it without limit (~30s at 64ms/chunk).
                 audioBufferRef.current.push(buffer);
+                if (audioBufferRef.current.length > 500) {
+                    audioBufferRef.current.shift();
+                }
             }
         };
 
@@ -318,10 +443,46 @@ export function useVoiceMode() {
         stopAudioCapture();
     }, [stopAudioCapture]);
 
+    /**
+     * Hands-free (call) mode: listen continuously and invoke `onUtterance`
+     * with each completed utterance. Runs until cancel()/stop.
+     */
+    const startContinuous = useCallback(async (onUtterance: (text: string) => void) => {
+        continuousCbRef.current = onUtterance;
+        await start(true);
+    }, [start]);
+
+    /**
+     * Mute/unmute the continuous stream (used while the assistant is
+     * thinking/speaking). Keeps the Deepgram socket alive with KeepAlives and
+     * discards any half-heard utterance from before the pause.
+     */
+    const setPaused = useCallback((paused: boolean) => {
+        if (pausedRef.current === paused) return;
+        pausedRef.current = paused;
+        if (paused) {
+            if (holdTimerRef.current) {
+                clearTimeout(holdTimerRef.current);
+                holdTimerRef.current = null;
+            }
+            transcriptBufferRef.current = '';
+            interimRef.current = '';
+            setInterimText('');
+            keepAliveTimerRef.current = setInterval(() => {
+                if (wsRef.current?.readyState === WebSocket.OPEN) {
+                    wsRef.current.send(JSON.stringify({ type: 'KeepAlive' }));
+                }
+            }, KEEPALIVE_INTERVAL_MS);
+        } else if (keepAliveTimerRef.current) {
+            clearInterval(keepAliveTimerRef.current);
+            keepAliveTimerRef.current = null;
+        }
+    }, []);
+
     /** Pre-cache auth details so mic click skips IPC round-trips */
     const warmup = useCallback(() => {
         refreshAuth().catch(() => {});
     }, [refreshAuth]);
 
-    return { state, interimText, audioLevelsRef, start, submit, cancel, warmup };
+    return { state, interimText, audioLevelsRef, start, submit, cancel, warmup, startContinuous, setPaused };
 }

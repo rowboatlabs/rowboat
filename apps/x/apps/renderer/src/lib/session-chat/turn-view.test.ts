@@ -96,6 +96,25 @@ describe('voice output', () => {
     expect(overlay.voiceSegments).toEqual(['hello there', 'bye'])
   })
 
+  it('emits an early clause from a long open block, then the remainder on close', () => {
+    let overlay = emptyOverlay()
+    const longClause = 'Okay so the first thing I would look at here is the error message,'
+    overlay = applyOverlay(overlay, delta(`<voice>${longClause} because`))
+    // Open block crossed the early-speech threshold at a clause boundary.
+    expect(overlay.voiceSegments).toEqual([longClause])
+    overlay = applyOverlay(overlay, delta(' it tells you the root cause.</voice>'))
+    // Remainder only — the early clause is not repeated.
+    expect(overlay.voiceSegments).toEqual([longClause, 'because it tells you the root cause.'])
+  })
+
+  it('does not emit early clauses from short open blocks', () => {
+    let overlay = emptyOverlay()
+    overlay = applyOverlay(overlay, delta('<voice>Sure, one sec'))
+    expect(overlay.voiceSegments).toEqual([])
+    overlay = applyOverlay(overlay, delta('.</voice>'))
+    expect(overlay.voiceSegments).toEqual(['Sure, one sec.'])
+  })
+
   it('keeps segments but resets the scan on model_call_completed', () => {
     let overlay = emptyOverlay()
     overlay = applyOverlay(overlay, delta('<voice>one</voice>'))
