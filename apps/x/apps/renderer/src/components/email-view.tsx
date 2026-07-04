@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Archive, Bold, CheckCheck, Forward, Italic, Link as LinkIcon, List, ListOrdered, LoaderIcon, Mail, Paperclip, Quote, Redo2, RefreshCw, Reply, ReplyAll, Search, Send, Sparkles, SquarePen, Strikethrough, Trash2, Undo2, X } from 'lucide-react'
+import { Archive, Bold, CheckCheck, Forward, Italic, Link as LinkIcon, List, ListOrdered, LoaderIcon, Mail, Paperclip, Quote, Redo2, RefreshCw, Reply, ReplyAll, Search, Send, Sparkles, SquarePen, Star, StarOff, Strikethrough, Trash2, Undo2, X } from 'lucide-react'
 import { useEditor, EditorContent, type Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
@@ -2149,10 +2149,12 @@ const ThreadRow = memo(function ThreadRow({
   isMounted,
   isLeaving,
   keysDisabled,
+  section,
   onToggle,
   onMarkRead,
   onArchive,
   onTrash,
+  onSetImportance,
   onHoverIn,
   onHoverOut,
   onCloseThread,
@@ -2164,10 +2166,13 @@ const ThreadRow = memo(function ThreadRow({
   isMounted: boolean
   isLeaving: boolean
   keysDisabled: boolean
+  /** Which inbox section the row is rendered in; null hides the importance toggle (e.g. search results). */
+  section: 'important' | 'other' | null
   onToggle: (thread: GmailThread) => void
   onMarkRead: (threadId: string, read?: boolean) => Promise<void>
   onArchive: (threadId: string) => Promise<void>
   onTrash: (threadId: string) => Promise<void>
+  onSetImportance: (threadId: string, importance: 'important' | 'other') => Promise<void>
   onHoverIn: (thread: GmailThread) => void
   onHoverOut: () => void
   onCloseThread: () => void
@@ -2200,6 +2205,17 @@ const ThreadRow = memo(function ThreadRow({
           <span className="gmail-row-date">{formatInboxTime(latest?.date || thread.date)}</span>
         </button>
         <div className="gmail-row-actions" onMouseDown={stop} onClick={stop}>
+          {section && (
+            <button
+              type="button"
+              className="gmail-row-action"
+              title={section === 'important' ? 'Not important — teach the classifier' : 'Important — teach the classifier'}
+              aria-label={section === 'important' ? 'Mark as not important' : 'Mark as important'}
+              onClick={(e) => { stop(e); void onSetImportance(thread.threadId, section === 'important' ? 'other' : 'important') }}
+            >
+              {section === 'important' ? <StarOff size={15} /> : <Star size={15} />}
+            </button>
+          )}
           <button
             type="button"
             className="gmail-row-action"
@@ -2297,6 +2313,7 @@ function ShortcutsHelpDialog({ open, onOpenChange }: { open: boolean; onOpenChan
             <ShortcutRow combo={['E']} label="Archive" />
             <ShortcutRow combo={['#']} label="Move to trash" />
             <ShortcutRow combo={['U']} label="Mark read / unread" />
+            <ShortcutRow combo={['I']} label="Toggle important (teaches the classifier)" />
             <ShortcutRow combo={['C']} alt={['N']} label="New message" />
             <ShortcutRow combo={['/']} label="Search" />
             <ShortcutRow combo={['G', 'I']} label="Go to inbox" />
@@ -2589,6 +2606,37 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
       markLeaving(threadId, false)
     }
   }, [removeThreadFromState, markLeaving])
+
+  // User flips a thread's verdict: sticky on the thread + recorded as a
+  // correction the importance classifier learns from. The row slides out of
+  // its current section and lands on top of the other one.
+  const setImportanceAction = useCallback(async (threadId: string, importance: 'important' | 'other') => {
+    const source = [...important.threads, ...other.threads].find((t) => t.threadId === threadId)
+    markLeaving(threadId, true)
+    try {
+      const [result] = await Promise.all([
+        window.ipc.invoke('gmail:setImportance', { threadId, importance }),
+        new Promise((resolve) => window.setTimeout(resolve, ROW_LEAVE_MS)),
+      ])
+      if (result.ok) {
+        const from = importance === 'important' ? 'other' as const : 'important' as const
+        setSection(from, (prev) => ({ ...prev, threads: prev.threads.filter((t) => t.threadId !== threadId) }))
+        if (source) {
+          setSection(importance, (prev) => ({
+            ...prev,
+            threads: [source, ...prev.threads.filter((t) => t.threadId !== threadId)],
+          }))
+        }
+        toast(importance === 'important' ? 'Marked important — noted for future emails.' : 'Marked not important — noted for future emails.', 'success')
+      } else if (result.error) {
+        toast(`Could not update importance: ${result.error}`, 'error')
+      }
+    } catch (err) {
+      toast(`Could not update importance: ${err instanceof Error ? err.message : String(err)}`, 'error')
+    } finally {
+      markLeaving(threadId, false)
+    }
+  }, [important.threads, other.threads, markLeaving, setSection])
 
   const trashThreadAction = useCallback(async (threadId: string) => {
     markLeaving(threadId, true)
@@ -3102,7 +3150,8 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
           return
         case 'e':
         case '#':
-        case 'u': {
+        case 'u':
+        case 'i': {
           if (listMode === 'drafts') return // drafts have no archive/trash/read state
           // The open thread takes precedence over the cursor.
           const targetId = selectedThreadId ?? (focusedIndex >= 0 ? visibleList[focusedIndex]?.threadId : undefined)
@@ -3111,6 +3160,10 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
           e.preventDefault()
           if (e.key === 'u') void markThreadReadAction(target.threadId, target.unread === true)
           else if (e.key === 'e') void archiveThreadAction(target.threadId)
+          else if (e.key === 'i') {
+            const isImportant = important.threads.some((t) => t.threadId === target.threadId)
+            void setImportanceAction(target.threadId, isImportant ? 'other' : 'important')
+          }
           else void trashThreadAction(target.threadId)
           return
         }
@@ -3121,7 +3174,7 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
   }, [
     visibleList, focusedThreadId, selectedThreadId, query, listMode, anyModalOpen,
     activeThreadComposing, rowIdOf, toggleThread, markThreadReadAction,
-    archiveThreadAction, trashThreadAction,
+    archiveThreadAction, trashThreadAction, setImportanceAction, important.threads,
   ])
 
   const hasAny = important.threads.length > 0 || other.threads.length > 0
@@ -3131,7 +3184,7 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
 
   const closeThread = useCallback(() => setSelectedThreadId(null), [])
 
-  const renderRow = (thread: GmailThread) => {
+  const renderRow = (thread: GmailThread, section: 'important' | 'other' | null = null) => {
     const isMounted = openedThreadIds.includes(thread.threadId)
     return (
       <ThreadRow
@@ -3142,10 +3195,12 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
         isMounted={isMounted}
         isLeaving={leavingThreadIds.has(thread.threadId)}
         keysDisabled={isMounted && anyModalOpen}
+        section={section}
         onToggle={toggleThread}
         onMarkRead={markThreadReadAction}
         onArchive={archiveThreadAction}
         onTrash={trashThreadAction}
+        onSetImportance={setImportanceAction}
         onHoverIn={scheduleHoverPrefetch}
         onHoverOut={cancelHoverPrefetch}
         onCloseThread={closeThread}
@@ -3260,7 +3315,7 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
                   <span>Search results</span>
                   <span>{searchResults.length} thread{searchResults.length === 1 ? '' : 's'}</span>
                 </div>
-                {searchResults.map(renderRow)}
+                {searchResults.map((t) => renderRow(t))}
               </section>
             </div>
           ) : (
@@ -3298,7 +3353,7 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
                     {important.threads.length}{important.hasReachedEnd ? '' : '+'} thread{important.threads.length === 1 ? '' : 's'}
                   </span>
                 </div>
-                {visibleImportant.map(renderRow)}
+                {visibleImportant.map((t) => renderRow(t, 'important'))}
                 {!important.hasReachedEnd && (
                   <SectionSentinel
                     disabled={important.loadingPage || important.hasReachedEnd}
@@ -3316,7 +3371,7 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
                     {other.threads.length}{other.hasReachedEnd ? '' : '+'} thread{other.threads.length === 1 ? '' : 's'}
                   </span>
                 </div>
-                {visibleOther.map(renderRow)}
+                {visibleOther.map((t) => renderRow(t, 'other'))}
                 {!other.hasReachedEnd && (
                   <SectionSentinel
                     disabled={other.loadingPage || other.hasReachedEnd}

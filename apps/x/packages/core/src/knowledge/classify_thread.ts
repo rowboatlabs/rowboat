@@ -14,6 +14,7 @@ import {
 import { captureLlmUsage } from '../analytics/usage.js';
 import { withUseCase } from '../analytics/use_case.js';
 import type { GmailThreadSnapshot } from './sync_gmail.js';
+import { formatImportanceFeedbackForPrompt, maybeDistillImportanceRules } from './email_importance_feedback.js';
 
 const STYLE_GUIDE_PATH = path.join(WorkDir, 'knowledge', 'Agent Notes', 'style', 'email.md');
 const CALENDAR_DIR = path.join(WorkDir, 'calendar_sync');
@@ -229,14 +230,25 @@ export async function classifyThread(
         const styleGuide = readEmailStyleGuide();
         const calendar = readUpcomingCalendar();
 
+        // Opportunistically distill accumulated user corrections into rules
+        // (no-ops unless enough new corrections exist).
+        await maybeDistillImportanceRules();
+
         const modelId = await getKgModel();
         const { provider } = await getDefaultModelAndProvider();
         const config = await resolveProviderConfig(provider);
         const model = createProvider(config).languageModel(modelId);
 
-        const systemPrompt = options.skipDraft
+        let systemPrompt = options.skipDraft
             ? `${SYSTEM_PROMPT}\n\n# Skip the draft\n\nThe user already has their own draft in progress for this thread — DO NOT generate a draftResponse. Always omit the draftResponse field.`
             : SYSTEM_PROMPT;
+
+        // The user's learned importance preferences override the generic
+        // criteria — appended last so they take precedence.
+        const feedback = formatImportanceFeedbackForPrompt();
+        if (feedback) {
+            systemPrompt = `${systemPrompt}\n\n${feedback}`;
+        }
 
         const result = await withUseCase({ useCase: 'knowledge_sync', subUseCase: 'email_classifier' }, () => generateObject({
             model,

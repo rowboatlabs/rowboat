@@ -284,6 +284,31 @@ export function buildOwnerBlock(): string {
 }
 
 /**
+ * Compute the Email Reply Gate mechanically and stamp the verdict on each email
+ * source. The gate ("cold inbound never creates notes") is the single most
+ * important selectivity rule, and leaving it to the model's judgment proved
+ * unreliable — 7 of 14 notes in one test corpus came from unanswered cold
+ * outreach. Code decides "did the user's side ever send a message in this
+ * thread"; the model only decides what the reply *means*.
+ */
+export function emailReplyGateBanner(filePath: string, content: string): string | null {
+    // Only email sources have the ### From: thread structure.
+    if (!filePath.split(path.sep).includes('gmail_sync')) return null;
+    const user = loadUserConfig();
+    if (!user?.email) return null;
+    const email = user.email.toLowerCase();
+    const domainRaw = (user.domain ?? email.split('@')[1] ?? '').toLowerCase();
+    // On a free-mail domain, same-domain senders are strangers, not teammates.
+    const teamDomain = domainRaw && !FREE_MAIL_DOMAINS.has(domainRaw) ? '@' + domainRaw : null;
+    const froms = [...content.matchAll(/^### From: (.+)$/gm)].map(m => m[1].toLowerCase());
+    if (froms.length === 0) return null;
+    const replied = froms.some(f => f.includes(email) || (teamDomain !== null && f.includes(teamDomain)));
+    return replied
+        ? `> **REPLY-GATE (computed by the system, authoritative): the user HAS sent a message in this thread.** New People/Organization notes are allowed IF the user's reply shows real engagement AND the other gates pass. A decline, brush-off, or unsubscribe-style reply ("not interested", "please remove me", a bare "no thanks") is NOT engagement — treat those threads like purely inbound ones.`
+        : `> **REPLY-GATE (computed by the system, authoritative): the user has NOT sent any message in this thread — purely inbound.** You MUST NOT create any new People or Organization note from this file, no matter how important the sender sounds. Allowed: updating notes that already exist, and suggestion cards in suggested-topics.md. Sole exception: a calendar invite for a real 1:1/small-group meeting scheduled with the user by name.`;
+}
+
+/**
  * Run note creation agent on a batch of files to extract entities and create/update notes
  */
 async function createNotesFromBatch(
@@ -328,6 +353,10 @@ async function createNotesFromBatch(
         // Pass workspace-relative path so the agent can link back to meeting notes
         const relativePath = path.relative(WorkDir, file.path);
         message += `## Source File ${idx + 1}: ${relativePath}\n\n`;
+        const gateBanner = emailReplyGateBanner(file.path, file.content);
+        if (gateBanner) {
+            message += gateBanner + `\n\n`;
+        }
         message += file.content;
         message += `\n\n---\n\n`;
     });

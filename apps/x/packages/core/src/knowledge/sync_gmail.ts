@@ -10,6 +10,7 @@ import { serviceLogger, type ServiceRunContext } from '../services/service_logge
 import { limitEventItems } from './limit_event_items.js';
 import { createEvent } from '../events/producer.js';
 import { classifyThread, getUserEmail } from './classify_thread.js';
+import { recordImportanceCorrection } from './email_importance_feedback.js';
 import { notifyIfEnabled } from '../application/notification/notifier.js';
 
 // Configuration
@@ -76,6 +77,40 @@ function writeCachedSnapshot(threadId: string, historyId: string, snapshot: Gmai
     } catch (err) {
         console.warn(`[Gmail cache] write failed for ${threadId}:`, err);
     }
+}
+
+/**
+ * User explicitly flips a thread's importance in the UI. Two effects:
+ *  1. The verdict is applied to the cached snapshot and marked sticky
+ *     (importanceSource: 'user') so re-classification never overrides it.
+ *  2. The disagreement is recorded as a correction the classifier learns from
+ *     (few-shot + distilled rules) for FUTURE threads.
+ */
+export function setThreadImportance(
+    threadId: string,
+    importance: 'important' | 'other',
+): { success: boolean; previous?: 'important' | 'other'; error?: string } {
+    const cached = readCachedSnapshot(threadId);
+    if (!cached) {
+        return { success: false, error: `No inbox entry found for thread ${threadId}` };
+    }
+    const previous = cached.snapshot.importance === 'other' ? 'other' as const : 'important' as const;
+    cached.snapshot.importance = importance;
+    cached.snapshot.importanceSource = 'user';
+    try {
+        fs.writeFileSync(cachePath(threadId), JSON.stringify(cached), 'utf-8');
+    } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+    recordImportanceCorrection({
+        threadId,
+        subject: cached.snapshot.subject || '(no subject)',
+        from: cached.snapshot.from || 'unknown',
+        agentVerdict: previous,
+        userVerdict: importance,
+        at: new Date().toISOString(),
+    });
+    return { success: true, previous };
 }
 
 export function saveMessageBodyHeight(threadId: string, messageId: string, height: number): void {
@@ -208,6 +243,8 @@ export interface GmailThreadSnapshot {
     past_summary?: string;
     unread?: boolean;
     importance?: 'important' | 'other';
+    /** 'user' when the user explicitly set importance in the UI — sticky; re-classification never overrides it. */
+    importanceSource?: 'user';
     draft_response?: string;
     gmail_draft?: string;
     /** Gmail-side draft id, present on entries from listDraftThreads. */
@@ -849,6 +886,12 @@ async function buildAndCacheSnapshot(
     const snapshot = await parseThreadSnapshot(threadId, threadData, gmailClient);
     if (!snapshot) return null;
 
+    // The user's explicit verdict on this thread is sticky — carry it over and
+    // skip nothing else (summary/draft still refresh below).
+    const userOverride = cached?.snapshot.importanceSource === 'user'
+        ? cached.snapshot.importance
+        : undefined;
+
     try {
         const userEmail = await getUserEmail(auth);
         const skipDraft = (snapshot.gmail_draft?.length ?? 0) > 0;
@@ -861,6 +904,11 @@ async function buildAndCacheSnapshot(
         }
     } catch (err) {
         console.warn(`[Gmail] classify failed for ${threadId}:`, err);
+    }
+
+    if (userOverride) {
+        snapshot.importance = userOverride;
+        snapshot.importanceSource = 'user';
     }
 
     if (threadData.historyId) {
