@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Minimize2, MonitorUp, PhoneOff, Presentation, User, Video, VideoOff } from 'lucide-react'
+import { Minimize2, MonitorUp, PhoneOff, Presentation, Square, User, Video, VideoOff } from 'lucide-react'
 
 import { MascotFaceIcon, TalkingHead } from '@/components/talking-head'
 import type { TTSState } from '@/hooks/useVoiceTTS'
@@ -19,6 +19,8 @@ interface VideoCallViewProps {
   practiceMode?: boolean
   /** Shrink to the floating pill without touching any devices. */
   onMinimize: () => void
+  /** Stop the assistant: silence speech and abort the run if still going. */
+  onInterrupt: () => void
   ttsState: TTSState
   /** Live TTS output level — drives the mascot's mouth animation. */
   getTtsLevel: () => number
@@ -52,6 +54,7 @@ export function VideoCallView({
   onToggleScreenShare,
   practiceMode,
   onMinimize,
+  onInterrupt,
   ttsState,
   getTtsLevel,
   status,
@@ -147,6 +150,18 @@ export function VideoCallView({
           <span className="absolute bottom-3 left-3 rounded-md bg-black/50 px-2 py-0.5 text-sm text-white">
             Rowboat
           </span>
+          {status !== 'listening' && (
+            <button
+              type="button"
+              onClick={onInterrupt}
+              className="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-md bg-red-600/90 px-2.5 py-1 text-sm font-medium text-white transition-colors hover:bg-red-500"
+              aria-label="Stop the assistant"
+              title={status === 'speaking' ? 'Stop speaking' : 'Stop responding'}
+            >
+              <Square className="h-3 w-3 fill-current" />
+              Stop
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setMascotVisible((v) => !v)}

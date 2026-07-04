@@ -1451,7 +1451,7 @@ const ipcSchemas = {
   // main app window (handled in the main process).
   'video:popoutAction': {
     req: z.object({
-      action: z.enum(['toggle-camera', 'toggle-share', 'end-call', 'expand']),
+      action: z.enum(['toggle-camera', 'toggle-share', 'stop-speaking', 'end-call', 'expand']),
     }),
     res: z.object({}),
   },
@@ -1469,7 +1469,7 @@ const ipcSchemas = {
   // Push channel: main → app window with a popout control-bar action.
   'video:popout-action': {
     req: z.object({
-      action: z.enum(['toggle-camera', 'toggle-share', 'end-call', 'expand']),
+      action: z.enum(['toggle-camera', 'toggle-share', 'stop-speaking', 'end-call', 'expand']),
     }),
     res: z.null(),
   },

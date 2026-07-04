@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Maximize2, MonitorUp, PhoneOff, User, Video, VideoOff } from 'lucide-react'
+import { Maximize2, MonitorUp, PhoneOff, Square, User, Video, VideoOff } from 'lucide-react'
 
 import { TalkingHead } from '@/components/talking-head'
 
@@ -80,7 +80,7 @@ export function VideoPopout() {
   // so the mascot still animates while the assistant speaks in the main window.
   const getLevel = useCallback(() => 0.45 + 0.35 * Math.sin(performance.now() / 90), [])
 
-  const sendAction = useCallback((action: 'toggle-camera' | 'toggle-share' | 'end-call' | 'expand') => {
+  const sendAction = useCallback((action: 'toggle-camera' | 'toggle-share' | 'stop-speaking' | 'end-call' | 'expand') => {
     void window.ipc.invoke('video:popoutAction', { action }).catch(() => {})
   }, [])
 
@@ -130,6 +130,19 @@ export function VideoPopout() {
               <span className={`block h-1.5 w-1.5 rounded-full ${statusDisplay.dotClass}`} />
               {statusDisplay.label}
             </span>
+          )}
+          {(state.status === 'speaking' || state.status === 'thinking') && (
+            <button
+              type="button"
+              onClick={() => sendAction('stop-speaking')}
+              className="absolute bottom-1 right-1.5 flex items-center gap-1 rounded bg-red-600/90 px-1.5 py-0.5 text-[10px] font-medium text-white hover:bg-red-500"
+              style={noDragRegion}
+              aria-label="Stop the assistant"
+              title={state.status === 'speaking' ? 'Stop speaking' : 'Stop responding'}
+            >
+              <Square className="h-2.5 w-2.5 fill-current" />
+              Stop
+            </button>
           )}
         </div>
         {/* Live caption of the in-progress utterance, floating over the tiles */}

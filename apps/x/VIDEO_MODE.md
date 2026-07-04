@@ -46,7 +46,10 @@ never turns the coach on.
 
 In-call controls (identical bar on both surfaces): camera toggle (silhouette
 avatar while off, no webcam frames captured), screen share toggle, mascot ⇄
-"R" letter avatar, end call. Captions of the in-progress utterance and the
+"R" letter avatar, end call. While the assistant is thinking or speaking, a
+red **Stop** button appears on the mascot tile — it silences TTS instantly,
+skips queued voice segments, and aborts the run if it's still generating
+(stopping a run from anywhere, including the composer, also silences TTS). Captions of the in-progress utterance and the
 assistant's spoken line run along the bottom. Typing in the composer still
 works mid-call; frames ride along with typed messages too.
 

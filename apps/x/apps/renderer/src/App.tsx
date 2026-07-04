@@ -978,6 +978,9 @@ function App() {
   // t0 = utterance accepted, submit = message sent, speak = first TTS
   // speak(). Emitted as call_turn_latency when audio actually starts.
   const callTurnMarksRef = useRef<{ t0: number; submit?: number; speak?: number } | null>(null)
+  // Late-bound handle to handleStop (defined much further down) so early
+  // call handlers can stop the run without reordering the component.
+  const stopRunRef = useRef<(() => Promise<void>) | null>(null)
   // Read-aloud style: 'summary' for typed chat, forced to 'full' during a
   // call and restored after. Context decides — the user never picks it.
   const ttsModeRef = useRef<'summary' | 'full'>('summary')
@@ -1250,6 +1253,21 @@ function App() {
     await video.startScreenShare()
   }, [video])
 
+  // Interrupt the assistant: silence TTS immediately, skip anything already
+  // queued from the in-flight turn, and stop the run if it's still
+  // generating (if it already finished, stopping the speech is all there is
+  // to do). Wired to the Stop control next to the mascot on both surfaces.
+  const handleInterruptAssistant = useCallback(() => {
+    ttsRef.current.cancel()
+    setAssistantCaption('')
+    if (voiceSegments) {
+      spokenVoiceRef.current.count = voiceSegments.length
+    }
+    if (activeIsProcessing) {
+      void stopRunRef.current?.()
+    }
+  }, [voiceSegments, activeIsProcessing])
+
   // Current phase of the call (null when not in one).
   const videoCallStatus: 'listening' | 'thinking' | 'speaking' | null =
     inCall
@@ -1317,13 +1335,14 @@ function App() {
     return window.ipc.on('video:popout-action', ({ action }) => {
       if (action === 'toggle-camera') handleToggleCamera()
       else if (action === 'toggle-share') void handleToggleScreenShare()
+      else if (action === 'stop-speaking') handleInterruptAssistant()
       else if (action === 'end-call') endCall()
       else if (action === 'expand') {
         if (video.screenState === 'live') video.stopScreenShare()
         setCallMinimized(false)
       }
     })
-  }, [handleToggleCamera, handleToggleScreenShare, endCall, video])
+  }, [handleToggleCamera, handleToggleScreenShare, handleInterruptAssistant, endCall, video])
 
   // Enter to submit voice input, Escape to cancel
   useEffect(() => {
@@ -3027,12 +3046,18 @@ function App() {
     if (!runId) return
     setStopClickedAt(Date.now())
     setIsStopping(true)
+    // Stopping the run must also silence it — the TTS queue holds segments
+    // that were already extracted from the stream and would keep playing
+    // long after the turn is aborted.
+    ttsRef.current.cancel()
+    setAssistantCaption('')
     try {
       await sessionChat.stop()
     } catch (error) {
       console.error('Failed to stop turn:', error)
     }
   }, [runId, sessionChat])
+  stopRunRef.current = handleStop
 
   const handlePermissionResponse = useCallback(async (
     toolCallId: string,
@@ -6693,6 +6718,7 @@ function App() {
                 onToggleCamera={handleToggleCamera}
                 practiceMode={practiceMode}
                 onMinimize={() => void handleMinimizeCall()}
+                onInterrupt={handleInterruptAssistant}
                 ttsState={tts.state}
                 getTtsLevel={tts.getLevel}
                 status={videoCallStatus ?? 'listening'}
