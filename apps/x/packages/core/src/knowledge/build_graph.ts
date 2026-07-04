@@ -305,7 +305,7 @@ export function emailReplyGateBanner(filePath: string, content: string): string 
     const replied = froms.some(f => f.includes(email) || (teamDomain !== null && f.includes(teamDomain)));
     return replied
         ? `> **REPLY-GATE (computed by the system, authoritative): the user HAS sent a message in this thread.** New People/Organization notes are allowed IF the user's reply shows real engagement AND the other gates pass. A decline, brush-off, or unsubscribe-style reply ("not interested", "please remove me", a bare "no thanks") is NOT engagement — treat those threads like purely inbound ones.`
-        : `> **REPLY-GATE (computed by the system, authoritative): the user has NOT sent any message in this thread — purely inbound.** You MUST NOT create any new People or Organization note from this file, no matter how important the sender sounds. Allowed: updating notes that already exist, and suggestion cards in suggested-topics.md. Sole exception: a calendar invite for a real 1:1/small-group meeting scheduled with the user by name.`;
+        : `> **REPLY-GATE (computed by the system, authoritative): the user has NOT sent any message in this thread — purely inbound.** You MUST NOT create ANY new note from this file — no People, no Organizations, no Projects, no Topics, no event notes. Not for the sender, and not for anyone or anything mentioned in the content (companies, speakers, events, products). No matter how important it sounds. Allowed: updating notes that already exist, and suggestion cards in suggested-topics.md. Sole exception: a calendar invite for a real 1:1/small-group meeting scheduled with the user by name may create the primary contact's note.`;
 }
 
 /**

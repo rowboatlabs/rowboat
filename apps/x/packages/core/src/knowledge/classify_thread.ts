@@ -223,7 +223,19 @@ export async function classifyThread(
     options: ClassifyOptions = {},
 ): Promise<Classification> {
     if (userSentLatest(snapshot, userEmail)) {
-        return { importance: 'important' };
+        // Force-important only for real conversations the user replied in.
+        // Threads where the user is the ONLY sender (outbound campaigns,
+        // first-touch outreach, self-test sends) are not inbox-important —
+        // when a recipient replies, the thread updates and is re-classified,
+        // and this shortcut then correctly marks it important.
+        const needle = (userEmail ?? '').toLowerCase();
+        const othersParticipated = needle
+            ? snapshot.messages.some((m) => m.from && !m.from.toLowerCase().includes(needle))
+            : false;
+        if (othersParticipated) {
+            return { importance: 'important' };
+        }
+        return { importance: 'other' };
     }
 
     try {
