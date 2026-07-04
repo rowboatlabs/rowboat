@@ -390,6 +390,7 @@ let lastVideoPopoutState: {
   ttsState: 'idle' | 'synthesizing' | 'speaking';
   status: 'listening' | 'thinking' | 'speaking' | null;
   cameraOn: boolean;
+  screenSharing: boolean;
   interimText: string | null;
 } | null = null;
 
@@ -1816,19 +1817,20 @@ export function setupIpcHandlers() {
       }
       return {};
     },
-    'video:focusMain': async () => {
+    'video:getPopoutState': async () => {
+      return { state: lastVideoPopoutState };
+    },
+    'video:popoutAction': async (_event, args) => {
+      // Relay a popout control-bar action to the app window, which owns the
+      // call (mic, camera, screen capture) and executes it there. 'expand'
+      // additionally brings the app window back to the foreground.
       const main = findMainAppWindow();
-      if (main) {
+      if (args.action === 'expand' && main) {
         if (main.isMinimized()) main.restore();
         main.show();
         main.focus();
       }
-      return {};
-    },
-    'video:popoutAction': async (_event, args) => {
-      // Relay a popout control-bar action to the app window, which owns the
-      // call (mic, camera, screen capture) and executes it there.
-      findMainAppWindow()?.webContents.send('video:popout-action', args);
+      main?.webContents.send('video:popout-action', args);
       return {};
     },
     // Live-note handlers

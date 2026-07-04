@@ -234,15 +234,22 @@ export function useVideoMode() {
         return true;
     }, [acquireCamera]);
 
-    const start = useCallback(async (): Promise<boolean> => {
+    /**
+     * Start video mode. `camera: false` starts a camera-less session (voice
+     * call / screen-share-only) — the mode is live so frames can flow from
+     * other sources, and the camera can be enabled later via setCameraEnabled.
+     */
+    const start = useCallback(async ({ camera = true }: { camera?: boolean } = {}): Promise<boolean> => {
         if (stateRef.current !== 'idle') return true;
         setState('starting');
-        const ok = await acquireCamera();
-        if (!ok) {
-            setState('idle');
-            return false;
+        if (camera) {
+            const ok = await acquireCamera();
+            if (!ok) {
+                setState('idle');
+                return false;
+            }
         }
-        setCameraOn(true);
+        setCameraOn(camera);
         setState('live');
         return true;
     }, [acquireCamera]);

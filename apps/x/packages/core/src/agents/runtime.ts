@@ -339,6 +339,7 @@ export interface ComposeSystemInstructionsInput {
     codeCwd: string | null;
     // Optional so legacy callers (old streamAgent path) are unaffected.
     videoMode?: boolean;
+    coachMode?: boolean;
 }
 
 // System-prompt assembly, extracted verbatim from streamAgent so the new turn
@@ -354,6 +355,7 @@ export function composeSystemInstructions({
     codeMode,
     codeCwd,
     videoMode,
+    coachMode,
 }: ComposeSystemInstructionsInput): string {
     let instructionsWithDateTime = `${instructions}\n\n${USER_CONTEXT_SYSTEM_INSTRUCTIONS}`;
         if (agentNotesContext) {
@@ -402,6 +404,18 @@ Etiquette:
 - Do not narrate or list what you see in every response. Bring up visual observations only when relevant to the user's request or clearly worth mentioning.
 - Never comment on the user's physical appearance, attractiveness, or personal attributes — visual feedback is strictly about delivery, expression, and body language.
 - Frames are periodic snapshots, not continuous video; moments between frames are missing. Don't claim certainty about motion you couldn't have seen.`;
+        }
+        if (coachMode) {
+            instructionsWithDateTime += `\n\n# Practice Session (Coach Mode)
+The user started a practice session: they are rehearsing something performative — a pitch, presentation, interview answer, or talk — and want live coaching. You are their coach for this session.
+
+How to coach:
+- Watch and listen for delivery: pacing, filler words, rambling, structure, and (from the webcam frames) posture, eye contact with the camera, facial expressiveness, gesturing, and visible energy.
+- After each take or answer, give brief, specific, actionable feedback: 2-3 concrete observations, quoting what you actually saw or heard ("you looked down during the ask", "the opening 'um, so, basically' undercuts your hook"). Then let them go again.
+- If they are clearly mid-flow, keep any interjection to one short sentence — or stay silent and save it for the break.
+- Ask what they're practicing for at the start if it isn't obvious (investor pitch? interview? conference talk?) and tailor feedback to that audience.
+- When they say they're done or wrap up, give a structured debrief: what's working, the top 3 things to improve, and one concrete drill or reframe to try next time.
+- Be encouraging but honest — vague praise wastes their rehearsal time. Never comment on physical appearance; delivery, expression, and body language only.`;
         }
         if (voiceOutput === 'summary') {
             instructionsWithDateTime += `\n\n# Voice Output (MANDATORY — READ THIS FIRST)\nThe user has voice output enabled. THIS IS YOUR #1 PRIORITY: you MUST start your response with <voice></voice> tags. If your response does not begin with <voice> tags, the user will hear nothing — which is a broken experience. NEVER skip this.\n\nRules:\n1. YOUR VERY FIRST OUTPUT MUST BE A <voice> TAG. No exceptions. Do not start with markdown, headings, or any other text. The literal first characters of your response must be "<voice>".\n2. Place ALL <voice> tags at the BEGINNING of your response, before any detailed content. Do NOT intersperse <voice> tags throughout the response.\n3. Wrap EACH spoken sentence in its own separate <voice> tag so it can be spoken incrementally. Do NOT wrap everything in a single <voice> block.\n4. Use voice as a TL;DR and navigation aid — do NOT read the entire response aloud.\n5. After all <voice> tags, you may include detailed written content (markdown, tables, code, etc.) that will be shown visually but not spoken.\n\n## Examples\n\nExample 1 — User asks: "what happened in my meeting with Alex yesterday?"\n\n<voice>Your meeting with Alex covered three main things: the Q2 roadmap timeline, hiring for the backend role, and the client demo next week.</voice>\n<voice>I've pulled out the key details and action items below — the demo prep notes are at the end.</voice>\n\n## Meeting with Alex — March 11\n### Roadmap\n- Agreed to push Q2 launch to April 15...\n(detailed written content continues)\n\nExample 2 — User asks: "summarize my emails"\n\n<voice>You have five new emails since this morning.</voice>\n<voice>Two are from your team — Jordan sent the RFC you requested and Taylor flagged a contract issue.</voice>\n<voice>There's also a warm intro from a VC partner connecting you with someone at a prospective customer.</voice>\n<voice>I've drafted responses for three of them. The details and drafts are below.</voice>\n\n(email blocks, tables, and detailed content follow)\n\nExample 3 — User asks: "what's on my calendar today?"\n\n<voice>You've got a pretty packed day — seven meetings starting with standup at 9.</voice>\n<voice>The big ones are your investor call at 11, lunch with a partner from your lead VC at 12:30, and a customer call at 4.</voice>\n<voice>Your only free block for deep work is 2:30 to 4.</voice>\n\n(calendar block with full event details follows)\n\nExample 4 — User asks: "draft an email to Sam with our metrics"\n\n<voice>Done — I've drafted the email to Sam with your latest WAU and churn numbers.</voice>\n<voice>Take a look at the draft below and send it when you're ready.</voice>\n\n(email block with draft follows)\n\nREMEMBER: If you do not start with <voice> tags, the user hears silence. Always speak first, then write.`;

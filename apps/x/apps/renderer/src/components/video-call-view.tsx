@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { MonitorUp, PhoneOff, User, Video, VideoOff } from 'lucide-react'
+import { Minimize2, MonitorUp, PhoneOff, Presentation, User, Video, VideoOff } from 'lucide-react'
 
 import { MascotFaceIcon, TalkingHead } from '@/components/talking-head'
 import type { TTSState } from '@/hooks/useVoiceTTS'
@@ -10,12 +10,15 @@ export type VideoCallStatus = 'listening' | 'thinking' | 'speaking'
 interface VideoCallViewProps {
   /** Live camera stream from useVideoMode — attached to the user's tile. */
   streamRef: React.MutableRefObject<MediaStream | null>
-  /** Live screen-share stream — shown as the presentation tile when sharing. */
-  screenStreamRef: React.MutableRefObject<MediaStream | null>
-  isScreenSharing: boolean
-  onToggleScreenShare: () => void
   cameraOn: boolean
   onToggleCamera: () => void
+  /** Starting a share collapses this view into the floating popout (the
+   *  surface is derived from devices — see App.tsx). */
+  onToggleScreenShare: () => void
+  /** Practice preset: the assistant is coaching this session. */
+  practiceMode?: boolean
+  /** Shrink to the floating pill without touching any devices. */
+  onMinimize: () => void
   ttsState: TTSState
   /** Live TTS output level — drives the mascot's mouth animation. */
   getTtsLevel: () => number
@@ -33,53 +36,22 @@ const STATUS_DISPLAY: Record<VideoCallStatus, { label: string; dotClass: string 
   speaking: { label: 'Speaking', dotClass: 'bg-sky-400 animate-pulse' },
 }
 
-/** Attach a MediaStream ref to a <video> element for the lifetime of the mount. */
-function StreamVideo({
-  streamRef,
-  mirrored,
-  className,
-}: {
-  streamRef: React.MutableRefObject<MediaStream | null>
-  mirrored?: boolean
-  className?: string
-}) {
-  const videoRef = useRef<HTMLVideoElement | null>(null)
-
-  useEffect(() => {
-    const videoEl = videoRef.current
-    if (!videoEl) return
-    videoEl.srcObject = streamRef.current
-    videoEl.play().catch(() => {})
-    return () => {
-      videoEl.srcObject = null
-    }
-  }, [streamRef])
-
-  return (
-    <video
-      ref={videoRef}
-      muted
-      playsInline
-      className={className}
-      style={mirrored ? { transform: 'scaleX(-1)' } : undefined}
-    />
-  )
-}
-
 /**
- * Full-screen hands-free call: a Meet-style layout with the user's webcam on
- * one side and the mascot as the other participant. While presenting, the
- * shared screen becomes the big tile and the participants shrink into a side
- * rail. The mascot animates with the assistant's speech; dismissing it swaps
- * in a Meet-style letter avatar ("R"). Live captions run along the bottom.
+ * Full-screen call surface: a Meet-style two-tile layout with the user's
+ * webcam on one side and the mascot as the other participant. Shown only
+ * while the camera is on with no screen share (the derived-surface rule in
+ * App.tsx) — sharing or muting the camera moves the call into the floating
+ * popout. The mascot animates with the assistant's speech; dismissing it
+ * swaps in a Meet-style letter avatar ("R"). Live captions run along the
+ * bottom.
  */
 export function VideoCallView({
   streamRef,
-  screenStreamRef,
-  isScreenSharing,
-  onToggleScreenShare,
   cameraOn,
   onToggleCamera,
+  onToggleScreenShare,
+  practiceMode,
+  onMinimize,
   ttsState,
   getTtsLevel,
   status,
@@ -87,7 +59,19 @@ export function VideoCallView({
   assistantCaption,
   onLeave,
 }: VideoCallViewProps) {
+  const videoRef = useRef<HTMLVideoElement | null>(null)
   const [mascotVisible, setMascotVisible] = useState(true)
+
+  useEffect(() => {
+    if (!cameraOn) return
+    const videoEl = videoRef.current
+    if (!videoEl) return
+    videoEl.srcObject = streamRef.current
+    videoEl.play().catch(() => {})
+    return () => {
+      videoEl.srcObject = null
+    }
+  }, [streamRef, cameraOn])
 
   const userSpeaking = status === 'listening' && Boolean(interimText)
   const assistantSpeaking = ttsState === 'speaking'
@@ -98,89 +82,80 @@ export function VideoCallView({
       ? { who: 'You', text: interimText }
       : null
 
-  const userTile = (
-    <div
-      className={cn(
-        'relative flex items-center justify-center overflow-hidden rounded-2xl bg-neutral-900 transition-shadow',
-        userSpeaking && 'ring-2 ring-green-500/80',
-        isScreenSharing && 'aspect-video w-full'
-      )}
-    >
-      {cameraOn ? (
-        <StreamVideo streamRef={streamRef} mirrored className="h-full w-full object-cover" />
-      ) : (
-        <span
-          className={cn(
-            'flex items-center justify-center rounded-full bg-neutral-700 text-neutral-400',
-            isScreenSharing ? 'h-16 w-16' : 'h-40 w-40'
-          )}
-          aria-label="Camera off"
-        >
-          <User className={isScreenSharing ? 'h-8 w-8' : 'h-20 w-20'} />
-        </span>
-      )}
-      <span className="absolute bottom-3 left-3 rounded-md bg-black/50 px-2 py-0.5 text-sm text-white">
-        You
-      </span>
-    </div>
-  )
-
-  const assistantTile = (
-    <div
-      className={cn(
-        'group relative flex items-center justify-center overflow-hidden rounded-2xl bg-neutral-900 transition-shadow',
-        assistantSpeaking && 'ring-2 ring-sky-400/80',
-        isScreenSharing && 'aspect-video w-full'
-      )}
-    >
-      {mascotVisible ? (
-        <TalkingHead ttsState={ttsState} getLevel={getTtsLevel} size={isScreenSharing ? 96 : 220} />
-      ) : (
-        <span
-          className={cn(
-            'flex items-center justify-center rounded-full bg-sky-600 font-medium text-white',
-            isScreenSharing ? 'h-16 w-16 text-3xl' : 'h-40 w-40 text-7xl'
-          )}
-          aria-label="Rowboat"
-        >
-          R
-        </span>
-      )}
-      <span className="absolute bottom-3 left-3 rounded-md bg-black/50 px-2 py-0.5 text-sm text-white">
-        Rowboat
-      </span>
-      <button
-        type="button"
-        onClick={() => setMascotVisible((v) => !v)}
-        className="absolute right-3 top-3 rounded-md bg-black/50 px-2 py-1 text-xs text-white/80 opacity-0 transition-opacity hover:text-white group-hover:opacity-100"
-      >
-        {mascotVisible ? 'Hide mascot' : 'Show mascot'}
-      </button>
-    </div>
-  )
-
   return (
     <div className="fixed inset-0 z-[100] flex flex-col bg-neutral-950">
-      {/* Participant tiles — Meet-style presentation layout while sharing */}
-      {isScreenSharing ? (
-        <div className="flex min-h-0 flex-1 gap-3 p-4 pb-2">
-          <div className="relative flex flex-1 items-center justify-center overflow-hidden rounded-2xl bg-neutral-900">
-            <StreamVideo streamRef={screenStreamRef} className="h-full w-full object-contain" />
-            <span className="absolute bottom-3 left-3 rounded-md bg-black/50 px-2 py-0.5 text-sm text-white">
-              Your screen
-            </span>
-          </div>
-          <div className="flex w-52 shrink-0 flex-col gap-3">
-            {userTile}
-            {assistantTile}
-          </div>
-        </div>
-      ) : (
-        <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 p-4 pb-2 md:grid-cols-2">
-          {userTile}
-          {assistantTile}
-        </div>
+      {practiceMode && (
+        <span className="absolute left-4 top-4 z-10 flex items-center gap-1.5 rounded-full bg-violet-600/90 px-3 py-1 text-xs font-medium text-white">
+          <Presentation className="h-3.5 w-3.5" />
+          Practice session
+        </span>
       )}
+      <button
+        type="button"
+        onClick={onMinimize}
+        className="absolute right-4 top-4 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-neutral-800 text-white/80 transition-colors hover:bg-neutral-700 hover:text-white"
+        aria-label="Minimize call (shares your screen)"
+        title="Minimize — shares your screen so it can help you work"
+      >
+        <Minimize2 className="h-4 w-4" />
+      </button>
+
+      {/* Participant tiles */}
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 p-4 pb-2 md:grid-cols-2">
+        {/* User */}
+        <div
+          className={cn(
+            'relative flex items-center justify-center overflow-hidden rounded-2xl bg-neutral-900 transition-shadow',
+            userSpeaking && 'ring-2 ring-green-500/80'
+          )}
+        >
+          {cameraOn ? (
+            <video
+              ref={videoRef}
+              muted
+              playsInline
+              className="h-full w-full object-cover"
+              style={{ transform: 'scaleX(-1)' }}
+            />
+          ) : (
+            <span className="flex h-40 w-40 items-center justify-center rounded-full bg-neutral-700 text-neutral-400" aria-label="Camera off">
+              <User className="h-20 w-20" />
+            </span>
+          )}
+          <span className="absolute bottom-3 left-3 rounded-md bg-black/50 px-2 py-0.5 text-sm text-white">
+            You
+          </span>
+        </div>
+
+        {/* Assistant */}
+        <div
+          className={cn(
+            'group relative flex items-center justify-center overflow-hidden rounded-2xl bg-neutral-900 transition-shadow',
+            assistantSpeaking && 'ring-2 ring-sky-400/80'
+          )}
+        >
+          {mascotVisible ? (
+            <TalkingHead ttsState={ttsState} getLevel={getTtsLevel} size={220} />
+          ) : (
+            <span
+              className="flex h-40 w-40 items-center justify-center rounded-full bg-sky-600 text-7xl font-medium text-white"
+              aria-label="Rowboat"
+            >
+              R
+            </span>
+          )}
+          <span className="absolute bottom-3 left-3 rounded-md bg-black/50 px-2 py-0.5 text-sm text-white">
+            Rowboat
+          </span>
+          <button
+            type="button"
+            onClick={() => setMascotVisible((v) => !v)}
+            className="absolute right-3 top-3 rounded-md bg-black/50 px-2 py-1 text-xs text-white/80 opacity-0 transition-opacity hover:text-white group-hover:opacity-100"
+          >
+            {mascotVisible ? 'Hide mascot' : 'Show mascot'}
+          </button>
+        </div>
+      </div>
 
       {/* Captions */}
       <div className="flex h-14 items-center justify-center px-6">
@@ -215,14 +190,9 @@ export function VideoCallView({
         <button
           type="button"
           onClick={onToggleScreenShare}
-          className={cn(
-            'flex h-10 w-10 items-center justify-center rounded-full transition-colors',
-            isScreenSharing
-              ? 'bg-sky-600 text-white hover:bg-sky-500'
-              : 'bg-neutral-800 text-white/90 hover:bg-neutral-700'
-          )}
-          aria-label={isScreenSharing ? 'Stop presenting' : 'Present your screen'}
-          title={isScreenSharing ? 'Stop presenting' : 'Present your screen'}
+          className="flex h-10 w-10 items-center justify-center rounded-full bg-neutral-800 text-white/90 transition-colors hover:bg-neutral-700"
+          aria-label="Present your screen"
+          title="Present your screen"
         >
           <MonitorUp className="h-5 w-5" />
         </button>
@@ -243,7 +213,7 @@ export function VideoCallView({
           type="button"
           onClick={onLeave}
           className="flex h-10 w-14 items-center justify-center rounded-full bg-red-600 text-white transition-colors hover:bg-red-500"
-          aria-label="Leave call"
+          aria-label="End call"
         >
           <PhoneOff className="h-5 w-5" />
         </button>

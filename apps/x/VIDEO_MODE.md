@@ -1,46 +1,70 @@
-# Video Mode — Deep Dive
+# Calls (Video Mode) — Deep Dive
 
-Video mode lets the assistant *see* the user (webcam) and their screen (screen
-share), in three presentations: frames attached to normal chat, a hands-free
-spoken call, and a full-screen Meet-style call. This doc covers the product
-flow, the technical pipeline, and the LLM prompt surface with exact pointers.
+Calls let the user talk to the assistant hands-free while it *sees* them
+(webcam) and their screen (screen share). There is ONE call engine —
+continuous listening, auto-submitted utterances, forced read-aloud TTS, frame
+capture — entered through four presets that differ only in starting devices.
+This doc covers the product flow, the technical pipeline, and the LLM prompt
+surface with exact pointers.
 
 ## Product flow
 
-The composer's video button (`chat-input-with-mentions.tsx`) toggles video
-mode; a chevron dropdown picks one of three modes (`VideoChatMode`):
+The composer has a **call split-button** (`chat-input-with-mentions.tsx`).
+The main click is the "work together" default — preset `share`: screen
+sharing ON, camera OFF, floating pill, so the user keeps working while the
+assistant watches along (the button tooltip discloses the screen share). The
+chevron menu holds the deviations. While a call is live the button turns red
+and ends it.
 
-| Mode | What it does |
-|------|--------------|
-| `chat` — "Video + chat" | Camera on. Webcam (and screen-share) frames ride along with every typed or dictated message. Small PiP preview floats above the composer. |
-| `call` — "Video call (hands-free)" | Everything in `chat`, plus: continuous listening (each utterance auto-submits as a voice message) and forced full read-aloud TTS. No typing needed; composer still works. |
-| `meeting` — "Video call (full screen)" | Same pipeline as `call`, presented as a full-screen Meet-style layout: user tile + animated mascot tile, captions, control bar. |
+| Preset | Starting devices | First surface |
+|--------|------------------|---------------|
+| `share` — main click | screen on, camera off | floating pill |
+| `voice` — "Voice call" | camera off, screen off | floating mascot pill |
+| `video` — "Video call" | camera on | full-screen call |
+| `practice` — "Practice session" | camera on, + coaching persona | full-screen call |
 
-On top of any mode:
+**One surface rule** (`callSurface` in `App.tsx`): full screen and screen
+sharing are mutually exclusive in both directions — a full-screen call covers
+the screen, so sharing it would show the call itself.
 
-- **Screen share** (`MonitorUp` buttons on the PiP overlay and the meeting
-  control bar): captures the primary screen; frames go to the model as a
-  separately labeled group. In the meeting view the screen becomes the big
-  tile with user + mascot in a side rail.
-- **Camera off** (Meet-style mute): video mode and screen share keep running,
-  no webcam frames are captured; tiles show a silhouette avatar.
-- **Mascot dismissal** (meeting view): swaps the animated mascot for a
-  Meet-style letter avatar ("R").
-- **Popout**: starting a screen share immediately pops the mini-call out into
-  a small always-on-top frameless window (user + mascot tiles, live caption,
-  control bar) that floats over every app — including Rowboat itself, since
-  the shared screen may be Rowboat. It stays for the whole share (surviving
-  app switches) and disappears when sharing stops or video mode ends. While
-  sharing it is THE call surface: the in-app PiP hides, and presenting from
-  the full-screen meeting collapses the meeting into it (restored when the
-  share ends). Control-bar actions (camera toggle / stop share / end call)
-  round-trip `video:popoutAction` → main → `video:popout-action` → app
-  window, which owns the mic/camera/capture. The expand button focuses the
-  main window (`video:focusMain`).
+- sharing → floating popout, always (pill = working)
+- not sharing → full screen unless `callMinimized` (full screen = facing
+  each other)
+- expanding the pill auto-STOPS any share; minimizing the full-screen call
+  auto-STARTS one (the pill exists to work together) — presenting from full
+  screen likewise collapses to the pill
+- the camera toggle never changes the surface: turning it on from the pill
+  puts your video IN the pill; expanding is its own explicit action
 
-`call`/`meeting` options are disabled unless both voice input (Deepgram) and
-voice output (TTS) are configured. Entering a call saves the user's TTS
-settings and forces `full` read-aloud; leaving restores them.
+**Screen-share consent** is three-layered: a toast the moment any share
+starts ("Your screen is being shared… [Stop sharing]"), a persistent
+"Sharing screen" badge on the pill, and macOS's purple recording indicator.
+If the auto-share fails (Screen Recording permission not granted) the call
+starts anyway as a voice call, with a toast linking to System Settings.
+Practice/coaching is always an explicit choice — expanding to full screen
+never turns the coach on.
+
+In-call controls (identical bar on both surfaces): camera toggle (silhouette
+avatar while off, no webcam frames captured), screen share toggle, mascot ⇄
+"R" letter avatar, end call. Captions of the in-progress utterance and the
+assistant's spoken line run along the bottom. Typing in the composer still
+works mid-call; frames ride along with typed messages too.
+
+Outside calls the composer keeps exactly two voice affordances: the **mic
+button** (push-to-talk dictation, untouched) and the **read-aloud toggle**
+(headphones; summary-style for typed chat — calls force full read-aloud and
+restore the prior setting on hang-up). The old video dropdown, talking-head
+toggle, and summary/full TTS dropdown are retired.
+
+The call button is disabled unless both voice input (Deepgram) and voice
+output (TTS) are configured. `call_started` (with `preset`) is captured in
+PostHog — the adoption metric for this feature.
+
+**Popout mechanics**: a small always-on-top frameless window (camera tile
+when on + mascot tile, live caption, control bar) floating over every app —
+including Rowboat. Control-bar actions round-trip `video:popoutAction` →
+main → `video:popout-action` → app window, which owns the mic/camera/capture;
+`expand` also refocuses the app window (handled in main).
 
 ## Frame pipeline
 
@@ -56,11 +80,13 @@ settings and forces `full` read-aloud; leaving restores them.
   at the moment of send. Falls back to the single latest frame for
   rapid-fire messages.
 
-`App.tsx` `handlePromptSubmit` (~line 2767) attaches the drained frames to
-the outgoing message as `UserImagePart`s and sets
-`composition.videoMode: true`. Frames also become `isVideoFrame` display
-attachments (filmstrip in the transcript — `chat-message-attachments.tsx`;
-history hydration in `lib/run-to-conversation.ts`).
+`App.tsx` `handlePromptSubmit` attaches the drained frames (whenever a call
+is live) to the outgoing message as `UserImagePart`s and sets
+`composition.videoMode` when the camera or screen is active, plus
+`composition.coachMode` during a practice session. Frames also become
+`isVideoFrame` display attachments (filmstrip in the transcript —
+`chat-message-attachments.tsx`; history hydration in
+`lib/run-to-conversation.ts`).
 
 ## Message schema & model encoding
 
@@ -95,27 +121,27 @@ history hydration in `lib/run-to-conversation.ts`).
 - Mid-call socket drops reconnect after 1s; the offline audio backlog is
   capped (~30s).
 
-Mode transitions live in `App.tsx` `handleVideoModeChange` (~line 1161):
-call ↔ meeting switches are presentation-only (mic/TTS untouched);
-entering/leaving hands-free saves/restores TTS settings. Push-to-talk is
-disabled while a call owns the mic.
+Call lifecycle lives in `App.tsx` `startCall(preset)` / `endCall()`:
+entering a call saves/forces TTS settings, cancels any push-to-talk
+recording, and starts the continuous loop; ending restores everything.
+Push-to-talk is disabled while a call owns the mic.
 
 ## Popout window
 
-- Shown iff `videoChatMode !== 'off' && screenState === 'live'` (effect in
-  `App.tsx`). Renderer asks `video:setPopout {show}` (main handler:
-  `apps/main/src/ipc.ts:1742`); main creates a frameless, `alwaysOnTop`
-  ('floating'), all-workspaces BrowserWindow at the top-right of the primary
-  display, loading the renderer bundle with `#video-popout`
+- Shown iff the derived `callSurface === 'popout'` (effect in `App.tsx`).
+  Renderer asks `video:setPopout {show}`; main creates a frameless,
+  `alwaysOnTop` ('floating'), all-workspaces BrowserWindow at the top-right
+  of the primary display, loading the renderer bundle with `#video-popout`
   (`apps/renderer/src/main.tsx` branches on the hash →
   `components/video-popout.tsx`).
 - Call state streams over the `video:popout-state` push channel; main caches
   the last payload and replays it on popout load. Shown with
-  `showInactive()` so it never steals focus (that would re-hide it).
+  `showInactive()` so it never steals focus.
 - The popout captures its **own** camera preview (MediaStreams can't cross
   windows) and synthesizes the mascot mouth level (no audio in that window).
-- `video:focusMain` matches only real app windows by URL — `getAllWindows()`
-  also contains hidden utility windows (PDF export) that must not be shown.
+- `video:popoutAction` relays control-bar actions to the app window, matched
+  only by real app-window URLs — `getAllWindows()` also contains hidden
+  utility windows (PDF export) that must not be shown or messaged.
 
 ## Permissions
 
@@ -132,8 +158,9 @@ disabled while a call owns the mic.
 | Prompt | Where |
 |--------|-------|
 | `# Video Mode (Live Camera)` system section — how to use webcam frames, coaching guidance, screen-share rules ("treat the screen as the primary subject", "last screen frame is current"), etiquette (never comment on appearance) | `packages/core/src/agents/runtime.ts:386` (`composeSystemInstructions`, gated on `videoMode`) |
-| Per-message frame context line `[Video mode: N live webcam frames … and M frames of the user's shared screen …]` + group labels | `packages/core/src/agents/runtime.ts:~1013` (`convertFromMessages`) |
-| `videoMode` composition override (session-sticky; flips bust prefix cache) | `packages/core/src/turns/bridges/real-agent-resolver.ts:57,125`; set from `App.tsx` `sendConfig` |
+| `# Practice Session (Coach Mode)` system section — coaching persona: specific/actionable feedback after each take, one-sentence interjections mid-flow, structured debrief on wrap-up | `composeSystemInstructions`, gated on `coachMode` (directly after the video section) |
+| Per-message frame context line `[Video mode: N live webcam frames … and M frames of the user's shared screen …]` + group labels | `packages/core/src/agents/runtime.ts` (`convertFromMessages`) |
+| `videoMode` / `coachMode` composition overrides (session-sticky; flips bust prefix cache) | `packages/core/src/turns/bridges/real-agent-resolver.ts` (`CompositionOverrides`); set from `App.tsx` `sendConfig` |
 
 Voice input/output prompt sections (`# Voice Input`, `# Voice Output`) are
 reused untouched — calls set `voiceInput` per utterance and force
@@ -156,4 +183,7 @@ screen frame per message unless the screen changed.
   "energy" coaching leans on visual cues.
 - Screen share always captures the primary display (no window/display
   picker yet).
-- The meeting view covers the chat; there's no in-call transcript drawer.
+- The full-screen call covers the chat; there's no in-call transcript drawer.
+- The "attach camera frames to typed chat without a call" combination (the
+  old video+chat mode) was cut in the call-model simplification; if analytics
+  show demand, it should return as an attachment chip, not a mode.

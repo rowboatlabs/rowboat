@@ -37,7 +37,7 @@ import { MarkdownPreOverride } from '@/components/ai-elements/markdown-code-over
 import { defaultRemarkPlugins } from 'streamdown'
 import remarkBreaks from 'remark-breaks'
 import { type ChatTab } from '@/components/tab-bar'
-import { ChatInputWithMentions, type PermissionMode, type StagedAttachment, type SelectedModel, type VideoChatMode } from '@/components/chat-input-with-mentions'
+import { ChatInputWithMentions, type CallPreset, type PermissionMode, type StagedAttachment, type SelectedModel } from '@/components/chat-input-with-mentions'
 import { ChatMessageAttachments } from '@/components/chat-message-attachments'
 import { useSidebar } from '@/components/ui/sidebar'
 import { wikiLabel } from '@/lib/wiki-links'
@@ -189,14 +189,11 @@ interface ChatSidebarProps {
   voiceAvailable?: boolean
   ttsAvailable?: boolean
   ttsEnabled?: boolean
-  ttsMode?: 'summary' | 'full'
   onToggleTts?: () => void
-  onTtsModeChange?: (mode: 'summary' | 'full') => void
-  ttsAvatarEnabled?: boolean
-  onToggleTtsAvatar?: () => void
-  videoChatMode?: VideoChatMode
-  onVideoModeChange?: (mode: VideoChatMode) => void
-  videoCallAvailable?: boolean
+  inCall?: boolean
+  onStartCall?: (preset: CallPreset) => void
+  onEndCall?: () => void
+  callAvailable?: boolean
   onComposioConnected?: (toolkitSlug: string) => void
 }
 
@@ -258,14 +255,11 @@ export function ChatSidebar({
   voiceAvailable,
   ttsAvailable,
   ttsEnabled,
-  ttsMode,
   onToggleTts,
-  onTtsModeChange,
-  ttsAvatarEnabled,
-  onToggleTtsAvatar,
-  videoChatMode,
-  onVideoModeChange,
-  videoCallAvailable,
+  inCall,
+  onStartCall,
+  onEndCall,
+  callAvailable,
   onComposioConnected,
 }: ChatSidebarProps) {
   const { state: sidebarState } = useSidebar()
@@ -837,14 +831,11 @@ export function ChatSidebar({
                           voiceAvailable={isActive && voiceAvailable}
                           ttsAvailable={isActive && ttsAvailable}
                           ttsEnabled={ttsEnabled}
-                          ttsMode={ttsMode}
                           onToggleTts={isActive ? onToggleTts : undefined}
-                          onTtsModeChange={isActive ? onTtsModeChange : undefined}
-                          ttsAvatarEnabled={ttsAvatarEnabled}
-                          onToggleTtsAvatar={isActive ? onToggleTtsAvatar : undefined}
-                          videoChatMode={videoChatMode}
-                          onVideoModeChange={isActive ? onVideoModeChange : undefined}
-                          videoCallAvailable={videoCallAvailable}
+                          inCall={inCall}
+                          onStartCall={isActive ? onStartCall : undefined}
+                          onEndCall={isActive ? onEndCall : undefined}
+                          callAvailable={callAvailable}
                         />
                       </div>
                     )

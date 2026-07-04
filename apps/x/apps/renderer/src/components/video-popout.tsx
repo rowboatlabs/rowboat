@@ -7,6 +7,7 @@ type PopoutState = {
   ttsState: 'idle' | 'synthesizing' | 'speaking'
   status: 'listening' | 'thinking' | 'speaking' | null
   cameraOn: boolean
+  screenSharing: boolean
   interimText: string | null
 }
 
@@ -23,18 +24,30 @@ const noDragRegion = { WebkitAppRegion: 'no-drag' } as React.CSSProperties
  * Content of the always-on-top popout window shown for the whole duration of
  * a screen share (Meet-style floating mini-call) — it floats over every app,
  * including Rowboat itself, and is the call's control surface while sharing:
- * camera toggle, stop-share, end-call. Rendered in its own BrowserWindow
+ * camera toggle, share toggle, end-call. Rendered in its own BrowserWindow
  * (see `video:setPopout` in the main process); call state streams in over
  * the `video:popout-state` push channel and control actions round-trip back
  * through `video:popoutAction`. Captures its own webcam feed — MediaStreams
  * can't cross windows.
  */
 export function VideoPopout() {
-  const [state, setState] = useState<PopoutState>({ ttsState: 'idle', status: null, cameraOn: true, interimText: null })
+  // Camera defaults OFF: guessing "on" would flash the user's video for a
+  // beat before the real state arrives — which reads as a bug. The true
+  // state is fetched immediately below.
+  const [state, setState] = useState<PopoutState>({ ttsState: 'idle', status: null, cameraOn: false, screenSharing: false, interimText: null })
   const videoRef = useRef<HTMLVideoElement | null>(null)
 
   useEffect(() => {
-    return window.ipc.on('video:popout-state', (next) => setState(next))
+    const cleanup = window.ipc.on('video:popout-state', (next) => setState(next))
+    // The main process replays the cached state on did-finish-load, but that
+    // can race this listener's registration — fetch it explicitly too.
+    window.ipc
+      .invoke('video:getPopoutState', null)
+      .then(({ state: cached }) => {
+        if (cached) setState(cached)
+      })
+      .catch(() => {})
+    return cleanup
   }, [])
 
   // Own camera feed, following the main window's camera-on/off state.
@@ -67,7 +80,7 @@ export function VideoPopout() {
   // so the mascot still animates while the assistant speaks in the main window.
   const getLevel = useCallback(() => 0.45 + 0.35 * Math.sin(performance.now() / 90), [])
 
-  const sendAction = useCallback((action: 'toggle-camera' | 'stop-share' | 'end-call') => {
+  const sendAction = useCallback((action: 'toggle-camera' | 'toggle-share' | 'end-call' | 'expand') => {
     void window.ipc.invoke('video:popoutAction', { action }).catch(() => {})
   }, [])
 
@@ -98,6 +111,14 @@ export function VideoPopout() {
           <span className="absolute bottom-1 left-1.5 rounded bg-black/50 px-1 py-px text-[10px] text-white">
             You
           </span>
+          {/* Persistent consent badge — the user must always be able to see
+              at a glance that their screen is going out. */}
+          {state.screenSharing && (
+            <span className="absolute left-1.5 top-1.5 flex items-center gap-1 rounded-full bg-sky-600/90 px-1.5 py-0.5 text-[10px] font-medium text-white">
+              <span className="block h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
+              Sharing screen
+            </span>
+          )}
         </div>
         <div className="relative flex flex-1 items-center justify-center overflow-hidden rounded-lg bg-neutral-800">
           <TalkingHead ttsState={state.ttsState} getLevel={getLevel} size={84} />
@@ -138,10 +159,14 @@ export function VideoPopout() {
         </button>
         <button
           type="button"
-          onClick={() => sendAction('stop-share')}
-          className="flex h-6 w-6 items-center justify-center rounded-full bg-sky-600 text-white transition-colors hover:bg-sky-500"
-          aria-label="Stop sharing screen"
-          title="Stop sharing screen"
+          onClick={() => sendAction('toggle-share')}
+          className={`flex h-6 w-6 items-center justify-center rounded-full transition-colors ${
+            state.screenSharing
+              ? 'bg-sky-600 text-white hover:bg-sky-500'
+              : 'bg-neutral-700 text-white/90 hover:bg-neutral-600'
+          }`}
+          aria-label={state.screenSharing ? 'Stop sharing screen' : 'Share your screen'}
+          title={state.screenSharing ? 'Stop sharing screen' : 'Share your screen'}
         >
           <MonitorUp className="h-3.5 w-3.5" />
         </button>
@@ -149,17 +174,17 @@ export function VideoPopout() {
           type="button"
           onClick={() => sendAction('end-call')}
           className="flex h-6 w-8 items-center justify-center rounded-full bg-red-600 text-white transition-colors hover:bg-red-500"
-          aria-label="End video mode"
-          title="End video mode"
+          aria-label="End call"
+          title="End call"
         >
           <PhoneOff className="h-3.5 w-3.5" />
         </button>
         <button
           type="button"
-          onClick={() => void window.ipc.invoke('video:focusMain', null)}
+          onClick={() => sendAction('expand')}
           className="flex h-6 w-6 items-center justify-center rounded-full bg-neutral-700 text-white/90 transition-colors hover:bg-neutral-600"
-          aria-label="Back to Rowboat"
-          title="Back to Rowboat"
+          aria-label="Expand to full screen (stops screen sharing)"
+          title="Expand to full screen (stops sharing)"
         >
           <Maximize2 className="h-3.5 w-3.5" />
         </button>

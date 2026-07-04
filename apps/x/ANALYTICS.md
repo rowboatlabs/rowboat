@@ -92,6 +92,7 @@ All in `apps/renderer/src/lib/analytics.ts`:
 - `chat_message_sent` — `{ voice_input, voice_output, search_enabled }`
 - `oauth_connected` / `oauth_disconnected` — `{ provider }`
 - `voice_input_started` — no properties
+- `call_started` — `{ preset: 'voice' | 'video' | 'share' | 'practice' }` — a hands-free call began (see `apps/x/VIDEO_MODE.md`)
 - `search_executed` — `{ types: string[] }`
 - `note_exported` — `{ format }`
 

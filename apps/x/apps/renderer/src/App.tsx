@@ -12,7 +12,7 @@ import { ChatSidebar } from './components/chat-sidebar';
 import { useSessionChat } from '@/hooks/useSessionChat';
 import { ChatHeader } from './components/chat-header';
 import { ChatEmptyState } from './components/chat-empty-state';
-import { ChatInputWithMentions, type PermissionMode, type StagedAttachment, type VideoChatMode } from './components/chat-input-with-mentions';
+import { ChatInputWithMentions, type CallPreset, type PermissionMode, type StagedAttachment } from './components/chat-input-with-mentions';
 import { ChatMessageAttachments } from '@/components/chat-message-attachments'
 import { GraphView, type GraphEdge, type GraphNode } from '@/components/graph-view';
 import { BasesView, type BaseConfig, DEFAULT_BASE_CONFIG } from '@/components/bases-view';
@@ -120,8 +120,6 @@ import { toast } from "sonner"
 import { useVoiceMode } from '@/hooks/useVoiceMode'
 import { useVideoMode } from '@/hooks/useVideoMode'
 import { useVoiceTTS } from '@/hooks/useVoiceTTS'
-import { TalkingHeadOverlay } from '@/components/talking-head'
-import { VideoPreviewOverlay } from '@/components/video-preview-overlay'
 import { VideoCallView } from '@/components/video-call-view'
 import { ProductTour, type TourNavTarget } from '@/components/product-tour'
 import { useMeetingTranscription, type CalendarEventMeta } from '@/hooks/useMeetingTranscription'
@@ -974,9 +972,9 @@ function App() {
   const [ttsAvailable, setTtsAvailable] = useState(false)
   const [ttsEnabled, setTtsEnabled] = useState(false)
   const ttsEnabledRef = useRef(false)
-  const [ttsMode, setTtsMode] = useState<'summary' | 'full'>('summary')
+  // Read-aloud style: 'summary' for typed chat, forced to 'full' during a
+  // call and restored after. Context decides — the user never picks it.
   const ttsModeRef = useRef<'summary' | 'full'>('summary')
-  const [ttsAvatarEnabled, setTtsAvatarEnabled] = useState(false)
   const [tourActive, setTourActive] = useState(false)
   const [isRecording, setIsRecording] = useState(false)
   const voiceTextBufferRef = useRef('')
@@ -1021,16 +1019,20 @@ function App() {
   const voiceRef = useRef(voice)
   voiceRef.current = voice
 
-  // Video chat mode: while on, the webcam runs and frames are attached to
-  // every outgoing message so the assistant can see the user. 'chat' keeps
-  // the normal composer; 'call' is fully hands-free — continuous listening,
-  // auto-submitted utterances, spoken responses (handler defined below, after
-  // the voice/submit plumbing it drives).
+  // Calls: one engine (hands-free voice loop + forced read-aloud TTS + frame
+  // capture), started via presets that only differ in device defaults. The
+  // presentation is DERIVED from devices, never picked: screen sharing →
+  // floating popout; camera on → full-screen call; camera off → popout
+  // (mascot pill). Handlers live below the voice/submit plumbing they drive.
   const video = useVideoMode()
-  const [videoChatMode, setVideoChatMode] = useState<VideoChatMode>('off')
-  const videoChatModeRef = useRef<VideoChatMode>('off')
-  // TTS settings to restore when a hands-free call ends (a call forces
-  // full-read-aloud TTS for its duration).
+  const [inCall, setInCall] = useState(false)
+  const inCallRef = useRef(false)
+  // User explicitly shrank the full-screen call to the floating pill.
+  const [callMinimized, setCallMinimized] = useState(false)
+  // Practice preset: adds the coaching persona to the system prompt.
+  const [practiceMode, setPracticeMode] = useState(false)
+  const practiceModeRef = useRef(false)
+  // TTS settings to restore when a call ends (a call forces full read-aloud).
   const preCallTtsRef = useRef<{ enabled: boolean; mode: 'summary' | 'full' } | null>(null)
 
   const handleToggleMeetingRef = useRef<(() => void) | undefined>(undefined)
@@ -1091,8 +1093,8 @@ function App() {
   }, [])
 
   const handleStartRecording = useCallback(() => {
-    // Hands-free call mode owns the mic — ignore push-to-talk while it's on.
-    if (videoChatModeRef.current === 'call' || videoChatModeRef.current === 'meeting') return
+    // A live call owns the mic — ignore push-to-talk while one is running.
+    if (inCallRef.current) return
     setIsRecording(true)
     isRecordingRef.current = true
     voice.start()
@@ -1123,29 +1125,9 @@ function App() {
       ttsEnabledRef.current = next
       if (!next) {
         ttsRef.current.cancel()
-        setTtsAvatarEnabled(false)
       }
       return next
     })
-  }, [])
-
-  // Talking-head mode implies voice output: enabling it turns TTS on,
-  // disabling it turns both off.
-  const handleToggleTtsAvatar = useCallback(() => {
-    setTtsAvatarEnabled(prev => {
-      const next = !prev
-      setTtsEnabled(next)
-      ttsEnabledRef.current = next
-      if (!next) {
-        ttsRef.current.cancel()
-      }
-      return next
-    })
-  }, [])
-
-  const handleTtsModeChange = useCallback((mode: 'summary' | 'full') => {
-    setTtsMode(mode)
-    ttsModeRef.current = mode
   }, [])
 
   const handleCancelRecording = useCallback(() => {
@@ -1154,112 +1136,117 @@ function App() {
     isRecordingRef.current = false
   }, [voice])
 
-  // Video chat mode transitions. 'chat' just runs the camera; 'call' and
-  // 'meeting' also listen continuously (auto-submitting each utterance as a
-  // voice message) and force full read-aloud TTS so the assistant answers out
-  // loud. 'meeting' is the same pipeline presented as a full-screen call.
-  const handleVideoModeChange = useCallback(async (mode: VideoChatMode) => {
-    const prev = videoChatModeRef.current
-    if (mode === prev) return
-    const wasHandsFree = prev === 'call' || prev === 'meeting'
-    const isHandsFree = mode === 'call' || mode === 'meeting'
+  // Start a call. Presets only differ in device defaults — the engine
+  // (continuous listening, auto-submitted utterances, forced read-aloud TTS,
+  // frame capture) is identical for all of them. The default entry ('share',
+  // the call button's main click) is "work together": screen shared, camera
+  // off, floating pill — the user keeps working while the assistant watches
+  // along. 'video'/'practice' open face-to-face full screen instead.
+  const startCall = useCallback(async (preset: CallPreset) => {
+    if (inCallRef.current) return
+    const camera = preset === 'video' || preset === 'practice'
+    const ok = await video.start({ camera })
+    if (!ok) return // camera denied/unavailable — stay out of the call
+    if (preset === 'share') {
+      // If screen capture fails (usually the macOS Screen Recording
+      // permission), continue as a voice call — sharing is one tap away on
+      // the pill once permission is granted.
+      const shared = await video.startScreenShare()
+      if (!shared) {
+        toast("Couldn't share your screen", {
+          description: 'Grant Rowboat Screen Recording access, then tap the share button on the call.',
+          action: {
+            label: 'Open Settings',
+            onClick: () => void window.ipc.invoke('meeting:openScreenRecordingSettings', null).catch(() => {}),
+          },
+        })
+      }
+    }
 
-    // Leaving hands-free: release the mic and restore the pre-call TTS settings.
-    if (wasHandsFree && !isHandsFree) {
+    // A manual push-to-talk recording can't coexist with the call's mic.
+    if (isRecordingRef.current) {
       voiceRef.current.cancel()
-      const saved = preCallTtsRef.current
-      preCallTtsRef.current = null
-      const restoreEnabled = saved?.enabled ?? false
-      setTtsEnabled(restoreEnabled)
-      ttsEnabledRef.current = restoreEnabled
-      if (saved) {
-        setTtsMode(saved.mode)
-        ttsModeRef.current = saved.mode
-      }
-      if (!restoreEnabled) ttsRef.current.cancel()
+      setIsRecording(false)
+      isRecordingRef.current = false
     }
+    preCallTtsRef.current = { enabled: ttsEnabledRef.current, mode: ttsModeRef.current }
+    setTtsEnabled(true)
+    ttsEnabledRef.current = true
+    ttsModeRef.current = 'full'
+    void voiceRef.current.startContinuous((text) => {
+      pendingVoiceInputRef.current = true
+      handlePromptSubmitRef.current?.({ text, files: [] })
+    })
 
-    if (mode === 'off') {
-      video.stop()
-      videoChatModeRef.current = 'off'
-      setVideoChatMode('off')
-      return
+    setPracticeMode(preset === 'practice')
+    practiceModeRef.current = preset === 'practice'
+    // Pill-first presets start minimized; face-to-face presets start expanded.
+    setCallMinimized(preset === 'voice' || preset === 'share')
+    inCallRef.current = true
+    setInCall(true)
+    analytics.callStarted(preset)
+  }, [video])
+
+  const endCall = useCallback(() => {
+    if (!inCallRef.current) return
+    voiceRef.current.cancel()
+    const saved = preCallTtsRef.current
+    preCallTtsRef.current = null
+    const restoreEnabled = saved?.enabled ?? false
+    setTtsEnabled(restoreEnabled)
+    ttsEnabledRef.current = restoreEnabled
+    if (saved) {
+      ttsModeRef.current = saved.mode
     }
-
-    if (prev === 'off') {
-      const ok = await video.start()
-      if (!ok) return // camera denied/unavailable — stay off
-    }
-
-    // Entering hands-free (call ↔ meeting switches keep the mic/TTS as-is).
-    if (isHandsFree && !wasHandsFree) {
-      // A manual push-to-talk recording can't coexist with the call's mic.
-      if (isRecordingRef.current) {
-        voiceRef.current.cancel()
-        setIsRecording(false)
-        isRecordingRef.current = false
-      }
-      preCallTtsRef.current = { enabled: ttsEnabledRef.current, mode: ttsModeRef.current }
-      setTtsEnabled(true)
-      ttsEnabledRef.current = true
-      setTtsMode('full')
-      ttsModeRef.current = 'full'
-      void voiceRef.current.startContinuous((text) => {
-        pendingVoiceInputRef.current = true
-        handlePromptSubmitRef.current?.({ text, files: [] })
-      })
-    }
-
-    videoChatModeRef.current = mode
-    setVideoChatMode(mode)
+    if (!restoreEnabled) ttsRef.current.cancel()
+    video.stop()
+    setPracticeMode(false)
+    practiceModeRef.current = false
+    setCallMinimized(false)
+    inCallRef.current = false
+    setInCall(false)
   }, [video])
 
   // During a call, mute the mic while the assistant is thinking or speaking
   // so its own TTS (or a half-turn) never gets transcribed back at it.
   useEffect(() => {
-    if (videoChatMode !== 'call' && videoChatMode !== 'meeting') return
+    if (!inCall) return
     voiceRef.current.setPaused(activeIsProcessing || tts.state !== 'idle')
-  }, [videoChatMode, activeIsProcessing, tts.state])
+  }, [inCall, activeIsProcessing, tts.state])
 
-  // Presenting from the full-screen call collapses it into the floating
-  // popout (the user needs their screen — possibly Rowboat itself — free to
-  // navigate while sharing). When the share ends, return to full screen.
-  const returnToMeetingAfterShareRef = useRef(false)
-
-  // Screen sharing (any video mode): frames of the shared screen ride along
-  // with each message next to the webcam frames.
+  // Screen sharing: frames of the shared screen ride along with each message
+  // next to the webcam frames. The surface change (full screen → pill) falls
+  // out of the derivation below.
   const handleToggleScreenShare = useCallback(async () => {
     if (video.screenState === 'live') {
       video.stopScreenShare()
     } else {
-      const ok = await video.startScreenShare()
-      if (ok && videoChatModeRef.current === 'meeting') {
-        returnToMeetingAfterShareRef.current = true
-        void handleVideoModeChange('call')
-      }
+      await video.startScreenShare()
     }
-  }, [video, handleVideoModeChange])
+  }, [video])
 
-  // Share ended (from the popout, the PiP, or the OS): restore the
-  // full-screen call if that's where the share was started from.
-  useEffect(() => {
-    if (video.screenState === 'live') return
-    if (!returnToMeetingAfterShareRef.current) return
-    returnToMeetingAfterShareRef.current = false
-    if (videoChatModeRef.current === 'call') {
-      void handleVideoModeChange('meeting')
-    }
-  }, [video.screenState, handleVideoModeChange])
-
-  // Meet-style camera mute: video mode (and any screen share) stays on, but
-  // no webcam frames are captured while the camera is off.
+  // Meet-style camera mute: the call (and any screen share) stays on, but no
+  // webcam frames are captured while the camera is off. Deliberately does NOT
+  // change the surface — turning your camera on from the pill puts your video
+  // IN the pill; expanding to full screen is its own explicit action.
   const handleToggleCamera = useCallback(() => {
     void video.setCameraEnabled(!video.cameraOn)
   }, [video])
 
-  // Current phase of a hands-free call (null outside call/meeting modes).
+  // Minimizing the full-screen call drops you back to working — and the pill
+  // exists to work *together*, so sharing starts automatically (the symmetric
+  // twin of expand, which stops it). If capture fails (permission), the call
+  // still minimizes as a plain pill. `callMinimized` is also set so stopping
+  // the share from the pill keeps you in the pill rather than snapping back
+  // to full screen.
+  const handleMinimizeCall = useCallback(async () => {
+    setCallMinimized(true)
+    await video.startScreenShare()
+  }, [video])
+
+  // Current phase of the call (null when not in one).
   const videoCallStatus: 'listening' | 'thinking' | 'speaking' | null =
-    videoChatMode === 'call' || videoChatMode === 'meeting'
+    inCall
       ? tts.state === 'speaking'
         ? 'speaking'
         : tts.state === 'synthesizing' || activeIsProcessing
@@ -1267,39 +1254,70 @@ function App() {
           : 'listening'
       : null
 
-  // Meet-style popout: the floating always-on-top mini-call appears the
-  // moment screen sharing starts and stays for the whole share — including
-  // over Rowboat itself (the shared screen may BE Rowboat), and across app
-  // switches. It disappears when sharing stops or video mode ends.
-  useEffect(() => {
-    const shouldShow = videoChatMode !== 'off' && video.screenState === 'live'
-    void window.ipc.invoke('video:setPopout', { show: shouldShow }).catch(() => {})
-  }, [videoChatMode, video.screenState])
+  // The call's surface follows one rule: full screen and screen sharing are
+  // mutually exclusive (a full-screen call covers the screen — sharing it
+  // would show the call itself). Sharing → floating pill, always. Not
+  // sharing → full screen unless the user shrank it (`callMinimized`).
+  // Expanding the pill auto-stops any share; presenting from full screen
+  // auto-collapses to the pill.
+  const callSurface: 'fullscreen' | 'popout' | null = !inCall
+    ? null
+    : video.screenState === 'live' || callMinimized
+      ? 'popout'
+      : 'fullscreen'
 
-  // Keep the popout's mascot/status/camera/caption mirror of the call fresh.
+  useEffect(() => {
+    void window.ipc.invoke('video:setPopout', { show: callSurface === 'popout' }).catch(() => {})
+  }, [callSurface])
+
+  // Consent surface for screen sharing: an unmissable toast the moment any
+  // share starts (auto-started calls included), with one-tap stop. The pill
+  // also carries a persistent "Sharing screen" badge, and macOS shows its
+  // purple recording indicator.
+  const prevScreenStateRef = useRef(video.screenState)
+  useEffect(() => {
+    const prev = prevScreenStateRef.current
+    prevScreenStateRef.current = video.screenState
+    if (video.screenState === 'live' && prev !== 'live') {
+      toast('Your screen is being shared', {
+        description: 'The assistant sees snapshots of it along with what you say.',
+        action: { label: 'Stop sharing', onClick: () => video.stopScreenShare() },
+        duration: 6000,
+      })
+    }
+  }, [video.screenState, video])
+
+  // Keep the popout's mascot/status/devices/caption mirror of the call fresh.
   // The main process caches the latest state and replays it when the popout
   // loads.
   useEffect(() => {
-    if (videoChatMode === 'off') return
+    if (!inCall) return
     void window.ipc
       .invoke('video:popoutState', {
         ttsState: tts.state,
         status: videoCallStatus,
         cameraOn: video.cameraOn,
-        interimText: videoCallStatus ? voice.interimText || null : null,
+        screenSharing: video.screenState === 'live',
+        interimText: voice.interimText || null,
       })
       .catch(() => {})
-  }, [videoChatMode, tts.state, videoCallStatus, video.cameraOn, voice.interimText])
+  }, [inCall, tts.state, videoCallStatus, video.cameraOn, video.screenState, voice.interimText])
 
   // Execute popout control-bar actions (the popout window has no access to
-  // the call's mic/camera/capture — they live here).
+  // the call's mic/camera/capture — they live here). 'expand' goes full
+  // screen, which by the exclusivity rule stops any running share; the main
+  // process already refocused the app window.
   useEffect(() => {
     return window.ipc.on('video:popout-action', ({ action }) => {
       if (action === 'toggle-camera') handleToggleCamera()
-      else if (action === 'stop-share') video.stopScreenShare()
-      else if (action === 'end-call') void handleVideoModeChange('off')
+      else if (action === 'toggle-share') void handleToggleScreenShare()
+      else if (action === 'end-call') endCall()
+      else if (action === 'expand') {
+        if (video.screenState === 'live') video.stopScreenShare()
+        setCallMinimized(false)
+      }
     })
-  }, [handleToggleCamera, video, handleVideoModeChange])
+  }, [handleToggleCamera, handleToggleScreenShare, endCall, video])
 
   // Enter to submit voice input, Escape to cancel
   useEffect(() => {
@@ -2783,7 +2801,7 @@ function App() {
 
     // Video chat mode: drain the webcam frames buffered since the last send
     // so they ride along with this message as inline image parts.
-    const videoFrames = videoChatModeRef.current !== 'off' ? video.collectFrames() : []
+    const videoFrames = inCallRef.current ? video.collectFrames() : []
 
     const userMessageId = `user-${Date.now()}`
     const displayAttachments: ChatMessage['attachments'] = hasAttachments || videoFrames.length > 0
@@ -2854,7 +2872,8 @@ function App() {
               ...(ttsEnabledRef.current ? { voiceOutput: ttsModeRef.current } : {}),
               ...(searchEnabled ? { searchEnabled: true } : {}),
               ...(codeMode ? { codeMode } : {}),
-              ...(videoChatModeRef.current !== 'off' ? { videoMode: true } : {}),
+              ...(inCallRef.current && (video.cameraOn || video.screenState === 'live') ? { videoMode: true } : {}),
+              ...(practiceModeRef.current ? { coachMode: true } : {}),
             },
           },
         },
@@ -6536,14 +6555,11 @@ function App() {
                             voiceAvailable={isActive && voiceAvailable}
                             ttsAvailable={isActive && ttsAvailable}
                             ttsEnabled={ttsEnabled}
-                            ttsMode={ttsMode}
                             onToggleTts={isActive ? handleToggleTts : undefined}
-                            onTtsModeChange={isActive ? handleTtsModeChange : undefined}
-                            ttsAvatarEnabled={ttsAvatarEnabled}
-                            onToggleTtsAvatar={isActive ? handleToggleTtsAvatar : undefined}
-                            videoChatMode={videoChatMode}
-                            onVideoModeChange={isActive ? handleVideoModeChange : undefined}
-                            videoCallAvailable={voiceAvailable && ttsAvailable}
+                            inCall={inCall}
+                            onStartCall={isActive ? startCall : undefined}
+                            onEndCall={isActive ? endCall : undefined}
+                            callAvailable={voiceAvailable && ttsAvailable}
                           />
                         </div>
                       )
@@ -6652,69 +6668,32 @@ function App() {
                 voiceAvailable={voiceAvailable}
                 ttsAvailable={ttsAvailable}
                 ttsEnabled={ttsEnabled}
-                ttsMode={ttsMode}
                 onToggleTts={handleToggleTts}
-                onTtsModeChange={handleTtsModeChange}
-                ttsAvatarEnabled={ttsAvatarEnabled}
-                onToggleTtsAvatar={handleToggleTtsAvatar}
-                videoChatMode={videoChatMode}
-                onVideoModeChange={handleVideoModeChange}
-                videoCallAvailable={voiceAvailable && ttsAvailable}
+                inCall={inCall}
+                onStartCall={startCall}
+                onEndCall={endCall}
+                callAvailable={voiceAvailable && ttsAvailable}
                 onComposioConnected={handleComposioConnected}
               />
             )}
-            {/* Webcam PiP preview while video chat mode is on. Hidden while
-                screen sharing (the floating popout is the call surface then)
-                and in the full-screen meeting view (which replaces it). */}
-            {(videoChatMode === 'chat' || videoChatMode === 'call') && video.screenState !== 'live' && (
-              <VideoPreviewOverlay
-                streamRef={video.streamRef}
-                onTurnOff={() => handleVideoModeChange('off')}
-                callStatus={
-                  videoChatMode === 'call'
-                    ? tts.state !== 'idle'
-                      ? 'speaking'
-                      : activeIsProcessing
-                        ? 'thinking'
-                        : 'listening'
-                    : undefined
-                }
-                interimText={videoChatMode === 'call' ? voice.interimText : undefined}
-                onToggleScreenShare={handleToggleScreenShare}
-                cameraOn={video.cameraOn}
-                onToggleCamera={handleToggleCamera}
-              />
-            )}
-            {/* Full-screen Meet-style call: user tile + animated mascot tile */}
-            {videoChatMode === 'meeting' && (
+            {/* Full-screen call: user tile + animated mascot tile. Shown only
+                when the derived surface says so (camera on, no screen share,
+                not minimized) — otherwise the call lives in the floating
+                popout window. */}
+            {callSurface === 'fullscreen' && (
               <VideoCallView
                 streamRef={video.streamRef}
-                screenStreamRef={video.screenStreamRef}
-                isScreenSharing={video.screenState === 'live'}
                 onToggleScreenShare={handleToggleScreenShare}
                 cameraOn={video.cameraOn}
                 onToggleCamera={handleToggleCamera}
+                practiceMode={practiceMode}
+                onMinimize={() => void handleMinimizeCall()}
                 ttsState={tts.state}
                 getTtsLevel={tts.getLevel}
-                status={
-                  tts.state === 'speaking'
-                    ? 'speaking'
-                    : tts.state === 'synthesizing' || activeIsProcessing
-                      ? 'thinking'
-                      : 'listening'
-                }
+                status={videoCallStatus ?? 'listening'}
                 interimText={voice.interimText}
                 assistantCaption={assistantCaption}
-                onLeave={() => handleVideoModeChange('off')}
-              />
-            )}
-            {/* Talking head hovers over the active view while avatar voice mode is
-                on (hidden during the tour, which shows its own mascot) */}
-            {ttsAvatarEnabled && !tourActive && (
-              <TalkingHeadOverlay
-                ttsState={tts.state}
-                getLevel={tts.getLevel}
-                onDismiss={handleToggleTtsAvatar}
+                onLeave={endCall}
               />
             )}
             {/* Mascot-guided product tour */}

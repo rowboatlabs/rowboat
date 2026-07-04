@@ -1394,21 +1394,36 @@ const ipcSchemas = {
       ttsState: z.enum(['idle', 'synthesizing', 'speaking']),
       status: z.enum(['listening', 'thinking', 'speaking']).nullable(),
       cameraOn: z.boolean(),
-      // Live transcript of the in-progress utterance (hands-free call only).
+      screenSharing: z.boolean(),
+      // Live transcript of the in-progress utterance.
       interimText: z.string().nullable(),
     }),
     res: z.object({}),
   },
-  // Popout window → bring the main app window back to the foreground.
-  'video:focusMain': {
+  // Popout window → fetch the latest cached call state on mount. The
+  // did-finish-load replay can race the React listener registration, and the
+  // popout must never guess (a wrong camera-on default flashes the user's
+  // video before the first state push corrects it).
+  'video:getPopoutState': {
     req: z.null(),
-    res: z.object({}),
+    res: z.object({
+      state: z
+        .object({
+          ttsState: z.enum(['idle', 'synthesizing', 'speaking']),
+          status: z.enum(['listening', 'thinking', 'speaking']).nullable(),
+          cameraOn: z.boolean(),
+          screenSharing: z.boolean(),
+          interimText: z.string().nullable(),
+        })
+        .nullable(),
+    }),
   },
   // Popout control bar → main process → relayed to the app window, which
-  // executes the action on the live call.
+  // executes the action on the live call. 'expand' additionally focuses the
+  // main app window (handled in the main process).
   'video:popoutAction': {
     req: z.object({
-      action: z.enum(['toggle-camera', 'stop-share', 'end-call']),
+      action: z.enum(['toggle-camera', 'toggle-share', 'end-call', 'expand']),
     }),
     res: z.object({}),
   },
@@ -1418,6 +1433,7 @@ const ipcSchemas = {
       ttsState: z.enum(['idle', 'synthesizing', 'speaking']),
       status: z.enum(['listening', 'thinking', 'speaking']).nullable(),
       cameraOn: z.boolean(),
+      screenSharing: z.boolean(),
       interimText: z.string().nullable(),
     }),
     res: z.null(),
@@ -1425,7 +1441,7 @@ const ipcSchemas = {
   // Push channel: main → app window with a popout control-bar action.
   'video:popout-action': {
     req: z.object({
-      action: z.enum(['toggle-camera', 'stop-share', 'end-call']),
+      action: z.enum(['toggle-camera', 'toggle-share', 'end-call', 'expand']),
     }),
     res: z.null(),
   },

@@ -65,6 +65,10 @@ export function voiceInputStarted() {
   posthog.capture('voice_input_started')
 }
 
+export function callStarted(preset: 'voice' | 'video' | 'share' | 'practice') {
+  posthog.capture('call_started', { preset })
+}
+
 export function searchExecuted(types: string[]) {
   posthog.capture('search_executed', { types })
 }

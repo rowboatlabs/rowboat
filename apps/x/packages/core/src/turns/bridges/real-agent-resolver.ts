@@ -55,6 +55,7 @@ const CompositionOverrides = z.object({
     codeMode: z.enum(["claude", "codex"]).nullable().optional(),
     codeCwd: z.string().nullable().optional(),
     videoMode: z.boolean().optional(),
+    coachMode: z.boolean().optional(),
 });
 
 export interface RealAgentResolverDeps {
@@ -123,6 +124,7 @@ export class RealAgentResolver implements IAgentResolver {
             codeMode: composition.codeMode ?? null,
             codeCwd: composition.codeCwd ?? null,
             videoMode: composition.videoMode ?? false,
+            coachMode: composition.coachMode ?? false,
         });
 
         const tools = await this.resolveTools(agent);
