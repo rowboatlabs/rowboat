@@ -204,6 +204,7 @@ export async function listTasks(opts: ListTasksOptions = {}): Promise<ListTasksR
             active: task.active,
             ...(task.triggers ? { triggers: task.triggers } : {}),
             ...(task.projectId ? { projectId: task.projectId } : {}),
+            ...(task.sourceApp ? { sourceApp: task.sourceApp } : {}),
             createdAt: task.createdAt,
             ...(task.lastAttemptAt ? { lastAttemptAt: task.lastAttemptAt } : {}),
             ...(task.lastRunId ? { lastRunId: task.lastRunId } : {}),

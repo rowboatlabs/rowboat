@@ -33,6 +33,7 @@ import { liveNoteEventConsumer } from "@x/core/dist/knowledge/live-note/event-co
 import { init as initBackgroundTaskScheduler } from "@x/core/dist/background-tasks/scheduler.js";
 import { backgroundTaskEventConsumer } from "@x/core/dist/background-tasks/event-consumer.js";
 import { init as initAppsServer, shutdown as shutdownAppsServer } from "@x/core/dist/apps/server.js";
+import { registerAppsHostApi } from "@x/core/dist/apps/host-api.js";
 import { shutdown as shutdownAnalytics } from "@x/core/dist/analytics/posthog.js";
 import { identifyIfSignedIn } from "@x/core/dist/analytics/identify.js";
 
@@ -453,7 +454,9 @@ app.whenReady().then(async () => {
   // start chrome extension sync server
   initChromeSync();
 
-  // start the Rowboat Apps server (per-app origins on 127.0.0.1:3210)
+  // start the Rowboat Apps server (per-app origins on 127.0.0.1:3210) with the
+  // full Host API (tools/fetch/llm/copilot behind the capability gate)
+  registerAppsHostApi();
   initAppsServer().catch((error) => {
     console.error('[Apps] Failed to start:', error);
   });

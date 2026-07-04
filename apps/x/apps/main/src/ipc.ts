@@ -58,6 +58,7 @@ import { loadNotificationSettings, saveNotificationSettings } from '@x/core/dist
 import * as composioHandler from './composio-handler.js';
 import * as appsIndexer from '@x/core/dist/apps/indexer.js';
 import * as appsServer from '@x/core/dist/apps/server.js';
+import * as appsAgents from '@x/core/dist/apps/agents.js';
 import { consumePendingDeepLink } from './deeplink.js';
 import { qualifyAndDisconnectComposioGoogle } from '@x/core/dist/migrations/composio-google-migration.js';
 import { IAgentScheduleRepo } from '@x/core/dist/agent-schedule/repo.js';
@@ -1318,10 +1319,15 @@ export function setupIpcHandlers() {
     // Rowboat Apps handlers (spec §13)
     'apps:list': async () => {
       const status = appsServer.getServerStatus();
+      const apps = await appsIndexer.listApps();
+      // Keep bundled agents materialized (idempotent; disabled by default).
+      for (const app of apps) {
+        if (app.agentSlugs.length) await appsAgents.syncAppAgents(app);
+      }
       return {
         serverRunning: status.running,
         ...(status.error ? { serverError: status.error } : {}),
-        apps: await appsIndexer.listApps(),
+        apps,
       };
     },
     'apps:get': async (_event, args) => {
@@ -1335,6 +1341,9 @@ export function setupIpcHandlers() {
     },
     'apps:delete': async (_event, args) => {
       await appsIndexer.deleteApp(args.folder);
+      // Remove app-owned bg-tasks too — orphaned app--<folder>-- tasks firing
+      // against a deleted app was a painful prototype failure mode.
+      await appsAgents.deleteAppAgents(args.folder);
       return { ok: true as const };
     },
     'apps:setTheme': async (_event, args) => {

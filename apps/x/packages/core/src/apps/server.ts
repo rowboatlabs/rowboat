@@ -73,7 +73,7 @@ const reloadTimers = new Map<string, NodeJS.Timeout>();
 // Helpers
 // ---------------------------------------------------------------------------
 
-function sendError(res: express.Response, status: number, code: string, message: string): void {
+export function sendError(res: express.Response, status: number, code: string, message: string): void {
     res.status(status).json({ error: { code, message } });
 }
 
@@ -299,7 +299,7 @@ export function setAppsTheme(theme: 'light' | 'dark'): void {
 // Data API (§7.3)
 // ---------------------------------------------------------------------------
 
-async function readBody(req: express.Request, limit: number): Promise<Buffer | null> {
+export async function readBody(req: express.Request, limit: number): Promise<Buffer | null> {
     return new Promise((resolve, reject) => {
         const chunks: Buffer[] = [];
         let size = 0;
@@ -515,6 +515,11 @@ async function handleHostApi(
 
     const extra = extraHostApiRoutes.get(pathname);
     if (extra) {
+        // All registered endpoints are POST-only (§7.4–7.7). REQUIRED: GETs are
+        // exempt from the D17 anti-CSRF checks, so a GET must never reach them.
+        if (req.method !== 'POST') {
+            return sendError(res, 405, 'method_not_allowed', `${pathname} accepts POST only`);
+        }
         await extra(slug, manifest, req, res);
         return;
     }
