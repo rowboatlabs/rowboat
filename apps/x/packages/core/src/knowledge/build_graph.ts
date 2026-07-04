@@ -20,6 +20,7 @@ import { getTagDefinitions } from './tag_system.js';
 import { knowledgeSourcesRepo } from './sources/repo.js';
 import { syncSlackKnowledgeSources } from './sources/sync_slack.js';
 import type { KnowledgeSourceConfig } from './sources/types.js';
+import { loadUserConfig } from '../config/user_config.js';
 
 /**
  * Build obsidian-style knowledge graph by running topic extraction
@@ -230,6 +231,58 @@ async function readFileContents(filePaths: string[]): Promise<{ path: string; co
     return files;
 }
 
+// Free-mail providers: a shared domain here does NOT mean two people are colleagues.
+const FREE_MAIL_DOMAINS = new Set([
+    'gmail.com', 'googlemail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'live.com',
+    'icloud.com', 'me.com', 'aol.com', 'proton.me', 'protonmail.com', 'hey.com', 'fastmail.com',
+]);
+
+/**
+ * Build the "Owner of this memory" block injected into every note-creation /
+ * curation run. The whole prompt's identity logic (self-exclusion, email reply
+ * gate, first-person perspective, outbound-email handling) depends on the
+ * agent knowing exactly who the user is — never make it guess from headers.
+ */
+export function buildOwnerBlock(): string {
+    const user = loadUserConfig();
+    const email = user?.email ?? '';
+    const domainFromEmail = email.includes('@') ? email.split('@')[1].toLowerCase() : '';
+    const domain = (user?.domain ?? domainFromEmail).toLowerCase();
+    const isFreeMail = FREE_MAIL_DOMAINS.has(domain);
+
+    // Optional profile lines from Agent Notes/user.md (e.g. role, company) —
+    // gives the agent context like "the owner runs Rowboat" so it correctly
+    // reads outbound product email as the owner's own actions.
+    let profileLines = '';
+    try {
+        const userNotesPath = path.join(NOTES_OUTPUT_DIR, 'Agent Notes', 'user.md');
+        if (fs.existsSync(userNotesPath)) {
+            const lines = fs.readFileSync(userNotesPath, 'utf-8')
+                .split('\n')
+                .map(l => l.trim())
+                .filter(l => l.startsWith('- '))
+                // Strip "[timestamp]" prefixes for compactness
+                .map(l => l.replace(/^- \[[^\]]*\]\s*/, '- '))
+                .slice(0, 6);
+            if (lines.length > 0) profileLines = lines.join('\n');
+        }
+    } catch {
+        // profile lines are best-effort
+    }
+
+    let block = `# Owner Of This Memory (authoritative — do not infer identity from email headers)\n\n`;
+    block += `- **Name:** ${user?.name || '(not set — resolve from the email address below when needed)'}\n`;
+    block += `- **Email:** ${email || '(not set)'}\n`;
+    block += `- **Email domain:** ${domain || '(not set)'}${isFreeMail ? ' (personal free-mail domain — do NOT treat same-domain senders as the owner\'s colleagues)' : ' (company domain — same-domain senders are the owner\'s teammates)'}\n`;
+    if (profileLines) {
+        block += `- **Profile:**\n${profileLines.split('\n').map(l => `  ${l}`).join('\n')}\n`;
+    }
+    block += `\nEvery note is written from this person's first-person perspective: "I"/"me"/"my" = the owner above. `;
+    block += `Messages sent FROM the owner's address are the owner's own actions (including outbound sales/marketing/product email from their company). `;
+    block += `Never create a People note for the owner, and never describe the owner in third person. Apply the "Owner Identity" rules in your instructions.\n`;
+    return block;
+}
+
 /**
  * Run note creation agent on a batch of files to extract entities and create/update notes
  */
@@ -245,8 +298,10 @@ async function createNotesFromBatch(
 
     const suggestedTopicsContent = readSuggestedTopicsFile();
 
-    // Build message with index and all files in the batch
+    // Build message with owner identity, index, and all files in the batch
     let message = `Process the following ${files.length} source files and create/update obsidian notes.\n\n`;
+    message += buildOwnerBlock();
+    message += `\n---\n\n`;
     message += `**Instructions:**\n`;
     message += `- Use the KNOWLEDGE BASE INDEX below to resolve entities - DO NOT grep/search for existing notes\n`;
     message += `- Extract entities (people, organizations, projects, topics) from ALL files below\n`;
@@ -276,6 +331,18 @@ async function createNotesFromBatch(
         message += file.content;
         message += `\n\n---\n\n`;
     });
+
+    // Recency-position reminder: small models weight the end of the prompt
+    // heavily, and the identity rules are the ones that corrupt the graph
+    // when missed. Repeat the critical three right before generation.
+    const user = loadUserConfig();
+    if (user?.email) {
+        const ownerLabel = user.name ? `${user.name} <${user.email}>` : user.email;
+        message += `**FINAL REMINDER — the owner of this memory is ${ownerLabel}.** `;
+        message += `(1) Never create or update a People note for them; in prose they are "I", never their name. `;
+        message += `(2) Emails FROM ${user.email} are the owner's own actions ("I emailed…"), not an external contact. `;
+        message += `(3) No placeholder text ("Unknown"/"-") and no links between entities that didn't co-occur in one source file.\n`;
+    }
 
     const { turnId, state } = await runHeadlessAgent({
         agentId: NOTE_CREATION_AGENT,
@@ -743,6 +810,147 @@ export async function processAllSources(): Promise<void> {
     }
 }
 
+// ── Curation ("gardener") pass ───────────────────────────────────────────────
+// note_creation only appends; without periodic consolidation, notes bloat and
+// rot (duplicate activity, stale open items, frontmatter drift, patterns never
+// promoted to facts). Daily, rewrite the notes that need it — one at a time —
+// with the note_curation agent. This is the graph's compounding loop.
+
+const CURATION_AGENT = 'note_curation';
+const CURATION_INTERVAL_MS = 24 * 60 * 60 * 1000; // daily
+const CURATION_MAX_NOTES_PER_RUN = 8;
+const CURATION_ENTITY_FOLDERS = ['People', 'Organizations', 'Projects', 'Topics'];
+// A note qualifies when it has accumulated enough activity to be worth a pass,
+// and has been modified since it was last curated (with a cooldown so we don't
+// re-curate on every small append).
+const CURATION_MIN_ACTIVITY_LINES = 8;
+const CURATION_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
+
+function countActivityEntries(content: string): number {
+    // Activity/Timeline/Log entries all start with a bolded date bullet or header
+    const matches = content.match(/^-?\s*\*\*\d{4}-\d{2}(-\d{2})?\*\*/gm);
+    return matches ? matches.length : 0;
+}
+
+function parseCuratedAt(content: string): Date | null {
+    const m = content.match(/^curated_at:\s*"?([^"\n]+)"?\s*$/m);
+    if (!m) return null;
+    const d = new Date(m[1].trim());
+    return isNaN(d.getTime()) ? null : d;
+}
+
+function findCurationCandidates(): { path: string; activityCount: number }[] {
+    const candidates: { path: string; activityCount: number; mtime: number }[] = [];
+    for (const folder of CURATION_ENTITY_FOLDERS) {
+        const dir = path.join(NOTES_OUTPUT_DIR, folder);
+        if (!fs.existsSync(dir)) continue;
+        for (const entry of fs.readdirSync(dir)) {
+            if (!entry.endsWith('.md')) continue;
+            const filePath = path.join(dir, entry);
+            try {
+                const stat = fs.statSync(filePath);
+                if (!stat.isFile()) continue;
+                const content = fs.readFileSync(filePath, 'utf-8');
+                const activityCount = countActivityEntries(content);
+                if (activityCount < CURATION_MIN_ACTIVITY_LINES) continue;
+                const curatedAt = parseCuratedAt(content);
+                if (curatedAt) {
+                    const modifiedSinceCuration = stat.mtime.getTime() > curatedAt.getTime();
+                    const cooledDown = Date.now() - curatedAt.getTime() > CURATION_COOLDOWN_MS;
+                    if (!modifiedSinceCuration || !cooledDown) continue;
+                }
+                candidates.push({ path: filePath, activityCount, mtime: stat.mtime.getTime() });
+            } catch {
+                // unreadable note — skip
+            }
+        }
+    }
+    // Most-bloated first
+    candidates.sort((a, b) => b.activityCount - a.activityCount);
+    return candidates.slice(0, CURATION_MAX_NOTES_PER_RUN);
+}
+
+export async function curateNotes(): Promise<void> {
+    const state = loadState();
+    const last = state.lastCurationTime ? new Date(state.lastCurationTime).getTime() : 0;
+    if (Date.now() - last < CURATION_INTERVAL_MS) return;
+
+    const candidates = findCurationCandidates();
+    // Stamp the attempt time even when there is nothing to do, so we only scan daily.
+    state.lastCurationTime = new Date().toISOString();
+    saveState(state);
+    if (candidates.length === 0) {
+        console.log('[GraphBuilder] Curation: no notes need consolidation');
+        return;
+    }
+
+    console.log(`[GraphBuilder] Curation: consolidating ${candidates.length} note(s)`);
+    const run = await serviceLogger.startRun({
+        service: 'graph',
+        message: `Curating ${candidates.length} knowledge note${candidates.length === 1 ? '' : 's'}`,
+        trigger: 'timer',
+    });
+
+    let curated = 0;
+    let hadError = false;
+    for (const candidate of candidates) {
+        const relPath = path.relative(WorkDir, candidate.path);
+        try {
+            const content = fs.readFileSync(candidate.path, 'utf-8');
+            let message = buildOwnerBlock();
+            message += `\n---\n\n`;
+            message += `Curate the following knowledge note per your instructions. Rewrite it in place with a single file-writeText to the SAME path.\n\n`;
+            message += `**Note path:** ${relPath}\n\n`;
+            message += `**Current content:**\n\n${content}\n`;
+            await runHeadlessAgent({
+                agentId: CURATION_AGENT,
+                message,
+                model: await getKgModel(),
+                throwOnError: true,
+            });
+            curated++;
+            await serviceLogger.log({
+                type: 'progress',
+                service: run.service,
+                runId: run.runId,
+                level: 'info',
+                message: `Curated ${relPath}`,
+                step: 'curate',
+                current: curated,
+                total: candidates.length,
+            });
+        } catch (error) {
+            hadError = true;
+            console.error(`[GraphBuilder] Curation failed for ${relPath}:`, error);
+            await serviceLogger.log({
+                type: 'error',
+                service: run.service,
+                runId: run.runId,
+                level: 'error',
+                message: `Curation failed for ${relPath}`,
+                error: getErrorDetails(error),
+            });
+        }
+    }
+
+    try {
+        await commitAll('Knowledge curation', 'Rowboat');
+    } catch (err) {
+        console.error('[GraphBuilder] Failed to commit curation to version history:', err);
+    }
+
+    await serviceLogger.log({
+        type: 'run_complete',
+        service: run.service,
+        runId: run.runId,
+        level: hadError ? 'error' : 'info',
+        message: `Curation complete: ${curated}/${candidates.length} notes consolidated`,
+        durationMs: Date.now() - run.startedAt,
+        outcome: hadError ? 'error' : 'ok',
+        summary: { notesCurated: curated },
+    });
+}
+
 /**
  * Main entry point - runs as independent service monitoring all source folders
  */
@@ -763,6 +971,12 @@ export async function init() {
             await processAllSources();
         } catch (error) {
             console.error('[GraphBuilder] Error in main loop:', error);
+        }
+
+        try {
+            await curateNotes(); // no-ops unless the daily interval has elapsed
+        } catch (error) {
+            console.error('[GraphBuilder] Error in curation pass:', error);
         }
     }
 }

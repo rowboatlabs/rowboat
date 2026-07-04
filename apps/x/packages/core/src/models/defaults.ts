@@ -6,6 +6,11 @@ import container from "../di/container.js";
 
 const SIGNED_IN_DEFAULT_MODEL = "anthropic/claude-opus-4.7";
 const SIGNED_IN_DEFAULT_PROVIDER = "rowboat";
+// KG note-creation historically failed on identity (self-notes, perspective
+// flips, misread outbound email) — root cause was the owner block never being
+// injected, not the model tier. With identity injected + the NON-NEGOTIABLE
+// RULES checklist + the end-of-message owner reminder, the lite tier is
+// serviceable and 6x cheaper than full flash for this always-on service.
 const SIGNED_IN_KG_MODEL = "google/gemini-3.1-flash-lite";
 const SIGNED_IN_LIVE_NOTE_AGENT_MODEL = "google/gemini-3.1-flash-lite";
 const SIGNED_IN_AUTO_PERMISSION_DECISION_MODEL = "google/gemini-3.1-flash-lite";

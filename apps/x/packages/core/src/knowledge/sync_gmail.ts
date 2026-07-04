@@ -1094,11 +1094,20 @@ async function processThread(auth: OAuth2Client, threadId: string, syncDir: stri
         const firstHeader = messages[0].payload?.headers;
         const subject = firstHeader?.find(h => h.name === 'Subject')?.value || '(No Subject)';
 
+        // Exclude unsent drafts — same rule as the incremental append path.
+        // A draft rendered as a normal "### From:" block reads as a sent reply
+        // downstream (email reply gate, "how the user responded"), which is
+        // wrong: drafts are unsent and often half-written.
+        const sentOnly = messages.filter(m => !(m.labelIds ?? []).includes('DRAFT'));
+        if (sentOnly.length === 0) {
+            return null;
+        }
+
         let mdContent = `# ${subject}\n\n`;
         mdContent += `**Thread ID:** ${threadId}\n`;
-        mdContent += `**Message Count:** ${messages.length}\n\n---\n\n`;
+        mdContent += `**Message Count:** ${sentOnly.length}\n\n---\n\n`;
 
-        for (const msg of messages) {
+        for (const msg of sentOnly) {
             const msgId = msg.id!;
             const headers = msg.payload?.headers || [];
             const from = headers.find(h => h.name === 'From')?.value || 'Unknown';

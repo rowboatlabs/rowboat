@@ -10,6 +10,12 @@ Main orchestrator that:
 - Runs the `note_creation` agent to extract entities
 - Only processes new or changed files (tracked via state)
 
+### `note_curation.ts` — the consolidation ("gardener") agent
+`note_creation` only appends, so notes bloat and rot over time. A daily curation pass (`curateNotes()` in `build_graph.ts`) rewrites the most-accumulated notes one at a time: collapses activity older than 60 days into monthly summaries, promotes recurring patterns into dated Key facts / Assistant notes (the reflection step), retires stale open items to a Dormant list, reconciles frontmatter/body drift and perspective errors, and stamps `curated_at` in frontmatter. Notes qualify at ≥8 activity entries, modified since last curation, with a 7-day cooldown; max 8 notes/run; committed to version history as "Knowledge curation".
+
+### Owner identity injection
+Every note_creation and note_curation run receives an "Owner Of This Memory" block (built by `buildOwnerBlock()` in `build_graph.ts` from `config/user.json` + `knowledge/Agent Notes/user.md`). The prompt's identity logic — self-exclusion, first-person perspective, the Email Reply Gate, outbound-email handling, teammate detection by domain — all depends on it. Never let the agent guess who the user is from email headers.
+
 ### `graph_state.ts`
 State management module that tracks which files have been processed:
 - Uses hybrid mtime + hash approach for change detection
@@ -64,7 +70,7 @@ This is efficient (only hashes potentially changed files) and reliable (confirms
    - Loads state
    - Scans source directory for files
    - Filters to only new/changed files
-   - Processes in batches of 25
+   - Processes ONE source file per agent run (BATCH_SIZE = 1 — prevents cross-file entity contamination)
    - Updates state after each successful batch (saves progress incrementally)
 
 3. **Agent processes batch**
@@ -207,15 +213,12 @@ On first run, `strictness_analyzer.ts` analyzes your emails and recommends a lev
 
 ### Prompt Files
 
-Each strictness level has its own agent prompt:
-- `note_creation_high.md` - Original strict rules
-- `note_creation_medium.md` - Relaxed for personalized emails
-- `note_creation_low.md` - Minimal filtering
+(Historical: per-strictness prompt files no longer exist.) The single prompt lives in `note_creation.ts` (`getRaw()`); email gating is label-based via `renderNoteEffectRules()` from `tag_system.ts`, layered with the Email Reply Gate, direct-interaction, transactional, weekly-importance, and ongoing-relationship tests.
 
 ## Other Configuration
 
 ### Batch Size
-Change `BATCH_SIZE` in `build_graph.ts` (currently 25 files per batch)
+Change `BATCH_SIZE` in `build_graph.ts` (currently 1 — one source file per agent run, deliberately, to prevent cross-file entity contamination)
 
 ### State File Location
 Change `STATE_FILE` in `graph_state.ts` (currently `WorkDir/knowledge_graph_state.json`)
