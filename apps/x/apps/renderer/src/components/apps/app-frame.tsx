@@ -11,11 +11,28 @@ import { AppDetail } from '@/components/apps/app-detail'
 export function AppFrame({ app, onBack }: { app: rowboatApp.AppSummary; onBack: () => void }) {
   const [reloadNonce, setReloadNonce] = useState(0)
   const [showDetail, setShowDetail] = useState(false)
+  // Load watchdog: if the iframe hasn't fired `load` within the deadline,
+  // surface a visible retry state instead of a silent blank pane.
+  const [loadState, setLoadState] = useState<'loading' | 'ok' | 'stuck'>('loading')
   const title = app.manifest?.name ?? app.folder
 
   useEffect(() => {
     appOpened(app.folder)
   }, [app.folder])
+
+  // Reset the watchdog when the target changes (adjust-during-render pattern).
+  const [watchKey, setWatchKey] = useState(`${app.folder}:${reloadNonce}`)
+  if (watchKey !== `${app.folder}:${reloadNonce}`) {
+    setWatchKey(`${app.folder}:${reloadNonce}`)
+    setLoadState('loading')
+  }
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setLoadState((s) => (s === 'loading' ? 'stuck' : s))
+    }, 6000)
+    return () => window.clearTimeout(timer)
+  }, [watchKey])
 
   return (
     <div className="flex h-full flex-col">
@@ -55,13 +72,27 @@ export function AppFrame({ app, onBack }: { app: rowboatApp.AppSummary; onBack: 
         </button>
       </div>
       <div className="flex min-h-0 flex-1">
-        <div className="min-w-0 flex-1">
+        <div className="relative min-w-0 flex-1">
           <iframe
             key={reloadNonce}
             title={title}
             src={`${app.origin}/`}
+            onLoad={() => setLoadState('ok')}
             className="h-full w-full border-0 bg-background"
           />
+          {loadState === 'stuck' && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background/95 text-sm">
+              <div className="text-muted-foreground">This app is taking too long to load.</div>
+              <button
+                type="button"
+                onClick={() => setReloadNonce((n) => n + 1)}
+                className="rounded-md border border-border px-3 py-1.5 font-medium hover:bg-accent"
+              >
+                Retry
+              </button>
+              <div className="font-mono text-xs text-muted-foreground">{app.origin}</div>
+            </div>
+          )}
         </div>
         {showDetail && (
           <div className="w-80 shrink-0 border-l border-border">

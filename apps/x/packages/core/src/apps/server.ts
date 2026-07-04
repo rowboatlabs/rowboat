@@ -710,6 +710,27 @@ export function getServerStatus(): { running: boolean; error?: string } {
     return server ? { running: true } : { running: false, ...(serverError ? { error: serverError } : {}) };
 }
 
+let lagMonitor: NodeJS.Timeout | null = null;
+
+/**
+ * Event-loop lag monitor: the apps server shares the main process with agent
+ * runs, sync pipelines, etc. If the loop stalls, every open app hangs with it —
+ * log stalls >300ms so "app went blank" reports can be tied to a culprit.
+ */
+function startLagMonitor(): void {
+    if (lagMonitor) return;
+    let last = Date.now();
+    lagMonitor = setInterval(() => {
+        const now = Date.now();
+        const lag = now - last - 500;
+        if (lag > 300) {
+            console.warn(`[Apps] main event-loop stalled ~${lag}ms (apps server shares this loop — open apps hang during stalls)`);
+        }
+        last = now;
+    }, 500);
+    lagMonitor.unref?.();
+}
+
 export async function init(): Promise<void> {
     if (server) return;
     if (startPromise) return startPromise;
@@ -717,6 +738,7 @@ export async function init(): Promise<void> {
     startPromise = (async () => {
         try {
             await fsp.mkdir(APPS_DIR, { recursive: true });
+            startLagMonitor();
             await startWatcher();
             const expressApp = createApp();
             await new Promise<void>((resolve, reject) => {

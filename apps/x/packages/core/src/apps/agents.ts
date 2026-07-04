@@ -59,6 +59,9 @@ async function materializeAgent(folder: string, agentFile: string): Promise<stri
 
     if (await pathExists(taskYaml)) {
         // Update path (§8.4): overwrite definition fields, preserve the rest.
+        // Write ONLY when the definition actually changed — this sync runs on
+        // every apps:list poll, and an unconditional rewrite races the bg
+        // runner's own task.yaml patches mid-run (and spams watcher events).
         try {
             const current = parseYaml(await fs.readFile(taskYaml, 'utf-8')) as BackgroundTask;
             const next: BackgroundTask = {
@@ -69,7 +72,14 @@ async function materializeAgent(folder: string, agentFile: string): Promise<stri
                 sourceApp: folder,
             };
             if (!def.triggers) delete next.triggers;
-            await fs.writeFile(taskYaml, stringifyYaml(next), 'utf-8');
+            const unchanged =
+                current.name === next.name &&
+                current.instructions === next.instructions &&
+                current.sourceApp === next.sourceApp &&
+                JSON.stringify(current.triggers ?? null) === JSON.stringify(next.triggers ?? null);
+            if (!unchanged) {
+                await fs.writeFile(taskYaml, stringifyYaml(next), 'utf-8');
+            }
         } catch (e) {
             console.warn(`[Apps] failed to update agent task ${slug}:`, e);
         }
