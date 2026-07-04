@@ -29,7 +29,7 @@ const patternFor = (id: string): string => PATTERNS[hash(id + '·pat') % PATTERN
 const CARD_CSS = `
 .ma-page {
   container-type: inline-size;
-  --ma-bg:#eceef1;
+  --ma-bg:#f8f8f9;
   --ma-card-from:#ffffff; --ma-card-mid:#f2f3f6; --ma-card-to:#e6e8ee;
   --ma-card-hover-from:#ffffff; --ma-card-hover-mid:#f5f6f9; --ma-card-hover-to:#eaecf1;
   --ma-sheen:rgba(255,255,255,0.55); --ma-top-highlight:rgba(255,255,255,0.9);
