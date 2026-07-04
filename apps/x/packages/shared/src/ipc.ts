@@ -649,6 +649,12 @@ const ipcSchemas = {
     }),
     res: z.null(),
   },
+  // Bring the main app window to the foreground (e.g. the assistant navigated
+  // the UI during a call while the user was in another app).
+  'app:focusMainWindow': {
+    req: z.null(),
+    res: z.object({}),
+  },
   'app:takeMeetingNotes': {
     req: z.object({
       // Pass the raw calendar event JSON through; renderer adapts to its existing flow.

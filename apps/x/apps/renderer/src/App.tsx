@@ -97,6 +97,7 @@ import {
   type ChatViewportAnchorState,
   type ChatTabViewState,
   type ConversationItem,
+  type ToolCall,
   createEmptyChatTabViewState,
   getWebSearchCardData,
   getAppActionCardData,
@@ -4569,22 +4570,61 @@ function App() {
   // External search set by app-navigation tool (passed to BasesView)
   const [externalBaseSearch, setExternalBaseSearch] = useState<string | undefined>(undefined)
 
-  // Process pending app-navigation results
-  useEffect(() => {
-    const result = pendingAppNavRef.current
-    if (!result) return
-    pendingAppNavRef.current = null
+  // Apply an app-navigation tool result to the UI. Shared by both event
+  // paths (legacy runs:events and the session-chat turn runtime).
+  const applyAppNavigation = useCallback((result: Record<string, unknown>) => {
+    // During a call, navigation must be VISIBLE: the full-screen call view
+    // would cover the very thing being shown — collapse it to the pill —
+    // and if the user is in another app, bring Rowboat forward.
+    const visibleActions = ['open-note', 'open-view', 'read-view', 'open-item', 'update-base-view', 'create-base']
+    if (inCallRef.current && visibleActions.includes(result.action as string)) {
+      setCallMinimized(true)
+      void window.ipc.invoke('app:focusMainWindow', null).catch(() => {})
+    }
+
+    // Views the assistant can open (or auto-open while reading them via
+    // read-view — the user should SEE what's being read).
+    const navigateToNamedView = (view: string) => {
+      switch (view) {
+        case 'graph': void navigateToView({ type: 'graph' }); break
+        case 'bases': void navigateToView({ type: 'file', path: BASES_DEFAULT_TAB_PATH }); break
+        case 'home': void navigateToView({ type: 'home' }); break
+        case 'email': void navigateToView({ type: 'email' }); break
+        case 'meetings': void navigateToView({ type: 'meetings' }); break
+        case 'live-notes': void navigateToView({ type: 'live-notes' }); break
+        case 'bg-tasks': void navigateToView({ type: 'bg-tasks' }); break
+        case 'chat-history': void navigateToView({ type: 'chat-history' }); break
+        case 'knowledge': void navigateToView({ type: 'knowledge-view' }); break
+        case 'workspace': void navigateToView({ type: 'workspace' }); break
+        case 'code': void navigateToView({ type: 'code' }); break
+      }
+    }
 
     switch (result.action) {
       case 'open-note':
         navigateToFile(result.path as string)
         break
       case 'open-view':
-        if (result.view === 'graph') void navigateToView({ type: 'graph' })
-        if (result.view === 'bases') {
-          void navigateToView({ type: 'file', path: BASES_DEFAULT_TAB_PATH })
+      case 'read-view':
+        navigateToNamedView(result.view as string)
+        break
+      case 'open-item': {
+        switch (result.kind) {
+          case 'email-thread':
+            void navigateToView({ type: 'email', threadId: result.threadId as string })
+            break
+          case 'note':
+            navigateToFile(result.path as string)
+            break
+          case 'bg-task':
+            void navigateToView({ type: 'task', name: result.taskName as string })
+            break
+          case 'session':
+            void navigateToView({ type: 'chat', runId: result.sessionId as string })
+            break
         }
         break
+      }
       case 'update-base-view': {
         // Navigate to bases if not already there
         const targetPath = selectedPath && isBaseFilePath(selectedPath) ? selectedPath : BASES_DEFAULT_TAB_PATH
@@ -4664,7 +4704,40 @@ function App() {
         }
         break
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navigateToFile, navigateToView, selectedPath])
+
+  // Legacy runs:events path: handleRunEvent stashes the result in a ref;
+  // polled every render (the triggering event always causes one).
+  useEffect(() => {
+    const result = pendingAppNavRef.current
+    if (!result) return
+    pendingAppNavRef.current = null
+    applyAppNavigation(result)
   })
+
+  // Turn-runtime path: the session-chat store surfaces tool results in the
+  // conversation; apply newly completed app-navigation calls exactly once.
+  // On session switch/load, everything already in the transcript happened in
+  // the past — seed as processed without replaying navigations.
+  const processedAppNavRef = useRef<{ key: string | null; ids: Set<string> }>({ key: null, ids: new Set() })
+  useEffect(() => {
+    const conversation = sessionChat.chatState?.conversation
+    if (!conversation) return
+    const completed = conversation.filter(
+      (item): item is ToolCall => isToolCall(item) && item.name === 'app-navigation' && item.status === 'completed'
+    )
+    if (processedAppNavRef.current.key !== runId) {
+      processedAppNavRef.current = { key: runId, ids: new Set(completed.map((t) => t.id)) }
+      return
+    }
+    for (const tool of completed) {
+      if (processedAppNavRef.current.ids.has(tool.id)) continue
+      processedAppNavRef.current.ids.add(tool.id)
+      const result = tool.result as Record<string, unknown> | undefined
+      if (result && result.success) applyAppNavigation(result)
+    }
+  }, [sessionChat.chatState?.conversation, runId, applyAppNavigation])
 
   const navigateToFullScreenChat = useCallback(() => {
     // Only treat this as navigation when coming from another view

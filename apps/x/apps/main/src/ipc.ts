@@ -1835,10 +1835,13 @@ export function setupIpcHandlers() {
           preload: preloadPath,
         },
       });
-      // Float above other apps (and fullscreen spaces on macOS) — the whole
-      // point is being visible while the user works elsewhere.
+      // Float above other apps on every workspace. Deliberately NOT
+      // `visibleOnFullScreen: true`: on macOS that flag hides the app's Dock
+      // icon for as long as such a window exists (the app becomes an
+      // "agent" app), which reads as Rowboat having vanished. The trade-off
+      // is the popout won't hover over other apps' fullscreen Spaces.
       win.setAlwaysOnTop(true, 'floating');
-      win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+      win.setVisibleOnAllWorkspaces(true);
       win.webContents.once('did-finish-load', () => {
         if (lastVideoPopoutState) {
           win.webContents.send('video:popout-state', lastVideoPopoutState);
@@ -1862,6 +1865,15 @@ export function setupIpcHandlers() {
       lastVideoPopoutState = args;
       if (videoPopoutWin && !videoPopoutWin.isDestroyed()) {
         videoPopoutWin.webContents.send('video:popout-state', args);
+      }
+      return {};
+    },
+    'app:focusMainWindow': async () => {
+      const main = findMainAppWindow();
+      if (main) {
+        if (main.isMinimized()) main.restore();
+        main.show();
+        main.focus();
       }
       return {};
     },

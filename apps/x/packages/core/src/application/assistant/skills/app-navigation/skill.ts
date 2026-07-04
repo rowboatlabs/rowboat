@@ -1,82 +1,91 @@
 export const skill = String.raw`
-# App Navigation Skill
+# App Driving Skill
 
-You have access to the **app-navigation** tool which lets you control the Rowboat UI directly — opening notes, switching views, filtering the knowledge base, and creating saved views.
+You have the **app-navigation** tool: you can DRIVE the Rowboat app the user
+is looking at — open any view, read what a view contains, open specific items
+(an email thread, a note, a background agent, a past chat), filter the
+knowledge base, and manage saved views. Navigation happens on the USER'S
+screen: when you open something, they watch it open.
+
+## The core pattern: show while telling
+
+When the user asks about something that lives inside Rowboat ("what emails do
+I have?", "what background agents are running?", "open the note about Acme"),
+don't answer blind. Drive:
+
+1. **read-view** the relevant view — this returns the actual data AND
+   navigates the user's screen to that view at the same time.
+2. Answer from the returned data, concisely.
+3. If they ask about one item ("open the one from Arjun"), **open-item** it —
+   it appears on their screen — and summarize what's in it if useful.
+
+This matters most during a call: the user is talking to you hands-free and
+watching the screen. Navigate so they see what you see, and keep spoken
+answers short.
 
 ## Actions
 
+### read-view — read a view's contents (and show it)
+Returns the same data the view renders; the app simultaneously navigates to
+that view so the user sees it.
+
+- ` + "`view: \"email\"`" + ` → latest important inbox threads: ` + "`{ threadId, subject, from, date, unread, summary }`" + `.
+  Pass ` + "`query`" + ` to search instead (sender name, subject words — e.g. ` + "`query: \"from Arjun\"`" + ` or just ` + "`\"Arjun\"`" + `).
+- ` + "`view: \"bg-tasks\"`" + ` → background agents: ` + "`{ name, slug, active, triggers, lastRunAt, lastRunSummary, lastRunError }`" + `.
+- ` + "`view: \"chat-history\"`" + ` → past chats: ` + "`{ sessionId, title, updatedAt, turnCount }`" + `.
+- ` + "`limit`" + ` (optional, default 15).
+
+For notes, meetings, and live notes use the ` + "`file-*`" + ` tools (they are
+markdown files in the workspace) and then open-note / open-item to show them.
+
+### open-item — open one specific thing on screen
+- ` + "`kind: \"email-thread\"`" + ` + ` + "`threadId`" + ` (from read-view email)
+- ` + "`kind: \"note\"`" + ` + ` + "`path`" + `
+- ` + "`kind: \"bg-task\"`" + ` + ` + "`taskName`" + ` (from read-view bg-tasks; validated against real tasks)
+- ` + "`kind: \"session\"`" + ` + ` + "`sessionId`" + ` (from read-view chat-history)
+
+### open-view — just switch the screen
+` + "`view`" + `: ` + "`home | email | meetings | live-notes | bg-tasks | chat-history | knowledge | workspace | code | bases | graph`" + `
+Use when the user asks to "go to"/"show" a view without a question to answer.
+
 ### open-note
-Open a specific knowledge file in the editor pane.
+Open a knowledge file in the editor. ` + "`path`" + `: full workspace-relative path
+(e.g. ` + "`knowledge/People/John Smith.md`" + `). Use ` + "`file-grep`" + ` first if unsure
+of the exact path.
 
-**When to use:** When the user asks to see, open, or view a specific note (e.g., "open John's note", "show me the Acme project page").
+### update-base-view / get-base-state / create-base
+Knowledge-base table control (unchanged):
+- ` + "`update-base-view`" + `: ` + "`filters`" + ` (` + "`set/add/remove/clear`" + ` of ` + "`{category, value}`" + `),
+  ` + "`sort`" + ` (` + "`{field, dir}`" + `), ` + "`search`" + `. **Never pass ` + "`columns`" + ` unless the user
+  explicitly asks to change columns** — it overrides their layout.
+- ` + "`get-base-state`" + `: available filter categories/values and note count.
+- ` + "`create-base`" + `: save the current view configuration under ` + "`name`" + `.
 
-**Parameters:**
-- ` + "`path`" + `: Full workspace-relative path (e.g., ` + "`knowledge/People/John Smith.md`" + `)
+## Worked examples
 
-**Tips:**
-- Use ` + "`file-grep`" + ` first to find the exact path if you're unsure of the filename.
-- Always pass the full ` + "`knowledge/...`" + ` path, not just the filename.
+**"What emails do I have?"** (on a call)
+1. ` + "`app-navigation({ action: \"read-view\", view: \"email\" })`" + ` — email view opens on their screen.
+2. Speak the highlights: "You've got six new ones — the ones that matter are from Arjun about the deck and from Stripe about billing."
 
-### open-view
-Switch the UI to the graph or bases view.
+**"Open the one from Arjun."**
+1. Find Arjun's thread in the data you already have (or ` + "`read-view`" + ` with ` + "`query: \"Arjun\"`" + `).
+2. ` + "`app-navigation({ action: \"open-item\", kind: \"email-thread\", threadId: \"...\" })`" + `
+3. "It's open — he's asking whether Thursday works for the pitch review."
 
-**When to use:** When the user asks to see the knowledge graph, view all notes, or open the bases/table view.
+**"What background agents do I have?"**
+1. ` + "`app-navigation({ action: \"read-view\", view: \"bg-tasks\" })`" + `
+2. "Three: the inbox summarizer ran an hour ago, the meeting-prep agent is active, and the Linear digest failed its last run — want me to open that one?"
 
-**Parameters:**
-- ` + "`view`" + `: ` + "`\"graph\"`" + ` or ` + "`\"bases\"`" + `
+**"Show me all active customers"**
+1. ` + "`get-base-state`" + ` to see available categories, then
+2. ` + "`update-base-view`" + ` with ` + "`filters.set: [{ category: \"relationship\", value: \"customer\" }]`" + `
 
-### update-base-view
-Change filters, columns, sort order, or search in the bases (table) view.
-
-**When to use:** When the user asks to find, filter, sort, or search notes. Examples: "show me all active customers", "filter by topic=hiring", "sort by name", "search for pricing".
-
-**Parameters:**
-- ` + "`filters`" + `: Object with ` + "`set`" + `, ` + "`add`" + `, ` + "`remove`" + `, or ` + "`clear`" + ` — each takes an array of ` + "`{ category, value }`" + ` pairs.
-  - ` + "`set`" + `: Replace ALL current filters with these.
-  - ` + "`add`" + `: Append filters without removing existing ones.
-  - ` + "`remove`" + `: Remove specific filters.
-  - ` + "`clear: true`" + `: Remove all filters.
-- ` + "`columns`" + `: Object with ` + "`set`" + `, ` + "`add`" + `, or ` + "`remove`" + ` — each takes an array of column names (frontmatter keys).
-- ` + "`sort`" + `: ` + "`{ field, dir }`" + ` where dir is ` + "`\"asc\"`" + ` or ` + "`\"desc\"`" + `.
-- ` + "`search`" + `: Free-text search string.
-
-**Tips:**
-- If unsure what categories/values are available, call ` + "`get-base-state`" + ` first.
-- For "show me X", prefer ` + "`filters.set`" + ` to start fresh rather than ` + "`filters.add`" + `.
-- Categories come from frontmatter keys (e.g., relationship, status, topic, type).
-- **CRITICAL: Do NOT pass ` + "`columns`" + ` unless the user explicitly asks to show/hide specific columns.** Omit the ` + "`columns`" + ` parameter entirely when only filtering, sorting, or searching. Passing ` + "`columns`" + ` will override the user's current column layout and can make the view appear empty.
-
-### get-base-state
-Retrieve information about what's in the knowledge base — available filter categories, values, and note count.
-
-**When to use:** When you need to know what properties exist before filtering, or when the user asks "what can I filter by?", "how many notes are there?", etc.
-
-**Parameters:**
-- ` + "`base_name`" + ` (optional): Name of a saved base to inspect.
-
-### create-base
-Save the current view configuration as a named base.
-
-**When to use:** When the user asks to save a filtered view, create a saved search, or says "save this as [name]".
-
-**Parameters:**
-- ` + "`name`" + `: Human-readable name for the base.
-
-## Workflow Example
-
-1. User: "Show me all people who are customers"
-2. First, check what properties are available:
-   ` + "`app-navigation({ action: \"get-base-state\" })`" + `
-3. Apply filters based on the available properties:
-   ` + "`app-navigation({ action: \"update-base-view\", filters: { set: [{ category: \"relationship\", value: \"customer\" }] } })`" + `
-4. If the user wants to save it:
-   ` + "`app-navigation({ action: \"create-base\", name: \"Customers\" })`" + `
-
-## Important Notes
-- The ` + "`update-base-view`" + ` action will automatically navigate to the bases view if the user isn't already there.
-- ` + "`open-note`" + ` validates that the file exists before navigating.
-- Filter categories and values come from frontmatter in knowledge files.
-- **Never send ` + "`columns`" + ` or ` + "`sort`" + ` with ` + "`update-base-view`" + ` unless the user specifically asks to change them.** Only pass the parameters you intend to change — omitted parameters are left untouched.
+## Notes
+- read-view/open-view/open-item change what the user is looking at — that is
+  the point, but don't bounce their screen around needlessly; navigate when
+  it serves the question.
+- open-note and open-item validate the target exists before navigating.
+- update-base-view auto-navigates to the bases view.
 `;
 
 export default skill;

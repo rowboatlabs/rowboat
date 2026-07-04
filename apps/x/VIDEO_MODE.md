@@ -132,6 +132,11 @@ Push-to-talk is disabled while a call owns the mic.
 
 ## Popout window
 
+- The popout window keeps the Dock icon alive: it uses
+  `setVisibleOnAllWorkspaces(true)` WITHOUT `visibleOnFullScreen` — that flag
+  turns the app into a macOS "agent" app and hides its Dock icon while the
+  window exists (looks like Rowboat vanished). Trade-off: the popout doesn't
+  hover over other apps' fullscreen Spaces.
 - Shown iff the derived `callSurface === 'popout'` (effect in `App.tsx`).
   Renderer asks `video:setPopout {show}`; main creates a frameless,
   `alwaysOnTop` ('floating'), all-workspaces BrowserWindow at the top-right
@@ -163,12 +168,35 @@ Push-to-talk is disabled while a call owns the mic.
 |--------|-------|
 | `# Video Mode (Live Camera)` system section — how to use webcam frames, coaching guidance, screen-share rules ("treat the screen as the primary subject", "last screen frame is current"), etiquette (never comment on appearance) | `packages/core/src/agents/runtime.ts:386` (`composeSystemInstructions`, gated on `videoMode`) |
 | `# Practice Session (Coach Mode)` system section — coaching persona: specific/actionable feedback after each take, one-sentence interjections mid-flow, structured debrief on wrap-up | `composeSystemInstructions`, gated on `coachMode` (directly after the video section) |
+| "Driving the app" paragraph in the video-mode section — on calls, prefer app-navigation read-view/open-item (show while telling) over describing or squinting at frames | same `# Video Mode` section; full action docs in the `app-navigation` skill (`application/assistant/skills/app-navigation/skill.ts`) |
 | Per-message frame context line `[Video mode: N live webcam frames … and M frames of the user's shared screen …]` + group labels | `packages/core/src/agents/runtime.ts` (`convertFromMessages`) |
 | `videoMode` / `coachMode` composition overrides (session-sticky; flips bust prefix cache) | `packages/core/src/turns/bridges/real-agent-resolver.ts` (`CompositionOverrides`); set from `App.tsx` `sendConfig` |
 
 Voice input/output prompt sections (`# Voice Input`, `# Voice Output`) are
 reused untouched — calls set `voiceInput` per utterance and force
 `voiceOutput: 'full'`.
+
+## Driving the app on a call
+
+The assistant can drive the Rowboat UI itself via the extended
+`app-navigation` builtin ("app driver"): `open-view` (any main view),
+`read-view` (returns the emails / background agents / chat-history data the
+view renders — and the renderer simultaneously navigates there so the user
+watches it happen), and `open-item` (a specific email thread, note,
+background agent, or past chat, deep-linked on screen). Data comes from the
+same core functions the UI's IPC handlers use (`listImportantThreads` /
+`searchThreads`, background-task `listTasks`, the sessions container) — no
+OCR of screen frames. The renderer applies results via
+`applyAppNavigation` in App.tsx, fed from BOTH event paths: the legacy
+`runs:events` ref-poll AND a watcher over the session-chat conversation (the
+turn runtime does not emit legacy run events — miss this and navigation
+silently no-ops while the tool reports success). Session switches seed the
+watcher so replaying history never navigates. During a call, visible
+navigations also collapse the full-screen call to the pill and focus the app
+window (`app:focusMainWindow`) so the user actually sees the screen change.
+Card labels live in `lib/chat-conversation.ts`. The call prompt and the
+`app-navigation` skill teach the show-while-telling pattern: read-view →
+speak the highlights → open-item when the user picks one.
 
 ## Latency
 
