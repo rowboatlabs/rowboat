@@ -16,7 +16,7 @@ const THEMES: Theme[] = [
   { accent: '#14B8A6', glow: 'rgba(20,184,166,0.40)' }, // Teal
   { accent: '#EC4899', glow: 'rgba(236,72,153,0.42)' }, // Rose
 ]
-const PATTERNS = ['dots', 'grid', 'diagonal', 'radial', 'waves', 'mesh']
+const PATTERNS = ['dots', 'grid', 'diagonal', 'radial', 'waves', 'mesh', 'cross', 'rings', 'zigzag', 'plus', 'checker', 'beams']
 
 function hash(s: string): number {
   let h = 0
@@ -97,6 +97,12 @@ const CARD_CSS = `
 .ma-pat-radial::before { background-image: radial-gradient(circle at 78% 18%, var(--accent) 0%, transparent 55%); opacity:calc(var(--ma-pat-opacity) + 0.05); }
 .ma-pat-waves::before { background-image: repeating-radial-gradient(circle at 50% -30%, transparent 0 20px, var(--accent) 20px 21px); }
 .ma-pat-mesh::before { background-image: radial-gradient(circle at 12% 18%, var(--accent) 0%, transparent 42%), radial-gradient(circle at 88% 82%, var(--accent) 0%, transparent 42%); opacity:calc(var(--ma-pat-opacity) + 0.03); }
+.ma-pat-cross::before { background-image: repeating-linear-gradient(45deg, var(--accent) 0 1px, transparent 1px 18px), repeating-linear-gradient(-45deg, var(--accent) 0 1px, transparent 1px 18px); }
+.ma-pat-rings::before { background-image: repeating-radial-gradient(circle at 82% 20%, transparent 0 14px, var(--accent) 14px 15px); }
+.ma-pat-zigzag::before { background-image: linear-gradient(135deg, var(--accent) 25%, transparent 25%), linear-gradient(225deg, var(--accent) 25%, transparent 25%); background-size: 22px 12px; background-position: 0 0, 11px 0; opacity:calc(var(--ma-pat-opacity) - 0.03); }
+.ma-pat-plus::before { background-image: radial-gradient(var(--accent) 0.8px, transparent 1px), linear-gradient(var(--accent) 1px, transparent 1px), linear-gradient(90deg, var(--accent) 1px, transparent 1px); background-size: 24px 24px, 24px 24px, 24px 24px; background-position: 12px 12px, 0 11.5px, 11.5px 0; opacity:calc(var(--ma-pat-opacity) - 0.02); }
+.ma-pat-checker::before { background-image: repeating-conic-gradient(var(--accent) 0% 25%, transparent 0% 50%); background-size: 26px 26px; opacity:calc(var(--ma-pat-opacity) - 0.04); }
+.ma-pat-beams::before { background-image: repeating-linear-gradient(100deg, var(--accent) 0 2px, transparent 2px 34px); }
 .ma-top { display:flex; justify-content:flex-end; gap:6px; }
 .ma-badge {
   display:inline-flex; align-items:center; height:22px; padding:0 10px; border-radius:999px;
