@@ -1,8 +1,8 @@
 import type { LiveNote, LiveNoteTriggerType } from '@x/shared/dist/live-note.js';
 import { fetchLiveNote, patchLiveNote, readNoteBody } from './fileops.js';
-import { createRun, createMessage } from '../../runs/runs.js';
 import { getLiveNoteAgentModel } from '../../models/defaults.js';
-import { extractAgentResponse, waitForRunCompletion } from '../../agents/utils.js';
+import { startHeadlessAgent } from '../../agents/headless-app.js';
+import { withUseCase } from '../../analytics/use_case.js';
 import { buildTriggerBlock } from '../../agents/build-trigger-block.js';
 import { liveNoteBus } from './bus.js';
 import { PrefixLogger } from '@x/shared/dist/prefix-logger.js';
@@ -109,17 +109,20 @@ export async function runLiveNoteAgent(
         const bodyBefore = await readNoteBody(filePath);
 
         const model = live.model ?? await getLiveNoteAgentModel();
-        const agentRun = await createRun({
-            agentId: 'live-note-agent',
-            model,
-            ...(live.provider ? { provider: live.provider } : {}),
-            useCase: 'live_note_agent',
-            // Use the granular trigger as the analytics sub-use-case so
-            // dashboards can break down agent runs by what woke them up
-            // (manual / cron / window / event). Pass 1 routing emits the
-            // separate `routing` sub-use-case from routing.ts.
-            subUseCase: trigger,
-        });
+        // The use-case context propagates to every tool the agent calls; the
+        // granular trigger doubles as the sub-use-case (manual / cron /
+        // window / event) so dashboards can break down what woke the agent.
+        const handle = await withUseCase(
+            { useCase: 'live_note_agent', subUseCase: trigger },
+            () => startHeadlessAgent({
+                agentId: 'live-note-agent',
+                message: buildMessage(filePath, live, trigger, context),
+                model,
+                ...(live.provider ? { provider: live.provider } : {}),
+                throwOnError: true,
+            }),
+        );
+        const agentRun = { id: handle.turnId };
 
         log.log(`${filePath} — start trigger=${trigger} runId=${agentRun.id}`);
 
@@ -141,14 +144,11 @@ export async function runLiveNoteAgent(
         });
 
         try {
-            await createMessage(agentRun.id, buildMessage(filePath, live, trigger, context));
-            // throwOnError: surface any error event in the run's log (LLM API
-            // failures, tool errors, billing/credit issues) as a rejection so
-            // the failure branch records lastRunError. Without this the run
-            // can "complete" with errors silently and we'd hit the success
-            // branch with an empty summary, clobbering any prior lastRunError.
-            await waitForRunCompletion(agentRun.id, { throwOnError: true });
-            const summary = await extractAgentResponse(agentRun.id);
+            // throwOnError: a failed/cancelled turn rejects here so the
+            // failure branch records lastRunError. Without this the turn
+            // could settle silently and we'd hit the success branch with an
+            // empty summary, clobbering any prior lastRunError.
+            const { summary } = await handle.done;
 
             const bodyAfter = await readNoteBody(filePath);
             const didUpdate = bodyAfter !== bodyBefore;

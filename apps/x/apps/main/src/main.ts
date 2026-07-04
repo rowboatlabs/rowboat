@@ -2,7 +2,8 @@ import { app, BrowserWindow, desktopCapturer, protocol, net, shell, session, typ
 import path from "node:path";
 import {
   setupIpcHandlers,
-  startRunsWatcher,
+  startRunsWatcher, startSessionsWatcher,
+  startChannelsWatcher,
   startCodeSessionStatusWatcher,
   startServicesWatcher,
   startLiveNoteAgentWatcher,
@@ -25,8 +26,10 @@ import { init as initEmailLabeling } from "@x/core/dist/knowledge/label_emails.j
 import { init as initNoteTagging } from "@x/core/dist/knowledge/tag_notes.js";
 import { init as initInlineTasks } from "@x/core/dist/knowledge/inline_tasks.js";
 import { init as initAgentRunner } from "@x/core/dist/agent-schedule/runner.js";
+import { init as initChannels } from "@x/core/dist/channels/service.js";
 import { init as initAgentNotes } from "@x/core/dist/knowledge/agent_notes.js";
 import { init as initCalendarNotifications } from "@x/core/dist/knowledge/notify_calendar_meetings.js";
+import { init as initMeetingPrep } from "@x/core/dist/knowledge/meeting_prep_scheduler.js";
 import { init as initLiveNoteScheduler } from "@x/core/dist/knowledge/live-note/scheduler.js";
 import { init as initEventProcessor, registerConsumer } from "@x/core/dist/events/init.js";
 import { liveNoteEventConsumer } from "@x/core/dist/knowledge/live-note/event-consumer.js";
@@ -36,6 +39,7 @@ import { init as initAppsServer, shutdown as shutdownAppsServer } from "@x/core/
 import { registerAppsHostApi } from "@x/core/dist/apps/host-api.js";
 import { shutdown as shutdownAnalytics } from "@x/core/dist/analytics/posthog.js";
 import { identifyIfSignedIn } from "@x/core/dist/analytics/identify.js";
+import { migrateRuns } from "@x/core/dist/migrations/runs/migrate.js";
 
 import { initConfigs } from "@x/core/dist/config/initConfigs.js";
 import { getAgentSlackCliStatus } from "@x/core/dist/slack/agent-slack-exec.js";
@@ -45,6 +49,7 @@ import { execFileSync } from "node:child_process";
 import { init as initChromeSync } from "@x/core/dist/knowledge/chrome-extension/server/server.js";
 import container, { registerBrowserControlService, registerNotificationService } from "@x/core/dist/di/container.js";
 import type { CodeModeManager } from "@x/core/dist/code-mode/acp/manager.js";
+import type { ISessions } from "@x/core/dist/sessions/index.js";
 import { browserViewManager, BROWSER_PARTITION } from "./browser/view.js";
 import { setupBrowserEventForwarding } from "./browser/ipc.js";
 import { ElectronBrowserControlService } from "./browser/control-service.js";
@@ -388,6 +393,37 @@ app.whenReady().then(async () => {
   // start runs watcher
   startRunsWatcher();
 
+  // One-time: port legacy runs/*.jsonl into the new turn/session runtime.
+  // Must run BEFORE the session index is built so migrated sessions are picked
+  // up by the startup scan. Fully defensive — never blocks boot.
+  try {
+    const migration = migrateRuns();
+    if (migration.scanned > 0) {
+      console.log(
+        `[runs-migration] migrated ${migration.migratedTurns} turn(s) across ` +
+        `${migration.migratedSessions} session(s) from ${migration.scanned} run(s) ` +
+        `(${migration.skipped} skipped, ${migration.failed.length} failed)`,
+      );
+      for (const failure of migration.failed) {
+        console.warn(`[runs-migration] left in place (failed): ${failure.file} — ${failure.error}`);
+      }
+    }
+  } catch (error) {
+    console.error('[runs-migration] pass failed:', error);
+  }
+
+  // New runtime: build the in-memory session index (startup scan) before the
+  // renderer can list sessions, then forward the session bus to windows.
+  await container.resolve<ISessions>('sessions').initialize();
+  startSessionsWatcher();
+
+  // Mobile channels (WhatsApp/Telegram bridge): needs the session index, so
+  // start after initialize(). Failures must never block boot.
+  startChannelsWatcher();
+  initChannels().catch((error) => {
+    console.error('[Channels] Failed to start mobile channels:', error);
+  });
+
   // start code-session status tracker (derives working/needs-you/idle + notifications)
   startCodeSessionStatusWatcher();
 
@@ -450,6 +486,9 @@ app.whenReady().then(async () => {
 
   // start calendar meeting notification service (fires 1-minute warnings)
   initCalendarNotifications();
+
+  // start meeting prep scheduler (generates prep notes ~6h before a meeting)
+  void initMeetingPrep();
 
   // start chrome extension sync server
   initChromeSync();

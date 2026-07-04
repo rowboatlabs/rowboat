@@ -3,6 +3,7 @@ packages:
   - packages/*
 
 allowBuilds:
+  baileys: set this to true or false
   core-js: true
   electron: true
   electron-winstaller: true
@@ -24,4 +25,5 @@ onlyBuiltDependencies:
   - macos-alias
   - protobufjs
 patchedDependencies:
+  '@agentclientprotocol/codex-acp@0.0.44': patches/@agentclientprotocol__codex-acp@0.0.44.patch
   '@openai/codex@0.128.0': patches/@openai__codex@0.128.0.patch

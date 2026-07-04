@@ -169,6 +169,25 @@
   color: var(--gm-placeholder);
 }
 
+.gmail-search-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--gm-text-muted);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.gmail-search-clear:hover {
+  background: var(--gm-icon-hover-bg);
+  color: var(--gm-text);
+}
+
 .gmail-icon-button {
   display: inline-flex;
   align-items: center;
@@ -203,6 +222,46 @@
 .gmail-row-group {
   display: flex;
   flex-direction: column;
+}
+
+/* Native list virtualization: offscreen rows skip layout and paint entirely.
+   Applied only to rows without a mounted ThreadDetail (those hold iframes and
+   composers, which must keep rendering while offscreen). */
+.gmail-row-group-cv {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 40px;
+}
+
+/* While the list is scrolling, rows ignore the pointer so hover restyles and
+   prefetch timers don't compete with frame rendering. */
+.gmail-shell[data-scrolling] .gmail-row-shell {
+  pointer-events: none;
+}
+
+/* Archived/trashed rows slide out and collapse before removal. Removing the
+   class (failed action) snaps the row back. */
+.gmail-row-group-leaving {
+  overflow: hidden;
+  pointer-events: none;
+  animation: gmail-row-leave 160ms ease-in forwards;
+}
+
+@keyframes gmail-row-leave {
+  0% {
+    opacity: 1;
+    transform: translateX(0);
+    max-height: 48px;
+  }
+  60% {
+    opacity: 0;
+    transform: translateX(32px);
+    max-height: 48px;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(32px);
+    max-height: 0;
+  }
 }
 
 .gmail-list-header {
@@ -319,6 +378,20 @@
   background: var(--gm-bg-row-selected-hover);
 }
 
+/* The j/k keyboard cursor. Declared after the hover rules (same specificity)
+   so the focus ring survives hovering the focused row. */
+.gmail-row-focused,
+.gmail-row-focused:hover {
+  background: var(--gm-bg-row-hover);
+  box-shadow: inset 0 0 0 1px var(--gm-accent);
+}
+
+.gmail-row-selected.gmail-row-focused,
+.gmail-row-selected.gmail-row-focused:hover {
+  background: var(--gm-bg-row-selected);
+  box-shadow: inset 2px 0 0 var(--gm-accent), inset 0 0 0 1px var(--gm-accent);
+}
+
 .gmail-row-unread {
   color: var(--gm-text);
 }
@@ -394,10 +467,48 @@
   border-top: 1px solid var(--gm-border);
   border-bottom: 1px solid var(--gm-border);
   box-shadow: inset 2px 0 0 var(--gm-accent);
+  /* Replays whenever the detail is shown — hidden details are display: none,
+     so un-hiding restarts the animation. */
+  animation: gmail-detail-open 140ms ease-out;
 }
 
 .gmail-detail-hidden {
   display: none;
+}
+
+@keyframes gmail-detail-open {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* The inline reply/forward composer pops in from below the thread. */
+.gmail-compose-inline {
+  animation: gmail-compose-open 140ms ease-out;
+}
+
+@keyframes gmail-compose-open {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gmail-detail-inline,
+  .gmail-compose-inline,
+  .gmail-row-group-leaving {
+    animation: none;
+  }
 }
 
 .gmail-detail-toolbar {
@@ -1015,6 +1126,17 @@
   box-shadow:
     0 0 0 1px color-mix(in oklab, var(--ring) 38%, transparent),
     var(--rowboat-shadow);
+}
+
+.dark .rowboat-code-chat-input {
+  border-color: color-mix(in oklab, var(--border) 76%, transparent);
+  background: #000000;
+  box-shadow: none;
+}
+
+.dark .rowboat-code-chat-input:focus-within {
+  border-color: color-mix(in oklab, var(--ring) 70%, var(--border) 30%);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--ring) 30%, transparent);
 }
 
 [data-slot="message-content"] {

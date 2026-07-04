@@ -114,7 +114,7 @@ function filePermissionTargets(toolName: string, args: Record<string, unknown>):
     }
 }
 
-async function getToolPermissionMetadata(
+export async function getToolPermissionMetadata(
     toolCall: z.infer<typeof ToolCallPart>,
     underlyingTool: z.infer<typeof ToolAttachment>,
     sessionAllowedCommands: Set<string>,
@@ -172,7 +172,7 @@ async function getToolPermissionMetadata(
     };
 }
 
-function loadUserWorkDir(runId: string): string | null {
+export function loadUserWorkDir(runId: string): string | null {
     try {
         const file = workDirConfigFile(runId);
         if (!fs.existsSync(file)) return null;
@@ -185,7 +185,7 @@ function loadUserWorkDir(runId: string): string | null {
     }
 }
 
-function loadAgentNotesContext(): string | null {
+export function loadAgentNotesContext(): string | null {
     const sections: string[] = [];
 
     const userFile = path.join(AGENT_NOTES_DIR, 'user.md');
@@ -326,6 +326,129 @@ If Middle pane state is empty, the user was not looking at any relevant note or 
 If Middle pane state is note, the supplied path and content are available so you can reference the note when relevant. The user may or may not be talking about this note. Do NOT assume every message is about it. Only reference or act on this note when the user's message clearly relates to it, such as "this note", "what I'm looking at", "here", "above", "below", or questions whose subject is plainly the note's content. For unrelated questions, ignore this note entirely and answer normally. Do not mention that you can see this note unless it is relevant to the answer.
 
 If Middle pane state is browser, only the URL and page title are supplied; the page content itself is NOT included. If you need the page content to answer, use the browser tools available to you to read the page. The user may or may not be talking about this page. Only reference or act on this page when the user's message clearly relates to it, such as "this page", "this article", "what I'm looking at", "this site", or "summarize this". For unrelated questions, ignore this page entirely and answer normally. Do not mention that you can see the browser unless it is relevant to the answer.`;
+
+
+export interface ComposeSystemInstructionsInput {
+    instructions: string;
+    agentNotesContext: string | null;
+    userWorkDir: string | null;
+    voiceInput: boolean;
+    voiceOutput: 'summary' | 'full' | null;
+    searchEnabled: boolean;
+    codeMode: 'claude' | 'codex' | null;
+    codeCwd: string | null;
+    // Optional so legacy callers (old streamAgent path) are unaffected.
+    videoMode?: boolean;
+    coachMode?: boolean;
+}
+
+// System-prompt assembly, extracted verbatim from streamAgent so the new turn
+// runtime's agent resolver composes byte-identical prompts. Pure: callers
+// load agent notes / work dir themselves.
+export function composeSystemInstructions({
+    instructions,
+    agentNotesContext,
+    userWorkDir,
+    voiceInput,
+    voiceOutput,
+    searchEnabled,
+    codeMode,
+    codeCwd,
+    videoMode,
+    coachMode,
+}: ComposeSystemInstructionsInput): string {
+    let instructionsWithDateTime = `${instructions}\n\n${USER_CONTEXT_SYSTEM_INSTRUCTIONS}`;
+        if (agentNotesContext) {
+            instructionsWithDateTime += `\n\n${agentNotesContext}`;
+        }
+        if (userWorkDir) {
+                instructionsWithDateTime += `\n\n# User Work Directory
+The user has chosen the following directory as their current **work directory**:
+
+\`${userWorkDir}\`
+
+Treat this as the **default location** for file operations whenever the user refers to files generically:
+- "list the files", "show me what's in here", "what's the latest report" — list or look in the work directory.
+- "save this", "export it", "write that to a file" — write the output into the work directory unless the user names another location.
+- "open the file I was just working on", "the doc from earlier" — assume the work directory first.
+
+Use absolute paths rooted at this directory with the \`file-*\` tools. For example, list with \`file-list({ path: "${userWorkDir}" })\`, read text with \`file-readText\`, and write text with \`file-writeText\`. For PDFs, Office docs, images, scanned docs, and other non-text files, use \`parseFile\` or \`LLMParse\` with the absolute path; you do NOT need to copy the file into the workspace first.
+
+**Exceptions — these ALWAYS take precedence over the work directory default:**
+1. **Knowledge base questions.** If the user asks about anything in the knowledge graph (notes, people, organizations, projects, topics) or paths starting with \`knowledge/\`, use file tools against \`knowledge/\` as documented above. Do NOT redirect those into the work directory.
+2. **Explicit paths.** If the user names a different directory or gives an absolute/relative path (e.g. "in ~/Downloads", "from /tmp/foo", "the Desktop"), honor that path exactly and ignore the work-directory default for that request.
+3. **Workspace-specific operations.** Anything that obviously belongs in the Rowboat workspace (config files, MCP servers, agent schedules, etc.) stays in the workspace, not the work directory.
+
+Do not announce the work directory unless it's relevant. Just use it.`;
+        }
+        if (voiceInput) {
+            instructionsWithDateTime += `\n\n# Voice Input\nThe user's message was transcribed from speech. Be aware that:\n- There may be transcription errors. Silently correct obvious ones (e.g. homophones, misheard words). If an error is genuinely ambiguous, briefly mention your interpretation (e.g. "I'm assuming you meant X").\n- Spoken messages are often long-winded. The user may ramble, repeat themselves, or correct something they said earlier in the same message. Focus on their final intent, not every word verbatim.`;
+        }
+        if (videoMode) {
+            instructionsWithDateTime += `\n\n# Video Mode (Live Camera)
+The user has turned on video mode: their webcam is on, and their messages arrive with a series of live webcam frames (ordered oldest to newest) captured while they were speaking or typing. The frames are a live view of the user themselves — not a document or file to analyze.
+
+How to use the frames:
+- Use them for what visual awareness genuinely adds: the user's expressions, body language, posture, gestures, eye contact with the camera, visible energy, anything they hold up to the camera, and their surroundings when relevant.
+- Compare across frames to notice change over time within a message (e.g. increasingly slouched, started smiling, looked away for most of the message).
+- When the user practices something performative (a pitch, presentation, interview, talk) or asks for delivery feedback, give specific, actionable coaching grounded in what you actually see — cite concrete observations ("in the last few frames you looked down and away from the camera") rather than generic advice. Cover posture, eye contact, facial expressiveness, gesturing, and visible energy.
+- If they show something to the camera (an object, document, whiteboard), read or describe it and respond accordingly.
+
+Driving the app:
+- You can control the Rowboat app the user is looking at via the app-navigation tool (load the app-navigation skill first): open views, READ a view's contents as data (emails, background agents, chat history), and open specific items on their screen.
+- When the user asks about anything that lives inside Rowboat ("what emails do I have?", "what agents are running?", "open the one from Arjun"), prefer driving over describing: read-view shows the view on their screen while returning its data, then answer out loud briefly; open-item when they pick one. Narrate as you act ("pulling up your inbox…"). Reading a view's data beats squinting at screen-share frames — it's exact.
+
+Screen sharing:
+- The user may also share their screen. Screen-share frames arrive in a separately labeled group after the webcam frames; they show the user's screen, not the user.
+- When screen frames are present, treat them as the primary subject: the user is usually asking about, or working on, what's visible there. Read the screen carefully — code, documents, error messages, UI state — and help with it concretely.
+- The LAST screen frame is the most current view of their screen; earlier ones show how it changed while they spoke.
+- Frames are downscaled captures: small text may be hard to read. If something crucial is illegible, say what you need ("zoom into the error message" / "make that panel bigger") rather than guessing.
+
+Etiquette:
+- Do not narrate or list what you see in every response. Bring up visual observations only when relevant to the user's request or clearly worth mentioning.
+- Never comment on the user's physical appearance, attractiveness, or personal attributes — visual feedback is strictly about delivery, expression, and body language.
+- Frames are periodic snapshots, not continuous video; moments between frames are missing. Don't claim certainty about motion you couldn't have seen.`;
+        }
+        if (coachMode) {
+            instructionsWithDateTime += `\n\n# Practice Session (Coach Mode)
+The user started a practice session: they are rehearsing something performative — a pitch, presentation, interview answer, or talk — and want live coaching. You are their coach for this session.
+
+How to coach:
+- Watch and listen for delivery: pacing, filler words, rambling, structure, and (from the webcam frames) posture, eye contact with the camera, facial expressiveness, gesturing, and visible energy.
+- After each take or answer, give brief, specific, actionable feedback: 2-3 concrete observations, quoting what you actually saw or heard ("you looked down during the ask", "the opening 'um, so, basically' undercuts your hook"). Then let them go again.
+- If they are clearly mid-flow, keep any interjection to one short sentence — or stay silent and save it for the break.
+- Ask what they're practicing for at the start if it isn't obvious (investor pitch? interview? conference talk?) and tailor feedback to that audience.
+- When they say they're done or wrap up, give a structured debrief: what's working, the top 3 things to improve, and one concrete drill or reframe to try next time.
+- Be encouraging but honest — vague praise wastes their rehearsal time. Never comment on physical appearance; delivery, expression, and body language only.`;
+        }
+        if (voiceOutput === 'summary') {
+            instructionsWithDateTime += `\n\n# Voice Output (MANDATORY — READ THIS FIRST)\nThe user has voice output enabled. THIS IS YOUR #1 PRIORITY: you MUST start your response with <voice></voice> tags. If your response does not begin with <voice> tags, the user will hear nothing — which is a broken experience. NEVER skip this.\n\nRules:\n1. YOUR VERY FIRST OUTPUT MUST BE A <voice> TAG. No exceptions. Do not start with markdown, headings, or any other text. The literal first characters of your response must be "<voice>".\n2. Place ALL <voice> tags at the BEGINNING of your response, before any detailed content. Do NOT intersperse <voice> tags throughout the response.\n3. Wrap EACH spoken sentence in its own separate <voice> tag so it can be spoken incrementally. Do NOT wrap everything in a single <voice> block.\n4. Use voice as a TL;DR and navigation aid — do NOT read the entire response aloud.\n5. After all <voice> tags, you may include detailed written content (markdown, tables, code, etc.) that will be shown visually but not spoken.\n\n## Examples\n\nExample 1 — User asks: "what happened in my meeting with Alex yesterday?"\n\n<voice>Your meeting with Alex covered three main things: the Q2 roadmap timeline, hiring for the backend role, and the client demo next week.</voice>\n<voice>I've pulled out the key details and action items below — the demo prep notes are at the end.</voice>\n\n## Meeting with Alex — March 11\n### Roadmap\n- Agreed to push Q2 launch to April 15...\n(detailed written content continues)\n\nExample 2 — User asks: "summarize my emails"\n\n<voice>You have five new emails since this morning.</voice>\n<voice>Two are from your team — Jordan sent the RFC you requested and Taylor flagged a contract issue.</voice>\n<voice>There's also a warm intro from a VC partner connecting you with someone at a prospective customer.</voice>\n<voice>I've drafted responses for three of them. The details and drafts are below.</voice>\n\n(email blocks, tables, and detailed content follow)\n\nExample 3 — User asks: "what's on my calendar today?"\n\n<voice>You've got a pretty packed day — seven meetings starting with standup at 9.</voice>\n<voice>The big ones are your investor call at 11, lunch with a partner from your lead VC at 12:30, and a customer call at 4.</voice>\n<voice>Your only free block for deep work is 2:30 to 4.</voice>\n\n(calendar block with full event details follows)\n\nExample 4 — User asks: "draft an email to Sam with our metrics"\n\n<voice>Done — I've drafted the email to Sam with your latest WAU and churn numbers.</voice>\n<voice>Take a look at the draft below and send it when you're ready.</voice>\n\n(email block with draft follows)\n\nREMEMBER: If you do not start with <voice> tags, the user hears silence. Always speak first, then write.`;
+        } else if (voiceOutput === 'full') {
+            instructionsWithDateTime += `\n\n# Voice Output — Full Read-Aloud (MANDATORY — READ THIS FIRST)\nThe user wants your ENTIRE response spoken aloud. THIS IS YOUR #1 PRIORITY: every single sentence must be wrapped in <voice></voice> tags. If you write anything outside <voice> tags, the user will not hear it — which is a broken experience. NEVER skip this.\n\nRules:\n1. YOUR VERY FIRST OUTPUT MUST BE A <voice> TAG. No exceptions. The literal first characters of your response must be "<voice>".\n2. Wrap EACH sentence in its own separate <voice> tag so it can be spoken incrementally.\n3. Write your response in a natural, conversational style suitable for listening — no markdown headings, bullet points, or formatting symbols. Use plain spoken language.\n4. Structure the content as if you are speaking to the user directly. Use transitions like "first", "also", "one more thing" instead of visual formatting.\n5. EVERY sentence MUST be inside a <voice> tag. Do not leave ANY content outside <voice> tags. If it's not in a <voice> tag, the user cannot hear it.\n\n## Examples\n\nExample 1 — User asks: "what happened in my meeting with Alex yesterday?"\n\n<voice>Your meeting with Alex covered three main things.</voice>\n<voice>First, you discussed the Q2 roadmap timeline and agreed to push the launch to April.</voice>\n<voice>Second, you talked about hiring for the backend role — Alex will send over two candidates by Friday.</voice>\n<voice>And lastly, the client demo is next week on Thursday at 2pm, and you're handling the intro slides.</voice>\n\nExample 2 — User asks: "summarize my emails"\n\n<voice>You've got five new emails since this morning.</voice>\n<voice>Two are from your team — Jordan sent the RFC you asked for, and Taylor flagged a contract issue that needs your sign-off.</voice>\n<voice>There's a warm intro from a VC partner connecting you with an engineering lead at a potential customer.</voice>\n<voice>And someone from a prospective client wants to confirm your API tier before your call this afternoon.</voice>\n<voice>I've drafted replies for three of them — the metrics update, the intro, and the API question.</voice>\n<voice>The only one I left for you is Taylor's contract redline, since that needs your judgment on the liability cap.</voice>\n\nExample 3 — User asks: "what's on my calendar today?"\n\n<voice>You've got a packed day — seven meetings starting with standup at 9.</voice>\n<voice>The highlights are your investor call at 11, lunch with a VC partner at 12:30, and a customer call at 4.</voice>\n<voice>Your only open block for deep work is 2:30 to 4, so plan accordingly.</voice>\n<voice>Oh, and your 1-on-1 with your co-founder is at 5:30 — that's a walking meeting.</voice>\n\nExample 4 — User asks: "how are our metrics looking?"\n\n<voice>Metrics are looking strong this week.</voice>\n<voice>You hit 2,573 weekly active users, which is up 12% week over week.</voice>\n<voice>That means you've crossed the 2,500 milestone — worth calling out in your next investor update.</voice>\n<voice>Churn is down to 4.1%, improving month over month.</voice>\n<voice>The trailing 8-week compound growth rate is about 10%.</voice>\n\nREMEMBER: Start with <voice> immediately. No preamble, no markdown before it. Speak first.`;
+        }
+        if (searchEnabled) {
+            instructionsWithDateTime += `\n\n# Search\nThe user has requested a search. Use the web-search tool to answer their query.`;
+        }
+        if (codeMode) {
+            const agentDisplay = codeMode === 'claude' ? 'Claude Code' : 'Codex';
+            instructionsWithDateTime += `\n\n# Code Mode (Active) — Agent: ${agentDisplay}
+The user has turned on **code mode** and the composer chip is set to **${agentDisplay}** (\`${codeMode}\`). For EVERY coding task this turn, use **${agentDisplay}**, and narrate that agent ("Using ${agentDisplay} to …").
+
+The chip is the single source of truth for which agent runs:
+- Do NOT carry over a different agent from earlier in this thread — even if a previous run used the other agent, use **${agentDisplay}** now.
+- Do NOT switch agents based on an in-chat text request ("use codex", "switch to claude"). The agent only changes when the user toggles the chip; if they ask in chat, tell them to toggle the chip.
+
+**How to run coding work — call the \`code_agent_run\` tool** with:
+- \`agent\`: \`${codeMode}\` (always — match the chip).
+- \`cwd\`: ${codeCwd ? `\`${codeCwd}\` (always — this coding session is pinned to that directory; never use another path)` : `the absolute project/working directory (resolve it per the code-with-agents skill — a path the user named, the "# User Work Directory" block, or ask once)`}.
+- \`prompt\`: a clear, self-contained coding instruction.
+
+The tool runs the agent on-device and streams its tool calls, file diffs, and plan into the chat; any action needing approval surfaces as an inline permission card, so you do NOT pre-confirm with an in-chat "reply yes". This chat keeps ONE persistent agent session, so follow-up coding requests automatically resume with full context — just call \`code_agent_run\` again. Do NOT shell out to \`acpx\` or \`executeCommand\` for coding, and do NOT fall back to your own file tools.
+
+If the user's message is clearly NOT a coding request (small talk, an unrelated question), answer directly without invoking the coding agent. Code mode signals readiness, not that every message must route through the agent.`;
+        }
+        return instructionsWithDateTime;
+}
 
 export interface IAgentRuntime {
     trigger(runId: string): Promise<void>;
@@ -861,15 +984,27 @@ export function convertFromMessages(messages: z.infer<typeof Message>[]): ModelM
                         providerOptions,
                     });
                 } else {
-                    // New content parts array — collapse to text for LLM
+                    // New content parts array — collapse text/attachments to text
+                    // for the LLM; inline image parts (video-mode webcam and
+                    // screen-share frames) are passed through as real multimodal
+                    // image parts, grouped under labeled text headers so the
+                    // model knows which images show the user vs their screen.
                     const textSegments: string[] = userMessageContextPrefix ? [userMessageContextPrefix] : [];
                     const attachmentLines: string[] = [];
+                    type EncodedImagePart = { type: "image"; image: string; mediaType: string };
+                    const cameraParts: EncodedImagePart[] = [];
+                    const screenParts: EncodedImagePart[] = [];
+                    const frameTimes: string[] = [];
 
                     for (const part of msg.content) {
                         if (part.type === "attachment") {
                             const sizeStr = part.size ? `, ${formatBytes(part.size)}` : '';
                             const lineStr = part.lineNumber ? ` (line ${part.lineNumber})` : '';
                             attachmentLines.push(`- ${part.filename} (${part.mimeType}${sizeStr}) at ${part.path}${lineStr}`);
+                        } else if (part.type === "image") {
+                            const target = part.source === "screen" ? screenParts : cameraParts;
+                            target.push({ type: "image", image: part.data, mediaType: part.mediaType });
+                            if (part.capturedAt) frameTimes.push(part.capturedAt);
                         } else {
                             textSegments.push(part.text);
                         }
@@ -883,11 +1018,38 @@ export function convertFromMessages(messages: z.infer<typeof Message>[]): ModelM
                         }
                     }
 
-                    result.push({
-                        role: "user",
-                        content: textSegments.join("\n"),
-                        providerOptions,
-                    });
+                    const imageCount = cameraParts.length + screenParts.length;
+                    if (imageCount > 0) {
+                        const span = frameTimes.length >= 2
+                            ? ` spanning ${frameTimes[0]} to ${frameTimes[frameTimes.length - 1]}`
+                            : frameTimes.length === 1
+                                ? ` captured at ${frameTimes[0]}`
+                                : '';
+                        const kinds: string[] = [];
+                        if (cameraParts.length > 0) kinds.push(`${cameraParts.length} live webcam frame${cameraParts.length === 1 ? '' : 's'} of the user`);
+                        if (screenParts.length > 0) kinds.push(`${screenParts.length} frame${screenParts.length === 1 ? '' : 's'} of the user's shared screen`);
+                        textSegments.push(`[Video mode: ${kinds.join(' and ')} attached below, each group oldest to newest,${span ? span + ',' : ''} recorded while they composed this message.]`);
+                        const content: Array<{ type: "text"; text: string } | EncodedImagePart> = [
+                            { type: "text", text: textSegments.join("\n") },
+                        ];
+                        if (cameraParts.length > 0) {
+                            content.push({ type: "text", text: "Webcam frames (oldest to newest):" }, ...cameraParts);
+                        }
+                        if (screenParts.length > 0) {
+                            content.push({ type: "text", text: "Screen-share frames (oldest to newest):" }, ...screenParts);
+                        }
+                        result.push({
+                            role: "user",
+                            content,
+                            providerOptions,
+                        });
+                    } else {
+                        result.push({
+                            role: "user",
+                            content: textSegments.join("\n"),
+                            providerOptions,
+                        });
+                    }
                 }
                 break;
             }
@@ -1423,70 +1585,17 @@ export async function* streamAgent({
         loopLogger.log('running llm turn');
         // stream agent response and build message
         const messageBuilder = new StreamStepMessageBuilder();
-        let instructionsWithDateTime = `${agent.instructions}\n\n${USER_CONTEXT_SYSTEM_INSTRUCTIONS}`;
-        // Inject Agent Notes context for copilot
-        if (state.agentName === 'copilot' || state.agentName === 'rowboatx') {
-            const agentNotesContext = loadAgentNotesContext();
-            if (agentNotesContext) {
-                instructionsWithDateTime += `\n\n${agentNotesContext}`;
-            }
-            const userWorkDir = loadUserWorkDir(runId);
-            if (userWorkDir) {
-                loopLogger.log('injecting user work directory', userWorkDir);
-                instructionsWithDateTime += `\n\n# User Work Directory
-The user has chosen the following directory as their current **work directory**:
-
-\`${userWorkDir}\`
-
-Treat this as the **default location** for file operations whenever the user refers to files generically:
-- "list the files", "show me what's in here", "what's the latest report" — list or look in the work directory.
-- "save this", "export it", "write that to a file" — write the output into the work directory unless the user names another location.
-- "open the file I was just working on", "the doc from earlier" — assume the work directory first.
-
-Use absolute paths rooted at this directory with the \`file-*\` tools. For example, list with \`file-list({ path: "${userWorkDir}" })\`, read text with \`file-readText\`, and write text with \`file-writeText\`. For PDFs, Office docs, images, scanned docs, and other non-text files, use \`parseFile\` or \`LLMParse\` with the absolute path; you do NOT need to copy the file into the workspace first.
-
-**Exceptions — these ALWAYS take precedence over the work directory default:**
-1. **Knowledge base questions.** If the user asks about anything in the knowledge graph (notes, people, organizations, projects, topics) or paths starting with \`knowledge/\`, use file tools against \`knowledge/\` as documented above. Do NOT redirect those into the work directory.
-2. **Explicit paths.** If the user names a different directory or gives an absolute/relative path (e.g. "in ~/Downloads", "from /tmp/foo", "the Desktop"), honor that path exactly and ignore the work-directory default for that request.
-3. **Workspace-specific operations.** Anything that obviously belongs in the Rowboat workspace (config files, MCP servers, agent schedules, etc.) stays in the workspace, not the work directory.
-
-Do not announce the work directory unless it's relevant. Just use it.`;
-            }
-        }
-        if (voiceInput) {
-            loopLogger.log('voice input enabled, injecting voice input prompt');
-            instructionsWithDateTime += `\n\n# Voice Input\nThe user's message was transcribed from speech. Be aware that:\n- There may be transcription errors. Silently correct obvious ones (e.g. homophones, misheard words). If an error is genuinely ambiguous, briefly mention your interpretation (e.g. "I'm assuming you meant X").\n- Spoken messages are often long-winded. The user may ramble, repeat themselves, or correct something they said earlier in the same message. Focus on their final intent, not every word verbatim.`;
-        }
-        if (voiceOutput === 'summary') {
-            loopLogger.log('voice output enabled (summary mode), injecting voice output prompt');
-            instructionsWithDateTime += `\n\n# Voice Output (MANDATORY — READ THIS FIRST)\nThe user has voice output enabled. THIS IS YOUR #1 PRIORITY: you MUST start your response with <voice></voice> tags. If your response does not begin with <voice> tags, the user will hear nothing — which is a broken experience. NEVER skip this.\n\nRules:\n1. YOUR VERY FIRST OUTPUT MUST BE A <voice> TAG. No exceptions. Do not start with markdown, headings, or any other text. The literal first characters of your response must be "<voice>".\n2. Place ALL <voice> tags at the BEGINNING of your response, before any detailed content. Do NOT intersperse <voice> tags throughout the response.\n3. Wrap EACH spoken sentence in its own separate <voice> tag so it can be spoken incrementally. Do NOT wrap everything in a single <voice> block.\n4. Use voice as a TL;DR and navigation aid — do NOT read the entire response aloud.\n5. After all <voice> tags, you may include detailed written content (markdown, tables, code, etc.) that will be shown visually but not spoken.\n\n## Examples\n\nExample 1 — User asks: "what happened in my meeting with Alex yesterday?"\n\n<voice>Your meeting with Alex covered three main things: the Q2 roadmap timeline, hiring for the backend role, and the client demo next week.</voice>\n<voice>I've pulled out the key details and action items below — the demo prep notes are at the end.</voice>\n\n## Meeting with Alex — March 11\n### Roadmap\n- Agreed to push Q2 launch to April 15...\n(detailed written content continues)\n\nExample 2 — User asks: "summarize my emails"\n\n<voice>You have five new emails since this morning.</voice>\n<voice>Two are from your team — Jordan sent the RFC you requested and Taylor flagged a contract issue.</voice>\n<voice>There's also a warm intro from a VC partner connecting you with someone at a prospective customer.</voice>\n<voice>I've drafted responses for three of them. The details and drafts are below.</voice>\n\n(email blocks, tables, and detailed content follow)\n\nExample 3 — User asks: "what's on my calendar today?"\n\n<voice>You've got a pretty packed day — seven meetings starting with standup at 9.</voice>\n<voice>The big ones are your investor call at 11, lunch with a partner from your lead VC at 12:30, and a customer call at 4.</voice>\n<voice>Your only free block for deep work is 2:30 to 4.</voice>\n\n(calendar block with full event details follows)\n\nExample 4 — User asks: "draft an email to Sam with our metrics"\n\n<voice>Done — I've drafted the email to Sam with your latest WAU and churn numbers.</voice>\n<voice>Take a look at the draft below and send it when you're ready.</voice>\n\n(email block with draft follows)\n\nREMEMBER: If you do not start with <voice> tags, the user hears silence. Always speak first, then write.`;
-        } else if (voiceOutput === 'full') {
-            loopLogger.log('voice output enabled (full mode), injecting voice output prompt');
-            instructionsWithDateTime += `\n\n# Voice Output — Full Read-Aloud (MANDATORY — READ THIS FIRST)\nThe user wants your ENTIRE response spoken aloud. THIS IS YOUR #1 PRIORITY: every single sentence must be wrapped in <voice></voice> tags. If you write anything outside <voice> tags, the user will not hear it — which is a broken experience. NEVER skip this.\n\nRules:\n1. YOUR VERY FIRST OUTPUT MUST BE A <voice> TAG. No exceptions. The literal first characters of your response must be "<voice>".\n2. Wrap EACH sentence in its own separate <voice> tag so it can be spoken incrementally.\n3. Write your response in a natural, conversational style suitable for listening — no markdown headings, bullet points, or formatting symbols. Use plain spoken language.\n4. Structure the content as if you are speaking to the user directly. Use transitions like "first", "also", "one more thing" instead of visual formatting.\n5. EVERY sentence MUST be inside a <voice> tag. Do not leave ANY content outside <voice> tags. If it's not in a <voice> tag, the user cannot hear it.\n\n## Examples\n\nExample 1 — User asks: "what happened in my meeting with Alex yesterday?"\n\n<voice>Your meeting with Alex covered three main things.</voice>\n<voice>First, you discussed the Q2 roadmap timeline and agreed to push the launch to April.</voice>\n<voice>Second, you talked about hiring for the backend role — Alex will send over two candidates by Friday.</voice>\n<voice>And lastly, the client demo is next week on Thursday at 2pm, and you're handling the intro slides.</voice>\n\nExample 2 — User asks: "summarize my emails"\n\n<voice>You've got five new emails since this morning.</voice>\n<voice>Two are from your team — Jordan sent the RFC you asked for, and Taylor flagged a contract issue that needs your sign-off.</voice>\n<voice>There's a warm intro from a VC partner connecting you with an engineering lead at a potential customer.</voice>\n<voice>And someone from a prospective client wants to confirm your API tier before your call this afternoon.</voice>\n<voice>I've drafted replies for three of them — the metrics update, the intro, and the API question.</voice>\n<voice>The only one I left for you is Taylor's contract redline, since that needs your judgment on the liability cap.</voice>\n\nExample 3 — User asks: "what's on my calendar today?"\n\n<voice>You've got a packed day — seven meetings starting with standup at 9.</voice>\n<voice>The highlights are your investor call at 11, lunch with a VC partner at 12:30, and a customer call at 4.</voice>\n<voice>Your only open block for deep work is 2:30 to 4, so plan accordingly.</voice>\n<voice>Oh, and your 1-on-1 with your co-founder is at 5:30 — that's a walking meeting.</voice>\n\nExample 4 — User asks: "how are our metrics looking?"\n\n<voice>Metrics are looking strong this week.</voice>\n<voice>You hit 2,573 weekly active users, which is up 12% week over week.</voice>\n<voice>That means you've crossed the 2,500 milestone — worth calling out in your next investor update.</voice>\n<voice>Churn is down to 4.1%, improving month over month.</voice>\n<voice>The trailing 8-week compound growth rate is about 10%.</voice>\n\nREMEMBER: Start with <voice> immediately. No preamble, no markdown before it. Speak first.`;
-        }
-        if (searchEnabled) {
-            loopLogger.log('search enabled, injecting search prompt');
-            instructionsWithDateTime += `\n\n# Search\nThe user has requested a search. Use the web-search tool to answer their query.`;
-        }
-        if (codeMode) {
-            loopLogger.log('code mode enabled, injecting coding-agent context', codeMode);
-            const agentDisplay = codeMode === 'claude' ? 'Claude Code' : 'Codex';
-            instructionsWithDateTime += `\n\n# Code Mode (Active) — Agent: ${agentDisplay}
-The user has turned on **code mode** and the composer chip is set to **${agentDisplay}** (\`${codeMode}\`). For EVERY coding task this turn, use **${agentDisplay}**, and narrate that agent ("Using ${agentDisplay} to …").
-
-The chip is the single source of truth for which agent runs:
-- Do NOT carry over a different agent from earlier in this thread — even if a previous run used the other agent, use **${agentDisplay}** now.
-- Do NOT switch agents based on an in-chat text request ("use codex", "switch to claude"). The agent only changes when the user toggles the chip; if they ask in chat, tell them to toggle the chip.
-
-**How to run coding work — call the \`code_agent_run\` tool** with:
-- \`agent\`: \`${codeMode}\` (always — match the chip).
-- \`cwd\`: ${codeCwd ? `\`${codeCwd}\` (always — this coding session is pinned to that directory; never use another path)` : `the absolute project/working directory (resolve it per the code-with-agents skill — a path the user named, the "# User Work Directory" block, or ask once)`}.
-- \`prompt\`: a clear, self-contained coding instruction.
-
-The tool runs the agent on-device and streams its tool calls, file diffs, and plan into the chat; any action needing approval surfaces as an inline permission card, so you do NOT pre-confirm with an in-chat "reply yes". This chat keeps ONE persistent agent session, so follow-up coding requests automatically resume with full context — just call \`code_agent_run\` again. Do NOT shell out to \`acpx\` or \`executeCommand\` for coding, and do NOT fall back to your own file tools.
-
-If the user's message is clearly NOT a coding request (small talk, an unrelated question), answer directly without invoking the coding agent. Code mode signals readiness, not that every message must route through the agent.`;
-        }
+        const composeCopilotContext = state.agentName === 'copilot' || state.agentName === 'rowboatx';
+        const instructionsWithDateTime = composeSystemInstructions({
+            instructions: agent.instructions,
+            agentNotesContext: composeCopilotContext ? loadAgentNotesContext() : null,
+            userWorkDir: composeCopilotContext ? loadUserWorkDir(runId) : null,
+            voiceInput,
+            voiceOutput,
+            searchEnabled,
+            codeMode,
+            codeCwd,
+        });
         let streamError: string | null = null;
         for await (const event of streamLlm(
             model,

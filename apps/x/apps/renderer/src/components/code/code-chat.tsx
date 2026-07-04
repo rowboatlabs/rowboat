@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
-import { ArrowUp, FileText, Loader2, LoaderIcon, Plus, Square, Terminal, X } from 'lucide-react'
+import { useEffect, useRef, useState, type DragEvent, type MutableRefObject } from 'react'
+import { ArrowUp, FileText, Loader2, LoaderIcon, Mic, Plus, Square, Terminal, X } from 'lucide-react'
 import type { CodeSession, CodeSessionStatus } from '@x/shared/src/code-sessions.js'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -15,9 +15,54 @@ import { CodeRunPermissionRequest, CodingRunTimeline } from '@/components/coding
 import { PermissionRequest } from '@/components/ai-elements/permission-request'
 import { AskHumanRequest } from '@/components/ai-elements/ask-human-request'
 import { WebSearchResult } from '@/components/ai-elements/web-search-result'
+import { useVoiceMode } from '@/hooks/useVoiceMode'
 import { useCodeChat, isDirectTurn, isChatToolCall, isChatErrorMessage, type CodeChatItem } from './use-code-chat'
 
 const AGENT_LABEL: Record<string, string> = { claude: 'Claude Code', codex: 'Codex' }
+const WAVE_BAR_WIDTH = 3
+const WAVE_BAR_GAP = 2
+const WAVE_BAR_MIN = 1.5
+const WAVE_BAR_MAX = 18
+
+function VoiceWaveform({ audioLevelsRef }: { audioLevelsRef: MutableRefObject<number[]> }) {
+  const [bars, setBars] = useState<number[]>([])
+
+  useEffect(() => {
+    let raf = 0
+    let lastSig = ''
+    const tick = () => {
+      const levels = audioLevelsRef.current
+      const next = levels.length > 48 ? levels.slice(levels.length - 48) : levels
+      const sig = `${next.length}:${next.length ? next[next.length - 1] : 0}`
+      if (sig !== lastSig) {
+        lastSig = sig
+        setBars(next.slice())
+      }
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [audioLevelsRef])
+
+  return (
+    <div className="flex h-5 w-full items-center overflow-hidden" style={{ gap: WAVE_BAR_GAP }}>
+      {bars.map((level, i) => {
+        const amp = Math.min(1, Math.max(0, level)) ** 0.8
+        return (
+          <span
+            key={i}
+            className="shrink-0 rounded-full bg-primary"
+            style={{
+              width: WAVE_BAR_WIDTH,
+              height: WAVE_BAR_MIN + amp * (WAVE_BAR_MAX - WAVE_BAR_MIN),
+              transition: 'height 90ms linear',
+            }}
+          />
+        )
+      })}
+    </div>
+  )
+}
 
 function RowboatToolCall({ item, onOpenDiff }: { item: ToolCall; onOpenDiff: (path: string) => void }) {
   const [open, setOpen] = useState(false)
@@ -97,20 +142,30 @@ export function CodeChat({
   session,
   status,
   onOpenDiff,
+  voiceAvailable = false,
 }: {
   session: CodeSession
   status: CodeSessionStatus
   onOpenDiff: (path: string) => void
+  voiceAvailable?: boolean
 }) {
   const {
-    items, liveText, isProcessing, pendingPermission, pendingToolPermissions, pendingAskHumans,
+    items, liveText, isProcessing, compactionStatus, contextUsage,
+    pendingPermission, pendingToolPermissions, pendingAskHumans,
     loading, send, stop, resolvePermission, respondToToolPermission, respondToAskHuman,
   } = useCodeChat(session)
   const [draft, setDraft] = useState('')
   const [stopping, setStopping] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const voice = useVoiceMode()
+  const voiceWarmup = voice.warmup
 
   const busy = isProcessing || status === 'working' || status === 'needs-you'
+  const recording = voice.state !== 'idle'
+  const recordingStopping = voice.state === 'submitting'
+  const contextUsedPercent = contextUsage
+    ? Math.min(100, Math.round((contextUsage.used / contextUsage.size) * 100))
+    : null
   // Attached file PATHS — like dragging a file into the Claude Code CLI, the
   // agent receives paths and reads the files itself with its own tools.
   const [attachments, setAttachments] = useState<string[]>([])
@@ -119,12 +174,17 @@ export function CodeChat({
     setDraft('')
     setAttachments([])
     setStopping(false)
+    voice.cancel()
     textareaRef.current?.focus()
   }, [session.id])
 
   useEffect(() => {
     if (!busy) setStopping(false)
   }, [busy])
+
+  useEffect(() => {
+    if (voiceAvailable) voiceWarmup()
+  }, [voiceAvailable, voiceWarmup])
 
   const addAttachments = (paths: string[]) => {
     const cleaned = paths.filter(Boolean)
@@ -141,7 +201,7 @@ export function CodeChat({
     textareaRef.current?.focus()
   }
 
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDrop = (e: DragEvent) => {
     if (!e.dataTransfer?.files?.length) return
     e.preventDefault()
     const paths = Array.from(e.dataTransfer.files)
@@ -175,6 +235,27 @@ export function CodeChat({
     await stop()
   }
 
+  const handleStartRecording = () => {
+    if (busy) return
+    void voice.start()
+  }
+
+  const handleSubmitRecording = async () => {
+    if (!recording || recordingStopping) return
+    const text = await voice.submit()
+    if (!text) return
+    const result = await send(text)
+    if (!result.ok && result.error) {
+      toast.error(result.error)
+      setDraft(text)
+    }
+  }
+
+  const handleCancelRecording = () => {
+    voice.cancel()
+    textareaRef.current?.focus()
+  }
+
   const basename = (p: string) => p.split(/[\\/]/).pop() || p
 
   return (
@@ -188,7 +269,10 @@ export function CodeChat({
         <Terminal className="size-3.5 shrink-0 text-muted-foreground" />
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium">{session.title}</div>
-          <div className="text-[11px] text-muted-foreground">{AGENT_LABEL[session.agent]} — direct</div>
+          <div className="text-[11px] text-muted-foreground">
+            {AGENT_LABEL[session.agent]} — direct
+            {contextUsedPercent != null ? ` · ${contextUsedPercent}% context used` : ''}
+          </div>
         </div>
       </div>
 
@@ -239,9 +323,19 @@ export function CodeChat({
             />
           ))}
           {busy && !pendingPermission && pendingToolPermissions.size === 0 && pendingAskHumans.size === 0 && (
-            <Shimmer className="text-sm">
-              {stopping ? 'Stopping…' : `${AGENT_LABEL[session.agent]} is working…`}
-            </Shimmer>
+            compactionStatus === 'stalled' ? (
+              <div className="text-sm text-amber-600">
+                Context compaction is taking longer than expected. You can stop and retry in a fresh session.
+              </div>
+            ) : (
+              <Shimmer className="text-sm">
+                {stopping
+                  ? 'Stopping…'
+                  : compactionStatus === 'running'
+                    ? 'Compacting context…'
+                    : `${AGENT_LABEL[session.agent]} is working…`}
+              </Shimmer>
+            )
           )}
         </ConversationContent>
         <ConversationScrollButton />
@@ -249,8 +343,8 @@ export function CodeChat({
 
       {/* Composer — mirrors the assistant chat input's look (rounded card,
           borderless textarea, round primary send / destructive stop). */}
-      <div className="p-3">
-        <div className="rowboat-chat-input mx-auto w-full max-w-3xl rounded-lg border border-border bg-background shadow-none">
+      <div className="bg-background p-3 dark:bg-black">
+        <div className="rowboat-chat-input rowboat-code-chat-input mx-auto w-full max-w-3xl rounded-lg border border-border bg-background shadow-none">
           {attachments.length > 0 && (
             <div className="flex flex-wrap gap-2 px-4 pb-1 pt-3">
               {attachments.map((p) => (
@@ -273,22 +367,58 @@ export function CodeChat({
               ))}
             </div>
           )}
-          <div className="px-4 pb-2 pt-4">
-            <Textarea
-              ref={textareaRef}
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault()
-                  void handleSend()
-                }
-              }}
-              placeholder="Type your message..."
-              className="max-h-40 min-h-[24px] w-full resize-none border-0 bg-transparent p-0 text-sm shadow-none outline-none focus-visible:ring-0"
-              rows={2}
-            />
-          </div>
+          {recording ? (
+            <div className="flex items-center gap-3 px-4 py-3">
+              <button
+                type="button"
+                onClick={handleCancelRecording}
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                aria-label="Cancel recording"
+              >
+                <X className="h-4 w-4" />
+              </button>
+              <div className="flex min-w-0 flex-1 flex-col gap-1 overflow-hidden">
+                <VoiceWaveform audioLevelsRef={voice.audioLevelsRef} />
+                <div className={cn('min-h-5 truncate text-sm leading-5', voice.interimText.trim() ? 'text-foreground' : 'text-muted-foreground')}>
+                  {voice.interimText.trim() || (recordingStopping ? 'Finalizing...' : 'Listening...')}
+                </div>
+              </div>
+              <Button
+                size="icon"
+                onClick={() => void handleSubmitRecording()}
+                disabled={recordingStopping}
+                className={cn(
+                  'h-7 w-7 shrink-0 rounded-full transition-all',
+                  recordingStopping
+                    ? 'bg-muted text-muted-foreground'
+                    : 'bg-primary text-primary-foreground hover:bg-primary/90',
+                )}
+              >
+                {recordingStopping ? (
+                  <LoaderIcon className="h-4 w-4 animate-spin" />
+                ) : (
+                  <ArrowUp className="h-4 w-4" />
+                )}
+              </Button>
+            </div>
+          ) : (
+            <div className="px-4 pb-2 pt-4">
+              <Textarea
+                ref={textareaRef}
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault()
+                    void handleSend()
+                  }
+                }}
+                placeholder="Type your message..."
+                className="max-h-40 min-h-[24px] w-full resize-none border-0 bg-transparent p-0 text-sm shadow-none outline-none focus-visible:ring-0"
+                rows={2}
+              />
+            </div>
+          )}
           <div className="flex items-center gap-2 px-3 pb-3">
             <Tooltip>
               <TooltipTrigger asChild>
@@ -303,6 +433,22 @@ export function CodeChat({
               </TooltipTrigger>
               <TooltipContent side="top">Attach files — the agent reads them from disk (or drag & drop)</TooltipContent>
             </Tooltip>
+            {voiceAvailable && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={handleStartRecording}
+                    disabled={busy || recording}
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                    aria-label="Voice input"
+                  >
+                    <Mic className="h-4 w-4" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">Voice input</TooltipContent>
+              </Tooltip>
+            )}
             <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
               <Terminal className="size-3.5 shrink-0" />
               <span className="truncate">Direct — straight to {AGENT_LABEL[session.agent]}</span>

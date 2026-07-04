@@ -1,7 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowLeft, ArrowRight, Loader2, Plus, RotateCw, X } from 'lucide-react'
 
+import type { HttpAuthRequest } from '@x/shared/dist/browser-control.js'
+
 import { TabBar } from '@/components/tab-bar'
+import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 
 /**
@@ -86,9 +98,80 @@ const getBrowserTabTitle = (tab: BrowserTabState) => {
   }
 }
 
+/**
+ * Credential prompt for HTTP basic/proxy auth challenges raised by pages in
+ * the embedded browser. Rendered as a regular app dialog: BrowserPane already
+ * hides the native WebContentsView whenever a dialog overlay is open, so the
+ * prompt is never obscured by the page that triggered it.
+ */
+function BrowserHttpAuthDialog({
+  request,
+  onSubmit,
+  onCancel,
+}: {
+  request: HttpAuthRequest
+  onSubmit: (username: string, password: string) => void
+  onCancel: () => void
+}) {
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+
+  // Basic auth allows an empty username (token-style `curl -u :TOKEN`), so the
+  // only invalid submission is fully empty. The server decides the rest.
+  const canSubmit = username.length > 0 || password.length > 0
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!canSubmit) return
+    onSubmit(username, password)
+  }
+
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) onCancel() }}>
+      <DialogContent className="w-[min(24rem,calc(100%-2rem))] max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Sign in</DialogTitle>
+          <DialogDescription>
+            {request.isProxy
+              ? `The proxy ${request.host} requires a username and password.`
+              : `${request.host} requires a username and password.`}
+            {request.realm ? ` (${request.realm})` : ''}
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+          <Input
+            autoFocus
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder="Username"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+          />
+          <Input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Password"
+          />
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onCancel}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={!canSubmit}>
+              Sign in
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 export function BrowserPane({ onClose, forceHidden = false }: BrowserPaneProps) {
   const [state, setState] = useState<BrowserState>(EMPTY_STATE)
   const [addressValue, setAddressValue] = useState('')
+  const [authQueue, setAuthQueue] = useState<HttpAuthRequest[]>([])
 
   const activeTabIdRef = useRef<string | null>(null)
   const addressFocusedRef = useRef(false)
@@ -120,6 +203,51 @@ export function BrowserPane({ onClose, forceHidden = false }: BrowserPaneProps) 
 
     return cleanup
   }, [applyState])
+
+  // Mirror of authQueue for the unmount handler, which must read the latest
+  // queue without re-subscribing on every change.
+  const authQueueRef = useRef<HttpAuthRequest[]>([])
+  useEffect(() => {
+    authQueueRef.current = authQueue
+  }, [authQueue])
+
+  useEffect(() => {
+    const offRequest = window.ipc.on('browser:httpAuthRequest', (incoming) => {
+      setAuthQueue((queue) => [...queue, incoming as HttpAuthRequest])
+    })
+    // Main resolved a challenge on its own (timeout, or its tab/window was
+    // destroyed) — drop the corresponding dialog so it can't linger over an
+    // unrelated page with a submit that would no-op.
+    const offResolved = window.ipc.on('browser:httpAuthResolved', (incoming) => {
+      const { requestId } = incoming as { requestId: string }
+      setAuthQueue((queue) => queue.filter((request) => request.requestId !== requestId))
+    })
+    return () => {
+      offRequest()
+      offResolved()
+      // Cancel anything still pending so the main-process login callbacks and
+      // timers are freed immediately instead of waiting out the timeout.
+      for (const request of authQueueRef.current) {
+        void window.ipc.invoke('browser:httpAuthResponse', { requestId: request.requestId })
+      }
+    }
+  }, [])
+
+  const respondToAuth = useCallback(
+    (requestId: string, credentials: { username: string; password: string } | null) => {
+      setAuthQueue((queue) => queue.filter((request) => request.requestId !== requestId))
+      // Omit username to cancel; include it (even empty) to submit.
+      void window.ipc.invoke(
+        'browser:httpAuthResponse',
+        credentials
+          ? { requestId, username: credentials.username, password: credentials.password }
+          : { requestId },
+      )
+    },
+    [],
+  )
+
+  const activeAuthRequest = authQueue[0] ?? null
 
   const setViewVisible = useCallback((visible: boolean) => {
     if (viewVisibleRef.current === visible) return
@@ -420,6 +548,17 @@ export function BrowserPane({ onClose, forceHidden = false }: BrowserPaneProps) 
         className="relative min-h-0 min-w-0 flex-1"
         data-browser-viewport
       />
+
+      {activeAuthRequest && (
+        <BrowserHttpAuthDialog
+          key={activeAuthRequest.requestId}
+          request={activeAuthRequest}
+          onSubmit={(username, password) =>
+            respondToAuth(activeAuthRequest.requestId, { username, password })
+          }
+          onCancel={() => respondToAuth(activeAuthRequest.requestId, null)}
+        />
+      )}
     </div>
   )
 }

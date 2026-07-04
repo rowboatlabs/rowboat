@@ -15,16 +15,19 @@ import {
   FolderCog,
   FolderOpen,
   Globe,
-  Headphones,
   ImagePlus,
   LoaderIcon,
   Lock,
   Mic,
   MoreHorizontal,
+  Phone,
+  PhoneOff,
   Plus,
+  Presentation,
   ShieldCheck,
   Square,
   Terminal,
+  Video,
   X,
 } from 'lucide-react'
 
@@ -210,6 +213,18 @@ function compactWorkDirPath(path: string) {
   return path.replace(/^\/Users\/[^/]+/, '~')
 }
 
+// Call presets: front doors into the same call engine, differing only in
+// starting devices. 'share' is the call button's main click — the "work
+// together" default (screen shared, camera off, floating pill). The chevron
+// menu holds the deviations.
+export type CallPreset = 'voice' | 'video' | 'share' | 'practice'
+
+const CALL_PRESET_MENU: Array<{ preset: CallPreset; label: string; description: string; Icon: typeof Phone }> = [
+  { preset: 'voice', label: 'Voice call', description: 'Just talk — nothing is shared, the mascot hovers while you work', Icon: AudioLines },
+  { preset: 'video', label: 'Video call', description: 'Camera on, face to face — it sees your expressions', Icon: Video },
+  { preset: 'practice', label: 'Practice session', description: 'Rehearse a pitch or interview with live coaching', Icon: Presentation },
+]
+
 interface ChatInputInnerProps {
   onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => void
   onStop?: () => void
@@ -223,18 +238,20 @@ interface ChatInputInnerProps {
   onDraftChange?: (text: string) => void
   isRecording?: boolean
   recordingText?: string
-  recordingState?: 'connecting' | 'listening'
+  recordingState?: 'connecting' | 'listening' | 'stopping'
   /** Live mic amplitude history (RMS per frame) driving the recording waveform. */
   audioLevelsRef?: React.MutableRefObject<number[]>
   onStartRecording?: () => void
-  onSubmitRecording?: () => void
+  onSubmitRecording?: () => void | Promise<void>
   onCancelRecording?: () => void
   voiceAvailable?: boolean
-  ttsAvailable?: boolean
-  ttsEnabled?: boolean
-  ttsMode?: 'summary' | 'full'
-  onToggleTts?: () => void
-  onTtsModeChange?: (mode: 'summary' | 'full') => void
+  /** A call is live (hands-free voice loop + spoken responses). */
+  inCall?: boolean
+  /** Start a call with the given preset's device defaults. */
+  onStartCall?: (preset: CallPreset) => void
+  onEndCall?: () => void
+  /** Calls need both voice input (STT) and voice output (TTS) configured. */
+  callAvailable?: boolean
   /** Fired when the user picks a different model in the dropdown (only when no run exists yet). */
   onSelectedModelChange?: (model: SelectedModel | null) => void
   /** Work directory for this chat (per-chat). Null when none is set. */
@@ -262,16 +279,16 @@ function ChatInputInner({
   onDraftChange,
   isRecording,
   recordingText,
+  recordingState,
   audioLevelsRef,
   onStartRecording,
   onSubmitRecording,
   onCancelRecording,
   voiceAvailable,
-  ttsAvailable,
-  ttsEnabled,
-  ttsMode,
-  onToggleTts,
-  onTtsModeChange,
+  inCall,
+  onStartCall,
+  onEndCall,
+  callAvailable,
   onSelectedModelChange,
   workDir = null,
   onWorkDirChange,
@@ -341,22 +358,15 @@ function ChatInputInner({
     }
   })
 
-  // When a run exists, freeze the dropdown to the run's resolved model+provider.
+  // Sessions runtime: model and permission mode are per-message turn config,
+  // so nothing is frozen for an existing chat — the picker stays live.
   useEffect(() => {
     if (!runId) {
       setLockedModel(null)
       setPermissionMode('auto')
       return
     }
-    let cancelled = false
-    window.ipc.invoke('runs:fetch', { runId }).then((run) => {
-      if (cancelled) return
-      if (run.provider && run.model) {
-        setLockedModel({ provider: run.provider, model: run.model })
-      }
-      setPermissionMode(run.permissionMode ?? 'manual')
-    }).catch(() => { /* legacy run or fetch failure — leave unlocked */ })
-    return () => { cancelled = true }
+    setLockedModel(null)
   }, [runId])
 
   useEffect(() => {
@@ -758,7 +768,7 @@ function ChatInputInner({
   const currentWorkDirPath = effectiveWorkDir ? compactWorkDirPath(effectiveWorkDir) : ''
 
   return (
-    <div className="rowboat-chat-input rounded-lg border border-border bg-background shadow-none">
+    <div data-tour-id="chat-composer" className="rowboat-chat-input rounded-lg border border-border bg-background shadow-none">
       {attachments.length > 0 && (
         <div className="flex flex-wrap gap-2 px-4 pb-1 pt-3">
           {attachments.map((attachment) => {
@@ -829,23 +839,33 @@ function ChatInputInner({
           >
             <X className="h-4 w-4" />
           </button>
-          {/* Audio-reactive waveform only — the transcribed words are intentionally
-              not shown while recording; they're still captured and submitted. */}
-          <div className="flex flex-1 items-center overflow-hidden">
+          <div className="flex min-w-0 flex-1 flex-col gap-1 overflow-hidden">
             <VoiceWaveform audioLevelsRef={audioLevelsRef} />
+            <div
+              className={cn(
+                'min-h-5 truncate text-sm leading-5',
+                recordingText?.trim() ? 'text-foreground' : 'text-muted-foreground'
+              )}
+            >
+              {recordingText?.trim() || (recordingState === 'stopping' ? 'Finalizing...' : 'Listening...')}
+            </div>
           </div>
           <Button
             size="icon"
             onClick={onSubmitRecording}
-            disabled={!recordingText?.trim()}
+            disabled={recordingState === 'stopping'}
             className={cn(
               'h-7 w-7 shrink-0 rounded-full transition-all',
-              recordingText?.trim()
+              recordingState !== 'stopping'
                 ? 'bg-primary text-primary-foreground hover:bg-primary/90'
                 : 'bg-muted text-muted-foreground'
             )}
           >
-            <ArrowUp className="h-4 w-4" />
+            {recordingState === 'stopping' ? (
+              <LoaderIcon className="h-4 w-4 animate-spin" />
+            ) : (
+              <ArrowUp className="h-4 w-4" />
+            )}
           </Button>
         </div>
       ) : (
@@ -1267,48 +1287,66 @@ function ChatInputInner({
             </DropdownMenuContent>
           </DropdownMenu>
         ) : null}
-        {onToggleTts && ttsAvailable && (
+        {onStartCall && (
           <div className="flex shrink-0 items-center">
             <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  onClick={onToggleTts}
+                  onClick={() => {
+                    if (inCall) {
+                      onEndCall?.()
+                    } else if (callAvailable) {
+                      onStartCall('share')
+                    }
+                  }}
                   className={cn(
-                    'relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors',
-                    ttsEnabled
-                      ? 'text-foreground hover:bg-muted'
-                      : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                    'flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors',
+                    inCall
+                      ? 'bg-red-600 text-white hover:bg-red-500'
+                      : callAvailable
+                        ? 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                        : 'cursor-default text-muted-foreground/40'
                   )}
-                  aria-label={ttsEnabled ? 'Disable voice output' : 'Enable voice output'}
+                  aria-label={inCall ? 'End call' : 'Start a call'}
                 >
-                  <Headphones className="h-4 w-4" />
-                  {!ttsEnabled && (
-                    <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                      <span className="block h-[1.5px] w-5 -rotate-45 rounded-full bg-muted-foreground" />
-                    </span>
-                  )}
+                  {inCall ? <PhoneOff className="h-4 w-4" /> : <Phone className="h-4 w-4" />}
                 </button>
               </TooltipTrigger>
               <TooltipContent side="top">
-                {ttsEnabled ? 'Voice output on' : 'Voice output off'}
+                {inCall
+                  ? 'End call'
+                  : callAvailable
+                    ? 'Start a call — it sees your screen while you talk it through'
+                    : 'Calls need voice input and output configured'}
               </TooltipContent>
             </Tooltip>
-            {ttsEnabled && onTtsModeChange && (
+            {!inCall && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
                     className="flex h-7 w-4 shrink-0 items-center justify-center text-muted-foreground transition-colors hover:text-foreground"
+                    aria-label="Call options"
                   >
                     <ChevronDown className="h-3 w-3" />
                   </button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuRadioGroup value={ttsMode ?? 'summary'} onValueChange={(v) => onTtsModeChange(v as 'summary' | 'full')}>
-                    <DropdownMenuRadioItem value="summary">Speak summary</DropdownMenuRadioItem>
-                    <DropdownMenuRadioItem value="full">Speak full response</DropdownMenuRadioItem>
-                  </DropdownMenuRadioGroup>
+                <DropdownMenuContent align="end" className="w-72">
+                  {CALL_PRESET_MENU.map(({ preset, label, description, Icon }) => (
+                    <DropdownMenuItem
+                      key={preset}
+                      disabled={!callAvailable}
+                      onSelect={() => onStartCall(preset)}
+                      className="items-start gap-3 py-2"
+                    >
+                      <Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                      <span className="min-w-0">
+                        <span className="block text-sm font-medium leading-tight">{label}</span>
+                        <span className="block pt-0.5 text-xs leading-tight text-muted-foreground">{description}</span>
+                      </span>
+                    </DropdownMenuItem>
+                  ))}
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
@@ -1477,17 +1515,16 @@ export interface ChatInputWithMentionsProps {
   onDraftChange?: (text: string) => void
   isRecording?: boolean
   recordingText?: string
-  recordingState?: 'connecting' | 'listening'
+  recordingState?: 'connecting' | 'listening' | 'stopping'
   audioLevelsRef?: React.MutableRefObject<number[]>
   onStartRecording?: () => void
-  onSubmitRecording?: () => void
+  onSubmitRecording?: () => void | Promise<void>
   onCancelRecording?: () => void
   voiceAvailable?: boolean
-  ttsAvailable?: boolean
-  ttsEnabled?: boolean
-  ttsMode?: 'summary' | 'full'
-  onToggleTts?: () => void
-  onTtsModeChange?: (mode: 'summary' | 'full') => void
+  inCall?: boolean
+  onStartCall?: (preset: CallPreset) => void
+  onEndCall?: () => void
+  callAvailable?: boolean
   onSelectedModelChange?: (model: SelectedModel | null) => void
   workDir?: string | null
   onWorkDirChange?: (value: string | null) => void
@@ -1517,11 +1554,10 @@ export function ChatInputWithMentions({
   onSubmitRecording,
   onCancelRecording,
   voiceAvailable,
-  ttsAvailable,
-  ttsEnabled,
-  ttsMode,
-  onToggleTts,
-  onTtsModeChange,
+  inCall,
+  onStartCall,
+  onEndCall,
+  callAvailable,
   onSelectedModelChange,
   workDir,
   onWorkDirChange,
@@ -1548,11 +1584,10 @@ export function ChatInputWithMentions({
         onSubmitRecording={onSubmitRecording}
         onCancelRecording={onCancelRecording}
         voiceAvailable={voiceAvailable}
-        ttsAvailable={ttsAvailable}
-        ttsEnabled={ttsEnabled}
-        ttsMode={ttsMode}
-        onToggleTts={onToggleTts}
-        onTtsModeChange={onTtsModeChange}
+        inCall={inCall}
+        onStartCall={onStartCall}
+        onEndCall={onEndCall}
+        callAvailable={callAvailable}
         onSelectedModelChange={onSelectedModelChange}
         workDir={workDir}
         onWorkDirChange={onWorkDirChange}

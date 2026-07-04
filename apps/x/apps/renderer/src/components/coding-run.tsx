@@ -9,6 +9,7 @@ import {
   Pencil,
   Search,
   ShieldQuestion,
+  Sparkles,
   Terminal,
   Trash2,
   Wrench,
@@ -87,7 +88,8 @@ export function reduceEvents(events: CodeRunEvent[]): Row[] {
   return rows
 }
 
-function toolKindIcon(kind?: string) {
+function toolKindIcon(kind?: string, title?: string) {
+  if (title === 'Compacting context') return <Sparkles className="size-3.5 shrink-0 text-muted-foreground" />
   switch (kind) {
     case 'read': return <Eye className="size-3.5 shrink-0 text-muted-foreground" />
     case 'edit': return <Pencil className="size-3.5 shrink-0 text-muted-foreground" />
@@ -137,7 +139,7 @@ export function CodingRunTimeline({
                 {running
                   ? <Loader className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
                   : <CheckCircle2 className="size-3.5 shrink-0 text-green-600" />}
-                {toolKindIcon(row.toolKind)}
+                {toolKindIcon(row.toolKind, row.title)}
                 <span className="truncate text-foreground/90">{row.title ?? row.toolKind ?? 'Tool call'}</span>
               </div>
               {row.diffs.length > 0 && (

@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 
-export type UseCase = 'copilot_chat' | 'live_note_agent' | 'background_task_agent' | 'meeting_note' | 'knowledge_sync' | 'code_session' | 'app_llm_generate' | 'app_copilot_run';
+export type UseCase = 'copilot_chat' | 'live_note_agent' | 'background_task_agent' | 'meeting_note' | 'meeting_prep' | 'knowledge_sync' | 'code_session' | 'app_llm_generate' | 'app_copilot_run';
 
 export interface UseCaseContext {
   useCase: UseCase;

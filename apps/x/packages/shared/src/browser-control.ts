@@ -14,6 +14,15 @@ export const BrowserStateSchema = z.object({
   tabs: z.array(BrowserTabStateSchema),
 });
 
+// HTTP basic/proxy auth challenge raised by a page in the embedded browser.
+// Defined once here so main, preload, and renderer share one shape.
+export const HttpAuthRequestSchema = z.object({
+  requestId: z.string(),
+  host: z.string(),
+  isProxy: z.boolean(),
+  realm: z.string().optional(),
+});
+
 export const BrowserPageElementSchema = z.object({
   index: z.number().int().positive(),
   tagName: z.string(),
@@ -134,6 +143,7 @@ export const BrowserControlResultSchema = z.object({
 
 export type BrowserTabState = z.infer<typeof BrowserTabStateSchema>;
 export type BrowserState = z.infer<typeof BrowserStateSchema>;
+export type HttpAuthRequest = z.infer<typeof HttpAuthRequestSchema>;
 export type BrowserPageElement = z.infer<typeof BrowserPageElementSchema>;
 export type BrowserPageSnapshot = z.infer<typeof BrowserPageSnapshotSchema>;
 export type BrowserControlAction = z.infer<typeof BrowserControlActionSchema>;

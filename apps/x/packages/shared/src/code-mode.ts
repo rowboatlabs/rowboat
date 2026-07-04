@@ -54,6 +54,11 @@ export const CodeRunEvent = z.discriminatedUnion("type", [
         })),
     }),
     z.object({
+        type: z.literal("usage"),
+        used: z.number().nonnegative(),
+        size: z.number().positive(),
+    }),
+    z.object({
         type: z.literal("permission"),
         ask: PermissionAsk,
         decision: z.union([PermissionDecision, z.literal("cancelled")]),

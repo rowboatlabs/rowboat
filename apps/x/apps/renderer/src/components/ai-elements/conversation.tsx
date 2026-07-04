@@ -43,6 +43,7 @@ export const Conversation = ({
   const contentRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const spacerRef = useRef<HTMLDivElement | null>(null);
+  const stickToBottomRef = useRef(true);
   const [isAtBottom, setIsAtBottom] = useState(true);
 
   const updateBottomState = useCallback(() => {
@@ -50,7 +51,9 @@ export const Conversation = ({
     if (!container) return;
     const distanceFromBottom =
       container.scrollHeight - container.scrollTop - container.clientHeight;
-    setIsAtBottom(distanceFromBottom <= BOTTOM_THRESHOLD_PX);
+    const atBottom = distanceFromBottom <= BOTTOM_THRESHOLD_PX;
+    stickToBottomRef.current = atBottom;
+    setIsAtBottom(atBottom);
   }, []);
 
   const applyAnchorLayout = useCallback(
@@ -131,7 +134,12 @@ export const Conversation = ({
         cancelAnimationFrame(rafId);
       }
       rafId = requestAnimationFrame(() => {
+        const shouldStick = !anchorMessageId && stickToBottomRef.current;
         applyAnchorLayout(false);
+        if (shouldStick) {
+          container.scrollTop = container.scrollHeight;
+          updateBottomState();
+        }
       });
     };
 
@@ -178,6 +186,7 @@ export const Conversation = ({
     const container = scrollRef.current;
     if (!container) return;
     container.scrollTop = container.scrollHeight;
+    stickToBottomRef.current = true;
     updateBottomState();
   }, [updateBottomState]);
 

@@ -4,3 +4,6 @@
 data/
 .venv/
 .claude/
+
+# Local-only meeting-prep planning doc
+/PLAN.md

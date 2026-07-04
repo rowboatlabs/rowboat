@@ -41,6 +41,10 @@ export interface PendingCodePermission {
 
 const DIRECT_PREFIX = 'direct-'
 const STRUCTURAL_EVENTS = new Set(['tool_call', 'tool_call_update', 'plan', 'permission'])
+const COMPACTION_TITLE = 'Compacting context'
+const COMPACTION_STALLED_MS = 90_000
+
+export type CompactionStatus = 'idle' | 'running' | 'stalled'
 
 function messageText(content: unknown): string {
   if (typeof content === 'string') return content
@@ -62,6 +66,8 @@ export function useCodeChat(session: CodeSession | null) {
   const [items, setItems] = useState<CodeChatItem[]>([])
   const [liveText, setLiveText] = useState('')
   const [isProcessing, setIsProcessing] = useState(false)
+  const [compactionStatus, setCompactionStatus] = useState<CompactionStatus>('idle')
+  const [contextUsage, setContextUsage] = useState<{ used: number; size: number } | null>(null)
   const [pendingPermission, setPendingPermission] = useState<PendingCodePermission | null>(null)
   // Rowboat-mode copilot gates, same as the main chat: pre-tool-call permission
   // requests and ask-human questions. Keyed by toolCallId.
@@ -69,6 +75,7 @@ export function useCodeChat(session: CodeSession | null) {
   const [pendingAskHumans, setPendingAskHumans] = useState<Map<string, z.infer<typeof AskHumanRequestEvent>>>(new Map())
   const [loading, setLoading] = useState(false)
   const seenMessageIdsRef = useRef<Set<string>>(new Set())
+  const compactionToolIdRef = useRef<string | null>(null)
 
   const applyCodeRunEvent = useCallback((toolCallId: string, event: CodeRunEvent) => {
     if (toolCallId.startsWith(DIRECT_PREFIX)) {
@@ -99,6 +106,9 @@ export function useCodeChat(session: CodeSession | null) {
     if (!sessionId) {
       setItems([])
       setLiveText('')
+      setCompactionStatus('idle')
+      setContextUsage(null)
+      compactionToolIdRef.current = null
       setPendingPermission(null)
       return
     }
@@ -106,6 +116,9 @@ export function useCodeChat(session: CodeSession | null) {
     setLoading(true)
     setItems([])
     setLiveText('')
+    setCompactionStatus('idle')
+    setContextUsage(null)
+    compactionToolIdRef.current = null
     setPendingPermission(null)
     setPendingToolPermissions(new Map())
     setPendingAskHumans(new Map())
@@ -217,6 +230,12 @@ export function useCodeChat(session: CodeSession | null) {
     return () => { cancelled = true }
   }, [sessionId])
 
+  useEffect(() => {
+    if (compactionStatus !== 'running') return
+    const timer = window.setTimeout(() => setCompactionStatus('stalled'), COMPACTION_STALLED_MS)
+    return () => window.clearTimeout(timer)
+  }, [compactionStatus])
+
   // Live event stream.
   useEffect(() => {
     if (!sessionId) return
@@ -230,6 +249,8 @@ export function useCodeChat(session: CodeSession | null) {
           break
         case 'run-processing-end':
           setIsProcessing(false)
+          setCompactionStatus('idle')
+          compactionToolIdRef.current = null
           setPendingPermission(null)
           // Anything still streaming that never landed as a message (e.g. the
           // turn errored) is flushed so the text isn't lost.
@@ -247,6 +268,8 @@ export function useCodeChat(session: CodeSession | null) {
           break
         case 'run-stopped':
           setIsProcessing(false)
+          setCompactionStatus('idle')
+          compactionToolIdRef.current = null
           setPendingPermission(null)
           setPendingToolPermissions(new Map())
           setPendingAskHumans(new Map())
@@ -348,6 +371,19 @@ export function useCodeChat(session: CodeSession | null) {
           break
         case 'code-run-event': {
           setIsProcessing(true)
+          if (event.event.type === 'usage') {
+            setContextUsage({ used: event.event.used, size: event.event.size })
+          }
+          if (event.event.type === 'tool_call' && event.event.title === COMPACTION_TITLE) {
+            compactionToolIdRef.current = event.event.id ?? null
+            setCompactionStatus('running')
+          }
+          if (event.event.type === 'tool_call_update'
+            && event.event.id != null
+            && event.event.id === compactionToolIdRef.current) {
+            compactionToolIdRef.current = null
+            setCompactionStatus('idle')
+          }
           if (event.event.type === 'message' && event.event.role === 'agent' && event.toolCallId.startsWith(DIRECT_PREFIX)) {
             const text = event.event.text
             setLiveText((prev) => prev + text)
@@ -460,6 +496,8 @@ export function useCodeChat(session: CodeSession | null) {
     items,
     liveText,
     isProcessing,
+    compactionStatus,
+    contextUsage,
     pendingPermission,
     pendingToolPermissions,
     pendingAskHumans,

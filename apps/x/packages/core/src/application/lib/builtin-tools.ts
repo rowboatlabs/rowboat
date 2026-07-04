@@ -24,6 +24,9 @@ import { ICodeModeConfigRepo } from "../../code-mode/repo.js";
 import type { ApprovalPolicy } from "@x/shared/dist/code-mode.js";
 import type { ICodeProjectsRepo } from "../../code-mode/projects/repo.js";
 import * as gitService from "../../code-mode/git/service.js";
+import { listImportantThreads, searchThreads } from "../../knowledge/sync_gmail.js";
+import { listTasks as listBackgroundTasks } from "../../background-tasks/fileops.js";
+import type { ISessions } from "../../sessions/api.js";
 
 // Inputs for the bg-task builtin tools. Reuse the canonical schema field
 // descriptions; only `triggers` gets a tighter contextual override (the
@@ -1068,15 +1071,24 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
     // ============================================================================
 
     'app-navigation': {
-        description: 'Control the app UI - navigate to notes, switch views, filter/search the knowledge base, and manage saved views.',
+        description: 'Drive the Rowboat app UI: navigate to any view, read what a view contains (emails, background agents, chat history), open specific items (an email thread, a note, an agent, a past chat), filter/search the knowledge base, and manage saved views. Use it to SHOW the user things while telling them — navigation happens on their screen.',
         inputSchema: z.object({
-            action: z.enum(["open-note", "open-view", "open-app", "update-base-view", "get-base-state", "create-base"]).describe("The navigation action to perform"),
+            action: z.enum(["open-note", "open-view", "open-app", "read-view", "open-item", "update-base-view", "get-base-state", "create-base"]).describe("The navigation action to perform"),
             // open-note
             path: z.string().optional().describe("Knowledge file path for open-note, e.g. knowledge/People/John.md"),
             // open-app
-            appId: z.string().optional().describe("Mini App id (folder name under ~/.rowboat/apps) for open-app — opens it in the middle pane under Mini Apps."),
-            // open-view
-            view: z.enum(["bases", "graph"]).optional().describe("Which view to open (for open-view action)"),
+            appId: z.string().optional().describe("App folder slug under ~/.rowboat/apps (for open-app) — opens the app in the middle pane."),
+            // open-view / read-view
+            view: z.enum(["home", "email", "meetings", "live-notes", "bg-tasks", "chat-history", "knowledge", "workspace", "code", "bases", "graph"]).optional().describe("Which view to open (open-view) or read (read-view; supported for read: email, bg-tasks, chat-history)"),
+            // read-view (email)
+            query: z.string().optional().describe("For read-view on email: search query (sender name, subject words, etc.). Omit to list the latest important inbox threads."),
+            limit: z.number().int().min(1).max(50).optional().describe("For read-view: max items to return (default 15)"),
+            // open-item
+            kind: z.enum(["email-thread", "note", "bg-task", "session"]).optional().describe("What to open (for open-item)"),
+            threadId: z.string().optional().describe("Gmail thread id (open-item kind=email-thread; get it from read-view email)"),
+            taskName: z.string().optional().describe("Background task/agent name (open-item kind=bg-task; get it from read-view bg-tasks)"),
+            sessionId: z.string().optional().describe("Chat session id (open-item kind=session; get it from read-view chat-history)"),
+
             // update-base-view
             filters: z.object({
                 set: z.array(z.object({ category: z.string(), value: z.string() })).optional().describe("Replace all filters with these"),
@@ -1134,6 +1146,110 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                         return { success: false, error: `App not found: ${appId}` };
                     }
                     return { success: true, action: 'open-app', appId, appName };
+                }
+
+                case 'read-view': {
+                    // Returns the same data the view renders, so the assistant
+                    // can answer precisely — and the renderer navigates to the
+                    // view at the same time so the user SEES what's being read.
+                    const view = input.view as string;
+                    const limit = (input.limit as number | undefined) ?? 15;
+                    try {
+                        switch (view) {
+                            case 'email': {
+                                const query = (input.query as string | undefined)?.trim();
+                                const result = query
+                                    ? await searchThreads(query, { limit })
+                                    : listImportantThreads({ limit });
+                                const threads = (result.threads ?? []).slice(0, limit).map((t) => ({
+                                    threadId: t.threadId,
+                                    subject: t.subject ?? '(no subject)',
+                                    from: t.from ?? '',
+                                    date: t.date ?? '',
+                                    unread: t.unread ?? false,
+                                    summary: t.summary ? t.summary.slice(0, 200) : undefined,
+                                }));
+                                return { success: true, action: 'read-view', view, query, threads };
+                            }
+                            case 'bg-tasks': {
+                                const { items } = await listBackgroundTasks({ limit });
+                                const agents = items.map((t) => ({
+                                    name: t.name,
+                                    slug: t.slug,
+                                    active: t.active,
+                                    triggers: t.triggers,
+                                    lastRunAt: t.lastRunAt,
+                                    lastRunSummary: t.lastRunSummary ? t.lastRunSummary.slice(0, 200) : undefined,
+                                    lastRunError: t.lastRunError ? t.lastRunError.slice(0, 200) : undefined,
+                                }));
+                                return { success: true, action: 'read-view', view, agents };
+                            }
+                            case 'chat-history': {
+                                const sessions = container.resolve<ISessions>('sessions')
+                                    .listSessions()
+                                    .slice(0, limit)
+                                    .map((s) => ({
+                                        sessionId: s.sessionId,
+                                        title: s.title ?? '(untitled)',
+                                        updatedAt: s.updatedAt,
+                                        turnCount: s.turnCount,
+                                    }));
+                                return { success: true, action: 'read-view', view, sessions };
+                            }
+                            default:
+                                return {
+                                    success: false,
+                                    error: `read-view supports: email, bg-tasks, chat-history. For notes/meetings/live-notes use the file-* tools (they are files under the workspace); for other views use open-view and describe what you need.`,
+                                };
+                        }
+                    } catch (error) {
+                        return {
+                            success: false,
+                            error: error instanceof Error ? error.message : `Failed to read ${view}`,
+                        };
+                    }
+                }
+
+                case 'open-item': {
+                    const kind = input.kind as string;
+                    switch (kind) {
+                        case 'email-thread': {
+                            const threadId = input.threadId as string | undefined;
+                            if (!threadId) return { success: false, error: 'threadId is required for kind=email-thread' };
+                            return { success: true, action: 'open-item', kind, threadId };
+                        }
+                        case 'note': {
+                            const filePath = input.path as string | undefined;
+                            if (!filePath) return { success: false, error: 'path is required for kind=note' };
+                            const result = await files.exists(filePath);
+                            if (!result.exists) return { success: false, error: `File not found: ${filePath}` };
+                            return { success: true, action: 'open-item', kind, path: filePath };
+                        }
+                        case 'bg-task': {
+                            const taskName = input.taskName as string | undefined;
+                            if (!taskName) return { success: false, error: 'taskName is required for kind=bg-task' };
+                            // Validate (and canonicalize) against the real task list.
+                            const { items: tasks } = await listBackgroundTasks({});
+                            const match = tasks.find(
+                                (t) => t.name === taskName || t.slug === taskName
+                                    || t.name.toLowerCase() === taskName.toLowerCase(),
+                            );
+                            if (!match) {
+                                return {
+                                    success: false,
+                                    error: `No background task named "${taskName}". Known tasks: ${tasks.map((t) => t.name).join(', ') || '(none)'}`,
+                                };
+                            }
+                            return { success: true, action: 'open-item', kind, taskName: match.name };
+                        }
+                        case 'session': {
+                            const sessionId = input.sessionId as string | undefined;
+                            if (!sessionId) return { success: false, error: 'sessionId is required for kind=session' };
+                            return { success: true, action: 'open-item', kind, sessionId };
+                        }
+                        default:
+                            return { success: false, error: `Unknown item kind: ${kind}` };
+                    }
                 }
 
                 case 'update-base-view': {

@@ -6,9 +6,7 @@ import {
     Pencil, Check, PanelRightClose, PanelRightOpen, Sparkles,
     Code2, FolderOpen, LayoutTemplate,
 } from 'lucide-react'
-import type { z } from 'zod'
 import type { BackgroundTask, BackgroundTaskSummary, Triggers } from '@x/shared/dist/background-task.js'
-import type { Run } from '@x/shared/dist/runs.js'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { Input } from '@/components/ui/input'
@@ -17,7 +15,7 @@ import { useBackgroundTaskAgentStatus } from '@/hooks/use-bg-task-agent-status'
 import { formatRelativeTime } from '@/lib/relative-time'
 import { toast } from '@/lib/toast'
 import type { ConversationItem } from '@/lib/chat-conversation'
-import { runLogToConversation } from '@/lib/run-to-conversation'
+import { fetchAgentRunTranscript, type AgentRunTranscript } from '@/lib/agent-transcript'
 import { CompactConversation } from '@/components/compact-conversation'
 import { RichMarkdownViewer } from '@/components/rich-markdown-viewer'
 import { HtmlFileViewer } from '@/components/html-file-viewer'
@@ -970,10 +968,9 @@ function SetupTab({
 // Runs history tab — list + drill-down transcript view
 //
 // Source of truth: `bg-tasks/<slug>/runs.log` — a plain-text file with one
-// runId per line (newest first). The actual transcripts live at the global
-// `$WorkDir/runs/<runId>.jsonl`, so this tab fetches runIds via the bg-task
-// IPC, then loads each Run through the standard `runs:fetch`. No bg-task-
-// specific transcript path or schema needed.
+// turn id per line (newest first). Transcripts live in the turn runtime's
+// storage; this tab fetches ids via the bg-task IPC, then loads each through
+// the shared agent-transcript loader (turn-first, legacy-run fallback).
 // ---------------------------------------------------------------------------
 
 interface RunRowSummary {
@@ -984,27 +981,6 @@ interface RunRowSummary {
     error?: string
 }
 
-// Pull the bits we want to display for a row out of a full Run's event log.
-function summarizeRun(run: z.infer<typeof Run>): RunRowSummary {
-    const out: RunRowSummary = { runId: run.id, createdAt: run.createdAt, trigger: run.subUseCase }
-    for (const event of run.log) {
-        if (event.type === 'error' && typeof event.error === 'string') {
-            out.error = event.error
-        } else if (event.type === 'message' && event.message?.role === 'assistant') {
-            const content = event.message.content
-            if (typeof content === 'string') {
-                out.summary = content
-            } else if (Array.isArray(content)) {
-                const text = content
-                    .filter((p) => p.type === 'text')
-                    .map((p) => ('text' in p ? p.text : ''))
-                    .join('')
-                if (text) out.summary = text
-            }
-        }
-    }
-    return out
-}
 
 function RunsHistoryTab({ slug, task }: { slug: string; task: BackgroundTask }) {
     const [rows, setRows] = useState<RunRowSummary[]>([])
@@ -1016,19 +992,25 @@ function RunsHistoryTab({ slug, task }: { slug: string; task: BackgroundTask }) 
         setLoading(true)
         try {
             const { runIds } = await window.ipc.invoke('bg-task:listRunIds', { slug, limit: 100 })
-            // Fetch each Run in parallel via the canonical IPC. Runs whose
-            // jsonl no longer exists (deleted manually, never written, …) are
-            // dropped silently.
+            // Fetch transcripts in parallel (turn-first, legacy-run
+            // fallback). Ids whose files no longer exist keep a bare row so
+            // the user knows the run happened.
             const settled = await Promise.allSettled(
-                runIds.map(runId => window.ipc.invoke('runs:fetch', { runId }))
+                runIds.map(runId => fetchAgentRunTranscript(runId))
             )
             const next: RunRowSummary[] = []
             for (let i = 0; i < settled.length; i++) {
                 const r = settled[i]
-                if (r.status === 'fulfilled' && r.value) {
-                    next.push(summarizeRun(r.value))
+                if (r.status === 'fulfilled') {
+                    const t = r.value
+                    next.push({
+                        runId: t.id,
+                        ...(t.createdAt === undefined ? {} : { createdAt: t.createdAt }),
+                        ...(t.trigger === undefined ? {} : { trigger: t.trigger }),
+                        ...(t.summary === undefined ? {} : { summary: t.summary }),
+                        ...(t.error === undefined ? {} : { error: t.error }),
+                    })
                 } else {
-                    // Keep the row visible with just the id so the user knows it exists.
                     next.push({ runId: runIds[i] })
                 }
             }
@@ -1134,7 +1116,7 @@ function RunTranscriptView({
     isInFlight: boolean
     onBack: () => void
 }) {
-    const [run, setRun] = useState<z.infer<typeof Run> | null>(null)
+    const [transcript, setTranscript] = useState<AgentRunTranscript | null>(null)
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
 
@@ -1144,15 +1126,13 @@ function RunTranscriptView({
         setError(null)
         void (async () => {
             try {
-                // Bg-task transcripts now live at the global runs/ location —
-                // same path resolution as every other run, no special handling.
-                const r = await window.ipc.invoke('runs:fetch', { runId })
+                const t = await fetchAgentRunTranscript(runId)
                 if (cancelled) return
-                setRun(r)
+                setTranscript(t)
             } catch (err) {
                 if (cancelled) return
                 setError(err instanceof Error ? err.message : String(err))
-                setRun(null)
+                setTranscript(null)
             } finally {
                 if (!cancelled) setLoading(false)
             }
@@ -1160,8 +1140,8 @@ function RunTranscriptView({
         return () => { cancelled = true }
     }, [runId])
 
-    const summary = run ? summarizeRun(run) : undefined
-    const items: ConversationItem[] = run ? runLogToConversation(run.log) : []
+    const summary = transcript ?? undefined
+    const items: ConversationItem[] = transcript?.items ?? []
 
     return (
         <div className="flex flex-1 flex-col overflow-hidden">
@@ -1221,10 +1201,10 @@ function RunTranscriptView({
                             Couldn&apos;t load transcript: {error}
                         </div>
                     )}
-                    {run && !loading && items.length === 0 && (
+                    {transcript && !loading && items.length === 0 && (
                         <p className="text-xs italic text-muted-foreground">No messages or tool calls recorded.</p>
                     )}
-                    {run && !loading && items.length > 0 && (
+                    {transcript && !loading && items.length > 0 && (
                         <CompactConversation items={items} />
                     )}
                 </div>
