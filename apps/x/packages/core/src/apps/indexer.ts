@@ -174,6 +174,25 @@ export async function createApp(input: { folder: string; name: string; descripti
     return summary;
 }
 
+/** Read the app's README.md (root or dist/), if any. Best effort. */
+export async function readAppReadme(folder: string): Promise<string | undefined> {
+    for (const candidate of ['README.md', 'dist/README.md']) {
+        try {
+            return await fs.readFile(path.join(appDir(folder), candidate), 'utf-8');
+        } catch { /* try next */ }
+    }
+    return undefined;
+}
+
+/** Whether a one-step rollback is available (§12.3: .previous/ exists). */
+export async function rollbackAvailable(folder: string): Promise<boolean> {
+    try {
+        return (await fs.stat(path.join(appDir(folder), '.previous'))).isDirectory();
+    } catch {
+        return false;
+    }
+}
+
 /** Delete a local app (§5.3). Installed apps must go through uninstall. */
 export async function deleteApp(folder: string): Promise<void> {
     if (!FOLDER_SLUG_RE.test(folder)) throw new Error(`invalid_folder: ${folder}`);

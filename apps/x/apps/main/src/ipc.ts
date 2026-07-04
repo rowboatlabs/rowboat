@@ -59,6 +59,7 @@ import * as composioHandler from './composio-handler.js';
 import * as appsIndexer from '@x/core/dist/apps/indexer.js';
 import * as appsServer from '@x/core/dist/apps/server.js';
 import * as appsAgents from '@x/core/dist/apps/agents.js';
+import { capture } from '@x/core/dist/analytics/posthog.js';
 import { consumePendingDeepLink } from './deeplink.js';
 import { qualifyAndDisconnectComposioGoogle } from '@x/core/dist/migrations/composio-google-migration.js';
 import { IAgentScheduleRepo } from '@x/core/dist/agent-schedule/repo.js';
@@ -1333,17 +1334,24 @@ export function setupIpcHandlers() {
     'apps:get': async (_event, args) => {
       const app = await appsIndexer.getApp(args.folder);
       if (!app) throw new Error(`no such app: ${args.folder}`);
-      // readme + rollback are M3 concerns; shapes are stable now.
-      return { app, rollbackAvailable: false };
+      const readme = await appsIndexer.readAppReadme(args.folder);
+      return {
+        app,
+        ...(readme ? { readme } : {}),
+        rollbackAvailable: await appsIndexer.rollbackAvailable(args.folder),
+      };
     },
     'apps:create': async (_event, args) => {
-      return { app: await appsIndexer.createApp(args) };
+      const app = await appsIndexer.createApp(args);
+      capture('app_created', { folder: app.folder });
+      return { app };
     },
     'apps:delete': async (_event, args) => {
       await appsIndexer.deleteApp(args.folder);
       // Remove app-owned bg-tasks too — orphaned app--<folder>-- tasks firing
       // against a deleted app was a painful prototype failure mode.
       await appsAgents.deleteAppAgents(args.folder);
+      capture('app_deleted', { folder: args.folder });
       return { ok: true as const };
     },
     'apps:setTheme': async (_event, args) => {

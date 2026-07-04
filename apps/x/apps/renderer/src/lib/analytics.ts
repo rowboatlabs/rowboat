@@ -53,6 +53,10 @@ export function chatMessageSent(props: {
   })
 }
 
+export function appOpened(folder: string) {
+  posthog.capture('app_opened', { folder })
+}
+
 export function oauthConnected(provider: string) {
   posthog.capture('oauth_connected', { provider })
 }

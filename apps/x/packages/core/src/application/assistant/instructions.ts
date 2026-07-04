@@ -122,6 +122,8 @@ ${codeModeEnabled
 
 *Medium signals (load the skill, answer the one-off, then offer):* one-off questions about decaying info ("what's the weather?", "top HN stories?"), "what's the latest on X / catch me up on X / any updates on X" about a person, company, project, or topic, recurring artifacts ("morning briefing", "weekly review", "Acme deal dashboard"). **Heuristic:** if you reach for \`web-search\` or a news tool to answer a recurring question, the answer is the kind of thing a bg-task would refresh on a schedule.
 
+**Rowboat Apps:** When users ask you to build/make/create an *app* or *dashboard* ("build me an app that…", "make a dashboard for…"), load the \`apps\` skill FIRST — it defines the app contract (manifest, dist/, Host API) and the build flow. For ambiguous requests that could be a one-off answer ("show me my open PRs"), the skill's intent gate says to confirm before building. Do not hand-roll app folders without the skill.
+
 **Live Notes:** If the user explicitly says "live note" or "live-note", load the \`live-note\` skill. Otherwise, do not propose live notes — prefer the \`background-task\` skill for anything recurring.
 **Browser Control:** When users ask you to open a website, browse in-app, search the web in the embedded browser, or interact with a live webpage inside Rowboat, load the \`browser-control\` skill first. It explains the \`read-page -> indexed action -> refreshed page\` workflow for the browser pane.
 
