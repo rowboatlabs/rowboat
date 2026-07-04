@@ -15,7 +15,7 @@ import { WorkDir } from "../../config/config.js";
 import { composioAccountsRepo } from "../../composio/repo.js";
 import { executeAction as executeComposioAction, isConfigured as isComposioConfigured, searchTools as searchComposioTools } from "../../composio/client.js";
 import { CURATED_TOOLKITS, CURATED_TOOLKIT_SLUGS } from "@x/shared/dist/composio.js";
-import { MiniAppManifest } from "@x/shared/dist/mini-app.js";
+import { RowboatAppManifestSchema } from "@x/shared/dist/rowboat-app.js";
 import { BrowserControlInputSchema, type BrowserControlInput } from "@x/shared/dist/browser-control.js";
 import { BackgroundTaskSchema, TriggersSchema } from "@x/shared/dist/background-task.js";
 import type { CodeModeManager } from "../../code-mode/acp/manager.js";
@@ -1124,14 +1124,14 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
 
                 case 'open-app': {
                     const appId = input.appId as string;
-                    if (!appId) return { success: false, error: 'open-app requires appId' };
+                    if (!appId) return { success: false, error: 'open-app requires appId (the app folder slug)' };
                     let appName = appId;
                     try {
-                        const raw = await fs.readFile(path.join(WorkDir, 'apps', appId, 'manifest.json'), 'utf-8');
-                        const m = JSON.parse(raw) as { title?: string };
-                        if (m.title) appName = m.title;
+                        const raw = await fs.readFile(path.join(WorkDir, 'apps', appId, 'rowboat-app.json'), 'utf-8');
+                        const m = JSON.parse(raw) as { name?: string };
+                        if (m.name) appName = m.name;
                     } catch {
-                        return { success: false, error: `Mini App not found: ${appId}` };
+                        return { success: false, error: `App not found: ${appId}` };
                     }
                     return { success: true, action: 'open-app', appId, appName };
                 }
@@ -1514,54 +1514,17 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         },
         isAvailable: async () => isComposioConfigured(),
     },
-    'mini-app-install': {
-        description: "Install or update a Mini App on disk at ~/.rowboat/apps/<id>/. Writes manifest.json + dist/index.html (and optional initial data.json). Use this to materialize an app you built — do NOT hand-write these files with file tools. The HTML must be self-contained and include the bridge via <script src=\"/__bridge__.js\"></script>, coding against window.rowboat. After install, the app shows up in the Mini Apps gallery.",
+    'app-set-data': {
+        description: "Write a Rowboat App's data file — JSON its frontend reads via GET /_rowboat/data/<file>. Deterministic: you supply the content, code handles the path, atomicity (temp→rename), and the app's dataContracts validation. This is how a background task refreshes an app's data — the agent RETURNS the data; never hand-write files under apps/.",
         inputSchema: z.object({
-            manifest: MiniAppManifest,
-            html: z.string().describe('Full self-contained HTML for dist/index.html.'),
-            data: z.unknown().optional().describe('Optional initial data.json content (only written if no data.json exists yet).'),
+            appFolder: z.string().describe('The app folder slug under ~/.rowboat/apps.'),
+            file: z.string().describe("Path relative to the app's data/ directory, e.g. \"data.json\"."),
+            data: z.unknown().describe('Full payload to store. Pass the object directly — do NOT JSON.stringify it.'),
         }),
-        execute: async ({ manifest, html, data }: { manifest: z.infer<typeof MiniAppManifest>; html: string; data?: unknown }) => {
+        execute: async ({ appFolder, file, data }: { appFolder: string; file: string; data: unknown }) => {
             try {
-                const m = MiniAppManifest.parse(manifest);
-                const dir = path.join(WorkDir, 'apps', m.id);
-                const dist = path.join(dir, 'dist');
-                await fs.mkdir(dist, { recursive: true });
-                // Atomic writes (temp→rename): an app opened mid-install must never
-                // see a partially-written manifest or index.html (blank screen).
-                const writeAtomic = async (p: string, content: string) => {
-                    const tmp = `${p}.tmp`;
-                    await fs.writeFile(tmp, content);
-                    await fs.rename(tmp, p);
-                };
-                await writeAtomic(path.join(dist, 'index.html'), html);
-                await writeAtomic(path.join(dir, 'manifest.json'), JSON.stringify(m, null, 2));
-                if (data !== undefined) {
-                    let payload: unknown = data;
-                    if (typeof payload === 'string') { try { payload = JSON.parse(payload); } catch { payload = undefined; } }
-                    if (payload !== undefined && payload !== null && typeof payload === 'object') {
-                        // sibling of index.html so the app can fetch('data.json')
-                        const dataPath = path.join(dist, 'data.json');
-                        try { await fs.access(dataPath); } catch { await fs.writeFile(dataPath, JSON.stringify(payload, null, 2)); }
-                    }
-                }
-                return { success: true, id: m.id, url: `app://miniapp/${m.id}/index.html` };
-            } catch (e) {
-                return { success: false, error: e instanceof Error ? e.message : String(e) };
-            }
-        },
-    },
-    'mini-app-set-data': {
-        description: "Write a Mini App's data.json — the JSON its frontend reads via rowboat.getData/onData. The path is derived from appId and the write is atomic (temp→rename), so you only supply the content. This is how a background task refreshes an app's data; the agent returns the data, the write is deterministic.",
-        inputSchema: z.object({
-            appId: z.string().describe('The app id (folder name under ~/.rowboat/apps).'),
-            data: z.unknown().describe('Full data payload to store as data.json (matching the app data schema).'),
-        }),
-        execute: async ({ appId, data }: { appId: string; data: unknown }) => {
-            try {
-                // Guard the #1 mistake: passing a JSON *string* (JSON.stringify'd)
-                // instead of the object. Auto-parse a string; reject non-objects so
-                // the UI never gets a double-encoded blob it can't read.
+                // #1 agent mistake: passing a stringified payload. Auto-parse
+                // strings; reject anything that isn't an object/array.
                 let payload: unknown = data;
                 if (typeof payload === 'string') {
                     try { payload = JSON.parse(payload); }
@@ -1570,36 +1533,50 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 if (payload === null || typeof payload !== 'object') {
                     return { success: false, error: 'data must be a JSON object or array.' };
                 }
-                const dir = path.join(WorkDir, 'apps', appId);
-                // The app must already exist — never create a stray folder, and load
-                // its dataContract to guard the write.
-                let manifest: z.infer<typeof MiniAppManifest>;
+
+                // The app must exist with a valid manifest — never create stray folders.
+                const dir = path.join(WorkDir, 'apps', appFolder);
+                let manifest: z.infer<typeof RowboatAppManifestSchema>;
                 try {
-                    manifest = MiniAppManifest.parse(JSON.parse(await fs.readFile(path.join(dir, 'manifest.json'), 'utf-8')));
+                    manifest = RowboatAppManifestSchema.parse(JSON.parse(await fs.readFile(path.join(dir, 'rowboat-app.json'), 'utf-8')));
                 } catch {
-                    return { success: false, error: `No installed Mini App "${appId}". Install it first (mini-app-install).` };
+                    return { success: false, error: `No app "${appFolder}" (missing or invalid rowboat-app.json).` };
                 }
-                const contract = manifest.dataContract;
-                if (contract && !Array.isArray(payload)) {
-                    const obj = payload as Record<string, unknown>;
-                    const missing = (contract.requiredKeys ?? []).filter((k) => obj[k] === undefined || obj[k] === null);
-                    if (missing.length) {
-                        return { success: false, error: `data is missing required key(s): ${missing.join(', ')}. Match the app's data shape — do NOT write a different shape; keep the last good data.` };
+
+                // Same path rules as the data API: confined to data/.
+                const dataRoot = path.join(dir, 'data');
+                const relNorm = path.posix.normalize(file).replace(/^\/+/, '');
+                if (!relNorm || relNorm === '.' || relNorm.startsWith('..') || relNorm.includes('\0') || relNorm.includes('\\')) {
+                    return { success: false, error: `invalid file path: ${file}` };
+                }
+                const abs = path.resolve(dataRoot, relNorm);
+                if (abs !== dataRoot && !abs.startsWith(dataRoot + path.sep)) {
+                    return { success: false, error: `file path escapes data/: ${file}` };
+                }
+
+                const contract = manifest.dataContracts.find((c) => path.posix.normalize(c.file) === relNorm);
+                if (contract) {
+                    if (Array.isArray(payload) && (contract.requiredKeys.length || contract.nonEmptyArrayKeys.length)) {
+                        return { success: false, error: `${relNorm} must be a JSON object to satisfy its data contract. Keep the last good data — do not retry with a different shape.` };
                     }
-                    const badArrays = (contract.nonEmptyArrayKeys ?? []).filter((k) => !Array.isArray(obj[k]) || (obj[k] as unknown[]).length === 0);
-                    if (badArrays.length) {
-                        return { success: false, error: `these key(s) must be non-empty arrays: ${badArrays.join(', ')}. Don't overwrite good series with empty ones — keep the last good data.` };
+                    if (!Array.isArray(payload)) {
+                        const obj = payload as Record<string, unknown>;
+                        const missing = contract.requiredKeys.filter((k) => obj[k] === undefined || obj[k] === null);
+                        if (missing.length) {
+                            return { success: false, error: `data is missing required key(s): ${missing.join(', ')}. Match the app's data shape and keep the last good data — do NOT retry with a different shape.` };
+                        }
+                        const badArrays = contract.nonEmptyArrayKeys.filter((k) => !Array.isArray(obj[k]) || (obj[k] as unknown[]).length === 0);
+                        if (badArrays.length) {
+                            return { success: false, error: `these key(s) must be non-empty arrays: ${badArrays.join(', ')}. Don't overwrite good series with empty ones — keep the last good data.` };
+                        }
                     }
                 }
-                // data.json is a served sibling of index.html so apps fetch it
-                // via a relative URL (app://miniapp/<id>/data.json).
-                const distDir = path.join(dir, 'dist');
-                await fs.mkdir(distDir, { recursive: true });
-                const dataPath = path.join(distDir, 'data.json');
-                const tmp = `${dataPath}.tmp`;
+
+                await fs.mkdir(path.dirname(abs), { recursive: true });
+                const tmp = `${abs}.tmp-${Math.random().toString(16).slice(2, 10)}`;
                 await fs.writeFile(tmp, JSON.stringify(payload, null, 2));
-                await fs.rename(tmp, dataPath);
-                return { success: true, appId };
+                await fs.rename(tmp, abs);
+                return { success: true, appFolder, file: relNorm };
             } catch (e) {
                 return { success: false, error: e instanceof Error ? e.message : String(e) };
             }

@@ -33,6 +33,9 @@ export type BackgroundTask = {
     projectId?: string;
     model?: string;
     provider?: string;
+    // Folder slug of the Rowboat App that installed this task (spec §8.2).
+    // Runtime-managed; tasks with sourceApp are owned by the app lifecycle.
+    sourceApp?: string;
     createdAt: string;
     // Runtime-managed — never hand-write. Mirrors live-note's flat-field
     // pattern: `lastAttemptAt` is bumped at every run start (backoff anchor),
@@ -53,6 +56,7 @@ export type BackgroundTaskSummary = {
     active: boolean;
     triggers?: Triggers;
     projectId?: string;
+    sourceApp?: string;
     createdAt: string;
     lastAttemptAt?: string;
     lastRunId?: string;
@@ -71,6 +75,7 @@ export const BackgroundTaskSchema = z.object({
     projectId: z.string().optional().describe('When set, marks this as a coding task pinned to a registered code project (repo). The agent implements detected work via the launch-code-task tool, each launch in its own isolated worktree.'),
     model: z.string().optional().describe('ADVANCED — leave unset. Per-task model override.'),
     provider: z.string().optional().describe('ADVANCED — leave unset. Per-task provider name override.'),
+    sourceApp: z.string().optional().describe('Folder slug of the app that installed this task. Runtime-managed.'),
     createdAt: z.string().describe('ISO timestamp set once at create-time.'),
     lastAttemptAt: z.string().optional().describe('Runtime-managed — never write this yourself. Bumped at the start of every agent run; used by the scheduler for backoff so failures do not retry-storm.'),
     lastRunId: z.string().optional().describe('Runtime-managed — never write this yourself. The id of the most recent run (success or failure); used by the bg-task:stop handler.'),
@@ -86,6 +91,7 @@ export const BackgroundTaskSummarySchema = z.object({
     active: z.boolean(),
     triggers: TriggersSchema.optional(),
     projectId: z.string().optional(),
+    sourceApp: z.string().optional(),
     createdAt: z.string(),
     lastAttemptAt: z.string().optional(),
     lastRunId: z.string().optional(),

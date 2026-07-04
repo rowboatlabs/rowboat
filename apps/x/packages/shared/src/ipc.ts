@@ -16,7 +16,7 @@ import {
 import { UserMessageContent } from './message.js';
 import { RowboatApiConfig } from './rowboat-account.js';
 import { ZListToolkitsResponse } from './composio.js';
-import { MiniAppManifest } from './mini-app.js';
+import { AppSummarySchema } from './rowboat-app.js';
 import { BrowserStateSchema } from './browser-control.js';
 import { BillingInfoSchema } from './billing.js';
 import { EmailBlockSchema, GmailThreadSchema } from './blocks.js';
@@ -1008,60 +1008,34 @@ const ipcSchemas = {
       shouldShow: z.boolean(),
     }),
   },
-  // Mini Apps: seed built-in apps to ~/.rowboat/apps/<id>/ (idempotent).
-  'mini-apps:seed': {
-    req: z.object({
-      apps: z.array(z.object({
-        manifest: MiniAppManifest,
-        html: z.string(),
-        data: z.unknown().optional(),
-      })),
-    }),
+  // Rowboat Apps (spec §13) — M1 local channels.
+  'apps:list': {
+    req: z.object({}),
     res: z.object({
-      seeded: z.array(z.string()),
+      serverRunning: z.boolean(),
+      serverError: z.string().optional(),
+      apps: z.array(AppSummarySchema),
     }),
   },
-  // Mini Apps: list installed app manifests from ~/.rowboat/apps/.
-  'mini-apps:list': {
-    req: z.null(),
+  'apps:get': {
+    req: z.object({ folder: z.string() }),
     res: z.object({
-      manifests: z.array(MiniAppManifest),
+      app: AppSummarySchema,
+      readme: z.string().optional(),
+      rollbackAvailable: z.boolean(),
     }),
   },
-  // Mini Apps: read an app's latest data.json (agent output).
-  'mini-apps:get-data': {
-    req: z.object({ id: z.string() }),
-    res: z.object({ data: z.unknown().nullable() }),
+  'apps:create': {
+    req: z.object({ folder: z.string(), name: z.string(), description: z.string() }),
+    res: z.object({ app: AppSummarySchema }),
   },
-  // Mini Apps: event pushed main→renderer when an app's data.json changes on
-  // disk (agent refresh), so an open app can reload its data live.
-  'mini-apps:dataChanged': {
-    req: z.object({ id: z.string() }),
-    res: z.null(),
+  'apps:delete': {
+    req: z.object({ folder: z.string() }),
+    res: z.object({ ok: z.literal(true) }),
   },
-  // Mini Apps: event pushed main→renderer when an app is installed/updated
-  // (manifest or index.html changed), so the gallery re-lists and an open app
-  // reloads once the install settles.
-  'mini-apps:appsChanged': {
-    req: z.object({ id: z.string() }),
-    res: z.null(),
-  },
-  // Mini Apps: proxy an HTTP request through main (bypasses browser CORS for the
-  // sandboxed app origin). GET/POST to http(s) only.
-  'mini-apps:fetch': {
-    req: z.object({
-      url: z.string(),
-      method: z.string().optional(),
-      headers: z.record(z.string(), z.string()).optional(),
-      body: z.string().optional(),
-    }),
-    res: z.object({
-      ok: z.boolean(),
-      status: z.number(),
-      statusText: z.string(),
-      text: z.string(),
-      error: z.string().optional(),
-    }),
+  'apps:setTheme': {
+    req: z.object({ theme: z.enum(['light', 'dark']) }),
+    res: z.object({ ok: z.literal(true) }),
   },
   'composio:didConnect': {
     req: z.object({

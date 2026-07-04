@@ -32,14 +32,13 @@ import { init as initEventProcessor, registerConsumer } from "@x/core/dist/event
 import { liveNoteEventConsumer } from "@x/core/dist/knowledge/live-note/event-consumer.js";
 import { init as initBackgroundTaskScheduler } from "@x/core/dist/background-tasks/scheduler.js";
 import { backgroundTaskEventConsumer } from "@x/core/dist/background-tasks/event-consumer.js";
-import { init as initLocalSites, shutdown as shutdownLocalSites } from "@x/core/dist/local-sites/server.js";
+import { init as initAppsServer, shutdown as shutdownAppsServer } from "@x/core/dist/apps/server.js";
 import { shutdown as shutdownAnalytics } from "@x/core/dist/analytics/posthog.js";
 import { identifyIfSignedIn } from "@x/core/dist/analytics/identify.js";
 
 import { initConfigs } from "@x/core/dist/config/initConfigs.js";
 import { getAgentSlackCliStatus } from "@x/core/dist/slack/agent-slack-exec.js";
 import { resolveWorkspacePath } from "@x/core/dist/workspace/workspace.js";
-import { resolveMiniAppAsset, serveMiniAppAsset, initMiniAppsWatcher, MINIAPP_BRIDGE_JS } from "./mini-apps-handler.js";
 import started from "electron-squirrel-startup";
 import { execFileSync } from "node:child_process";
 import { init as initChromeSync } from "@x/core/dist/knowledge/chrome-extension/server/server.js";
@@ -162,28 +161,6 @@ function registerAppProtocol() {
         if (!relPath) return new Response("Not Found", { status: 404 });
         const absPath = resolveWorkspacePath(relPath);
         return net.fetch(pathToFileURL(absPath).toString());
-      } catch {
-        return new Response("Forbidden", { status: 403 });
-      }
-    }
-
-    // Mini App assets: app://miniapp/<id>/<rel-path> → ~/.rowboat/apps/<id>/dist/
-    if (url.host === "miniapp") {
-      try {
-        const segments = decodeURIComponent(url.pathname).replace(/^\/+/, "").split("/");
-        const id = segments.shift();
-        if (!id) return new Response("Not Found", { status: 404 });
-        // Canonical bridge shim shared by all apps.
-        if (id === "__bridge__.js") {
-          return new Response(MINIAPP_BRIDGE_JS, {
-            headers: { "content-type": "text/javascript; charset=utf-8" },
-          });
-        }
-        const absPath = resolveMiniAppAsset(id, segments.join("/"));
-        if (!absPath) return new Response("Forbidden", { status: 403 });
-        // Direct disk read — bypasses Chromium's network service, which can
-        // stall under load and blank every open app at once.
-        return serveMiniAppAsset(absPath);
       } catch {
         return new Response("Forbidden", { status: 403 });
       }
@@ -428,9 +405,6 @@ app.whenReady().then(async () => {
   // start bg-task scheduler (cron / window)
   initBackgroundTaskScheduler();
 
-  // watch ~/.rowboat/apps for data.json changes → live-refresh open Mini Apps
-  initMiniAppsWatcher();
-
   // register event consumers and start the shared event processor
   // (consumes $WorkDir/events/pending/, routes events to all consumers
   // concurrently for Pass-1, then fires each consumer's candidates in parallel)
@@ -479,9 +453,9 @@ app.whenReady().then(async () => {
   // start chrome extension sync server
   initChromeSync();
 
-  // start local sites server for iframe dashboards and other mini apps
-  initLocalSites().catch((error) => {
-    console.error('[LocalSites] Failed to start:', error);
+  // start the Rowboat Apps server (per-app origins on 127.0.0.1:3210)
+  initAppsServer().catch((error) => {
+    console.error('[Apps] Failed to start:', error);
   });
 
   app.on("activate", () => {
@@ -510,8 +484,8 @@ app.on("before-quit", () => {
   }
   // Kill embedded terminal shells.
   disposeAllTerminals();
-  shutdownLocalSites().catch((error) => {
-    console.error('[LocalSites] Failed to shut down cleanly:', error);
+  shutdownAppsServer().catch((error) => {
+    console.error('[Apps] Failed to shut down cleanly:', error);
   });
   shutdownAnalytics().catch((error) => {
     console.error('[Analytics] Failed to flush on quit:', error);

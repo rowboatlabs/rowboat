@@ -27,7 +27,7 @@ import { SidebarContentPanel } from '@/components/sidebar-content';
 import { SuggestedTopicsView } from '@/components/suggested-topics-view';
 import { LiveNotesView } from '@/components/live-notes-view';
 import { BgTasksView } from '@/components/bg-tasks-view';
-import { MiniAppsView } from '@/components/mini-apps-view';
+import { AppsView } from '@/components/apps/apps-view';
 import { EmailView } from '@/components/email-view';
 import { WorkspaceView } from '@/components/workspace-view';
 import { CodingRunBlock } from '@/components/coding-run';
@@ -4424,6 +4424,19 @@ function App() {
     return window.ipc.on('app:openUrl', ({ url }) => handle(url))
   }, [])
 
+  // Report the UI theme to the apps server (spec §7.1): apps read it from
+  // GET /_rowboat/app and get live changes via the SSE theme event.
+  useEffect(() => {
+    const report = () => {
+      const theme = document.documentElement.classList.contains('dark') ? 'dark' as const : 'light' as const
+      void window.ipc.invoke('apps:setTheme', { theme }).catch(() => { /* server may be down */ })
+    }
+    report()
+    const observer = new MutationObserver(report)
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
+    return () => observer.disconnect()
+  }, [])
+
   // Triggered by main when the user clicks a calendar-meeting notification.
   // Reuses the same flow as the in-app "Join meeting & take notes" button.
   // When `openMeeting` is true, also opens the meeting URL in the system browser.
@@ -6000,10 +6013,10 @@ function App() {
                 </div>
               ) : isAppsOpen ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-                  <MiniAppsView
-                    initialAppId={appInitialId}
+                  <AppsView
+                    initialAppFolder={appInitialId}
                     initialVersion={appIdVersion}
-                    onNewApp={() => prefillChat('Build me a mini-app that ')}
+                    onNewApp={() => prefillChat('Build me an app that ')}
                   />
                 </div>
               ) : isEmailOpen ? (

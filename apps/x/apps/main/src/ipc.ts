@@ -56,7 +56,8 @@ import { syncSlackKnowledgeSources, triggerSync as triggerSlackKnowledgeSync, ge
 import { isOnboardingComplete, markOnboardingComplete } from '@x/core/dist/config/note_creation_config.js';
 import { loadNotificationSettings, saveNotificationSettings } from '@x/core/dist/config/notification_config.js';
 import * as composioHandler from './composio-handler.js';
-import * as miniAppsHandler from './mini-apps-handler.js';
+import * as appsIndexer from '@x/core/dist/apps/indexer.js';
+import * as appsServer from '@x/core/dist/apps/server.js';
 import { consumePendingDeepLink } from './deeplink.js';
 import { qualifyAndDisconnectComposioGoogle } from '@x/core/dist/migrations/composio-google-migration.js';
 import { IAgentScheduleRepo } from '@x/core/dist/agent-schedule/repo.js';
@@ -1314,18 +1315,31 @@ export function setupIpcHandlers() {
     'migration:check-composio-google': async () => {
       return qualifyAndDisconnectComposioGoogle();
     },
-    // Mini Apps handlers
-    'mini-apps:seed': async (_event, args) => {
-      return miniAppsHandler.seedApps(args.apps);
+    // Rowboat Apps handlers (spec §13)
+    'apps:list': async () => {
+      const status = appsServer.getServerStatus();
+      return {
+        serverRunning: status.running,
+        ...(status.error ? { serverError: status.error } : {}),
+        apps: await appsIndexer.listApps(),
+      };
     },
-    'mini-apps:list': async () => {
-      return miniAppsHandler.listApps();
+    'apps:get': async (_event, args) => {
+      const app = await appsIndexer.getApp(args.folder);
+      if (!app) throw new Error(`no such app: ${args.folder}`);
+      // readme + rollback are M3 concerns; shapes are stable now.
+      return { app, rollbackAvailable: false };
     },
-    'mini-apps:get-data': async (_event, args) => {
-      return miniAppsHandler.getAppData(args.id);
+    'apps:create': async (_event, args) => {
+      return { app: await appsIndexer.createApp(args) };
     },
-    'mini-apps:fetch': async (_event, args) => {
-      return miniAppsHandler.proxyFetch(args);
+    'apps:delete': async (_event, args) => {
+      await appsIndexer.deleteApp(args.folder);
+      return { ok: true as const };
+    },
+    'apps:setTheme': async (_event, args) => {
+      appsServer.setAppsTheme(args.theme);
+      return { ok: true as const };
     },
     // Agent schedule handlers
     'agent-schedule:getConfig': async () => {
