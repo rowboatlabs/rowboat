@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { BrowserWindow } from 'electron';
 import { WorkDir } from '@x/core/dist/config/config.js';
 import { MiniAppManifest } from '@x/shared/dist/mini-app.js';
 import type { z } from 'zod';
@@ -61,6 +62,8 @@ export const MINIAPP_BRIDGE_JS = `
       stateCbs.forEach(function (cb) { try { cb(state); } catch (_) {} });
     } else if (m.type === 'rowboat:mini-app:theme') {
       applyTheme(m.theme);
+    } else if (m.type === 'rowboat:mini-app:data-updated') {
+      loadData();
     } else if (m.type === 'rowboat:mini-app:rpc-result') {
       var p = pending[m.id];
       if (p) { delete pending[m.id]; if (m.ok) p.resolve(m.result); else p.reject(new Error(m.error || 'request failed')); }
@@ -107,8 +110,13 @@ export function seedApps(apps: Array<{ manifest: Manifest; html: string; data?: 
     const dir = appDir(manifest.id);
     const distDir = path.join(dir, 'dist');
     ensureDir(distDir);
-    fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(manifest, null, 2));
-    fs.writeFileSync(path.join(distDir, 'index.html'), app.html);
+    // Atomic writes so a concurrently-open app never reads a partial file.
+    const writeAtomic = (p: string, content: string) => {
+      fs.writeFileSync(`${p}.tmp`, content);
+      fs.renameSync(`${p}.tmp`, p);
+    };
+    writeAtomic(path.join(distDir, 'index.html'), app.html);
+    writeAtomic(path.join(dir, 'manifest.json'), JSON.stringify(manifest, null, 2));
     const dataPath = path.join(dir, 'data.json');
     if (app.data !== undefined && !fs.existsSync(dataPath)) {
       fs.writeFileSync(dataPath, JSON.stringify(app.data, null, 2));
@@ -171,6 +179,81 @@ export function getAppData(id: string): { data: unknown | null } {
     return { data: JSON.parse(raw) };
   } catch {
     return { data: null };
+  }
+}
+
+/**
+ * Watch ~/.rowboat/apps for data.json changes and notify all renderer windows
+ * (mini-apps:dataChanged) so an open app can reload its data live. Debounced
+ * per app id (agents write via temp→rename, which fires multiple fs events).
+ */
+export function initMiniAppsWatcher(): void {
+  fs.mkdirSync(APPS_DIR, { recursive: true });
+  const pending = new Map<string, NodeJS.Timeout>();
+  const notify = (channel: 'mini-apps:dataChanged' | 'mini-apps:appsChanged', id: string) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed() && win.webContents) {
+        win.webContents.send(channel, { id });
+      }
+    }
+  };
+  const schedule = (channel: 'mini-apps:dataChanged' | 'mini-apps:appsChanged', id: string) => {
+    const key = `${channel}:${id}`;
+    const existing = pending.get(key);
+    if (existing) clearTimeout(existing);
+    pending.set(key, setTimeout(() => { pending.delete(key); notify(channel, id); }, 300));
+  };
+  try {
+    fs.watch(APPS_DIR, { recursive: true }, (_event, filename) => {
+      if (!filename) return;
+      // filename is relative to APPS_DIR, e.g. "<id>/dist/data.json"
+      const id = filename.split(path.sep)[0];
+      if (!id || id.startsWith('.') || filename.endsWith('.tmp')) return;
+      if (filename.endsWith('data.json')) {
+        schedule('mini-apps:dataChanged', id);
+      } else if (filename.endsWith('manifest.json') || filename.endsWith('index.html')) {
+        // install / update settled → gallery re-lists, open frames reload
+        schedule('mini-apps:appsChanged', id);
+      }
+    });
+  } catch (err) {
+    console.error('[MiniApps] watcher failed to start:', err);
+  }
+}
+
+const MIME_BY_EXT: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.ico': 'image/x-icon',
+  '.woff2': 'font/woff2',
+  '.txt': 'text/plain; charset=utf-8',
+};
+
+/**
+ * Serve a mini-app asset by reading it directly from disk. Deliberately avoids
+ * net.fetch(file://…): that routes through Chromium's shared network service,
+ * which can stall under load and blank every open app at once. Logs slow serves
+ * so stalls are visible in the terminal.
+ */
+export async function serveMiniAppAsset(absPath: string): Promise<Response> {
+  const started = Date.now();
+  try {
+    const buf = await fs.promises.readFile(absPath);
+    const mime = MIME_BY_EXT[path.extname(absPath).toLowerCase()] ?? 'application/octet-stream';
+    const ms = Date.now() - started;
+    if (ms > 250) console.warn(`[MiniApps] slow asset serve (${ms}ms): ${absPath}`);
+    return new Response(new Uint8Array(buf), { headers: { 'content-type': mime } });
+  } catch {
+    return new Response('Not Found', { status: 404 });
   }
 }
 

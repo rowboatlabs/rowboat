@@ -73,6 +73,8 @@ export type MiniAppInboundMessage =
   | { type: 'rowboat:mini-app:state'; state: unknown }
   /** Host theme; sent on ready and whenever the app theme changes. */
   | { type: 'rowboat:mini-app:theme'; theme: 'light' | 'dark' }
+  /** data.json changed on disk — the shim re-fetches and fires onData. */
+  | { type: 'rowboat:mini-app:data-updated' }
   /** Result of a previously requested rpc call, correlated by id. */
   | { type: 'rowboat:mini-app:rpc-result'; id: string; ok: boolean; result?: unknown; error?: string }
 
@@ -83,5 +85,6 @@ export const MINI_APP_MESSAGE = {
   data: 'rowboat:mini-app:data',
   state: 'rowboat:mini-app:state',
   theme: 'rowboat:mini-app:theme',
+  dataUpdated: 'rowboat:mini-app:data-updated',
   rpcResult: 'rowboat:mini-app:rpc-result',
 } as const

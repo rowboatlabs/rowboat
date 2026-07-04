@@ -39,7 +39,7 @@ import { identifyIfSignedIn } from "@x/core/dist/analytics/identify.js";
 import { initConfigs } from "@x/core/dist/config/initConfigs.js";
 import { getAgentSlackCliStatus } from "@x/core/dist/slack/agent-slack-exec.js";
 import { resolveWorkspacePath } from "@x/core/dist/workspace/workspace.js";
-import { resolveMiniAppAsset, MINIAPP_BRIDGE_JS } from "./mini-apps-handler.js";
+import { resolveMiniAppAsset, serveMiniAppAsset, initMiniAppsWatcher, MINIAPP_BRIDGE_JS } from "./mini-apps-handler.js";
 import started from "electron-squirrel-startup";
 import { execFileSync } from "node:child_process";
 import { init as initChromeSync } from "@x/core/dist/knowledge/chrome-extension/server/server.js";
@@ -181,7 +181,9 @@ function registerAppProtocol() {
         }
         const absPath = resolveMiniAppAsset(id, segments.join("/"));
         if (!absPath) return new Response("Forbidden", { status: 403 });
-        return net.fetch(pathToFileURL(absPath).toString());
+        // Direct disk read — bypasses Chromium's network service, which can
+        // stall under load and blank every open app at once.
+        return serveMiniAppAsset(absPath);
       } catch {
         return new Response("Forbidden", { status: 403 });
       }
@@ -425,6 +427,9 @@ app.whenReady().then(async () => {
 
   // start bg-task scheduler (cron / window)
   initBackgroundTaskScheduler();
+
+  // watch ~/.rowboat/apps for data.json changes → live-refresh open Mini Apps
+  initMiniAppsWatcher();
 
   // register event consumers and start the shared event processor
   // (consumes $WorkDir/events/pending/, routes events to all consumers

@@ -176,25 +176,32 @@ export function MiniAppsView({ initialAppId, initialVersion, onNewApp }: { initi
   const [manifests, setManifests] = useState<miniApp.MiniAppManifest[]>([])
 
   // Open a specific app when asked from outside (app-navigation open-app).
-  useEffect(() => {
+  // Adjust-during-render pattern: react to a new request (version bump) without
+  // an effect.
+  const [appliedVersion, setAppliedVersion] = useState(initialVersion)
+  if (initialVersion !== appliedVersion) {
+    setAppliedVersion(initialVersion)
     if (initialAppId) setSelectedId(initialAppId)
-  }, [initialAppId, initialVersion])
+  }
 
-  // List apps installed under ~/.rowboat/apps. Apps are created there by the
-  // copilot builder (or placed manually); none are bundled in the repo.
+  // List apps installed under ~/.rowboat/apps (created by the copilot builder or
+  // placed manually; none are bundled in the repo). Keeps the list live as apps
+  // are installed/updated, and re-lists on each open-app request (the app may
+  // have been installed after this view mounted).
   useEffect(() => {
     let cancelled = false
-    ;(async () => {
+    const load = async () => {
       try {
         const r = await window.ipc.invoke('mini-apps:list', null)
-        if (cancelled) return
-        setManifests([...r.manifests].sort((a, b) => a.title.localeCompare(b.title)))
+        if (!cancelled) setManifests([...r.manifests].sort((a, b) => a.title.localeCompare(b.title)))
       } catch {
         if (!cancelled) setManifests([])
       }
-    })()
-    return () => { cancelled = true }
-  }, [])
+    }
+    void load()
+    const off = window.ipc.on('mini-apps:appsChanged', () => { void load() })
+    return () => { cancelled = true; off() }
+  }, [initialVersion])
 
   const selected = selectedId ? manifests.find((m) => m.id === selectedId) : undefined
 

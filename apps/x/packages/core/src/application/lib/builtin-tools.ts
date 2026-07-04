@@ -1527,8 +1527,15 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 const dir = path.join(WorkDir, 'apps', m.id);
                 const dist = path.join(dir, 'dist');
                 await fs.mkdir(dist, { recursive: true });
-                await fs.writeFile(path.join(dir, 'manifest.json'), JSON.stringify(m, null, 2));
-                await fs.writeFile(path.join(dist, 'index.html'), html);
+                // Atomic writes (temp→rename): an app opened mid-install must never
+                // see a partially-written manifest or index.html (blank screen).
+                const writeAtomic = async (p: string, content: string) => {
+                    const tmp = `${p}.tmp`;
+                    await fs.writeFile(tmp, content);
+                    await fs.rename(tmp, p);
+                };
+                await writeAtomic(path.join(dist, 'index.html'), html);
+                await writeAtomic(path.join(dir, 'manifest.json'), JSON.stringify(m, null, 2));
                 if (data !== undefined) {
                     let payload: unknown = data;
                     if (typeof payload === 'string') { try { payload = JSON.parse(payload); } catch { payload = undefined; } }

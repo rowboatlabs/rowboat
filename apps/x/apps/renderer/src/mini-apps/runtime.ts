@@ -49,6 +49,8 @@ const BRIDGE_SHIM = /* js */ `
       stateCbs.forEach(function (cb) { try { cb(state); } catch (_) {} });
     } else if (m.type === 'rowboat:mini-app:theme') {
       applyTheme(m.theme);
+    } else if (m.type === 'rowboat:mini-app:data-updated') {
+      loadData();
     } else if (m.type === 'rowboat:mini-app:rpc-result') {
       var p = pending[m.id];
       if (p) {

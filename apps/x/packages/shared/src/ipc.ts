@@ -1033,6 +1033,19 @@ const ipcSchemas = {
     req: z.object({ id: z.string() }),
     res: z.object({ data: z.unknown().nullable() }),
   },
+  // Mini Apps: event pushed main→renderer when an app's data.json changes on
+  // disk (agent refresh), so an open app can reload its data live.
+  'mini-apps:dataChanged': {
+    req: z.object({ id: z.string() }),
+    res: z.null(),
+  },
+  // Mini Apps: event pushed main→renderer when an app is installed/updated
+  // (manifest or index.html changed), so the gallery re-lists and an open app
+  // reloads once the install settles.
+  'mini-apps:appsChanged': {
+    req: z.object({ id: z.string() }),
+    res: z.null(),
+  },
   // Mini Apps: proxy an HTTP request through main (bypasses browser CORS for the
   // sandboxed app origin). GET/POST to http(s) only.
   'mini-apps:fetch': {

@@ -122,8 +122,22 @@ export function MiniAppFrame({ manifest }: { manifest: miniApp.MiniAppManifest }
     }
 
     window.addEventListener('message', handleMessage)
+    // Live refresh: when this app's data.json changes on disk (agent run),
+    // tell the shim to re-fetch so onData fires with fresh data.
+    const offDataChanged = window.ipc.on('mini-apps:dataChanged', ({ id }) => {
+      if (id === manifest.id) postToFrame({ type: MINI_APP_MESSAGE.dataUpdated })
+    })
+    // If this app itself was just (re)installed, reload the frame — covers an
+    // app opened mid-install that rendered a partial/blank page. Reset src
+    // (contentWindow.location is cross-origin and would throw).
+    const offAppsChanged = window.ipc.on('mini-apps:appsChanged', ({ id }) => {
+      const frame = iframeRef.current
+      if (id === manifest.id && frame) frame.src = frame.src // eslint-disable-line no-self-assign
+    })
     return () => {
       window.removeEventListener('message', handleMessage)
+      offDataChanged()
+      offAppsChanged()
       themeObserver.disconnect()
     }
   }, [manifest.id, scope])
