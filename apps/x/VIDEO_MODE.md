@@ -44,9 +44,19 @@ starts anyway as a voice call, with a toast linking to System Settings.
 Practice/coaching is always an explicit choice — expanding to full screen
 never turns the coach on.
 
-In-call controls (identical bar on both surfaces): camera toggle (silhouette
-avatar while off, no webcam frames captured), screen share toggle, mascot ⇄
-"R" letter avatar, end call. While the assistant is thinking or speaking, a
+In-call controls (identical bar on both surfaces): mic mute, camera toggle
+(silhouette avatar while off, no webcam frames captured), screen share
+toggle, mascot ⇄ "R" letter avatar, end call. **Mute is a full input
+pause**, not just audio — mic audio stops reaching Deepgram
+(`useVoiceMode.setPaused`, OR'd with the automatic thinking/speaking pause)
+AND camera/screen frame capture stops (`useVideoMode.setCapturePaused`;
+`collectFrames()` returns nothing while muted, so typed messages carry no
+frames either), letting the user talk to someone in the room without the
+assistant listening in. Devices stay acquired for instant unmute (camera
+light and macOS share indicator stay on — the pill's share badge switches to
+"Sharing paused"), the status chip shows "Muted" instead of "Listening",
+and assistant output is unaffected (in-flight speech keeps playing; Stop
+handles that). Mute resets to off at call start/end. While the assistant is thinking or speaking, a
 red **Stop** button appears on the mascot tile — it silences TTS instantly,
 skips queued voice segments, and aborts the run if it's still generating
 (stopping a run from anywhere, including the composer, also silences TTS). Captions of the in-progress utterance and the

@@ -154,6 +154,10 @@ export function useVideoMode() {
     // Camera can be turned off mid-session (Meet-style) while the mode — and
     // any screen share — keeps running. Resets to on for the next session.
     const [cameraOn, setCameraOn] = useState(true);
+    // In-call mute pauses capture entirely: nothing lands in the ring buffers
+    // and collectFrames() returns nothing, so a muted stretch can never ride
+    // along with a later message. Streams stay open for instant resume.
+    const capturePausedRef = useRef(false);
     const cameraPipeRef = useRef<CapturePipe>(emptyPipe());
     const screenPipeRef = useRef<CapturePipe>(emptyPipe());
     // Stable stream refs for preview components (<video srcObject>).
@@ -165,11 +169,17 @@ export function useVideoMode() {
     screenStateRef.current = screenState;
 
     const captureCameraFrame = useCallback(() => {
+        if (capturePausedRef.current) return;
         capturePipeFrame(cameraPipeRef.current, CAMERA_FRAME_WIDTH, CAMERA_JPEG_QUALITY);
     }, []);
 
     const captureScreenFrame = useCallback(() => {
+        if (capturePausedRef.current) return;
         capturePipeFrame(screenPipeRef.current, SCREEN_FRAME_WIDTH, SCREEN_JPEG_QUALITY);
+    }, []);
+
+    const setCapturePaused = useCallback((paused: boolean) => {
+        capturePausedRef.current = paused;
     }, []);
 
     const stopScreenShare = useCallback(() => {
@@ -183,6 +193,7 @@ export function useVideoMode() {
         streamRef.current = null;
         setState('idle');
         setCameraOn(true);
+        capturePausedRef.current = false;
         stopScreenShare();
     }, [stopScreenShare]);
 
@@ -295,6 +306,9 @@ export function useVideoMode() {
      */
     const collectFrames = useCallback((): CapturedVideoFrame[] => {
         if (stateRef.current !== 'live') return [];
+        // Muted: no frames at all — not even pre-mute buffered ones — so a
+        // typed message during a mute carries nothing captured around it.
+        if (capturePausedRef.current) return [];
         // Grab a frame right now so the message always includes the moment of send.
         captureCameraFrame();
         const frames = drainPipe(cameraPipeRef.current, MAX_CAMERA_FRAMES_PER_MESSAGE, 'camera');
@@ -308,5 +322,5 @@ export function useVideoMode() {
     // Release the camera/screen if the component unmounts with video mode on.
     useEffect(() => stop, [stop]);
 
-    return { state, screenState, cameraOn, streamRef, screenStreamRef, start, stop, startScreenShare, stopScreenShare, setCameraEnabled, collectFrames };
+    return { state, screenState, cameraOn, streamRef, screenStreamRef, start, stop, startScreenShare, stopScreenShare, setCameraEnabled, setCapturePaused, collectFrames };
 }

@@ -1061,6 +1061,11 @@ function App() {
   const inCallRef = useRef(false)
   // User explicitly shrank the full-screen call to the floating pill.
   const [callMinimized, setCallMinimized] = useState(false)
+  // In-call mute: a full input pause, not just audio — mic audio stops
+  // reaching Deepgram AND camera/screen frame capture stops, so nothing said
+  // or shown while muted ever reaches the assistant. Output is untouched
+  // (in-flight speech keeps playing; the Stop control handles that).
+  const [micMuted, setMicMuted] = useState(false)
   // Practice preset: adds the coaching persona to the system prompt.
   const [practiceMode, setPracticeMode] = useState(false)
   const practiceModeRef = useRef(false)
@@ -1200,6 +1205,7 @@ function App() {
 
     setPracticeMode(preset === 'practice')
     practiceModeRef.current = preset === 'practice'
+    setMicMuted(false)
     // Pill-first presets start minimized; face-to-face presets start expanded.
     setCallMinimized(preset === 'voice' || preset === 'share')
     inCallRef.current = true
@@ -1217,17 +1223,26 @@ function App() {
     video.stop()
     setPracticeMode(false)
     practiceModeRef.current = false
+    setMicMuted(false)
     setCallMinimized(false)
     inCallRef.current = false
     setInCall(false)
   }, [video])
 
   // During a call, mute the mic while the assistant is thinking or speaking
-  // so its own TTS (or a half-turn) never gets transcribed back at it.
+  // so its own TTS (or a half-turn) never gets transcribed back at it — and
+  // whenever the user muted themselves.
   useEffect(() => {
     if (!inCall) return
-    voiceRef.current.setPaused(activeIsProcessing || tts.state !== 'idle')
-  }, [inCall, activeIsProcessing, tts.state])
+    voiceRef.current.setPaused(micMuted || activeIsProcessing || tts.state !== 'idle')
+  }, [inCall, micMuted, activeIsProcessing, tts.state])
+
+  // The user-mute half that lives in the video pipeline: stop sampling
+  // camera/screen frames while muted (see useVideoMode.setCapturePaused).
+  const setCapturePaused = video.setCapturePaused
+  useEffect(() => {
+    setCapturePaused(micMuted)
+  }, [micMuted, setCapturePaused])
 
   // Screen sharing: frames of the shared screen ride along with each message
   // next to the webcam frames. The surface change (full screen → pill) falls
@@ -1247,6 +1262,14 @@ function App() {
   const handleToggleCamera = useCallback(() => {
     void video.setCameraEnabled(!video.cameraOn)
   }, [video])
+
+  // Zoom-style mute button, except it pauses ALL input (mic + frames) so the
+  // user can talk to someone in the room without the assistant listening in.
+  // Devices stay acquired (camera light and share indicator stay on) so
+  // unmuting is instant.
+  const handleToggleMic = useCallback(() => {
+    setMicMuted((m) => !m)
+  }, [])
 
   // Minimizing the full-screen call drops you back to working — and the pill
   // exists to work *together*, so sharing starts automatically (the symmetric
@@ -1327,11 +1350,12 @@ function App() {
         ttsState: tts.state,
         status: videoCallStatus,
         cameraOn: video.cameraOn,
+        micMuted,
         screenSharing: video.screenState === 'live',
         interimText: voice.interimText || null,
       })
       .catch(() => {})
-  }, [inCall, tts.state, videoCallStatus, video.cameraOn, video.screenState, voice.interimText])
+  }, [inCall, tts.state, videoCallStatus, video.cameraOn, micMuted, video.screenState, voice.interimText])
 
   // Execute popout control-bar actions (the popout window has no access to
   // the call's mic/camera/capture — they live here). 'expand' goes full
@@ -1339,7 +1363,8 @@ function App() {
   // process already refocused the app window.
   useEffect(() => {
     return window.ipc.on('video:popout-action', ({ action }) => {
-      if (action === 'toggle-camera') handleToggleCamera()
+      if (action === 'toggle-mic') handleToggleMic()
+      else if (action === 'toggle-camera') handleToggleCamera()
       else if (action === 'toggle-share') void handleToggleScreenShare()
       else if (action === 'stop-speaking') handleInterruptAssistant()
       else if (action === 'end-call') endCall()
@@ -1348,7 +1373,7 @@ function App() {
         setCallMinimized(false)
       }
     })
-  }, [handleToggleCamera, handleToggleScreenShare, handleInterruptAssistant, endCall, video])
+  }, [handleToggleMic, handleToggleCamera, handleToggleScreenShare, handleInterruptAssistant, endCall, video])
 
   // Enter to submit voice input, Escape to cancel
   useEffect(() => {
@@ -6835,6 +6860,8 @@ function App() {
                 onToggleScreenShare={handleToggleScreenShare}
                 cameraOn={video.cameraOn}
                 onToggleCamera={handleToggleCamera}
+                micMuted={micMuted}
+                onToggleMic={handleToggleMic}
                 practiceMode={practiceMode}
                 onMinimize={() => void handleMinimizeCall()}
                 onInterrupt={handleInterruptAssistant}

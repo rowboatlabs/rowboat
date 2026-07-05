@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Maximize2, MonitorUp, PhoneOff, Square, User, Video, VideoOff } from 'lucide-react'
+import { Maximize2, Mic, MicOff, MonitorUp, PhoneOff, Square, User, Video, VideoOff } from 'lucide-react'
 
 import { TalkingHead } from '@/components/talking-head'
 
@@ -7,6 +7,8 @@ type PopoutState = {
   ttsState: 'idle' | 'synthesizing' | 'speaking'
   status: 'listening' | 'thinking' | 'speaking' | null
   cameraOn: boolean
+  /** User mute = full input pause: no mic audio AND no frame capture. */
+  micMuted: boolean
   screenSharing: boolean
   interimText: string | null
 }
@@ -34,7 +36,7 @@ export function VideoPopout() {
   // Camera defaults OFF: guessing "on" would flash the user's video for a
   // beat before the real state arrives — which reads as a bug. The true
   // state is fetched immediately below.
-  const [state, setState] = useState<PopoutState>({ ttsState: 'idle', status: null, cameraOn: false, screenSharing: false, interimText: null })
+  const [state, setState] = useState<PopoutState>({ ttsState: 'idle', status: null, cameraOn: false, micMuted: false, screenSharing: false, interimText: null })
   const videoRef = useRef<HTMLVideoElement | null>(null)
 
   useEffect(() => {
@@ -80,7 +82,7 @@ export function VideoPopout() {
   // so the mascot still animates while the assistant speaks in the main window.
   const getLevel = useCallback(() => 0.45 + 0.35 * Math.sin(performance.now() / 90), [])
 
-  const sendAction = useCallback((action: 'toggle-camera' | 'toggle-share' | 'stop-speaking' | 'end-call' | 'expand') => {
+  const sendAction = useCallback((action: 'toggle-mic' | 'toggle-camera' | 'toggle-share' | 'stop-speaking' | 'end-call' | 'expand') => {
     void window.ipc.invoke('video:popoutAction', { action }).catch(() => {})
   }, [])
 
@@ -112,11 +114,18 @@ export function VideoPopout() {
             You
           </span>
           {/* Persistent consent badge — the user must always be able to see
-              at a glance that their screen is going out. */}
+              at a glance that their screen is going out. Muted pauses frame
+              capture while keeping the share stream open, so say so. */}
           {state.screenSharing && (
             <span className="absolute left-1.5 top-1.5 flex items-center gap-1 rounded-full bg-sky-600/90 px-1.5 py-0.5 text-[10px] font-medium text-white">
-              <span className="block h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
-              Sharing screen
+              <span className={`block h-1.5 w-1.5 rounded-full bg-white ${state.micMuted ? '' : 'animate-pulse'}`} />
+              {state.micMuted ? 'Sharing paused' : 'Sharing screen'}
+            </span>
+          )}
+          {state.micMuted && (
+            <span className="absolute bottom-1 right-1.5 flex items-center gap-1 rounded bg-red-600/90 px-1.5 py-0.5 text-[10px] font-medium text-white">
+              <MicOff className="h-2.5 w-2.5" />
+              Muted
             </span>
           )}
         </div>
@@ -127,8 +136,18 @@ export function VideoPopout() {
           </span>
           {statusDisplay && (
             <span className="absolute right-1.5 top-1.5 flex items-center gap-1 rounded-full bg-black/50 px-1.5 py-0.5 text-[10px] font-medium text-white">
-              <span className={`block h-1.5 w-1.5 rounded-full ${statusDisplay.dotClass}`} />
-              {statusDisplay.label}
+              {/* Muted overrides "Listening" — the green pulse would be a lie. */}
+              {state.micMuted && state.status === 'listening' ? (
+                <>
+                  <span className="block h-1.5 w-1.5 rounded-full bg-red-500" />
+                  Muted
+                </>
+              ) : (
+                <>
+                  <span className={`block h-1.5 w-1.5 rounded-full ${statusDisplay.dotClass}`} />
+                  {statusDisplay.label}
+                </>
+              )}
             </span>
           )}
           {(state.status === 'speaking' || state.status === 'thinking') && (
@@ -157,6 +176,19 @@ export function VideoPopout() {
 
       {/* Control bar — actions execute in the main app window */}
       <div className="flex h-7 shrink-0 items-center justify-center gap-2" style={noDragRegion}>
+        <button
+          type="button"
+          onClick={() => sendAction('toggle-mic')}
+          className={`flex h-6 w-6 items-center justify-center rounded-full transition-colors ${
+            state.micMuted
+              ? 'bg-red-600 text-white hover:bg-red-500'
+              : 'bg-neutral-700 text-white/90 hover:bg-neutral-600'
+          }`}
+          aria-label={state.micMuted ? 'Unmute' : 'Mute (pauses mic and frame capture)'}
+          title={state.micMuted ? 'Unmute' : 'Mute — pauses your mic and all frame capture'}
+        >
+          {state.micMuted ? <MicOff className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
+        </button>
         <button
           type="button"
           onClick={() => sendAction('toggle-camera')}

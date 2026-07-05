@@ -1465,6 +1465,8 @@ const ipcSchemas = {
       ttsState: z.enum(['idle', 'synthesizing', 'speaking']),
       status: z.enum(['listening', 'thinking', 'speaking']).nullable(),
       cameraOn: z.boolean(),
+      // User mute: mic audio and frame capture are both paused.
+      micMuted: z.boolean(),
       screenSharing: z.boolean(),
       // Live transcript of the in-progress utterance.
       interimText: z.string().nullable(),
@@ -1483,6 +1485,7 @@ const ipcSchemas = {
           ttsState: z.enum(['idle', 'synthesizing', 'speaking']),
           status: z.enum(['listening', 'thinking', 'speaking']).nullable(),
           cameraOn: z.boolean(),
+          micMuted: z.boolean(),
           screenSharing: z.boolean(),
           interimText: z.string().nullable(),
         })
@@ -1494,7 +1497,7 @@ const ipcSchemas = {
   // main app window (handled in the main process).
   'video:popoutAction': {
     req: z.object({
-      action: z.enum(['toggle-camera', 'toggle-share', 'stop-speaking', 'end-call', 'expand']),
+      action: z.enum(['toggle-mic', 'toggle-camera', 'toggle-share', 'stop-speaking', 'end-call', 'expand']),
     }),
     res: z.object({}),
   },
@@ -1504,6 +1507,7 @@ const ipcSchemas = {
       ttsState: z.enum(['idle', 'synthesizing', 'speaking']),
       status: z.enum(['listening', 'thinking', 'speaking']).nullable(),
       cameraOn: z.boolean(),
+      micMuted: z.boolean(),
       screenSharing: z.boolean(),
       interimText: z.string().nullable(),
     }),
@@ -1512,7 +1516,7 @@ const ipcSchemas = {
   // Push channel: main → app window with a popout control-bar action.
   'video:popout-action': {
     req: z.object({
-      action: z.enum(['toggle-camera', 'toggle-share', 'stop-speaking', 'end-call', 'expand']),
+      action: z.enum(['toggle-mic', 'toggle-camera', 'toggle-share', 'stop-speaking', 'end-call', 'expand']),
     }),
     res: z.null(),
   },
