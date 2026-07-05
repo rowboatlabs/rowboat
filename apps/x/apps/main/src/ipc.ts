@@ -622,6 +622,9 @@ function emitServiceEvent(event: z.infer<typeof ServiceEvent>): void {
 }
 
 export function emitOAuthEvent(event: { provider: string; success: boolean; error?: string; userId?: string }): void {
+  // Native connection status (e.g. Google) is baked into the Copilot system
+  // prompt, so any OAuth state change must rebuild it.
+  invalidateCopilotInstructionsCache();
   const windows = BrowserWindow.getAllWindows();
   for (const win of windows) {
     if (!win.isDestroyed() && win.webContents) {

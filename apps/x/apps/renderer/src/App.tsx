@@ -631,7 +631,7 @@ type ViewState =
   | { type: 'suggested-topics' }
   | { type: 'meetings' }
   | { type: 'live-notes' }
-  | { type: 'email'; threadId?: string }
+  | { type: 'email'; threadId?: string; searchQuery?: string }
   | { type: 'workspace'; path?: string }
   | { type: 'knowledge-view'; folderPath?: string; mode?: KnowledgeViewMode }
   | { type: 'chat-history' }
@@ -646,7 +646,7 @@ function viewStatesEqual(a: ViewState, b: ViewState): boolean {
   if (a.type === 'task' && b.type === 'task') return a.name === b.name
   if (a.type === 'workspace' && b.type === 'workspace') return (a.path ?? '') === (b.path ?? '')
   if (a.type === 'knowledge-view' && b.type === 'knowledge-view') return (a.folderPath ?? '') === (b.folderPath ?? '') && (a.mode ?? '') === (b.mode ?? '')
-  if (a.type === 'email' && b.type === 'email') return (a.threadId ?? '') === (b.threadId ?? '')
+  if (a.type === 'email' && b.type === 'email') return (a.threadId ?? '') === (b.threadId ?? '') && (a.searchQuery ?? '') === (b.searchQuery ?? '')
   return true // both graph
 }
 
@@ -842,6 +842,10 @@ function App() {
   const [isHomeOpen, setIsHomeOpen] = useState(true)
   const [emailInitialThreadId, setEmailInitialThreadId] = useState<string | null>(null)
   const [emailThreadIdVersion, setEmailThreadIdVersion] = useState(0)
+  // Search query pushed into the email view's search box (e.g. the assistant's
+  // read-view email query), so threads outside the synced inbox get real rows.
+  const [emailInitialSearchQuery, setEmailInitialSearchQuery] = useState<string | null>(null)
+  const [emailSearchQueryVersion, setEmailSearchQueryVersion] = useState(0)
   const [expandedFrom, setExpandedFrom] = useState<{
     path: string | null
     graph: boolean
@@ -4258,6 +4262,10 @@ function App() {
           setEmailInitialThreadId(view.threadId)
           setEmailThreadIdVersion((v) => v + 1)
         }
+        if (view.searchQuery) {
+          setEmailInitialSearchQuery(view.searchQuery)
+          setEmailSearchQueryVersion((v) => v + 1)
+        }
         ensureEmailFileTab()
         return
       case 'workspace':
@@ -4606,7 +4614,15 @@ function App() {
         break
       case 'open-view':
       case 'read-view':
-        navigateToNamedView(result.view as string)
+        // A read-view email search runs against the whole mailbox, so drive
+        // the email view's own search box with the same query — matched
+        // threads get real rows even when they're outside the synced inbox
+        // (and a follow-up open-item can then select them).
+        if (result.action === 'read-view' && result.view === 'email' && typeof result.query === 'string' && result.query.trim()) {
+          void navigateToView({ type: 'email', searchQuery: result.query.trim() })
+        } else {
+          navigateToNamedView(result.view as string)
+        }
         break
       case 'open-item': {
         switch (result.kind) {
@@ -6185,7 +6201,7 @@ function App() {
                 </div>
               ) : isEmailOpen ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-                  <EmailView initialThreadId={emailInitialThreadId} threadIdVersion={emailThreadIdVersion} />
+                  <EmailView initialThreadId={emailInitialThreadId} threadIdVersion={emailThreadIdVersion} initialSearchQuery={emailInitialSearchQuery} searchQueryVersion={emailSearchQueryVersion} />
                 </div>
               ) : isWorkspaceOpen ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
