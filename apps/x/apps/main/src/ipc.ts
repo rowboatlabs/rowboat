@@ -702,6 +702,19 @@ export function startSessionsWatcher(): void {
   sessionsWatcher = sessionBus.subscribe((event) => emitSessionEvent(event));
 }
 
+// The renderer window is created before the session-index startup scan
+// finishes, so an early sessions:list could observe a partially built index
+// (the scan runs oldest-first — exactly the newest chats would be missing).
+// sessions:list awaits this deferred; main.ts resolves it when the scan
+// settles (success or failure, so the list never hangs).
+let resolveSessionsIndexReady: () => void;
+const sessionsIndexReady = new Promise<void>((resolve) => {
+  resolveSessionsIndexReady = resolve;
+});
+export function markSessionsIndexReady(): void {
+  resolveSessionsIndexReady();
+}
+
 let servicesWatcher: (() => void) | null = null;
 export async function startServicesWatcher(): Promise<void> {
   if (servicesWatcher) {
@@ -938,6 +951,7 @@ export function setupIpcHandlers() {
       return { sessionId };
     },
     'sessions:list': async () => {
+      await sessionsIndexReady;
       return { sessions: container.resolve<ISessions>('sessions').listSessions() };
     },
     'sessions:get': async (_event, args) => {
