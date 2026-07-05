@@ -2383,9 +2383,13 @@ export type EmailViewProps = {
   initialThreadId?: string | null
   /** Bump to re-focus on the same threadId after navigating away inside the view. */
   threadIdVersion?: number
+  /** Query to load into the search box (e.g. the assistant's read-view email search). */
+  initialSearchQuery?: string | null
+  /** Bump to re-apply the same search query. */
+  searchQueryVersion?: number
 }
 
-export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps = {}) {
+export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery, searchQueryVersion }: EmailViewProps = {}) {
   const [important, setImportant] = useState<SectionState>(() => clearLoadingFlag(persistedImportant))
   const [other, setOther] = useState<SectionState>(() => clearLoadingFlag(persistedOther))
   const hadPersistedDataOnMount = useRef(persistedImportant !== null)
@@ -2404,6 +2408,13 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
   const [refreshing, setRefreshing] = useState(!hadPersistedDataOnMount.current)
   const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
+  // Externally-driven search (assistant read-view email query): load it into
+  // the search box so the debounced full-mailbox search below runs — matched
+  // threads get real rows even when they're not in the synced inbox.
+  useEffect(() => {
+    const q = initialSearchQuery?.trim()
+    if (q) setQuery(q)
+  }, [initialSearchQuery, searchQueryVersion])
   const [composeOpen, setComposeOpen] = useState(false)
   // Stable so the open composer isn't re-rendered on every inbox sync tick.
   const closeCompose = useCallback(() => setComposeOpen(false), [])
