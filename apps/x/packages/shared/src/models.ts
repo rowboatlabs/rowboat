@@ -9,6 +9,11 @@ export const LlmProvider = z.object({
   // to a ~4k window that silently truncates Rowboat's prompts; when unset,
   // local providers get a larger default (see core/models/local.ts).
   contextLength: z.number().int().positive().optional(),
+  // Reasoning effort for local thinking models (Ollama `think` parameter).
+  // gpt-oss supports the levels directly; other thinking models map
+  // low → thinking off, high → thinking on. Defaults to "low" for Ollama —
+  // background agents and chat both want snappy responses on local hardware.
+  reasoningEffort: z.enum(["low", "medium", "high"]).optional(),
 });
 
 export const LlmModelConfig = z.object({
@@ -20,6 +25,7 @@ export const LlmModelConfig = z.object({
     baseURL: z.string().optional(),
     headers: z.record(z.string(), z.string()).optional(),
     contextLength: z.number().int().positive().optional(),
+    reasoningEffort: z.enum(["low", "medium", "high"]).optional(),
     model: z.string().optional(),
     models: z.array(z.string()).optional(),
     knowledgeGraphModel: z.string().optional(),

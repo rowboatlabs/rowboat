@@ -15,7 +15,9 @@ import { withUseCase } from "../analytics/use_case.js";
 import {
     applyLocalModelSettings,
     isLocalProvider,
+    makeOllamaThinkFetch,
     DEFAULT_OLLAMA_CONTEXT_LENGTH,
+    DEFAULT_OLLAMA_REASONING_EFFORT,
     type LlmPriority,
 } from "./local.js";
 
@@ -58,6 +60,12 @@ export function createProvider(config: z.infer<typeof Provider>): ProviderV2 {
             return createOllama({
                 baseURL: ollamaURL,
                 headers,
+                // Rewrites `think` on the wire: the provider itself can only
+                // send think:false, which thinking models ignore — leaving
+                // e.g. gpt-oss at medium effort. See makeOllamaThinkFetch.
+                fetch: makeOllamaThinkFetch(
+                    config.reasoningEffort ?? DEFAULT_OLLAMA_REASONING_EFFORT,
+                ),
             });
         }
         case "openai-compatible":

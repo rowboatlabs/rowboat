@@ -225,6 +225,98 @@ export function applyLocalModelSettings(
     });
 }
 
+export type ReasoningEffort = "low" | "medium" | "high";
+
+// Local models default to snappy: gpt-oss at medium effort spends ~3x the
+// tokens of low on the same answer, and the AI SDK Ollama provider can't
+// express effort at all (its `think` option is boolean-only and hardcoded to
+// false, which thinking models like gpt-oss simply ignore).
+export const DEFAULT_OLLAMA_REASONING_EFFORT: ReasoningEffort = "low";
+
+/**
+ * Map a configured effort to the Ollama `think` value for a given model.
+ * - gpt-oss accepts effort levels directly ("low" | "medium" | "high").
+ * - Other thinking models (qwen3, deepseek-r1, …) only toggle: low turns
+ *   thinking off, high forces it on, medium leaves the model default.
+ * - Models without the thinking capability must not receive `think` at all.
+ * Returns undefined when `think` should be stripped from the request.
+ */
+export function resolveThinkValue(
+    modelName: string,
+    effort: ReasoningEffort,
+    supportsThinking: boolean,
+): boolean | string | undefined {
+    if (/gpt-oss/i.test(modelName)) {
+        return effort;
+    }
+    if (!supportsThinking) {
+        return undefined;
+    }
+    switch (effort) {
+        case "low":
+            return false;
+        case "medium":
+            return undefined;
+        case "high":
+            return true;
+    }
+}
+
+// The ollama-ai-provider-v2 request builder always writes `think: false`
+// (its providerOptions schema is boolean-only), so effort can only be set by
+// rewriting the wire request. This wraps fetch for createOllama: /api/chat
+// bodies get `think` set per resolveThinkValue; every other request passes
+// through untouched. Thinking capability is probed once per model via
+// /api/show and cached for the process lifetime.
+export function makeOllamaThinkFetch(
+    effort: ReasoningEffort,
+): typeof fetch {
+    const thinkingSupport = new Map<string, Promise<boolean>>();
+
+    const supportsThinking = (chatUrl: string, model: string): Promise<boolean> => {
+        const showUrl = chatUrl.replace(/\/chat(\?.*)?$/, "/show");
+        const key = `${showUrl}|${model}`;
+        let cached = thinkingSupport.get(key);
+        if (!cached) {
+            cached = fetch(showUrl, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ model }),
+            })
+                .then(async (res) => {
+                    if (!res.ok) return false;
+                    const data = await res.json() as { capabilities?: string[] };
+                    return Array.isArray(data.capabilities) && data.capabilities.includes("thinking");
+                })
+                .catch(() => false);
+            thinkingSupport.set(key, cached);
+        }
+        return cached;
+    };
+
+    return async (input, init) => {
+        try {
+            const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+            const isChat = /\/api\/chat(\?.*)?$/.test(url);
+            const body = init?.body;
+            if (isChat && typeof body === "string") {
+                const parsed = JSON.parse(body) as Record<string, unknown>;
+                const model = typeof parsed.model === "string" ? parsed.model : "";
+                const think = resolveThinkValue(model, effort, await supportsThinking(url, model));
+                if (think === undefined) {
+                    delete parsed.think;
+                } else {
+                    parsed.think = think;
+                }
+                return fetch(input, { ...init, body: JSON.stringify(parsed) });
+            }
+        } catch {
+            // Malformed body or URL — send the original request unchanged.
+        }
+        return fetch(input, init);
+    };
+}
+
 // Hold the slot until the provider stream drains, errors, or is cancelled —
 // a streaming response occupies the local server for its full duration.
 function releaseOnSettled<T>(stream: ReadableStream<T>, release: () => void): ReadableStream<T> {
