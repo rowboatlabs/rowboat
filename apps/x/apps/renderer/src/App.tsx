@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 import { MarkdownEditor, type MarkdownEditorHandle } from './components/markdown-editor';
 import { ChatSidebar } from './components/chat-sidebar';
 import { useSessionChat } from '@/hooks/useSessionChat';
+import { subscribeSessionFeed } from '@/lib/session-chat/feed';
 import { ChatHeader } from './components/chat-header';
 import { ChatEmptyState } from './components/chat-empty-state';
 import { ChatInputWithMentions, type CallPreset, type PermissionMode, type StagedAttachment } from './components/chat-input-with-mentions';
@@ -2253,6 +2254,35 @@ function App() {
   useEffect(() => {
     loadRuns()
   }, [loadRuns])
+
+  // Keep the runs list live: the session index publishes index-changed on
+  // every write (session created, turn settled, title change, delete), so the
+  // list stays current without re-fetching.
+  useEffect(() => {
+    return subscribeSessionFeed((event) => {
+      if (event.kind !== 'index-changed') return
+      setRuns((prev) => {
+        if (event.entry === null) {
+          return prev.filter((run) => run.id !== event.sessionId)
+        }
+        const next: RunListItem = {
+          id: event.entry.sessionId,
+          title: event.entry.title ?? 'New chat',
+          createdAt: event.entry.createdAt,
+          modifiedAt: event.entry.updatedAt,
+          agentId: event.entry.lastAgentId ?? 'copilot',
+        }
+        // Re-sort: chat-header and home-view slice the top of this list
+        // without sorting, so it must stay newest-first like sessions:list.
+        const recency = (run: RunListItem) => {
+          const ms = new Date(run.modifiedAt).getTime()
+          return Number.isNaN(ms) ? 0 : ms
+        }
+        return [...prev.filter((run) => run.id !== next.id), next]
+          .sort((a, b) => recency(b) - recency(a))
+      })
+    })
+  }, [])
 
   const [bgTaskSummaries, setBgTaskSummaries] = useState<Array<{
     slug: string

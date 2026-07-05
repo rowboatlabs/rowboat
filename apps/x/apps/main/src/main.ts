@@ -2,7 +2,7 @@ import { app, BrowserWindow, desktopCapturer, protocol, net, shell, session, typ
 import path from "node:path";
 import {
   setupIpcHandlers,
-  startRunsWatcher, startSessionsWatcher,
+  startRunsWatcher, startSessionsWatcher, markSessionsIndexReady,
   startChannelsWatcher,
   startCodeSessionStatusWatcher,
   startServicesWatcher,
@@ -411,9 +411,16 @@ app.whenReady().then(async () => {
     console.error('[runs-migration] pass failed:', error);
   }
 
-  // New runtime: build the in-memory session index (startup scan) before the
-  // renderer can list sessions, then forward the session bus to windows.
-  await container.resolve<ISessions>('sessions').initialize();
+  // New runtime: build the in-memory session index (startup scan), then
+  // forward the session bus to windows. The renderer window is already up and
+  // may have called sessions:list — that handler blocks on
+  // markSessionsIndexReady, which must fire even if the scan throws so the
+  // list never hangs.
+  try {
+    await container.resolve<ISessions>('sessions').initialize();
+  } finally {
+    markSessionsIndexReady();
+  }
   startSessionsWatcher();
 
   // Mobile channels (WhatsApp/Telegram bridge): needs the session index, so
