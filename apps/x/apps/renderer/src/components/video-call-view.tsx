@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Minimize2, MonitorUp, PhoneOff, Presentation, Square, User, Video, VideoOff } from 'lucide-react'
+import { Mic, MicOff, Minimize2, MonitorUp, PhoneOff, Presentation, Square, User, Video, VideoOff } from 'lucide-react'
 
 import { MascotFaceIcon, TalkingHead } from '@/components/talking-head'
 import type { TTSState } from '@/hooks/useVoiceTTS'
@@ -12,6 +12,9 @@ interface VideoCallViewProps {
   streamRef: React.MutableRefObject<MediaStream | null>
   cameraOn: boolean
   onToggleCamera: () => void
+  /** User mute = full input pause: no mic audio AND no frame capture. */
+  micMuted: boolean
+  onToggleMic: () => void
   /** Starting a share collapses this view into the floating popout (the
    *  surface is derived from devices — see App.tsx). */
   onToggleScreenShare: () => void
@@ -51,6 +54,8 @@ export function VideoCallView({
   streamRef,
   cameraOn,
   onToggleCamera,
+  micMuted,
+  onToggleMic,
   onToggleScreenShare,
   practiceMode,
   onMinimize,
@@ -128,6 +133,12 @@ export function VideoCallView({
           <span className="absolute bottom-3 left-3 rounded-md bg-black/50 px-2 py-0.5 text-sm text-white">
             You
           </span>
+          {micMuted && (
+            <span className="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-md bg-red-600/90 px-2 py-0.5 text-sm font-medium text-white">
+              <MicOff className="h-3.5 w-3.5" />
+              Muted — nothing is heard or captured
+            </span>
+          )}
         </div>
 
         {/* Assistant */}
@@ -185,9 +196,34 @@ export function VideoCallView({
       {/* Control bar */}
       <div className="flex items-center justify-center gap-4 pb-5">
         <span className="flex items-center gap-2 rounded-full bg-neutral-800 px-3 py-1.5 text-xs font-medium text-white/90">
-          <span className={cn('block h-2 w-2 rounded-full', STATUS_DISPLAY[status].dotClass)} />
-          {STATUS_DISPLAY[status].label}
+          {/* Muted overrides "Listening" — the green pulse would be a lie.
+              Thinking/speaking still show: output continues while muted. */}
+          {micMuted && status === 'listening' ? (
+            <>
+              <span className="block h-2 w-2 rounded-full bg-red-500" />
+              Muted
+            </>
+          ) : (
+            <>
+              <span className={cn('block h-2 w-2 rounded-full', STATUS_DISPLAY[status].dotClass)} />
+              {STATUS_DISPLAY[status].label}
+            </>
+          )}
         </span>
+        <button
+          type="button"
+          onClick={onToggleMic}
+          className={cn(
+            'flex h-10 w-10 items-center justify-center rounded-full transition-colors',
+            micMuted
+              ? 'bg-red-600 text-white hover:bg-red-500'
+              : 'bg-neutral-800 text-white/90 hover:bg-neutral-700'
+          )}
+          aria-label={micMuted ? 'Unmute' : 'Mute (pauses mic and frame capture)'}
+          title={micMuted ? 'Unmute' : 'Mute — pauses your mic and all frame capture'}
+        >
+          {micMuted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
+        </button>
         <button
           type="button"
           onClick={onToggleCamera}

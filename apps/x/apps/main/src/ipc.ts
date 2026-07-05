@@ -395,6 +395,7 @@ let lastVideoPopoutState: {
   ttsState: 'idle' | 'synthesizing' | 'speaking';
   status: 'listening' | 'thinking' | 'speaking' | null;
   cameraOn: boolean;
+  micMuted: boolean;
   screenSharing: boolean;
   interimText: string | null;
 } | null = null;
