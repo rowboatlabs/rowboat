@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   ArrowUp,
@@ -303,6 +303,11 @@ function ChatInputInner({
 
   const [configuredModels, setConfiguredModels] = useState<ConfiguredModel[]>([])
   const [activeModelKey, setActiveModelKey] = useState('')
+  // The effective runtime default (what a run actually uses when the user
+  // hasn't picked a model) — shown in the picker instead of guessing from
+  // list order, which can disagree with the real default.
+  const [defaultModel, setDefaultModel] = useState<ConfiguredModel | null>(null)
+  const loadModelConfigEpoch = useRef(0)
   const [lockedModel, setLockedModel] = useState<SelectedModel | null>(null)
   const [searchEnabled, setSearchEnabled] = useState(false)
   const [searchAvailable, setSearchAvailable] = useState(false)
@@ -398,6 +403,17 @@ function ChatInputInner({
   // Load the list of models the user can choose from.
   // Signed-in: gateway model list. Signed-out: providers configured in models.json.
   const loadModelConfig = useCallback(async () => {
+    // Concurrent runs race (mount fires one before the sign-in state resolves,
+    // which fires another) — only the newest run may write state, else a slow
+    // stale run can clobber the fresh list with an empty one.
+    const epoch = ++loadModelConfigEpoch.current
+    try {
+      const def = await window.ipc.invoke('llm:getDefaultModel', null)
+      if (loadModelConfigEpoch.current !== epoch) return
+      setDefaultModel({ provider: def.provider as ProviderName, model: def.model })
+    } catch {
+      if (loadModelConfigEpoch.current === epoch) setDefaultModel(null)
+    }
     try {
       if (isRowboatConnected) {
         const listResult = await window.ipc.invoke('models:list', null)
@@ -407,6 +423,7 @@ function ChatInputInner({
         const models: ConfiguredModel[] = (rowboatProvider?.models || []).map(
           (m: { id: string }) => ({ provider: 'rowboat', model: m.id })
         )
+        if (loadModelConfigEpoch.current !== epoch) return
         setConfiguredModels(models)
       } else {
         const result = await window.ipc.invoke('workspace:readFile', { path: 'config/models.json' })
@@ -457,10 +474,12 @@ function ChatInputInner({
             for (const m of saved) push(flavor, m)
           }
         }
+        if (loadModelConfigEpoch.current !== epoch) return
         setConfiguredModels(models)
       }
-    } catch {
-      // No config yet
+    } catch (err) {
+      // No config yet — but surface unexpected failures for diagnosis.
+      console.error('[chat-input] failed to load model list', err)
     }
   }, [isRowboatConnected])
 
@@ -647,15 +666,25 @@ function ChatInputInner({
     checkSearch()
   }, [isActive, isRowboatConnected])
 
+  // The dropdown's items: always include the effective default so the picker
+  // is never empty (and never missing the model that actually runs) even
+  // while the full list is still loading.
+  const pickerModels = useMemo<ConfiguredModel[]>(() => {
+    if (!defaultModel) return configuredModels
+    const defaultKey = `${defaultModel.provider}/${defaultModel.model}`
+    if (configuredModels.some((m) => `${m.provider}/${m.model}` === defaultKey)) return configuredModels
+    return [defaultModel, ...configuredModels]
+  }, [configuredModels, defaultModel])
+
   // Selecting a model affects only the *next* run created from this tab.
   // Once a run exists, model is frozen on the run and the dropdown is read-only.
   const handleModelChange = useCallback((key: string) => {
     if (lockedModel) return
-    const entry = configuredModels.find((m) => `${m.provider}/${m.model}` === key)
+    const entry = pickerModels.find((m) => `${m.provider}/${m.model}` === key)
     if (!entry) return
     setActiveModelKey(key)
     onSelectedModelChange?.({ provider: entry.provider, model: entry.model })
-  }, [configuredModels, lockedModel, onSelectedModelChange])
+  }, [pickerModels, lockedModel, onSelectedModelChange])
 
   // Restore the tab draft when this input mounts.
   useEffect(() => {
@@ -1259,7 +1288,7 @@ function ChatInputInner({
               {providerDisplayNames[lockedModel.provider] || lockedModel.provider} — fixed for this chat
             </TooltipContent>
           </Tooltip>
-        ) : configuredModels.length > 0 ? (
+        ) : pickerModels.length > 0 ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
@@ -1267,14 +1296,22 @@ function ChatInputInner({
                 className="flex h-7 min-w-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               >
                 <span className="min-w-0 truncate">
-                  {getSelectedModelDisplayName(configuredModels.find((m) => `${m.provider}/${m.model}` === activeModelKey)?.model || configuredModels[0]?.model || 'Model')}
+                  {getSelectedModelDisplayName(
+                    pickerModels.find((m) => `${m.provider}/${m.model}` === activeModelKey)?.model
+                      || defaultModel?.model
+                      || pickerModels[0]?.model
+                      || 'Model'
+                  )}
                 </span>
                 <ChevronDown className="h-3 w-3 shrink-0" />
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuRadioGroup value={activeModelKey} onValueChange={handleModelChange}>
-                {configuredModels.map((m) => {
+              <DropdownMenuRadioGroup
+                value={activeModelKey || (defaultModel ? `${defaultModel.provider}/${defaultModel.model}` : '')}
+                onValueChange={handleModelChange}
+              >
+                {pickerModels.map((m) => {
                   const key = `${m.provider}/${m.model}`
                   return (
                     <DropdownMenuRadioItem key={key} value={key}>
