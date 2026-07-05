@@ -12,7 +12,7 @@ async function resolveRoutingModel() {
     const { model: modelId, provider } = await getBackgroundTaskAgentModel();
     const config = await resolveProviderConfig(provider);
     return {
-        model: createLanguageModel(config, modelId, { priority: 'classifier' }),
+        model: createLanguageModel(config, modelId),
         modelId,
         providerName: provider,
     };

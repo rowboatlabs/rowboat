@@ -147,7 +147,7 @@ export async function maybeDistillImportanceRules(): Promise<void> {
     try {
         const { model: modelId, provider } = await getKgModel();
         const config = await resolveProviderConfig(provider);
-        const model = createLanguageModel(config, modelId, { priority: 'background' });
+        const model = createLanguageModel(config, modelId);
 
         const correctionLines = fb.corrections.map(c =>
             `- From: ${c.from} | Subject: "${c.subject}" | classifier said ${c.agentVerdict}, user corrected to ${c.userVerdict}`

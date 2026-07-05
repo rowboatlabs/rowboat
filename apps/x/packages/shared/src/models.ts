@@ -37,6 +37,11 @@ export const LlmModelConfig = z.object({
   // the signed-in curated default and the legacy top-level provider/model
   // pair — this is what lets signed-in users default to a BYOK model.
   defaultSelection: ModelRef.optional(),
+  // When true, background agent runs (knowledge pipeline, live notes,
+  // background tasks) wait until no chat turn is running before starting.
+  // Surfaced as a settings checkbox; recommended for local models, where a
+  // background run competes with the chat for the same hardware.
+  deferBackgroundTasks: z.boolean().optional(),
   providers: z.record(z.string(), z.object({
     apiKey: z.string().optional(),
     baseURL: z.string().optional(),

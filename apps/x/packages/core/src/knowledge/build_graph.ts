@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { WorkDir } from '../config/config.js';
 import { getKgModel } from '../models/defaults.js';
-import { runHeadlessAgent, toolInputPaths } from '../agents/headless-app.js';
+import { runWhenPossible, toolInputPaths } from '../agents/headless-app.js';
 import { getErrorDetails } from '../agents/utils.js';
 import { serviceLogger, type ServiceRunContext } from '../services/service_logger.js';
 import {
@@ -385,7 +385,7 @@ async function createNotesFromBatch(
         message += `(3) No placeholder text ("Unknown"/"-") and no links between entities that didn't co-occur in one source file.\n`;
     }
 
-    const { turnId, state } = await runHeadlessAgent({
+    const { turnId, state } = await runWhenPossible({
         agentId: NOTE_CREATION_AGENT,
         message,
         ...(await getKgModel()),
@@ -943,7 +943,7 @@ export async function curateNotes(): Promise<void> {
             message += `Curate the following knowledge note per your instructions. Rewrite it in place with a single file-writeText to the SAME path.\n\n`;
             message += `**Note path:** ${relPath}\n\n`;
             message += `**Current content:**\n\n${content}\n`;
-            await runHeadlessAgent({
+            await runWhenPossible({
                 agentId: CURATION_AGENT,
                 message,
                 ...(await getKgModel()),

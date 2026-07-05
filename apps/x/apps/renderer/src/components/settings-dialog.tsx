@@ -364,6 +364,11 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
   const [testState, setTestState] = useState<{ status: "idle" | "testing" | "success" | "error"; error?: string }>({ status: "idle" })
   const [configLoading, setConfigLoading] = useState(true)
   const [showMoreProviders, setShowMoreProviders] = useState(false)
+  // "Defer background tasks while a chat is running" — a top-level
+  // models.json flag. deferExplicit tracks whether the user (or the Ollama
+  // auto-enable) has ever set it, so we only auto-enable once.
+  const [deferBackgroundTasks, setDeferBackgroundTasks] = useState(false)
+  const [deferExplicit, setDeferExplicit] = useState(false)
 
   const activeConfig = providerConfigs[provider]
   const showApiKey = provider === "openai" || provider === "anthropic" || provider === "google" || provider === "openrouter" || provider === "aigateway" || provider === "openai-compatible"
@@ -406,6 +411,8 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
           path: "config/models.json",
         })
         const parsed = JSON.parse(result.data)
+        setDeferBackgroundTasks(parsed?.deferBackgroundTasks === true)
+        setDeferExplicit(typeof parsed?.deferBackgroundTasks === "boolean")
         if (parsed?.provider?.flavor && parsed?.model) {
           const flavor = parsed.provider.flavor as LlmProviderFlavor
           setProvider(flavor)
@@ -461,6 +468,17 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
 
     loadCurrentConfig()
   }, [dialogOpen])
+
+  const handleDeferToggle = useCallback(async (value: boolean) => {
+    setDeferBackgroundTasks(value)
+    setDeferExplicit(true)
+    try {
+      await window.ipc.invoke("models:updateConfig", { deferBackgroundTasks: value })
+      window.dispatchEvent(new Event("models-config-changed"))
+    } catch {
+      toast.error("Failed to save setting")
+    }
+  }, [])
 
   // Load models catalog
   useEffect(() => {
@@ -532,6 +550,12 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
         setDefaultProvider(provider)
         setTestState({ status: "success" })
         window.dispatchEvent(new Event('models-config-changed'))
+        // Local models compete with background agents for the same hardware:
+        // when the user connects Ollama and has never touched the defer
+        // flag, enable it for them (they can switch it off below).
+        if (provider === "ollama" && !deferExplicit && !deferBackgroundTasks) {
+          void handleDeferToggle(true)
+        }
         // Capability probe caveats (local models): saved, but the user should
         // know when the model can't do tools or has a too-small context.
         const warnings: string[] = result.warnings ?? []
@@ -551,7 +575,7 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
       setTestState({ status: "error", error: "Connection test failed" })
       toast.error("Connection test failed")
     }
-  }, [canTest, provider, activeConfig, rowboatConnected])
+  }, [canTest, provider, activeConfig, rowboatConnected, deferExplicit, deferBackgroundTasks, handleDeferToggle])
 
   const handleSetDefault = useCallback(async (prov: LlmProviderFlavor) => {
     const config = providerConfigs[prov]
@@ -937,6 +961,17 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
           Connected and saved
         </div>
       )}
+
+      {/* Defer background tasks while chatting */}
+      <div className="flex items-center justify-between gap-4 rounded-md border px-3 py-2.5">
+        <div className="min-w-0">
+          <div className="text-sm font-medium">Defer background tasks while chatting</div>
+          <div className="text-xs text-muted-foreground mt-0.5">
+            Background agents (knowledge sync, live notes, tasks) wait until your chat finishes. Recommended for local models.
+          </div>
+        </div>
+        <Switch checked={deferBackgroundTasks} onCheckedChange={handleDeferToggle} />
+      </div>
 
       {/* Test & Save button */}
       <Button

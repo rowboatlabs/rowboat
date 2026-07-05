@@ -247,7 +247,7 @@ export async function classifyThread(
 
         const { model: modelId, provider } = await getKgModel();
         const config = await resolveProviderConfig(provider);
-        const model = createLanguageModel(config, modelId, { priority: 'background' });
+        const model = createLanguageModel(config, modelId);
 
         let systemPrompt = options.skipDraft
             ? `${SYSTEM_PROMPT}\n\n# Skip the draft\n\nThe user already has their own draft in progress for this thread — DO NOT generate a draftResponse. Always omit the draftResponse field.`

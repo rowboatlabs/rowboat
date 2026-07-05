@@ -55,6 +55,16 @@ export async function getDefaultModelAndProvider(): Promise<{ model: string; pro
 }
 
 /**
+ * "Defer background tasks while a chat is running" (settings checkbox,
+ * models.json `deferBackgroundTasks`). Read at each background invocation so
+ * toggling takes effect immediately.
+ */
+export async function shouldDeferBackgroundTasks(): Promise<boolean> {
+    const cfg = await readConfig();
+    return cfg?.deferBackgroundTasks === true;
+}
+
+/**
  * Resolve a provider name (as stored on a run, an agent, or returned by
  * getDefaultModelAndProvider) into the full LlmProvider config that
  * createProvider expects (apiKey/baseURL/headers).

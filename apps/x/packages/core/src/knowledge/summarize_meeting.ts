@@ -139,7 +139,7 @@ function loadCalendarEventContext(calendarEventJson: string): string {
 export async function summarizeMeeting(transcript: string, meetingStartTime?: string, calendarEventJson?: string): Promise<string> {
     const { model: modelId, provider: providerName } = await getMeetingNotesModel();
     const providerConfig = await resolveProviderConfig(providerName);
-    const model = createLanguageModel(providerConfig, modelId, { priority: 'background' });
+    const model = createLanguageModel(providerConfig, modelId);
 
     // If a specific calendar event was linked, use it directly.
     // Otherwise fall back to scanning events within ±3 hours.

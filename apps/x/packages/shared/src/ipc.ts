@@ -623,6 +623,7 @@ const ipcSchemas = {
       meetingNotesModel: ModelOverride.nullable().optional(),
       liveNoteAgentModel: ModelOverride.nullable().optional(),
       autoPermissionDecisionModel: ModelOverride.nullable().optional(),
+      deferBackgroundTasks: z.boolean().nullable().optional(),
     }),
     res: z.object({
       success: z.literal(true),

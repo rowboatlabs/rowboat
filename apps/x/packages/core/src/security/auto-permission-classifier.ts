@@ -83,7 +83,7 @@ export async function classifyToolPermissions(input: {
 
     const { model: modelId, provider: providerName } = await getAutoPermissionDecisionModel();
     const providerConfig = await resolveProviderConfig(providerName);
-    const model = createLanguageModel(providerConfig, modelId, { priority: "classifier" });
+    const model = createLanguageModel(providerConfig, modelId);
 
     const result = await withUseCase(
         {

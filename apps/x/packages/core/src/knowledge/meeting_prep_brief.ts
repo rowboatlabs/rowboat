@@ -177,7 +177,7 @@ async function generateBrief(event: CalendarEvent, ctx: Awaited<ReturnType<typeo
 
     const { model: modelId, provider: providerName } = await getMeetingNotesModel();
     const providerConfig = await resolveProviderConfig(providerName);
-    const model = createLanguageModel(providerConfig, modelId, { priority: 'background' });
+    const model = createLanguageModel(providerConfig, modelId);
 
     const result = await withUseCase({ useCase: 'meeting_prep' }, () => generateText({
         model,

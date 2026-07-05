@@ -584,8 +584,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
 
                 const { model: modelId, provider: providerName } = await getDefaultModelAndProvider();
                 const providerConfig = await resolveProviderConfig(providerName);
-                // Runs as a tool inside a chat turn more often than not.
-                const model = createLanguageModel(providerConfig, modelId, { priority: 'interactive' });
+                const model = createLanguageModel(providerConfig, modelId);
 
                 const userPrompt = prompt || 'Convert this file to well-structured markdown.';
 

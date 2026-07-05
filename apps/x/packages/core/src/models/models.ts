@@ -14,11 +14,9 @@ import { getChatModelIds } from "./models-dev.js";
 import { withUseCase } from "../analytics/use_case.js";
 import {
     applyLocalModelSettings,
-    isLocalProvider,
     makeOllamaThinkFetch,
     DEFAULT_OLLAMA_CONTEXT_LENGTH,
     DEFAULT_OLLAMA_REASONING_EFFORT,
-    type LlmPriority,
 } from "./local.js";
 
 export const Provider = LlmProvider;
@@ -90,18 +88,14 @@ export function createProvider(config: z.infer<typeof Provider>): ProviderV2 {
 
 /**
  * The one place model instances are created. Applies local-runtime settings
- * (explicit Ollama context window) and, when `priority` is given, routes the
- * call through the shared local scheduler so background work cannot starve
- * interactive chat. Pass `priority: null` when the caller does its own
- * scheduling (the turn runtime's model registry).
+ * (explicit Ollama context window) on top of the raw provider model.
  */
 export function createLanguageModel(
     providerConfig: z.infer<typeof Provider>,
     modelId: string,
-    opts: { priority?: LlmPriority | null } = {},
 ): LanguageModel {
     const model = createProvider(providerConfig).languageModel(modelId);
-    return applyLocalModelSettings(model, providerConfig, opts.priority ?? null);
+    return applyLocalModelSettings(model, providerConfig);
 }
 
 export interface ModelCapabilities {
@@ -151,9 +145,10 @@ export async function probeModelCapabilities(
             }
             return result;
         }
-        if (providerConfig.flavor === "openai-compatible" && isLocalProvider(providerConfig)) {
+        if (providerConfig.flavor === "openai-compatible") {
             // LM Studio's enhanced REST API lives at /api/v0 on the same
-            // origin as the OpenAI-compatible /v1 endpoint.
+            // origin as the OpenAI-compatible /v1 endpoint. Non-LM Studio
+            // endpoints just 404 here, which reports as "unknown".
             const origin = new URL(providerConfig.baseURL ?? "").origin;
             const res = await fetch(`${origin}/api/v0/models`, {
                 headers: providerConfig.headers ?? {},
@@ -342,7 +337,7 @@ export async function generateOneShot(opts: GenerateTextOptions): Promise<Genera
         const modelId = opts.model || def.model;
         const providerName = opts.provider || def.provider;
         const providerConfig = await resolveProviderConfig(providerName);
-        const languageModel = createLanguageModel(providerConfig, modelId, { priority: "interactive" });
+        const languageModel = createLanguageModel(providerConfig, modelId);
         const result = await withUseCase(
             { useCase: "copilot_chat", subUseCase: "email_compose" },
             () => generateText({

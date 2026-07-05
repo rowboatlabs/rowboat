@@ -20,6 +20,7 @@ import container from "../di/container.js";
 import { notifyIfEnabled } from "../application/notification/notifier.js";
 import { IModelConfigRepo } from "../models/repo.js";
 import { createLanguageModel } from "../models/models.js";
+import { chatActivity } from "../application/lib/chat-activity.js";
 import { resolveProviderConfig } from "../models/defaults.js";
 import { IAgentsRepo } from "./repo.js";
 import { IMonotonicallyIncreasingIdGenerator } from "../application/lib/id-gen.js";
@@ -496,6 +497,9 @@ export class AgentRuntime implements IAgentRuntime {
             return;
         }
         const signal = this.abortRegistry.createForRun(runId);
+        // Legacy runs are user-facing chats: mark activity so background
+        // agents can defer (see agents/headless-app.ts runWhenPossible).
+        chatActivity.enter();
         try {
             await this.bus.publish({
                 runId,
@@ -610,6 +614,7 @@ export class AgentRuntime implements IAgentRuntime {
             await this.runsRepo.appendEvents(runId, [errorEvent]);
             await this.bus.publish(errorEvent);
         } finally {
+            chatActivity.exit();
             this.abortRegistry.cleanup(runId);
             await this.runsLock.release(runId);
             await this.bus.publish({
@@ -1365,8 +1370,7 @@ export async function* streamAgent({
     }
     const modelId = state.runModel;
     const providerConfig = await resolveProviderConfig(state.runProvider);
-    // Legacy runs are user-facing chats: interactive priority on local models.
-    const model = createLanguageModel(providerConfig, modelId, { priority: "interactive" });
+    const model = createLanguageModel(providerConfig, modelId);
     logger.log(`using model: ${modelId} (provider: ${state.runProvider})`);
 
     // Install use-case context for tool-internal LLM calls (e.g. parseFile)

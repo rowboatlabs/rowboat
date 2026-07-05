@@ -14,11 +14,7 @@ import type { JsonValue, ModelDescriptor, TurnUsage } from "@x/shared/dist/turns
 import { convertFromMessages } from "../../agents/runtime.js";
 import { resolveProviderConfig } from "../../models/defaults.js";
 import { createProvider } from "../../models/models.js";
-import {
-    applyLocalModelSettings,
-    isLocalProvider,
-    localLlmScheduler,
-} from "../../models/local.js";
+import { applyLocalModelSettings } from "../../models/local.js";
 import type {
     IModelRegistry,
     LlmStreamEvent,
@@ -70,15 +66,11 @@ export class RealModelRegistry implements IModelRegistry {
     ): Promise<ResolvedModel> {
         const providerConfig = await this.resolveProvider(descriptor.provider);
         const provider = this.createProviderImpl(providerConfig);
-        // Local settings (Ollama context window) are applied here, but
-        // scheduling happens per-step in run() where the turn's priority is
-        // known — so priority stays null.
+        // Local settings (Ollama context window) are applied here.
         const model = applyLocalModelSettings(
             provider.languageModel(descriptor.model),
             providerConfig,
-            null,
         );
-        const local = isLocalProvider(providerConfig);
         return {
             descriptor,
             // The structural -> wire conversion the app uses today: weaves
@@ -87,14 +79,13 @@ export class RealModelRegistry implements IModelRegistry {
             // per-message, so composed requests are byte-stable.
             encodeMessages: (messages) =>
                 convertFromMessages(messages) as unknown as JsonValue[],
-            stream: (request) => this.run(model, request, local),
+            stream: (request) => this.run(model, request),
         };
     }
 
     private async *run(
         model: LanguageModel,
         request: ModelStreamRequest,
-        local: boolean,
     ): AsyncGenerator<LlmStreamEvent, void, void> {
         const tools: ToolSet = {};
         for (const descriptor of request.tools) {
@@ -123,15 +114,6 @@ export class RealModelRegistry implements IModelRegistry {
                 : {}),
         };
 
-        // One scheduler slot per model step: local runtimes serve requests
-        // serially, and headless turns must not starve interactive chat.
-        const release = local
-            ? await localLlmScheduler.acquire(
-                  request.priority ?? "interactive",
-                  request.signal,
-              )
-            : null;
-
         const parts: Array<z.infer<typeof AssistantContentPart>> = [];
         let textBuffer = "";
         let reasoningBuffer = "";
@@ -139,112 +121,108 @@ export class RealModelRegistry implements IModelRegistry {
         let usage: z.infer<typeof TurnUsage> = {};
         let providerMetadata: JsonValue | undefined;
 
-        try {
-            const result = this.invoke({
-                model,
-                system: request.systemPrompt,
-                messages: request.messages as ModelMessage[],
-                tools,
-                abortSignal: request.signal,
-                ...generationParams,
-            });
+        const result = this.invoke({
+            model,
+            system: request.systemPrompt,
+            messages: request.messages as ModelMessage[],
+            tools,
+            abortSignal: request.signal,
+            ...generationParams,
+        });
 
-            for await (const raw of result.fullStream) {
-                request.signal.throwIfAborted();
-                const event = raw as {
-                    type: string;
-                    text?: string;
-                    toolCallId?: string;
-                    toolName?: string;
-                    input?: unknown;
-                    finishReason?: string;
-                    usage?: Record<string, number | undefined>;
-                    providerMetadata?: unknown;
-                    error?: unknown;
-                };
-                switch (event.type) {
-                    case "text-start":
-                        textBuffer = "";
-                        yield { type: "step_event", event: { type: "text_start" } };
-                        break;
-                    case "text-delta": {
-                        const delta = event.text ?? "";
-                        textBuffer += delta;
-                        const last = parts[parts.length - 1];
-                        if (last?.type === "text") {
-                            last.text += delta;
-                        } else {
-                            parts.push({ type: "text", text: delta });
-                        }
-                        yield { type: "text_delta", delta };
-                        break;
+        for await (const raw of result.fullStream) {
+            request.signal.throwIfAborted();
+            const event = raw as {
+                type: string;
+                text?: string;
+                toolCallId?: string;
+                toolName?: string;
+                input?: unknown;
+                finishReason?: string;
+                usage?: Record<string, number | undefined>;
+                providerMetadata?: unknown;
+                error?: unknown;
+            };
+            switch (event.type) {
+                case "text-start":
+                    textBuffer = "";
+                    yield { type: "step_event", event: { type: "text_start" } };
+                    break;
+                case "text-delta": {
+                    const delta = event.text ?? "";
+                    textBuffer += delta;
+                    const last = parts[parts.length - 1];
+                    if (last?.type === "text") {
+                        last.text += delta;
+                    } else {
+                        parts.push({ type: "text", text: delta });
                     }
-                    case "text-end":
-                        yield {
-                            type: "step_event",
-                            event: { type: "text_end", text: textBuffer },
-                        };
-                        break;
-                    case "reasoning-start":
-                        reasoningBuffer = "";
-                        yield { type: "step_event", event: { type: "reasoning_start" } };
-                        break;
-                    case "reasoning-delta": {
-                        const delta = event.text ?? "";
-                        reasoningBuffer += delta;
-                        const last = parts[parts.length - 1];
-                        if (last?.type === "reasoning") {
-                            last.text += delta;
-                        } else {
-                            parts.push({ type: "reasoning", text: delta });
-                        }
-                        yield { type: "reasoning_delta", delta };
-                        break;
-                    }
-                    case "reasoning-end":
-                        yield {
-                            type: "step_event",
-                            event: { type: "reasoning_end", text: reasoningBuffer },
-                        };
-                        break;
-                    case "tool-call": {
-                        const toolCall = {
-                            type: "tool-call" as const,
-                            toolCallId: String(event.toolCallId),
-                            toolName: String(event.toolName),
-                            arguments: event.input,
-                        };
-                        parts.push(toolCall);
-                        yield { type: "step_event", event: { type: "tool_call", toolCall } };
-                        break;
-                    }
-                    case "finish-step": {
-                        finishReason = event.finishReason ?? "unknown";
-                        usage = mapUsage(event.usage);
-                        providerMetadata = toJsonValue(event.providerMetadata);
-                        yield {
-                            type: "step_event",
-                            event: {
-                                type: "finish_step",
-                                finishReason,
-                                usage,
-                                ...(providerMetadata === undefined
-                                    ? {}
-                                    : { providerMetadata }),
-                            },
-                        };
-                        break;
-                    }
-                    case "error":
-                        throw event.error instanceof Error
-                            ? event.error
-                            : new Error(formatStreamError(event.error));
-                    default:
-                        break;
+                    yield { type: "text_delta", delta };
+                    break;
                 }
+                case "text-end":
+                    yield {
+                        type: "step_event",
+                        event: { type: "text_end", text: textBuffer },
+                    };
+                    break;
+                case "reasoning-start":
+                    reasoningBuffer = "";
+                    yield { type: "step_event", event: { type: "reasoning_start" } };
+                    break;
+                case "reasoning-delta": {
+                    const delta = event.text ?? "";
+                    reasoningBuffer += delta;
+                    const last = parts[parts.length - 1];
+                    if (last?.type === "reasoning") {
+                        last.text += delta;
+                    } else {
+                        parts.push({ type: "reasoning", text: delta });
+                    }
+                    yield { type: "reasoning_delta", delta };
+                    break;
+                }
+                case "reasoning-end":
+                    yield {
+                        type: "step_event",
+                        event: { type: "reasoning_end", text: reasoningBuffer },
+                    };
+                    break;
+                case "tool-call": {
+                    const toolCall = {
+                        type: "tool-call" as const,
+                        toolCallId: String(event.toolCallId),
+                        toolName: String(event.toolName),
+                        arguments: event.input,
+                    };
+                    parts.push(toolCall);
+                    yield { type: "step_event", event: { type: "tool_call", toolCall } };
+                    break;
+                }
+                case "finish-step": {
+                    finishReason = event.finishReason ?? "unknown";
+                    usage = mapUsage(event.usage);
+                    providerMetadata = toJsonValue(event.providerMetadata);
+                    yield {
+                        type: "step_event",
+                        event: {
+                            type: "finish_step",
+                            finishReason,
+                            usage,
+                            ...(providerMetadata === undefined
+                                ? {}
+                                : { providerMetadata }),
+                        },
+                    };
+                    break;
+                }
+                case "error":
+                    throw event.error instanceof Error
+                        ? event.error
+                        : new Error(formatStreamError(event.error));
+                default:
+                    break;
             }
-        } finally {
-            release?.();
         }
 
         yield {

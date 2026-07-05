@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { google } from 'googleapis';
 import { WorkDir } from '../config/config.js';
-import { runHeadlessAgent } from '../agents/headless-app.js';
+import { runWhenPossible } from '../agents/headless-app.js';
 import { getKgModel } from '../models/defaults.js';
 import { getErrorDetails } from '../agents/utils.js';
 import { serviceLogger } from '../services/service_logger.js';
@@ -281,7 +281,7 @@ async function processAgentNotes(): Promise<void> {
         const timestamp = new Date().toISOString();
         const message = `Current timestamp: ${timestamp}\n\nProcess the following source material and update the Agent Notes folder accordingly.\n\n${messageParts.join('\n\n')}`;
 
-        await runHeadlessAgent({
+        await runWhenPossible({
             agentId: AGENT_ID,
             message,
             ...(await getKgModel()),

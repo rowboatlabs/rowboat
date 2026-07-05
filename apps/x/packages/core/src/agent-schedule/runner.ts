@@ -4,7 +4,7 @@ import { IAgentScheduleRepo } from "./repo.js";
 import { IAgentScheduleStateRepo } from "./state-repo.js";
 import { AgentScheduleConfig, AgentScheduleEntry } from "@x/shared/dist/agent-schedule.js";
 import { AgentScheduleState, AgentScheduleStateEntry } from "@x/shared/dist/agent-schedule-state.js";
-import { startHeadlessAgent } from "../agents/headless-app.js";
+import { startWhenPossible } from "../agents/headless-app.js";
 import { withUseCase } from "../analytics/use_case.js";
 import z from "zod";
 
@@ -165,7 +165,7 @@ async function runAgent(
         const startingMessage = entry.startingMessage ?? DEFAULT_STARTING_MESSAGE;
         const handle = await withUseCase(
             { useCase: 'copilot_chat', subUseCase: 'scheduled' },
-            () => startHeadlessAgent({
+            () => startWhenPossible({
                 agentId: agentName,
                 message: startingMessage,
                 signal: AbortSignal.timeout(TIMEOUT_MS),

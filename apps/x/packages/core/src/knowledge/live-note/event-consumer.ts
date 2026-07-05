@@ -10,7 +10,7 @@ async function resolveRoutingModel() {
     const { model: modelId, provider } = await getLiveNoteAgentModel();
     const config = await resolveProviderConfig(provider);
     return {
-        model: createLanguageModel(config, modelId, { priority: 'classifier' }),
+        model: createLanguageModel(config, modelId),
         modelId,
         providerName: provider,
     };
