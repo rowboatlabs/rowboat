@@ -566,6 +566,13 @@ const ipcSchemas = {
     res: z.object({
       success: z.boolean(),
       error: z.string().optional(),
+      // Capability caveats from the local-model probe (tool support, context
+      // window) — the connection still succeeded.
+      warnings: z.array(z.string()).optional(),
+      capabilities: z.object({
+        supportsTools: z.boolean().optional(),
+        maxContextLength: z.number().optional(),
+      }).optional(),
     }),
   },
   'models:listForProvider': {

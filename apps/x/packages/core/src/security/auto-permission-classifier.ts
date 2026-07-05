@@ -1,11 +1,12 @@
-import { generateObject, type ModelMessage } from "ai";
+import type { ModelMessage } from "ai";
 import z from "zod";
 import { ToolPermissionMetadata } from "@x/shared/dist/runs.js";
 import { ToolCallPart } from "@x/shared/dist/message.js";
 import { captureLlmUsage } from "../analytics/usage.js";
 import { withUseCase, type UseCase } from "../analytics/use_case.js";
 import { getAutoPermissionDecisionModel, getDefaultModelAndProvider, resolveProviderConfig } from "../models/defaults.js";
-import { createProvider } from "../models/models.js";
+import { createLanguageModel } from "../models/models.js";
+import { generateObjectSafe } from "../models/structured.js";
 
 const DecisionSchema = z.object({
     decisions: z.array(z.object({
@@ -83,7 +84,7 @@ export async function classifyToolPermissions(input: {
     const modelId = await getAutoPermissionDecisionModel();
     const { provider: providerName } = await getDefaultModelAndProvider();
     const providerConfig = await resolveProviderConfig(providerName);
-    const model = createProvider(providerConfig).languageModel(modelId);
+    const model = createLanguageModel(providerConfig, modelId, { priority: "classifier" });
 
     const result = await withUseCase(
         {
@@ -91,11 +92,12 @@ export async function classifyToolPermissions(input: {
             subUseCase: "auto_permission_classifier",
             ...(input.agentName ? { agentName: input.agentName } : {}),
         },
-        () => generateObject({
+        () => generateObjectSafe({
             model,
             system: SYSTEM_PROMPT,
             prompt: buildPrompt(input),
             schema: DecisionSchema,
+            retry: true,
         }),
     );
 

@@ -93,7 +93,7 @@ async function resolveCodeProject(dirPath: string): Promise<
 import { ensureLoaded as ensureBrowserSkillsLoaded, readSkillContent as readBrowserSkillContent, refreshFromRemote as refreshBrowserSkills } from "../browser-skills/index.js";
 import type { ToolContext } from "./exec-tool.js";
 import { generateText } from "ai";
-import { createProvider } from "../../models/models.js";
+import { createLanguageModel } from "../../models/models.js";
 import { getDefaultModelAndProvider, resolveProviderConfig } from "../../models/defaults.js";
 import { captureLlmUsage } from "../../analytics/usage.js";
 import { getCurrentUseCase, withUseCase } from "../../analytics/use_case.js";
@@ -584,7 +584,8 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
 
                 const { model: modelId, provider: providerName } = await getDefaultModelAndProvider();
                 const providerConfig = await resolveProviderConfig(providerName);
-                const model = createProvider(providerConfig).languageModel(modelId);
+                // Runs as a tool inside a chat turn more often than not.
+                const model = createLanguageModel(providerConfig, modelId, { priority: 'interactive' });
 
                 const userPrompt = prompt || 'Convert this file to well-structured markdown.';
 

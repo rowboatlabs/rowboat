@@ -951,6 +951,11 @@ class TurnAdvance {
                 tools: composed.tools,
                 parameters: composed.parameters,
                 signal: this.signal,
+                // Headless turns (no human waiting) yield the local-model
+                // queue to interactive chat.
+                priority: this.definition.config.humanAvailable
+                    ? "interactive"
+                    : "background",
             })) {
                 switch (event.type) {
                     case "text_delta":

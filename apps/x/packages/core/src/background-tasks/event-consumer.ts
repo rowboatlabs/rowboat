@@ -1,6 +1,6 @@
 import type { EventConsumer, EventConsumerTarget } from '../events/consumer.js';
 import { routeBatch } from '../events/routing.js';
-import { createProvider } from '../models/models.js';
+import { createLanguageModel } from '../models/models.js';
 import {
     getDefaultModelAndProvider,
     getBackgroundTaskAgentModel,
@@ -14,7 +14,7 @@ async function resolveRoutingModel() {
     const { provider } = await getDefaultModelAndProvider();
     const config = await resolveProviderConfig(provider);
     return {
-        model: createProvider(config).languageModel(modelId),
+        model: createLanguageModel(config, modelId, { priority: 'classifier' }),
         modelId,
         providerName: provider,
     };

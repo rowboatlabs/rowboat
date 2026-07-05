@@ -7,7 +7,7 @@ import { runHeadlessAgent } from '../agents/headless-app.js';
 import { getKgModel } from '../models/defaults.js';
 import container from '../di/container.js';
 import type { IModelConfigRepo } from '../models/repo.js';
-import { createProvider } from '../models/models.js';
+import { createLanguageModel } from '../models/models.js';
 import { inlineTask } from '@x/shared';
 import { captureLlmUsage } from '../analytics/usage.js';
 import { withUseCase } from '../analytics/use_case.js';
@@ -613,8 +613,7 @@ export async function processRowboatInstruction(
 export async function classifySchedule(instruction: string): Promise<InlineTaskSchedule | null> {
     const repo = container.resolve<IModelConfigRepo>('modelConfigRepo');
     const config = await repo.getConfig();
-    const provider = createProvider(config.provider);
-    const model = provider.languageModel(config.model);
+    const model = createLanguageModel(config.provider, config.model, { priority: 'classifier' });
 
     const now = new Date();
     const defaultEnd = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);

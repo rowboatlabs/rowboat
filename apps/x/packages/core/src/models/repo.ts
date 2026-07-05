@@ -48,6 +48,10 @@ export class FSModelConfigRepo implements IModelConfigRepo {
             apiKey: config.provider.apiKey,
             baseURL: config.provider.baseURL,
             headers: config.provider.headers,
+            // Preserve a hand-edited contextLength unless the caller sets one.
+            ...(config.provider.contextLength !== undefined
+                ? { contextLength: config.provider.contextLength }
+                : {}),
             model: config.model,
             models: config.models,
             knowledgeGraphModel: config.knowledgeGraphModel,

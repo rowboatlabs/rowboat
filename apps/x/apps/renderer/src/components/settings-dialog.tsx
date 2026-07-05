@@ -528,7 +528,17 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
         setDefaultProvider(provider)
         setTestState({ status: "success" })
         window.dispatchEvent(new Event('models-config-changed'))
-        toast.success("Model configuration saved")
+        // Capability probe caveats (local models): saved, but the user should
+        // know when the model can't do tools or has a too-small context.
+        const warnings: string[] = result.warnings ?? []
+        if (warnings.length > 0) {
+          for (const warning of warnings) {
+            toast.warning(warning, { duration: 12000 })
+          }
+          toast.success("Model configuration saved (with warnings)")
+        } else {
+          toast.success("Model configuration saved")
+        }
       } else {
         setTestState({ status: "error", error: result.error })
         toast.error(result.error || "Connection test failed")

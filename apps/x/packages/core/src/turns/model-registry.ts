@@ -34,6 +34,10 @@ export interface ModelStreamRequest {
     tools: Array<z.infer<typeof ToolDescriptor>>;
     parameters: Record<string, JsonValue>;
     signal: AbortSignal;
+    // Scheduling class for local-model queueing: interactive turns (a human
+    // is watching) preempt queued headless/background work. Defaults to
+    // "interactive" so an unset priority never slows a user down.
+    priority?: "interactive" | "background";
 }
 
 export interface ResolvedModel {

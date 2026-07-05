@@ -5,6 +5,10 @@ export const LlmProvider = z.object({
   apiKey: z.string().optional(),
   baseURL: z.string().optional(),
   headers: z.record(z.string(), z.string()).optional(),
+  // Context window (in tokens) to request from local runtimes. Ollama defaults
+  // to a ~4k window that silently truncates Rowboat's prompts; when unset,
+  // local providers get a larger default (see core/models/local.ts).
+  contextLength: z.number().int().positive().optional(),
 });
 
 export const LlmModelConfig = z.object({
@@ -15,6 +19,7 @@ export const LlmModelConfig = z.object({
     apiKey: z.string().optional(),
     baseURL: z.string().optional(),
     headers: z.record(z.string(), z.string()).optional(),
+    contextLength: z.number().int().positive().optional(),
     model: z.string().optional(),
     models: z.array(z.string()).optional(),
     knowledgeGraphModel: z.string().optional(),

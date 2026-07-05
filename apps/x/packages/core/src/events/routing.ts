@@ -1,6 +1,6 @@
-import { generateObject } from 'ai';
 import type { LanguageModel } from 'ai';
 import { events, PrefixLogger } from '@x/shared';
+import { generateObjectSafe } from '../models/structured.js';
 import type { RowboatEvent } from '@x/shared/dist/events.js';
 import { captureLlmUsage } from '../analytics/usage.js';
 import { withUseCase, type UseCase } from '../analytics/use_case.js';
@@ -89,11 +89,12 @@ export async function routeBatch(
     for (let i = 0; i < targets.length; i += BATCH_SIZE) {
         const batch = targets.slice(i, i + BATCH_SIZE);
         try {
-            const result = await withUseCase({ useCase: opts.useCase, subUseCase: 'routing' }, () => generateObject({
+            const result = await withUseCase({ useCase: opts.useCase, subUseCase: 'routing' }, () => generateObjectSafe({
                 model,
                 system: systemPrompt,
                 prompt: buildPrompt(event, batch, opts.entityPlural),
                 schema: events.Pass1OutputSchema,
+                retry: true,
             }));
             captureLlmUsage({
                 useCase: opts.useCase,

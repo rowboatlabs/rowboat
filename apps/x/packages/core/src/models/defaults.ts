@@ -52,6 +52,7 @@ export async function resolveProviderConfig(name: string): Promise<z.infer<typeo
             apiKey: entry.apiKey,
             baseURL: entry.baseURL,
             headers: entry.headers,
+            contextLength: entry.contextLength,
         });
     }
     if (cfg.provider.flavor === name) {

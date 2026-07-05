@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { generateText } from 'ai';
 import { WorkDir } from '../config/config.js';
-import { createProvider } from '../models/models.js';
+import { createLanguageModel } from '../models/models.js';
 import { getDefaultModelAndProvider, getMeetingNotesModel, resolveProviderConfig } from '../models/defaults.js';
 import { captureLlmUsage } from '../analytics/usage.js';
 import { withUseCase } from '../analytics/use_case.js';
@@ -178,7 +178,7 @@ async function generateBrief(event: CalendarEvent, ctx: Awaited<ReturnType<typeo
     const modelId = await getMeetingNotesModel();
     const { provider: providerName } = await getDefaultModelAndProvider();
     const providerConfig = await resolveProviderConfig(providerName);
-    const model = createProvider(providerConfig).languageModel(modelId);
+    const model = createLanguageModel(providerConfig, modelId, { priority: 'background' });
 
     const result = await withUseCase({ useCase: 'meeting_prep' }, () => generateText({
         model,

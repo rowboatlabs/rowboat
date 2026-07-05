@@ -19,7 +19,7 @@ import { resolveFilePathForPermission } from "../filesystem/files.js";
 import container from "../di/container.js";
 import { notifyIfEnabled } from "../application/notification/notifier.js";
 import { IModelConfigRepo } from "../models/repo.js";
-import { createProvider } from "../models/models.js";
+import { createLanguageModel } from "../models/models.js";
 import { resolveProviderConfig } from "../models/defaults.js";
 import { IAgentsRepo } from "./repo.js";
 import { IMonotonicallyIncreasingIdGenerator } from "../application/lib/id-gen.js";
@@ -1365,8 +1365,8 @@ export async function* streamAgent({
     }
     const modelId = state.runModel;
     const providerConfig = await resolveProviderConfig(state.runProvider);
-    const provider = createProvider(providerConfig);
-    const model = provider.languageModel(modelId);
+    // Legacy runs are user-facing chats: interactive priority on local models.
+    const model = createLanguageModel(providerConfig, modelId, { priority: "interactive" });
     logger.log(`using model: ${modelId} (provider: ${state.runProvider})`);
 
     // Install use-case context for tool-internal LLM calls (e.g. parseFile)

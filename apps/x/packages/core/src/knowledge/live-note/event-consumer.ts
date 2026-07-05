@@ -3,7 +3,7 @@ import { fetchLiveNote } from './fileops.js';
 import { runLiveNoteAgent } from './runner.js';
 import type { EventConsumer, EventConsumerTarget } from '../../events/consumer.js';
 import { routeBatch } from '../../events/routing.js';
-import { createProvider } from '../../models/models.js';
+import { createLanguageModel } from '../../models/models.js';
 import { getDefaultModelAndProvider, getLiveNoteAgentModel, resolveProviderConfig } from '../../models/defaults.js';
 
 async function resolveRoutingModel() {
@@ -11,7 +11,7 @@ async function resolveRoutingModel() {
     const { provider } = await getDefaultModelAndProvider();
     const config = await resolveProviderConfig(provider);
     return {
-        model: createProvider(config).languageModel(modelId),
+        model: createLanguageModel(config, modelId, { priority: 'classifier' }),
         modelId,
         providerName: provider,
     };
