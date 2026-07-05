@@ -33,6 +33,7 @@ import { parse } from "yaml";
 import { captureLlmUsage } from "../analytics/usage.js";
 import { enterUseCase, withUseCase, type UseCase } from "../analytics/use_case.js";
 import { getRaw as getNoteCreationRaw } from "../knowledge/note_creation.js";
+import { getRaw as getNoteCurationRaw } from "../knowledge/note_curation.js";
 import { getRaw as getLabelingAgentRaw } from "../knowledge/labeling_agent.js";
 import { getRaw as getNoteTaggingAgentRaw } from "../knowledge/note_tagging_agent.js";
 import { getRaw as getInlineTaskAgentRaw } from "../knowledge/inline_task_agent.js";
@@ -796,8 +797,8 @@ export async function loadAgent(id: string): Promise<z.infer<typeof Agent>> {
         return buildBackgroundTaskAgent();
     }
 
-    if (id === 'note_creation') {
-        const raw = getNoteCreationRaw();
+    if (id === 'note_creation' || id === 'note_curation') {
+        const raw = id === 'note_curation' ? getNoteCurationRaw() : getNoteCreationRaw();
         let agent: z.infer<typeof Agent> = {
             name: id,
             instructions: raw,

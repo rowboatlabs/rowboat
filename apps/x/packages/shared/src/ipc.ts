@@ -279,6 +279,20 @@ const ipcSchemas = {
       name: z.string().nullable(),
     }),
   },
+  // User explicitly flips a thread's importance verdict. Sticky on the thread
+  // (re-classification never overrides) and recorded as a correction the
+  // importance classifier learns from.
+  'gmail:setImportance': {
+    req: z.object({
+      threadId: z.string().min(1),
+      importance: z.enum(['important', 'other']),
+    }),
+    res: z.object({
+      ok: z.boolean(),
+      previous: z.enum(['important', 'other']).optional(),
+      error: z.string().optional(),
+    }),
+  },
   'gmail:archiveThread': {
     req: z.object({ threadId: z.string().min(1) }),
     res: z.object({ ok: z.boolean(), error: z.string().optional() }),
