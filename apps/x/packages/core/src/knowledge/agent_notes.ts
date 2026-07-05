@@ -256,7 +256,11 @@ async function processAgentNotes(): Promise<void> {
         for (const runFile of runsToProcess) {
             const messages = extractConversationMessages(path.join(RUNS_DIR, runFile));
             if (messages.length === 0) continue;
-            conversationText += `\n--- Conversation ---\n`;
+            // Run id + date let the agent write chat-digest artifacts
+            // (knowledge_sources/chats/<runId>.md) with provenance.
+            const runId = runFile.replace(/\.jsonl$/, '');
+            const dateMatch = runId.match(/^(\d{4}-\d{2}-\d{2})/);
+            conversationText += `\n--- Conversation (runId: ${runId}, date: ${dateMatch ? dateMatch[1] : 'unknown'}) ---\n`;
             for (const msg of messages) {
                 conversationText += `${msg.role}: ${msg.text}\n\n`;
             }

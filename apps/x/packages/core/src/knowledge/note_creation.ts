@@ -238,12 +238,18 @@ file-readText({ path: "{source_file}" })
 - Source file path is under \`knowledge_sources/<provider>/\`
 - Contains issue, PR, task, ticket, comment, status, or project metadata
 
+**Chat digest indicators:**
+- YAML frontmatter has \`source: chat\`
+- Source file path is under \`knowledge_sources/chats/\`
+- Carries a system-stamped CHAT SOURCE banner in the message
+
 **Set processing mode:**
 - \`source_type = "meeting"\` → Can create new notes
 - \`source_type = "email"\` → Can create notes if personalized and relevant
 - \`source_type = "voice_memo"\` → Can create new notes (treat like meetings)
 - \`source_type = "slack"\` → Prefer updating existing project/person/topic notes; create new notes only for clear durable entities
 - \`source_type = "connected_tool"\` → Prefer updating existing project/topic notes; create new notes only for durable projects, organizations, repositories, issues, or initiatives
+- \`source_type = "chat"\` → **STRICTLY UPDATE-ONLY** (see "Chat Digests" below): enrich entities that already have notes; never create any note or suggestion card from a chat digest
 
 ---
 
@@ -304,6 +310,18 @@ Process artifacts from GitHub, Linear, Jira, and similar tools when they carry p
 - Comments that clarify requirements, decisions, blockers, or commitments
 
 Skip routine metadata churn and duplicated notifications unless they change durable knowledge.
+
+## For Chat Digests (source: chat) — STRICTLY UPDATE-ONLY
+
+Chat digests summarize the owner's own copilot conversations (e.g. researching a person before a meeting). The owner's research about an entity that already earned a note belongs ON that note — but chats NEVER create notes.
+
+- Resolve each entity in "## Entities discussed" against the knowledge index. **Only confidently resolved entities with an existing note are touched.** Ambiguous or unresolved → skip that entity silently.
+- For each resolved entity:
+  - Activity line: \`**{session_date}** (chat): Researched {entity} ahead of {context} — {one-line gist}.\`
+  - Findings → dated Key facts **keeping their provenance markers**: \`- ({session_date}, web research) Acme raised a $30M Series B\` or \`- ({session_date}, user said) …\`
+  - **Trust hierarchy:** \`(web research)\` facts NEVER overwrite facts learned from direct interaction (email/meeting) — a conflict is recorded as "(web says X; our correspondence says Y)". \`(user said)\` facts rank above web research but below direct interaction with the entity themself.
+  - Add an Assistant note only for durable assistant-relevant context (e.g. what the owner prepped for).
+- If NO entity resolves to an existing note: reply SKIP. Do not create notes, do not add suggestion cards — node-less research themes are handled elsewhere.
 
 ## For Emails — Read YAML Frontmatter
 
@@ -1048,6 +1066,11 @@ This applies everywhere, including \`## Assistant notes\` lines ("The owner redu
 **2025-01-15** (email): [[People/Sarah Chen]] sent pricing proposal for [[Projects/Acme Integration]]. [View thread](https://mail.google.com/mail/#inbox/18d5a3b2c1e4f567)
 \`\`\`
 
+**For chat digests:** No external link; the session date and gist suffice:
+\`\`\`
+**2026-07-05** (chat): Researched [[People/Sarah Chen]] ahead of Tuesday's meeting — funding, product line, recent talk.
+\`\`\`
+
 **For voice memos:** Include a link to the voice memo file using the Path field:
 \`\`\`
 **2025-01-15** (voice memo): Discussed [[Projects/Acme Integration]] timeline. See [[Voice Memos/2025-01-15/voice-memo-2025-01-15T10-30-00-000Z]]
@@ -1312,6 +1335,7 @@ ${renderNoteTypesBlock()}
 | Email (create label + user replied in thread) | Yes | Yes | Yes |
 | Email (create label, purely inbound — no user reply) | Update-only (no new People/Org notes) | Yes | Yes |
 | Email (only skip labels) | No (SKIP) | No | No |
+| Chat digest (source: chat) | Never | Yes — resolved existing entities only | Yes |
 
 **Email Reply Gate:** New canonical People/Organization notes from an email require the user to have replied at least once in the thread (a \`### From:\` matching \`user.email\` or \`@user.domain\`). Purely inbound threads update existing notes only. Calendar invites for a scheduled meeting are exempt.
 

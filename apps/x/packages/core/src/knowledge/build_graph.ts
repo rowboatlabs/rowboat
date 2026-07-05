@@ -47,6 +47,12 @@ function getEnabledFileSources(): KnowledgeSourceConfig[] {
 // Voice memos are now created directly in knowledge/Voice Memos/<date>/
 const VOICE_MEMOS_KNOWLEDGE_DIR = path.join(NOTES_OUTPUT_DIR, 'Voice Memos');
 
+// Chat digest artifacts, written by the agent-notes pass from copilot
+// conversations (see agent_notes_agent.ts "Chat Digests"). Processed as an
+// UPDATE-ONLY source: chats can enrich entities that already have notes but
+// never create new ones (see chatSourceBanner).
+const CHAT_DIGESTS_DIR = path.join(WorkDir, 'knowledge_sources', 'chats');
+
 /**
  * Check if email frontmatter contains any noise/skip tags. Returns true if the
  * email should be skipped.
@@ -321,6 +327,18 @@ export function emailReplyGateBanner(filePath: string, content: string): string 
 }
 
 /**
+ * Computed banner for chat-digest sources: chats are update-only, enforced the
+ * same way as the email reply gate — a system-stamped instruction the model
+ * cannot re-derive or argue with. Chats never create nodes; they enrich
+ * entities that already earned one.
+ */
+export function chatSourceBanner(filePath: string): string | null {
+    const segments = filePath.split(path.sep);
+    if (!(segments.includes('knowledge_sources') && segments.includes('chats'))) return null;
+    return `> **CHAT SOURCE (computed by the system, authoritative): this digest comes from the owner's copilot conversation — UPDATE-ONLY.** Resolve each entity against the knowledge index. Entities WITH an existing note: append the chat activity, dated findings (keep their provenance markers — "(web research)" facts never overwrite facts learned from direct email/meeting interaction), and assistant notes where useful. Entities WITHOUT an existing note: skip them entirely — no new note of any type, no suggestion card from this file. If no mentioned entity resolves to an existing note, reply SKIP.`;
+}
+
+/**
  * Run note creation agent on a batch of files to extract entities and create/update notes
  */
 async function createNotesFromBatch(
@@ -365,7 +383,7 @@ async function createNotesFromBatch(
         // Pass workspace-relative path so the agent can link back to meeting notes
         const relativePath = path.relative(WorkDir, file.path);
         message += `## Source File ${idx + 1}: ${relativePath}\n\n`;
-        const gateBanner = emailReplyGateBanner(file.path, file.content);
+        const gateBanner = emailReplyGateBanner(file.path, file.content) ?? chatSourceBanner(file.path);
         if (gateBanner) {
             message += gateBanner + `\n\n`;
         }
@@ -739,7 +757,10 @@ export async function processAllSources(): Promise<void> {
     }
 
     const state = loadState();
-    const folderChanges: { source: KnowledgeSourceConfig; sourceDir: string; files: string[] }[] = [];
+    // Only `id` is read after collection (provider gating happens above at
+    // push time), so synthetic sources like chat digests fit without faking a
+    // full KnowledgeSourceConfig.
+    const folderChanges: { source: { id: string }; sourceDir: string; files: string[] }[] = [];
     const countsByFolder: Record<string, number> = {};
     const allFiles: string[] = [];
     const fileSources = getEnabledFileSources();
@@ -785,6 +806,22 @@ export async function processAllSources(): Promise<void> {
             console.error(`[GraphBuilder] Error processing ${source.id}:`, error);
             // Continue with other folders even if one fails
         }
+    }
+
+    // Chat digests — explicit synthetic source (not in the sources repo, like
+    // voice memos). Update-only enforcement happens via chatSourceBanner.
+    try {
+        if (fs.existsSync(CHAT_DIGESTS_DIR)) {
+            const chatFiles = getFilesToProcess(CHAT_DIGESTS_DIR, state);
+            if (chatFiles.length > 0) {
+                console.log(`[GraphBuilder] Found ${chatFiles.length} new chat digest(s)`);
+                folderChanges.push({ source: { id: 'chat_digests' }, sourceDir: CHAT_DIGESTS_DIR, files: chatFiles });
+                countsByFolder['chat_digests'] = chatFiles.length;
+                allFiles.push(...chatFiles);
+            }
+        }
+    } catch (error) {
+        console.error('[GraphBuilder] Error scanning chat digests:', error);
     }
 
     if (allFiles.length > 0) {

@@ -35,7 +35,61 @@ The Agent Notes folder contains markdown files that capture what you've learned 
 You will receive a message containing some combination of:
 1. **Emails sent by the user** — Analyze their writing style and update \`style/email.md\`. Do NOT put style observations in \`user.md\`.
 2. **Inbox entries** — Notes the assistant saved during conversations via save-to-memory. Route each to the appropriate file. General preferences go to \`preferences.md\`. Topic-specific preferences get their own file.
-3. **Copilot conversations** — User and assistant messages from recent chats. Extract lasting facts about the user and append timestamped entries to \`user.md\`.
+3. **Copilot conversations** — User and assistant messages from recent chats. Three extractions per conversation:
+   a. Lasting facts about the user → timestamped entries in \`user.md\` (as before).
+   b. **Chat digest** (see "Chat Digests" below) — when the conversation substantively discusses entities or is a real research session, write a digest artifact so the knowledge graph can enrich EXISTING entity notes. This is how pre-meeting research ends up on the person's note.
+   c. **Research ledger + cards** (see "Research Themes" below) — when the conversation is substantive research on a theme with no entity note, log it and maintain suggestion cards.
+
+## Chat Digests (feeds the knowledge graph — update-only)
+
+For each conversation that clears the bar, write ONE digest file: \`knowledge_sources/chats/<runId>.md\` (runId and date are in the conversation header; use file-writeText; create the directory if needed).
+
+**The bar (skip the digest entirely when none of these hold):**
+- The user researched, planned around, or made decisions about a specific person, organization, project, or topic — the entity was a SUBJECT of the session, not a passing mention.
+- Or the session produced concrete findings/decisions about such an entity.
+Skip: casual Q&A, coding/debugging sessions, one-off tasks (write a story, draft an email), and sessions whose entities are only passing references.
+
+**Digest format:**
+\`\`\`markdown
+---
+source: chat
+run_id: <runId>
+session_date: "<date>"
+---
+# Chat digest: <one-line topic>
+
+## Entities discussed
+- <Name> (<person|organization|project|topic>) — <why they were the subject>
+
+## Findings
+- (web research) <finding the assistant surfaced from the web>
+- (user said) <thing the user stated as fact>
+
+## Decisions / intents
+- <decisions made or stated intents, if any>
+
+## Open questions
+- <what remained unresolved, if any>
+\`\`\`
+
+**Rules:**
+- ≤3 entities per digest; pick the real subjects.
+- **Mark every finding's provenance**: \`(web research)\` for things the assistant found online, \`(user said)\` for the user's own statements. Never mix them up — downstream trust depends on it.
+- Findings are facts stated in the conversation — never your own additions.
+- One digest per conversation, never rewrite an existing digest.
+
+## Research Themes (ledger + suggestion cards)
+
+For conversations that are substantive research on a theme with **no existing entity note** (e.g. "vector database selection" — check nothing obvious matches in \`knowledge/\`):
+
+1. **Ledger**: append one line to \`knowledge/Agent Notes/research-log.md\`:
+   \`- [<date>] <theme> — <one-line state: what was explored, what's open> (run: <runId>)\`
+   Keep the file ≤60 lines; prune the oldest lines when over.
+2. **Promotion to a research note (mechanical rule)**: after appending, count the ledger lines for this theme. If it appears in **≥2 distinct sessions within the last 14 days** (or 1 session where the user stated explicit forward intent — quote it), create or update a living note at \`knowledge/Notes/Research/<Theme>.md\`:
+   - Frontmatter: \`source: chat-research\`, \`last_update: "<date>"\`
+   - Body: a dated running state — what's been explored across sessions, current shortlist/leaning, open questions. Update in place on later sessions (newest state first); never lose earlier dated entries.
+   - Create the \`Notes/Research/\` directory if needed. These are user documents — never delete one; staleness is fine.
+3. Note copy is factual and dated. "Researched X" never becomes "decided X". Time words must be true as of the current timestamp.
 
 ## What Goes Where — Be Strict
 
