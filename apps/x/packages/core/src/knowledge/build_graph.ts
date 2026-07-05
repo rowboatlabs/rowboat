@@ -48,8 +48,14 @@ function getEnabledFileSources(): KnowledgeSourceConfig[] {
 const VOICE_MEMOS_KNOWLEDGE_DIR = path.join(NOTES_OUTPUT_DIR, 'Voice Memos');
 
 /**
- * Check if email frontmatter contains any noise/skip filter tags.
- * Returns true if the email should be skipped.
+ * Check if email frontmatter contains any noise/skip tags. Returns true if the
+ * email should be skipped.
+ *
+ * Noise tags are matched ANYWHERE in the labels block, not just under
+ * `filter:` — the labeling agent sometimes files a noise-class tag under a
+ * different bucket (observed: `candidate` under `relationship:`), and a noise
+ * tag is noise regardless of which key it landed on. Tag names are distinct
+ * from all non-noise tag values, so a match is unambiguous.
  */
 function hasNoiseLabels(content: string): boolean {
     if (!content.startsWith('---')) return false;
@@ -65,25 +71,23 @@ function hasNoiseLabels(content: string): boolean {
             .map(t => t.tag)
     );
 
-    // Match list items under filter: key
-    const filterMatch = frontmatter.match(/filter:\s*\n((?:\s+-\s+.+\n?)*)/);
-    if (filterMatch) {
-        const filterLines = filterMatch[1].match(/^\s+-\s+(.+)$/gm);
-        if (filterLines) {
-            for (const line of filterLines) {
-                const tag = line.replace(/^\s+-\s+/, '').trim().replace(/['"]/g, '');
-                if (noiseTags.has(tag)) return true;
-            }
-        }
+    const values: string[] = [];
+    // List items: "  - tag"
+    for (const m of frontmatter.matchAll(/^\s+-\s+(.+)$/gm)) {
+        values.push(m[1]);
+    }
+    // Inline arrays: "key: [a, b]"
+    for (const m of frontmatter.matchAll(/:\s*\[([^\]]*)\]/g)) {
+        values.push(...m[1].split(','));
+    }
+    // Simple scalars: "key: value"
+    for (const m of frontmatter.matchAll(/^\s*[\w-]+:\s*([^\n[\]{}|>-][^\n]*)$/gm)) {
+        values.push(m[1]);
     }
 
-    // Match inline array like filter: ['cold-outreach'] or filter: [cold-outreach]
-    const inlineMatch = frontmatter.match(/filter:\s*\[([^\]]*)\]/);
-    if (inlineMatch && inlineMatch[1].trim()) {
-        const tags = inlineMatch[1].split(',').map(t => t.trim().replace(/['"]/g, ''));
-        for (const tag of tags) {
-            if (noiseTags.has(tag)) return true;
-        }
+    for (const raw of values) {
+        const tag = raw.trim().replace(/['"]/g, '');
+        if (noiseTags.has(tag)) return true;
     }
 
     return false;
@@ -302,7 +306,15 @@ export function emailReplyGateBanner(filePath: string, content: string): string 
     const teamDomain = domainRaw && !FREE_MAIL_DOMAINS.has(domainRaw) ? '@' + domainRaw : null;
     const froms = [...content.matchAll(/^### From: (.+)$/gm)].map(m => m[1].toLowerCase());
     if (froms.length === 0) return null;
-    const replied = froms.some(f => f.includes(email) || (teamDomain !== null && f.includes(teamDomain)));
+    // Google Groups rewrites external senders to look like the list address:
+    // `'Jane Doe' via Founders <founders@user-domain.com>`. Such a From is an
+    // EXTERNAL person routed through a group on the user's domain — it must
+    // not count as the user's side having replied. Exact user-email matches
+    // are also disqualified by the rewrite marker (the group addr differs).
+    const isGroupRewrite = (f: string) => /\bvia\b[^<]*</.test(f);
+    const replied = froms.some(f =>
+        !isGroupRewrite(f) && (f.includes(email) || (teamDomain !== null && f.includes(teamDomain)))
+    );
     return replied
         ? `> **REPLY-GATE (computed by the system, authoritative): the user HAS sent a message in this thread.** New People/Organization notes are allowed IF the user's reply shows real engagement AND the other gates pass. A decline, brush-off, or unsubscribe-style reply ("not interested", "please remove me", a bare "no thanks") is NOT engagement — treat those threads like purely inbound ones.`
         : `> **REPLY-GATE (computed by the system, authoritative): the user has NOT sent any message in this thread — purely inbound.** You MUST NOT create ANY new note from this file — no People, no Organizations, no Projects, no Topics, no event notes. Not for the sender, and not for anyone or anything mentioned in the content (companies, speakers, events, products). No matter how important it sounds. Allowed: updating notes that already exist, and suggestion cards in suggested-topics.md. Sole exception: a calendar invite for a real 1:1/small-group meeting scheduled with the user by name may create the primary contact's note.`;

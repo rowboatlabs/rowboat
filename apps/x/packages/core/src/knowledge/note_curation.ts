@@ -80,6 +80,7 @@ Look across the full activity history for patterns no single update could see, a
 - **Downgrade unevidenced owner actions.** If the note claims the owner attended/met/agreed/partnered but its own activity shows only inbound mail (no owner reply, no meeting, no accepted RSVP), rewrite to what actually happened: "X invited me to Y" / "X reached out about Z — no interaction from my side yet". Same for relationship fields set from inbound-only threads — clear them.
 
 ## 5. Temporal hygiene
+- **Stale time words**: any "upcoming"/"scheduled for"/"next week"/future-tense phrasing whose date is now past gets rewritten in past tense as of today — "a 1:1 was scheduled for 2026-06-17" (don't claim it happened unless the note shows it did). Relative words become absolute dates.
 - Key facts carry dates: \`- (2026-07-03) Fact\`. Add \`(previously X as of <date>)\` when a fact superseded an older one. Undated facts you can date from activity context — date them; otherwise leave undated rather than guessing.
 - **Open items**: check each against later activity — if a later entry shows it was done, mark \`[x]\` with the date. Items older than 45 days with no reinforcement move to a \`### Dormant\` sub-list under Open items (don't delete; don't leave them polluting the active list).
 - Resolve contradictions newest-wins-with-history; use "(needs clarification)" only for genuine same-time conflicts.
