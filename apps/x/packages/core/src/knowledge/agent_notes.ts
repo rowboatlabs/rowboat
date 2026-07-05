@@ -284,7 +284,7 @@ async function processAgentNotes(): Promise<void> {
         await runHeadlessAgent({
             agentId: AGENT_ID,
             message,
-            model: await getKgModel(),
+            ...(await getKgModel()),
             throwOnError: true,
         });
 

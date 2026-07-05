@@ -7,7 +7,6 @@ import { WorkDir } from '../config/config.js';
 import { createLanguageModel } from '../models/models.js';
 import { generateObjectSafe } from '../models/structured.js';
 import {
-    getDefaultModelAndProvider,
     getKgModel,
     resolveProviderConfig,
 } from '../models/defaults.js';
@@ -246,8 +245,7 @@ export async function classifyThread(
         // (no-ops unless enough new corrections exist).
         await maybeDistillImportanceRules();
 
-        const modelId = await getKgModel();
-        const { provider } = await getDefaultModelAndProvider();
+        const { model: modelId, provider } = await getKgModel();
         const config = await resolveProviderConfig(provider);
         const model = createLanguageModel(config, modelId, { priority: 'background' });
 

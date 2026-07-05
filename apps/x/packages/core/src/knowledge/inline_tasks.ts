@@ -483,7 +483,7 @@ async function processInlineTasks(): Promise<void> {
                 const { summary: result } = await runHeadlessAgent({
                     agentId: INLINE_TASK_AGENT,
                     message,
-                    model: await getKgModel(),
+                    ...(await getKgModel()),
                 });
                 if (result) {
                     if (task.targetId) {
@@ -562,7 +562,7 @@ export async function processRowboatInstruction(
     const { summary: rawResponse } = await runHeadlessAgent({
         agentId: INLINE_TASK_AGENT,
         message,
-        model: await getKgModel(),
+        ...(await getKgModel()),
     });
     if (!rawResponse) {
         return { instruction, schedule: null, scheduleLabel: null, response: null };

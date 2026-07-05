@@ -55,7 +55,7 @@ Process new items and use the user context above to identify yourself when draft
         await runHeadlessAgent({
             agentId: agentName,
             message,
-            model: await getKgModel(),
+            ...(await getKgModel()),
         });
 
         // Update last run time

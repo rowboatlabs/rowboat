@@ -388,7 +388,7 @@ async function createNotesFromBatch(
     const { turnId, state } = await runHeadlessAgent({
         agentId: NOTE_CREATION_AGENT,
         message,
-        model: await getKgModel(),
+        ...(await getKgModel()),
         throwOnError: true,
     });
 
@@ -946,7 +946,7 @@ export async function curateNotes(): Promise<void> {
             await runHeadlessAgent({
                 agentId: CURATION_AGENT,
                 message,
-                model: await getKgModel(),
+                ...(await getKgModel()),
                 throwOnError: true,
             });
             curated++;

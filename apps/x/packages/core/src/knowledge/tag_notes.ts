@@ -100,7 +100,7 @@ async function tagNoteBatch(
     const { turnId, state } = await runHeadlessAgent({
         agentId: NOTE_TAGGING_AGENT,
         message,
-        model: await getKgModel(),
+        ...(await getKgModel()),
         throwOnError: true,
     });
 

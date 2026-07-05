@@ -4,7 +4,7 @@ import { ToolPermissionMetadata } from "@x/shared/dist/runs.js";
 import { ToolCallPart } from "@x/shared/dist/message.js";
 import { captureLlmUsage } from "../analytics/usage.js";
 import { withUseCase, type UseCase } from "../analytics/use_case.js";
-import { getAutoPermissionDecisionModel, getDefaultModelAndProvider, resolveProviderConfig } from "../models/defaults.js";
+import { getAutoPermissionDecisionModel, resolveProviderConfig } from "../models/defaults.js";
 import { createLanguageModel } from "../models/models.js";
 import { generateObjectSafe } from "../models/structured.js";
 
@@ -81,8 +81,7 @@ export async function classifyToolPermissions(input: {
 }): Promise<AutoPermissionDecision[]> {
     if (input.candidates.length === 0) return [];
 
-    const modelId = await getAutoPermissionDecisionModel();
-    const { provider: providerName } = await getDefaultModelAndProvider();
+    const { model: modelId, provider: providerName } = await getAutoPermissionDecisionModel();
     const providerConfig = await resolveProviderConfig(providerName);
     const model = createLanguageModel(providerConfig, modelId, { priority: "classifier" });
 

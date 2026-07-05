@@ -137,7 +137,12 @@ export async function runBackgroundTask(
             }
         }
 
-        const model = task.model || await getBackgroundTaskAgentModel();
+        // task.yaml model/provider win; otherwise the category default
+        // (provider-qualified in hybrid mode). A task model without a
+        // provider keeps the legacy meaning: the app-default provider.
+        const selection = await getBackgroundTaskAgentModel();
+        const model = task.model || selection.model;
+        const provider = task.provider ?? (task.model ? undefined : selection.provider);
         // Establish the use-case context for the whole turn so every tool the
         // agent calls (notably notify-user) reads `background_task_agent` via
         // getCurrentUseCase(); the AsyncLocalStorage context set here flows
@@ -148,7 +153,7 @@ export async function runBackgroundTask(
                 agentId: 'background-task-agent',
                 message: buildMessage(slug, task, trigger, context, codeProject),
                 model,
-                ...(task.provider ? { provider: task.provider } : {}),
+                ...(provider ? { provider } : {}),
                 throwOnError: true,
             }),
         );

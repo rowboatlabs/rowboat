@@ -108,7 +108,12 @@ export async function runLiveNoteAgent(
 
         const bodyBefore = await readNoteBody(filePath);
 
-        const model = live.model ?? await getLiveNoteAgentModel();
+        // Note-frontmatter model/provider win; otherwise the category default
+        // (provider-qualified in hybrid mode). A frontmatter model without a
+        // provider keeps the legacy meaning: the app-default provider.
+        const selection = await getLiveNoteAgentModel();
+        const model = live.model ?? selection.model;
+        const provider = live.provider ?? (live.model ? undefined : selection.provider);
         // The use-case context propagates to every tool the agent calls; the
         // granular trigger doubles as the sub-use-case (manual / cron /
         // window / event) so dashboards can break down what woke the agent.
@@ -118,7 +123,7 @@ export async function runLiveNoteAgent(
                 agentId: 'live-note-agent',
                 message: buildMessage(filePath, live, trigger, context),
                 model,
-                ...(live.provider ? { provider: live.provider } : {}),
+                ...(provider ? { provider } : {}),
                 throwOnError: true,
             }),
         );

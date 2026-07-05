@@ -87,7 +87,7 @@ async function labelEmailBatch(
     const { turnId, state } = await runHeadlessAgent({
         agentId: LABELING_AGENT,
         message,
-        model: await getKgModel(),
+        ...(await getKgModel()),
         throwOnError: true,
     });
 

@@ -2,7 +2,6 @@ import type { EventConsumer, EventConsumerTarget } from '../events/consumer.js';
 import { routeBatch } from '../events/routing.js';
 import { createLanguageModel } from '../models/models.js';
 import {
-    getDefaultModelAndProvider,
     getBackgroundTaskAgentModel,
     resolveProviderConfig,
 } from '../models/defaults.js';
@@ -10,8 +9,7 @@ import { listTasks } from './fileops.js';
 import { runBackgroundTask } from './runner.js';
 
 async function resolveRoutingModel() {
-    const modelId = await getBackgroundTaskAgentModel();
-    const { provider } = await getDefaultModelAndProvider();
+    const { model: modelId, provider } = await getBackgroundTaskAgentModel();
     const config = await resolveProviderConfig(provider);
     return {
         model: createLanguageModel(config, modelId, { priority: 'classifier' }),

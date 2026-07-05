@@ -400,8 +400,10 @@ function ChatInputInner({
     return cleanup
   }, [])
 
-  // Load the list of models the user can choose from.
-  // Signed-in: gateway model list. Signed-out: providers configured in models.json.
+  // Load the list of models the user can choose from. Hybrid mode: signed-in
+  // users get the gateway list AND every BYOK provider configured in
+  // models.json (selecting a BYOK model routes that message through the
+  // user's own key / local server). Signed-out users get BYOK only.
   const loadModelConfig = useCallback(async () => {
     // Concurrent runs race (mount fires one before the sign-in state resolves,
     // which fires another) — only the newest run may write state, else a slow
@@ -415,44 +417,37 @@ function ChatInputInner({
       if (loadModelConfigEpoch.current === epoch) setDefaultModel(null)
     }
     try {
-      if (isRowboatConnected) {
+      const models: ConfiguredModel[] = []
+      const seen = new Set<string>()
+      const push = (provider: string, model: string) => {
+        if (!model) return
+        const key = `${provider}/${model}`
+        if (seen.has(key)) return
+        seen.add(key)
+        models.push({ provider: provider as ProviderName, model })
+      }
+
+      // Full catalog per provider (gateway + cloud). Providers with no
+      // catalog (Ollama, OpenAI-compatible) fall back to the models saved in
+      // config below.
+      const catalog: Record<string, string[]> = {}
+      try {
         const listResult = await window.ipc.invoke('models:list', null)
-        const rowboatProvider = listResult.providers?.find(
-          (p: { id: string }) => p.id === 'rowboat'
-        )
-        const models: ConfiguredModel[] = (rowboatProvider?.models || []).map(
-          (m: { id: string }) => ({ provider: 'rowboat', model: m.id })
-        )
-        if (loadModelConfigEpoch.current !== epoch) return
-        setConfiguredModels(models)
-      } else {
+        for (const p of listResult.providers || []) {
+          catalog[p.id] = (p.models || []).map((m: { id: string }) => m.id)
+        }
+      } catch { /* offline / no catalog — fall back to saved config below */ }
+
+      if (isRowboatConnected) {
+        for (const m of catalog['rowboat'] || []) push('rowboat', m)
+      }
+
+      try {
         const result = await window.ipc.invoke('workspace:readFile', { path: 'config/models.json' })
         const parsed = JSON.parse(result.data)
 
-        // Offer every model the configured key supports — the same full catalog
-        // Settings uses for its dropdowns — so BYOK chat matches the signed-in
-        // gateway picker. The picker is no longer limited to a hand-curated
-        // config.models list. Providers with no catalog (Ollama, OpenAI-compatible)
-        // fall back to the model saved in config.
-        const catalog: Record<string, string[]> = {}
-        try {
-          const listResult = await window.ipc.invoke('models:list', null)
-          for (const p of listResult.providers || []) {
-            catalog[p.id] = (p.models || []).map((m: { id: string }) => m.id)
-          }
-        } catch { /* offline / no catalog — fall back to saved config below */ }
-
-        const models: ConfiguredModel[] = []
-        const seen = new Set<string>()
-        const push = (provider: string, model: string) => {
-          if (!model) return
-          const key = `${provider}/${model}`
-          if (seen.has(key)) return
-          seen.add(key)
-          models.push({ provider: provider as ProviderName, model })
-        }
-
-        // List the default provider first so its default model leads the picker.
+        // List the default provider first so its default model leads the
+        // BYOK section of the picker.
         const defaultFlavor = typeof parsed?.provider?.flavor === 'string' ? parsed.provider.flavor : ''
         const flavors = Object.keys(parsed?.providers || {})
           .sort((a, b) => (a === defaultFlavor ? -1 : b === defaultFlavor ? 1 : 0))
@@ -474,9 +469,21 @@ function ChatInputInner({
             for (const m of saved) push(flavor, m)
           }
         }
-        if (loadModelConfigEpoch.current !== epoch) return
-        setConfiguredModels(models)
-      }
+
+        // The user's explicit default selection leads the whole picker.
+        const sel = parsed?.defaultSelection
+        if (sel && typeof sel.provider === 'string' && typeof sel.model === 'string') {
+          const selKey = `${sel.provider}/${sel.model}`
+          const index = models.findIndex((m) => `${m.provider}/${m.model}` === selKey)
+          if (index > 0) {
+            const [entry] = models.splice(index, 1)
+            models.unshift(entry)
+          }
+        }
+      } catch { /* no BYOK config yet */ }
+
+      if (loadModelConfigEpoch.current !== epoch) return
+      setConfiguredModels(models)
     } catch (err) {
       // No config yet — but surface unexpected failures for diagnosis.
       console.error('[chat-input] failed to load model list', err)
