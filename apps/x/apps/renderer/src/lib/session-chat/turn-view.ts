@@ -200,7 +200,7 @@ function extractAttachments(content: UserContent): MessageAttachment[] | undefin
 }
 
 function toolStatus(tc: ToolCallState): ToolCall['status'] {
-  if (tc.result) return 'completed'
+  if (tc.result) return tc.result.result.isError ? 'error' : 'completed'
   if (tc.permission && !tc.permission.resolved) return 'pending'
   return 'running'
 }

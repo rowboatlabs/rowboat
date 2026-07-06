@@ -868,7 +868,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         }),
         execute: async ({ agent, cwd, prompt }: { agent: 'claude' | 'codex', cwd: string, prompt: string }, ctx?: ToolContext) => {
             if (!ctx) {
-                return { success: false, message: 'code_agent_run requires run context (runId / streaming).' };
+                throw new Error('code_agent_run requires run context (runId / streaming).');
             }
             // The composer chip is the source of truth for the agent. The model's `agent`
             // argument is only a fallback for the ask-human flow (code mode not active, no
@@ -955,10 +955,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                         changedFiles: [...changedFiles],
                     };
                 }
-                return {
-                    success: false,
-                    message: `Coding agent failed: ${error instanceof Error ? error.message : String(error)}`,
-                };
+                throw new Error(`Coding agent failed: ${error instanceof Error ? error.message : String(error)}`);
             } finally {
                 ctx.signal.removeEventListener('abort', onAbort);
             }
