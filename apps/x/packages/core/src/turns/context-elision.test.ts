@@ -4,6 +4,7 @@ import type { TurnContext, TurnEvent } from "@x/shared/dist/turns.js";
 import {
     ElidingContextResolver,
     elideHistoricImages,
+    elideHistoricMiddlePaneContent,
     elideHistoricToolResults,
 } from "./context-elision.js";
 import { TurnRepoContextResolver } from "./context-resolver.js";
@@ -238,10 +239,60 @@ describe("elideHistoricImages", () => {
     });
 });
 
+function noteMessage(content: string) {
+    return {
+        role: "user" as const,
+        content: "make this punchier",
+        userMessageContext: {
+            currentDateTime: "Thursday, July 2, 2026 at 10:00 AM GMT",
+            middlePane: {
+                kind: "note" as const,
+                path: "knowledge/Notes/Draft.md",
+                content,
+            },
+        },
+    };
+}
+
+describe("elideHistoricMiddlePaneContent", () => {
+    it("replaces large note snapshots, keeping kind and path", () => {
+        const [elided] = elideHistoricMiddlePaneContent([
+            noteMessage("n".repeat(600)),
+        ]);
+        if (elided.role !== "user") throw new Error("expected user message");
+        const middlePane = elided.userMessageContext?.middlePane;
+        if (middlePane?.kind !== "note") throw new Error("expected note pane");
+        expect(middlePane.path).toBe("knowledge/Notes/Draft.md");
+        expect(middlePane.content).toContain("omitted from history");
+        expect(middlePane.content).toContain("600");
+        expect(elided.userMessageContext?.currentDateTime).toBeDefined();
+        expect(elided.content).toBe("make this punchier");
+    });
+
+    it("keeps small notes and non-note panes untouched", () => {
+        const small = noteMessage("short todo list");
+        const browser = {
+            role: "user" as const,
+            content: "what is this page?",
+            userMessageContext: {
+                middlePane: {
+                    kind: "browser" as const,
+                    url: "https://example.com",
+                    title: "Example",
+                },
+            },
+        };
+        const plain = user("no context at all");
+        const messages = [small, browser, plain];
+        expect(elideHistoricMiddlePaneContent(messages)).toEqual(messages);
+    });
+});
+
 const POLICY_OFF = {
     toolResults: false,
     toolResultThresholdChars: 100,
     images: false,
+    middlePaneContent: false,
 };
 
 describe("ElidingContextResolver", () => {
@@ -326,5 +377,24 @@ describe("ElidingContextResolver", () => {
         }
         expect(input.content.some((p) => p.type === "image")).toBe(false);
         expect(JSON.stringify(input.content)).toContain("1 webcam frame");
+    });
+
+    it("elides middle-pane note snapshots in the resolved prefix when enabled", async () => {
+        const repo = new InMemoryTurnRepo();
+        const log = toolTurnLog(T1, [], "small").map((event) =>
+            event.type === "turn_created"
+                ? { ...event, input: noteMessage("n".repeat(600)) }
+                : event,
+        );
+        repo.seed(log);
+        const resolved = await resolver(repo, {
+            ...POLICY_OFF,
+            middlePaneContent: true,
+        }).resolve({ previousTurnId: T1 });
+        const input = resolved[0];
+        if (input.role !== "user") throw new Error("expected user message");
+        const middlePane = input.userMessageContext?.middlePane;
+        if (middlePane?.kind !== "note") throw new Error("expected note pane");
+        expect(middlePane.content).toContain("omitted from history");
     });
 });

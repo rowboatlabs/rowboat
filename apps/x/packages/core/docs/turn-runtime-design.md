@@ -393,18 +393,21 @@ Rules:
 The app wires the resolver through a decorator (`context-elision.ts`) that
 applies transmit-time elision to the materialized prefix: tool results from
 prior turns above a size threshold are replaced with a short placeholder
-telling the model to re-run the tool if it needs the output, and inline
-image parts from prior turns (video-mode webcam and screen-share frames) are
+telling the model to re-run the tool if it needs the output; inline image
+parts from prior turns (video-mode webcam and screen-share frames) are
 replaced with a text part recording how many frames of each kind were
-dropped. The durable log is untouched; only the transmitted bytes change.
+dropped; and middle-pane note snapshots on prior-turn user messages keep
+their kind and path but have their content replaced with a placeholder
+pointing at the still-readable file. The durable log is untouched; only the
+transmitted bytes change.
 Elision is a pure function of each message, so resolved prefixes stay
 byte-stable across calls (provider prefix caches keep working), and the
 current turn's own messages never pass through the resolver, so in-flight
 tool results and just-captured frames are always sent verbatim. Policy lives
 in `config/context.json` (`elideHistoricToolResults`, default true;
 `elideHistoricToolResultsThresholdChars`, default 10000;
-`elideHistoricImages`, default true). The inspect CLI composes through the
-same decorated resolver.
+`elideHistoricImages`, default true; `elideHistoricMiddlePaneContent`,
+default true). The inspect CLI composes through the same decorated resolver.
 
 ### 6.7 Agent snapshot inheritance
 
