@@ -56,7 +56,12 @@ export function PublishDialog({ folder, appName, onClose, onPublished }: {
             setError(p.status === 'expired' ? 'The code expired — start again.' : 'Authorization was denied.')
             setPhase('auth')
           }
-        })()
+        })().catch((e: unknown) => {
+          // A hard failure (bad client config, network) must surface, not spin.
+          if (pollTimer.current) window.clearInterval(pollTimer.current)
+          setError(e instanceof Error ? e.message : String(e))
+          setPhase('auth')
+        })
       }, 5000)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))

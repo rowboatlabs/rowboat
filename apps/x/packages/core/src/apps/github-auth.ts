@@ -35,6 +35,8 @@ type PendingFlow = {
     deviceCode: string;
     intervalMs: number;
     expiresAt: number;
+    /** Token already issued but the identity fetch failed — retry that step. */
+    issuedToken?: string;
 };
 let pending: PendingFlow | null = null;
 
@@ -53,10 +55,11 @@ async function writeAuth(auth: StoredAuth): Promise<void> {
 
 /** Start the device flow. Returns the code the user enters on github.com. */
 export async function startDeviceFlow(): Promise<{ userCode: string; verificationUri: string; expiresIn: number }> {
+    // GitHub's OAuth endpoints take form-encoded params (JSON is not reliable).
     const res = await fetch('https://github.com/login/device/code', {
         method: 'POST',
-        headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
-        body: JSON.stringify({ client_id: GITHUB_OAUTH_CLIENT_ID, scope: 'public_repo' }),
+        headers: { 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ client_id: GITHUB_OAUTH_CLIENT_ID, scope: 'public_repo' }).toString(),
     });
     if (!res.ok) throw new Error(`device_code_failed: HTTP ${res.status}`);
     const body = await res.json() as {
@@ -85,44 +88,57 @@ export async function pollDeviceFlow(): Promise<PollResult> {
         return { status: 'expired' };
     }
 
-    const res = await fetch('https://github.com/login/oauth/access_token', {
-        method: 'POST',
-        headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            client_id: GITHUB_OAUTH_CLIENT_ID,
-            device_code: pending.deviceCode,
-            grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
-        }),
-    });
-    const body = await res.json() as { access_token?: string; error?: string };
+    let accessToken = pending.issuedToken;
+    if (!accessToken) {
+        const res = await fetch('https://github.com/login/oauth/access_token', {
+            method: 'POST',
+            headers: { 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+                client_id: GITHUB_OAUTH_CLIENT_ID,
+                device_code: pending.deviceCode,
+                grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
+            }).toString(),
+        });
+        const body = await res.json() as { access_token?: string; error?: string; error_description?: string };
 
-    if (body.error === 'authorization_pending') return { status: 'pending' };
-    if (body.error === 'slow_down') {
-        pending.intervalMs += 5000;
-        return { status: 'pending' };
+        if (body.error === 'authorization_pending') return { status: 'pending' };
+        if (body.error === 'slow_down') {
+            pending.intervalMs += 5000;
+            return { status: 'pending' };
+        }
+        if (body.error === 'expired_token' || body.error === 'incorrect_device_code') {
+            pending = null;
+            return { status: 'expired' };
+        }
+        if (body.error === 'access_denied') {
+            pending = null;
+            return { status: 'denied' };
+        }
+        if (body.error) {
+            // Unknown/config errors (unsupported_grant_type, device_flow_disabled…)
+            // must FAIL loudly, not spin as pending forever.
+            pending = null;
+            throw new Error(`device_flow_error: ${body.error}${body.error_description ? ` — ${body.error_description}` : ''}`);
+        }
+        if (!body.access_token) return { status: 'pending' };
+        accessToken = body.access_token;
+        // The device code is consumed once the token is issued — remember the
+        // token so a transient identity failure below can retry next poll.
+        pending.issuedToken = accessToken;
     }
-    if (body.error === 'expired_token') {
-        pending = null;
-        return { status: 'expired' };
-    }
-    if (body.error === 'access_denied') {
-        pending = null;
-        return { status: 'denied' };
-    }
-    if (!body.access_token) return { status: 'pending' };
 
     // Identity: cache login alongside the token.
     const userRes = await fetch('https://api.github.com/user', {
-        headers: { 'Authorization': `Bearer ${body.access_token}`, 'Accept': 'application/vnd.github+json' },
+        headers: { 'Authorization': `Bearer ${accessToken}`, 'Accept': 'application/vnd.github+json' },
     });
-    if (!userRes.ok) throw new Error(`identity_failed: HTTP ${userRes.status}`);
+    if (!userRes.ok) return { status: 'pending' }; // retry identity next poll
     const user = await userRes.json() as { login: string };
 
     const auth: StoredAuth = { login: user.login, createdAt: new Date().toISOString() };
     if (cipher?.isAvailable()) {
-        auth.tokenEncrypted = cipher.encrypt(body.access_token);
+        auth.tokenEncrypted = cipher.encrypt(accessToken);
     } else {
-        auth.token = body.access_token;
+        auth.token = accessToken;
         auth.plaintext = true;
     }
     await writeAuth(auth);
