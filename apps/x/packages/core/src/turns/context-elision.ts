@@ -12,29 +12,41 @@ import type { IContextResolver } from "./context-resolver.js";
 import { TurnRepoContextResolver } from "./context-resolver.js";
 import type { ITurnRepo } from "./repo.js";
 
-// Transmit-time elision of historic tool results (the cross-turn prefix
-// only — the current turn's own messages never pass through the resolver, so
-// in-flight tool results are always sent verbatim). Large tool outputs from
-// earlier turns (skill loads, file reads, HTTP fetches) dominate resent
-// context; the model rarely needs them verbatim and can re-run the tool when
-// it does. Elision is a pure function of each message's content, so resolved
-// prefixes stay byte-stable across calls and turns (provider prefix caches
-// keep working), and the durable JSONL log is untouched — only the
-// transmitted bytes change.
+// Transmit-time elision of historic context (the cross-turn prefix only —
+// the current turn's own messages never pass through the resolver, so
+// in-flight tool results and just-captured frames are always sent verbatim).
+//
+// Two policies, both on by default:
+//   - Tool results: large tool outputs from earlier turns (skill loads, file
+//     reads, HTTP fetches) dominate resent context; the model rarely needs
+//     them verbatim and can re-run the tool when it does.
+//   - Inline images: video-mode webcam and screen-share frames matter for
+//     the response they were captured for; afterwards the assistant's own
+//     text carries the takeaway, and fresh frames arrive with every new call
+//     message. Unlike tool results they cannot be re-fetched, so the
+//     placeholder only records what was there.
+//
+// Elision is a pure function of each message's content, so resolved prefixes
+// stay byte-stable across calls and turns (provider prefix caches keep
+// working), and the durable JSONL log is untouched — only the transmitted
+// bytes change.
 
-export interface ToolResultElisionPolicy {
-    enabled: boolean;
-    thresholdChars: number;
+export interface ElisionPolicy {
+    toolResults: boolean;
+    toolResultThresholdChars: number;
+    images: boolean;
 }
 
-export const DEFAULT_ELISION_POLICY: ToolResultElisionPolicy = {
-    enabled: true,
-    thresholdChars: 10_000,
+export const DEFAULT_ELISION_POLICY: ElisionPolicy = {
+    toolResults: true,
+    toolResultThresholdChars: 10_000,
+    images: true,
 };
 
 const ContextConfig = z.object({
     elideHistoricToolResults: z.boolean().optional(),
     elideHistoricToolResultsThresholdChars: z.number().int().min(0).optional(),
+    elideHistoricImages: z.boolean().optional(),
 });
 
 const CONTEXT_CONFIG_PATH = path.join(WorkDir, "config", "context.json");
@@ -42,7 +54,7 @@ const CONTEXT_CONFIG_PATH = path.join(WorkDir, "config", "context.json");
 // Read the elision policy from config/context.json, falling back to defaults
 // for missing keys or an unreadable file. Read per resolve so a config edit
 // applies to the next turn without a restart.
-export function loadElisionPolicy(): ToolResultElisionPolicy {
+export function loadElisionPolicy(): ElisionPolicy {
     try {
         if (!fs.existsSync(CONTEXT_CONFIG_PATH)) {
             return DEFAULT_ELISION_POLICY;
@@ -50,12 +62,14 @@ export function loadElisionPolicy(): ToolResultElisionPolicy {
         const raw = fs.readFileSync(CONTEXT_CONFIG_PATH, "utf-8");
         const parsed = ContextConfig.parse(JSON.parse(raw));
         return {
-            enabled:
+            toolResults:
                 parsed.elideHistoricToolResults ??
-                DEFAULT_ELISION_POLICY.enabled,
-            thresholdChars:
+                DEFAULT_ELISION_POLICY.toolResults,
+            toolResultThresholdChars:
                 parsed.elideHistoricToolResultsThresholdChars ??
-                DEFAULT_ELISION_POLICY.thresholdChars,
+                DEFAULT_ELISION_POLICY.toolResultThresholdChars,
+            images:
+                parsed.elideHistoricImages ?? DEFAULT_ELISION_POLICY.images,
         };
     } catch {
         return DEFAULT_ELISION_POLICY;
@@ -80,18 +94,48 @@ export function elideHistoricToolResults(
     });
 }
 
+export function elideHistoricImages(
+    messages: Array<z.infer<typeof ConversationMessage>>,
+): Array<z.infer<typeof ConversationMessage>> {
+    return messages.map((message) => {
+        if (message.role !== "user" || typeof message.content === "string") {
+            return message;
+        }
+        const images = message.content.filter((part) => part.type === "image");
+        if (images.length === 0) {
+            return message;
+        }
+        const camera = images.filter((part) => part.source !== "screen").length;
+        const screen = images.length - camera;
+        const kinds = [
+            ...(camera > 0 ? [`${camera} webcam frame${camera === 1 ? "" : "s"}`] : []),
+            ...(screen > 0 ? [`${screen} screen-share frame${screen === 1 ? "" : "s"}`] : []),
+        ].join(" and ");
+        return {
+            ...message,
+            content: [
+                ...message.content.filter((part) => part.type !== "image"),
+                {
+                    type: "text" as const,
+                    text: `[Omitted from history to save context: ${kinds} captured while this message was composed. The assistant saw them when responding to this message.]`,
+                },
+            ],
+        };
+    });
+}
+
 // IContextResolver decorator: applies the elision policy to the materialized
 // cross-turn prefix. Agent snapshot resolution is delegated untouched.
 export class ElidingContextResolver implements IContextResolver {
     private readonly inner: IContextResolver;
-    private readonly loadPolicy: () => ToolResultElisionPolicy;
+    private readonly loadPolicy: () => ElisionPolicy;
 
     constructor({
         inner,
         loadPolicy,
     }: {
         inner: IContextResolver;
-        loadPolicy?: () => ToolResultElisionPolicy;
+        loadPolicy?: () => ElisionPolicy;
     }) {
         this.inner = inner;
         this.loadPolicy = loadPolicy ?? loadElisionPolicy;
@@ -100,12 +144,18 @@ export class ElidingContextResolver implements IContextResolver {
     async resolve(
         context: z.infer<typeof TurnContext>,
     ): Promise<Array<z.infer<typeof ConversationMessage>>> {
-        const prefix = await this.inner.resolve(context);
+        let prefix = await this.inner.resolve(context);
         const policy = this.loadPolicy();
-        if (!policy.enabled) {
-            return prefix;
+        if (policy.toolResults) {
+            prefix = elideHistoricToolResults(
+                prefix,
+                policy.toolResultThresholdChars,
+            );
         }
-        return elideHistoricToolResults(prefix, policy.thresholdChars);
+        if (policy.images) {
+            prefix = elideHistoricImages(prefix);
+        }
+        return prefix;
     }
 
     resolveAgent(
