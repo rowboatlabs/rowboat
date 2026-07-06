@@ -25,6 +25,11 @@ import type { ITurnRepo } from "./repo.js";
 //     text carries the takeaway, and fresh frames arrive with every new call
 //     message. Unlike tool results they cannot be re-fetched, so the
 //     placeholder only records what was there.
+//   - Middle-pane note content: every user message sent while a note is
+//     open carries a full snapshot of that note in userMessageContext. Only
+//     the newest snapshot matters (the system prompt already tells the model
+//     later middle-pane context overrides earlier), and the current file is
+//     always re-readable at the recorded path.
 //
 // Elision is a pure function of each message's content, so resolved prefixes
 // stay byte-stable across calls and turns (provider prefix caches keep
@@ -35,18 +40,25 @@ export interface ElisionPolicy {
     toolResults: boolean;
     toolResultThresholdChars: number;
     images: boolean;
+    middlePaneContent: boolean;
 }
 
 export const DEFAULT_ELISION_POLICY: ElisionPolicy = {
     toolResults: true,
     toolResultThresholdChars: 10_000,
     images: true,
+    middlePaneContent: true,
 };
+
+// Notes smaller than this stay verbatim in history: below the floor the
+// placeholder saves nothing and a short note may carry useful context.
+const MIDDLE_PANE_CONTENT_FLOOR_CHARS = 500;
 
 const ContextConfig = z.object({
     elideHistoricToolResults: z.boolean().optional(),
     elideHistoricToolResultsThresholdChars: z.number().int().min(0).optional(),
     elideHistoricImages: z.boolean().optional(),
+    elideHistoricMiddlePaneContent: z.boolean().optional(),
 });
 
 const CONTEXT_CONFIG_PATH = path.join(WorkDir, "config", "context.json");
@@ -70,6 +82,9 @@ export function loadElisionPolicy(): ElisionPolicy {
                 DEFAULT_ELISION_POLICY.toolResultThresholdChars,
             images:
                 parsed.elideHistoricImages ?? DEFAULT_ELISION_POLICY.images,
+            middlePaneContent:
+                parsed.elideHistoricMiddlePaneContent ??
+                DEFAULT_ELISION_POLICY.middlePaneContent,
         };
     } catch {
         return DEFAULT_ELISION_POLICY;
@@ -124,6 +139,34 @@ export function elideHistoricImages(
     });
 }
 
+export function elideHistoricMiddlePaneContent(
+    messages: Array<z.infer<typeof ConversationMessage>>,
+): Array<z.infer<typeof ConversationMessage>> {
+    return messages.map((message) => {
+        if (message.role !== "user") {
+            return message;
+        }
+        const middlePane = message.userMessageContext?.middlePane;
+        if (
+            !middlePane ||
+            middlePane.kind !== "note" ||
+            middlePane.content.length <= MIDDLE_PANE_CONTENT_FLOOR_CHARS
+        ) {
+            return message;
+        }
+        return {
+            ...message,
+            userMessageContext: {
+                ...message.userMessageContext,
+                middlePane: {
+                    ...middlePane,
+                    content: `[Note content (${middlePane.content.length} characters) omitted from history to save context. This snapshot is stale; read the file at the path above if its content is needed now.]`,
+                },
+            },
+        };
+    });
+}
+
 // IContextResolver decorator: applies the elision policy to the materialized
 // cross-turn prefix. Agent snapshot resolution is delegated untouched.
 export class ElidingContextResolver implements IContextResolver {
@@ -154,6 +197,9 @@ export class ElidingContextResolver implements IContextResolver {
         }
         if (policy.images) {
             prefix = elideHistoricImages(prefix);
+        }
+        if (policy.middlePaneContent) {
+            prefix = elideHistoricMiddlePaneContent(prefix);
         }
         return prefix;
     }
