@@ -66,6 +66,7 @@ import * as appsIndexer from '@x/core/dist/apps/indexer.js';
 import * as appsServer from '@x/core/dist/apps/server.js';
 import * as appsAgents from '@x/core/dist/apps/agents.js';
 import { capture } from '@x/core/dist/analytics/posthog.js';
+import * as githubAuth from '@x/core/dist/apps/github-auth.js';
 import { consumePendingDeepLink } from './deeplink.js';
 import { qualifyAndDisconnectComposioGoogle } from '@x/core/dist/migrations/composio-google-migration.js';
 import { IAgentScheduleRepo } from '@x/core/dist/agent-schedule/repo.js';
@@ -1596,6 +1597,23 @@ export function setupIpcHandlers() {
     },
     'apps:setTheme': async (_event, args) => {
       appsServer.setAppsTheme(args.theme);
+      return { ok: true as const };
+    },
+    // GitHub auth (device flow) — publishing only
+    'githubAuth:start': async () => {
+      const result = await githubAuth.startDeviceFlow();
+      // Surface the code and open GitHub's verification page externally (§10).
+      void shell.openExternal(result.verificationUri);
+      return result;
+    },
+    'githubAuth:poll': async () => {
+      return githubAuth.pollDeviceFlow();
+    },
+    'githubAuth:status': async () => {
+      return githubAuth.getAuthStatus();
+    },
+    'githubAuth:signOut': async () => {
+      await githubAuth.clearAuth();
       return { ok: true as const };
     },
     // Agent schedule handlers

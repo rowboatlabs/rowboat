@@ -1,4 +1,4 @@
-import { app, BrowserWindow, desktopCapturer, protocol, net, shell, session, type Session } from "electron";
+import { app, BrowserWindow, desktopCapturer, protocol, net, shell, session, safeStorage, type Session } from "electron";
 import path from "node:path";
 import {
   setupIpcHandlers,
@@ -38,6 +38,7 @@ import { init as initBackgroundTaskScheduler } from "@x/core/dist/background-tas
 import { backgroundTaskEventConsumer } from "@x/core/dist/background-tasks/event-consumer.js";
 import { init as initAppsServer, shutdown as shutdownAppsServer } from "@x/core/dist/apps/server.js";
 import { registerAppsHostApi } from "@x/core/dist/apps/host-api.js";
+import { setTokenCipher as setGithubTokenCipher } from "@x/core/dist/apps/github-auth.js";
 import { shutdown as shutdownAnalytics } from "@x/core/dist/analytics/posthog.js";
 import { identifyIfSignedIn } from "@x/core/dist/analytics/identify.js";
 import { migrateRuns } from "@x/core/dist/migrations/runs/migrate.js";
@@ -505,6 +506,14 @@ app.whenReady().then(async () => {
   // start the Rowboat Apps server (per-app origins on 127.0.0.1:3210) with the
   // full Host API (tools/fetch/llm/copilot behind the capability gate)
   registerAppsHostApi();
+
+  // GitHub publish token at rest: encrypt via the OS keychain when available
+  // (core stays electron-free; the cipher is injected here).
+  setGithubTokenCipher({
+    isAvailable: () => safeStorage.isEncryptionAvailable(),
+    encrypt: (plain) => safeStorage.encryptString(plain).toString('base64'),
+    decrypt: (encrypted) => safeStorage.decryptString(Buffer.from(encrypted, 'base64')),
+  });
   initAppsServer().catch((error) => {
     console.error('[Apps] Failed to start:', error);
   });

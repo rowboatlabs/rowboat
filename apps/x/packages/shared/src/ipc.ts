@@ -1256,6 +1256,26 @@ const ipcSchemas = {
     req: z.object({ theme: z.enum(['light', 'dark']) }),
     res: z.object({ ok: z.literal(true) }),
   },
+  // GitHub auth (device flow) — required only for publishing apps (spec §10).
+  'githubAuth:start': {
+    req: z.object({}),
+    res: z.object({ userCode: z.string(), verificationUri: z.string(), expiresIn: z.number() }),
+  },
+  'githubAuth:poll': {
+    req: z.object({}),
+    res: z.object({
+      status: z.enum(['pending', 'authorized', 'expired', 'denied']),
+      login: z.string().optional(),
+    }),
+  },
+  'githubAuth:status': {
+    req: z.object({}),
+    res: z.object({ signedIn: z.boolean(), login: z.string().optional() }),
+  },
+  'githubAuth:signOut': {
+    req: z.object({}),
+    res: z.object({ ok: z.literal(true) }),
+  },
   'composio:didConnect': {
     req: z.object({
       toolkitSlug: z.string(),

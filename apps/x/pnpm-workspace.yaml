@@ -13,6 +13,8 @@ allowBuilds:
   node-pty: true
   protobufjs: true
 
+blockExoticSubdeps: false
+
 overrides:
   vscode-jsonrpc: 8.2.0
 
