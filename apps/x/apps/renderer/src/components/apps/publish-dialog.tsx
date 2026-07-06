@@ -62,7 +62,9 @@ export function PublishDialog({ folder, appName, onClose, onPublished }: {
           setError(e instanceof Error ? e.message : String(e))
           setPhase('auth')
         })
-      }, 5000)
+        // Heartbeat only — core paces the actual GitHub requests to the
+        // flow's required interval (and skips the request when it's too soon).
+      }, 2000)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }

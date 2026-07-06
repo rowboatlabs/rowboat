@@ -35,6 +35,8 @@ type PendingFlow = {
     deviceCode: string;
     intervalMs: number;
     expiresAt: number;
+    /** Last time we actually hit GitHub's token endpoint (pacing). */
+    lastTokenPollAt?: number;
     /** Token already issued but the identity fetch failed — retry that step. */
     issuedToken?: string;
     identityAttempts?: number;
@@ -71,7 +73,10 @@ export async function startDeviceFlow(): Promise<{ userCode: string; verificatio
     };
     pending = {
         deviceCode: body.device_code,
-        intervalMs: (body.interval || 5) * 1000,
+        // +1s safety margin: GitHub measures arrival spacing, and a request
+        // that lands even slightly early gets `slow_down`, which RAISES the
+        // required interval for the rest of the flow.
+        intervalMs: ((body.interval || 5) + 1) * 1000,
         expiresAt: Date.now() + body.expires_in * 1000,
     };
     return { userCode: body.user_code, verificationUri: body.verification_uri, expiresIn: body.expires_in };
@@ -93,6 +98,18 @@ export async function pollDeviceFlow(): Promise<PollResult> {
 
     let accessToken = pending.issuedToken;
     if (!accessToken) {
+        // Pacing lives HERE, not in the renderer: the renderer's timer is just
+        // a heartbeat. GitHub rate-limits the token endpoint per device code —
+        // polling faster than the flow's interval returns `slow_down` and
+        // permanently raises the required interval, and a caller that keeps
+        // its own fixed cadence then gets `slow_down` on EVERY poll (looks
+        // "pending" forever, even after the user authorized). Skip the request
+        // entirely until the current interval has elapsed.
+        const now = Date.now();
+        if (pending.lastTokenPollAt !== undefined && now - pending.lastTokenPollAt < pending.intervalMs) {
+            return { status: 'pending' };
+        }
+        pending.lastTokenPollAt = now;
         const res = await fetch('https://github.com/login/oauth/access_token', {
             method: 'POST',
             headers: { ...GH_HEADERS, 'Content-Type': 'application/x-www-form-urlencoded' },
