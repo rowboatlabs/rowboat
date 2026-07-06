@@ -32,6 +32,8 @@ export const StartEvent = BaseRunEvent.extend({
         "meeting_note",
         "knowledge_sync",
         "code_session",
+        "app_llm_generate",
+        "app_copilot_run",
     ]).optional(),
     subUseCase: z.string().optional(),
 });
@@ -202,6 +204,8 @@ export const UseCase = z.enum([
     "meeting_note",
     "knowledge_sync",
     "code_session",
+    "app_llm_generate",
+    "app_copilot_run",
 ]);
 
 export const Run = z.object({

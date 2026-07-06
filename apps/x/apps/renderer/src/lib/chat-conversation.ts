@@ -242,6 +242,7 @@ export const getAppActionCardData = (tool: ToolCall): AppActionCardData | null =
     switch (action) {
       case 'open-note': return { action, label: `Opening ${(input.path as string || '').split('/').pop()?.replace(/\.md$/, '') || 'note'}...` }
       case 'open-view': return { action, label: `Opening ${appViewLabel(input.view)}...` }
+      case 'open-app': return { action, label: `Opening ${input.appId || 'app'}...` }
       case 'read-view': return { action, label: `Reading ${appViewLabel(input.view)}...` }
       case 'open-item': return { action, label: 'Opening...' }
       case 'update-base-view': return { action, label: 'Updating view...' }
@@ -259,6 +260,8 @@ export const getAppActionCardData = (tool: ToolCall): AppActionCardData | null =
     }
     case 'open-view':
       return { action: 'open-view', label: `Opened ${appViewLabel(result.view)}` }
+    case 'open-app':
+      return { action: 'open-app', label: `Opened ${result.appName || result.appId || 'app'}` }
     case 'read-view': {
       const counted =
         (result.threads as unknown[] | undefined)?.length ??

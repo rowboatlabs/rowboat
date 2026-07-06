@@ -3,6 +3,7 @@ packages:
   - packages/*
 
 allowBuilds:
+  baileys: set this to true or false
   core-js: true
   electron: true
   electron-winstaller: true

@@ -18,6 +18,7 @@ import { RequestedAgent, type TurnEvent } from './turns.js';
 import type { SessionBusEvent, SessionIndexEntry, SessionState } from './sessions.js';
 import { RowboatApiConfig } from './rowboat-account.js';
 import { ZListToolkitsResponse } from './composio.js';
+import { AppSummarySchema } from './rowboat-app.js';
 import { BrowserStateSchema, HttpAuthRequestSchema } from './browser-control.js';
 import { BillingInfoSchema } from './billing.js';
 import { EmailBlockSchema, GmailThreadSchema } from './blocks.js';
@@ -1226,6 +1227,35 @@ const ipcSchemas = {
       shouldShow: z.boolean(),
     }),
   },
+  // Rowboat Apps (spec §13) — M1 local channels.
+  'apps:list': {
+    req: z.object({}),
+    res: z.object({
+      serverRunning: z.boolean(),
+      serverError: z.string().optional(),
+      apps: z.array(AppSummarySchema),
+    }),
+  },
+  'apps:get': {
+    req: z.object({ folder: z.string() }),
+    res: z.object({
+      app: AppSummarySchema,
+      readme: z.string().optional(),
+      rollbackAvailable: z.boolean(),
+    }),
+  },
+  'apps:create': {
+    req: z.object({ folder: z.string(), name: z.string(), description: z.string() }),
+    res: z.object({ app: AppSummarySchema }),
+  },
+  'apps:delete': {
+    req: z.object({ folder: z.string() }),
+    res: z.object({ ok: z.literal(true) }),
+  },
+  'apps:setTheme': {
+    req: z.object({ theme: z.enum(['light', 'dark']) }),
+    res: z.object({ ok: z.literal(true) }),
+  },
   'composio:didConnect': {
     req: z.object({
       toolkitSlug: z.string(),
@@ -1238,6 +1268,34 @@ const ipcSchemas = {
   'composio:list-toolkits': {
     req: z.object({}),
     res: ZListToolkitsResponse,
+  },
+  // Mini Apps: execute a Composio tool by slug (scoped to a connected toolkit).
+  'composio:execute-tool': {
+    req: z.object({
+      toolkitSlug: z.string(),
+      toolSlug: z.string(),
+      arguments: z.record(z.string(), z.unknown()).optional(),
+    }),
+    res: z.object({
+      successful: z.boolean(),
+      data: z.unknown().optional(),
+      error: z.string().optional(),
+    }),
+  },
+  // Mini Apps: search Composio tools within a toolkit (returns slugs + schemas).
+  'composio:search-tools': {
+    req: z.object({
+      toolkitSlug: z.string(),
+      query: z.string(),
+    }),
+    res: z.object({
+      tools: z.array(z.object({
+        slug: z.string(),
+        name: z.string(),
+        description: z.string().optional(),
+      })),
+      error: z.string().optional(),
+    }),
   },
   // Agent schedule channels
   'agent-schedule:getConfig': {

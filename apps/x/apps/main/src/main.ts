@@ -36,7 +36,8 @@ import { init as initEventProcessor, registerConsumer } from "@x/core/dist/event
 import { liveNoteEventConsumer } from "@x/core/dist/knowledge/live-note/event-consumer.js";
 import { init as initBackgroundTaskScheduler } from "@x/core/dist/background-tasks/scheduler.js";
 import { backgroundTaskEventConsumer } from "@x/core/dist/background-tasks/event-consumer.js";
-import { init as initLocalSites, shutdown as shutdownLocalSites } from "@x/core/dist/local-sites/server.js";
+import { init as initAppsServer, shutdown as shutdownAppsServer } from "@x/core/dist/apps/server.js";
+import { registerAppsHostApi } from "@x/core/dist/apps/host-api.js";
 import { shutdown as shutdownAnalytics } from "@x/core/dist/analytics/posthog.js";
 import { identifyIfSignedIn } from "@x/core/dist/analytics/identify.js";
 import { migrateRuns } from "@x/core/dist/migrations/runs/migrate.js";
@@ -501,9 +502,11 @@ app.whenReady().then(async () => {
   // start chrome extension sync server
   initChromeSync();
 
-  // start local sites server for iframe dashboards and other mini apps
-  initLocalSites().catch((error) => {
-    console.error('[LocalSites] Failed to start:', error);
+  // start the Rowboat Apps server (per-app origins on 127.0.0.1:3210) with the
+  // full Host API (tools/fetch/llm/copilot behind the capability gate)
+  registerAppsHostApi();
+  initAppsServer().catch((error) => {
+    console.error('[Apps] Failed to start:', error);
   });
 
   app.on("activate", () => {
@@ -532,8 +535,8 @@ app.on("before-quit", () => {
   }
   // Kill embedded terminal shells.
   disposeAllTerminals();
-  shutdownLocalSites().catch((error) => {
-    console.error('[LocalSites] Failed to shut down cleanly:', error);
+  shutdownAppsServer().catch((error) => {
+    console.error('[Apps] Failed to shut down cleanly:', error);
   });
   shutdownAnalytics().catch((error) => {
     console.error('[Analytics] Failed to flush on quit:', error);

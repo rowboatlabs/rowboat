@@ -62,6 +62,10 @@ import { syncSlackKnowledgeSources, triggerSync as triggerSlackKnowledgeSync, ge
 import { isOnboardingComplete, markOnboardingComplete } from '@x/core/dist/config/note_creation_config.js';
 import { loadNotificationSettings, saveNotificationSettings } from '@x/core/dist/config/notification_config.js';
 import * as composioHandler from './composio-handler.js';
+import * as appsIndexer from '@x/core/dist/apps/indexer.js';
+import * as appsServer from '@x/core/dist/apps/server.js';
+import * as appsAgents from '@x/core/dist/apps/agents.js';
+import { capture } from '@x/core/dist/analytics/posthog.js';
 import { consumePendingDeepLink } from './deeplink.js';
 import { qualifyAndDisconnectComposioGoogle } from '@x/core/dist/migrations/composio-google-migration.js';
 import { IAgentScheduleRepo } from '@x/core/dist/agent-schedule/repo.js';
@@ -1544,8 +1548,55 @@ export function setupIpcHandlers() {
     'composio:list-toolkits': async () => {
       return composioHandler.listToolkits();
     },
+    'composio:execute-tool': async (_event, args) => {
+      return composioHandler.executeTool(args.toolkitSlug, args.toolSlug, args.arguments);
+    },
+    'composio:search-tools': async (_event, args) => {
+      return composioHandler.searchToolsInToolkit(args.toolkitSlug, args.query);
+    },
     'migration:check-composio-google': async () => {
       return qualifyAndDisconnectComposioGoogle();
+    },
+    // Rowboat Apps handlers (spec §13)
+    'apps:list': async () => {
+      const status = appsServer.getServerStatus();
+      const apps = await appsIndexer.listApps();
+      // Keep bundled agents materialized (idempotent; disabled by default).
+      for (const app of apps) {
+        if (app.agentSlugs.length) await appsAgents.syncAppAgents(app);
+      }
+      return {
+        serverRunning: status.running,
+        ...(status.error ? { serverError: status.error } : {}),
+        apps,
+      };
+    },
+    'apps:get': async (_event, args) => {
+      const app = await appsIndexer.getApp(args.folder);
+      if (!app) throw new Error(`no such app: ${args.folder}`);
+      const readme = await appsIndexer.readAppReadme(args.folder);
+      return {
+        app,
+        ...(readme ? { readme } : {}),
+        rollbackAvailable: await appsIndexer.rollbackAvailable(args.folder),
+      };
+    },
+    'apps:create': async (_event, args) => {
+      const app = await appsIndexer.createApp(args);
+      capture('app_created', { folder: app.folder });
+      return { app };
+    },
+    'apps:delete': async (_event, args) => {
+      await appsIndexer.deleteApp(args.folder);
+      // Remove app-owned bg-tasks too — orphaned app--<folder>-- tasks firing
+      // against a deleted app was a painful prototype failure mode.
+      await appsAgents.deleteAppAgents(args.folder);
+      capture('app_deleted', { folder: args.folder });
+      return { ok: true as const };
+    },
+    'apps:setTheme': async (_event, args) => {
+      appsServer.setAppsTheme(args.theme);
+      return { ok: true as const };
     },
     // Agent schedule handlers
     'agent-schedule:getConfig': async () => {
