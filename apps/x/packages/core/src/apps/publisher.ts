@@ -260,6 +260,9 @@ export async function publishApp(
         await writePublishRecord(folder, record);
         onProgress(step);
     };
+    // Resume: re-report steps completed by a prior attempt so the UI shows
+    // them as done instead of leaving stale spinners.
+    for (const step of completed) onProgress(step as PublishStep);
 
     // 1. packaged
     const outDir = path.join(WorkDir, 'tmp', `app-publish-${name}`);
