@@ -19,7 +19,7 @@ import { CompletionStep } from "./steps/completion-step"
 
 interface OnboardingModalProps {
   open: boolean
-  onComplete: () => void
+  onComplete: (opts?: { startTour?: boolean }) => void
 }
 
 export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {

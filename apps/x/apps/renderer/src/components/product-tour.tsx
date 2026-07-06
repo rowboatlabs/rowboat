@@ -14,6 +14,7 @@ import tourClipMeetings from '@/assets/tour/meetings.mp3'
 import tourClipCode from '@/assets/tour/code.mp3'
 import tourClipKnowledge from '@/assets/tour/knowledge.mp3'
 import tourClipAgents from '@/assets/tour/agents.mp3'
+import tourClipApps from '@/assets/tour/apps.mp3'
 import tourClipWorkspaces from '@/assets/tour/workspaces.mp3'
 import tourClipChats from '@/assets/tour/chats.mp3'
 import tourClipComposer from '@/assets/tour/composer.mp3'
@@ -26,6 +27,7 @@ export type TourNavTarget =
   | 'code'
   | 'knowledge'
   | 'agents'
+  | 'apps'
   | 'workspaces'
 
 type TourStep = {
@@ -103,6 +105,13 @@ const TOUR_STEPS: TourStep[] = [
     text: 'Background agents work on schedules — they keep your Brain fresh and take care of recurring tasks while you row elsewhere.',
   },
   {
+    id: 'apps',
+    targetId: 'nav-apps',
+    navigate: 'apps',
+    title: 'Apps',
+    text: 'Apps are mini-apps you build right here in Rowboat — they get the same tools and integrations I do, and you can share them with other people. Just ask for one in chat.',
+  },
+  {
     id: 'workspaces',
     targetId: 'nav-workspaces',
     navigate: 'workspaces',
@@ -141,6 +150,7 @@ const TOUR_CLIPS: Record<string, string> = {
   code: tourClipCode,
   knowledge: tourClipKnowledge,
   agents: tourClipAgents,
+  apps: tourClipApps,
   workspaces: tourClipWorkspaces,
   chats: tourClipChats,
   composer: tourClipComposer,

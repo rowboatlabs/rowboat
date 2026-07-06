@@ -5252,14 +5252,18 @@ function App() {
     checkOnboarding()
   }, [])
 
-  // Handler for onboarding completion
-  const handleOnboardingComplete = useCallback(async () => {
+  // Handler for onboarding completion. When the user accepts the tour offer
+  // on the final step, hand off to the mascot tour once the modal's exit
+  // animation has cleared.
+  const handleOnboardingComplete = useCallback(async (opts?: { startTour?: boolean }) => {
     try {
       await window.ipc.invoke('onboarding:markComplete', null)
-      setShowOnboarding(false)
     } catch (err) {
       console.error('Failed to mark onboarding complete:', err)
-      setShowOnboarding(false)
+    }
+    setShowOnboarding(false)
+    if (opts?.startTour) {
+      window.setTimeout(() => setTourActive(true), 400)
     }
   }, [])
 
@@ -5475,11 +5479,14 @@ function App() {
       case 'agents':
         openBgTasksView()
         break
+      case 'apps':
+        openAppsView()
+        break
       case 'workspaces':
         knowledgeActions.openWorkspaceAt()
         break
     }
-  }, [navigateToView, openEmailView, openMeetingsView, openCodeView, knowledgeActions, openBgTasksView])
+  }, [navigateToView, openEmailView, openMeetingsView, openCodeView, knowledgeActions, openBgTasksView, openAppsView])
 
   // Handler for when a voice note is created/updated
   const handleVoiceNoteCreated = useCallback(async (notePath: string) => {

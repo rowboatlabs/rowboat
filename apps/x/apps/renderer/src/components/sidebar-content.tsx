@@ -913,6 +913,7 @@ export function SidebarContentPanel({
               </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
+                  data-tour-id="nav-apps"
                   isActive={activeNav === 'apps'}
                   onClick={onOpenApps}
                 >
