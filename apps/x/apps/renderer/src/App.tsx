@@ -78,6 +78,7 @@ import { Button } from "@/components/ui/button"
 import { Toaster } from "@/components/ui/sonner"
 import { BillingErrorDialog } from "@/components/billing-error-dialog"
 import { matchBillingError, type BillingErrorMatch } from "@/lib/billing-error"
+import { dispatchCreditExhausted, dispatchCreditReplenished } from "@/lib/credit-status"
 import { ensureMarkdownExtension, normalizeWikiPath, splitWikiFragment, stripKnowledgePrefix, toKnowledgePath, wikiLabel } from '@/lib/wiki-links'
 import { splitFrontmatter, joinFrontmatter } from '@/lib/frontmatter'
 import { extractConferenceLink } from '@/lib/calendar-event'
@@ -941,6 +942,7 @@ function App() {
         lastHandledBillingErrorIdRef.current = item.id
         setBillingErrorMatch(match)
         setBillingErrorOpen(true)
+        if (match.kind === 'out_of_credits') dispatchCreditExhausted()
       }
       return
     }
@@ -2544,6 +2546,7 @@ function App() {
             const nextUsage = normalizeUsage(llmEvent.usage)
             if (nextUsage) {
               setModelUsage(nextUsage)
+              dispatchCreditReplenished()
             }
           }
         }
