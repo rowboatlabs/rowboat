@@ -67,6 +67,11 @@ import * as appsServer from '@x/core/dist/apps/server.js';
 import * as appsAgents from '@x/core/dist/apps/agents.js';
 import { capture } from '@x/core/dist/analytics/posthog.js';
 import * as githubAuth from '@x/core/dist/apps/github-auth.js';
+import * as appsInstaller from '@x/core/dist/apps/installer.js';
+import { registryClient } from '@x/core/dist/apps/registry.js';
+
+// D18 install previews awaiting confirmation, keyed by app name.
+const appInstallPreviews = new Map<string, Awaited<ReturnType<typeof appsInstaller.previewInstall>>>();
 import { consumePendingDeepLink } from './deeplink.js';
 import { qualifyAndDisconnectComposioGoogle } from '@x/core/dist/migrations/composio-google-migration.js';
 import { IAgentScheduleRepo } from '@x/core/dist/agent-schedule/repo.js';
@@ -1600,6 +1605,74 @@ export function setupIpcHandlers() {
       return { ok: true as const };
     },
     // GitHub auth (device flow) — publishing only
+    // Catalog + install/update (spec §12–13)
+    'apps:catalogIndex': async (_event, args) => {
+      return registryClient.refreshIndex(args.force);
+    },
+    'apps:catalogSearch': async (_event, args) => {
+      return { records: await registryClient.search(args.query) };
+    },
+    'apps:catalogDetail': async (_event, args) => {
+      const record = await registryClient.resolve(args.name);
+      if (!record) throw new Error(`no such app in the catalog: ${args.name}`);
+      let manifest;
+      try { manifest = await registryClient.latestManifest(record); } catch { /* best effort */ }
+      let readme: string | undefined;
+      try {
+        const res = await fetch(`https://raw.githubusercontent.com/${record.repo}/HEAD/README.md`);
+        if (res.ok) readme = await res.text();
+      } catch { /* best effort */ }
+      const installed = (await appsIndexer.listApps()).find((a) => a.install?.name === args.name);
+      return {
+        record,
+        ...(manifest ? { manifest } : {}),
+        ...(readme ? { readme } : {}),
+        ...(installed ? { installedFolder: installed.folder } : {}),
+      };
+    },
+    'apps:install': async (_event, args) => {
+      const record = await registryClient.resolve(args.name);
+      if (!record) throw new Error(`no such app in the catalog: ${args.name}`);
+      if (!args.confirmed) {
+        const preview = await appsInstaller.previewInstall(record);
+        appInstallPreviews.set(args.name, preview);
+        return preview;
+      }
+      // D18: the confirmed phase checks the bundle against what was previewed.
+      const preview = appInstallPreviews.get(args.name) ?? await appsInstaller.previewInstall(record);
+      const result = await appsInstaller.installFromRegistry(record, preview);
+      appInstallPreviews.delete(args.name);
+      capture('app_installed', { name: args.name });
+      return result;
+    },
+    'apps:installFromUrl': async (_event, args) => {
+      if (!args.confirmed) {
+        return appsInstaller.previewUrlInstall(args.url);
+      }
+      const result = await appsInstaller.confirmUrlInstall(args.url);
+      capture('app_installed', { name: result.app.manifest?.name ?? result.app.folder });
+      return result;
+    },
+    'apps:uninstall': async (_event, args) => {
+      await appsInstaller.uninstallApp(args.folder);
+      capture('app_uninstalled', { folder: args.folder });
+      return { ok: true as const };
+    },
+    'apps:checkUpdate': async (_event, args) => {
+      return appsInstaller.checkUpdate(args.folder);
+    },
+    'apps:update': async (_event, args) => {
+      const before = (await appsIndexer.getApp(args.folder))?.manifest?.version;
+      const app = await appsInstaller.updateApp(args.folder, {
+        confirmOverwriteModified: args.confirmOverwriteModified,
+        confirmNewCapabilities: args.confirmNewCapabilities,
+      });
+      capture('app_updated', { from: before, to: app.manifest?.version });
+      return { app };
+    },
+    'apps:rollback': async (_event, args) => {
+      return { app: await appsInstaller.rollbackApp(args.folder) };
+    },
     'githubAuth:start': async () => {
       const result = await githubAuth.startDeviceFlow();
       // Surface the code and open GitHub's verification page externally (§10).
