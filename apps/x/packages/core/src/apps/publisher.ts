@@ -165,6 +165,23 @@ async function pushSource(token: string, login: string, repoName: string, folder
     const dir = appDir(folder);
     const files = await collectSourceFiles(dir);
 
+    // The Git Data API (blobs/trees/commits) answers 409 "Git Repository is
+    // empty" on a repo with no commits — it cannot bootstrap an empty repo.
+    // Ensure main exists first via the Contents API, then chain onto it.
+    let parents: string[] = [];
+    try {
+        const ref = await gh<{ object: { sha: string } }>(token, 'GET', `/repos/${login}/${repoName}/git/ref/heads/main`);
+        parents = [ref.object.sha];
+    } catch {
+        await gh(token, 'PUT', `/repos/${login}/${repoName}/contents/README.md`, {
+            message: 'bootstrap',
+            content: Buffer.from(generatedReadme(manifest)).toString('base64'),
+            branch: 'main',
+        });
+        const ref = await gh<{ object: { sha: string } }>(token, 'GET', `/repos/${login}/${repoName}/git/ref/heads/main`);
+        parents = [ref.object.sha];
+    }
+
     type TreeEntry = { path: string; mode: '100644'; type: 'blob'; sha: string };
     const tree: TreeEntry[] = [];
     for (const rel of files) {
@@ -189,24 +206,13 @@ async function pushSource(token: string, login: string, repoName: string, folder
 
     const treeRes = await gh<{ sha: string }>(token, 'POST', `/repos/${login}/${repoName}/git/trees`, { tree });
 
-    // Parent-less commit for an empty repo; otherwise chain onto main.
-    let parents: string[] = [];
-    try {
-        const ref = await gh<{ object: { sha: string } }>(token, 'GET', `/repos/${login}/${repoName}/git/ref/heads/main`);
-        parents = [ref.object.sha];
-    } catch { /* empty repo */ }
-
     const commit = await gh<{ sha: string }>(token, 'POST', `/repos/${login}/${repoName}/git/commits`, {
         message: `Publish ${manifest.name} v${version}`,
         tree: treeRes.sha,
         parents,
     });
 
-    if (parents.length) {
-        await gh(token, 'PATCH', `/repos/${login}/${repoName}/git/refs/heads/main`, { sha: commit.sha, force: false });
-    } else {
-        await gh(token, 'POST', `/repos/${login}/${repoName}/git/refs`, { ref: 'refs/heads/main', sha: commit.sha });
-    }
+    await gh(token, 'PATCH', `/repos/${login}/${repoName}/git/refs/heads/main`, { sha: commit.sha, force: false });
 }
 
 async function uploadAsset(token: string, uploadUrlBase: string, name: string, data: Buffer, contentType: string): Promise<void> {
