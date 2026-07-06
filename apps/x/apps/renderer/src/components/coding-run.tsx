@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   AlertCircle,
   CheckCircle2,
@@ -19,6 +19,7 @@ import type { CodeRunEvent, PermissionAsk, PermissionDecision } from '@x/shared/
 import { cn } from '@/lib/utils'
 import { Tool, ToolContent, ToolHeader } from '@/components/ai-elements/tool'
 import { getToolErrorText, toToolState, type ToolCall } from '@/lib/chat-conversation'
+import { clearCodeRunBuffer, useCodeRunFeed } from '@/lib/code-run-feed'
 
 // ── Timeline reduction ──────────────────────────────────────────────
 // The raw ACP stream is a flat list of events; collapse it into ordered rows,
@@ -283,12 +284,22 @@ export function CodingRunBlock({
     (item.input as { agent?: string } | undefined)?.agent
   const title = AGENT_LABEL[agent ?? ''] ?? 'Coding agent'
   const error = getToolErrorText(item)
+  // Timeline source: the durable record (item.codeRunEvents — the settle-time
+  // batch, or the legacy path's inline accumulation) wins; while it's absent
+  // the live CodeRunFeed buffer streams the run in real time.
+  const liveEvents = useCodeRunFeed(item.id)
+  const durableEvents = item.codeRunEvents
+  const events = durableEvents?.length ? durableEvents : liveEvents
+  // Once the durable batch has landed the buffer is redundant — drop it.
+  useEffect(() => {
+    if (durableEvents?.length) clearCodeRunBuffer(item.id)
+  }, [durableEvents?.length, item.id])
   return (
     <>
       <Tool open={open} onOpenChange={onOpenChange}>
         <ToolHeader title={title} type="tool-code_agent_run" state={toToolState(item.status)} />
         <ToolContent>
-          <CodingRunTimeline events={item.codeRunEvents ?? []} error={error} />
+          <CodingRunTimeline events={events} error={error} />
         </ToolContent>
       </Tool>
       {item.pendingCodePermission && (

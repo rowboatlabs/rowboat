@@ -3,6 +3,7 @@ import path from "node:path";
 import {
   setupIpcHandlers,
   startRunsWatcher, startSessionsWatcher, markSessionsIndexReady,
+  startCodeRunFeedWatcher,
   startChannelsWatcher,
   startCodeSessionStatusWatcher,
   startServicesWatcher,
@@ -422,6 +423,7 @@ app.whenReady().then(async () => {
     markSessionsIndexReady();
   }
   startSessionsWatcher();
+  startCodeRunFeedWatcher();
 
   // Mobile channels (WhatsApp/Telegram bridge): needs the session index, so
   // start after initialize(). Failures must never block boot.

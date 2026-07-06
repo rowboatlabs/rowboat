@@ -20,7 +20,8 @@ import { BackgroundTaskSchema, TriggersSchema } from "@x/shared/dist/background-
 import type { CodeModeManager } from "../../code-mode/acp/manager.js";
 import type { CodePermissionRegistry } from "../../code-mode/acp/permission-registry.js";
 import { ICodeModeConfigRepo } from "../../code-mode/repo.js";
-import type { ApprovalPolicy } from "@x/shared/dist/code-mode.js";
+import type { ApprovalPolicy, CodeRunEvent as CodeRunEventType } from "@x/shared/dist/code-mode.js";
+import type { CodeRunFeed } from "../../code-mode/feed.js";
 import type { ICodeProjectsRepo } from "../../code-mode/projects/repo.js";
 import * as gitService from "../../code-mode/git/service.js";
 import { listImportantThreads, searchThreads } from "../../knowledge/sync_gmail.js";
@@ -66,6 +67,27 @@ function expandHome(p: string): string {
     if (t === '~') return os.homedir();
     if (t.startsWith('~/') || t.startsWith(`~${path.sep}`)) return path.join(os.homedir(), t.slice(2));
     return t;
+}
+
+// Shrink a code-run timeline for durable storage: consecutive same-role message
+// chunks merge into one event. Display-lossless — the timeline renderer
+// concatenates consecutive messages anyway (CodingRunTimeline) — and typically
+// collapses the ~90% of a run's events that are per-token text deltas.
+// Everything else (tool calls/updates, plans, permissions) is kept verbatim in
+// order: updates are id-keyed transitions and must not be merged.
+export function coalesceCodeRunEvents(events: CodeRunEventType[]): CodeRunEventType[] {
+    const out: CodeRunEventType[] = [];
+    for (const event of events) {
+        const last = out[out.length - 1];
+        if (
+            event.type === 'message' && last?.type === 'message' && last.role === event.role
+        ) {
+            out[out.length - 1] = { ...last, text: last.text + event.text };
+        } else {
+            out.push(event);
+        }
+    }
+    return out;
 }
 
 async function resolveCodeProject(dirPath: string): Promise<
@@ -876,8 +898,19 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
             // chip change. Honor the chip so switching it deterministically switches agents.
             const effectiveAgent = ctx.codeMode ?? agent;
             // Code-section sessions pin the working directory — never trust the model's
-            // cwd argument over the session's.
-            const effectiveCwd = ctx.codeCwd ?? cwd;
+            // cwd argument over the session's. Expand `~` and resolve to an absolute path:
+            // the engine is spawned with this as the child's cwd, and `child_process.spawn`
+            // does NO shell tilde expansion.
+            const effectiveCwd = path.resolve(expandHome(ctx.codeCwd ?? cwd));
+            // Fail loudly if the directory is missing. Otherwise the spawn below fails with
+            // Node's misleading "spawn <command> ENOENT" (it blames the executable, not the
+            // bad cwd), which reads as "the coding engine isn't installed" — see the enriched
+            // message the model surfaces. A clear error lets the model/user fix the path.
+            try {
+                if (!(await fs.stat(effectiveCwd)).isDirectory()) throw new Error('not a directory');
+            } catch {
+                throw new Error(`code_agent_run: working directory does not exist: ${effectiveCwd}`);
+            }
             const manager = container.resolve<CodeModeManager>('codeModeManager');
             const registry = container.resolve<CodePermissionRegistry>('codePermissionRegistry');
 
@@ -905,6 +938,10 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
 
             let finalText = '';
             const changedFiles = new Set<string>();
+            // The full ordered timeline, published ONCE as a durable batch when the
+            // run settles (see finally). The per-event copies below are ephemeral.
+            const collected: CodeRunEventType[] = [];
+            const feed = container.resolve<CodeRunFeed>('codeRunFeed');
             try {
                 const result = await manager.runPrompt({
                     runId: ctx.runId,
@@ -916,6 +953,11 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                     onEvent: (event) => {
                         if (event.type === 'message' && event.role === 'agent') finalText += event.text;
                         if (event.type === 'tool_call_update') for (const f of event.diffs) changedFiles.add(f);
+                        collected.push(event);
+                        // Live rendering, two transports: the CodeRunFeed side-channel
+                        // (turns-runtime chats — the runtime never sees this traffic)
+                        // and the legacy runs bus (code-section tabs). Both ephemeral.
+                        feed.broadcast({ toolCallId: ctx.toolCallId, event });
                         void ctx.publish({
                             runId: ctx.runId,
                             type: 'code-run-event',
@@ -958,6 +1000,23 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 throw new Error(`Coding agent failed: ${error instanceof Error ? error.message : String(error)}`);
             } finally {
                 ctx.signal.removeEventListener('abort', onAbort);
+                // Durable record for replay-on-reload — one event with the whole
+                // (coalesced) timeline, on every settle path including errors and
+                // cancellation, so partial runs keep their history too.
+                if (collected.length > 0) {
+                    await ctx.publish({
+                        runId: ctx.runId,
+                        type: 'code-run-events-batch',
+                        toolCallId: ctx.toolCallId,
+                        events: coalesceCodeRunEvents(collected),
+                        subflow: [],
+                    }).catch((e: unknown) => {
+                        // History is best-effort (rethrowing here would mask the run's
+                        // real outcome) — but a lost timeline must leave a trail, since
+                        // this batch is the only durable record of the run's activity.
+                        console.warn(`[code_agent_run] failed to persist code-run timeline: ${e instanceof Error ? e.message : String(e)}`);
+                    });
+                }
             }
         },
     },

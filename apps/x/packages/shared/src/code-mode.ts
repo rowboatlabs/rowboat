@@ -73,3 +73,11 @@ export const RunPromptResult = z.object({
     sessionId: z.string(),
 });
 export type RunPromptResult = z.infer<typeof RunPromptResult>;
+
+// One item on the ephemeral CodeRunFeed (`codeRun:events` broadcast): a live
+// code-run event tagged with the tool call it belongs to. Fire-and-forget —
+// the durable record is the code-run-events-batch written when the run settles.
+export type CodeRunFeedEvent = {
+    toolCallId: string;
+    event: CodeRunEvent;
+};

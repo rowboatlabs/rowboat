@@ -275,8 +275,11 @@ export class AcpClient {
     // Point the open session at a specific model. The adapter resolves aliases
     // ("opus"/"sonnet"/…) to concrete ids. Throws if the model is unknown; the
     // caller applies this best-effort so a bad value never blocks a turn.
+    // ACP 1.x folded model selection into the generic config-option system (the
+    // 'model' category), so this goes through setSessionConfigOption just like
+    // effort does — matching the id extractModelOptions reads.
     async setModel(sessionId: string, modelId: string): Promise<void> {
-        await this.conn().unstable_setSessionModel({ sessionId, modelId });
+        await this.conn().setSessionConfigOption({ sessionId, configId: 'model', value: modelId });
     }
 
     // Set the reasoning-effort level via the agent's "effort" config option.
