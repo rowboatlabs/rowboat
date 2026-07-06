@@ -3,6 +3,7 @@ import type { z } from "zod";
 import type { TurnContext, TurnEvent } from "@x/shared/dist/turns.js";
 import {
     ElidingContextResolver,
+    elideHistoricImages,
     elideHistoricToolResults,
 } from "./context-elision.js";
 import { TurnRepoContextResolver } from "./context-resolver.js";
@@ -150,6 +151,16 @@ function toolTurnLog(
     ];
 }
 
+function frame(source: "camera" | "screen") {
+    return {
+        type: "image" as const,
+        data: "aGVsbG8=".repeat(50),
+        mediaType: "image/jpeg",
+        source,
+        capturedAt: "2026-07-02T10:00:00Z",
+    };
+}
+
 const T1 = "2026-07-02T10-00-00Z-0000001-000";
 
 describe("elideHistoricToolResults", () => {
@@ -191,10 +202,56 @@ describe("elideHistoricToolResults", () => {
     });
 });
 
+describe("elideHistoricImages", () => {
+    it("replaces image parts with a labeled placeholder, keeping other parts", () => {
+        const message = {
+            role: "user" as const,
+            content: [
+                { type: "text" as const, text: "how do I look?" },
+                frame("camera"),
+                frame("camera"),
+                frame("screen"),
+            ],
+        };
+        const [elided] = elideHistoricImages([message]);
+        if (typeof elided.content === "string" || elided.role !== "user") {
+            throw new Error("expected user message with parts");
+        }
+        expect(elided.content.filter((p) => p.type === "image")).toHaveLength(0);
+        expect(elided.content[0]).toEqual({ type: "text", text: "how do I look?" });
+        const placeholder = elided.content[elided.content.length - 1];
+        if (placeholder.type !== "text") throw new Error("expected text placeholder");
+        expect(placeholder.text).toContain("2 webcam frames");
+        expect(placeholder.text).toContain("1 screen-share frame");
+    });
+
+    it("leaves string-content and image-free user messages untouched", () => {
+        const messages = [
+            user("plain"),
+            {
+                role: "user" as const,
+                content: [{ type: "text" as const, text: "no images" }],
+            },
+            assistant("a"),
+        ];
+        expect(elideHistoricImages(messages)).toEqual(messages);
+    });
+});
+
+const POLICY_OFF = {
+    toolResults: false,
+    toolResultThresholdChars: 100,
+    images: false,
+};
+
 describe("ElidingContextResolver", () => {
     function resolver(
         repo: InMemoryTurnRepo,
-        policy: { enabled: boolean; thresholdChars: number },
+        policy: {
+            toolResults: boolean;
+            toolResultThresholdChars: number;
+            images: boolean;
+        },
     ) {
         return new ElidingContextResolver({
             inner: new TurnRepoContextResolver({ turnRepo: repo }),
@@ -206,8 +263,8 @@ describe("ElidingContextResolver", () => {
         const repo = new InMemoryTurnRepo();
         repo.seed(toolTurnLog(T1, [], "x".repeat(200)));
         const resolved = await resolver(repo, {
-            enabled: true,
-            thresholdChars: 100,
+            ...POLICY_OFF,
+            toolResults: true,
         }).resolve({ previousTurnId: T1 });
         const tool = resolved.find((m) => m.role === "tool");
         expect(tool?.content).toContain("elided");
@@ -224,10 +281,9 @@ describe("ElidingContextResolver", () => {
         const repo = new InMemoryTurnRepo();
         const output = "x".repeat(200);
         repo.seed(toolTurnLog(T1, [], output));
-        const resolved = await resolver(repo, {
-            enabled: false,
-            thresholdChars: 100,
-        }).resolve({ previousTurnId: T1 });
+        const resolved = await resolver(repo, POLICY_OFF).resolve({
+            previousTurnId: T1,
+        });
         const tool = resolved.find((m) => m.role === "tool");
         expect(tool?.content).toBe(output);
     });
@@ -236,10 +292,39 @@ describe("ElidingContextResolver", () => {
         const repo = new InMemoryTurnRepo();
         repo.seed(toolTurnLog(T1, [], "small"));
         const resolved = await resolver(repo, {
-            enabled: true,
-            thresholdChars: 100,
+            ...POLICY_OFF,
+            toolResults: true,
         }).resolve({ previousTurnId: T1 });
         const tool = resolved.find((m) => m.role === "tool");
         expect(tool?.content).toBe("small");
+    });
+
+    it("elides images in the resolved prefix when enabled", async () => {
+        const repo = new InMemoryTurnRepo();
+        const log = toolTurnLog(T1, [], "small").map((event) =>
+            event.type === "turn_created"
+                ? {
+                      ...event,
+                      input: {
+                          role: "user" as const,
+                          content: [
+                              { type: "text" as const, text: "watch me" },
+                              frame("camera"),
+                          ],
+                      },
+                  }
+                : event,
+        );
+        repo.seed(log);
+        const resolved = await resolver(repo, {
+            ...POLICY_OFF,
+            images: true,
+        }).resolve({ previousTurnId: T1 });
+        const input = resolved[0];
+        if (input.role !== "user" || typeof input.content === "string") {
+            throw new Error("expected user message with parts");
+        }
+        expect(input.content.some((p) => p.type === "image")).toBe(false);
+        expect(JSON.stringify(input.content)).toContain("1 webcam frame");
     });
 });
