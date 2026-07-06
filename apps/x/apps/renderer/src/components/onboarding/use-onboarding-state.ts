@@ -20,7 +20,7 @@ export interface LlmModelOption {
   release_date?: string
 }
 
-export function useOnboardingState(open: boolean, onComplete: () => void) {
+export function useOnboardingState(open: boolean, onComplete: (opts?: { startTour?: boolean }) => void) {
   const [currentStep, setCurrentStep] = useState<Step>(0)
   const [onboardingPath, setOnboardingPath] = useState<OnboardingPath>(null)
 
@@ -410,8 +410,15 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
     }
   }, [currentStep, onboardingPath])
 
+  // Kept as no-arg handlers (rather than one that takes options) so the
+  // completion step can pass them straight to onClick without the mouse
+  // event leaking in as the options object.
   const handleComplete = useCallback(() => {
     onComplete()
+  }, [onComplete])
+
+  const handleCompleteWithTour = useCallback(() => {
+    onComplete({ startTour: true })
   }, [onComplete])
 
   // Test the active provider's credentials and persist its config. Returns
@@ -743,6 +750,7 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
     handleNext,
     handleBack,
     handleComplete,
+    handleCompleteWithTour,
     handleSwitchToRowboat,
   }
 }
