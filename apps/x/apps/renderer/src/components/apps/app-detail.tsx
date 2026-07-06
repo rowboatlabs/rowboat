@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { X, RotateCcw, Play } from 'lucide-react'
+import { X, RotateCcw, Play, UploadCloud, ArrowUpCircle, Trash2 } from 'lucide-react'
 import type { rowboatApp } from '@x/shared'
+import { PublishDialog } from '@/components/apps/publish-dialog'
 
 // App detail panel (spec §14): manifest info, provenance/publish state,
 // bundled agents with enable toggles, rollback when available. Update/publish
@@ -21,6 +22,64 @@ export function AppDetail({ folder, onClose }: { folder: string; onClose: () => 
   const [agents, setAgents] = useState<AgentRow[]>([])
   const [error, setError] = useState<string | null>(null)
   const [reloadNonce, setReloadNonce] = useState(0)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [updateInfo, setUpdateInfo] = useState<{ current: string; latest: string; updateAvailable: boolean } | null>(null)
+  const [showPublish, setShowPublish] = useState(false)
+  const [busyAction, setBusyAction] = useState<string | null>(null)
+
+  const runAction = async (name: string, fn: () => Promise<string | void>) => {
+    setBusyAction(name)
+    setError(null)
+    setNotice(null)
+    try {
+      const msg = await fn()
+      if (msg) setNotice(msg)
+      setReloadNonce((n) => n + 1)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusyAction(null)
+    }
+  }
+
+  const checkForUpdate = () => runAction('check', async () => {
+    const r = await window.ipc.invoke('apps:checkUpdate', { folder })
+    setUpdateInfo(r)
+    return r.updateAvailable ? `v${r.latest} is available (you have v${r.current}).` : `Up to date (v${r.current}).`
+  })
+
+  const doUpdate = () => runAction('update', async () => {
+    try {
+      await window.ipc.invoke('apps:update', { folder })
+      return 'Updated.'
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      // D18 / modified-files confirmation flows (§12.3)
+      if (msg.includes('new_capabilities')) {
+        if (!window.confirm(`This update widens the app's access:\n${msg}\n\nProceed?`)) return
+        await window.ipc.invoke('apps:update', { folder, confirmNewCapabilities: true, confirmOverwriteModified: true })
+        return 'Updated (new capabilities confirmed).'
+      }
+      if (msg.includes('modified_files')) {
+        if (!window.confirm(`You modified files this update will overwrite:\n${msg}\n\nProceed?`)) return
+        await window.ipc.invoke('apps:update', { folder, confirmOverwriteModified: true })
+        return 'Updated (local modifications overwritten).'
+      }
+      throw e
+    }
+  })
+
+  const doRollback = () => runAction('rollback', async () => {
+    await window.ipc.invoke('apps:rollback', { folder })
+    return 'Rolled back to the previous version.'
+  })
+
+  const doUninstall = () => runAction('uninstall', async () => {
+    const agentNote = agents.length ? `\n\nThis also deletes its background agents: ${agents.map((a) => a.name).join(', ')}.` : ''
+    if (!window.confirm(`Uninstall this app? Its data/ folder will be deleted.${agentNote}`)) return
+    await window.ipc.invoke('apps:uninstall', { folder })
+    onClose()
+  })
 
   useEffect(() => {
     let cancelled = false
@@ -82,6 +141,7 @@ export function AppDetail({ folder, onClose }: { folder: string; onClose: () => 
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 text-sm">
         {error && <div className="mb-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-destructive">{error}</div>}
+        {notice && <div className="mb-3 rounded-md border border-border bg-muted/40 px-3 py-2 text-muted-foreground">{notice}</div>}
         {!app ? (
           <div className="text-muted-foreground">Loading…</div>
         ) : (
@@ -123,11 +183,35 @@ export function AppDetail({ folder, onClose }: { folder: string; onClose: () => 
               ) : (
                 <p className="text-muted-foreground">Local app — created on this machine{app.publish ? `, published as ${app.publish.repo}` : ''}.</p>
               )}
-              {rollback && (
-                <button type="button" className="mt-1 flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-xs font-medium hover:bg-accent">
-                  <RotateCcw className="size-3.5" /> Roll back to previous version
-                </button>
-              )}
+              <div className="flex flex-wrap gap-2 pt-1">
+                {app.kind === 'installed' && app.install?.repo && (
+                  <button type="button" disabled={busyAction !== null}
+                    onClick={() => void (updateInfo?.updateAvailable ? doUpdate() : checkForUpdate())}
+                    className="flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-xs font-medium hover:bg-accent disabled:opacity-50">
+                    <ArrowUpCircle className="size-3.5" />
+                    {busyAction === 'check' || busyAction === 'update' ? 'Working…'
+                      : updateInfo?.updateAvailable ? `Update to v${updateInfo.latest}` : 'Check for update'}
+                  </button>
+                )}
+                {rollback && (
+                  <button type="button" disabled={busyAction !== null} onClick={() => void doRollback()}
+                    className="flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-xs font-medium hover:bg-accent disabled:opacity-50">
+                    <RotateCcw className="size-3.5" /> Roll back
+                  </button>
+                )}
+                {app.kind === 'local' && (
+                  <button type="button" disabled={busyAction !== null} onClick={() => setShowPublish(true)}
+                    className="flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-xs font-medium hover:bg-accent disabled:opacity-50">
+                    <UploadCloud className="size-3.5" /> {app.publish ? 'Publish update' : 'Publish'}
+                  </button>
+                )}
+                {app.kind === 'installed' && (
+                  <button type="button" disabled={busyAction !== null} onClick={() => void doUninstall()}
+                    className="flex items-center gap-1.5 rounded-md border border-destructive/40 px-2.5 py-1 text-xs font-medium text-destructive hover:bg-destructive/10 disabled:opacity-50">
+                    <Trash2 className="size-3.5" /> Uninstall
+                  </button>
+                )}
+              </div>
             </section>
 
             <section className="space-y-2">
@@ -172,6 +256,14 @@ export function AppDetail({ folder, onClose }: { folder: string; onClose: () => 
           </div>
         )}
       </div>
+      {showPublish && app && (
+        <PublishDialog
+          folder={folder}
+          appName={manifest?.name ?? folder}
+          onClose={() => setShowPublish(false)}
+          onPublished={() => setReloadNonce((n) => n + 1)}
+        />
+      )}
     </div>
   )
 }
