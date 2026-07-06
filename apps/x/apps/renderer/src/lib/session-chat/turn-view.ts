@@ -13,6 +13,7 @@ import {
   type TurnState,
   type TurnStreamEvent,
 } from '@x/shared/src/turns.js'
+import type { CodeRunEvent, PermissionAsk } from '@x/shared/src/code-mode.js'
 import type {
   ChatMessage,
   ConversationItem,
@@ -205,6 +206,41 @@ function toolStatus(tc: ToolCallState): ToolCall['status'] {
   return 'running'
 }
 
+// code_agent_run's durable trail in tool_progress (see the publish bridge in
+// real-tool-registry.ts): ONE settle-time 'code-run-events' batch carrying the
+// whole timeline (the live per-event stream travels over the ephemeral
+// CodeRunFeed and never reaches turn state), plus per-ask
+// 'code-run-permission-request' / 'code-run-permission-resolved' pairs. An ask
+// is pending while requests outnumber resolutions and the tool hasn't settled.
+function codeRunViewOf(
+  tc: ToolCallState,
+): Pick<ToolCall, 'codeRunEvents' | 'pendingCodePermission'> {
+  let events: CodeRunEvent[] | undefined
+  let pending: { requestId: string; ask: PermissionAsk } | null = null
+  let unresolved = 0
+  for (const p of tc.progress) {
+    const entry = p.progress
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
+    const kind = (entry as { kind?: unknown }).kind
+    if (kind === 'code-run-events') {
+      const batch = (entry as { events?: unknown }).events
+      if (Array.isArray(batch)) events = batch as CodeRunEvent[]
+    } else if (kind === 'code-run-permission-request') {
+      const { requestId, ask } = entry as { requestId?: unknown; ask?: unknown }
+      if (typeof requestId === 'string' && ask) {
+        pending = { requestId, ask: ask as PermissionAsk }
+        unresolved += 1
+      }
+    } else if (kind === 'code-run-permission-resolved') {
+      unresolved -= 1
+    }
+  }
+  return {
+    ...(events && events.length > 0 ? { codeRunEvents: events } : {}),
+    ...(pending && unresolved > 0 && !tc.result ? { pendingCodePermission: pending } : {}),
+  }
+}
+
 // One turn's contribution to the conversation: the user input, then per
 // completed model call its text and tool calls (with live status/results).
 export function buildTurnConversation(state: TurnState): ConversationItem[] {
@@ -258,6 +294,7 @@ export function buildTurnConversation(state: TurnState): ConversationItem[] {
           ...(tc?.result ? { result: tc.result.result.output as ToolCall['result'] } : {}),
           status: tc ? toolStatus(tc) : 'running',
           timestamp: ts(),
+          ...(tc ? codeRunViewOf(tc) : {}),
         } satisfies ToolCall)
       }
     }

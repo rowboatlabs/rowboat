@@ -130,6 +130,17 @@ export const CodeRunPermissionRequestEvent = BaseRunEvent.extend({
     ask: PermissionAsk,
 });
 
+// The complete, ordered code-run timeline, published ONCE when the coding turn
+// settles (consecutive agent message chunks coalesced — display-lossless, the
+// timeline concatenates them anyway). This is the durable record; the live
+// per-event stream travels over the ephemeral CodeRunFeed (`codeRun:events`)
+// and is never persisted.
+export const CodeRunEventsBatchEvent = BaseRunEvent.extend({
+    type: z.literal("code-run-events-batch"),
+    toolCallId: z.string(),
+    events: z.array(CodeRunEventSchema),
+});
+
 export const ToolPermissionAutoDecisionEvent = BaseRunEvent.extend({
     type: z.literal("tool-permission-auto-decision"),
     toolCallId: z.string(),
@@ -165,6 +176,7 @@ export const RunEvent = z.union([
     ToolPermissionResponseEvent,
     CodeRunStreamEvent,
     CodeRunPermissionRequestEvent,
+    CodeRunEventsBatchEvent,
     ToolPermissionAutoDecisionEvent,
     RunErrorEvent,
     RunStoppedEvent,

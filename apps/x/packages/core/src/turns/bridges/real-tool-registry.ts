@@ -108,6 +108,35 @@ export class RealToolRegistry implements IToolRegistry {
                                         kind: "tool-output",
                                         chunk: event.output,
                                     });
+                                } else if (event.type === "code-run-event") {
+                                    // The live per-event stream travels over the
+                                    // ephemeral CodeRunFeed (never persisted) — but a
+                                    // permission RESOLUTION is durably marked so an
+                                    // answered ask never resurrects as a pending card
+                                    // after a reload or session switch.
+                                    if (event.event.type === "permission") {
+                                        await ctx.reportProgress({
+                                            kind: "code-run-permission-resolved",
+                                        });
+                                    }
+                                } else if (event.type === "code-run-permission-request") {
+                                    // Durable (not feed-ephemeral): the coding turn is
+                                    // BLOCKED until the user answers via
+                                    // codeRun:resolvePermission, so the ask must survive
+                                    // session switches — dropping it would hang the turn
+                                    // under policy 'ask' with no card to answer.
+                                    await ctx.reportProgress({
+                                        kind: "code-run-permission-request",
+                                        requestId: event.requestId,
+                                        ask: toJsonValue(event.ask),
+                                    });
+                                } else if (event.type === "code-run-events-batch") {
+                                    // Settle-time durable record of the whole timeline —
+                                    // what reloads replay instead of the live feed.
+                                    await ctx.reportProgress({
+                                        kind: "code-run-events",
+                                        events: toJsonValue(event.events),
+                                    });
                                 }
                             },
                         },

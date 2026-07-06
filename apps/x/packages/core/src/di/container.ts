@@ -21,6 +21,7 @@ import { FSSlackConfigRepo, ISlackConfigRepo } from "../slack/repo.js";
 import { FSChannelsConfigRepo, IChannelsConfigRepo } from "../channels/repo.js";
 import { CodeModeManager } from "../code-mode/acp/manager.js";
 import { CodePermissionRegistry } from "../code-mode/acp/permission-registry.js";
+import { CodeRunFeed } from "../code-mode/feed.js";
 import { FSCodeProjectsRepo, ICodeProjectsRepo } from "../code-mode/projects/repo.js";
 import { FSCodeSessionsRepo, ICodeSessionsRepo } from "../code-mode/sessions/repo.js";
 import { CodeSessionService } from "../code-mode/sessions/service.js";
@@ -98,6 +99,9 @@ container.register({
     // session/load); the registry brokers mid-run approvals.
     codeModeManager: asClass(CodeModeManager).singleton(),
     codePermissionRegistry: asClass(CodePermissionRegistry).singleton(),
+    // Ephemeral live stream for code_agent_run (renderer side-channel; the
+    // durable record is the settle-time code-run-events-batch).
+    codeRunFeed: asClass(CodeRunFeed).singleton(),
 
     // Code section: project registry, session metadata, the direct-drive
     // session service, and the live status tracker.

@@ -38,6 +38,7 @@ import type { IOAuthRepo } from '@x/core/dist/auth/repo.js';
 import { IGranolaConfigRepo } from '@x/core/dist/knowledge/granola/repo.js';
 import { ICodeModeConfigRepo } from '@x/core/dist/code-mode/repo.js';
 import { CodePermissionRegistry } from '@x/core/dist/code-mode/acp/permission-registry.js';
+import type { CodeRunFeed } from '@x/core/dist/code-mode/feed.js';
 import { checkCodeModeAgentStatus } from '@x/core/dist/code-mode/status.js';
 import { ensureEngine } from '@x/core/dist/code-mode/acp/engine-provisioner.js';
 import type { ICodeProjectsRepo } from '@x/core/dist/code-mode/projects/repo.js';
@@ -701,6 +702,25 @@ export function startSessionsWatcher(): void {
   }
   const sessionBus = container.resolve<EmitterSessionBus>('sessionBus');
   sessionsWatcher = sessionBus.subscribe((event) => emitSessionEvent(event));
+}
+
+// Ephemeral code-run stream: CodeRunFeed → all renderer windows. A direct
+// tool→renderer side-channel that bypasses the turn runtime; the durable
+// record is the settle-time code-run-events-batch tool progress.
+let codeRunFeedWatcher: (() => void) | null = null;
+export function startCodeRunFeedWatcher(): void {
+  if (codeRunFeedWatcher) {
+    return;
+  }
+  const feed = container.resolve<CodeRunFeed>('codeRunFeed');
+  codeRunFeedWatcher = feed.subscribe((event) => {
+    const windows = BrowserWindow.getAllWindows();
+    for (const win of windows) {
+      if (!win.isDestroyed() && win.webContents) {
+        win.webContents.send('codeRun:events', event);
+      }
+    }
+  });
 }
 
 // The renderer window is created before the session-index startup scan

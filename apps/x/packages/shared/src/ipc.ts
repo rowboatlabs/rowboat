@@ -21,7 +21,7 @@ import { ZListToolkitsResponse } from './composio.js';
 import { BrowserStateSchema, HttpAuthRequestSchema } from './browser-control.js';
 import { BillingInfoSchema } from './billing.js';
 import { EmailBlockSchema, GmailThreadSchema } from './blocks.js';
-import { PermissionDecision, ApprovalPolicy, CodingAgent } from './code-mode.js';
+import { PermissionDecision, ApprovalPolicy, CodingAgent, type CodeRunFeedEvent } from './code-mode.js';
 import { NotificationSettingsSchema } from './notification-settings.js';
 import { CodeProject, CodeSession, CodeSessionMode, CodeSessionStatus, GitRepoInfo, GitStatusFile, CodeAgentModelOptions } from './code-sessions.js';
 import { ChannelsConfig, ChannelsStatus } from './channels.js';
@@ -448,6 +448,14 @@ const ipcSchemas = {
   },
   'runs:events': {
     req: z.null(),
+    res: z.null(),
+  },
+  // Ephemeral code-run stream (CodeRunFeed): per-event broadcast of a
+  // code_agent_run's live ACP activity, keyed by toolCallId. Never persisted —
+  // the durable record is the code-run-events-batch tool progress written when
+  // the run settles. Typed via z.custom like the other broadcast feeds.
+  'codeRun:events': {
+    req: z.custom<CodeRunFeedEvent>(),
     res: z.null(),
   },
   // ── New runtime: sessions + turns (session-design.md) ────────────────────
