@@ -1697,7 +1697,9 @@ export function setupIpcHandlers() {
       return result;
     },
     'githubAuth:poll': async () => {
-      return githubAuth.pollDeviceFlow();
+      const result = await githubAuth.pollDeviceFlow();
+      console.log(`[GitHubAuth] poll result → ${result.status}`);
+      return result;
     },
     'githubAuth:status': async () => {
       return githubAuth.getAuthStatus();

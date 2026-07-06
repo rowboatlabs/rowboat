@@ -37,7 +37,10 @@ type PendingFlow = {
     expiresAt: number;
     /** Token already issued but the identity fetch failed — retry that step. */
     issuedToken?: string;
+    identityAttempts?: number;
 };
+
+const GH_HEADERS = { 'Accept': 'application/json', 'User-Agent': 'rowboat-apps' };
 let pending: PendingFlow | null = null;
 
 async function readAuth(): Promise<StoredAuth | null> {
@@ -58,7 +61,7 @@ export async function startDeviceFlow(): Promise<{ userCode: string; verificatio
     // GitHub's OAuth endpoints take form-encoded params (JSON is not reliable).
     const res = await fetch('https://github.com/login/device/code', {
         method: 'POST',
-        headers: { 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
+        headers: { ...GH_HEADERS, 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({ client_id: GITHUB_OAUTH_CLIENT_ID, scope: 'public_repo' }).toString(),
     });
     if (!res.ok) throw new Error(`device_code_failed: HTTP ${res.status}`);
@@ -92,7 +95,7 @@ export async function pollDeviceFlow(): Promise<PollResult> {
     if (!accessToken) {
         const res = await fetch('https://github.com/login/oauth/access_token', {
             method: 'POST',
-            headers: { 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
+            headers: { ...GH_HEADERS, 'Content-Type': 'application/x-www-form-urlencoded' },
             body: new URLSearchParams({
                 client_id: GITHUB_OAUTH_CLIENT_ID,
                 device_code: pending.deviceCode,
@@ -100,6 +103,7 @@ export async function pollDeviceFlow(): Promise<PollResult> {
             }).toString(),
         });
         const body = await res.json() as { access_token?: string; error?: string; error_description?: string };
+        console.log(`[GitHubAuth] poll: http=${res.status} error=${body.error ?? 'none'} token=${body.access_token ? 'ISSUED' : 'no'}`);
 
         if (body.error === 'authorization_pending') return { status: 'pending' };
         if (body.error === 'slow_down') {
@@ -127,11 +131,21 @@ export async function pollDeviceFlow(): Promise<PollResult> {
         pending.issuedToken = accessToken;
     }
 
-    // Identity: cache login alongside the token.
+    // Identity: cache login alongside the token. Bounded retries — a
+    // persistent failure must surface, never spin as "pending" forever.
     const userRes = await fetch('https://api.github.com/user', {
-        headers: { 'Authorization': `Bearer ${accessToken}`, 'Accept': 'application/vnd.github+json' },
+        headers: { 'Authorization': `Bearer ${accessToken}`, 'Accept': 'application/vnd.github+json', 'User-Agent': 'rowboat-apps' },
     });
-    if (!userRes.ok) return { status: 'pending' }; // retry identity next poll
+    console.log(`[GitHubAuth] identity: http=${userRes.status}`);
+    if (!userRes.ok) {
+        pending.identityAttempts = (pending.identityAttempts ?? 0) + 1;
+        if (pending.identityAttempts >= 3) {
+            const detail = await userRes.text().catch(() => '');
+            pending = null;
+            throw new Error(`identity_failed: GET /user → HTTP ${userRes.status} ${detail.slice(0, 160)}`);
+        }
+        return { status: 'pending' };
+    }
     const user = await userRes.json() as { login: string };
 
     const auth: StoredAuth = { login: user.login, createdAt: new Date().toISOString() };
