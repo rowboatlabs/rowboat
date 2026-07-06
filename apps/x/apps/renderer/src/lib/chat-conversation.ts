@@ -121,6 +121,19 @@ export const normalizeToolOutput = (
   return output
 }
 
+export const getToolErrorText = (tool: ToolCall): string | undefined => {
+  if (tool.status !== 'error') return undefined
+  if (typeof tool.result === 'string' && tool.result.trim()) return tool.result
+  if (tool.result !== undefined) {
+    try {
+      return JSON.stringify(tool.result, null, 2)
+    } catch {
+      // Fall through to the generic label for non-serializable legacy values.
+    }
+  }
+  return 'Tool error'
+}
+
 export type WebSearchCardResult = { title: string; url: string; description: string }
 
 export type WebSearchCardData = {

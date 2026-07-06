@@ -51,6 +51,7 @@ import {
   getWebSearchCardData,
   getComposioConnectCardData,
   getToolDisplayName,
+  getToolErrorText,
   groupConversationItems,
   isChatMessage,
   isErrorMessage,
@@ -484,7 +485,7 @@ export function ChatSidebar({
         )
       }
       const toolTitle = getToolDisplayName(item)
-      const errorText = item.status === 'error' ? 'Tool error' : ''
+      const errorText = getToolErrorText(item)
       const output = normalizeToolOutput(item.result, item.status)
       const input = normalizeToolInput(item.input)
       return (

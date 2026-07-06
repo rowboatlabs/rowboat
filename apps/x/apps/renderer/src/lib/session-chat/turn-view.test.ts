@@ -190,6 +190,35 @@ describe('buildTurnConversation', () => {
     expect(items.map((i) => i.status)).toEqual(['pending', 'running'])
   })
 
+  it('uses the tool result envelope to determine error status', () => {
+    const state = reduceTurn([
+      created(T1, S1),
+      requested(T1, 0),
+      completed(
+        T1,
+        0,
+        assistantCalls(
+          toolCallPart('flagged', 'echo'),
+          toolCallPart('normal', 'echo'),
+        ),
+      ),
+      invocation(T1, 'flagged', 'echo'),
+      {
+        type: 'tool_result',
+        turnId: T1,
+        ts: TS,
+        toolCallId: 'flagged',
+        toolName: 'echo',
+        source: 'sync',
+        result: { output: 'boom', isError: true },
+      },
+      invocation(T1, 'normal', 'echo'),
+      toolResult(T1, 'normal', 'echo', { success: false, message: 'payload data' }),
+    ])
+    const items = buildTurnConversation(state).filter(isToolCall)
+    expect(items.map((i) => i.status)).toEqual(['error', 'completed'])
+  })
+
   it('renders user attachments and a failed turn as an error item', () => {
     const input = {
       role: 'user' as const,

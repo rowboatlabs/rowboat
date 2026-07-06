@@ -10,7 +10,7 @@ import { Conversation, ConversationContent, ConversationScrollButton } from '@/c
 import { MessageResponse } from '@/components/ai-elements/message'
 import { Shimmer } from '@/components/ai-elements/shimmer'
 import { Tool, ToolContent, ToolHeader } from '@/components/ai-elements/tool'
-import { toToolState, getToolDisplayName, getWebSearchCardData, type ToolCall } from '@/lib/chat-conversation'
+import { toToolState, getToolDisplayName, getToolErrorText, getWebSearchCardData, type ToolCall } from '@/lib/chat-conversation'
 import { CodeRunPermissionRequest, CodingRunTimeline } from '@/components/coding-run'
 import { PermissionRequest } from '@/components/ai-elements/permission-request'
 import { AskHumanRequest } from '@/components/ai-elements/ask-human-request'
@@ -84,7 +84,7 @@ function RowboatToolCall({ item, onOpenDiff }: { item: ToolCall; onOpenDiff: (pa
       <Tool open={open || item.status === 'running'} onOpenChange={setOpen}>
         <ToolHeader title={AGENT_LABEL[agent ?? ''] ?? 'Coding agent'} type="tool-code_agent_run" state={toToolState(item.status)} />
         <ToolContent>
-          <CodingRunTimeline events={item.codeRunEvents ?? []} onOpenDiff={onOpenDiff} />
+          <CodingRunTimeline events={item.codeRunEvents ?? []} error={getToolErrorText(item)} onOpenDiff={onOpenDiff} />
         </ToolContent>
       </Tool>
     )
