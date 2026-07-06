@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import { ArrowLeft, ExternalLink, Info, RotateCw } from 'lucide-react'
+import { ArrowLeft, BadgeCheck, ExternalLink, Info, RotateCw, UploadCloud } from 'lucide-react'
 import type { rowboatApp } from '@x/shared'
 import { appOpened } from '@/lib/analytics'
 import { AppDetail } from '@/components/apps/app-detail'
+import { PublishDialog } from '@/components/apps/publish-dialog'
 
 // Full-height iframe on the app's own origin (spec §6.6). No sandbox attr —
 // per-app browser origins are the isolation boundary. Toolbar: back, reload,
@@ -11,6 +12,7 @@ import { AppDetail } from '@/components/apps/app-detail'
 export function AppFrame({ app, onBack }: { app: rowboatApp.AppSummary; onBack: () => void }) {
   const [reloadNonce, setReloadNonce] = useState(0)
   const [showDetail, setShowDetail] = useState(false)
+  const [showPublish, setShowPublish] = useState(false)
   // Load watchdog: if the iframe hasn't fired `load` within the deadline,
   // surface a visible retry state instead of a silent blank pane.
   const [loadState, setLoadState] = useState<'loading' | 'ok' | 'stuck'>('loading')
@@ -62,6 +64,27 @@ export function AppFrame({ app, onBack }: { app: rowboatApp.AppSummary; onBack: 
         >
           <ExternalLink className="size-4" />
         </button>
+        {app.kind === 'local' && (
+          app.publish ? (
+            <button
+              type="button"
+              title={`Published as ${app.publish.repo} — view details`}
+              onClick={() => setShowDetail(true)}
+              className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm font-medium text-green-600 hover:bg-green-500/10 dark:text-green-500"
+            >
+              <BadgeCheck className="size-4" /> Published
+            </button>
+          ) : (
+            <button
+              type="button"
+              title="Publish this app"
+              onClick={() => setShowPublish(true)}
+              className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              <UploadCloud className="size-4" /> Publish
+            </button>
+          )
+        )}
         <button
           type="button"
           title="App details"
@@ -100,6 +123,14 @@ export function AppFrame({ app, onBack }: { app: rowboatApp.AppSummary; onBack: 
           </div>
         )}
       </div>
+      {showPublish && (
+        <PublishDialog
+          folder={app.folder}
+          appName={title}
+          onClose={() => setShowPublish(false)}
+          onPublished={() => setShowDetail(true)}
+        />
+      )}
     </div>
   )
 }

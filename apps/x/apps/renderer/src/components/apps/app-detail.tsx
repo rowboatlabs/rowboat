@@ -180,8 +180,20 @@ export function AppDetail({ folder, onClose }: { folder: string; onClose: () => 
                   <InfoRow k="Installed" v={new Date(app.install.installedAt).toLocaleString()} />
                   {app.install.updatedAt && <InfoRow k="Updated" v={new Date(app.install.updatedAt).toLocaleString()} />}
                 </>
+              ) : app.publish ? (
+                <>
+                  <p className="text-muted-foreground">Local app — published to the Rowboat catalog.</p>
+                  <InfoRow k="Repository" v={app.publish.repo} mono link={`https://github.com/${app.publish.repo}`} />
+                  {app.publish.lastPublishedVersion && (
+                    <InfoRow
+                      k="Published"
+                      v={`v${app.publish.lastPublishedVersion}`}
+                      link={`https://github.com/${app.publish.repo}/releases/tag/v${app.publish.lastPublishedVersion}`}
+                    />
+                  )}
+                </>
               ) : (
-                <p className="text-muted-foreground">Local app — created on this machine{app.publish ? `, published as ${app.publish.repo}` : ''}.</p>
+                <p className="text-muted-foreground">Local app — created on this machine.</p>
               )}
               <div className="flex flex-wrap gap-2 pt-1">
                 {app.kind === 'installed' && app.install?.repo && (
@@ -268,11 +280,22 @@ export function AppDetail({ folder, onClose }: { folder: string; onClose: () => 
   )
 }
 
-function InfoRow({ k, v, mono }: { k: string; v: string; mono?: boolean }) {
+function InfoRow({ k, v, mono, link }: { k: string; v: string; mono?: boolean; link?: string }) {
   return (
     <div className="flex items-baseline gap-2">
       <span className="w-28 shrink-0 text-xs text-muted-foreground">{k}</span>
-      <span className={`min-w-0 truncate ${mono ? 'font-mono text-xs' : ''}`}>{v}</span>
+      {link ? (
+        <a
+          href={link}
+          target="_blank"
+          rel="noreferrer"
+          className={`min-w-0 truncate text-primary hover:underline ${mono ? 'font-mono text-xs' : ''}`}
+        >
+          {v}
+        </a>
+      ) : (
+        <span className={`min-w-0 truncate ${mono ? 'font-mono text-xs' : ''}`}>{v}</span>
+      )}
     </div>
   )
 }
