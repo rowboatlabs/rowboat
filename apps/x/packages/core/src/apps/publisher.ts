@@ -174,13 +174,14 @@ async function pushSource(token: string, login: string, repoName: string, folder
         const ref = await gh<{ object: { sha: string } }>(token, 'GET', `/repos/${login}/${repoName}/git/ref/heads/main`);
         parents = [ref.object.sha];
     } catch {
-        await gh(token, 'PUT', `/repos/${login}/${repoName}/contents/README.md`, {
+        // Use the PUT response's own commit sha — re-reading the ref right
+        // after the first commit can 409 on a stale replica.
+        const put = await gh<{ commit: { sha: string } }>(token, 'PUT', `/repos/${login}/${repoName}/contents/README.md`, {
             message: 'bootstrap',
             content: Buffer.from(generatedReadme(manifest)).toString('base64'),
             branch: 'main',
         });
-        const ref = await gh<{ object: { sha: string } }>(token, 'GET', `/repos/${login}/${repoName}/git/ref/heads/main`);
-        parents = [ref.object.sha];
+        parents = [put.commit.sha];
     }
 
     type TreeEntry = { path: string; mode: '100644'; type: 'blob'; sha: string };
