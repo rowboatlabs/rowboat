@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Plus, RefreshCw } from 'lucide-react'
 import type { rowboatApp } from '@x/shared'
 import { AppFrame } from '@/components/apps/app-frame'
+import { CatalogTab } from '@/components/apps/catalog'
 
 // Apps home (spec §14): "My apps" grid + Catalog placeholder (M3). Cards are
 // AppSummary-driven; click opens the app full-height on its own origin.
@@ -219,7 +220,7 @@ export function AppsView({ initialAppFolder, initialVersion, onNewApp }: {
         )}
 
         {tab === 'catalog' ? (
-          <div className="ma-empty">The community catalog is coming soon.</div>
+          <CatalogTab onInstalled={(folder) => { setSelectedFolder(folder); setTab('mine') }} />
         ) : (
           <div className="ma-grid">
             {apps.map((app, i) => (

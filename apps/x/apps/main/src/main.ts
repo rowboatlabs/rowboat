@@ -1,4 +1,4 @@
-import { app, BrowserWindow, desktopCapturer, protocol, net, shell, session, type Session } from "electron";
+import { app, BrowserWindow, desktopCapturer, protocol, net, shell, session, safeStorage, type Session } from "electron";
 import path from "node:path";
 import {
   setupIpcHandlers,
@@ -39,6 +39,7 @@ import { backgroundTaskEventConsumer } from "@x/core/dist/background-tasks/event
 import { startSkillsWatcher, stopSkillsWatcher } from "@x/core/dist/application/assistant/skills/watcher.js";
 import { init as initAppsServer, shutdown as shutdownAppsServer } from "@x/core/dist/apps/server.js";
 import { registerAppsHostApi } from "@x/core/dist/apps/host-api.js";
+import { setTokenCipher as setGithubTokenCipher } from "@x/core/dist/apps/github-auth.js";
 import { shutdown as shutdownAnalytics } from "@x/core/dist/analytics/posthog.js";
 import { identifyIfSignedIn } from "@x/core/dist/analytics/identify.js";
 import { migrateRuns } from "@x/core/dist/migrations/runs/migrate.js";
@@ -342,6 +343,16 @@ function createWindow() {
   }
 }
 
+// Renderer/child process deaths are otherwise silent in packaged builds (the
+// window or an app iframe just goes blank). Log the reason so crash reports
+// can be correlated with what Chromium thought happened.
+app.on('render-process-gone', (_event, webContents, details) => {
+  console.error(`[Crash] renderer gone: reason=${details.reason} exitCode=${details.exitCode} url=${webContents.getURL()}`);
+});
+app.on('child-process-gone', (_event, details) => {
+  console.error(`[Crash] child process gone: type=${details.type} reason=${details.reason} exitCode=${details.exitCode ?? ''} name=${details.name ?? ''}`);
+});
+
 app.whenReady().then(async () => {
   // Register custom protocol before creating window.
   // In production this serves the renderer SPA; in dev (and prod) it also
@@ -382,6 +393,24 @@ app.whenReady().then(async () => {
 
   setupIpcHandlers();
   setupBrowserEventForwarding();
+
+  // Start the Rowboat Apps server (per-app origins on 127.0.0.1:3210) BEFORE
+  // the window and the long service-init chain below. The Apps view is
+  // reachable as soon as the window paints; starting the server last meant
+  // every app iframe hit connection-refused (blank app) for the first ~10s of
+  // each launch. Route registration and the token cipher are synchronous;
+  // the listen itself is fire-and-forget.
+  registerAppsHostApi();
+  // GitHub publish token at rest: encrypt via the OS keychain when available
+  // (core stays electron-free; the cipher is injected here).
+  setGithubTokenCipher({
+    isAvailable: () => safeStorage.isEncryptionAvailable(),
+    encrypt: (plain) => safeStorage.encryptString(plain).toString('base64'),
+    decrypt: (encrypted) => safeStorage.decryptString(Buffer.from(encrypted, 'base64')),
+  });
+  initAppsServer().catch((error) => {
+    console.error('[Apps] Failed to start:', error);
+  });
 
   createWindow();
 
@@ -506,13 +535,6 @@ app.whenReady().then(async () => {
 
   // start chrome extension sync server
   initChromeSync();
-
-  // start the Rowboat Apps server (per-app origins on 127.0.0.1:3210) with the
-  // full Host API (tools/fetch/llm/copilot behind the capability gate)
-  registerAppsHostApi();
-  initAppsServer().catch((error) => {
-    console.error('[Apps] Failed to start:', error);
-  });
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {

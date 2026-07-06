@@ -354,10 +354,11 @@ async function handleCopilotRun(
         // Headless tool profile: the background-task agent (no shell, no
         // ask-human/interactive tools) — the same runtime scheduled agents use.
         // The run is recorded as a normal attributed turn (visible in history).
-        const model = await getBackgroundTaskAgentModel();
+        const selection = await getBackgroundTaskAgentModel();
         const run = await createRun({
             agentId: 'background-task-agent',
-            model,
+            model: selection.model,
+            provider: selection.provider,
             useCase: 'app_copilot_run',
             subUseCase: slug,
         });
