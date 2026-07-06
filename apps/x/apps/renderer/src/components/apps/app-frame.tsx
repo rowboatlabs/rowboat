@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ArrowLeft, BadgeCheck, ExternalLink, Info, Loader2, RotateCw, UploadCloud } from 'lucide-react'
+import { ArrowLeft, BadgeCheck, ExternalLink, Info, RotateCw, UploadCloud } from 'lucide-react'
 import type { rowboatApp } from '@x/shared'
 import { appOpened } from '@/lib/analytics'
 import { AppDetail } from '@/components/apps/app-detail'
@@ -36,10 +36,10 @@ export function AppFrame({ app, onBack }: { app: rowboatApp.AppSummary; onBack: 
     return () => window.clearTimeout(timer)
   }, [watchKey])
 
-  // Stuck recovery: the usual cause is the apps server not being reachable yet
-  // (it starts with the main process; on a fresh launch or a quick relaunch the
-  // first iframe load can beat it). Auto-retry instead of demanding a manual
-  // click, and say when the server itself is the problem.
+  // Stuck diagnosis: the usual cause is the apps server not being reachable
+  // yet (it starts with the main process; on a fresh launch or a quick
+  // relaunch the first iframe load can beat it). Say when the server itself
+  // is the problem.
   const [serverDown, setServerDown] = useState(false)
   useEffect(() => {
     if (loadState !== 'stuck') return
@@ -47,11 +47,7 @@ export function AppFrame({ app, onBack }: { app: rowboatApp.AppSummary; onBack: 
     void window.ipc.invoke('apps:serverStatus', {}).then((s) => {
       if (!cancelled) setServerDown(!s.running)
     }).catch(() => { /* status probe is best-effort */ })
-    const timer = window.setTimeout(() => setReloadNonce((n) => n + 1), 4000)
-    return () => {
-      cancelled = true
-      window.clearTimeout(timer)
-    }
+    return () => { cancelled = true }
   }, [loadState])
 
   return (
@@ -126,16 +122,16 @@ export function AppFrame({ app, onBack }: { app: rowboatApp.AppSummary; onBack: 
               <div className="text-muted-foreground">
                 {serverDown ? 'The Rowboat apps server is still starting up.' : 'This app is taking too long to load.'}
               </div>
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <Loader2 className="size-3.5 animate-spin" /> Retrying automatically…
-              </div>
               <button
                 type="button"
                 onClick={() => setReloadNonce((n) => n + 1)}
                 className="rounded-md border border-border px-3 py-1.5 font-medium hover:bg-accent"
               >
-                Retry now
+                Retry
               </button>
+              <div className="max-w-xs text-center text-xs text-muted-foreground">
+                If it still doesn&apos;t load, go back to Apps and open it again.
+              </div>
               <div className="font-mono text-xs text-muted-foreground">{app.origin}</div>
             </div>
           )}
