@@ -109,7 +109,7 @@ const TOUR_STEPS: TourStep[] = [
     targetId: 'nav-apps',
     navigate: 'apps',
     title: 'Apps',
-    text: 'Apps are little tools Rowboat builds just for you — ask for a dashboard or a tracker in chat, and it docks here, ready whenever you are.',
+    text: 'Apps are mini-apps you build right here in Rowboat — they get the same tools and integrations I do, and you can share them with other people. Just ask for one in chat.',
   },
   {
     id: 'workspaces',
