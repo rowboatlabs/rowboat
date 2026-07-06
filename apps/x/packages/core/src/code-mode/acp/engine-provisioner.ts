@@ -89,13 +89,16 @@ function locateExecutable(agent: CodingAgent, root: string): string | null {
         }
         return null;
     }
-    // codex: vendor/<target-triple>/codex/codex[.exe]
+    // codex ships its native binary under vendor/<target-triple>/. The containing
+    // subdir moved from `codex/` (≤0.128) to `bin/` (≥0.142), so probe both.
     const vendor = path.join(root, 'vendor');
     if (!fs.existsSync(vendor)) return null;
     for (const triple of fs.readdirSync(vendor)) {
-        for (const name of ['codex', 'codex.exe']) {
-            const p = path.join(vendor, triple, 'codex', name);
-            if (fs.existsSync(p)) return p;
+        for (const sub of ['bin', 'codex']) {
+            for (const name of ['codex', 'codex.exe']) {
+                const p = path.join(vendor, triple, sub, name);
+                if (fs.existsSync(p)) return p;
+            }
         }
     }
     return null;
@@ -224,8 +227,11 @@ function makeExecutable(agent: CodingAgent, root: string, exe: string): void {
     if (agent === 'codex') {
         const vendor = path.join(root, 'vendor');
         for (const triple of fs.existsSync(vendor) ? fs.readdirSync(vendor) : []) {
-            const rg = path.join(vendor, triple, 'path', 'rg');
-            if (fs.existsSync(rg)) fs.chmodSync(rg, 0o755);
+            // Bundled ripgrep moved from `path/` (≤0.128) to `codex-path/` (≥0.142).
+            for (const sub of ['codex-path', 'path']) {
+                const rg = path.join(vendor, triple, sub, 'rg');
+                if (fs.existsSync(rg)) fs.chmodSync(rg, 0o755);
+            }
         }
     }
 }

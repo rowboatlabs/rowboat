@@ -876,8 +876,19 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
             // chip change. Honor the chip so switching it deterministically switches agents.
             const effectiveAgent = ctx.codeMode ?? agent;
             // Code-section sessions pin the working directory — never trust the model's
-            // cwd argument over the session's.
-            const effectiveCwd = ctx.codeCwd ?? cwd;
+            // cwd argument over the session's. Expand `~` and resolve to an absolute path:
+            // the engine is spawned with this as the child's cwd, and `child_process.spawn`
+            // does NO shell tilde expansion.
+            const effectiveCwd = path.resolve(expandHome(ctx.codeCwd ?? cwd));
+            // Fail loudly if the directory is missing. Otherwise the spawn below fails with
+            // Node's misleading "spawn <command> ENOENT" (it blames the executable, not the
+            // bad cwd), which reads as "the coding engine isn't installed" — see the enriched
+            // message the model surfaces. A clear error lets the model/user fix the path.
+            try {
+                if (!(await fs.stat(effectiveCwd)).isDirectory()) throw new Error('not a directory');
+            } catch {
+                throw new Error(`code_agent_run: working directory does not exist: ${effectiveCwd}`);
+            }
             const manager = container.resolve<CodeModeManager>('codeModeManager');
             const registry = container.resolve<CodePermissionRegistry>('codePermissionRegistry');
 
