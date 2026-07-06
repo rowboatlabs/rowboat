@@ -741,22 +741,29 @@ export async function init(): Promise<void> {
             startLagMonitor();
             await startWatcher();
             const expressApp = createApp();
-            await new Promise<void>((resolve, reject) => {
-                const s = expressApp.listen(APPS_PORT, '127.0.0.1', () => {
-                    server = s;
+            const listenOn = (host: string) => new Promise<Server>((resolve, reject) => {
+                const s = expressApp.listen(APPS_PORT, host, () => resolve(s));
+                s.on('error', (error: NodeJS.ErrnoException) => reject(error));
+            });
+            // EADDRINUSE almost always means a previous Rowboat instance is
+            // still shutting down and holding the port (quick relaunch). Retry
+            // on the SAME port for a while — never scan for alternate ports
+            // (§6.1), origins embed the port — instead of disabling apps for
+            // the whole session on the first failure.
+            for (let attempt = 1; ; attempt++) {
+                try {
+                    server = await listenOn('127.0.0.1');
                     serverError = null;
                     console.log(`[Apps] server on 127.0.0.1:${APPS_PORT} (host suffix ${APPS_HOST_SUFFIX}), dir ${APPS_DIR}`);
-                    resolve();
-                });
-                s.on('error', (error: NodeJS.ErrnoException) => {
-                    if (error.code === 'EADDRINUSE') {
-                        // Never scan for alternate ports (§6.1) — origins embed the port.
-                        reject(new Error(`Port ${APPS_PORT} is already in use.`));
-                        return;
-                    }
-                    reject(error);
-                });
-            });
+                    break;
+                } catch (error) {
+                    const code = (error as NodeJS.ErrnoException).code;
+                    if (code !== 'EADDRINUSE') throw error;
+                    if (attempt >= 15) throw new Error(`Port ${APPS_PORT} is already in use.`);
+                    if (attempt === 1) console.warn(`[Apps] port ${APPS_PORT} in use — retrying (old instance still shutting down?)`);
+                    await new Promise((r) => setTimeout(r, 1000));
+                }
+            }
             // Dual-stack loopback: also listen on ::1 (see server6 note above).
             // Best-effort — some machines have IPv6 disabled.
             await new Promise<void>((resolve) => {

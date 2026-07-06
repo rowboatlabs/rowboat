@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Rowboat Apps registry record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "name", "owner", "repo", "createdAt"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "name": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 64,
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+    },
+    "owner": { "type": "string", "minLength": 1 },
+    "repo": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+    },
+    "description": { "type": "string", "maxLength": 500 },
+    "iconUrl": { "type": "string", "format": "uri", "pattern": "^https://" },
+    "createdAt": { "type": "string" }
+  }
+}

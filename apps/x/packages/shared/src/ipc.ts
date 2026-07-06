@@ -18,7 +18,7 @@ import { RequestedAgent, type TurnEvent } from './turns.js';
 import type { SessionBusEvent, SessionIndexEntry, SessionState } from './sessions.js';
 import { RowboatApiConfig } from './rowboat-account.js';
 import { ZListToolkitsResponse } from './composio.js';
-import { AppSummarySchema } from './rowboat-app.js';
+import { AppSummarySchema, RegistryRecordSchema, RowboatAppManifestSchema } from './rowboat-app.js';
 import { BrowserStateSchema, HttpAuthRequestSchema } from './browser-control.js';
 import { BillingInfoSchema } from './billing.js';
 import { EmailBlockSchema, GmailThreadSchema } from './blocks.js';
@@ -1228,6 +1228,13 @@ const ipcSchemas = {
     }),
   },
   // Rowboat Apps (spec §13) — M1 local channels.
+  'apps:serverStatus': {
+    req: z.object({}),
+    res: z.object({
+      running: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
   'apps:list': {
     req: z.object({}),
     res: z.object({
@@ -1254,6 +1261,111 @@ const ipcSchemas = {
   },
   'apps:setTheme': {
     req: z.object({ theme: z.enum(['light', 'dark']) }),
+    res: z.object({ ok: z.literal(true) }),
+  },
+  // Catalog + install/update (spec §12–13).
+  'apps:catalogIndex': {
+    req: z.object({ force: z.boolean().optional() }),
+    res: z.object({ records: z.array(RegistryRecordSchema), stale: z.boolean(), fetchedAt: z.string() }),
+  },
+  'apps:catalogSearch': {
+    req: z.object({ query: z.string() }),
+    res: z.object({ records: z.array(RegistryRecordSchema) }),
+  },
+  'apps:catalogDetail': {
+    req: z.object({ name: z.string() }),
+    res: z.object({
+      record: RegistryRecordSchema,
+      manifest: RowboatAppManifestSchema.optional(),
+      readme: z.string().optional(),
+      installedFolder: z.string().optional(),
+    }),
+  },
+  'apps:install': {
+    req: z.object({ name: z.string(), confirmed: z.boolean().optional() }),
+    res: z.object({
+      status: z.enum(['preview', 'installed']),
+      name: z.string().optional(),
+      version: z.string().optional(),
+      description: z.string().optional(),
+      capabilities: z.array(z.string()).optional(),
+      agents: z.array(z.string()).optional(),
+      app: AppSummarySchema.optional(),
+    }),
+  },
+  'apps:installFromUrl': {
+    req: z.object({ url: z.string(), confirmed: z.boolean() }),
+    res: z.object({
+      status: z.enum(['preview', 'installed']),
+      name: z.string().optional(),
+      version: z.string().optional(),
+      description: z.string().optional(),
+      capabilities: z.array(z.string()).optional(),
+      agents: z.array(z.string()).optional(),
+      updateSource: z.enum(['github', 'none']).optional(),
+      app: AppSummarySchema.optional(),
+    }),
+  },
+  'apps:uninstall': {
+    req: z.object({ folder: z.string() }),
+    res: z.object({ ok: z.literal(true) }),
+  },
+  'apps:checkUpdate': {
+    req: z.object({ folder: z.string() }),
+    res: z.object({ current: z.string(), latest: z.string(), updateAvailable: z.boolean() }),
+  },
+  'apps:update': {
+    req: z.object({
+      folder: z.string(),
+      confirmOverwriteModified: z.boolean().optional(),
+      confirmNewCapabilities: z.boolean().optional(),
+    }),
+    res: z.object({ app: AppSummarySchema }),
+  },
+  'apps:rollback': {
+    req: z.object({ folder: z.string() }),
+    res: z.object({ app: AppSummarySchema }),
+  },
+  // Advisory progress pushes for long-running app operations (§13).
+  'apps:progress': {
+    req: z.object({ folder: z.string(), step: z.string(), detail: z.string().optional() }),
+    res: z.null(),
+  },
+  'apps:publish': {
+    req: z.object({ folder: z.string() }),
+    res: z.object({
+      status: z.enum(['published', 'pending']),
+      repoUrl: z.string(),
+      releaseUrl: z.string(),
+      prUrl: z.string().optional(),
+    }),
+  },
+  'apps:publishUpdate': {
+    req: z.object({ folder: z.string(), increment: z.enum(['patch', 'minor', 'major']) }),
+    res: z.object({ version: z.string(), releaseUrl: z.string() }),
+  },
+  'apps:registerExisting': {
+    req: z.object({ name: z.string(), repo: z.string() }),
+    res: z.object({ status: z.enum(['published', 'pending']), prUrl: z.string() }),
+  },
+  // GitHub auth (device flow) — required only for publishing apps (spec §10).
+  'githubAuth:start': {
+    req: z.object({}),
+    res: z.object({ userCode: z.string(), verificationUri: z.string(), expiresIn: z.number() }),
+  },
+  'githubAuth:poll': {
+    req: z.object({}),
+    res: z.object({
+      status: z.enum(['pending', 'authorized', 'expired', 'denied']),
+      login: z.string().optional(),
+    }),
+  },
+  'githubAuth:status': {
+    req: z.object({}),
+    res: z.object({ signedIn: z.boolean(), login: z.string().optional() }),
+  },
+  'githubAuth:signOut': {
+    req: z.object({}),
     res: z.object({ ok: z.literal(true) }),
   },
   'composio:didConnect': {
