@@ -1,13 +1,12 @@
 import fs from 'fs';
 import path from 'path';
 import { z } from 'zod';
-import { generateObject } from 'ai';
 import { google } from 'googleapis';
 import type { OAuth2Client } from 'google-auth-library';
 import { WorkDir } from '../config/config.js';
-import { createProvider } from '../models/models.js';
+import { createLanguageModel } from '../models/models.js';
+import { generateObjectSafe } from '../models/structured.js';
 import {
-    getDefaultModelAndProvider,
     getKgModel,
     resolveProviderConfig,
 } from '../models/defaults.js';
@@ -246,10 +245,9 @@ export async function classifyThread(
         // (no-ops unless enough new corrections exist).
         await maybeDistillImportanceRules();
 
-        const modelId = await getKgModel();
-        const { provider } = await getDefaultModelAndProvider();
+        const { model: modelId, provider } = await getKgModel();
         const config = await resolveProviderConfig(provider);
-        const model = createProvider(config).languageModel(modelId);
+        const model = createLanguageModel(config, modelId);
 
         let systemPrompt = options.skipDraft
             ? `${SYSTEM_PROMPT}\n\n# Skip the draft\n\nThe user already has their own draft in progress for this thread — DO NOT generate a draftResponse. Always omit the draftResponse field.`
@@ -262,11 +260,12 @@ export async function classifyThread(
             systemPrompt = `${systemPrompt}\n\n${feedback}`;
         }
 
-        const result = await withUseCase({ useCase: 'knowledge_sync', subUseCase: 'email_classifier' }, () => generateObject({
+        const result = await withUseCase({ useCase: 'knowledge_sync', subUseCase: 'email_classifier' }, () => generateObjectSafe({
             model,
             system: systemPrompt,
             prompt: buildPrompt(snapshot, userEmail, styleGuide, calendar),
             schema: ClassificationSchema,
+            retry: true,
         }));
 
         captureLlmUsage({

@@ -1,10 +1,10 @@
 import fs from 'fs';
 import path from 'path';
 import { z } from 'zod';
-import { generateObject } from 'ai';
 import { WorkDir } from '../config/config.js';
-import { createProvider } from '../models/models.js';
-import { getDefaultModelAndProvider, getKgModel, resolveProviderConfig } from '../models/defaults.js';
+import { createLanguageModel } from '../models/models.js';
+import { generateObjectSafe } from '../models/structured.js';
+import { getKgModel, resolveProviderConfig } from '../models/defaults.js';
 import { captureLlmUsage } from '../analytics/usage.js';
 import { withUseCase } from '../analytics/use_case.js';
 
@@ -145,21 +145,21 @@ export async function maybeDistillImportanceRules(): Promise<void> {
     if (newSince <= 0) return;
 
     try {
-        const modelId = await getKgModel();
-        const { provider } = await getDefaultModelAndProvider();
+        const { model: modelId, provider } = await getKgModel();
         const config = await resolveProviderConfig(provider);
-        const model = createProvider(config).languageModel(modelId);
+        const model = createLanguageModel(config, modelId);
 
         const correctionLines = fb.corrections.map(c =>
             `- From: ${c.from} | Subject: "${c.subject}" | classifier said ${c.agentVerdict}, user corrected to ${c.userVerdict}`
         ).join('\n');
         const existingRules = fb.rules.length ? `\n\nCurrent rules (rewrite/merge as needed):\n${fb.rules.map(r => `- ${r}`).join('\n')}` : '';
 
-        const result = await withUseCase({ useCase: 'knowledge_sync', subUseCase: 'importance_rule_distiller' }, () => generateObject({
+        const result = await withUseCase({ useCase: 'knowledge_sync', subUseCase: 'importance_rule_distiller' }, () => generateObjectSafe({
             model,
             system: `You maintain a short list of email-importance preference rules for one user, derived from their explicit corrections of an automated classifier. Write at most ${MAX_RULES} rules. Rules must GENERALIZE (sender domains, email types, topics) — never restate a single thread. Where corrections conflict, prefer the more recent. Keep rules that are still supported; drop ones the corrections no longer support.`,
             prompt: `Corrections (oldest first):\n${correctionLines}${existingRules}`,
             schema: DistilledRules,
+            retry: true,
         }));
 
         captureLlmUsage({

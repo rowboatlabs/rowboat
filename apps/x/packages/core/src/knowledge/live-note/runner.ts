@@ -1,7 +1,7 @@
 import type { LiveNote, LiveNoteTriggerType } from '@x/shared/dist/live-note.js';
 import { fetchLiveNote, patchLiveNote, readNoteBody } from './fileops.js';
 import { getLiveNoteAgentModel } from '../../models/defaults.js';
-import { startHeadlessAgent } from '../../agents/headless-app.js';
+import { startHeadlessAgent, startWhenPossible } from '../../agents/headless-app.js';
 import { withUseCase } from '../../analytics/use_case.js';
 import { buildTriggerBlock } from '../../agents/build-trigger-block.js';
 import { liveNoteBus } from './bus.js';
@@ -108,17 +108,28 @@ export async function runLiveNoteAgent(
 
         const bodyBefore = await readNoteBody(filePath);
 
-        const model = live.model ?? await getLiveNoteAgentModel();
+        // Note-frontmatter model/provider win; otherwise the category default
+        // (provider-qualified in hybrid mode). A frontmatter model without a
+        // provider keeps the legacy meaning: the app-default provider.
+        const selection = await getLiveNoteAgentModel();
+        const model = live.model ?? selection.model;
+        const provider = live.provider ?? (live.model ? undefined : selection.provider);
+        // Manual runs are user-requested (the Run button, or the copilot's
+        // run-live-note-agent tool mid-chat) and must NOT wait for chat-idle:
+        // the requesting chat turn holds the chat-activity lock, so deferring
+        // here would deadlock the turn. Only autonomous triggers
+        // (cron/window/event) defer.
+        const start = trigger === 'manual' ? startHeadlessAgent : startWhenPossible;
         // The use-case context propagates to every tool the agent calls; the
         // granular trigger doubles as the sub-use-case (manual / cron /
         // window / event) so dashboards can break down what woke the agent.
         const handle = await withUseCase(
             { useCase: 'live_note_agent', subUseCase: trigger },
-            () => startHeadlessAgent({
+            () => start({
                 agentId: 'live-note-agent',
                 message: buildMessage(filePath, live, trigger, context),
                 model,
-                ...(live.provider ? { provider: live.provider } : {}),
+                ...(provider ? { provider } : {}),
                 throwOnError: true,
             }),
         );

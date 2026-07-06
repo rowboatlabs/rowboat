@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { RelPath, Encoding, Stat, DirEntry, ReaddirOptions, ReadFileResult, WorkspaceChangeEvent, WriteFileOptions, WriteFileResult, RemoveOptions } from './workspace.js';
 import { ListToolsResponse } from './mcp.js';
 import { AskHumanResponsePayload, CreateRunOptions, Run, ListRunsResponse, ToolPermissionAuthorizePayload } from './runs.js';
-import { LlmModelConfig, LlmProvider } from './models.js';
+import { LlmModelConfig, LlmProvider, ModelOverride, ModelRef } from './models.js';
 import { AgentScheduleConfig, AgentScheduleEntry } from './agent-schedule.js';
 import { AgentScheduleState } from './agent-schedule-state.js';
 import { ServiceEvent } from './service-events.js';
@@ -566,6 +566,13 @@ const ipcSchemas = {
     res: z.object({
       success: z.boolean(),
       error: z.string().optional(),
+      // Capability caveats from the local-model probe (tool support, context
+      // window) — the connection still succeeded.
+      warnings: z.array(z.string()).optional(),
+      capabilities: z.object({
+        supportsTools: z.boolean().optional(),
+        maxContextLength: z.number().optional(),
+      }).optional(),
     }),
   },
   'models:listForProvider': {
@@ -601,6 +608,23 @@ const ipcSchemas = {
   },
   'models:saveConfig': {
     req: LlmModelConfig,
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  // Partial top-level merge into models.json — used by hybrid (signed-in +
+  // BYOK) settings to set the default selection / category overrides without
+  // clobbering the BYOK provider config that saveConfig owns. Omitted keys
+  // are untouched; null clears a key back to its default.
+  'models:updateConfig': {
+    req: z.object({
+      defaultSelection: ModelRef.nullable().optional(),
+      knowledgeGraphModel: ModelOverride.nullable().optional(),
+      meetingNotesModel: ModelOverride.nullable().optional(),
+      liveNoteAgentModel: ModelOverride.nullable().optional(),
+      autoPermissionDecisionModel: ModelOverride.nullable().optional(),
+      deferBackgroundTasks: z.boolean().nullable().optional(),
+    }),
     res: z.object({
       success: z.literal(true),
     }),

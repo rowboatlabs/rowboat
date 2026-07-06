@@ -2,7 +2,7 @@ import type { BackgroundTask, BackgroundTaskTriggerType } from '@x/shared/dist/b
 import { PrefixLogger } from '@x/shared/dist/prefix-logger.js';
 import { fetchTask, patchTask, prependRunId } from './fileops.js';
 import { getBackgroundTaskAgentModel } from '../models/defaults.js';
-import { startHeadlessAgent } from '../agents/headless-app.js';
+import { startHeadlessAgent, startWhenPossible } from '../agents/headless-app.js';
 import { buildTriggerBlock } from '../agents/build-trigger-block.js';
 import { backgroundTaskBus } from './bus.js';
 import { withUseCase } from '../analytics/use_case.js';
@@ -137,18 +137,29 @@ export async function runBackgroundTask(
             }
         }
 
-        const model = task.model || await getBackgroundTaskAgentModel();
+        // task.yaml model/provider win; otherwise the category default
+        // (provider-qualified in hybrid mode). A task model without a
+        // provider keeps the legacy meaning: the app-default provider.
+        const selection = await getBackgroundTaskAgentModel();
+        const model = task.model || selection.model;
+        const provider = task.provider ?? (task.model ? undefined : selection.provider);
+        // Manual runs are user-requested (the Run button, or the copilot's
+        // run-background-task-agent tool mid-chat) and must NOT wait for
+        // chat-idle: the requesting chat turn holds the chat-activity lock,
+        // so deferring here would deadlock the turn. Only autonomous
+        // triggers (cron/window/event) defer.
+        const start = trigger === 'manual' ? startHeadlessAgent : startWhenPossible;
         // Establish the use-case context for the whole turn so every tool the
         // agent calls (notably notify-user) reads `background_task_agent` via
         // getCurrentUseCase(); the AsyncLocalStorage context set here flows
         // through the turn's async execution chain.
         const handle = await withUseCase(
             { useCase: 'background_task_agent', subUseCase: trigger },
-            () => startHeadlessAgent({
+            () => start({
                 agentId: 'background-task-agent',
                 message: buildMessage(slug, task, trigger, context, codeProject),
                 model,
-                ...(task.provider ? { provider: task.provider } : {}),
+                ...(provider ? { provider } : {}),
                 throwOnError: true,
             }),
         );

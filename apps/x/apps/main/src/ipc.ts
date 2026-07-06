@@ -1080,6 +1080,11 @@ export function setupIpcHandlers() {
       await repo.setConfig(args);
       return { success: true };
     },
+    'models:updateConfig': async (_event, args) => {
+      const repo = container.resolve<IModelConfigRepo>('modelConfigRepo');
+      await repo.updateConfig(args);
+      return { success: true };
+    },
     'oauth:connect': async (_event, args) => {
       const credentials = args.clientId && args.clientSecret
         ? { clientId: args.clientId.trim(), clientSecret: args.clientSecret.trim() }
