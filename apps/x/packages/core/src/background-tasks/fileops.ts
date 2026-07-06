@@ -81,13 +81,20 @@ export async function fetchTask(slug: string): Promise<BackgroundTask | null> {
  * structural edits (active toggle, instructions, triggers, model) and by the
  * runner for the `lastRun*` runtime fields.
  */
-export async function patchTask(slug: string, partial: Partial<BackgroundTask>): Promise<BackgroundTask> {
+export async function patchTask(
+    slug: string,
+    partial: Partial<BackgroundTask>,
+    clear: Array<keyof BackgroundTask> = [],
+): Promise<BackgroundTask> {
     return withFileLock(taskYamlPath(slug), async () => {
         const current = await fetchTask(slug);
         if (!current) {
             throw new Error(`Task '${slug}' not found`);
         }
         const next: BackgroundTask = { ...current, ...partial };
+        // Allow explicitly clearing a field (e.g. reset model → falls back to the
+        // default). A plain merge can't remove a key.
+        for (const key of clear) delete next[key];
         await fs.writeFile(taskYamlPath(slug), stringifyYaml(next), 'utf-8');
         return next;
     });
@@ -197,6 +204,7 @@ export async function listTasks(opts: ListTasksOptions = {}): Promise<ListTasksR
             active: task.active,
             ...(task.triggers ? { triggers: task.triggers } : {}),
             ...(task.projectId ? { projectId: task.projectId } : {}),
+            ...(task.sourceApp ? { sourceApp: task.sourceApp } : {}),
             createdAt: task.createdAt,
             ...(task.lastAttemptAt ? { lastAttemptAt: task.lastAttemptAt } : {}),
             ...(task.lastRunId ? { lastRunId: task.lastRunId } : {}),

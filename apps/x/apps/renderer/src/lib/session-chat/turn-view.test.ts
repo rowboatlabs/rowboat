@@ -96,6 +96,25 @@ describe('voice output', () => {
     expect(overlay.voiceSegments).toEqual(['hello there', 'bye'])
   })
 
+  it('emits an early clause from a long open block, then the remainder on close', () => {
+    let overlay = emptyOverlay()
+    const longClause = 'Okay so the first thing I would look at here is the error message,'
+    overlay = applyOverlay(overlay, delta(`<voice>${longClause} because`))
+    // Open block crossed the early-speech threshold at a clause boundary.
+    expect(overlay.voiceSegments).toEqual([longClause])
+    overlay = applyOverlay(overlay, delta(' it tells you the root cause.</voice>'))
+    // Remainder only — the early clause is not repeated.
+    expect(overlay.voiceSegments).toEqual([longClause, 'because it tells you the root cause.'])
+  })
+
+  it('does not emit early clauses from short open blocks', () => {
+    let overlay = emptyOverlay()
+    overlay = applyOverlay(overlay, delta('<voice>Sure, one sec'))
+    expect(overlay.voiceSegments).toEqual([])
+    overlay = applyOverlay(overlay, delta('.</voice>'))
+    expect(overlay.voiceSegments).toEqual(['Sure, one sec.'])
+  })
+
   it('keeps segments but resets the scan on model_call_completed', () => {
     let overlay = emptyOverlay()
     overlay = applyOverlay(overlay, delta('<voice>one</voice>'))
@@ -169,6 +188,117 @@ describe('buildTurnConversation', () => {
     ])
     const items = buildTurnConversation(state).filter(isToolCall)
     expect(items.map((i) => i.status)).toEqual(['pending', 'running'])
+  })
+
+  it('uses the tool result envelope to determine error status', () => {
+    const state = reduceTurn([
+      created(T1, S1),
+      requested(T1, 0),
+      completed(
+        T1,
+        0,
+        assistantCalls(
+          toolCallPart('flagged', 'echo'),
+          toolCallPart('normal', 'echo'),
+        ),
+      ),
+      invocation(T1, 'flagged', 'echo'),
+      {
+        type: 'tool_result',
+        turnId: T1,
+        ts: TS,
+        toolCallId: 'flagged',
+        toolName: 'echo',
+        source: 'sync',
+        result: { output: 'boom', isError: true },
+      },
+      invocation(T1, 'normal', 'echo'),
+      toolResult(T1, 'normal', 'echo', { success: false, message: 'payload data' }),
+    ])
+    const items = buildTurnConversation(state).filter(isToolCall)
+    expect(items.map((i) => i.status)).toEqual(['error', 'completed'])
+  })
+
+  it('derives the code-run timeline from the settle-time batch and asks from request events', () => {
+    const codeProgress = (progress: unknown): TEvent => ({
+      type: 'tool_progress',
+      turnId: T1,
+      ts: TS,
+      toolCallId: 'cr1',
+      source: 'sync',
+      progress: progress as never,
+    })
+    const state = reduceTurn([
+      created(T1, S1),
+      requested(T1, 0),
+      completed(T1, 0, assistantCalls(toolCallPart('cr1', 'code_agent_run', { agent: 'codex' }))),
+      invocation(T1, 'cr1', 'code_agent_run'),
+      codeProgress({
+        kind: 'code-run-permission-request',
+        requestId: 'cpr-1',
+        ask: { toolCallId: 'x', title: 'write file', options: [] },
+      }),
+      codeProgress({
+        kind: 'code-run-events',
+        events: [
+          { type: 'message', role: 'agent', text: 'hi' },
+          { type: 'tool_call', id: 'x', title: 'write file' },
+        ],
+      }),
+    ])
+    const tool = buildTurnConversation(state).filter(isToolCall)[0]
+    expect(tool.status).toBe('running')
+    expect(tool.codeRunEvents?.map((e) => e.type)).toEqual(['message', 'tool_call'])
+    expect(tool.pendingCodePermission?.requestId).toBe('cpr-1')
+  })
+
+  it('clears the pending code permission on the resolved marker and on tool result', () => {
+    const codeProgress = (toolCallId: string, progress: unknown): TEvent => ({
+      type: 'tool_progress',
+      turnId: T1,
+      ts: TS,
+      toolCallId,
+      source: 'sync',
+      progress: progress as never,
+    })
+    const ask = { toolCallId: 'x', title: 'write file', options: [] }
+    // resolved: the durable marker pairs off the request mid-run
+    const resolvedState = reduceTurn([
+      created(T1, S1),
+      requested(T1, 0),
+      completed(T1, 0, assistantCalls(toolCallPart('cr1', 'code_agent_run'))),
+      invocation(T1, 'cr1', 'code_agent_run'),
+      codeProgress('cr1', { kind: 'code-run-permission-request', requestId: 'cpr-1', ask }),
+      codeProgress('cr1', { kind: 'code-run-permission-resolved' }),
+    ])
+    const resolved = buildTurnConversation(resolvedState).filter(isToolCall)[0]
+    expect(resolved.pendingCodePermission).toBeUndefined()
+
+    // a second ask after the first resolution is pending again
+    const secondAskState = reduceTurn([
+      created(T1, S1),
+      requested(T1, 0),
+      completed(T1, 0, assistantCalls(toolCallPart('cr1', 'code_agent_run'))),
+      invocation(T1, 'cr1', 'code_agent_run'),
+      codeProgress('cr1', { kind: 'code-run-permission-request', requestId: 'cpr-1', ask }),
+      codeProgress('cr1', { kind: 'code-run-permission-resolved' }),
+      codeProgress('cr1', { kind: 'code-run-permission-request', requestId: 'cpr-2', ask }),
+    ])
+    const secondAsk = buildTurnConversation(secondAskState).filter(isToolCall)[0]
+    expect(secondAsk.pendingCodePermission?.requestId).toBe('cpr-2')
+
+    // settled: an unanswered ask must not survive the tool's terminal result
+    const settledState = reduceTurn([
+      created(T1, S1),
+      requested(T1, 0),
+      completed(T1, 0, assistantCalls(toolCallPart('cr2', 'code_agent_run'))),
+      invocation(T1, 'cr2', 'code_agent_run'),
+      codeProgress('cr2', { kind: 'code-run-permission-request', requestId: 'cpr-2', ask }),
+      toolResult(T1, 'cr2', 'code_agent_run', { success: false, stopReason: 'cancelled' }),
+    ])
+    const settled = buildTurnConversation(settledState).filter(isToolCall)[0]
+    expect(settled.pendingCodePermission).toBeUndefined()
+    expect(settled.status).toBe('completed')
   })
 
   it('renders user attachments and a failed turn as an error item', () => {

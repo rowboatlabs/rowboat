@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   ArrowUp,
@@ -15,16 +15,19 @@ import {
   FolderCog,
   FolderOpen,
   Globe,
-  Headphones,
   ImagePlus,
   LoaderIcon,
   Lock,
   Mic,
   MoreHorizontal,
+  Phone,
+  PhoneOff,
   Plus,
+  Presentation,
   ShieldCheck,
   Square,
   Terminal,
+  Video,
   X,
 } from 'lucide-react'
 
@@ -210,6 +213,18 @@ function compactWorkDirPath(path: string) {
   return path.replace(/^\/Users\/[^/]+/, '~')
 }
 
+// Call presets: front doors into the same call engine, differing only in
+// starting devices. 'share' is the call button's main click — the "work
+// together" default (screen shared, camera off, floating pill). The chevron
+// menu holds the deviations.
+export type CallPreset = 'voice' | 'video' | 'share' | 'practice'
+
+const CALL_PRESET_MENU: Array<{ preset: CallPreset; label: string; description: string; Icon: typeof Phone }> = [
+  { preset: 'voice', label: 'Voice call', description: 'Just talk — nothing is shared, the mascot hovers while you work', Icon: AudioLines },
+  { preset: 'video', label: 'Video call', description: 'Camera on, face to face — it sees your expressions', Icon: Video },
+  { preset: 'practice', label: 'Practice session', description: 'Rehearse a pitch or interview with live coaching', Icon: Presentation },
+]
+
 interface ChatInputInnerProps {
   onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => void
   onStop?: () => void
@@ -230,11 +245,13 @@ interface ChatInputInnerProps {
   onSubmitRecording?: () => void | Promise<void>
   onCancelRecording?: () => void
   voiceAvailable?: boolean
-  ttsAvailable?: boolean
-  ttsEnabled?: boolean
-  ttsMode?: 'summary' | 'full'
-  onToggleTts?: () => void
-  onTtsModeChange?: (mode: 'summary' | 'full') => void
+  /** A call is live (hands-free voice loop + spoken responses). */
+  inCall?: boolean
+  /** Start a call with the given preset's device defaults. */
+  onStartCall?: (preset: CallPreset) => void
+  onEndCall?: () => void
+  /** Calls need both voice input (STT) and voice output (TTS) configured. */
+  callAvailable?: boolean
   /** Fired when the user picks a different model in the dropdown (only when no run exists yet). */
   onSelectedModelChange?: (model: SelectedModel | null) => void
   /** Work directory for this chat (per-chat). Null when none is set. */
@@ -268,11 +285,10 @@ function ChatInputInner({
   onSubmitRecording,
   onCancelRecording,
   voiceAvailable,
-  ttsAvailable,
-  ttsEnabled,
-  ttsMode,
-  onToggleTts,
-  onTtsModeChange,
+  inCall,
+  onStartCall,
+  onEndCall,
+  callAvailable,
   onSelectedModelChange,
   workDir = null,
   onWorkDirChange,
@@ -287,6 +303,11 @@ function ChatInputInner({
 
   const [configuredModels, setConfiguredModels] = useState<ConfiguredModel[]>([])
   const [activeModelKey, setActiveModelKey] = useState('')
+  // The effective runtime default (what a run actually uses when the user
+  // hasn't picked a model) — shown in the picker instead of guessing from
+  // list order, which can disagree with the real default.
+  const [defaultModel, setDefaultModel] = useState<ConfiguredModel | null>(null)
+  const loadModelConfigEpoch = useRef(0)
   const [lockedModel, setLockedModel] = useState<SelectedModel | null>(null)
   const [searchEnabled, setSearchEnabled] = useState(false)
   const [searchAvailable, setSearchAvailable] = useState(false)
@@ -379,47 +400,54 @@ function ChatInputInner({
     return cleanup
   }, [])
 
-  // Load the list of models the user can choose from.
-  // Signed-in: gateway model list. Signed-out: providers configured in models.json.
+  // Load the list of models the user can choose from. Hybrid mode: signed-in
+  // users get the gateway list AND every BYOK provider configured in
+  // models.json (selecting a BYOK model routes that message through the
+  // user's own key / local server). Signed-out users get BYOK only.
   const loadModelConfig = useCallback(async () => {
+    // Concurrent runs race (mount fires one before the sign-in state resolves,
+    // which fires another) — only the newest run may write state, else a slow
+    // stale run can clobber the fresh list with an empty one.
+    const epoch = ++loadModelConfigEpoch.current
     try {
-      if (isRowboatConnected) {
+      const def = await window.ipc.invoke('llm:getDefaultModel', null)
+      if (loadModelConfigEpoch.current !== epoch) return
+      setDefaultModel({ provider: def.provider as ProviderName, model: def.model })
+    } catch {
+      if (loadModelConfigEpoch.current === epoch) setDefaultModel(null)
+    }
+    try {
+      const models: ConfiguredModel[] = []
+      const seen = new Set<string>()
+      const push = (provider: string, model: string) => {
+        if (!model) return
+        const key = `${provider}/${model}`
+        if (seen.has(key)) return
+        seen.add(key)
+        models.push({ provider: provider as ProviderName, model })
+      }
+
+      // Full catalog per provider (gateway + cloud). Providers with no
+      // catalog (Ollama, OpenAI-compatible) fall back to the models saved in
+      // config below.
+      const catalog: Record<string, string[]> = {}
+      try {
         const listResult = await window.ipc.invoke('models:list', null)
-        const rowboatProvider = listResult.providers?.find(
-          (p: { id: string }) => p.id === 'rowboat'
-        )
-        const models: ConfiguredModel[] = (rowboatProvider?.models || []).map(
-          (m: { id: string }) => ({ provider: 'rowboat', model: m.id })
-        )
-        setConfiguredModels(models)
-      } else {
+        for (const p of listResult.providers || []) {
+          catalog[p.id] = (p.models || []).map((m: { id: string }) => m.id)
+        }
+      } catch { /* offline / no catalog — fall back to saved config below */ }
+
+      if (isRowboatConnected) {
+        for (const m of catalog['rowboat'] || []) push('rowboat', m)
+      }
+
+      try {
         const result = await window.ipc.invoke('workspace:readFile', { path: 'config/models.json' })
         const parsed = JSON.parse(result.data)
 
-        // Offer every model the configured key supports — the same full catalog
-        // Settings uses for its dropdowns — so BYOK chat matches the signed-in
-        // gateway picker. The picker is no longer limited to a hand-curated
-        // config.models list. Providers with no catalog (Ollama, OpenAI-compatible)
-        // fall back to the model saved in config.
-        const catalog: Record<string, string[]> = {}
-        try {
-          const listResult = await window.ipc.invoke('models:list', null)
-          for (const p of listResult.providers || []) {
-            catalog[p.id] = (p.models || []).map((m: { id: string }) => m.id)
-          }
-        } catch { /* offline / no catalog — fall back to saved config below */ }
-
-        const models: ConfiguredModel[] = []
-        const seen = new Set<string>()
-        const push = (provider: string, model: string) => {
-          if (!model) return
-          const key = `${provider}/${model}`
-          if (seen.has(key)) return
-          seen.add(key)
-          models.push({ provider: provider as ProviderName, model })
-        }
-
-        // List the default provider first so its default model leads the picker.
+        // List the default provider first so its default model leads the
+        // BYOK section of the picker.
         const defaultFlavor = typeof parsed?.provider?.flavor === 'string' ? parsed.provider.flavor : ''
         const flavors = Object.keys(parsed?.providers || {})
           .sort((a, b) => (a === defaultFlavor ? -1 : b === defaultFlavor ? 1 : 0))
@@ -441,10 +469,24 @@ function ChatInputInner({
             for (const m of saved) push(flavor, m)
           }
         }
-        setConfiguredModels(models)
-      }
-    } catch {
-      // No config yet
+
+        // The user's explicit default selection leads the whole picker.
+        const sel = parsed?.defaultSelection
+        if (sel && typeof sel.provider === 'string' && typeof sel.model === 'string') {
+          const selKey = `${sel.provider}/${sel.model}`
+          const index = models.findIndex((m) => `${m.provider}/${m.model}` === selKey)
+          if (index > 0) {
+            const [entry] = models.splice(index, 1)
+            models.unshift(entry)
+          }
+        }
+      } catch { /* no BYOK config yet */ }
+
+      if (loadModelConfigEpoch.current !== epoch) return
+      setConfiguredModels(models)
+    } catch (err) {
+      // No config yet — but surface unexpected failures for diagnosis.
+      console.error('[chat-input] failed to load model list', err)
     }
   }, [isRowboatConnected])
 
@@ -631,15 +673,25 @@ function ChatInputInner({
     checkSearch()
   }, [isActive, isRowboatConnected])
 
+  // The dropdown's items: always include the effective default so the picker
+  // is never empty (and never missing the model that actually runs) even
+  // while the full list is still loading.
+  const pickerModels = useMemo<ConfiguredModel[]>(() => {
+    if (!defaultModel) return configuredModels
+    const defaultKey = `${defaultModel.provider}/${defaultModel.model}`
+    if (configuredModels.some((m) => `${m.provider}/${m.model}` === defaultKey)) return configuredModels
+    return [defaultModel, ...configuredModels]
+  }, [configuredModels, defaultModel])
+
   // Selecting a model affects only the *next* run created from this tab.
   // Once a run exists, model is frozen on the run and the dropdown is read-only.
   const handleModelChange = useCallback((key: string) => {
     if (lockedModel) return
-    const entry = configuredModels.find((m) => `${m.provider}/${m.model}` === key)
+    const entry = pickerModels.find((m) => `${m.provider}/${m.model}` === key)
     if (!entry) return
     setActiveModelKey(key)
     onSelectedModelChange?.({ provider: entry.provider, model: entry.model })
-  }, [configuredModels, lockedModel, onSelectedModelChange])
+  }, [pickerModels, lockedModel, onSelectedModelChange])
 
   // Restore the tab draft when this input mounts.
   useEffect(() => {
@@ -752,7 +804,7 @@ function ChatInputInner({
   const currentWorkDirPath = effectiveWorkDir ? compactWorkDirPath(effectiveWorkDir) : ''
 
   return (
-    <div className="rowboat-chat-input rounded-lg border border-border bg-background shadow-none">
+    <div data-tour-id="chat-composer" className="rowboat-chat-input rounded-lg border border-border bg-background shadow-none">
       {attachments.length > 0 && (
         <div className="flex flex-wrap gap-2 px-4 pb-1 pt-3">
           {attachments.map((attachment) => {
@@ -1243,7 +1295,7 @@ function ChatInputInner({
               {providerDisplayNames[lockedModel.provider] || lockedModel.provider} — fixed for this chat
             </TooltipContent>
           </Tooltip>
-        ) : configuredModels.length > 0 ? (
+        ) : pickerModels.length > 0 ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
@@ -1251,14 +1303,22 @@ function ChatInputInner({
                 className="flex h-7 min-w-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               >
                 <span className="min-w-0 truncate">
-                  {getSelectedModelDisplayName(configuredModels.find((m) => `${m.provider}/${m.model}` === activeModelKey)?.model || configuredModels[0]?.model || 'Model')}
+                  {getSelectedModelDisplayName(
+                    pickerModels.find((m) => `${m.provider}/${m.model}` === activeModelKey)?.model
+                      || defaultModel?.model
+                      || pickerModels[0]?.model
+                      || 'Model'
+                  )}
                 </span>
                 <ChevronDown className="h-3 w-3 shrink-0" />
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuRadioGroup value={activeModelKey} onValueChange={handleModelChange}>
-                {configuredModels.map((m) => {
+              <DropdownMenuRadioGroup
+                value={activeModelKey || (defaultModel ? `${defaultModel.provider}/${defaultModel.model}` : '')}
+                onValueChange={handleModelChange}
+              >
+                {pickerModels.map((m) => {
                   const key = `${m.provider}/${m.model}`
                   return (
                     <DropdownMenuRadioItem key={key} value={key}>
@@ -1271,48 +1331,66 @@ function ChatInputInner({
             </DropdownMenuContent>
           </DropdownMenu>
         ) : null}
-        {onToggleTts && ttsAvailable && (
+        {onStartCall && (
           <div className="flex shrink-0 items-center">
             <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  onClick={onToggleTts}
+                  onClick={() => {
+                    if (inCall) {
+                      onEndCall?.()
+                    } else if (callAvailable) {
+                      onStartCall('share')
+                    }
+                  }}
                   className={cn(
-                    'relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors',
-                    ttsEnabled
-                      ? 'text-foreground hover:bg-muted'
-                      : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                    'flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors',
+                    inCall
+                      ? 'bg-red-600 text-white hover:bg-red-500'
+                      : callAvailable
+                        ? 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                        : 'cursor-default text-muted-foreground/40'
                   )}
-                  aria-label={ttsEnabled ? 'Disable voice output' : 'Enable voice output'}
+                  aria-label={inCall ? 'End call' : 'Start a call'}
                 >
-                  <Headphones className="h-4 w-4" />
-                  {!ttsEnabled && (
-                    <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                      <span className="block h-[1.5px] w-5 -rotate-45 rounded-full bg-muted-foreground" />
-                    </span>
-                  )}
+                  {inCall ? <PhoneOff className="h-4 w-4" /> : <Phone className="h-4 w-4" />}
                 </button>
               </TooltipTrigger>
               <TooltipContent side="top">
-                {ttsEnabled ? 'Voice output on' : 'Voice output off'}
+                {inCall
+                  ? 'End call'
+                  : callAvailable
+                    ? 'Start a call — it sees your screen while you talk it through'
+                    : 'Calls need voice input and output configured'}
               </TooltipContent>
             </Tooltip>
-            {ttsEnabled && onTtsModeChange && (
+            {!inCall && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
                     className="flex h-7 w-4 shrink-0 items-center justify-center text-muted-foreground transition-colors hover:text-foreground"
+                    aria-label="Call options"
                   >
                     <ChevronDown className="h-3 w-3" />
                   </button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuRadioGroup value={ttsMode ?? 'summary'} onValueChange={(v) => onTtsModeChange(v as 'summary' | 'full')}>
-                    <DropdownMenuRadioItem value="summary">Speak summary</DropdownMenuRadioItem>
-                    <DropdownMenuRadioItem value="full">Speak full response</DropdownMenuRadioItem>
-                  </DropdownMenuRadioGroup>
+                <DropdownMenuContent align="end" className="w-72">
+                  {CALL_PRESET_MENU.map(({ preset, label, description, Icon }) => (
+                    <DropdownMenuItem
+                      key={preset}
+                      disabled={!callAvailable}
+                      onSelect={() => onStartCall(preset)}
+                      className="items-start gap-3 py-2"
+                    >
+                      <Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                      <span className="min-w-0">
+                        <span className="block text-sm font-medium leading-tight">{label}</span>
+                        <span className="block pt-0.5 text-xs leading-tight text-muted-foreground">{description}</span>
+                      </span>
+                    </DropdownMenuItem>
+                  ))}
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
@@ -1487,11 +1565,10 @@ export interface ChatInputWithMentionsProps {
   onSubmitRecording?: () => void | Promise<void>
   onCancelRecording?: () => void
   voiceAvailable?: boolean
-  ttsAvailable?: boolean
-  ttsEnabled?: boolean
-  ttsMode?: 'summary' | 'full'
-  onToggleTts?: () => void
-  onTtsModeChange?: (mode: 'summary' | 'full') => void
+  inCall?: boolean
+  onStartCall?: (preset: CallPreset) => void
+  onEndCall?: () => void
+  callAvailable?: boolean
   onSelectedModelChange?: (model: SelectedModel | null) => void
   workDir?: string | null
   onWorkDirChange?: (value: string | null) => void
@@ -1521,11 +1598,10 @@ export function ChatInputWithMentions({
   onSubmitRecording,
   onCancelRecording,
   voiceAvailable,
-  ttsAvailable,
-  ttsEnabled,
-  ttsMode,
-  onToggleTts,
-  onTtsModeChange,
+  inCall,
+  onStartCall,
+  onEndCall,
+  callAvailable,
   onSelectedModelChange,
   workDir,
   onWorkDirChange,
@@ -1552,11 +1628,10 @@ export function ChatInputWithMentions({
         onSubmitRecording={onSubmitRecording}
         onCancelRecording={onCancelRecording}
         voiceAvailable={voiceAvailable}
-        ttsAvailable={ttsAvailable}
-        ttsEnabled={ttsEnabled}
-        ttsMode={ttsMode}
-        onToggleTts={onToggleTts}
-        onTtsModeChange={onTtsModeChange}
+        inCall={inCall}
+        onStartCall={onStartCall}
+        onEndCall={onEndCall}
+        callAvailable={callAvailable}
         onSelectedModelChange={onSelectedModelChange}
         workDir={workDir}
         onWorkDirChange={onWorkDirChange}

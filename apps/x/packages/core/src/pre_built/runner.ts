@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { WorkDir } from '../config/config.js';
-import { runHeadlessAgent } from '../agents/headless-app.js';
+import { runWhenPossible } from '../agents/headless-app.js';
 import { getKgModel } from '../models/defaults.js';
 import {
     loadConfig,
@@ -52,10 +52,10 @@ Process new items and use the user context above to identify yourself when draft
         // The agent file is expected to be in the agents directory with
         // the same name. Waits for the turn to settle (errors tolerated,
         // matching the old no-throwOnError wait).
-        await runHeadlessAgent({
+        await runWhenPossible({
             agentId: agentName,
             message,
-            model: await getKgModel(),
+            ...(await getKgModel()),
         });
 
         // Update last run time

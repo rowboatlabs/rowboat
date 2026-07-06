@@ -155,8 +155,8 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
 
   // Preferred default models for each provider
   const preferredDefaults: Partial<Record<LlmProviderFlavor, string>> = {
-    openai: "gpt-5.2",
-    anthropic: "claude-opus-4-6-20260202",
+    openai: "gpt-5.4",
+    anthropic: "claude-opus-4-8",
   }
 
   // Initialize default models from catalog
@@ -434,10 +434,29 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
       }
 
       const catalog: string[] = result.models ?? []
+      const typed = activeConfig.model.trim()
+      // Hosted providers hide the model field (it holds an auto-seeded
+      // default), so only treat it as user intent where the field is shown —
+      // mirrors showModelInput in llm-setup-step.
+      const hostedProviders: LlmProviderFlavor[] = ["openai", "anthropic", "google"]
+      const modelInputShown = !hostedProviders.includes(llmProvider)
+
+      if (modelInputShown && typed && llmProvider === "ollama" && catalog.length > 0 && !catalog.includes(typed)) {
+        // Ollama's tag list is authoritative: an unlisted model isn't pulled,
+        // so saving it would break chat at runtime with no obvious cause.
+        const error = `Model '${typed}' is not available on this Ollama server. Pull it first (ollama pull ${typed}) or pick one of: ${catalog.slice(0, 5).join(", ")}${catalog.length > 5 ? ", …" : ""}`
+        setTestState({ status: "error", error })
+        toast.error(error)
+        return false
+      }
+
       const preferred = preferredDefaults[llmProvider]
-      const model =
-        (preferred && catalog.includes(preferred) && preferred) ||
-        catalog[0] || activeConfig.model.trim() || ""
+      // A model the user explicitly entered always wins — this used to prefer
+      // catalog[0], which silently replaced the user's Ollama model with
+      // whatever model the local server happened to list first.
+      const model = modelInputShown
+        ? (typed || catalog[0] || "")
+        : ((preferred && catalog.includes(preferred) && preferred) || catalog[0] || typed || "")
 
       // `models` is the user's curated assistant-model list (shown in Settings),
       // NOT the full provider catalog. Onboarding seeds it with just the selected

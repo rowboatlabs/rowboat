@@ -3,11 +3,11 @@ import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
 import { generateText } from 'ai';
 import { WorkDir } from '../config/config.js';
-import { runHeadlessAgent } from '../agents/headless-app.js';
+import { runWhenPossible } from '../agents/headless-app.js';
 import { getKgModel } from '../models/defaults.js';
 import container from '../di/container.js';
 import type { IModelConfigRepo } from '../models/repo.js';
-import { createProvider } from '../models/models.js';
+import { createLanguageModel } from '../models/models.js';
 import { inlineTask } from '@x/shared';
 import { captureLlmUsage } from '../analytics/usage.js';
 import { withUseCase } from '../analytics/use_case.js';
@@ -480,10 +480,10 @@ async function processInlineTasks(): Promise<void> {
                     '```',
                 ].join('\n');
 
-                const { summary: result } = await runHeadlessAgent({
+                const { summary: result } = await runWhenPossible({
                     agentId: INLINE_TASK_AGENT,
                     message,
-                    model: await getKgModel(),
+                    ...(await getKgModel()),
                 });
                 if (result) {
                     if (task.targetId) {
@@ -559,10 +559,10 @@ export async function processRowboatInstruction(
         '```',
     ].join('\n');
 
-    const { summary: rawResponse } = await runHeadlessAgent({
+    const { summary: rawResponse } = await runWhenPossible({
         agentId: INLINE_TASK_AGENT,
         message,
-        model: await getKgModel(),
+        ...(await getKgModel()),
     });
     if (!rawResponse) {
         return { instruction, schedule: null, scheduleLabel: null, response: null };
@@ -613,8 +613,7 @@ export async function processRowboatInstruction(
 export async function classifySchedule(instruction: string): Promise<InlineTaskSchedule | null> {
     const repo = container.resolve<IModelConfigRepo>('modelConfigRepo');
     const config = await repo.getConfig();
-    const provider = createProvider(config.provider);
-    const model = provider.languageModel(config.model);
+    const model = createLanguageModel(config.provider, config.model);
 
     const now = new Date();
     const defaultEnd = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);

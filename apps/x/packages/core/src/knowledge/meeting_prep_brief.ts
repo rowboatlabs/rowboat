@@ -2,8 +2,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { generateText } from 'ai';
 import { WorkDir } from '../config/config.js';
-import { createProvider } from '../models/models.js';
-import { getDefaultModelAndProvider, getMeetingNotesModel, resolveProviderConfig } from '../models/defaults.js';
+import { createLanguageModel } from '../models/models.js';
+import { getMeetingNotesModel, resolveProviderConfig } from '../models/defaults.js';
 import { captureLlmUsage } from '../analytics/usage.js';
 import { withUseCase } from '../analytics/use_case.js';
 import { parseFrontmatter } from '../application/lib/parse-frontmatter.js';
@@ -175,10 +175,9 @@ async function generateBrief(event: CalendarEvent, ctx: Awaited<ReturnType<typeo
     });
     if (attendeeLines.length) parts.push(`Attendees:\n${attendeeLines.join('\n')}`);
 
-    const modelId = await getMeetingNotesModel();
-    const { provider: providerName } = await getDefaultModelAndProvider();
+    const { model: modelId, provider: providerName } = await getMeetingNotesModel();
     const providerConfig = await resolveProviderConfig(providerName);
-    const model = createProvider(providerConfig).languageModel(modelId);
+    const model = createLanguageModel(providerConfig, modelId);
 
     const result = await withUseCase({ useCase: 'meeting_prep' }, () => generateText({
         model,

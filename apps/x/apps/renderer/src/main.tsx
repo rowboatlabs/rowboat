@@ -6,6 +6,7 @@ import { PostHogProvider } from 'posthog-js/react'
 import type { CaptureResult } from 'posthog-js'
 import { ThemeProvider } from '@/contexts/theme-context'
 import { configureAnalyticsContext } from './lib/analytics'
+import { VideoPopout } from '@/components/video-popout'
 
 // Fetch the stable installation ID from main so renderer + main share one
 // PostHog distinct_id. Falls back to PostHog's auto-generated anonymous ID
@@ -57,4 +58,14 @@ async function bootstrap() {
   // The loaded callback applies api_url/app_version once PostHog has initialized.
 }
 
-bootstrap()
+// The video-mode popout window loads the same bundle with a hash route and
+// renders only the mini-call UI — no analytics or app bootstrap needed.
+if (window.location.hash === '#video-popout') {
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <VideoPopout />
+    </StrictMode>,
+  )
+} else {
+  bootstrap()
+}

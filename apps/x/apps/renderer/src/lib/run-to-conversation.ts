@@ -41,6 +41,9 @@ export function runLogToConversation(log: RunLog): ConversationItem[] {
             filename?: string
             mimeType?: string
             size?: number
+            data?: string
+            mediaType?: string
+            source?: string
             toolCallId?: string
             toolName?: string
             arguments?: unknown
@@ -52,13 +55,24 @@ export function runLogToConversation(log: RunLog): ConversationItem[] {
             .join('')
 
           const attachmentParts = parts.filter((p) => p.type === 'attachment' && p.path)
-          if (attachmentParts.length > 0) {
-            msgAttachments = attachmentParts.map((p) => ({
-              path: p.path!,
-              filename: p.filename || p.path!.split('/').pop() || p.path!,
-              mimeType: p.mimeType || 'application/octet-stream',
-              size: p.size,
-            }))
+          // Video-mode webcam frames — inline base64 image parts, shown as a filmstrip
+          const imageParts = parts.filter((p) => p.type === 'image' && p.data)
+          if (attachmentParts.length > 0 || imageParts.length > 0) {
+            msgAttachments = [
+              ...attachmentParts.map((p) => ({
+                path: p.path!,
+                filename: p.filename || p.path!.split('/').pop() || p.path!,
+                mimeType: p.mimeType || 'application/octet-stream',
+                size: p.size,
+              })),
+              ...imageParts.map((p, index) => ({
+                path: '',
+                filename: `${p.source === 'screen' ? 'screen' : 'camera'}-frame-${index + 1}.jpg`,
+                mimeType: p.mediaType || 'image/jpeg',
+                thumbnailUrl: `data:${p.mediaType || 'image/jpeg'};base64,${p.data}`,
+                isVideoFrame: true,
+              })),
+            ]
           }
 
           if (msg.role === 'assistant') {

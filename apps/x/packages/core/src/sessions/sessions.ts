@@ -17,6 +17,7 @@ import {
     reduceTurn,
 } from "@x/shared/dist/turns.js";
 import type { IMonotonicallyIncreasingIdGenerator } from "../application/lib/id-gen.js";
+import { chatActivity } from "../application/lib/chat-activity.js";
 import type {
     ITurnRuntime,
     Turn,
@@ -339,9 +340,17 @@ export class SessionsImpl implements ISessions {
         input?: TurnExternalInput,
     ): TurnExecution {
         const controller = new AbortController();
+        // A session turn is a user-facing chat: mark it active so background
+        // agents can defer (see agents/headless-app.ts runWhenPossible).
+        if (sessionId !== null) {
+            chatActivity.enter();
+        }
         const execution = this.turnRuntime.advanceTurn(turnId, input, {
             signal: controller.signal,
         });
+        if (sessionId !== null) {
+            void execution.outcome.catch(() => undefined).finally(() => chatActivity.exit());
+        }
         this.active.set(turnId, { sessionId, controller, execution });
 
         void (async () => {

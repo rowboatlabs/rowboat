@@ -15,14 +15,19 @@ import { WorkDir } from "../../config/config.js";
 import { composioAccountsRepo } from "../../composio/repo.js";
 import { executeAction as executeComposioAction, isConfigured as isComposioConfigured, searchTools as searchComposioTools } from "../../composio/client.js";
 import { CURATED_TOOLKITS, CURATED_TOOLKIT_SLUGS } from "@x/shared/dist/composio.js";
+import { RowboatAppManifestSchema } from "@x/shared/dist/rowboat-app.js";
 import { BrowserControlInputSchema, type BrowserControlInput } from "@x/shared/dist/browser-control.js";
 import { BackgroundTaskSchema, TriggersSchema } from "@x/shared/dist/background-task.js";
 import type { CodeModeManager } from "../../code-mode/acp/manager.js";
 import type { CodePermissionRegistry } from "../../code-mode/acp/permission-registry.js";
 import { ICodeModeConfigRepo } from "../../code-mode/repo.js";
-import type { ApprovalPolicy } from "@x/shared/dist/code-mode.js";
+import type { ApprovalPolicy, CodeRunEvent as CodeRunEventType } from "@x/shared/dist/code-mode.js";
+import type { CodeRunFeed } from "../../code-mode/feed.js";
 import type { ICodeProjectsRepo } from "../../code-mode/projects/repo.js";
 import * as gitService from "../../code-mode/git/service.js";
+import { listImportantThreads, searchThreads } from "../../knowledge/sync_gmail.js";
+import { listTasks as listBackgroundTasks } from "../../background-tasks/fileops.js";
+import type { ISessions } from "../../sessions/api.js";
 
 // Inputs for the bg-task builtin tools. Reuse the canonical schema field
 // descriptions; only `triggers` gets a tighter contextual override (the
@@ -51,6 +56,7 @@ const PatchBackgroundTaskInput = BackgroundTaskSchema.pick({
     slug: z.string().describe('The slug of the task to update (the folder name under bg-tasks/).'),
     triggers: TriggersSchema.optional().describe('Replace the triggers object. To remove all triggers (make manual-only) pass an empty object.'),
     projectDir: z.string().optional().describe("Point an existing task at a code repo (or change which one) to make it a coding task. Absolute path or ~/… to a local git repository with at least one commit. Same rules as on create."),
+    clearModel: z.boolean().optional().describe("Reset the task's model/provider override so it falls back to the default. Use this to unstick a bad/rejected model value (do not also pass model)."),
 });
 
 // Turn a user-supplied directory into a registered code project id. Reuses the
@@ -63,6 +69,27 @@ function expandHome(p: string): string {
     if (t === '~') return os.homedir();
     if (t.startsWith('~/') || t.startsWith(`~${path.sep}`)) return path.join(os.homedir(), t.slice(2));
     return t;
+}
+
+// Shrink a code-run timeline for durable storage: consecutive same-role message
+// chunks merge into one event. Display-lossless — the timeline renderer
+// concatenates consecutive messages anyway (CodingRunTimeline) — and typically
+// collapses the ~90% of a run's events that are per-token text deltas.
+// Everything else (tool calls/updates, plans, permissions) is kept verbatim in
+// order: updates are id-keyed transitions and must not be merged.
+export function coalesceCodeRunEvents(events: CodeRunEventType[]): CodeRunEventType[] {
+    const out: CodeRunEventType[] = [];
+    for (const event of events) {
+        const last = out[out.length - 1];
+        if (
+            event.type === 'message' && last?.type === 'message' && last.role === event.role
+        ) {
+            out[out.length - 1] = { ...last, text: last.text + event.text };
+        } else {
+            out.push(event);
+        }
+    }
+    return out;
 }
 
 async function resolveCodeProject(dirPath: string): Promise<
@@ -90,8 +117,9 @@ async function resolveCodeProject(dirPath: string): Promise<
 import { ensureLoaded as ensureBrowserSkillsLoaded, readSkillContent as readBrowserSkillContent, refreshFromRemote as refreshBrowserSkills } from "../browser-skills/index.js";
 import type { ToolContext } from "./exec-tool.js";
 import { generateText } from "ai";
-import { createProvider } from "../../models/models.js";
+import { createLanguageModel } from "../../models/models.js";
 import { getDefaultModelAndProvider, resolveProviderConfig } from "../../models/defaults.js";
+import { listGatewayModels } from "../../models/gateway.js";
 import { captureLlmUsage } from "../../analytics/usage.js";
 import { getCurrentUseCase, withUseCase } from "../../analytics/use_case.js";
 import { isSignedIn } from "../../account/account.js";
@@ -581,7 +609,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
 
                 const { model: modelId, provider: providerName } = await getDefaultModelAndProvider();
                 const providerConfig = await resolveProviderConfig(providerName);
-                const model = createProvider(providerConfig).languageModel(modelId);
+                const model = createLanguageModel(providerConfig, modelId);
 
                 const userPrompt = prompt || 'Convert this file to well-structured markdown.';
 
@@ -865,7 +893,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         }),
         execute: async ({ agent, cwd, prompt }: { agent: 'claude' | 'codex', cwd: string, prompt: string }, ctx?: ToolContext) => {
             if (!ctx) {
-                return { success: false, message: 'code_agent_run requires run context (runId / streaming).' };
+                throw new Error('code_agent_run requires run context (runId / streaming).');
             }
             // The composer chip is the source of truth for the agent. The model's `agent`
             // argument is only a fallback for the ask-human flow (code mode not active, no
@@ -873,8 +901,19 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
             // chip change. Honor the chip so switching it deterministically switches agents.
             const effectiveAgent = ctx.codeMode ?? agent;
             // Code-section sessions pin the working directory — never trust the model's
-            // cwd argument over the session's.
-            const effectiveCwd = ctx.codeCwd ?? cwd;
+            // cwd argument over the session's. Expand `~` and resolve to an absolute path:
+            // the engine is spawned with this as the child's cwd, and `child_process.spawn`
+            // does NO shell tilde expansion.
+            const effectiveCwd = path.resolve(expandHome(ctx.codeCwd ?? cwd));
+            // Fail loudly if the directory is missing. Otherwise the spawn below fails with
+            // Node's misleading "spawn <command> ENOENT" (it blames the executable, not the
+            // bad cwd), which reads as "the coding engine isn't installed" — see the enriched
+            // message the model surfaces. A clear error lets the model/user fix the path.
+            try {
+                if (!(await fs.stat(effectiveCwd)).isDirectory()) throw new Error('not a directory');
+            } catch {
+                throw new Error(`code_agent_run: working directory does not exist: ${effectiveCwd}`);
+            }
             const manager = container.resolve<CodeModeManager>('codeModeManager');
             const registry = container.resolve<CodePermissionRegistry>('codePermissionRegistry');
 
@@ -902,6 +941,10 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
 
             let finalText = '';
             const changedFiles = new Set<string>();
+            // The full ordered timeline, published ONCE as a durable batch when the
+            // run settles (see finally). The per-event copies below are ephemeral.
+            const collected: CodeRunEventType[] = [];
+            const feed = container.resolve<CodeRunFeed>('codeRunFeed');
             try {
                 const result = await manager.runPrompt({
                     runId: ctx.runId,
@@ -913,6 +956,11 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                     onEvent: (event) => {
                         if (event.type === 'message' && event.role === 'agent') finalText += event.text;
                         if (event.type === 'tool_call_update') for (const f of event.diffs) changedFiles.add(f);
+                        collected.push(event);
+                        // Live rendering, two transports: the CodeRunFeed side-channel
+                        // (turns-runtime chats — the runtime never sees this traffic)
+                        // and the legacy runs bus (code-section tabs). Both ephemeral.
+                        feed.broadcast({ toolCallId: ctx.toolCallId, event });
                         void ctx.publish({
                             runId: ctx.runId,
                             type: 'code-run-event',
@@ -952,12 +1000,26 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                         changedFiles: [...changedFiles],
                     };
                 }
-                return {
-                    success: false,
-                    message: `Coding agent failed: ${error instanceof Error ? error.message : String(error)}`,
-                };
+                throw new Error(`Coding agent failed: ${error instanceof Error ? error.message : String(error)}`);
             } finally {
                 ctx.signal.removeEventListener('abort', onAbort);
+                // Durable record for replay-on-reload — one event with the whole
+                // (coalesced) timeline, on every settle path including errors and
+                // cancellation, so partial runs keep their history too.
+                if (collected.length > 0) {
+                    await ctx.publish({
+                        runId: ctx.runId,
+                        type: 'code-run-events-batch',
+                        toolCallId: ctx.toolCallId,
+                        events: coalesceCodeRunEvents(collected),
+                        subflow: [],
+                    }).catch((e: unknown) => {
+                        // History is best-effort (rethrowing here would mask the run's
+                        // real outcome) — but a lost timeline must leave a trail, since
+                        // this batch is the only durable record of the run's activity.
+                        console.warn(`[code_agent_run] failed to persist code-run timeline: ${e instanceof Error ? e.message : String(e)}`);
+                    });
+                }
             }
         },
     },
@@ -1065,13 +1127,24 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
     // ============================================================================
 
     'app-navigation': {
-        description: 'Control the app UI - navigate to notes, switch views, filter/search the knowledge base, and manage saved views.',
+        description: 'Drive the Rowboat app UI: navigate to any view, read what a view contains (emails, background agents, chat history), open specific items (an email thread, a note, an agent, a past chat), filter/search the knowledge base, and manage saved views. Use it to SHOW the user things while telling them — navigation happens on their screen.',
         inputSchema: z.object({
-            action: z.enum(["open-note", "open-view", "update-base-view", "get-base-state", "create-base"]).describe("The navigation action to perform"),
+            action: z.enum(["open-note", "open-view", "open-app", "read-view", "open-item", "update-base-view", "get-base-state", "create-base"]).describe("The navigation action to perform"),
             // open-note
             path: z.string().optional().describe("Knowledge file path for open-note, e.g. knowledge/People/John.md"),
-            // open-view
-            view: z.enum(["bases", "graph"]).optional().describe("Which view to open (for open-view action)"),
+            // open-app
+            appId: z.string().optional().describe("App folder slug under ~/.rowboat/apps (for open-app) — opens the app in the middle pane."),
+            // open-view / read-view
+            view: z.enum(["home", "email", "meetings", "live-notes", "bg-tasks", "chat-history", "knowledge", "workspace", "code", "bases", "graph"]).optional().describe("Which view to open (open-view) or read (read-view; supported for read: email, bg-tasks, chat-history)"),
+            // read-view (email)
+            query: z.string().optional().describe("For read-view on email: runs a LIVE Gmail search over the user's ENTIRE mailbox (not just synced mail) via the Gmail API. Supports full Gmail search operators: from:, to:, subject:, before:/after:, has:attachment, quoted phrases, OR, etc. Omit to list the latest important inbox threads."),
+            limit: z.number().int().min(1).max(50).optional().describe("For read-view: max items to return (default 15)"),
+            // open-item
+            kind: z.enum(["email-thread", "note", "bg-task", "session"]).optional().describe("What to open (for open-item)"),
+            threadId: z.string().optional().describe("Gmail thread id (open-item kind=email-thread; get it from read-view email)"),
+            taskName: z.string().optional().describe("Background task/agent name (open-item kind=bg-task; get it from read-view bg-tasks)"),
+            sessionId: z.string().optional().describe("Chat session id (open-item kind=session; get it from read-view chat-history)"),
+
             // update-base-view
             filters: z.object({
                 set: z.array(z.object({ category: z.string(), value: z.string() })).optional().describe("Replace all filters with these"),
@@ -1115,6 +1188,124 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 case 'open-view': {
                     const view = input.view as string;
                     return { success: true, action: 'open-view', view };
+                }
+
+                case 'open-app': {
+                    const appId = input.appId as string;
+                    if (!appId) return { success: false, error: 'open-app requires appId (the app folder slug)' };
+                    let appName = appId;
+                    try {
+                        const raw = await fs.readFile(path.join(WorkDir, 'apps', appId, 'rowboat-app.json'), 'utf-8');
+                        const m = JSON.parse(raw) as { name?: string };
+                        if (m.name) appName = m.name;
+                    } catch {
+                        return { success: false, error: `App not found: ${appId}` };
+                    }
+                    return { success: true, action: 'open-app', appId, appName };
+                }
+
+                case 'read-view': {
+                    // Returns the same data the view renders, so the assistant
+                    // can answer precisely — and the renderer navigates to the
+                    // view at the same time so the user SEES what's being read.
+                    const view = input.view as string;
+                    const limit = (input.limit as number | undefined) ?? 15;
+                    try {
+                        switch (view) {
+                            case 'email': {
+                                const query = (input.query as string | undefined)?.trim();
+                                const result = query
+                                    ? await searchThreads(query, { limit })
+                                    : listImportantThreads({ limit });
+                                const threads = (result.threads ?? []).slice(0, limit).map((t) => ({
+                                    threadId: t.threadId,
+                                    subject: t.subject ?? '(no subject)',
+                                    from: t.from ?? '',
+                                    date: t.date ?? '',
+                                    unread: t.unread ?? false,
+                                    summary: t.summary ? t.summary.slice(0, 200) : undefined,
+                                }));
+                                return { success: true, action: 'read-view', view, query, threads };
+                            }
+                            case 'bg-tasks': {
+                                const { items } = await listBackgroundTasks({ limit });
+                                const agents = items.map((t) => ({
+                                    name: t.name,
+                                    slug: t.slug,
+                                    active: t.active,
+                                    triggers: t.triggers,
+                                    lastRunAt: t.lastRunAt,
+                                    lastRunSummary: t.lastRunSummary ? t.lastRunSummary.slice(0, 200) : undefined,
+                                    lastRunError: t.lastRunError ? t.lastRunError.slice(0, 200) : undefined,
+                                }));
+                                return { success: true, action: 'read-view', view, agents };
+                            }
+                            case 'chat-history': {
+                                const sessions = container.resolve<ISessions>('sessions')
+                                    .listSessions()
+                                    .slice(0, limit)
+                                    .map((s) => ({
+                                        sessionId: s.sessionId,
+                                        title: s.title ?? '(untitled)',
+                                        updatedAt: s.updatedAt,
+                                        turnCount: s.turnCount,
+                                    }));
+                                return { success: true, action: 'read-view', view, sessions };
+                            }
+                            default:
+                                return {
+                                    success: false,
+                                    error: `read-view supports: email, bg-tasks, chat-history. For notes/meetings/live-notes use the file-* tools (they are files under the workspace); for other views use open-view and describe what you need.`,
+                                };
+                        }
+                    } catch (error) {
+                        return {
+                            success: false,
+                            error: error instanceof Error ? error.message : `Failed to read ${view}`,
+                        };
+                    }
+                }
+
+                case 'open-item': {
+                    const kind = input.kind as string;
+                    switch (kind) {
+                        case 'email-thread': {
+                            const threadId = input.threadId as string | undefined;
+                            if (!threadId) return { success: false, error: 'threadId is required for kind=email-thread' };
+                            return { success: true, action: 'open-item', kind, threadId };
+                        }
+                        case 'note': {
+                            const filePath = input.path as string | undefined;
+                            if (!filePath) return { success: false, error: 'path is required for kind=note' };
+                            const result = await files.exists(filePath);
+                            if (!result.exists) return { success: false, error: `File not found: ${filePath}` };
+                            return { success: true, action: 'open-item', kind, path: filePath };
+                        }
+                        case 'bg-task': {
+                            const taskName = input.taskName as string | undefined;
+                            if (!taskName) return { success: false, error: 'taskName is required for kind=bg-task' };
+                            // Validate (and canonicalize) against the real task list.
+                            const { items: tasks } = await listBackgroundTasks({});
+                            const match = tasks.find(
+                                (t) => t.name === taskName || t.slug === taskName
+                                    || t.name.toLowerCase() === taskName.toLowerCase(),
+                            );
+                            if (!match) {
+                                return {
+                                    success: false,
+                                    error: `No background task named "${taskName}". Known tasks: ${tasks.map((t) => t.name).join(', ') || '(none)'}`,
+                                };
+                            }
+                            return { success: true, action: 'open-item', kind, taskName: match.name };
+                        }
+                        case 'session': {
+                            const sessionId = input.sessionId as string | undefined;
+                            if (!sessionId) return { success: false, error: 'sessionId is required for kind=session' };
+                            return { success: true, action: 'open-item', kind, sessionId };
+                        }
+                        default:
+                            return { success: false, error: `Unknown item kind: ${kind}` };
+                    }
                 }
 
                 case 'update-base-view': {
@@ -1495,6 +1686,119 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         },
         isAvailable: async () => isComposioConfigured(),
     },
+    'app-set-data': {
+        description: "Write a Rowboat App's data file — JSON its frontend reads via GET /_rowboat/data/<file>. Deterministic: you supply the content, code handles the path, atomicity (temp→rename), and the app's dataContracts validation. This is how a background task refreshes an app's data — the agent RETURNS the data; never hand-write files under apps/.",
+        inputSchema: z.object({
+            appFolder: z.string().describe('The app folder slug under ~/.rowboat/apps.'),
+            file: z.string().describe("Path relative to the app's data/ directory, e.g. \"data.json\"."),
+            data: z.unknown().describe('Full payload to store. Pass the object directly — do NOT JSON.stringify it.'),
+        }),
+        execute: async ({ appFolder, file, data }: { appFolder: string; file: string; data: unknown }) => {
+            try {
+                // #1 agent mistake: passing a stringified payload. Auto-parse
+                // strings; reject anything that isn't an object/array.
+                let payload: unknown = data;
+                if (typeof payload === 'string') {
+                    try { payload = JSON.parse(payload); }
+                    catch { return { success: false, error: 'data must be a JSON object/array — pass the object directly, do NOT JSON.stringify it.' }; }
+                }
+                if (payload === null || typeof payload !== 'object') {
+                    return { success: false, error: 'data must be a JSON object or array.' };
+                }
+
+                // The app must exist with a valid manifest — never create stray folders.
+                const dir = path.join(WorkDir, 'apps', appFolder);
+                let manifest: z.infer<typeof RowboatAppManifestSchema>;
+                try {
+                    manifest = RowboatAppManifestSchema.parse(JSON.parse(await fs.readFile(path.join(dir, 'rowboat-app.json'), 'utf-8')));
+                } catch {
+                    return { success: false, error: `No app "${appFolder}" (missing or invalid rowboat-app.json).` };
+                }
+
+                // Same path rules as the data API: confined to data/.
+                const dataRoot = path.join(dir, 'data');
+                const relNorm = path.posix.normalize(file).replace(/^\/+/, '');
+                if (!relNorm || relNorm === '.' || relNorm.startsWith('..') || relNorm.includes('\0') || relNorm.includes('\\')) {
+                    return { success: false, error: `invalid file path: ${file}` };
+                }
+                const abs = path.resolve(dataRoot, relNorm);
+                if (abs !== dataRoot && !abs.startsWith(dataRoot + path.sep)) {
+                    return { success: false, error: `file path escapes data/: ${file}` };
+                }
+
+                const contract = manifest.dataContracts.find((c) => path.posix.normalize(c.file) === relNorm);
+                if (contract) {
+                    if (Array.isArray(payload) && (contract.requiredKeys.length || contract.nonEmptyArrayKeys.length)) {
+                        return { success: false, error: `${relNorm} must be a JSON object to satisfy its data contract. Keep the last good data — do not retry with a different shape.` };
+                    }
+                    if (!Array.isArray(payload)) {
+                        const obj = payload as Record<string, unknown>;
+                        const missing = contract.requiredKeys.filter((k) => obj[k] === undefined || obj[k] === null);
+                        if (missing.length) {
+                            return { success: false, error: `data is missing required key(s): ${missing.join(', ')}. Match the app's data shape and keep the last good data — do NOT retry with a different shape.` };
+                        }
+                        const badArrays = contract.nonEmptyArrayKeys.filter((k) => !Array.isArray(obj[k]) || (obj[k] as unknown[]).length === 0);
+                        if (badArrays.length) {
+                            return { success: false, error: `these key(s) must be non-empty arrays: ${badArrays.join(', ')}. Don't overwrite good series with empty ones — keep the last good data.` };
+                        }
+                    }
+                }
+
+                await fs.mkdir(path.dirname(abs), { recursive: true });
+                const tmp = `${abs}.tmp-${Math.random().toString(16).slice(2, 10)}`;
+                await fs.writeFile(tmp, JSON.stringify(payload, null, 2));
+                await fs.rename(tmp, abs);
+                return { success: true, appFolder, file: relNorm };
+            } catch (e) {
+                return { success: false, error: e instanceof Error ? e.message : String(e) };
+            }
+        },
+    },
+    'list-models': {
+        description: "List model IDs available for model overrides (e.g. to set a capable model on a background task). Signed-in users get the Rowboat gateway's allowed models; BYOK users get their configured model. Call this BEFORE setting a bg-task `model` so you pick a valid, allowed ID (arbitrary IDs are rejected). Returns { defaultModel, models }.",
+        inputSchema: z.object({}),
+        execute: async () => {
+            try {
+                if (await isSignedIn()) {
+                    const { providers } = await listGatewayModels();
+                    const models = providers.flatMap((p) => p.models.map((m) => m.id));
+                    const { model: defaultModel } = await getDefaultModelAndProvider();
+                    return { signedIn: true, defaultModel, models };
+                }
+                const { model, provider } = await getDefaultModelAndProvider();
+                return { signedIn: false, defaultModel: model, provider, models: [model] };
+            } catch (e) {
+                return { error: e instanceof Error ? e.message : String(e) };
+            }
+        },
+        isAvailable: async () => true,
+    },
+    'fetch-url': {
+        description: "Fetch an HTTP(S) URL and return the response body as text. Use this to pull data from web APIs or pages (e.g. a JSON endpoint) — especially in background tasks, which have no shell. GET by default; supports POST with a body. Returns { ok, status, statusText, body } (body truncated if very large). For JSON, parse the returned body.",
+        inputSchema: z.object({
+            url: z.string().describe('The http(s) URL to fetch.'),
+            method: z.enum(['GET', 'POST']).optional().describe('HTTP method (default GET).'),
+            headers: z.record(z.string(), z.string()).optional().describe('Optional request headers.'),
+            body: z.string().optional().describe('Request body (for POST).'),
+        }),
+        execute: async ({ url, method, headers, body }: { url: string; method?: string; headers?: Record<string, string>; body?: string }) => {
+            try {
+                const parsed = new URL(url);
+                if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+                    return { ok: false, status: 0, error: 'Only http(s) URLs are allowed.' };
+                }
+                const m = (method || 'GET').toUpperCase();
+                const res = await fetch(url, { method: m, headers, body: m === 'GET' || m === 'HEAD' ? undefined : body });
+                let text = await res.text();
+                const MAX = 200_000;
+                const truncated = text.length > MAX;
+                if (truncated) text = text.slice(0, MAX);
+                return { ok: res.ok, status: res.status, statusText: res.statusText, body: text, truncated };
+            } catch (e) {
+                return { ok: false, status: 0, error: e instanceof Error ? e.message : String(e) };
+            }
+        },
+    },
     'run-live-note-agent': {
         description: "Manually trigger the live-note agent to run now on a note. Equivalent to the user clicking the Run button in the live-note sidebar, but you can pass extra `context` to bias what the agent does this run — most useful for backfills (e.g. seeding a newly-made-live note from existing synced emails) or focused refreshes. Returns the action taken, summary, and the new note body.",
         inputSchema: z.object({
@@ -1563,7 +1867,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         execute: async (input: z.infer<typeof PatchBackgroundTaskInput>) => {
             try {
                 const { patchTask } = await import("../../background-tasks/fileops.js");
-                const { slug, projectDir, ...partial } = input;
+                const { slug, projectDir, clearModel, ...partial } = input;
                 let warning: string | undefined;
                 if (projectDir) {
                     const r = await resolveCodeProject(projectDir);
@@ -1571,7 +1875,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                     (partial as { projectId?: string }).projectId = r.projectId;
                     warning = r.warning;
                 }
-                const result = await patchTask(slug, partial);
+                const result = await patchTask(slug, partial, clearModel ? ['model', 'provider'] : []);
                 return { success: true, task: result, ...(warning ? { warning } : {}) };
             } catch (err) {
                 return { success: false, error: err instanceof Error ? err.message : String(err) };

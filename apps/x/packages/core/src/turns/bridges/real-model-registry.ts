@@ -14,6 +14,7 @@ import type { JsonValue, ModelDescriptor, TurnUsage } from "@x/shared/dist/turns
 import { convertFromMessages } from "../../agents/runtime.js";
 import { resolveProviderConfig } from "../../models/defaults.js";
 import { createProvider } from "../../models/models.js";
+import { applyLocalModelSettings } from "../../models/local.js";
 import type {
     IModelRegistry,
     LlmStreamEvent,
@@ -29,6 +30,10 @@ export type StreamTextInvoker = (options: {
     messages: ModelMessage[];
     tools: ToolSet;
     abortSignal: AbortSignal;
+    temperature?: number;
+    topP?: number;
+    maxOutputTokens?: number;
+    providerOptions?: Record<string, Record<string, JsonValue>>;
 }) => { fullStream: AsyncIterable<unknown> };
 
 const defaultInvoker: StreamTextInvoker = (options) =>
@@ -61,7 +66,11 @@ export class RealModelRegistry implements IModelRegistry {
     ): Promise<ResolvedModel> {
         const providerConfig = await this.resolveProvider(descriptor.provider);
         const provider = this.createProviderImpl(providerConfig);
-        const model = provider.languageModel(descriptor.model);
+        // Local settings (Ollama context window) are applied here.
+        const model = applyLocalModelSettings(
+            provider.languageModel(descriptor.model),
+            providerConfig,
+        );
         return {
             descriptor,
             // The structural -> wire conversion the app uses today: weaves
@@ -93,13 +102,17 @@ export class RealModelRegistry implements IModelRegistry {
             });
         }
 
-        const result = this.invoke({
-            model,
-            system: request.systemPrompt,
-            messages: request.messages as ModelMessage[],
-            tools,
-            abortSignal: request.signal,
-        });
+        // Persisted per-call parameters (turn-runtime-design.md §8.3): only
+        // the whitelisted generation knobs are forwarded to the provider.
+        const params = request.parameters ?? {};
+        const generationParams = {
+            ...(typeof params.temperature === "number" ? { temperature: params.temperature } : {}),
+            ...(typeof params.topP === "number" ? { topP: params.topP } : {}),
+            ...(typeof params.maxOutputTokens === "number" ? { maxOutputTokens: params.maxOutputTokens } : {}),
+            ...(params.providerOptions && typeof params.providerOptions === "object" && !Array.isArray(params.providerOptions)
+                ? { providerOptions: params.providerOptions as Record<string, Record<string, JsonValue>> }
+                : {}),
+        };
 
         const parts: Array<z.infer<typeof AssistantContentPart>> = [];
         let textBuffer = "";
@@ -107,6 +120,15 @@ export class RealModelRegistry implements IModelRegistry {
         let finishReason = "unknown";
         let usage: z.infer<typeof TurnUsage> = {};
         let providerMetadata: JsonValue | undefined;
+
+        const result = this.invoke({
+            model,
+            system: request.systemPrompt,
+            messages: request.messages as ModelMessage[],
+            tools,
+            abortSignal: request.signal,
+            ...generationParams,
+        });
 
         for await (const raw of result.fullStream) {
             request.signal.throwIfAborted();

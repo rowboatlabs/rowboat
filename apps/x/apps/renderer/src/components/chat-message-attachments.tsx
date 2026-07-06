@@ -91,11 +91,28 @@ interface ChatMessageAttachmentsProps {
 export function ChatMessageAttachments({ attachments, className }: ChatMessageAttachmentsProps) {
   if (attachments.length === 0) return null
 
-  const imageAttachments = attachments.filter((attachment) => isImageMime(attachment.mimeType))
-  const fileAttachments = attachments.filter((attachment) => !isImageMime(attachment.mimeType))
+  const videoFrames = attachments.filter((attachment) => attachment.isVideoFrame)
+  const imageAttachments = attachments.filter(
+    (attachment) => !attachment.isVideoFrame && isImageMime(attachment.mimeType)
+  )
+  const fileAttachments = attachments.filter(
+    (attachment) => !attachment.isVideoFrame && !isImageMime(attachment.mimeType)
+  )
 
   return (
     <div className={cn('flex flex-col items-end gap-2', className)}>
+      {videoFrames.length > 0 && (
+        <div className="flex max-w-[340px] flex-wrap justify-end gap-1">
+          {videoFrames.map((frame, index) => (
+            <img
+              key={`frame-${index}`}
+              src={frame.thumbnailUrl}
+              alt={`Camera frame ${index + 1}`}
+              className="h-12 w-auto rounded-md border border-border/60 bg-muted object-cover"
+            />
+          ))}
+        </div>
+      )}
       {imageAttachments.length > 0 && (
         <div className="flex flex-wrap justify-end gap-2">
           {imageAttachments.map((attachment, index) => (

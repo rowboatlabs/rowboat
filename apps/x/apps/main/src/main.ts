@@ -2,7 +2,9 @@ import { app, BrowserWindow, desktopCapturer, protocol, net, shell, session, typ
 import path from "node:path";
 import {
   setupIpcHandlers,
-  startRunsWatcher, startSessionsWatcher,
+  startRunsWatcher, startSessionsWatcher, markSessionsIndexReady,
+  startCodeRunFeedWatcher,
+  startChannelsWatcher,
   startCodeSessionStatusWatcher,
   startServicesWatcher,
   startLiveNoteAgentWatcher,
@@ -25,6 +27,7 @@ import { init as initEmailLabeling } from "@x/core/dist/knowledge/label_emails.j
 import { init as initNoteTagging } from "@x/core/dist/knowledge/tag_notes.js";
 import { init as initInlineTasks } from "@x/core/dist/knowledge/inline_tasks.js";
 import { init as initAgentRunner } from "@x/core/dist/agent-schedule/runner.js";
+import { init as initChannels } from "@x/core/dist/channels/service.js";
 import { init as initAgentNotes } from "@x/core/dist/knowledge/agent_notes.js";
 import { init as initCalendarNotifications } from "@x/core/dist/knowledge/notify_calendar_meetings.js";
 import { init as initMeetingPrep } from "@x/core/dist/knowledge/meeting_prep_scheduler.js";
@@ -33,10 +36,12 @@ import { init as initEventProcessor, registerConsumer } from "@x/core/dist/event
 import { liveNoteEventConsumer } from "@x/core/dist/knowledge/live-note/event-consumer.js";
 import { init as initBackgroundTaskScheduler } from "@x/core/dist/background-tasks/scheduler.js";
 import { backgroundTaskEventConsumer } from "@x/core/dist/background-tasks/event-consumer.js";
-import { init as initLocalSites, shutdown as shutdownLocalSites } from "@x/core/dist/local-sites/server.js";
 import { startSkillsWatcher, stopSkillsWatcher } from "@x/core/dist/application/assistant/skills/watcher.js";
+import { init as initAppsServer, shutdown as shutdownAppsServer } from "@x/core/dist/apps/server.js";
+import { registerAppsHostApi } from "@x/core/dist/apps/host-api.js";
 import { shutdown as shutdownAnalytics } from "@x/core/dist/analytics/posthog.js";
 import { identifyIfSignedIn } from "@x/core/dist/analytics/identify.js";
+import { migrateRuns } from "@x/core/dist/migrations/runs/migrate.js";
 
 import { initConfigs } from "@x/core/dist/config/initConfigs.js";
 import { getAgentSlackCliStatus } from "@x/core/dist/slack/agent-slack-exec.js";
@@ -390,10 +395,44 @@ app.whenReady().then(async () => {
   // start runs watcher
   startRunsWatcher();
 
-  // New runtime: build the in-memory session index (startup scan) before the
-  // renderer can list sessions, then forward the session bus to windows.
-  await container.resolve<ISessions>('sessions').initialize();
+  // One-time: port legacy runs/*.jsonl into the new turn/session runtime.
+  // Must run BEFORE the session index is built so migrated sessions are picked
+  // up by the startup scan. Fully defensive — never blocks boot.
+  try {
+    const migration = migrateRuns();
+    if (migration.scanned > 0) {
+      console.log(
+        `[runs-migration] migrated ${migration.migratedTurns} turn(s) across ` +
+        `${migration.migratedSessions} session(s) from ${migration.scanned} run(s) ` +
+        `(${migration.skipped} skipped, ${migration.failed.length} failed)`,
+      );
+      for (const failure of migration.failed) {
+        console.warn(`[runs-migration] left in place (failed): ${failure.file} — ${failure.error}`);
+      }
+    }
+  } catch (error) {
+    console.error('[runs-migration] pass failed:', error);
+  }
+
+  // New runtime: build the in-memory session index (startup scan), then
+  // forward the session bus to windows. The renderer window is already up and
+  // may have called sessions:list — that handler blocks on
+  // markSessionsIndexReady, which must fire even if the scan throws so the
+  // list never hangs.
+  try {
+    await container.resolve<ISessions>('sessions').initialize();
+  } finally {
+    markSessionsIndexReady();
+  }
   startSessionsWatcher();
+  startCodeRunFeedWatcher();
+
+  // Mobile channels (WhatsApp/Telegram bridge): needs the session index, so
+  // start after initialize(). Failures must never block boot.
+  startChannelsWatcher();
+  initChannels().catch((error) => {
+    console.error('[Channels] Failed to start mobile channels:', error);
+  });
 
   // start code-session status tracker (derives working/needs-you/idle + notifications)
   startCodeSessionStatusWatcher();
@@ -468,9 +507,11 @@ app.whenReady().then(async () => {
   // start chrome extension sync server
   initChromeSync();
 
-  // start local sites server for iframe dashboards and other mini apps
-  initLocalSites().catch((error) => {
-    console.error('[LocalSites] Failed to start:', error);
+  // start the Rowboat Apps server (per-app origins on 127.0.0.1:3210) with the
+  // full Host API (tools/fetch/llm/copilot behind the capability gate)
+  registerAppsHostApi();
+  initAppsServer().catch((error) => {
+    console.error('[Apps] Failed to start:', error);
   });
 
   app.on("activate", () => {
@@ -500,8 +541,8 @@ stopSkillsWatcher();
   }
   // Kill embedded terminal shells.
   disposeAllTerminals();
-  shutdownLocalSites().catch((error) => {
-    console.error('[LocalSites] Failed to shut down cleanly:', error);
+  shutdownAppsServer().catch((error) => {
+    console.error('[Apps] Failed to shut down cleanly:', error);
   });
   shutdownAnalytics().catch((error) => {
     console.error('[Analytics] Failed to flush on quit:', error);

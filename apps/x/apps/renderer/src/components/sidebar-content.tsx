@@ -13,6 +13,7 @@ import {
   Globe,
   AlertTriangle,
   Home,
+  LayoutGrid,
   Mic,
   SquarePen,
   Plug,
@@ -22,6 +23,8 @@ import {
   Settings,
   Square,
   Video,
+  CircleAlert,
+  X,
 } from "lucide-react"
 import {
   AlertDialog,
@@ -51,6 +54,7 @@ import {
   Popover,
   PopoverContent,
   PopoverTrigger,
+  PopoverArrow,
 } from "@/components/ui/popover"
 import {
   Tooltip,
@@ -58,7 +62,9 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+import { isOutOfCredits, CREDIT_EXHAUSTED_EVENT, CREDIT_REPLENISHED_EVENT } from "@/lib/credit-status"
 import { SettingsDialog } from "@/components/settings-dialog"
+import { MascotFaceIcon } from "@/components/talking-head"
 import { extractConferenceLink } from "@/lib/calendar-event"
 import { useBilling } from "@/hooks/useBilling"
 import { toast } from "@/lib/toast"
@@ -161,6 +167,7 @@ type SidebarContentPanelProps = {
   onOpenMeetings?: () => void
   onOpenCode?: () => void
   onOpenBgTasks?: () => void
+  onOpenApps?: () => void
   onOpenAgent?: (slug: string) => void
   recentRuns?: { id: string; title?: string; createdAt: string; modifiedAt?: string }[]
   onOpenRun?: (runId: string) => void
@@ -170,8 +177,10 @@ type SidebarContentPanelProps = {
   onNewChat?: () => void
   onToggleBrowser?: () => void
   onVoiceNoteCreated?: (path: string) => void
+  /** Starts the mascot-guided product tour. */
+  onStartTour?: () => void
   /** Which primary destination is currently active, for nav highlighting. */
-  activeNav?: 'home' | 'email' | 'meetings' | 'code' | 'knowledge' | 'agents' | 'workspaces' | null
+  activeNav?: 'home' | 'email' | 'meetings' | 'code' | 'knowledge' | 'agents' | 'apps' | 'workspaces' | null
   /** Live meeting recording state, so the recording row can show its indicator/stop. */
   meetingRecordingState?: 'idle' | 'connecting' | 'recording' | 'stopping'
   recordingMeetingSource?: string | null
@@ -410,6 +419,7 @@ export function SidebarContentPanel({
   onOpenMeetings,
   onOpenCode,
   onOpenBgTasks,
+  onOpenApps,
   recentRuns = [],
   onOpenRun,
   onOpenChatHistory,
@@ -418,6 +428,7 @@ export function SidebarContentPanel({
   onNewChat,
   onToggleBrowser,
   onVoiceNoteCreated,
+  onStartTour,
   activeNav,
   meetingRecordingState = 'idle',
   recordingMeetingSource = null,
@@ -430,9 +441,13 @@ export function SidebarContentPanel({
   const [openConnectionsAfterClose, setOpenConnectionsAfterClose] = useState(false)
   const connectorsButtonRef = useRef<HTMLButtonElement | null>(null)
   const [isRowboatConnected, setIsRowboatConnected] = useState(false)
+  const [creditPopoverOpen, setCreditPopoverOpen] = useState(false)
+  const [outOfCredits, setOutOfCredits] = useState(false)
+  const outOfCreditsRef = useRef(false)
+  const creditPopoverAutoShownRef = useRef(false)
   const [loggingIn, setLoggingIn] = useState(false)
   const [appUrl, setAppUrl] = useState<string | null>(null)
-  const { billing } = useBilling(isRowboatConnected)
+  const { billing, refresh: refreshBilling } = useBilling(isRowboatConnected)
   const currentBillingPlan = billing ? getBillingPlanData(billing.catalog, billing.subscriptionPlanId) : null
 
   // Nav previews: unread important emails + next upcoming meetings (top 2 each).
@@ -654,6 +669,50 @@ export function SidebarContentPanel({
     }
   }, [])
 
+  // Re-anchor the warning whenever billing (re)loads — billing is authoritative.
+  useEffect(() => {
+    if (billing) {
+      const next = isOutOfCredits(billing)
+      outOfCreditsRef.current = next
+      setOutOfCredits(next)
+    }
+  }, [billing])
+
+  // Live signals: a usage API error flips it on; a successful cost-incurring
+  // call flips it off and triggers a single billing refresh to reconcile.
+  useEffect(() => {
+    const onExhausted = () => {
+      outOfCreditsRef.current = true
+      setOutOfCredits(true)
+    }
+    const onReplenished = () => {
+      const wasOut = outOfCreditsRef.current
+      outOfCreditsRef.current = false
+      setOutOfCredits(false)
+      if (wasOut) void refreshBilling()
+    }
+    window.addEventListener(CREDIT_EXHAUSTED_EVENT, onExhausted)
+    window.addEventListener(CREDIT_REPLENISHED_EVENT, onReplenished)
+    return () => {
+      window.removeEventListener(CREDIT_EXHAUSTED_EVENT, onExhausted)
+      window.removeEventListener(CREDIT_REPLENISHED_EVENT, onReplenished)
+    }
+  }, [refreshBilling])
+
+  // Auto-open the popover the first time we go out of credits; reset when
+  // credits return so it can auto-open again on a future episode.
+  useEffect(() => {
+    if (outOfCredits) {
+      if (!creditPopoverAutoShownRef.current) {
+        creditPopoverAutoShownRef.current = true
+        setCreditPopoverOpen(true)
+      }
+    } else {
+      creditPopoverAutoShownRef.current = false
+      setCreditPopoverOpen(false)
+    }
+  }, [outOfCredits])
+
   // Single preview shown as a sublabel on the Email / Meetings nav buttons.
   const previewEmail = emailThreads[0]
   const previewMeeting = meetings[0]
@@ -695,13 +754,14 @@ export function SidebarContentPanel({
           <SidebarGroupContent>
             <SidebarMenu>
               <SidebarMenuItem>
-                <SidebarMenuButton isActive={activeNav === 'home'} onClick={onOpenHome}>
+                <SidebarMenuButton data-tour-id="nav-home" isActive={activeNav === 'home'} onClick={onOpenHome}>
                   <Home className="size-4 shrink-0" />
                   <span className="flex-1 truncate">Home</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
+                  data-tour-id="nav-email"
                   isActive={activeNav === 'email'}
                   onClick={() => onOpenEmail?.()}
                   className={previewEmail ? 'h-auto py-1.5' : undefined}
@@ -724,6 +784,7 @@ export function SidebarContentPanel({
               </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
+                  data-tour-id="nav-meetings"
                   isActive={activeNav === 'meetings'}
                   onClick={onOpenMeetings}
                   className={meetingSublabel ? 'h-auto py-1.5' : undefined}
@@ -802,7 +863,7 @@ export function SidebarContentPanel({
               </SidebarMenuItem>
               {codeModeEnabled && (
                 <SidebarMenuItem>
-                  <SidebarMenuButton isActive={activeNav === 'code'} onClick={onOpenCode}>
+                  <SidebarMenuButton data-tour-id="nav-code" isActive={activeNav === 'code'} onClick={onOpenCode}>
                     <Code2 className="size-4 shrink-0" />
                     <span className="flex-1 truncate">Code</span>
                   </SidebarMenuButton>
@@ -810,6 +871,7 @@ export function SidebarContentPanel({
               )}
               <SidebarMenuItem>
                 <SidebarMenuButton
+                  data-tour-id="nav-knowledge"
                   isActive={activeNav === 'knowledge'}
                   onClick={() => knowledgeActions.openKnowledgeView()}
                   className={knowledgeUpdatedLabel ? 'h-auto py-1.5' : undefined}
@@ -830,6 +892,7 @@ export function SidebarContentPanel({
             <SidebarMenu>
               <SidebarMenuItem>
                 <SidebarMenuButton
+                  data-tour-id="nav-agents"
                   isActive={activeNav === 'agents'}
                   onClick={onOpenBgTasks}
                   className={bgAgentsLabel ? 'h-auto py-1.5' : undefined}
@@ -850,6 +913,16 @@ export function SidebarContentPanel({
               </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
+                  isActive={activeNav === 'apps'}
+                  onClick={onOpenApps}
+                >
+                  <LayoutGrid className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="flex-1 truncate text-muted-foreground">Apps</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  data-tour-id="nav-workspaces"
                   isActive={activeNav === 'workspaces'}
                   onClick={() => knowledgeActions.openWorkspaceAt()}
                   className="h-auto py-1.5"
@@ -874,6 +947,7 @@ export function SidebarContentPanel({
           <SidebarGroupContent>
             <button
               type="button"
+              data-tour-id="nav-chats"
               onClick={() => setChatsExpanded((v) => !v)}
               className="flex w-full items-center gap-1.5 px-3 py-1 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground"
             >
@@ -913,31 +987,89 @@ export function SidebarContentPanel({
         </SidebarGroup>
       </SidebarContent>
       {/* Billing / upgrade CTA or Log in CTA */}
-      {isRowboatConnected && billing ? (
-        <div className="px-3 py-2">
-          <div className="flex items-center justify-between rounded-lg border border-sidebar-border bg-sidebar-accent/20 px-3 py-2">
-            <div className="min-w-0">
-              <span className="text-xs font-medium capitalize text-sidebar-foreground">
-                {currentBillingPlan?.displayName ?? (billing.subscriptionPlanId ? 'Unknown' : 'No plan')}
-              </span>
-              {billing.subscriptionStatus === 'trialing' && billing.trialExpiresAt && (() => {
-                const days = Math.max(0, Math.ceil((new Date(billing.trialExpiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
-                return (
-                  <p className="text-[10px] text-sidebar-foreground/60">
-                    {days === 0 ? 'Trial expires today' : days === 1 ? '1 day left' : `${days} days left`}
+      {isRowboatConnected && billing ? (() => {
+        const upgradeLabel = !billing.subscriptionPlanId || currentBillingPlan?.category === 'free' || currentBillingPlan?.category === 'starter' ? 'Upgrade' : 'Manage'
+        if (outOfCredits) {
+          return (
+            <div className="px-3 py-2">
+              <Popover open={creditPopoverOpen} onOpenChange={setCreditPopoverOpen}>
+                <div className="flex items-center justify-between rounded-lg border border-red-500/50 bg-red-500/10 px-3 py-2">
+                  <PopoverTrigger asChild>
+                    <button type="button" className="flex min-w-0 flex-1 items-center gap-2 text-left">
+                      <AlertTriangle className="size-4 shrink-0 text-red-500" />
+                      <div className="min-w-0">
+                        <span className="text-xs font-medium capitalize text-sidebar-foreground">
+                          {currentBillingPlan?.displayName ?? (billing.subscriptionPlanId ? 'Unknown' : 'No plan')}
+                        </span>
+                        <p className="text-[10px] text-red-500">Out of credits</p>
+                      </div>
+                    </button>
+                  </PopoverTrigger>
+                  <button
+                    onClick={() => appUrl && window.open(`${appUrl}?intent=upgrade`)}
+                    className="shrink-0 rounded-md bg-sidebar-foreground/10 px-2.5 py-1 text-[11px] font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-foreground/20"
+                  >
+                    {upgradeLabel}
+                  </button>
+                </div>
+                <PopoverContent side="top" align="start" sideOffset={10} className="w-72">
+                  <PopoverArrow className="fill-popover" />
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-red-500/15 text-red-500">
+                        <CircleAlert className="size-4" />
+                      </span>
+                      <h4 className="text-sm font-bold text-foreground">You&apos;ve run out of credits</h4>
+                    </div>
+                    <button
+                      type="button"
+                      aria-label="Close"
+                      onClick={() => setCreditPopoverOpen(false)}
+                      className="rounded-md p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                    >
+                      <X className="size-4" />
+                    </button>
+                  </div>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Upgrade your plan to continue using all features.
                   </p>
-                )
-              })()}
+                  <button
+                    onClick={() => { appUrl && window.open(`${appUrl}?intent=upgrade`); setCreditPopoverOpen(false) }}
+                    className="mt-3 w-full rounded-md bg-red-500 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-red-600"
+                  >
+                    Upgrade now
+                  </button>
+                </PopoverContent>
+              </Popover>
             </div>
-            <button
-              onClick={() => appUrl && window.open(`${appUrl}?intent=upgrade`)}
-              className="shrink-0 rounded-md bg-sidebar-foreground/10 px-2.5 py-1 text-[11px] font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-foreground/20"
-            >
-              {!billing.subscriptionPlanId || currentBillingPlan?.category === 'free' || currentBillingPlan?.category === 'starter' ? 'Upgrade' : 'Manage'}
-            </button>
+          )
+        }
+        return (
+          <div className="px-3 py-2">
+            <div className="flex items-center justify-between rounded-lg border border-sidebar-border bg-sidebar-accent/20 px-3 py-2">
+              <div className="min-w-0">
+                <span className="text-xs font-medium capitalize text-sidebar-foreground">
+                  {currentBillingPlan?.displayName ?? (billing.subscriptionPlanId ? 'Unknown' : 'No plan')}
+                </span>
+                {billing.subscriptionStatus === 'trialing' && billing.trialExpiresAt && (() => {
+                  const days = Math.max(0, Math.ceil((new Date(billing.trialExpiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
+                  return (
+                    <p className="text-[10px] text-sidebar-foreground/60">
+                      {days === 0 ? 'Trial expires today' : days === 1 ? '1 day left' : `${days} days left`}
+                    </p>
+                  )
+                })()}
+              </div>
+              <button
+                onClick={() => appUrl && window.open(`${appUrl}?intent=upgrade`)}
+                className="shrink-0 rounded-md bg-sidebar-foreground/10 px-2.5 py-1 text-[11px] font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-foreground/20"
+              >
+                {upgradeLabel}
+              </button>
+            </div>
           </div>
-        </div>
-      ) : null}
+        )
+      })() : null}
       {/* Sign in CTA */}
       {!isRowboatConnected && (
         <div className="px-3 py-2">
@@ -1015,6 +1147,15 @@ export function SidebarContentPanel({
               </AlertDialog>
             )}
           </div>
+          {onStartTour && (
+            <button
+              onClick={onStartTour}
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+            >
+              <MascotFaceIcon className="size-4" />
+              <span>Take a tour</span>
+            </button>
+          )}
           <SettingsDialog>
             <button className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors">
               <Settings className="size-4" />

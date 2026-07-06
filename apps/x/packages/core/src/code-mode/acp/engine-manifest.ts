@@ -4,96 +4,96 @@
 
 export const ENGINE_MANIFEST = {
     "claude": {
-        "version": "0.3.156",
+        "version": "0.3.198",
         "platforms": {
             "darwin-arm64": {
                 "pkg": "@anthropic-ai/claude-agent-sdk-darwin-arm64",
-                "pkgVersion": "0.3.156",
-                "tarball": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-darwin-arm64/-/claude-agent-sdk-darwin-arm64-0.3.156.tgz",
-                "integrity": "sha512-IkjcS9dqAUlD4Nb62L9AZtmAXCa+FV4ul8lIlyXXUprh3nlecbKsWOXVd/GORrzAhMmynJaX4+iV1JiutFKXUA=="
+                "pkgVersion": "0.3.198",
+                "tarball": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-darwin-arm64/-/claude-agent-sdk-darwin-arm64-0.3.198.tgz",
+                "integrity": "sha512-ZmiAybQKIKcP1qEAE/vfXvfxtKxG9CnJn98QTXC5Zxiwuy7Mllx2ALXh9dfmsf0V87CGEodlZQmMgUJotNIsUw=="
             },
             "darwin-x64": {
                 "pkg": "@anthropic-ai/claude-agent-sdk-darwin-x64",
-                "pkgVersion": "0.3.156",
-                "tarball": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-darwin-x64/-/claude-agent-sdk-darwin-x64-0.3.156.tgz",
-                "integrity": "sha512-6PKi5fPmGRuzXu+Em/iwLmPG3mqg0hl92wcTU8fmChqyNtxhxsjCw7LTbdFqp/05o5NeZVVV4k3p7YUv5IFD6g=="
+                "pkgVersion": "0.3.198",
+                "tarball": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-darwin-x64/-/claude-agent-sdk-darwin-x64-0.3.198.tgz",
+                "integrity": "sha512-XwH5vgN46WSwg8aC1OagNofnJpV/G1ciEu118GEKer8ZhVkq/dvK/DqShxMkb6r1jV7u5IJ7zPXu9uKliyNJAw=="
             },
             "linux-x64": {
                 "pkg": "@anthropic-ai/claude-agent-sdk-linux-x64",
-                "pkgVersion": "0.3.156",
-                "tarball": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-linux-x64/-/claude-agent-sdk-linux-x64-0.3.156.tgz",
-                "integrity": "sha512-ymhrdlbWoYvTACUdaGdhrEv+ZMfwXLsf0BRLkr/IvY5aqybP7URzWmmZGOtDQpqkT/8xu/UCGqUYH3woJwUxfg=="
+                "pkgVersion": "0.3.198",
+                "tarball": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-linux-x64/-/claude-agent-sdk-linux-x64-0.3.198.tgz",
+                "integrity": "sha512-Zqxyz2AT1UM5WlOOoLJhLssZDgZo8rBK5ku6daveK12zp+UTJGZhGsjFghz1/ASxH08KqOTbUePNTORnPhHAEQ=="
             },
             "linux-arm64": {
                 "pkg": "@anthropic-ai/claude-agent-sdk-linux-arm64",
-                "pkgVersion": "0.3.156",
-                "tarball": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-linux-arm64/-/claude-agent-sdk-linux-arm64-0.3.156.tgz",
-                "integrity": "sha512-H0Nfd41iw5isto9uQI1FlVSZ0eaDttr8rBpJMR25oK/mj3egMO5EmZ6aAxeeUYSLn2mSU50HA5VNxlGUE118TQ=="
+                "pkgVersion": "0.3.198",
+                "tarball": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-linux-arm64/-/claude-agent-sdk-linux-arm64-0.3.198.tgz",
+                "integrity": "sha512-qmz8dxEtDIlKntU5qYe0R4aWTxTue5S7zIQknatLX7aJ6HN/nq1aCNXWn5smTH2FViBkUPPR+sCIsNwSk6AT6Q=="
             },
             "linux-x64-musl": {
                 "pkg": "@anthropic-ai/claude-agent-sdk-linux-x64-musl",
-                "pkgVersion": "0.3.156",
-                "tarball": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-linux-x64-musl/-/claude-agent-sdk-linux-x64-musl-0.3.156.tgz",
-                "integrity": "sha512-/Q6WUizI6a+hqZZ6ElwRU0PEuFhOoN4v6CuU35HHbiZ/7uaocGht4A8ZIgK1Fw6wOGtZzGLbc00CA1OU1Zg8EA=="
+                "pkgVersion": "0.3.198",
+                "tarball": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-linux-x64-musl/-/claude-agent-sdk-linux-x64-musl-0.3.198.tgz",
+                "integrity": "sha512-h1SrWVIMjLInYNPlf+TxXuKTOdoiOfJLBSoQG97315Z2Nh0IpBfqWExlqYTtPCgKE7q2iga31U283QfHpIDlSQ=="
             },
             "linux-arm64-musl": {
                 "pkg": "@anthropic-ai/claude-agent-sdk-linux-arm64-musl",
-                "pkgVersion": "0.3.156",
-                "tarball": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-linux-arm64-musl/-/claude-agent-sdk-linux-arm64-musl-0.3.156.tgz",
-                "integrity": "sha512-R7KEVjxkR4rYgIQoHGBzwPdUJYxRTO8I4vHjRbMLH1eW4FS7BJvVs7ogfKR/NnHFBvMVqtC+l6jHLQv8bobUiw=="
+                "pkgVersion": "0.3.198",
+                "tarball": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-linux-arm64-musl/-/claude-agent-sdk-linux-arm64-musl-0.3.198.tgz",
+                "integrity": "sha512-Q7lKVNjIrUQ2B/AR77OvRf0zeOdEjonFVaR9FYrrwtzGeEqum69WSht5nM7Y7el3wjbNi0/eV0QTUM0DlsTEfw=="
             },
             "win32-x64": {
                 "pkg": "@anthropic-ai/claude-agent-sdk-win32-x64",
-                "pkgVersion": "0.3.156",
-                "tarball": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-win32-x64/-/claude-agent-sdk-win32-x64-0.3.156.tgz",
-                "integrity": "sha512-/PofeTWoiKgnWNSNk0wG4SsRn22GGLmnLhg2R94WcNhCRFOyOTmiZcYH2DBlWZBIRVTZDsSfa/Pl1DyPvYCGKw=="
+                "pkgVersion": "0.3.198",
+                "tarball": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-win32-x64/-/claude-agent-sdk-win32-x64-0.3.198.tgz",
+                "integrity": "sha512-y3HLuCCz1kDwUrhd6OnqO+d5BUpTFSzNUsPT9kf3r1vk9HYKF+eMC9eIlcOhiW2kX491kxEvuEOfqgIkGx15cg=="
             },
             "win32-arm64": {
                 "pkg": "@anthropic-ai/claude-agent-sdk-win32-arm64",
-                "pkgVersion": "0.3.156",
-                "tarball": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-win32-arm64/-/claude-agent-sdk-win32-arm64-0.3.156.tgz",
-                "integrity": "sha512-5sAeNObQQrMy4NF9HwxewrMnU7mVxZDHh+/MfJVQSz0GSTvXQ6gOuRH8helMlfspoU6VOdekPxVLRooX/3foEw=="
+                "pkgVersion": "0.3.198",
+                "tarball": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-win32-arm64/-/claude-agent-sdk-win32-arm64-0.3.198.tgz",
+                "integrity": "sha512-mjIHf1HFiRuXefewWTaNZFlTZlCaEt/xsRjc1nSTCEEpFolZayVhrDKz+O2QFVcDtPl8x8GeYSL0kiikg1DZjQ=="
             }
         }
     },
     "codex": {
-        "version": "0.128.0",
+        "version": "0.142.5",
         "platforms": {
             "darwin-arm64": {
                 "pkg": "@openai/codex",
-                "pkgVersion": "0.128.0-darwin-arm64",
-                "tarball": "https://registry.npmjs.org/@openai/codex/-/codex-0.128.0-darwin-arm64.tgz",
-                "integrity": "sha512-w+6zohfHx/kHBdles/CyFKaY57u9I3nK8QI9+NrdwMliKA0b7xn13yblRNkMpe09j6vL1oAWoxYsMOQ/vjBGug=="
+                "pkgVersion": "0.142.5-darwin-arm64",
+                "tarball": "https://registry.npmjs.org/@openai/codex/-/codex-0.142.5-darwin-arm64.tgz",
+                "integrity": "sha512-l43p8xv+Z/2/b6fCUc7/FmcQZsaPB7RFizLponGwHAnFOWe3i9Vky69p+up3BUam9AetoQQUv7Mo+2KdaFEqhA=="
             },
             "darwin-x64": {
                 "pkg": "@openai/codex",
-                "pkgVersion": "0.128.0-darwin-x64",
-                "tarball": "https://registry.npmjs.org/@openai/codex/-/codex-0.128.0-darwin-x64.tgz",
-                "integrity": "sha512-SDbn6fO22Puy8xmMIbZi4f2znMrUEPwABApke4mo+4ihaauwuVjeqzXvW5SPJz5ty/bG11/mSupQgReT7T8BBw=="
+                "pkgVersion": "0.142.5-darwin-x64",
+                "tarball": "https://registry.npmjs.org/@openai/codex/-/codex-0.142.5-darwin-x64.tgz",
+                "integrity": "sha512-yk6A06/VmW7NFsa48OVPaj//g/zeSpd79wjuqfXZwW8ZKRYQm3+wCd3hWjPl79F3QnXvDvM2j3JMIBL3m3GXXg=="
             },
             "linux-x64": {
                 "pkg": "@openai/codex",
-                "pkgVersion": "0.128.0-linux-x64",
-                "tarball": "https://registry.npmjs.org/@openai/codex/-/codex-0.128.0-linux-x64.tgz",
-                "integrity": "sha512-2lnSPA05CRRuKAzFW8BCmmNCSieDcToLwfC2ALLbBYilGLgzhRibjlDglK9F1BkEzfohSSWJu4PBbRu/aG60lQ=="
+                "pkgVersion": "0.142.5-linux-x64",
+                "tarball": "https://registry.npmjs.org/@openai/codex/-/codex-0.142.5-linux-x64.tgz",
+                "integrity": "sha512-pxY+d3NgNE57Y/MApD3/TZUAygxJN6I9h3ZeDUwe67mxWjUxsuapxMRFTKSznCalYbRAeZp752+AAXmUbmguEg=="
             },
             "linux-arm64": {
                 "pkg": "@openai/codex",
-                "pkgVersion": "0.128.0-linux-arm64",
-                "tarball": "https://registry.npmjs.org/@openai/codex/-/codex-0.128.0-linux-arm64.tgz",
-                "integrity": "sha512-+SvH73H60qvCXFuQGP/EsmR//s1hHMBR22PvJkXvM/hdnTIGucx+JqRUjAWdmmQ1IU6j3kgwVvdLW/6ICB+M6w=="
+                "pkgVersion": "0.142.5-linux-arm64",
+                "tarball": "https://registry.npmjs.org/@openai/codex/-/codex-0.142.5-linux-arm64.tgz",
+                "integrity": "sha512-77ka5PSnm5HdxdBT99IwntCasmbqevlS0eiC0AtEb6ZXCLkim2gm0AWm+jNYy0EhbssvNK+KghayWo34HMgXeA=="
             },
             "win32-x64": {
                 "pkg": "@openai/codex",
-                "pkgVersion": "0.128.0-win32-x64",
-                "tarball": "https://registry.npmjs.org/@openai/codex/-/codex-0.128.0-win32-x64.tgz",
-                "integrity": "sha512-k3jmUAFrzkUtvjGTXvSKjQqJLLlzjxp/VoHJDYedgmXUn6j70HxK38IwapzmnYfiBiTuzETvGwjXHzZgzKjhoQ=="
+                "pkgVersion": "0.142.5-win32-x64",
+                "tarball": "https://registry.npmjs.org/@openai/codex/-/codex-0.142.5-win32-x64.tgz",
+                "integrity": "sha512-a+wI4PEx9a2fg6V5ueTTDkOkr1XpEvA5RFXIbo/L2hOfzMmGtyRnbG24bCGu5Q2RSgVxSQV0aLkdb3vdYMNH9A=="
             },
             "win32-arm64": {
                 "pkg": "@openai/codex",
-                "pkgVersion": "0.128.0-win32-arm64",
-                "tarball": "https://registry.npmjs.org/@openai/codex/-/codex-0.128.0-win32-arm64.tgz",
-                "integrity": "sha512-ECJvsqmYFdA9pn42xxK3Odp/G16AjmBW0BglX8L0PwPjqbstbmlew9bfHf7xvL+SNfNl4NmyotW0+RNo1phgaA=="
+                "pkgVersion": "0.142.5-win32-arm64",
+                "tarball": "https://registry.npmjs.org/@openai/codex/-/codex-0.142.5-win32-arm64.tgz",
+                "integrity": "sha512-65BEqGbUZ7r0ayunIHdBjo5crwgbwKX/6puOcO+VCswUw/dXvDsN2IGcbXB52+bS9U5+FxP783cUHfTT6m40DQ=="
             }
         }
     }

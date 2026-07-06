@@ -19,6 +19,7 @@ export interface FileState {
 export interface GraphState {
     processedFiles: Record<string, FileState>; // filepath -> FileState
     lastBuildTime: string; // ISO timestamp of last successful build
+    lastCurationTime?: string; // ISO timestamp of the last note-curation pass
 }
 
 /**

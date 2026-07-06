@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
+  AlertCircle,
   CheckCircle2,
   Circle,
   CircleDot,
@@ -17,7 +18,8 @@ import {
 import type { CodeRunEvent, PermissionAsk, PermissionDecision } from '@x/shared/src/code-mode.js'
 import { cn } from '@/lib/utils'
 import { Tool, ToolContent, ToolHeader } from '@/components/ai-elements/tool'
-import { toToolState, type ToolCall } from '@/lib/chat-conversation'
+import { getToolErrorText, toToolState, type ToolCall } from '@/lib/chat-conversation'
+import { clearCodeRunBuffer, useCodeRunFeed } from '@/lib/code-run-feed'
 
 // ── Timeline reduction ──────────────────────────────────────────────
 // The raw ACP stream is a flat list of events; collapse it into ordered rows,
@@ -111,14 +113,26 @@ const basename = (p: string) => p.split(/[\\/]/).pop() || p
 
 export function CodingRunTimeline({
   events,
+  error,
   onOpenDiff,
 }: {
   events: CodeRunEvent[]
+  error?: string
   // When set, changed-file names become clickable (the Code section opens the diff).
   onOpenDiff?: (path: string) => void
 }) {
   const rows = useMemo(() => reduceEvents(events), [events])
   if (rows.length === 0) {
+    if (error) {
+      return (
+        <div className="px-4 py-3">
+          <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+            <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
+            <span className="min-w-0 whitespace-pre-wrap break-words">{error}</span>
+          </div>
+        </div>
+      )
+    }
     return <div className="px-4 py-3 text-xs text-muted-foreground">Starting the agent…</div>
   }
   return (
@@ -133,12 +147,17 @@ export function CodingRunTimeline({
         }
         if (row.kind === 'tool') {
           const running = row.status !== 'completed' && row.status !== 'failed'
+          const failed = row.status === 'failed'
           return (
             <div key={row.id} className="flex flex-col gap-1">
               <div className="flex items-center gap-2 text-sm">
-                {running
-                  ? <Loader className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
-                  : <CheckCircle2 className="size-3.5 shrink-0 text-green-600" />}
+                {running ? (
+                  <Loader className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+                ) : failed ? (
+                  <AlertCircle className="size-3.5 shrink-0 text-destructive" />
+                ) : (
+                  <CheckCircle2 className="size-3.5 shrink-0 text-green-600" />
+                )}
                 {toolKindIcon(row.toolKind, row.title)}
                 <span className="truncate text-foreground/90">{row.title ?? row.toolKind ?? 'Tool call'}</span>
               </div>
@@ -189,6 +208,12 @@ export function CodingRunTimeline({
           </div>
         )
       })}
+      {error && (
+        <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+          <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
+          <span className="min-w-0 whitespace-pre-wrap break-words">{error}</span>
+        </div>
+      )}
     </div>
   )
 }
@@ -258,12 +283,23 @@ export function CodingRunBlock({
     (item.result as { agent?: string } | undefined)?.agent ??
     (item.input as { agent?: string } | undefined)?.agent
   const title = AGENT_LABEL[agent ?? ''] ?? 'Coding agent'
+  const error = getToolErrorText(item)
+  // Timeline source: the durable record (item.codeRunEvents — the settle-time
+  // batch, or the legacy path's inline accumulation) wins; while it's absent
+  // the live CodeRunFeed buffer streams the run in real time.
+  const liveEvents = useCodeRunFeed(item.id)
+  const durableEvents = item.codeRunEvents
+  const events = durableEvents?.length ? durableEvents : liveEvents
+  // Once the durable batch has landed the buffer is redundant — drop it.
+  useEffect(() => {
+    if (durableEvents?.length) clearCodeRunBuffer(item.id)
+  }, [durableEvents?.length, item.id])
   return (
     <>
       <Tool open={open} onOpenChange={onOpenChange}>
         <ToolHeader title={title} type="tool-code_agent_run" state={toToolState(item.status)} />
         <ToolContent>
-          <CodingRunTimeline events={item.codeRunEvents ?? []} />
+          <CodingRunTimeline events={events} error={error} />
         </ToolContent>
       </Tool>
       {item.pendingCodePermission && (

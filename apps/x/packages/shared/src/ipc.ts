@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { RelPath, Encoding, Stat, DirEntry, ReaddirOptions, ReadFileResult, WorkspaceChangeEvent, WriteFileOptions, WriteFileResult, RemoveOptions } from './workspace.js';
 import { ListToolsResponse } from './mcp.js';
 import { AskHumanResponsePayload, CreateRunOptions, Run, ListRunsResponse, ToolPermissionAuthorizePayload } from './runs.js';
-import { LlmModelConfig, LlmProvider } from './models.js';
+import { LlmModelConfig, LlmProvider, ModelOverride, ModelRef } from './models.js';
 import { AgentScheduleConfig, AgentScheduleEntry } from './agent-schedule.js';
 import { AgentScheduleState } from './agent-schedule-state.js';
 import { ServiceEvent } from './service-events.js';
@@ -18,12 +18,14 @@ import { RequestedAgent, type TurnEvent } from './turns.js';
 import type { SessionBusEvent, SessionIndexEntry, SessionState } from './sessions.js';
 import { RowboatApiConfig } from './rowboat-account.js';
 import { ZListToolkitsResponse } from './composio.js';
-import { BrowserStateSchema } from './browser-control.js';
+import { AppSummarySchema } from './rowboat-app.js';
+import { BrowserStateSchema, HttpAuthRequestSchema } from './browser-control.js';
 import { BillingInfoSchema } from './billing.js';
 import { EmailBlockSchema, GmailThreadSchema } from './blocks.js';
-import { PermissionDecision, ApprovalPolicy, CodingAgent } from './code-mode.js';
+import { PermissionDecision, ApprovalPolicy, CodingAgent, type CodeRunFeedEvent } from './code-mode.js';
 import { NotificationSettingsSchema } from './notification-settings.js';
 import { CodeProject, CodeSession, CodeSessionMode, CodeSessionStatus, GitRepoInfo, GitStatusFile, CodeAgentModelOptions } from './code-sessions.js';
+import { ChannelsConfig, ChannelsStatus } from './channels.js';
 
 // ============================================================================
 // Runtime Validation Schemas (Single Source of Truth)
@@ -207,6 +209,56 @@ const ipcSchemas = {
       error: z.string().optional(),
     }),
   },
+  'gmail:saveDraft': {
+    req: z.object({
+      // Existing Gmail draft to update; omitted on first save (creates a new one).
+      draftId: z.string().min(1).optional(),
+      threadId: z.string().min(1).optional(),
+      // Recipients may be blank for a draft (unlike a send).
+      to: z.string().optional(),
+      cc: z.string().optional(),
+      bcc: z.string().optional(),
+      subject: z.string(),
+      bodyHtml: z.string(),
+      bodyText: z.string(),
+      inReplyTo: z.string().optional(),
+      references: z.string().optional(),
+      attachments: z
+        .array(
+          z.object({
+            filename: z.string(),
+            mimeType: z.string(),
+            contentBase64: z.string(),
+          }),
+        )
+        .optional(),
+    }),
+    res: z.object({
+      draftId: z.string().optional(),
+      error: z.string().optional(),
+    }),
+  },
+  'gmail:deleteDraft': {
+    req: z.object({ draftId: z.string().min(1) }),
+    res: z.object({ ok: z.boolean(), error: z.string().optional() }),
+  },
+  'gmail:getDrafts': {
+    req: z.object({}),
+    res: z.object({
+      threads: z.array(GmailThreadSchema),
+      error: z.string().optional(),
+    }),
+  },
+  'gmail:search': {
+    req: z.object({
+      query: z.string(),
+      limit: z.number().int().positive().optional(),
+    }),
+    res: z.object({
+      threads: z.array(GmailThreadSchema),
+      error: z.string().optional(),
+    }),
+  },
   'gmail:getConnectionStatus': {
     req: z.object({}),
     res: z.object({
@@ -228,6 +280,20 @@ const ipcSchemas = {
       name: z.string().nullable(),
     }),
   },
+  // User explicitly flips a thread's importance verdict. Sticky on the thread
+  // (re-classification never overrides) and recorded as a correction the
+  // importance classifier learns from.
+  'gmail:setImportance': {
+    req: z.object({
+      threadId: z.string().min(1),
+      importance: z.enum(['important', 'other']),
+    }),
+    res: z.object({
+      ok: z.boolean(),
+      previous: z.enum(['important', 'other']).optional(),
+      error: z.string().optional(),
+    }),
+  },
   'gmail:archiveThread': {
     req: z.object({ threadId: z.string().min(1) }),
     res: z.object({ ok: z.boolean(), error: z.string().optional() }),
@@ -237,7 +303,15 @@ const ipcSchemas = {
     res: z.object({ ok: z.boolean(), error: z.string().optional() }),
   },
   'gmail:markThreadRead': {
-    req: z.object({ threadId: z.string().min(1) }),
+    req: z.object({ threadId: z.string().min(1), read: z.boolean().optional() }),
+    res: z.object({ ok: z.boolean(), error: z.string().optional() }),
+  },
+  'gmail:downloadAttachment': {
+    req: z.object({
+      messageId: z.string().min(1),
+      savedPath: z.string().min(1),
+      attachmentId: z.string().optional(),
+    }),
     res: z.object({ ok: z.boolean(), error: z.string().optional() }),
   },
   'gmail:saveMessageHeight': {
@@ -377,6 +451,14 @@ const ipcSchemas = {
     req: z.null(),
     res: z.null(),
   },
+  // Ephemeral code-run stream (CodeRunFeed): per-event broadcast of a
+  // code_agent_run's live ACP activity, keyed by toolCallId. Never persisted —
+  // the durable record is the code-run-events-batch tool progress written when
+  // the run settles. Typed via z.custom like the other broadcast feeds.
+  'codeRun:events': {
+    req: z.custom<CodeRunFeedEvent>(),
+    res: z.null(),
+  },
   // ── New runtime: sessions + turns (session-design.md) ────────────────────
   // Turn-mutating calls return quickly; the renderer follows progress through
   // the sessions:events feed and the shared reduceTurn reducer.
@@ -493,6 +575,13 @@ const ipcSchemas = {
     res: z.object({
       success: z.boolean(),
       error: z.string().optional(),
+      // Capability caveats from the local-model probe (tool support, context
+      // window) — the connection still succeeded.
+      warnings: z.array(z.string()).optional(),
+      capabilities: z.object({
+        supportsTools: z.boolean().optional(),
+        maxContextLength: z.number().optional(),
+      }).optional(),
     }),
   },
   'models:listForProvider': {
@@ -528,6 +617,23 @@ const ipcSchemas = {
   },
   'models:saveConfig': {
     req: LlmModelConfig,
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  // Partial top-level merge into models.json — used by hybrid (signed-in +
+  // BYOK) settings to set the default selection / category overrides without
+  // clobbering the BYOK provider config that saveConfig owns. Omitted keys
+  // are untouched; null clears a key back to its default.
+  'models:updateConfig': {
+    req: z.object({
+      defaultSelection: ModelRef.nullable().optional(),
+      knowledgeGraphModel: ModelOverride.nullable().optional(),
+      meetingNotesModel: ModelOverride.nullable().optional(),
+      liveNoteAgentModel: ModelOverride.nullable().optional(),
+      autoPermissionDecisionModel: ModelOverride.nullable().optional(),
+      deferBackgroundTasks: z.boolean().nullable().optional(),
+    }),
     res: z.object({
       success: z.literal(true),
     }),
@@ -590,6 +696,12 @@ const ipcSchemas = {
       url: z.string(),
     }),
     res: z.null(),
+  },
+  // Bring the main app window to the foreground (e.g. the assistant navigated
+  // the UI during a call while the user was in another app).
+  'app:focusMainWindow': {
+    req: z.null(),
+    res: z.object({}),
   },
   'app:takeMeetingNotes': {
     req: z.object({
@@ -892,6 +1004,28 @@ const ipcSchemas = {
       success: z.literal(true),
     }),
   },
+  // ── Mobile channels (WhatsApp / Telegram bridge) ─────────────
+  'channels:getConfig': {
+    req: z.null(),
+    res: ChannelsConfig,
+  },
+  'channels:setConfig': {
+    req: ChannelsConfig,
+    res: z.object({ success: z.literal(true) }),
+  },
+  'channels:getStatus': {
+    req: z.null(),
+    res: ChannelsStatus,
+  },
+  'channels:whatsappLogout': {
+    req: z.null(),
+    res: z.object({ success: z.literal(true) }),
+  },
+  // Push: main → renderer status updates (QR rotation, connect/disconnect).
+  'channels:status': {
+    req: ChannelsStatus,
+    res: z.null(),
+  },
   'slack:getConfig': {
     req: z.null(),
     res: z.object({
@@ -1093,6 +1227,35 @@ const ipcSchemas = {
       shouldShow: z.boolean(),
     }),
   },
+  // Rowboat Apps (spec §13) — M1 local channels.
+  'apps:list': {
+    req: z.object({}),
+    res: z.object({
+      serverRunning: z.boolean(),
+      serverError: z.string().optional(),
+      apps: z.array(AppSummarySchema),
+    }),
+  },
+  'apps:get': {
+    req: z.object({ folder: z.string() }),
+    res: z.object({
+      app: AppSummarySchema,
+      readme: z.string().optional(),
+      rollbackAvailable: z.boolean(),
+    }),
+  },
+  'apps:create': {
+    req: z.object({ folder: z.string(), name: z.string(), description: z.string() }),
+    res: z.object({ app: AppSummarySchema }),
+  },
+  'apps:delete': {
+    req: z.object({ folder: z.string() }),
+    res: z.object({ ok: z.literal(true) }),
+  },
+  'apps:setTheme': {
+    req: z.object({ theme: z.enum(['light', 'dark']) }),
+    res: z.object({ ok: z.literal(true) }),
+  },
   'composio:didConnect': {
     req: z.object({
       toolkitSlug: z.string(),
@@ -1105,6 +1268,34 @@ const ipcSchemas = {
   'composio:list-toolkits': {
     req: z.object({}),
     res: ZListToolkitsResponse,
+  },
+  // Mini Apps: execute a Composio tool by slug (scoped to a connected toolkit).
+  'composio:execute-tool': {
+    req: z.object({
+      toolkitSlug: z.string(),
+      toolSlug: z.string(),
+      arguments: z.record(z.string(), z.unknown()).optional(),
+    }),
+    res: z.object({
+      successful: z.boolean(),
+      data: z.unknown().optional(),
+      error: z.string().optional(),
+    }),
+  },
+  // Mini Apps: search Composio tools within a toolkit (returns slugs + schemas).
+  'composio:search-tools': {
+    req: z.object({
+      toolkitSlug: z.string(),
+      query: z.string(),
+    }),
+    res: z.object({
+      tools: z.array(z.object({
+        slug: z.string(),
+        name: z.string(),
+        description: z.string().optional(),
+      })),
+      error: z.string().optional(),
+    }),
   },
   // Agent schedule channels
   'agent-schedule:getConfig': {
@@ -1304,6 +1495,34 @@ const ipcSchemas = {
       mimeType: z.string(),
     }),
   },
+  // Streaming TTS: main starts the synthesis and pushes audio chunks over
+  // 'voice:tts-chunk' as they arrive, so playback can begin on the first
+  // chunk instead of after the full body (~0.5-1s earlier first-audio).
+  'voice:synthesizeStreamStart': {
+    req: z.object({
+      requestId: z.string(),
+      text: z.string(),
+    }),
+    res: z.object({
+      ok: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  'voice:synthesizeStreamCancel': {
+    req: z.object({ requestId: z.string() }),
+    res: z.object({}),
+  },
+  // Push channel: main → renderer with streaming TTS audio. `done: true`
+  // (possibly with a final chunk) ends the stream; `error` aborts it.
+  'voice:tts-chunk': {
+    req: z.object({
+      requestId: z.string(),
+      chunkBase64: z.string().optional(),
+      done: z.boolean(),
+      error: z.string().optional(),
+    }),
+    res: z.null(),
+  },
   // Ensures the OS-level microphone permission is settled before capturing.
   // On first-ever use (macOS) the permission is 'not-determined'; resolving
   // the native prompt up front prevents the in-flight getUserMedia from
@@ -1313,6 +1532,83 @@ const ipcSchemas = {
     res: z.object({
       granted: z.boolean(),
     }),
+  },
+  // Same as ensureMicAccess but for the camera — settles the macOS TCC
+  // permission before video mode calls getUserMedia({ video: true }).
+  'voice:ensureCameraAccess': {
+    req: z.null(),
+    res: z.object({
+      granted: z.boolean(),
+    }),
+  },
+  // Video-mode popout: show/hide the small always-on-top window (user +
+  // mascot tiles) that floats over everything for the duration of a screen
+  // share, Meet-style.
+  'video:setPopout': {
+    req: z.object({ show: z.boolean() }),
+    res: z.object({}),
+  },
+  // Main-window renderer pushes the current call state; the main process
+  // caches it and relays to the popout window (replayed on popout load).
+  'video:popoutState': {
+    req: z.object({
+      ttsState: z.enum(['idle', 'synthesizing', 'speaking']),
+      status: z.enum(['listening', 'thinking', 'speaking']).nullable(),
+      cameraOn: z.boolean(),
+      // User mute: mic audio and frame capture are both paused.
+      micMuted: z.boolean(),
+      screenSharing: z.boolean(),
+      // Live transcript of the in-progress utterance.
+      interimText: z.string().nullable(),
+    }),
+    res: z.object({}),
+  },
+  // Popout window → fetch the latest cached call state on mount. The
+  // did-finish-load replay can race the React listener registration, and the
+  // popout must never guess (a wrong camera-on default flashes the user's
+  // video before the first state push corrects it).
+  'video:getPopoutState': {
+    req: z.null(),
+    res: z.object({
+      state: z
+        .object({
+          ttsState: z.enum(['idle', 'synthesizing', 'speaking']),
+          status: z.enum(['listening', 'thinking', 'speaking']).nullable(),
+          cameraOn: z.boolean(),
+          micMuted: z.boolean(),
+          screenSharing: z.boolean(),
+          interimText: z.string().nullable(),
+        })
+        .nullable(),
+    }),
+  },
+  // Popout control bar → main process → relayed to the app window, which
+  // executes the action on the live call. 'expand' additionally focuses the
+  // main app window (handled in the main process).
+  'video:popoutAction': {
+    req: z.object({
+      action: z.enum(['toggle-mic', 'toggle-camera', 'toggle-share', 'stop-speaking', 'end-call', 'expand']),
+    }),
+    res: z.object({}),
+  },
+  // Push channel: main → popout window with the latest call state.
+  'video:popout-state': {
+    req: z.object({
+      ttsState: z.enum(['idle', 'synthesizing', 'speaking']),
+      status: z.enum(['listening', 'thinking', 'speaking']).nullable(),
+      cameraOn: z.boolean(),
+      micMuted: z.boolean(),
+      screenSharing: z.boolean(),
+      interimText: z.string().nullable(),
+    }),
+    res: z.null(),
+  },
+  // Push channel: main → app window with a popout control-bar action.
+  'video:popout-action': {
+    req: z.object({
+      action: z.enum(['toggle-mic', 'toggle-camera', 'toggle-share', 'stop-speaking', 'end-call', 'expand']),
+    }),
+    res: z.null(),
   },
   'meeting:checkScreenPermission': {
     req: z.null(),
@@ -1666,6 +1962,30 @@ const ipcSchemas = {
   'browser:didUpdateState': {
     req: BrowserStateSchema,
     res: z.null(),
+  },
+  // HTTP basic/proxy auth challenge from a page in the embedded browser
+  // (main → renderer push). The renderer shows a credential prompt and
+  // answers via browser:httpAuthResponse.
+  'browser:httpAuthRequest': {
+    req: HttpAuthRequestSchema,
+    res: z.null(),
+  },
+  // Main → renderer: a pending auth challenge was resolved without the
+  // renderer answering (timed out, or its tab/window was destroyed), so the
+  // renderer must drop the corresponding dialog from its queue.
+  'browser:httpAuthResolved': {
+    req: z.object({ requestId: z.string() }),
+    res: z.null(),
+  },
+  // Renderer → main. Omit username to cancel the challenge; provide it (even
+  // empty, for token-style auth) to submit credentials.
+  'browser:httpAuthResponse': {
+    req: z.object({
+      requestId: z.string(),
+      username: z.string().optional(),
+      password: z.string().optional(),
+    }),
+    res: z.object({ ok: z.boolean() }),
   },
   // Billing channels
   'billing:getInfo': {

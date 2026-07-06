@@ -315,3 +315,50 @@ export async function listToolkits() {
         totalItems: filtered.length,
     };
 }
+
+/**
+ * Execute a Composio tool by slug on behalf of a Mini App. The toolkit must be
+ * connected (ACTIVE). Mirrors the agent's composio-execute-tool builtin.
+ */
+export async function executeTool(
+    toolkitSlug: string,
+    toolSlug: string,
+    args?: Record<string, unknown>,
+): Promise<{ successful: boolean; data?: unknown; error?: string }> {
+    const account = composioAccountsRepo.getAccount(toolkitSlug);
+    if (!account || account.status !== 'ACTIVE') {
+        return { successful: false, error: `Toolkit "${toolkitSlug}" is not connected.` };
+    }
+    try {
+        const result = await composioClient.executeAction(toolSlug, {
+            connected_account_id: account.id,
+            user_id: 'rowboat-user',
+            version: 'latest',
+            arguments: args ?? {},
+        });
+        return { successful: result.successful, data: result.data, error: result.error ?? undefined };
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(`[Composio] Mini App tool execution failed for ${toolSlug}:`, message);
+        return { successful: false, error: `Failed to execute ${toolSlug}: ${message}` };
+    }
+}
+
+/**
+ * Search Composio tools within a toolkit so a Mini App can discover the right
+ * tool slug + input schema at runtime (how generated apps will wire actions).
+ */
+export async function searchToolsInToolkit(
+    toolkitSlug: string,
+    query: string,
+): Promise<{ tools: Array<{ slug: string; name: string; description?: string }>; error?: string }> {
+    try {
+        const { items } = await composioClient.searchTools(query, [toolkitSlug]);
+        return {
+            tools: items.map((t) => ({ slug: t.slug, name: t.name, description: t.description })),
+        };
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return { tools: [], error: message };
+    }
+}

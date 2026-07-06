@@ -1,7 +1,8 @@
-import { ipcMain, BrowserWindow, shell, dialog, systemPreferences, desktopCapturer, app } from 'electron';
+import { ipcMain, BrowserWindow, shell, dialog, systemPreferences, desktopCapturer, app, screen } from 'electron';
 import { ipc } from '@x/shared';
 import path from 'node:path';
 import os from 'node:os';
+import { fileURLToPath } from 'node:url';
 import {
   connectProvider,
   disconnectProvider,
@@ -37,6 +38,7 @@ import type { IOAuthRepo } from '@x/core/dist/auth/repo.js';
 import { IGranolaConfigRepo } from '@x/core/dist/knowledge/granola/repo.js';
 import { ICodeModeConfigRepo } from '@x/core/dist/code-mode/repo.js';
 import { CodePermissionRegistry } from '@x/core/dist/code-mode/acp/permission-registry.js';
+import type { CodeRunFeed } from '@x/core/dist/code-mode/feed.js';
 import { checkCodeModeAgentStatus } from '@x/core/dist/code-mode/status.js';
 import { ensureEngine } from '@x/core/dist/code-mode/acp/engine-provisioner.js';
 import type { ICodeProjectsRepo } from '@x/core/dist/code-mode/projects/repo.js';
@@ -51,6 +53,8 @@ import type { CodeSession } from '@x/shared/dist/code-sessions.js';
 import { invalidateCopilotInstructionsCache } from '@x/core/dist/application/assistant/instructions.js';
 import { triggerSync as triggerGranolaSync } from '@x/core/dist/knowledge/granola/sync.js';
 import { ISlackConfigRepo } from '@x/core/dist/slack/repo.js';
+import { IChannelsConfigRepo } from '@x/core/dist/channels/repo.js';
+import { applyChannelsConfig, getChannelsStatus, logoutWhatsApp, subscribeChannelsStatus } from '@x/core/dist/channels/service.js';
 import { runAgentSlack, getAgentSlackCliStatus, AgentSlackRunError } from '@x/core/dist/slack/agent-slack-exec.js';
 import { knowledgeSourcesRepo } from '@x/core/dist/knowledge/sources/repo.js';
 import { rankSlackHomeMessages } from '@x/core/dist/knowledge/sources/rank_slack_home.js';
@@ -58,6 +62,10 @@ import { syncSlackKnowledgeSources, triggerSync as triggerSlackKnowledgeSync, ge
 import { isOnboardingComplete, markOnboardingComplete } from '@x/core/dist/config/note_creation_config.js';
 import { loadNotificationSettings, saveNotificationSettings } from '@x/core/dist/config/notification_config.js';
 import * as composioHandler from './composio-handler.js';
+import * as appsIndexer from '@x/core/dist/apps/indexer.js';
+import * as appsServer from '@x/core/dist/apps/server.js';
+import * as appsAgents from '@x/core/dist/apps/agents.js';
+import { capture } from '@x/core/dist/analytics/posthog.js';
 import { consumePendingDeepLink } from './deeplink.js';
 import { qualifyAndDisconnectComposioGoogle } from '@x/core/dist/migrations/composio-google-migration.js';
 import { IAgentScheduleRepo } from '@x/core/dist/agent-schedule/repo.js';
@@ -74,7 +82,7 @@ import { summarizeMeeting } from '@x/core/dist/knowledge/summarize_meeting.js';
 import { getAccessToken } from '@x/core/dist/auth/tokens.js';
 import { getRowboatConfig } from '@x/core/dist/config/rowboat.js';
 import { runLiveNoteAgent } from '@x/core/dist/knowledge/live-note/runner.js';
-import { listImportantThreads, listEverythingElseThreads, saveMessageBodyHeight, triggerSync as triggerGmailSync, sendThreadReply, archiveThread, trashThread, markThreadRead, getAccountEmail, getAccountName, getConnectionStatus as getGmailConnectionStatus } from '@x/core/dist/knowledge/sync_gmail.js';
+import { listImportantThreads, listEverythingElseThreads, saveMessageBodyHeight, triggerSync as triggerGmailSync, sendThreadReply, saveThreadDraft, deleteThreadDraft, listDraftThreads, searchThreads, archiveThread, trashThread, markThreadRead, downloadAttachment, getAccountEmail, getAccountName, getConnectionStatus as getGmailConnectionStatus, setThreadImportance } from '@x/core/dist/knowledge/sync_gmail.js';
 import { searchContacts as searchGmailContacts, warmContactIndex } from '@x/core/dist/knowledge/gmail_contacts.js';
 import { searchSentContacts, warmSentContacts } from '@x/core/dist/knowledge/gmail_sent_contacts.js';
 import { getGoogleDocsConnectionStatus, importGoogleDoc, syncGoogleDocDown, syncGoogleDocUp, getGoogleDocLink } from '@x/core/dist/knowledge/google_docs.js';
@@ -381,9 +389,37 @@ type InvokeHandlers = {
   [K in InvokeChannels]: InvokeHandler<K>;
 };
 
+// In-flight streaming TTS requests, keyed by renderer-chosen requestId.
+const activeTtsStreams = new Map<string, AbortController>();
+
+// Video-mode popout window (shown for the whole duration of a screen share,
+// floating over every app including Rowboat itself) and the last call state
+// pushed by the main window — replayed to the popout when it finishes loading.
+let videoPopoutWin: BrowserWindow | null = null;
+let lastVideoPopoutState: {
+  ttsState: 'idle' | 'synthesizing' | 'speaking';
+  status: 'listening' | 'thinking' | 'speaking' | null;
+  cameraOn: boolean;
+  micMuted: boolean;
+  screenSharing: boolean;
+  interimText: string | null;
+} | null = null;
+
+// Match only real app windows — getAllWindows() can also contain the popout
+// itself and hidden utility windows (e.g. PDF-export renderers), which must
+// not be shown, focused, or sent app events.
+function findMainAppWindow(): BrowserWindow | undefined {
+  return BrowserWindow.getAllWindows().find((w) => {
+    if (w === videoPopoutWin || w.isDestroyed()) return false;
+    const url = w.webContents.getURL();
+    const isAppWindow = url.startsWith('app://') || url.startsWith('http://localhost');
+    return isAppWindow && !url.includes('#video-popout');
+  });
+}
+
 /**
  * Register all IPC handlers with type safety and runtime validation
- * 
+ *
  * This function ensures:
  * 1. All invoke channels have handlers (exhaustiveness checking)
  * 2. Handler signatures match channel definitions
@@ -592,6 +628,9 @@ function emitServiceEvent(event: z.infer<typeof ServiceEvent>): void {
 }
 
 export function emitOAuthEvent(event: { provider: string; success: boolean; error?: string; userId?: string }): void {
+  // Native connection status (e.g. Google) is baked into the Copilot system
+  // prompt, so any OAuth state change must rebuild it.
+  invalidateCopilotInstructionsCache();
   const windows = BrowserWindow.getAllWindows();
   for (const win of windows) {
     if (!win.isDestroyed() && win.webContents) {
@@ -646,6 +685,20 @@ function emitSessionEvent(event: SessionBusEvent): void {
   }
 }
 
+// Mobile channels: status changes (QR pairing, connect/disconnect) → renderer.
+let channelsWatcher: (() => void) | null = null;
+export function startChannelsWatcher(): void {
+  if (channelsWatcher) return;
+  channelsWatcher = subscribeChannelsStatus((status) => {
+    const windows = BrowserWindow.getAllWindows();
+    for (const win of windows) {
+      if (!win.isDestroyed() && win.webContents) {
+        win.webContents.send('channels:status', status);
+      }
+    }
+  });
+}
+
 let sessionsWatcher: (() => void) | null = null;
 export function startSessionsWatcher(): void {
   if (sessionsWatcher) {
@@ -653,6 +706,38 @@ export function startSessionsWatcher(): void {
   }
   const sessionBus = container.resolve<EmitterSessionBus>('sessionBus');
   sessionsWatcher = sessionBus.subscribe((event) => emitSessionEvent(event));
+}
+
+// Ephemeral code-run stream: CodeRunFeed → all renderer windows. A direct
+// tool→renderer side-channel that bypasses the turn runtime; the durable
+// record is the settle-time code-run-events-batch tool progress.
+let codeRunFeedWatcher: (() => void) | null = null;
+export function startCodeRunFeedWatcher(): void {
+  if (codeRunFeedWatcher) {
+    return;
+  }
+  const feed = container.resolve<CodeRunFeed>('codeRunFeed');
+  codeRunFeedWatcher = feed.subscribe((event) => {
+    const windows = BrowserWindow.getAllWindows();
+    for (const win of windows) {
+      if (!win.isDestroyed() && win.webContents) {
+        win.webContents.send('codeRun:events', event);
+      }
+    }
+  });
+}
+
+// The renderer window is created before the session-index startup scan
+// finishes, so an early sessions:list could observe a partially built index
+// (the scan runs oldest-first — exactly the newest chats would be missing).
+// sessions:list awaits this deferred; main.ts resolves it when the scan
+// settles (success or failure, so the list never hangs).
+let resolveSessionsIndexReady: () => void;
+const sessionsIndexReady = new Promise<void>((resolve) => {
+  resolveSessionsIndexReady = resolve;
+});
+export function markSessionsIndexReady(): void {
+  resolveSessionsIndexReady();
 }
 
 let servicesWatcher: (() => void) | null = null;
@@ -782,6 +867,18 @@ export function setupIpcHandlers() {
     'gmail:sendReply': async (_event, args) => {
       return sendThreadReply(args);
     },
+    'gmail:saveDraft': async (_event, args) => {
+      return saveThreadDraft(args);
+    },
+    'gmail:deleteDraft': async (_event, args) => {
+      return deleteThreadDraft(args.draftId);
+    },
+    'gmail:getDrafts': async () => {
+      return listDraftThreads();
+    },
+    'gmail:search': async (_event, args) => {
+      return searchThreads(args.query, { limit: args.limit });
+    },
     'gmail:getConnectionStatus': async () => {
       return getGmailConnectionStatus();
     },
@@ -791,6 +888,10 @@ export function setupIpcHandlers() {
     'gmail:getAccountName': async () => {
       return { name: await getAccountName() };
     },
+    'gmail:setImportance': async (_event, args) => {
+      const result = setThreadImportance(args.threadId, args.importance);
+      return { ok: result.success, previous: result.previous, error: result.error };
+    },
     'gmail:archiveThread': async (_event, args) => {
       return archiveThread(args.threadId);
     },
@@ -798,7 +899,10 @@ export function setupIpcHandlers() {
       return trashThread(args.threadId);
     },
     'gmail:markThreadRead': async (_event, args) => {
-      return markThreadRead(args.threadId);
+      return markThreadRead(args.threadId, args.read);
+    },
+    'gmail:downloadAttachment': async (_event, args) => {
+      return downloadAttachment(args);
     },
     'gmail:saveMessageHeight': async (_event, args) => {
       saveMessageBodyHeight(args.threadId, args.messageId, args.height);
@@ -872,6 +976,7 @@ export function setupIpcHandlers() {
       return { sessionId };
     },
     'sessions:list': async () => {
+      await sessionsIndexReady;
       return { sessions: container.resolve<ISessions>('sessions').listSessions() };
     },
     'sessions:get': async (_event, args) => {
@@ -997,6 +1102,11 @@ export function setupIpcHandlers() {
     'models:saveConfig': async (_event, args) => {
       const repo = container.resolve<IModelConfigRepo>('modelConfigRepo');
       await repo.setConfig(args);
+      return { success: true };
+    },
+    'models:updateConfig': async (_event, args) => {
+      const repo = container.resolve<IModelConfigRepo>('modelConfigRepo');
+      await repo.updateConfig(args);
       return { success: true };
     },
     'oauth:connect': async (_event, args) => {
@@ -1191,6 +1301,22 @@ export function setupIpcHandlers() {
         triggerGranolaSync();
       }
 
+      return { success: true };
+    },
+    // ── Mobile channels (WhatsApp / Telegram bridge) ─────────────
+    'channels:getConfig': async () => {
+      return container.resolve<IChannelsConfigRepo>('channelsConfigRepo').getConfig();
+    },
+    'channels:setConfig': async (_event, args) => {
+      await container.resolve<IChannelsConfigRepo>('channelsConfigRepo').setConfig(args);
+      await applyChannelsConfig(args);
+      return { success: true };
+    },
+    'channels:getStatus': async () => {
+      return getChannelsStatus();
+    },
+    'channels:whatsappLogout': async () => {
+      await logoutWhatsApp();
       return { success: true };
     },
     'slack:getConfig': async () => {
@@ -1422,8 +1548,55 @@ export function setupIpcHandlers() {
     'composio:list-toolkits': async () => {
       return composioHandler.listToolkits();
     },
+    'composio:execute-tool': async (_event, args) => {
+      return composioHandler.executeTool(args.toolkitSlug, args.toolSlug, args.arguments);
+    },
+    'composio:search-tools': async (_event, args) => {
+      return composioHandler.searchToolsInToolkit(args.toolkitSlug, args.query);
+    },
     'migration:check-composio-google': async () => {
       return qualifyAndDisconnectComposioGoogle();
+    },
+    // Rowboat Apps handlers (spec §13)
+    'apps:list': async () => {
+      const status = appsServer.getServerStatus();
+      const apps = await appsIndexer.listApps();
+      // Keep bundled agents materialized (idempotent; disabled by default).
+      for (const app of apps) {
+        if (app.agentSlugs.length) await appsAgents.syncAppAgents(app);
+      }
+      return {
+        serverRunning: status.running,
+        ...(status.error ? { serverError: status.error } : {}),
+        apps,
+      };
+    },
+    'apps:get': async (_event, args) => {
+      const app = await appsIndexer.getApp(args.folder);
+      if (!app) throw new Error(`no such app: ${args.folder}`);
+      const readme = await appsIndexer.readAppReadme(args.folder);
+      return {
+        app,
+        ...(readme ? { readme } : {}),
+        rollbackAvailable: await appsIndexer.rollbackAvailable(args.folder),
+      };
+    },
+    'apps:create': async (_event, args) => {
+      const app = await appsIndexer.createApp(args);
+      capture('app_created', { folder: app.folder });
+      return { app };
+    },
+    'apps:delete': async (_event, args) => {
+      await appsIndexer.deleteApp(args.folder);
+      // Remove app-owned bg-tasks too — orphaned app--<folder>-- tasks firing
+      // against a deleted app was a painful prototype failure mode.
+      await appsAgents.deleteAppAgents(args.folder);
+      capture('app_deleted', { folder: args.folder });
+      return { ok: true as const };
+    },
+    'apps:setTheme': async (_event, args) => {
+      appsServer.setAppsTheme(args.theme);
+      return { ok: true as const };
     },
     // Agent schedule handlers
     'agent-schedule:getConfig': async () => {
@@ -1680,6 +1853,51 @@ export function setupIpcHandlers() {
     'voice:synthesize': async (_event, args) => {
       return voice.synthesizeSpeech(args.text);
     },
+    'voice:synthesizeStreamStart': async (event, args) => {
+      const { requestId, text } = args;
+      const sender = event.sender;
+      const controller = new AbortController();
+      activeTtsStreams.set(requestId, controller);
+      // Fire-and-forget: chunks are pushed to the renderer as they arrive so
+      // playback can begin immediately; the invoke returns once started.
+      void voice
+        .synthesizeSpeechStream(
+          text,
+          (chunk) => {
+            if (!sender.isDestroyed()) {
+              sender.send('voice:tts-chunk', {
+                requestId,
+                chunkBase64: chunk.toString('base64'),
+                done: false,
+              });
+            }
+          },
+          controller.signal,
+        )
+        .then(() => {
+          if (!sender.isDestroyed()) {
+            sender.send('voice:tts-chunk', { requestId, done: true });
+          }
+        })
+        .catch((err: unknown) => {
+          if (!sender.isDestroyed() && !controller.signal.aborted) {
+            sender.send('voice:tts-chunk', {
+              requestId,
+              done: true,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        })
+        .finally(() => {
+          activeTtsStreams.delete(requestId);
+        });
+      return { ok: true };
+    },
+    'voice:synthesizeStreamCancel': async (_event, args) => {
+      activeTtsStreams.get(args.requestId)?.abort();
+      activeTtsStreams.delete(args.requestId);
+      return {};
+    },
     'voice:ensureMicAccess': async () => {
       if (process.platform !== 'darwin') return { granted: true };
       const status = systemPreferences.getMediaAccessStatus('microphone');
@@ -1697,6 +1915,113 @@ export function setupIpcHandlers() {
       } catch {
         return { granted: false };
       }
+    },
+    'voice:ensureCameraAccess': async () => {
+      if (process.platform !== 'darwin') return { granted: true };
+      const status = systemPreferences.getMediaAccessStatus('camera');
+      console.log('[video] Camera permission status:', status);
+      if (status === 'granted') return { granted: true };
+      // Same flow as the microphone: settle the native TCC prompt before the
+      // renderer's getUserMedia so the first video click doesn't silently fail.
+      try {
+        const granted = await systemPreferences.askForMediaAccess('camera');
+        console.log('[video] Camera permission after prompt:', granted);
+        return { granted };
+      } catch {
+        return { granted: false };
+      }
+    },
+    'video:setPopout': async (_event, args) => {
+      if (!args.show) {
+        if (videoPopoutWin && !videoPopoutWin.isDestroyed()) videoPopoutWin.destroy();
+        videoPopoutWin = null;
+        return {};
+      }
+      if (videoPopoutWin && !videoPopoutWin.isDestroyed()) return {};
+
+      const workArea = screen.getPrimaryDisplay().workArea;
+      const width = 340;
+      const height = 184;
+      const ipcDir = path.dirname(fileURLToPath(import.meta.url));
+      const preloadPath = app.isPackaged
+        ? path.join(ipcDir, '../preload/dist/preload.js')
+        : path.join(ipcDir, '../../../preload/dist/preload.js');
+      const win = new BrowserWindow({
+        width,
+        height,
+        x: workArea.x + workArea.width - width - 24,
+        y: workArea.y + 24,
+        frame: false,
+        resizable: false,
+        alwaysOnTop: true,
+        skipTaskbar: true,
+        show: false,
+        hasShadow: true,
+        backgroundColor: '#171717',
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true,
+          sandbox: true,
+          preload: preloadPath,
+        },
+      });
+      // Float above other apps on every workspace. Deliberately NOT
+      // `visibleOnFullScreen: true`: on macOS that flag hides the app's Dock
+      // icon for as long as such a window exists (the app becomes an
+      // "agent" app), which reads as Rowboat having vanished. The trade-off
+      // is the popout won't hover over other apps' fullscreen Spaces.
+      win.setAlwaysOnTop(true, 'floating');
+      win.setVisibleOnAllWorkspaces(true);
+      win.webContents.once('did-finish-load', () => {
+        if (lastVideoPopoutState) {
+          win.webContents.send('video:popout-state', lastVideoPopoutState);
+        }
+        // showInactive: appearing must not steal focus from the app the user
+        // switched to — that would immediately re-hide the popout.
+        if (!win.isDestroyed()) win.showInactive();
+      });
+      win.on('closed', () => {
+        if (videoPopoutWin === win) videoPopoutWin = null;
+      });
+      videoPopoutWin = win;
+      if (app.isPackaged) {
+        win.loadURL('app://-/index.html#video-popout');
+      } else {
+        win.loadURL('http://localhost:5173/#video-popout');
+      }
+      return {};
+    },
+    'video:popoutState': async (_event, args) => {
+      lastVideoPopoutState = args;
+      if (videoPopoutWin && !videoPopoutWin.isDestroyed()) {
+        videoPopoutWin.webContents.send('video:popout-state', args);
+      }
+      return {};
+    },
+    'app:focusMainWindow': async () => {
+      const main = findMainAppWindow();
+      if (main) {
+        if (main.isMinimized()) main.restore();
+        main.show();
+        main.focus();
+      }
+      return {};
+    },
+    'video:getPopoutState': async () => {
+      return { state: lastVideoPopoutState };
+    },
+    'video:popoutAction': async (_event, args) => {
+      // Relay a popout control-bar action to the app window, which owns the
+      // call (mic, camera, screen capture) and executes it there. 'expand'
+      // additionally brings the app window back to the foreground.
+      const main = findMainAppWindow();
+      if (args.action === 'expand' && main) {
+        if (main.isMinimized()) main.restore();
+        main.show();
+        main.focus();
+      }
+      main?.webContents.send('video:popout-action', args);
+      return {};
     },
     // Live-note handlers
     'live-note:run': async (_event, args) => {

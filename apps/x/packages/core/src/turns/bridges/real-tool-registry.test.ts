@@ -125,6 +125,59 @@ describe("RealToolRegistry", () => {
         expect(ctx.progress).toEqual([{ kind: "tool-output", chunk: "chunk-1" }]);
     });
 
+    it("keeps code-run durability to permission asks/resolutions and the settle batch", async () => {
+        const chunk = { type: "message", role: "agent", text: "hi" } as const;
+        const resolution = {
+            type: "permission",
+            ask: { toolCallId: "x", title: "write file", options: [] },
+            decision: "allow_once",
+            auto: false,
+        } as const;
+        const ask = { toolCallId: "x", title: "write file", options: [] };
+        const { registry } = makeRegistry(async ({ ctx }) => {
+            // Chatty stream events are ephemeral (CodeRunFeed) — NOT progress.
+            await ctx.publish({
+                runId: "turn-1",
+                type: "code-run-event",
+                toolCallId: "tc-1",
+                event: chunk,
+                subflow: [],
+            });
+            await ctx.publish({
+                runId: "turn-1",
+                type: "code-run-permission-request",
+                toolCallId: "tc-1",
+                requestId: "cpr-1",
+                ask,
+                subflow: [],
+            });
+            // A permission resolution in the stream leaves a durable marker.
+            await ctx.publish({
+                runId: "turn-1",
+                type: "code-run-event",
+                toolCallId: "tc-1",
+                event: resolution,
+                subflow: [],
+            });
+            await ctx.publish({
+                runId: "turn-1",
+                type: "code-run-events-batch",
+                toolCallId: "tc-1",
+                events: [chunk, resolution],
+                subflow: [],
+            });
+            return "done";
+        });
+        const tool = (await registry.resolve(descriptor())) as SyncRuntimeTool;
+        const ctx = makeCtx();
+        await tool.execute({}, ctx);
+        expect(ctx.progress).toEqual([
+            { kind: "code-run-permission-request", requestId: "cpr-1", ask },
+            { kind: "code-run-permission-resolved" },
+            { kind: "code-run-events", events: [chunk, resolution] },
+        ]);
+    });
+
     it("wires the abort signal to the registry's force-kill path", async () => {
         const controller = new AbortController();
         const { registry, abortRegistry } = makeRegistry(async () => {
