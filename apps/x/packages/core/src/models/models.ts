@@ -10,6 +10,7 @@ import { LlmModelConfig, LlmProvider } from "@x/shared/dist/models.js";
 import z from "zod";
 import { getGatewayProvider } from "./gateway.js";
 import { getDefaultModelAndProvider, resolveProviderConfig } from "./defaults.js";
+import { getChatModelIds } from "./models-dev.js";
 import { withUseCase } from "../analytics/use_case.js";
 
 export const Provider = LlmProvider;
@@ -158,7 +159,16 @@ export async function listModelsForProvider(
             // OpenAI-shaped: { data: [{ id: "..." }] }
             ids = (data.data ?? []).map((m: { id: string }) => m.id);
         }
-        return ids.filter((id: string) => typeof id === "string" && id.length > 0);
+        const cleaned = ids.filter((id: string) => typeof id === "string" && id.length > 0);
+        if (flavor === "openai" || flavor === "anthropic" || flavor === "google") {
+            const chatIds = await getChatModelIds(flavor);
+            // Only filter when models.dev returned data; if it's empty (offline/no
+            // cache/unknown provider) keep the full list rather than showing none.
+            if (chatIds.size > 0) {
+                return cleaned.filter((id) => chatIds.has(id));
+            }
+        }
+        return cleaned;
     } finally {
         clearTimeout(timeout);
     }

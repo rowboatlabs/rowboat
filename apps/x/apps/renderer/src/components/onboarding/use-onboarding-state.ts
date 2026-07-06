@@ -8,7 +8,7 @@ export interface ProviderState {
   isConnecting: boolean
 }
 
-export type Step = 0 | 1 | 2 | 3
+export type Step = 0 | 1 | 2 | 3 | 4
 
 export type OnboardingPath = 'rowboat' | 'byok' | null
 
@@ -155,8 +155,8 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
 
   // Preferred default models for each provider
   const preferredDefaults: Partial<Record<LlmProviderFlavor, string>> = {
-    openai: "gpt-5.2",
-    anthropic: "claude-opus-4-6-20260202",
+    openai: "gpt-5.4",
+    anthropic: "claude-opus-4-8",
   }
 
   // Initialize default models from catalog
@@ -377,8 +377,8 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
   }, [startGoogleCalendarConnect])
 
   // New step flow:
-  // Rowboat path: 0 (welcome) → 2 (connect) → 3 (done)
-  // BYOK path: 0 (welcome) → 1 (llm setup) → 2 (connect) → 3 (done)
+  // Rowboat path: 0 (welcome) → 2 (connect) → 3 (code mode) → 4 (done)
+  // BYOK path: 0 (welcome) → 1 (llm setup) → 2 (connect) → 3 (code mode) → 4 (done)
   const handleNext = useCallback(() => {
     if (currentStep === 0) {
       if (onboardingPath === 'byok') {
@@ -390,6 +390,8 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
       setCurrentStep(2)
     } else if (currentStep === 2) {
       setCurrentStep(3)
+    } else if (currentStep === 3) {
+      setCurrentStep(4)
     }
   }, [currentStep, onboardingPath])
 
@@ -403,6 +405,8 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
       } else {
         setCurrentStep(1)
       }
+    } else if (currentStep === 3) {
+      setCurrentStep(2)
     }
   }, [currentStep, onboardingPath])
 
@@ -429,13 +433,17 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
         return false
       }
 
-      const models: string[] = result.models ?? []
+      const catalog: string[] = result.models ?? []
       const preferred = preferredDefaults[llmProvider]
       const model =
-        (preferred && models.includes(preferred) && preferred) ||
-        models[0] || activeConfig.model.trim() || ""
+        (preferred && catalog.includes(preferred) && preferred) ||
+        catalog[0] || activeConfig.model.trim() || ""
 
-      await window.ipc.invoke("models:saveConfig", { provider, model, models })
+      // `models` is the user's curated assistant-model list (shown in Settings),
+      // NOT the full provider catalog. Onboarding seeds it with just the selected
+      // model; users add more from Settings. Persisting the whole catalog here
+      // rendered every model as a separate assistant-model row.
+      await window.ipc.invoke("models:saveConfig", { provider, model, models: model ? [model] : [] })
       window.dispatchEvent(new Event('models-config-changed'))
       setTestState({ status: "success" })
       setConnectedFlavors(prev => new Set(prev).add(llmProvider))

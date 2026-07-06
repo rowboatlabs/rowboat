@@ -338,12 +338,14 @@ export function CodeView({
                 {terminalOpen ? <ChevronDown className="size-3.5" /> : <ChevronUp className="size-3.5" />}
               </button>
               {terminalOpen && (
-                <div style={{ height: terminalHeight }}>
-                  <TerminalPane
-                    key={selectedSession.id}
-                    terminalId={selectedSession.id}
-                    cwd={selectedSession.cwd}
-                  />
+                <div className="bg-background pb-3 dark:bg-black" style={{ height: terminalHeight + 12 }}>
+                  <div className="h-full min-h-0">
+                    <TerminalPane
+                      key={selectedSession.id}
+                      terminalId={selectedSession.id}
+                      cwd={selectedSession.cwd}
+                    />
+                  </div>
                 </div>
               )}
             </div>

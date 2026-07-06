@@ -6,7 +6,7 @@ import { useTheme } from '@/contexts/theme-context'
 
 // xterm color schemes tuned to the app's light/dark backgrounds.
 const DARK_THEME = {
-  background: '#1b1b1f',
+  background: '#000000',
   foreground: '#d4d4d8',
   cursor: '#d4d4d8',
   selectionBackground: 'rgba(120, 140, 255, 0.3)',
@@ -106,5 +106,11 @@ export function TerminalPane({ terminalId, cwd }: { terminalId: string; cwd: str
     if (term) term.options.theme = resolvedTheme === 'dark' ? DARK_THEME : LIGHT_THEME
   }, [resolvedTheme])
 
-  return <div ref={containerRef} className="h-full w-full overflow-hidden px-2 pt-1" />
+  return (
+    <div
+      ref={containerRef}
+      className="h-full w-full overflow-hidden px-2 pt-1"
+      style={{ backgroundColor: resolvedTheme === 'dark' ? '#000000' : '#ffffff' }}
+    />
+  )
 }

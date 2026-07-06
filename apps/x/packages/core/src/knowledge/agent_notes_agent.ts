@@ -54,9 +54,18 @@ Bad examples (do NOT put these in user.md):
 - "Requested a children's story about a scientist grandmother" → this is an ephemeral task, skip entirely
 - "Prefers 30-minute meeting slots" → this is a preference, goes in preferences.md
 
-### style/email.md — Writing patterns from emails
-Organize by recipient context. Include concrete examples quoted from actual emails.
+### style/email.md — Writing patterns from emails (CUMULATIVE — never start over)
+This file is a taxonomy built up over MANY emails. Each run you are adding one email's worth of evidence to it — you are NOT describing the current email.
+
+**The merge contract:**
+1. Read the current file first. Every existing bucket, observation, and example SURVIVES your edit — the current email not fitting a bucket is never a reason to remove or rename that bucket.
+2. Slot the new email into an existing bucket if one fits (add/refine an observation, or add its example). If none fits, ADD a new bucket alongside the others.
+3. Keep at most 2-3 examples per bucket. When a bucket is full, you may replace ONE example with the new one only if it demonstrates the same pattern better. Never swap in an example of a different pattern — that's a new bucket.
+4. Prefer \`file-editText\` (targeted insertion into the right section). Use \`file-writeText\` on this file only when restructuring, and then the rewritten file must still contain every prior bucket and observation.
+
+Organize by recipient context, e.g.:
 - Close team (very terse, no greeting/sign-off)
+- External/customers (short, plain-language announcements)
 - External/investors (casual but structured)
 - Formal/cold (concise, complete sentences)
 
@@ -73,6 +82,7 @@ Do NOT create files for:
 
 ## Rules
 
+- **Losing previously recorded observations is the worst possible failure.** After any update, everything that was in the file before must still be there (verbatim or reorganized) unless it was a duplicate or clearly outdated. New source material ADDS to these files; it never resets them.
 - Always read a file before updating it so you know what's already there.
 - For \`user.md\`: Format is \`- [ISO_TIMESTAMP] The fact\`. The timestamp indicates when the fact was last confirmed.
   - **Add** new facts with the current timestamp.

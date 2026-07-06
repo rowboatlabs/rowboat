@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { buildDeepgramListenUrl } from '@/lib/deepgram-listen-url';
+import { finalizeDeepgramStream } from '@/lib/deepgram-finalize';
 import { useRowboatAccount } from '@/hooks/useRowboatAccount';
 
 export type MeetingTranscriptionState = 'idle' | 'connecting' | 'recording' | 'stopping';
@@ -196,6 +197,25 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
         }, 1000);
     }, [writeTranscriptToFile]);
 
+    const stopInputCapture = useCallback(() => {
+        if (processorRef.current) {
+            processorRef.current.disconnect();
+            processorRef.current = null;
+        }
+        if (audioCtxRef.current) {
+            audioCtxRef.current.close();
+            audioCtxRef.current = null;
+        }
+        if (micStreamRef.current) {
+            micStreamRef.current.getTracks().forEach(t => t.stop());
+            micStreamRef.current = null;
+        }
+        if (systemStreamRef.current) {
+            systemStreamRef.current.getTracks().forEach(t => t.stop());
+            systemStreamRef.current = null;
+        }
+    }, []);
+
     const cleanup = useCallback(() => {
         if (writeTimerRef.current) {
             clearTimeout(writeTimerRef.current);
@@ -213,28 +233,13 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
             clearInterval(trackPollingRef.current);
             trackPollingRef.current = null;
         }
-        if (processorRef.current) {
-            processorRef.current.disconnect();
-            processorRef.current = null;
-        }
-        if (audioCtxRef.current) {
-            audioCtxRef.current.close();
-            audioCtxRef.current = null;
-        }
-        if (micStreamRef.current) {
-            micStreamRef.current.getTracks().forEach(t => t.stop());
-            micStreamRef.current = null;
-        }
-        if (systemStreamRef.current) {
-            systemStreamRef.current.getTracks().forEach(t => t.stop());
-            systemStreamRef.current = null;
-        }
+        stopInputCapture();
         if (wsRef.current) {
             wsRef.current.onclose = null;
             wsRef.current.close();
             wsRef.current = null;
         }
-    }, []);
+    }, [stopInputCapture]);
 
     const start = useCallback(async (calendarEvent?: CalendarEventMeta): Promise<string | null> => {
         if (state !== 'idle') return null;
@@ -551,12 +556,14 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
         if (state !== 'recording') return;
         setState('stopping');
 
+        stopInputCapture();
+        await finalizeDeepgramStream(wsRef.current, 2200);
         cleanup();
-        interimRef.current = new Map();
         await writeTranscriptToFile();
+        interimRef.current = new Map();
 
         setState('idle');
-    }, [state, cleanup, writeTranscriptToFile]);
+    }, [state, cleanup, stopInputCapture, writeTranscriptToFile]);
 
     return { state, start, stop };
 }

@@ -37,7 +37,7 @@ import { MarkdownPreOverride } from '@/components/ai-elements/markdown-code-over
 import { defaultRemarkPlugins } from 'streamdown'
 import remarkBreaks from 'remark-breaks'
 import { type ChatTab } from '@/components/tab-bar'
-import { ChatInputWithMentions, type PermissionMode, type StagedAttachment, type SelectedModel } from '@/components/chat-input-with-mentions'
+import { ChatInputWithMentions, type CallPreset, type PermissionMode, type StagedAttachment, type SelectedModel } from '@/components/chat-input-with-mentions'
 import { ChatMessageAttachments } from '@/components/chat-message-attachments'
 import { useSidebar } from '@/components/ui/sidebar'
 import { wikiLabel } from '@/lib/wiki-links'
@@ -51,6 +51,7 @@ import {
   getWebSearchCardData,
   getComposioConnectCardData,
   getToolDisplayName,
+  getToolErrorText,
   groupConversationItems,
   isChatMessage,
   isErrorMessage,
@@ -142,6 +143,10 @@ interface ChatSidebarProps {
   chatTabStates?: Record<string, ChatTabViewState>
   viewportAnchors?: Record<string, ChatViewportAnchorState>
   isProcessing: boolean
+  // Actively working (sessions runtime). When provided, drives the shimmer
+  // instead of isProcessing so waiting on a permission/ask-human doesn't
+  // render a "Thinking…" under the card.
+  isThinking?: boolean
   isStopping?: boolean
   onStop?: () => void
   onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => void
@@ -177,17 +182,16 @@ interface ChatSidebarProps {
   // Voice / TTS props
   isRecording?: boolean
   recordingText?: string
-  recordingState?: 'connecting' | 'listening'
+  recordingState?: 'connecting' | 'listening' | 'stopping'
   audioLevelsRef?: React.MutableRefObject<number[]>
   onStartRecording?: () => void
-  onSubmitRecording?: () => void
+  onSubmitRecording?: () => void | Promise<void>
   onCancelRecording?: () => void
   voiceAvailable?: boolean
-  ttsAvailable?: boolean
-  ttsEnabled?: boolean
-  ttsMode?: 'summary' | 'full'
-  onToggleTts?: () => void
-  onTtsModeChange?: (mode: 'summary' | 'full') => void
+  inCall?: boolean
+  onStartCall?: (preset: CallPreset) => void
+  onEndCall?: () => void
+  callAvailable?: boolean
   onComposioConnected?: (toolkitSlug: string) => void
 }
 
@@ -211,6 +215,7 @@ export function ChatSidebar({
   chatTabStates = {},
   viewportAnchors = {},
   isProcessing,
+  isThinking,
   isStopping,
   onStop,
   onSubmit,
@@ -246,11 +251,10 @@ export function ChatSidebar({
   onSubmitRecording,
   onCancelRecording,
   voiceAvailable,
-  ttsAvailable,
-  ttsEnabled,
-  ttsMode,
-  onToggleTts,
-  onTtsModeChange,
+  inCall,
+  onStartCall,
+  onEndCall,
+  callAvailable,
   onComposioConnected,
 }: ChatSidebarProps) {
   const { state: sidebarState } = useSidebar()
@@ -373,7 +377,14 @@ export function ChatSidebar({
     }
 
     try {
-      const result = await window.ipc.invoke('runs:downloadLog', { runId: activeRunId })
+      // Session-first (new runtime); legacy runs fallback covers old
+      // background tabs until stage 7 removes the runs runtime.
+      let result: { success: boolean; error?: string }
+      try {
+        result = await window.ipc.invoke('sessions:downloadLog', { sessionId: activeRunId })
+      } catch {
+        result = await window.ipc.invoke('runs:downloadLog', { runId: activeRunId })
+      }
       if (result.success) {
         toast.success('Chat log saved')
       } else if (result.error) {
@@ -474,7 +485,7 @@ export function ChatSidebar({
         )
       }
       const toolTitle = getToolDisplayName(item)
-      const errorText = item.status === 'error' ? 'Tool error' : ''
+      const errorText = getToolErrorText(item)
       const output = normalizeToolOutput(item.result, item.status)
       const input = normalizeToolInput(item.input)
       return (
@@ -674,11 +685,6 @@ export function ChatSidebar({
                           {!tabHasConversation ? (
                             <ChatEmptyState
                               wide={isMaximized}
-                              // A pinned coding-session chat must not offer jumping
-                              // to other conversations from the empty state either.
-                              recentRuns={pinnedToCodeSession ? [] : recentRuns}
-                              onSelectRun={pinnedToCodeSession ? undefined : onSelectRun}
-                              onOpenChatHistory={pinnedToCodeSession ? undefined : onOpenChatHistory}
                               onPickPrompt={setLocalPresetMessage}
                             />
                           ) : (
@@ -730,7 +736,7 @@ export function ChatSidebar({
                                             onApproveSession={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'session')}
                                             onApproveAlways={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'always')}
                                             onDeny={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
-                                            isProcessing={isActive && isProcessing}
+                                            isProcessing={isActive && (isThinking ?? isProcessing)}
                                             response={response}
                                           />
                                         )}
@@ -747,7 +753,7 @@ export function ChatSidebar({
                                   key={request.toolCallId}
                                   query={request.query}
                                   onResponse={(response) => onAskHumanResponse(request.toolCallId, request.subflow, response)}
-                                  isProcessing={isActive && isProcessing}
+                                  isProcessing={isActive && (isThinking ?? isProcessing)}
                                 />
                               ))}
 
@@ -759,7 +765,7 @@ export function ChatSidebar({
                                 </Message>
                               )}
 
-                              {isActive && isProcessing && !tabState.currentAssistantMessage && (
+                              {isActive && (isThinking ?? isProcessing) && !tabState.currentAssistantMessage && (
                                 <Message from="assistant">
                                   <MessageContent>
                                     <Shimmer duration={1}>Thinking...</Shimmer>
@@ -818,11 +824,10 @@ export function ChatSidebar({
                           onSubmitRecording={isActive ? onSubmitRecording : undefined}
                           onCancelRecording={isActive ? onCancelRecording : undefined}
                           voiceAvailable={isActive && voiceAvailable}
-                          ttsAvailable={isActive && ttsAvailable}
-                          ttsEnabled={ttsEnabled}
-                          ttsMode={ttsMode}
-                          onToggleTts={isActive ? onToggleTts : undefined}
-                          onTtsModeChange={isActive ? onTtsModeChange : undefined}
+                          inCall={inCall}
+                          onStartCall={isActive ? onStartCall : undefined}
+                          onEndCall={isActive ? onEndCall : undefined}
+                          callAvailable={callAvailable}
                         />
                       </div>
                     )

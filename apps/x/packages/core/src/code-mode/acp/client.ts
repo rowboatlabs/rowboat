@@ -139,6 +139,8 @@ function toEvent(update: SessionUpdate): CodeRunEvent {
                     priority: e.priority ?? undefined,
                 })),
             };
+        case 'usage_update':
+            return { type: 'usage', used: update.used, size: update.size };
         default:
             return { type: 'other', sessionUpdate: update.sessionUpdate };
     }

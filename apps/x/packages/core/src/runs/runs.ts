@@ -152,3 +152,8 @@ export async function listRuns(cursor?: string): Promise<z.infer<typeof ListRuns
     const repo = container.resolve<IRunsRepo>('runsRepo');
     return repo.list(cursor);
 }
+
+export async function listRunsByWorkDir(dir: string): Promise<z.infer<typeof ListRunsResponse>> {
+    const repo = container.resolve<IRunsRepo>('runsRepo');
+    return repo.listByWorkDir(dir);
+}

@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Bug, Terminal, AlertTriangle, RefreshCw, PanelRight, Bell } from "lucide-react"
+import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Bug, Terminal, AlertTriangle, RefreshCw, PanelRight, Bell, Smartphone } from "lucide-react"
 
 import {
   Dialog,
@@ -25,9 +25,11 @@ import { useTheme } from "@/contexts/theme-context"
 import { toast } from "sonner"
 import { AccountSettings } from "@/components/settings/account-settings"
 import { ConnectedAccountsSettings } from "@/components/settings/connected-accounts-settings"
+import { MobileChannelsSettings } from "@/components/settings/mobile-channels-settings"
 import type { ApprovalPolicy } from "@x/shared/src/code-mode.js"
+import { startProvisioning, useProvisioning, enabledOptimistic, type AgentStatus, type CodeModeAgentStatus } from "@/lib/code-mode-provisioning"
 
-type ConfigTab = "account" | "connections" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "notifications" | "note-tagging" | "help"
+type ConfigTab = "account" | "connections" | "mobile" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "notifications" | "note-tagging" | "help"
 
 interface TabConfig {
   id: ConfigTab
@@ -49,6 +51,12 @@ const tabs: TabConfig[] = [
     label: "Connections",
     icon: Plug,
     description: "Manage accounts and tools",
+  },
+  {
+    id: "mobile",
+    label: "Mobile",
+    icon: Smartphone,
+    description: "Chat with Rowboat from WhatsApp or Telegram",
   },
   {
     id: "models",
@@ -319,8 +327,8 @@ const moreProviders: Array<{ id: LlmProviderFlavor; name: string; description: s
 ]
 
 const preferredDefaults: Partial<Record<LlmProviderFlavor, string>> = {
-  openai: "gpt-5.2",
-  anthropic: "claude-opus-4-6-20260202",
+  openai: "gpt-5.4",
+  anthropic: "claude-opus-4-8",
 }
 
 const defaultBaseURLs: Partial<Record<LlmProviderFlavor, string>> = {
@@ -384,38 +392,6 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
     []
   )
 
-  const updateModelAt = useCallback(
-    (prov: LlmProviderFlavor, index: number, value: string) => {
-      setProviderConfigs(prev => {
-        const models = [...prev[prov].models]
-        models[index] = value
-        return { ...prev, [prov]: { ...prev[prov], models } }
-      })
-      setTestState({ status: "idle" })
-    },
-    []
-  )
-
-  const addModel = useCallback(
-    (prov: LlmProviderFlavor) => {
-      setProviderConfigs(prev => ({
-        ...prev,
-        [prov]: { ...prev[prov], models: [...prev[prov].models, ""] },
-      }))
-    },
-    []
-  )
-
-  const removeModel = useCallback(
-    (prov: LlmProviderFlavor, index: number) => {
-      setProviderConfigs(prev => {
-        const models = prev[prov].models.filter((_, i) => i !== index)
-        return { ...prev, [prov]: { ...prev[prov], models: models.length > 0 ? models : [""] } }
-      })
-      setTestState({ status: "idle" })
-    },
-    []
-  )
 
   // Load current config from file
   useEffect(() => {
@@ -727,48 +703,29 @@ function ModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
             </div>
           ) : (
             <div className="space-y-2">
-              {activeConfig.models.map((model, index) => (
-                <div key={index} className="group/model relative">
-                  {showModelInput ? (
-                    <Input
-                      value={model}
-                      onChange={(e) => updateModelAt(provider, index, e.target.value)}
-                      placeholder="Enter model"
-                    />
-                  ) : (
-                    <Select
-                      value={model}
-                      onValueChange={(value) => updateModelAt(provider, index, value)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select a model" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {modelsForProvider.map((m) => (
-                          <SelectItem key={m.id} value={m.id}>
-                            {m.name || m.id}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                  {activeConfig.models.length > 1 && (
-                    <button
-                      onClick={() => removeModel(provider, index)}
-                      className="absolute right-8 top-1/2 -translate-y-1/2 flex size-6 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/model:opacity-100"
-                    >
-                      <X className="size-3.5" />
-                    </button>
-                  )}
-                </div>
-              ))}
-              <button
-                onClick={() => addModel(provider)}
-                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-              >
-                <Plus className="size-3.5" />
-                Add assistant model
-              </button>
+              {showModelInput ? (
+                <Input
+                  value={primaryModel}
+                  onChange={(e) => updateConfig(provider, { models: [e.target.value] })}
+                  placeholder="Enter model"
+                />
+              ) : (
+                <Select
+                  value={primaryModel}
+                  onValueChange={(value) => updateConfig(provider, { models: [value] })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a model" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {modelsForProvider.map((m) => (
+                      <SelectItem key={m.id} value={m.id}>
+                        {m.name || m.id}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
             </div>
           )}
           {modelsError && (
@@ -1756,66 +1713,6 @@ function NoteTaggingSettings({ dialogOpen }: { dialogOpen: boolean }) {
 
 // --- Code Mode Settings ---
 
-type AgentStatus = { installed: boolean; signedIn: boolean }
-type CodeModeAgentStatus = { claude: AgentStatus; codex: AgentStatus }
-
-// Engine provisioning runs in the main process and keeps going even if the Settings
-// dialog is closed. Track its state at MODULE level (not in the row component, which
-// unmounts on close) so reopening Settings still shows the live % instead of the Enable
-// button. A single persistent listener on the progress channel feeds this store.
-type ProvState = { pct: number | null; error?: string }
-const provStore: Record<string, ProvState | undefined> = {}
-// Agents we provisioned this session — used to show "Ready" immediately on success
-// without waiting for the async status refresh to round-trip (which caused the row to
-// briefly flash the Enable button again).
-const enabledOptimistic = new Set<string>()
-const provListeners = new Set<() => void>()
-let provChannelHooked = false
-
-function notifyProv() { provListeners.forEach((l) => l()) }
-
-function startProvisioning(agent: 'claude' | 'codex', onDone: () => void | Promise<void>): void {
-  if (provStore[agent] && !provStore[agent]!.error) return // already in flight
-  provStore[agent] = { pct: null }
-  notifyProv()
-  if (!provChannelHooked) {
-    provChannelHooked = true
-    window.ipc.on('codeMode:engineProgress', (p) => {
-      const cur = provStore[p.agent]
-      if (!cur) return
-      const pct = p.totalBytes ? Math.floor(((p.receivedBytes ?? 0) / p.totalBytes) * 100) : cur.pct
-      provStore[p.agent] = { pct }
-      notifyProv()
-    })
-  }
-  window.ipc.invoke('codeMode:provisionEngine', { agent })
-    .then((res) => {
-      if (res.success) {
-        // Mark installed optimistically so the row shows "Ready" the instant the flag
-        // clears — don't depend on the async status refresh (which re-renders the parent
-        // separately and left a window showing the Enable button). loadStatus still runs
-        // in the background to sync the real status.
-        enabledOptimistic.add(agent)
-        provStore[agent] = undefined
-        void onDone()
-      } else {
-        provStore[agent] = { pct: null, error: res.error ?? 'Failed to enable' }
-      }
-    })
-    .catch((e) => { provStore[agent] = { pct: null, error: e instanceof Error ? e.message : 'Failed to enable' } })
-    .finally(notifyProv)
-}
-
-function useProvisioning(agent: string): ProvState | undefined {
-  const [, force] = useState(0)
-  useEffect(() => {
-    const l = () => force((n) => n + 1)
-    provListeners.add(l)
-    return () => { provListeners.delete(l) }
-  }, [])
-  return provStore[agent]
-}
-
 function AgentStatusRow({
   name,
   agent,
@@ -2075,7 +1972,7 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
 
 // --- Notification Settings ---
 
-type NotificationCategoryKey = "chat_completion" | "new_email" | "agent_permission"
+type NotificationCategoryKey = "chat_completion" | "new_email" | "agent_permission" | "background_task"
 
 const NOTIFICATION_CATEGORIES: { key: NotificationCategoryKey; label: string; description: string }[] = [
   {
@@ -2092,6 +1989,11 @@ const NOTIFICATION_CATEGORIES: { key: NotificationCategoryKey; label: string; de
     key: "agent_permission",
     label: "Permission requests",
     description: "When an agent needs your approval to run a tool. Always shown, even when the app is focused.",
+  },
+  {
+    key: "background_task",
+    label: "Background agents",
+    description: "When a background agent you've set up has something to surface. Click to open it on the background tasks page.",
   },
 ]
 
@@ -2321,7 +2223,7 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
             </div>
 
             {/* Content */}
-            <div className={cn("flex-1 p-4 min-h-0", (activeTab === "models" || activeTab === "connections" || activeTab === "account" || activeTab === "code-mode" || activeTab === "notifications") ? "overflow-y-auto" : activeTab === "note-tagging" ? "overflow-hidden flex flex-col" : "overflow-hidden")}>
+            <div className={cn("flex-1 p-4 min-h-0", (activeTab === "models" || activeTab === "connections" || activeTab === "mobile" || activeTab === "account" || activeTab === "code-mode" || activeTab === "notifications") ? "overflow-y-auto" : activeTab === "note-tagging" ? "overflow-hidden flex flex-col" : "overflow-hidden")}>
               {activeTab === "account" ? (
                 <AccountSettings dialogOpen={open} />
               ) : activeTab === "connections" ? (
@@ -2336,6 +2238,8 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
                     <ToolsLibrarySettings dialogOpen={open} rowboatConnected={rowboatConnected} />
                   </div>
                 </div>
+              ) : activeTab === "mobile" ? (
+                <MobileChannelsSettings dialogOpen={open} />
               ) : activeTab === "models" ? (
                 rowboatConnected
                   ? <RowboatModelSettings dialogOpen={open} />

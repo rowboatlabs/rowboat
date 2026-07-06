@@ -6,6 +6,7 @@ import { CURATED_TOOLKITS } from "@x/shared/dist/composio.js";
 import container from "../../di/container.js";
 import type { ICodeModeConfigRepo } from "../../code-mode/repo.js";
 import type { ISlackConfigRepo } from "../../slack/repo.js";
+import type { IOAuthRepo } from "../../auth/repo.js";
 import { knowledgeSourcesRepo } from "../../knowledge/sources/repo.js";
 
 const runtimeContextPrompt = getRuntimeContextPrompt(getRuntimeContext());
@@ -14,7 +15,7 @@ const runtimeContextPrompt = getRuntimeContextPrompt(getRuntimeContext());
  * Generate dynamic instructions section for Composio integrations.
  * Lists connected toolkits and explains the meta-tool discovery flow.
  */
-async function getComposioToolsPrompt(slackConnected: boolean = false): Promise<string> {
+async function getComposioToolsPrompt(slackConnected: boolean = false, googleConnected: boolean = false): Promise<string> {
     if (!(await isComposioConfigured())) {
         return '';
     }
@@ -29,30 +30,50 @@ async function getComposioToolsPrompt(slackConnected: boolean = false): Promise<
         ? ` Exception: **Slack is connected natively** — use the \`slack\` skill for Slack, not Composio.`
         : '';
 
+    // Google is connected natively, so email reading must not route to Composio.
+    const googleException = googleConnected
+        ? ` Exception: **Gmail is connected natively** — read/check/search email with the \`app-navigation\` tool (\`read-view\`, \`view: "email"\`), not Composio.`
+        : '';
+
     return `
 ## Composio Integrations
 
 ${connectedSection}
 
-Load the \`composio-integration\` skill when the user asks to interact with any third-party service. NEVER say "I can't access [service]" without loading the skill and trying Composio first.${slackException}
+Load the \`composio-integration\` skill when the user asks to interact with any third-party service. NEVER say "I can't access [service]" without loading the skill and trying Composio first.${slackException}${googleException}
 `;
 }
 
-function buildStaticInstructions(composioEnabled: boolean, catalog: string, codeModeEnabled: boolean = true, slackConnected: boolean = false, slackChannelsHint: string = ''): string {
-    // Conditionally include Composio-related instruction sections
-    const emailDraftSuffix = composioEnabled
-        ? ` Do NOT load this skill for reading, fetching, or checking emails — use the \`composio-integration\` skill for that instead.`
-        : ` Do NOT load this skill for reading, fetching, or checking emails.`;
+function buildStaticInstructions(composioEnabled: boolean, catalog: string, codeModeEnabled: boolean = true, slackConnected: boolean = false, slackChannelsHint: string = '', googleConnected: boolean = false): string {
+    // Conditionally include Composio-related instruction sections.
+    // When Google is connected natively, email reading routes to the native
+    // app-navigation email view — never to Composio.
+    const emailDraftSuffix = googleConnected
+        ? ` Do NOT load this skill for reading, fetching, or checking emails — Gmail is connected natively; use the \`app-navigation\` tool (\`read-view\`, \`view: "email"\`) for that instead.`
+        : composioEnabled
+            ? ` Do NOT load this skill for reading, fetching, or checking emails — use the \`composio-integration\` skill for that instead.`
+            : ` Do NOT load this skill for reading, fetching, or checking emails.`;
 
-    // When Slack is connected natively (desktop/cURL auth, not Composio), keep it
-    // out of the Composio routing examples so the Copilot doesn't try to connect
-    // it through Composio and wrongly report it as unavailable.
-    const composioServiceExamples = slackConnected
-        ? 'Gmail, GitHub, LinkedIn, Notion, Google Sheets, Jira, etc.'
-        : 'Gmail, GitHub, Slack, LinkedIn, Notion, Google Sheets, Jira, etc.';
+    // When Slack or Google is connected natively (not via Composio), keep them
+    // out of the Composio routing examples so the Copilot doesn't route their
+    // requests through Composio or wrongly report them as unavailable.
+    const composioServiceExamples = ['Gmail', 'GitHub', 'Slack', 'LinkedIn', 'Notion', 'Google Sheets', 'Jira']
+        .filter(service => !(slackConnected && service === 'Slack') && !(googleConnected && service === 'Gmail'))
+        .join(', ') + ', etc.';
+
+    const thirdPartyExamples = googleConnected
+        ? 'listing issues, sending messages, fetching profiles'
+        : 'reading emails, listing issues, sending messages, fetching profiles';
 
     const thirdPartyBlock = composioEnabled
-        ? `\n**Third-Party Services:** When users ask to interact with any external service (${composioServiceExamples}) — reading emails, listing issues, sending messages, fetching profiles — load the \`composio-integration\` skill first. Do NOT look in local \`gmail_sync/\` or \`calendar_sync/\` folders for live data.\n`
+        ? `\n**Third-Party Services:** When users ask to interact with any external service (${composioServiceExamples}) — ${thirdPartyExamples} — load the \`composio-integration\` skill first. Do NOT look in local \`gmail_sync/\` or \`calendar_sync/\` folders for live data.\n`
+        : '';
+
+    // Google is connected directly in Rowboat (native OAuth + background sync),
+    // independent of Composio. Route email reading to the native app-navigation
+    // email view so the Copilot never sends it through Composio.
+    const gmailBlock = googleConnected
+        ? `\n**Gmail (connected natively):** The user's Google account is connected directly in Rowboat, and their email is synced continuously. For ANY request to read, fetch, check, or search emails — "get my last few emails", "any new emails?", "find the email from X", "search my gmail for Y" — load the \`app-navigation\` skill and use the \`app-navigation\` tool's \`read-view\` action with \`view: "email"\`. Its \`query\` parameter runs a LIVE Gmail search over the entire mailbox via the Gmail API with full Gmail search operators (\`from:\`, \`subject:\`, \`before:\`, etc.) — it IS Gmail's real search, so use it even when the user explicitly asks to "search Gmail directly". NEVER route email reading through the \`composio-integration\` skill or Composio Gmail tools, and NEVER tell the user Gmail isn't connected. Email *drafting* still goes through the \`draft-emails\` skill.\n`
         : '';
 
     // Slack is connected directly in Rowboat (agent-slack CLI), independent of
@@ -69,9 +90,15 @@ function buildStaticInstructions(composioEnabled: boolean, catalog: string, code
         ? ` For Slack specifically, load the \`slack\` skill and use the agent-slack CLI — Slack is connected natively, not via Composio.`
         : '';
 
+    const googleToolPriority = googleConnected
+        ? ` For reading email specifically, use the \`app-navigation\` tool (\`read-view\`, \`view: "email"\`) — Gmail is connected natively, not via Composio.`
+        : '';
+
+    const toolPriorityServiceExamples = googleConnected ? 'GitHub, Notion, etc.' : 'GitHub, Gmail, etc.';
+
     const toolPriority = composioEnabled
-        ? `For third-party services (GitHub, Gmail, etc.), load the \`composio-integration\` skill.${slackToolPriority} For capabilities Composio doesn't cover (web search, file scraping, audio), use MCP tools via the \`mcp-integration\` skill.`
-        : `For capabilities like web search, file scraping, and audio, use MCP tools via the \`mcp-integration\` skill.${slackToolPriority}`;
+        ? `For third-party services (${toolPriorityServiceExamples}), load the \`composio-integration\` skill.${slackToolPriority}${googleToolPriority} For capabilities Composio doesn't cover (web search, file scraping, audio), use MCP tools via the \`mcp-integration\` skill.`
+        : `For capabilities like web search, file scraping, and audio, use MCP tools via the \`mcp-integration\` skill.${slackToolPriority}${googleToolPriority}`;
 
     const slackToolsLine = composioEnabled
         ? `- \`slack-checkConnection\`, \`slack-listAvailableTools\`, \`slack-executeAction\` - Slack integration (requires Slack to be connected via Composio). Use \`slack-listAvailableTools\` first to discover available tool slugs, then \`slack-executeAction\` to execute them.\n`
@@ -104,7 +131,7 @@ Rowboat is an agentic assistant for everyday work - emails, meetings, projects, 
 
 **Email Drafting:** When users ask you to **draft** or **compose** emails (e.g., "draft a follow-up to Monica", "write an email to John about the project"), load the \`draft-emails\` skill first.${emailDraftSuffix}
 
-${thirdPartyBlock}${slackBlock}**Meeting Prep:** When users ask you to prepare for a meeting, prep for a call, or brief them on attendees, load the \`meeting-prep\` skill first. It provides structured guidance for gathering context about attendees from the knowledge base and creating useful meeting briefs.
+${thirdPartyBlock}${gmailBlock}${slackBlock}**Meeting Prep:** When users ask you to prepare for a meeting, prep for a call, or brief them on attendees, load the \`meeting-prep\` skill first. It provides structured guidance for gathering context about attendees from the knowledge base and creating useful meeting briefs.
 
 **Create Presentations:** When users ask you to create a presentation, slide deck, pitch deck, or PDF slides, load the \`create-presentations\` skill first. It provides structured guidance for generating PDF presentations using context from the knowledge base.
 
@@ -114,7 +141,7 @@ ${codeModeEnabled
     ? `**Code with Agents:** When users ask you to write code, build a project, create a script, fix a bug, or do any software development task — **including simple things like "create a .c file" or "write a hello-world in Python"** — your FIRST action MUST be \`loadSkill('code-with-agents')\`. Do NOT reach for \`executeCommand\` (PowerShell / bash / shell) or any workspace file tool to do code work yourself before loading this skill. The skill decides whether to delegate to Claude Code / Codex (via acpx) or hand control back to you, and it presents the user a one-click choice when needed. Paths outside the Rowboat workspace root (e.g. \`G:/...\`, \`~/projects/...\`) are NORMAL for coding tasks — do NOT raise "outside workspace" concerns or fall back to your own tools.`
     : `**Code with Agents (disabled):** Code mode is currently OFF in the user's settings. Do NOT load \`code-with-agents\` and do NOT call acpx. Handle coding requests yourself with your normal tools if you can. After answering, add a final line letting the user know they can delegate coding to Claude Code or Codex by enabling Code Mode in Settings → Code Mode.`}
 
-**App Control:** When users ask you to open notes, show the bases or graph view, filter or search notes, or manage saved views, load the \`app-navigation\` skill first. It provides structured guidance for navigating the app UI and controlling the knowledge base view.
+**App Control (drive the app):** You can drive the Rowboat UI the user is looking at — open any view (email, meetings, background agents, chat history, knowledge, workspace, code, bases, graph), READ what a view contains (\`read-view\` returns emails / background agents / past chats as data while showing the view on screen), and open specific items (an email thread, a note, an agent, a past chat). When users ask to open, show, find, or ask about anything that lives inside Rowboat, load the \`app-navigation\` skill first — it documents the show-while-telling pattern. This matters most on calls: navigate so the user sees what you see, then answer briefly.
 
 **Background Tasks (Self-Running Work):** Rowboat can run *background tasks* — persistent instructions the agent fires on a schedule and/or in response to incoming emails / calendar events. A bg-task either maintains a snapshot in its \`index.md\` (digest, dashboard, rolling summary) or performs a recurring side-effect (send a Slack message, draft an email, post to a webhook, call an API). This is the flagship surface for *anything recurring*.
 
@@ -293,7 +320,7 @@ ${runtimeContextPrompt}
 - \`addMcpServer\`, \`listMcpServers\`, \`listMcpTools\`, \`executeMcpTool\` - MCP server management and execution
 - \`loadSkill\` - Skill loading
 ${slackToolsLine}- \`web-search\` - Search the web. Returns rich results with full text, highlights, and metadata. The \`category\` parameter defaults to \`general\` (full web search) — only use a specific category like \`news\`, \`company\`, \`research paper\` etc. when the query is clearly about that type. For everyday queries (weather, restaurants, prices, how-to), use \`general\`.
-- \`app-navigation\` - Control the app UI: open notes, switch views, filter/search the knowledge base, manage saved views. **Load the \`app-navigation\` skill before using this tool.**
+- \`app-navigation\` - Drive the app UI: open any view, read a view's contents (emails / background agents / chat history), open specific items (email thread, note, agent, past chat), filter/search the knowledge base, manage saved views. **Load the \`app-navigation\` skill before using this tool.**
 - \`browser-control\` - Control the embedded browser pane: open sites, inspect the live page, switch tabs, and interact with indexed page elements. **Load the \`browser-control\` skill before using this tool.**
 - \`save-to-memory\` - Save observations about the user to the agent memory system. Use this proactively during conversations.
 ${composioToolsLine}
@@ -371,6 +398,14 @@ export async function buildCopilotInstructions(): Promise<string> {
     } catch {
         // repo unavailable — default to not connected
     }
+    let googleConnected = false;
+    try {
+        const oauthRepo = container.resolve<IOAuthRepo>('oauthRepo');
+        const googleConnection = await oauthRepo.read('google');
+        googleConnected = !!googleConnection.tokens;
+    } catch {
+        // repo unavailable — default to not connected
+    }
     if (slackConnected) {
         try {
             // Surface the channels the user selected for sync so the Copilot
@@ -395,8 +430,8 @@ export async function buildCopilotInstructions(): Promise<string> {
     const catalog = excludeIds.length > 0
         ? buildSkillCatalog({ excludeIds })
         : skillCatalog;
-    const baseInstructions = buildStaticInstructions(composioEnabled, catalog, codeModeEnabled, slackConnected, slackChannelsHint);
-    const composioPrompt = await getComposioToolsPrompt(slackConnected);
+    const baseInstructions = buildStaticInstructions(composioEnabled, catalog, codeModeEnabled, slackConnected, slackChannelsHint, googleConnected);
+    const composioPrompt = await getComposioToolsPrompt(slackConnected, googleConnected);
     cachedInstructions = composioPrompt
         ? baseInstructions + '\n' + composioPrompt
         : baseInstructions;

@@ -6,14 +6,16 @@ import type { Step, OnboardingPath } from "./use-onboarding-state"
 const ROWBOAT_STEPS = [
   { step: 0 as Step, label: "Welcome" },
   { step: 2 as Step, label: "Connect" },
-  { step: 3 as Step, label: "Done" },
+  { step: 3 as Step, label: "Code" },
+  { step: 4 as Step, label: "Done" },
 ]
 
 const BYOK_STEPS = [
   { step: 0 as Step, label: "Welcome" },
   { step: 1 as Step, label: "Model" },
   { step: 2 as Step, label: "Connect" },
-  { step: 3 as Step, label: "Done" },
+  { step: 3 as Step, label: "Code" },
+  { step: 4 as Step, label: "Done" },
 ]
 
 interface StepIndicatorProps {
@@ -26,7 +28,7 @@ export function StepIndicator({ currentStep, path }: StepIndicatorProps) {
   const currentIndex = steps.findIndex(s => s.step === currentStep)
 
   return (
-    <div className="flex items-center gap-2 mb-8 px-4">
+    <div className="flex items-center gap-2 mb-20 px-4">
       {steps.map((s, i) => (
         <React.Fragment key={s.step}>
           {i > 0 && (
@@ -37,7 +39,7 @@ export function StepIndicator({ currentStep, path }: StepIndicatorProps) {
               )}
             />
           )}
-          <div className="flex flex-col items-center gap-1.5">
+          <div className="relative flex flex-col items-center">
             <div
               className={cn(
                 "size-8 rounded-full flex items-center justify-center text-xs font-medium transition-all duration-300",
@@ -54,7 +56,7 @@ export function StepIndicator({ currentStep, path }: StepIndicatorProps) {
             </div>
             <span
               className={cn(
-                "text-[11px] font-medium transition-colors duration-300",
+                "absolute top-full mt-1.5 whitespace-nowrap text-[11px] font-medium transition-colors duration-300",
                 i <= currentIndex ? "text-foreground" : "text-muted-foreground"
               )}
             >

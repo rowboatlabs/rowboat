@@ -1,11 +1,11 @@
 import type { BackgroundTask, BackgroundTaskTriggerType } from '@x/shared/dist/background-task.js';
 import { PrefixLogger } from '@x/shared/dist/prefix-logger.js';
 import { fetchTask, patchTask, prependRunId } from './fileops.js';
-import { createRun, createMessage } from '../runs/runs.js';
 import { getBackgroundTaskAgentModel } from '../models/defaults.js';
-import { extractAgentResponse, waitForRunCompletion } from '../agents/utils.js';
+import { startHeadlessAgent } from '../agents/headless-app.js';
 import { buildTriggerBlock } from '../agents/build-trigger-block.js';
 import { backgroundTaskBus } from './bus.js';
+import { withUseCase } from '../analytics/use_case.js';
 
 const log = new PrefixLogger('BgTask:Agent');
 
@@ -138,20 +138,25 @@ export async function runBackgroundTask(
         }
 
         const model = task.model || await getBackgroundTaskAgentModel();
-        const agentRun = await createRun({
-            agentId: 'background-task-agent',
-            model,
-            ...(task.provider ? { provider: task.provider } : {}),
-            useCase: 'background_task_agent',
-            // Granular trigger as analytics sub-use-case — matches live-note's
-            // pattern at runner.ts:149.
-            subUseCase: trigger,
-        });
+        // Establish the use-case context for the whole turn so every tool the
+        // agent calls (notably notify-user) reads `background_task_agent` via
+        // getCurrentUseCase(); the AsyncLocalStorage context set here flows
+        // through the turn's async execution chain.
+        const handle = await withUseCase(
+            { useCase: 'background_task_agent', subUseCase: trigger },
+            () => startHeadlessAgent({
+                agentId: 'background-task-agent',
+                message: buildMessage(slug, task, trigger, context, codeProject),
+                model,
+                ...(task.provider ? { provider: task.provider } : {}),
+                throwOnError: true,
+            }),
+        );
 
-        const runId = agentRun.id;
-        // Record this run in the task's runs.log pointer file (newest first).
-        // The transcript itself lives at the global $WorkDir/runs/<runId>.jsonl
-        // — runs.log is just an index that ties runIds to this task.
+        const runId = handle.turnId;
+        // Record this turn in the task's runs.log pointer file (newest first).
+        // The transcript itself lives at $WorkDir/storage/turns/YYYY/MM/DD/
+        // — runs.log is just an index that ties turn ids to this task.
         await prependRunId(slug, runId);
         const startedAt = new Date().toISOString();
 
@@ -183,9 +188,7 @@ export async function runBackgroundTask(
         });
 
         try {
-            await createMessage(runId, buildMessage(slug, task, trigger, context, codeProject));
-            await waitForRunCompletion(runId, { throwOnError: true });
-            const summary = await extractAgentResponse(runId);
+            const { summary } = await handle.done;
 
             // Success — bump cycle anchor, refresh summary, clear any prior error.
             await patchTask(slug, {

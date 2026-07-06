@@ -57,11 +57,12 @@ ${renderTagSystemForEmails()}
 
 1. For each email file provided in the message, read its content carefully.
 2. Classify the email using the taxonomy above. Think like a **YC startup founder** triaging their inbox — your time is your scarcest resource:
-   - **Relationship**: Who is this from? An investor, customer, team member, vendor, candidate, etc.?
+   - **Relationship**: Who is this from? An investor, customer, team member, vendor, etc.? (\`candidate\` is a NOISE tag, not a relationship — see Filter below.)
    - **Topic**: What is this about? Legal, finance, hiring, fundraising, security, infrastructure, etc.?
    - **Email Type**: Is this a warm intro or a followup on an existing conversation?
    - **Filter (Noise)**: Is this email noise? **Apply ALL applicable filter tags.** If even one noise tag is present the email is skipped — noise overrides everything. Common noise:
      - Cold outreach / unsolicited service pitches / "YC exclusive" deals / freelancers offering free work
+     - Job applications, role inquiries, and recruiter mail → \`filter: ['candidate']\` (candidate is a noise tag and MUST go under filter, never under relationship)
      - Newsletters, industry reports, webinar invitations, product tips from vendors
      - Promotions, marketing, event invitations you did not register for, startup program upsells
      - Automated notifications (email verifications, recording uploads, platform policy changes, expired OTPs)

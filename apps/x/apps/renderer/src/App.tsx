@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { useCallback, useEffect, useLayoutEffect, useState, useRef } from 'react'
 import { workspace } from '@x/shared';
-import { RunEvent, ListRunsResponse } from '@x/shared/src/runs.js';
+import { RunEvent } from '@x/shared/src/runs.js';
 import type { LanguageModelUsage, ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
@@ -9,9 +9,11 @@ import { CheckIcon, LoaderIcon, PanelLeftIcon, ArrowLeft, ArrowRight, MessageSqu
 import { cn } from '@/lib/utils';
 import { MarkdownEditor, type MarkdownEditorHandle } from './components/markdown-editor';
 import { ChatSidebar } from './components/chat-sidebar';
+import { useSessionChat } from '@/hooks/useSessionChat';
+import { subscribeSessionFeed } from '@/lib/session-chat/feed';
 import { ChatHeader } from './components/chat-header';
 import { ChatEmptyState } from './components/chat-empty-state';
-import { ChatInputWithMentions, type PermissionMode, type StagedAttachment } from './components/chat-input-with-mentions';
+import { ChatInputWithMentions, type CallPreset, type PermissionMode, type StagedAttachment } from './components/chat-input-with-mentions';
 import { ChatMessageAttachments } from '@/components/chat-message-attachments'
 import { GraphView, type GraphEdge, type GraphNode } from '@/components/graph-view';
 import { BasesView, type BaseConfig, DEFAULT_BASE_CONFIG } from '@/components/bases-view';
@@ -119,15 +121,18 @@ import { AgentScheduleConfig } from '@x/shared/dist/agent-schedule.js'
 import { AgentScheduleState } from '@x/shared/dist/agent-schedule-state.js'
 import { toast } from "sonner"
 import { useVoiceMode } from '@/hooks/useVoiceMode'
+import { useVideoMode } from '@/hooks/useVideoMode'
 import { useVoiceTTS } from '@/hooks/useVoiceTTS'
+import { VideoCallView } from '@/components/video-call-view'
+import { ProductTour, type TourNavTarget } from '@/components/product-tour'
 import { useMeetingTranscription, type CalendarEventMeta } from '@/hooks/useMeetingTranscription'
 import { useAnalyticsIdentity } from '@/hooks/useAnalyticsIdentity'
 import * as analytics from '@/lib/analytics'
+import { playAckCue } from '@/lib/call-sounds'
 import { useTheme } from '@/contexts/theme-context'
 
 type DirEntry = z.infer<typeof workspace.DirEntry>
 type RunEventType = z.infer<typeof RunEvent>
-type ListRunsResponseType = z.infer<typeof ListRunsResponse>
 
 interface TreeNode extends DirEntry {
   children?: TreeNode[]
@@ -628,12 +633,13 @@ type ViewState =
   | { type: 'suggested-topics' }
   | { type: 'meetings' }
   | { type: 'live-notes' }
-  | { type: 'email' }
+  | { type: 'email'; threadId?: string; searchQuery?: string }
   | { type: 'workspace'; path?: string }
   | { type: 'knowledge-view'; folderPath?: string; mode?: KnowledgeViewMode }
   | { type: 'chat-history' }
   | { type: 'home' }
   | { type: 'code' }
+  | { type: 'bg-tasks' }
 
 function viewStatesEqual(a: ViewState, b: ViewState): boolean {
   if (a.type !== b.type) return false
@@ -642,6 +648,7 @@ function viewStatesEqual(a: ViewState, b: ViewState): boolean {
   if (a.type === 'task' && b.type === 'task') return a.name === b.name
   if (a.type === 'workspace' && b.type === 'workspace') return (a.path ?? '') === (b.path ?? '')
   if (a.type === 'knowledge-view' && b.type === 'knowledge-view') return (a.folderPath ?? '') === (b.folderPath ?? '') && (a.mode ?? '') === (b.mode ?? '')
+  if (a.type === 'email' && b.type === 'email') return (a.threadId ?? '') === (b.threadId ?? '') && (a.searchQuery ?? '') === (b.searchQuery ?? '')
   return true // both graph
 }
 
@@ -649,7 +656,7 @@ function viewStatesEqual(a: ViewState, b: ViewState): boolean {
  * Parse a rowboat:// deep link into a ViewState. Returns null if the URL is
  * malformed or names an unknown target.
  *
- * Shape: rowboat://open?type=<file|chat|graph|task|suggested-topics|meetings|live-notes>&...
+ * Shape: rowboat://open?type=<file|chat|graph|task|suggested-topics|meetings|live-notes|email>&...
  *   file:             ?type=file&path=knowledge/foo.md
  *   chat:             ?type=chat&runId=abc123        (runId optional)
  *   graph:            ?type=graph
@@ -657,6 +664,7 @@ function viewStatesEqual(a: ViewState, b: ViewState): boolean {
  *   suggested-topics: ?type=suggested-topics
  *   meetings:         ?type=meetings
  *   live-notes:       ?type=live-notes
+ *   email:            ?type=email
  */
 function parseDeepLink(input: string): ViewState | null {
   const SCHEME = 'rowboat://'
@@ -685,6 +693,10 @@ function parseDeepLink(input: string): ViewState | null {
       return { type: 'meetings' }
     case 'live-notes':
       return { type: 'live-notes' }
+    case 'email': {
+      const threadId = params.get('threadId')
+      return { type: 'email', threadId: threadId || undefined }
+    }
     case 'workspace': {
       const path = params.get('path')
       return { type: 'workspace', path: path ?? undefined }
@@ -704,6 +716,8 @@ function parseDeepLink(input: string): ViewState | null {
       return { type: 'home' }
     case 'code':
       return { type: 'code' }
+    case 'bg-tasks':
+      return { type: 'bg-tasks' }
     default:
       return null
   }
@@ -830,6 +844,10 @@ function App() {
   const [isHomeOpen, setIsHomeOpen] = useState(true)
   const [emailInitialThreadId, setEmailInitialThreadId] = useState<string | null>(null)
   const [emailThreadIdVersion, setEmailThreadIdVersion] = useState(0)
+  // Search query pushed into the email view's search box (e.g. the assistant's
+  // read-view email query), so threads outside the synced inbox get real rows.
+  const [emailInitialSearchQuery, setEmailInitialSearchQuery] = useState<string | null>(null)
+  const [emailSearchQueryVersion, setEmailSearchQueryVersion] = useState(0)
   const [expandedFrom, setExpandedFrom] = useState<{
     path: string | null
     graph: boolean
@@ -931,6 +949,10 @@ function App() {
   }, [conversation])
   const [, setModelUsage] = useState<LanguageModelUsage | null>(null)
   const [runId, setRunId] = useState<string | null>(null)
+  // New runtime: the active session's chat data + actions. All logic lives in
+  // SessionChatStore (tested headlessly); the hook is a thin subscription.
+  // runId IS the session id in the sessions runtime.
+  const sessionChat = useSessionChat(runId)
   const runIdRef = useRef<string | null>(null)
   const loadRunRequestIdRef = useRef(0)
   const [isProcessing, setIsProcessing] = useState(false)
@@ -938,17 +960,39 @@ function App() {
   const processingRunIdsRef = useRef<Set<string>>(new Set())
   const streamingBuffersRef = useRef<Map<string, { assistant: string }>>(new Map())
   const [isStopping, setIsStopping] = useState(false)
-  const [stopClickedAt, setStopClickedAt] = useState<number | null>(null)
+  const [, setStopClickedAt] = useState<number | null>(null)
+  // Sessions runtime: hook-derived activity for the ACTIVE chat.
+  // activeIsProcessing blocks the composer until the turn settles;
+  // activeIsThinking ("actively working") drives shimmers and disables
+  // permission/ask-human buttons — false while waiting on the user.
+  const activeIsProcessing = sessionChat.chatState?.isProcessing ?? isProcessing
+  const activeIsThinking = sessionChat.chatState ? sessionChat.chatState.isThinking : isProcessing
+  // A failed session load must be visible, not a blank chat.
+  const sessionLoadErrorItems = React.useMemo<ConversationItem[]>(() => (
+    sessionChat.error
+      ? [{ id: 'session-load-error', kind: 'error', message: `Failed to load chat: ${sessionChat.error}`, timestamp: 0 }]
+      : []
+  ), [sessionChat.error])
   const [agentId] = useState<string>('copilot')
   const [presetMessage, setPresetMessage] = useState<string | undefined>(undefined)
 
   // Voice mode state
   const [voiceAvailable, setVoiceAvailable] = useState(false)
   const [ttsAvailable, setTtsAvailable] = useState(false)
-  const [ttsEnabled, setTtsEnabled] = useState(false)
+  // TTS plays only during calls now (the standing read-aloud toggle was
+  // retired; a per-message "read aloud" action may replace it later).
   const ttsEnabledRef = useRef(false)
-  const [ttsMode, setTtsMode] = useState<'summary' | 'full'>('summary')
+  // Voice-to-voice latency marks for the current call turn (performance.now):
+  // t0 = utterance accepted, submit = message sent, speak = first TTS
+  // speak(). Emitted as call_turn_latency when audio actually starts.
+  const callTurnMarksRef = useRef<{ t0: number; submit?: number; speak?: number } | null>(null)
+  // Late-bound handle to handleStop (defined much further down) so early
+  // call handlers can stop the run without reordering the component.
+  const stopRunRef = useRef<(() => Promise<void>) | null>(null)
+  // Read-aloud style: 'summary' for typed chat, forced to 'full' during a
+  // call and restored after. Context decides — the user never picks it.
   const ttsModeRef = useRef<'summary' | 'full'>('summary')
+  const [tourActive, setTourActive] = useState(false)
   const [isRecording, setIsRecording] = useState(false)
   const voiceTextBufferRef = useRef('')
   const spokenIndexRef = useRef(0)
@@ -958,9 +1002,75 @@ function App() {
   const ttsRef = useRef(tts)
   ttsRef.current = tts
 
+  // Latest assistant line handed to TTS — shown as the caption in the
+  // full-screen call view while the assistant is speaking.
+  const [assistantCaption, setAssistantCaption] = useState('')
+  useEffect(() => {
+    if (tts.state === 'idle') setAssistantCaption('')
+  }, [tts.state])
+
+  // Speak newly completed <voice> blocks from the new runtime's live stream
+  // (parity with the legacy text-delta voice extraction below). The store
+  // accumulates completed blocks in chatState.voiceSegments; we speak only
+  // segments that appeared after the current session became active.
+  const spokenVoiceRef = useRef<{ key: string | null; count: number }>({ key: null, count: 0 })
+  const voiceSegments = sessionChat.chatState?.voiceSegments
+  useEffect(() => {
+    if (!voiceSegments) return
+    if (spokenVoiceRef.current.key !== runId) {
+      // Session switch: skip anything already streamed before we arrived.
+      spokenVoiceRef.current = { key: runId, count: voiceSegments.length }
+      return
+    }
+    while (spokenVoiceRef.current.count < voiceSegments.length) {
+      const segment = voiceSegments[spokenVoiceRef.current.count]
+      spokenVoiceRef.current.count += 1
+      if (ttsEnabledRef.current) {
+        const marks = callTurnMarksRef.current
+        if (marks && marks.speak === undefined) marks.speak = performance.now()
+        ttsRef.current.speak(segment)
+        setAssistantCaption(segment)
+      }
+    }
+  }, [voiceSegments, runId])
+
+  // Emit the turn's voice-to-voice latency breakdown once audio is audible.
+  useEffect(() => {
+    if (tts.state !== 'speaking') return
+    const marks = callTurnMarksRef.current
+    if (!marks || marks.submit === undefined || marks.speak === undefined) return
+    callTurnMarksRef.current = null
+    const now = performance.now()
+    analytics.callTurnLatency({
+      endpointToSubmitMs: marks.submit - marks.t0,
+      submitToSpeakMs: marks.speak - marks.submit,
+      speakToAudioMs: now - marks.speak,
+      totalMs: now - marks.t0,
+    })
+  }, [tts.state])
+
   const voice = useVoiceMode()
   const voiceRef = useRef(voice)
   voiceRef.current = voice
+
+  // Calls: one engine (hands-free voice loop + forced read-aloud TTS + frame
+  // capture), started via presets that only differ in device defaults. The
+  // presentation is DERIVED from devices, never picked: screen sharing →
+  // floating popout; camera on → full-screen call; camera off → popout
+  // (mascot pill). Handlers live below the voice/submit plumbing they drive.
+  const video = useVideoMode()
+  const [inCall, setInCall] = useState(false)
+  const inCallRef = useRef(false)
+  // User explicitly shrank the full-screen call to the floating pill.
+  const [callMinimized, setCallMinimized] = useState(false)
+  // In-call mute: a full input pause, not just audio — mic audio stops
+  // reaching Deepgram AND camera/screen frame capture stops, so nothing said
+  // or shown while muted ever reaches the assistant. Output is untouched
+  // (in-flight speech keeps playing; the Stop control handles that).
+  const [micMuted, setMicMuted] = useState(false)
+  // Practice preset: adds the coaching persona to the system prompt.
+  const [practiceMode, setPracticeMode] = useState(false)
+  const practiceModeRef = useRef(false)
 
   const handleToggleMeetingRef = useRef<(() => void) | undefined>(undefined)
   const meetingTranscription = useMeetingTranscription(() => {
@@ -1020,6 +1130,8 @@ function App() {
   }, [])
 
   const handleStartRecording = useCallback(() => {
+    // A live call owns the mic — ignore push-to-talk while one is running.
+    if (inCallRef.current) return
     setIsRecording(true)
     isRecordingRef.current = true
     voice.start()
@@ -1033,8 +1145,9 @@ function App() {
   const editorRefsByTabId = useRef<Map<string, MarkdownEditorHandle>>(new Map())
   const [pendingPaletteSubmit, setPendingPaletteSubmit] = useState<{ text: string; mention: CommandPaletteMention | null } | null>(null)
 
-  const handleSubmitRecording = useCallback(() => {
-    const text = voice.submit()
+  const handleSubmitRecording = useCallback(async () => {
+    if (!isRecordingRef.current) return
+    const text = await voice.submit()
     setIsRecording(false)
     isRecordingRef.current = false
     if (text) {
@@ -1043,27 +1156,226 @@ function App() {
     }
   }, [voice])
 
-  const handleToggleTts = useCallback(() => {
-    setTtsEnabled(prev => {
-      const next = !prev
-      ttsEnabledRef.current = next
-      if (!next) {
-        ttsRef.current.cancel()
-      }
-      return next
-    })
-  }, [])
-
-  const handleTtsModeChange = useCallback((mode: 'summary' | 'full') => {
-    setTtsMode(mode)
-    ttsModeRef.current = mode
-  }, [])
-
   const handleCancelRecording = useCallback(() => {
     voice.cancel()
     setIsRecording(false)
     isRecordingRef.current = false
   }, [voice])
+
+  // Start a call. Presets only differ in device defaults — the engine
+  // (continuous listening, auto-submitted utterances, forced read-aloud TTS,
+  // frame capture) is identical for all of them. The default entry ('share',
+  // the call button's main click) is "work together": screen shared, camera
+  // off, floating pill — the user keeps working while the assistant watches
+  // along. 'video'/'practice' open face-to-face full screen instead.
+  const startCall = useCallback(async (preset: CallPreset) => {
+    if (inCallRef.current) return
+    const camera = preset === 'video' || preset === 'practice'
+    const ok = await video.start({ camera })
+    if (!ok) return // camera denied/unavailable — stay out of the call
+    if (preset === 'share') {
+      // If screen capture fails (usually the macOS Screen Recording
+      // permission), continue as a voice call — sharing is one tap away on
+      // the pill once permission is granted.
+      const shared = await video.startScreenShare()
+      if (!shared) {
+        toast("Couldn't share your screen", {
+          description: 'Grant Rowboat Screen Recording access, then tap the share button on the call.',
+          action: {
+            label: 'Open Settings',
+            onClick: () => void window.ipc.invoke('meeting:openScreenRecordingSettings', null).catch(() => {}),
+          },
+        })
+      }
+    }
+
+    // A manual push-to-talk recording can't coexist with the call's mic.
+    if (isRecordingRef.current) {
+      voiceRef.current.cancel()
+      setIsRecording(false)
+      isRecordingRef.current = false
+    }
+    ttsEnabledRef.current = true
+    ttsModeRef.current = 'full'
+    void voiceRef.current.startContinuous((text) => {
+      // Instant "heard you" feedback + start of the latency clock.
+      playAckCue()
+      callTurnMarksRef.current = { t0: performance.now() }
+      pendingVoiceInputRef.current = true
+      handlePromptSubmitRef.current?.({ text, files: [] })
+    })
+
+    setPracticeMode(preset === 'practice')
+    practiceModeRef.current = preset === 'practice'
+    setMicMuted(false)
+    // Pill-first presets start minimized; face-to-face presets start expanded.
+    setCallMinimized(preset === 'voice' || preset === 'share')
+    inCallRef.current = true
+    setInCall(true)
+    analytics.callStarted(preset)
+  }, [video])
+
+  const endCall = useCallback(() => {
+    if (!inCallRef.current) return
+    voiceRef.current.cancel()
+    ttsEnabledRef.current = false
+    ttsModeRef.current = 'summary'
+    ttsRef.current.cancel()
+    callTurnMarksRef.current = null
+    video.stop()
+    setPracticeMode(false)
+    practiceModeRef.current = false
+    setMicMuted(false)
+    setCallMinimized(false)
+    inCallRef.current = false
+    setInCall(false)
+  }, [video])
+
+  // During a call, mute the mic while the assistant is thinking or speaking
+  // so its own TTS (or a half-turn) never gets transcribed back at it — and
+  // whenever the user muted themselves.
+  useEffect(() => {
+    if (!inCall) return
+    voiceRef.current.setPaused(micMuted || activeIsProcessing || tts.state !== 'idle')
+  }, [inCall, micMuted, activeIsProcessing, tts.state])
+
+  // The user-mute half that lives in the video pipeline: stop sampling
+  // camera/screen frames while muted (see useVideoMode.setCapturePaused).
+  const setCapturePaused = video.setCapturePaused
+  useEffect(() => {
+    setCapturePaused(micMuted)
+  }, [micMuted, setCapturePaused])
+
+  // Screen sharing: frames of the shared screen ride along with each message
+  // next to the webcam frames. The surface change (full screen → pill) falls
+  // out of the derivation below.
+  const handleToggleScreenShare = useCallback(async () => {
+    if (video.screenState === 'live') {
+      video.stopScreenShare()
+    } else {
+      await video.startScreenShare()
+    }
+  }, [video])
+
+  // Meet-style camera mute: the call (and any screen share) stays on, but no
+  // webcam frames are captured while the camera is off. Deliberately does NOT
+  // change the surface — turning your camera on from the pill puts your video
+  // IN the pill; expanding to full screen is its own explicit action.
+  const handleToggleCamera = useCallback(() => {
+    void video.setCameraEnabled(!video.cameraOn)
+  }, [video])
+
+  // Zoom-style mute button, except it pauses ALL input (mic + frames) so the
+  // user can talk to someone in the room without the assistant listening in.
+  // Devices stay acquired (camera light and share indicator stay on) so
+  // unmuting is instant.
+  const handleToggleMic = useCallback(() => {
+    setMicMuted((m) => !m)
+  }, [])
+
+  // Minimizing the full-screen call drops you back to working — and the pill
+  // exists to work *together*, so sharing starts automatically (the symmetric
+  // twin of expand, which stops it). If capture fails (permission), the call
+  // still minimizes as a plain pill. `callMinimized` is also set so stopping
+  // the share from the pill keeps you in the pill rather than snapping back
+  // to full screen.
+  const handleMinimizeCall = useCallback(async () => {
+    setCallMinimized(true)
+    await video.startScreenShare()
+  }, [video])
+
+  // Interrupt the assistant: silence TTS immediately, skip anything already
+  // queued from the in-flight turn, and stop the run if it's still
+  // generating (if it already finished, stopping the speech is all there is
+  // to do). Wired to the Stop control next to the mascot on both surfaces.
+  const handleInterruptAssistant = useCallback(() => {
+    ttsRef.current.cancel()
+    setAssistantCaption('')
+    if (voiceSegments) {
+      spokenVoiceRef.current.count = voiceSegments.length
+    }
+    if (activeIsProcessing) {
+      void stopRunRef.current?.()
+    }
+  }, [voiceSegments, activeIsProcessing])
+
+  // Current phase of the call (null when not in one).
+  const videoCallStatus: 'listening' | 'thinking' | 'speaking' | null =
+    inCall
+      ? tts.state === 'speaking'
+        ? 'speaking'
+        : tts.state === 'synthesizing' || activeIsProcessing
+          ? 'thinking'
+          : 'listening'
+      : null
+
+  // The call's surface follows one rule: full screen and screen sharing are
+  // mutually exclusive (a full-screen call covers the screen — sharing it
+  // would show the call itself). Sharing → floating pill, always. Not
+  // sharing → full screen unless the user shrank it (`callMinimized`).
+  // Expanding the pill auto-stops any share; presenting from full screen
+  // auto-collapses to the pill.
+  const callSurface: 'fullscreen' | 'popout' | null = !inCall
+    ? null
+    : video.screenState === 'live' || callMinimized
+      ? 'popout'
+      : 'fullscreen'
+
+  useEffect(() => {
+    void window.ipc.invoke('video:setPopout', { show: callSurface === 'popout' }).catch(() => {})
+  }, [callSurface])
+
+  // Consent surface for screen sharing: an unmissable toast the moment any
+  // share starts (auto-started calls included), with one-tap stop. The pill
+  // also carries a persistent "Sharing screen" badge, and macOS shows its
+  // purple recording indicator.
+  const prevScreenStateRef = useRef(video.screenState)
+  useEffect(() => {
+    const prev = prevScreenStateRef.current
+    prevScreenStateRef.current = video.screenState
+    if (video.screenState === 'live' && prev !== 'live') {
+      toast('Your screen is being shared', {
+        description: 'The assistant sees snapshots of it along with what you say.',
+        action: { label: 'Stop sharing', onClick: () => video.stopScreenShare() },
+        duration: 6000,
+      })
+    }
+  }, [video.screenState, video])
+
+  // Keep the popout's mascot/status/devices/caption mirror of the call fresh.
+  // The main process caches the latest state and replays it when the popout
+  // loads.
+  useEffect(() => {
+    if (!inCall) return
+    void window.ipc
+      .invoke('video:popoutState', {
+        ttsState: tts.state,
+        status: videoCallStatus,
+        cameraOn: video.cameraOn,
+        micMuted,
+        screenSharing: video.screenState === 'live',
+        interimText: voice.interimText || null,
+      })
+      .catch(() => {})
+  }, [inCall, tts.state, videoCallStatus, video.cameraOn, micMuted, video.screenState, voice.interimText])
+
+  // Execute popout control-bar actions (the popout window has no access to
+  // the call's mic/camera/capture — they live here). 'expand' goes full
+  // screen, which by the exclusivity rule stops any running share; the main
+  // process already refocused the app window.
+  useEffect(() => {
+    return window.ipc.on('video:popout-action', ({ action }) => {
+      if (action === 'toggle-mic') handleToggleMic()
+      else if (action === 'toggle-camera') handleToggleCamera()
+      else if (action === 'toggle-share') void handleToggleScreenShare()
+      else if (action === 'stop-speaking') handleInterruptAssistant()
+      else if (action === 'end-call') endCall()
+      else if (action === 'expand') {
+        if (video.screenState === 'live') video.stopScreenShare()
+        setCallMinimized(false)
+      }
+    })
+  }, [handleToggleMic, handleToggleCamera, handleToggleScreenShare, handleInterruptAssistant, endCall, video])
 
   // Enter to submit voice input, Escape to cancel
   useEffect(() => {
@@ -1952,21 +2264,16 @@ function App() {
   // Load runs list (all pages)
   const loadRuns = useCallback(async () => {
     try {
-      const allRuns: RunListItem[] = []
-      let cursor: string | undefined = undefined
-
-      // Fetch all pages
-      do {
-        const result: ListRunsResponseType = await window.ipc.invoke('runs:list', { cursor })
-        allRuns.push(...result.runs)
-        cursor = result.nextCursor
-      } while (cursor)
-
-      // Filter for copilot chats only (Code-section sessions live in the Code view)
-      const copilotRuns = allRuns.filter((run: RunListItem) => run.agentId === 'copilot' && run.useCase !== 'code_session')
-      setRuns(copilotRuns)
+      const { sessions } = await window.ipc.invoke('sessions:list', {})
+      setRuns(sessions.map((entry) => ({
+        id: entry.sessionId,
+        title: entry.title ?? 'New chat',
+        createdAt: entry.createdAt,
+        modifiedAt: entry.updatedAt,
+        agentId: entry.lastAgentId ?? 'copilot',
+      })))
     } catch (err) {
-      console.error('Failed to load runs:', err)
+      console.error('Failed to load sessions:', err)
     }
   }, [])
 
@@ -1974,6 +2281,35 @@ function App() {
   useEffect(() => {
     loadRuns()
   }, [loadRuns])
+
+  // Keep the runs list live: the session index publishes index-changed on
+  // every write (session created, turn settled, title change, delete), so the
+  // list stays current without re-fetching.
+  useEffect(() => {
+    return subscribeSessionFeed((event) => {
+      if (event.kind !== 'index-changed') return
+      setRuns((prev) => {
+        if (event.entry === null) {
+          return prev.filter((run) => run.id !== event.sessionId)
+        }
+        const next: RunListItem = {
+          id: event.entry.sessionId,
+          title: event.entry.title ?? 'New chat',
+          createdAt: event.entry.createdAt,
+          modifiedAt: event.entry.updatedAt,
+          agentId: event.entry.lastAgentId ?? 'copilot',
+        }
+        // Re-sort: chat-header and home-view slice the top of this list
+        // without sorting, so it must stay newest-first like sessions:list.
+        const recency = (run: RunListItem) => {
+          const ms = new Date(run.modifiedAt).getTime()
+          return Number.isNaN(ms) ? 0 : ms
+        }
+        return [...prev.filter((run) => run.id !== next.id), next]
+          .sort((a, b) => recency(b) - recency(a))
+      })
+    })
+  }, [])
 
   const [bgTaskSummaries, setBgTaskSummaries] = useState<Array<{
     slug: string
@@ -2065,193 +2401,30 @@ function App() {
     }
   }, [backgroundTasks, loadBackgroundTasks])
 
-  // Load a specific run and populate conversation
+  // Switch the active session. The useSessionChat hook loads and follows the
+  // conversation; this only resets composer/tab state.
   const loadRun = useCallback(async (id: string) => {
     const requestId = (loadRunRequestIdRef.current += 1)
+    setConversation([])
+    setCurrentAssistantMessage('')
+    setRunId(id)
+    setMessage('')
+    setIsProcessing(false)
+    setIsStopping(false)
+    setStopClickedAt(null)
+    setPendingPermissionRequests(new Map())
+    setPendingAskHumanRequests(new Map())
+    setAllPermissionRequests(new Map())
+    setPermissionResponses(new Map())
+    setAutoPermissionDecisions(new Map())
     try {
-      const run = await window.ipc.invoke('runs:fetch', { runId: id })
-      if (loadRunRequestIdRef.current !== requestId) return
-
-      // Parse the log events into conversation items
-      const items: ConversationItem[] = []
-      const toolCallMap = new Map<string, ToolCall>()
-
-      for (const event of run.log) {
-        switch (event.type) {
-          case 'message': {
-            const msg = event.message
-            if (msg.role === 'user' || msg.role === 'assistant') {
-              // Extract text content from message
-              let textContent = ''
-              let msgAttachments: ChatMessage['attachments'] = undefined
-              if (typeof msg.content === 'string') {
-                textContent = msg.content
-              } else if (Array.isArray(msg.content)) {
-                const contentParts = msg.content as Array<{
-                  type: string
-                  text?: string
-                  path?: string
-                  filename?: string
-                  mimeType?: string
-                  size?: number
-                  toolCallId?: string
-                  toolName?: string
-                  arguments?: ToolUIPart['input']
-                }>
-
-                textContent = contentParts
-                  .filter((part) => part.type === 'text')
-                  .map((part) => part.text || '')
-                  .join('')
-
-                const attachmentParts = contentParts.filter((part) => part.type === 'attachment' && part.path)
-                if (attachmentParts.length > 0) {
-                  msgAttachments = attachmentParts.map((part) => ({
-                    path: part.path!,
-                    filename: part.filename || part.path!.split('/').pop() || part.path!,
-                    mimeType: part.mimeType || 'application/octet-stream',
-                    size: part.size,
-                  }))
-                }
-
-                // Also extract tool-call parts from assistant messages
-                if (msg.role === 'assistant') {
-                  for (const part of contentParts) {
-                    if (part.type === 'tool-call' && part.toolCallId && part.toolName) {
-                      const toolCall: ToolCall = {
-                        id: part.toolCallId,
-                        name: part.toolName,
-                        input: normalizeToolInput(part.arguments),
-                        status: 'pending',
-                        timestamp: event.ts ? new Date(event.ts).getTime() : Date.now(),
-                      }
-                      toolCallMap.set(toolCall.id, toolCall)
-                      items.push(toolCall)
-                    }
-                  }
-                }
-              }
-              if (textContent || msgAttachments) {
-                items.push({
-                  id: event.messageId,
-                  role: msg.role,
-                  content: textContent,
-                  attachments: msgAttachments,
-                  timestamp: event.ts ? new Date(event.ts).getTime() : Date.now(),
-                })
-              }
-            }
-            break
-          }
-          case 'tool-invocation': {
-            // Update existing tool call status or create new one
-            const existingTool = event.toolCallId ? toolCallMap.get(event.toolCallId) : null
-            if (existingTool) {
-              existingTool.input = normalizeToolInput(event.input)
-              existingTool.status = 'running'
-            } else {
-              const toolCall: ToolCall = {
-                id: event.toolCallId || `tool-${Date.now()}-${Math.random()}`,
-                name: event.toolName,
-                input: normalizeToolInput(event.input),
-                status: 'running',
-                timestamp: event.ts ? new Date(event.ts).getTime() : Date.now(),
-              }
-              toolCallMap.set(toolCall.id, toolCall)
-              items.push(toolCall)
-            }
-            break
-          }
-          case 'tool-result': {
-            const existingTool = event.toolCallId ? toolCallMap.get(event.toolCallId) : null
-            if (existingTool) {
-              existingTool.result = event.result
-              existingTool.status = 'completed'
-            }
-            break
-          }
-          case 'error': {
-            items.push({
-              id: `error-${Date.now()}-${Math.random()}`,
-              kind: 'error',
-              message: event.error,
-              timestamp: event.ts ? new Date(event.ts).getTime() : Date.now(),
-            })
-            break
-          }
-          case 'llm-stream-event': {
-            // We don't need to reconstruct streaming events for history
-            // Reasoning is captured in the final message
-            break
-          }
-        }
-      }
-      if (loadRunRequestIdRef.current !== requestId) return
-
-      // Track permission requests and responses from history
-      const allPermissionRequests = new Map<string, z.infer<typeof ToolPermissionRequestEvent>>()
-      const permResponseMap = new Map<string, 'approve' | 'deny'>()
-      const autoPermissionDecisions = new Map<string, z.infer<typeof ToolPermissionAutoDecisionEvent>>()
-      const askHumanRequests = new Map<string, z.infer<typeof AskHumanRequestEvent>>()
-      const respondedAskHumanIds = new Set<string>()
-
-      for (const event of run.log) {
-        if (event.type === 'tool-permission-request') {
-          allPermissionRequests.set(event.toolCall.toolCallId, event)
-        } else if (event.type === 'tool-permission-response') {
-          permResponseMap.set(event.toolCallId, event.response)
-        } else if (event.type === 'tool-permission-auto-decision') {
-          autoPermissionDecisions.set(event.toolCallId, event)
-        } else if (event.type === 'ask-human-request') {
-          askHumanRequests.set(event.toolCallId, event)
-        } else if (event.type === 'ask-human-response') {
-          respondedAskHumanIds.add(event.toolCallId)
-        }
-      }
-      if (loadRunRequestIdRef.current !== requestId) return
-
-      // Separate pending vs responded permission requests
-      const pendingPerms = new Map<string, z.infer<typeof ToolPermissionRequestEvent>>()
-      for (const [id, req] of allPermissionRequests.entries()) {
-        if (!permResponseMap.has(id)) {
-          pendingPerms.set(id, req)
-        }
-      }
-
-      const pendingAsks = new Map<string, z.infer<typeof AskHumanRequestEvent>>()
-      for (const [id, req] of askHumanRequests.entries()) {
-        if (!respondedAskHumanIds.has(id)) {
-          pendingAsks.set(id, req)
-        }
-      }
-      if (loadRunRequestIdRef.current !== requestId) return
-
-      // Set the conversation and runId
-      setConversation(items)
-      setRunId(id)
-      setMessage('')
-      // Reconcile composer state with THIS run. Loading a run while another one
-      // is mid-turn (e.g. binding a code session steals the single chat tab)
-      // must not leave isProcessing/isStopping pointing at the old run — that
-      // wedges the composer: stop targets the new run (a no-op) while the old
-      // run's processing-end arrives flagged as non-active and clears nothing.
-      setIsProcessing(processingRunIdsRef.current.has(id))
-      setIsStopping(false)
-      setStopClickedAt(null)
-      setCurrentAssistantMessage(streamingBuffersRef.current.get(id)?.assistant ?? '')
-      setPendingPermissionRequests(pendingPerms)
-      setPendingAskHumanRequests(pendingAsks)
-      setAllPermissionRequests(allPermissionRequests)
-      setPermissionResponses(permResponseMap)
-      setAutoPermissionDecisions(autoPermissionDecisions)
-
-      // Restore the run's per-chat work directory into the tab it was loaded into.
+      // Restore the session's per-chat work directory into the active tab.
       const tabId = activeChatTabIdRef.current
       const wd = await loadRunWorkDir(id)
       if (loadRunRequestIdRef.current !== requestId) return
       setWorkDirByTab((prev) => ({ ...prev, [tabId]: wd }))
     } catch (err) {
-      console.error('Failed to load run:', err)
+      console.error('Failed to load session work dir:', err)
     }
   }, [loadRunWorkDir])
 
@@ -2357,6 +2530,7 @@ function App() {
               console.log('[voice] extracted voice tag:', voiceContent)
               if (voiceContent && ttsEnabledRef.current) {
                 ttsRef.current.speak(voiceContent)
+                setAssistantCaption(voiceContent)
               }
               spokenIndexRef.current += voiceMatch.index + voiceMatch[0].length
             }
@@ -2703,7 +2877,7 @@ function App() {
     codeMode?: 'claude' | 'codex',
     permissionMode?: PermissionMode,
   ) => {
-    if (isProcessing) return
+    if (activeIsProcessing) return
 
     const submitTabId = activeChatTabIdRef.current
     const { text } = message
@@ -2713,15 +2887,33 @@ function App() {
 
     setMessage('')
 
+    // Video chat mode: drain the webcam frames buffered since the last send
+    // so they ride along with this message as inline image parts.
+    const marks = callTurnMarksRef.current
+    if (inCallRef.current && marks && marks.submit === undefined) {
+      marks.submit = performance.now()
+    }
+
+    const videoFrames = inCallRef.current ? video.collectFrames() : []
+
     const userMessageId = `user-${Date.now()}`
-    const displayAttachments: ChatMessage['attachments'] = hasAttachments
-      ? stagedAttachments.map((attachment) => ({
-          path: attachment.path,
-          filename: attachment.filename,
-          mimeType: attachment.mimeType,
-          size: attachment.size,
-          thumbnailUrl: attachment.thumbnailUrl,
-        }))
+    const displayAttachments: ChatMessage['attachments'] = hasAttachments || videoFrames.length > 0
+      ? [
+          ...stagedAttachments.map((attachment) => ({
+            path: attachment.path,
+            filename: attachment.filename,
+            mimeType: attachment.mimeType,
+            size: attachment.size,
+            thumbnailUrl: attachment.thumbnailUrl,
+          })),
+          ...videoFrames.map((frame, index) => ({
+            path: '',
+            filename: `${frame.source}-frame-${index + 1}.jpg`,
+            mimeType: frame.mediaType,
+            thumbnailUrl: frame.dataUrl,
+            isVideoFrame: true,
+          })),
+        ]
       : undefined
     setConversation((prev) => [...prev, {
       id: userMessageId,
@@ -2736,15 +2928,11 @@ function App() {
       let currentRunId = runId
       let isNewRun = false
       let newRunCreatedAt: string | null = null
+      const selected = selectedModelByTabRef.current.get(submitTabId)
       if (!currentRunId) {
-        const selected = selectedModelByTabRef.current.get(submitTabId)
-        const run = await window.ipc.invoke('runs:create', {
-          agentId,
-          ...(selected ? { model: selected.model, provider: selected.provider } : {}),
-          permissionMode: permissionMode ?? 'manual',
-        })
-        currentRunId = run.id
-        newRunCreatedAt = run.createdAt
+        const createdSession = await window.ipc.invoke('sessions:create', {})
+        currentRunId = createdSession.sessionId
+        newRunCreatedAt = new Date().toISOString()
         setRunId(currentRunId)
         analytics.chatSessionCreated(currentRunId)
         // Update active chat tab's runId to the new run
@@ -2763,7 +2951,33 @@ function App() {
       let titleSource = userMessage
       const hasMentions = (mentions?.length ?? 0) > 0
 
-      if (hasAttachments || hasMentions) {
+      // Per-message turn config. Composition inputs land in the system prompt
+      // via the agent resolver; keep them session-sticky where possible so the
+      // provider prefix cache survives across turns.
+      const sendConfig = {
+        agent: {
+          agentId,
+          overrides: {
+            ...(selected ? { model: { provider: selected.provider, model: selected.model } } : {}),
+            composition: {
+              workDirId: currentRunId,
+              ...(pendingVoiceInputRef.current ? { voiceInput: true } : {}),
+              ...(ttsEnabledRef.current ? { voiceOutput: ttsModeRef.current } : {}),
+              ...(searchEnabled ? { searchEnabled: true } : {}),
+              ...(codeMode ? { codeMode } : {}),
+              ...(inCallRef.current && (video.cameraOn || video.screenState === 'live') ? { videoMode: true } : {}),
+              ...(practiceModeRef.current ? { coachMode: true } : {}),
+            },
+          },
+        },
+        autoPermission: (permissionMode ?? 'manual') === 'auto',
+      }
+      const userMessageContextFor = (middlePane: Awaited<ReturnType<typeof buildMiddlePaneContext>>) => ({
+        currentDateTime: new Date().toISOString(),
+        middlePane: middlePane ?? { kind: 'empty' as const },
+      })
+
+      if (hasAttachments || hasMentions || videoFrames.length > 0) {
         type ContentPart =
           | { type: 'text'; text: string }
           | {
@@ -2773,6 +2987,13 @@ function App() {
               mimeType: string
               size?: number
               lineNumber?: number
+            }
+          | {
+              type: 'image'
+              data: string
+              mediaType: string
+              source: 'camera' | 'screen'
+              capturedAt: string
             }
 
         const contentParts: ContentPart[] = []
@@ -2805,17 +3026,25 @@ function App() {
           titleSource = stagedAttachments[0]?.filename ?? mentions?.[0]?.displayName ?? mentions?.[0]?.path ?? ''
         }
 
-        // Shared IPC payload types can lag until package rebuilds; runtime validation still enforces schema.
-        const attachmentPayload = contentParts as unknown as string
+        for (const frame of videoFrames) {
+          contentParts.push({
+            type: 'image',
+            data: frame.data,
+            mediaType: frame.mediaType,
+            source: frame.source,
+            capturedAt: frame.capturedAt,
+          })
+        }
+
         const middlePaneContext = await buildMiddlePaneContext()
-        await window.ipc.invoke('runs:createMessage', {
-          runId: currentRunId,
-          message: attachmentPayload,
-          voiceInput: pendingVoiceInputRef.current || undefined,
-          voiceOutput: ttsEnabledRef.current ? ttsModeRef.current : undefined,
-          searchEnabled: searchEnabled || undefined,
-          codeMode: codeMode || undefined,
-          middlePaneContext,
+        await window.ipc.invoke('sessions:sendMessage', {
+          sessionId: currentRunId,
+          input: {
+            role: 'user',
+            content: contentParts,
+            userMessageContext: userMessageContextFor(middlePaneContext),
+          },
+          config: sendConfig,
         })
         analytics.chatMessageSent({
           voiceInput: pendingVoiceInputRef.current || undefined,
@@ -2824,14 +3053,14 @@ function App() {
         })
       } else {
         const middlePaneContext = await buildMiddlePaneContext()
-        await window.ipc.invoke('runs:createMessage', {
-          runId: currentRunId,
-          message: userMessage,
-          voiceInput: pendingVoiceInputRef.current || undefined,
-          voiceOutput: ttsEnabledRef.current ? ttsModeRef.current : undefined,
-          searchEnabled: searchEnabled || undefined,
-          codeMode: codeMode || undefined,
-          middlePaneContext,
+        await window.ipc.invoke('sessions:sendMessage', {
+          sessionId: currentRunId,
+          input: {
+            role: 'user',
+            content: userMessage,
+            userMessageContext: userMessageContextFor(middlePaneContext),
+          },
+          config: sendConfig,
         })
         analytics.chatMessageSent({
           voiceInput: pendingVoiceInputRef.current || undefined,
@@ -2868,20 +3097,30 @@ function App() {
     handlePromptSubmitRef.current?.({ text: `${name} connected successfully.`, files: [] })
   }, [])
 
+  // The composer's stop state clears when the active turn settles.
+  useEffect(() => {
+    if (sessionChat.chatState && !sessionChat.chatState.isProcessing) {
+      setIsStopping(false)
+      setStopClickedAt(null)
+    }
+  }, [sessionChat.chatState])
+
   const handleStop = useCallback(async () => {
     if (!runId) return
-    const now = Date.now()
-    const isForce = isStopping && stopClickedAt !== null && (now - stopClickedAt) < 2000
-
-    setStopClickedAt(now)
+    setStopClickedAt(Date.now())
     setIsStopping(true)
-
+    // Stopping the run must also silence it — the TTS queue holds segments
+    // that were already extracted from the stream and would keep playing
+    // long after the turn is aborted.
+    ttsRef.current.cancel()
+    setAssistantCaption('')
     try {
-      await window.ipc.invoke('runs:stop', { runId, force: isForce })
+      await sessionChat.stop()
     } catch (error) {
-      console.error('Failed to stop run:', error)
+      console.error('Failed to stop turn:', error)
     }
-  }, [runId, isStopping, stopClickedAt])
+  }, [runId, sessionChat])
+  stopRunRef.current = handleStop
 
   const handlePermissionResponse = useCallback(async (
     toolCallId: string,
@@ -2891,33 +3130,17 @@ function App() {
   ) => {
     if (!runId) return
 
-    // Optimistically update the UI immediately
-    setPermissionResponses(prev => {
-      const next = new Map(prev)
-      next.set(toolCallId, response)
-      return next
-    })
-    setPendingPermissionRequests(prev => {
-      const next = new Map(prev)
-      next.delete(toolCallId)
-      return next
-    })
-
+    void subflow // subflows retired with the runs runtime
     try {
-      await window.ipc.invoke('runs:authorizePermission', {
-        runId,
-        authorization: { subflow, toolCallId, response, scope }
-      })
+      await sessionChat.respondToPermission(
+        toolCallId,
+        response === 'approve' ? 'allow' : 'deny',
+        scope ? { scope } : undefined,
+      )
     } catch (error) {
       console.error('Failed to authorize permission:', error)
-      // Revert the optimistic update on error
-      setPermissionResponses(prev => {
-        const next = new Map(prev)
-        next.delete(toolCallId)
-        return next
-      })
     }
-  }, [runId])
+  }, [runId, sessionChat])
 
   // Answer a mid-run permission request from a code_agent_run coding turn. The
   // pending ask lives on the tool call itself, so we optimistically clear it and
@@ -2941,15 +3164,13 @@ function App() {
 
   const handleAskHumanResponse = useCallback(async (toolCallId: string, subflow: string[], response: string) => {
     if (!runId) return
+    void subflow // subflows retired with the runs runtime
     try {
-      await window.ipc.invoke('runs:provideHumanInput', {
-        runId,
-        reply: { subflow, toolCallId, response }
-      })
+      await sessionChat.answerAskHuman(toolCallId, response)
     } catch (error) {
       console.error('Failed to provide human input:', error)
     }
-  }, [runId])
+  }, [runId, sessionChat])
 
   const dismissBrowserOverlay = useCallback(() => {
     setIsBrowserOpen(false)
@@ -3761,6 +3982,7 @@ function App() {
     if (isChatHistoryOpen) return { type: 'chat-history' }
     if (isHomeOpen) return { type: 'home' }
     if (isCodeOpen) return { type: 'code' }
+    if (isBgTasksOpen) return { type: 'bg-tasks' }
     if (selectedPath) return { type: 'file', path: selectedPath }
     if (isGraphOpen) return { type: 'graph' }
     return { type: 'chat', runId }
@@ -4092,6 +4314,16 @@ function App() {
         setIsKnowledgeViewOpen(false)
         setIsChatHistoryOpen(false)
       setIsHomeOpen(false)
+        // Deep links (e.g. a new-email notification) carry the thread to open;
+        // bump the version so EmailView re-selects it even if email is already open.
+        if (view.threadId) {
+          setEmailInitialThreadId(view.threadId)
+          setEmailThreadIdVersion((v) => v + 1)
+        }
+        if (view.searchQuery) {
+          setEmailInitialSearchQuery(view.searchQuery)
+          setEmailSearchQueryVersion((v) => v + 1)
+        }
         ensureEmailFileTab()
         return
       case 'workspace':
@@ -4179,6 +4411,18 @@ function App() {
         setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsBgTasksOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false)
         ensureCodeFileTab()
         return
+      case 'bg-tasks':
+        setSelectedPath(null)
+        setIsGraphOpen(false)
+        setIsBrowserOpen(false)
+        setExpandedFrom(null)
+        setIsRightPaneMaximized(false)
+        setSelectedBackgroundTask(null)
+        setIsSuggestedTopicsOpen(false)
+        setIsMeetingsOpen(false); setIsLiveNotesOpen(false); setIsEmailOpen(false); setIsWorkspaceOpen(false); setIsKnowledgeViewOpen(false); setIsChatHistoryOpen(false); setIsHomeOpen(false)
+        setIsBgTasksOpen(true)
+        ensureBgTasksFileTab()
+        return
       case 'chat':
         setSelectedPath(null)
         setIsGraphOpen(false)
@@ -4207,7 +4451,7 @@ function App() {
         }
         return
     }
-  }, [ensureEmailFileTab, ensureMeetingsFileTab, ensureLiveNotesFileTab, ensureFileTabForPath, ensureGraphFileTab, ensureSuggestedTopicsFileTab, ensureWorkspaceFileTab, ensureKnowledgeViewFileTab, ensureChatHistoryFileTab, ensureHomeFileTab, ensureCodeFileTab, handleNewChat, isRightPaneMaximized, loadRun])
+  }, [ensureEmailFileTab, ensureMeetingsFileTab, ensureLiveNotesFileTab, ensureFileTabForPath, ensureGraphFileTab, ensureSuggestedTopicsFileTab, ensureWorkspaceFileTab, ensureKnowledgeViewFileTab, ensureChatHistoryFileTab, ensureHomeFileTab, ensureCodeFileTab, ensureBgTasksFileTab, handleNewChat, isRightPaneMaximized, loadRun])
 
   const navigateToView = useCallback(async (nextView: ViewState) => {
     const current = currentViewState
@@ -4392,22 +4636,69 @@ function App() {
   // External search set by app-navigation tool (passed to BasesView)
   const [externalBaseSearch, setExternalBaseSearch] = useState<string | undefined>(undefined)
 
-  // Process pending app-navigation results
-  useEffect(() => {
-    const result = pendingAppNavRef.current
-    if (!result) return
-    pendingAppNavRef.current = null
+  // Apply an app-navigation tool result to the UI. Shared by both event
+  // paths (legacy runs:events and the session-chat turn runtime).
+  const applyAppNavigation = useCallback((result: Record<string, unknown>) => {
+    // During a call, navigation must be VISIBLE: the full-screen call view
+    // would cover the very thing being shown — collapse it to the pill —
+    // and if the user is in another app, bring Rowboat forward.
+    const visibleActions = ['open-note', 'open-view', 'read-view', 'open-item', 'update-base-view', 'create-base']
+    if (inCallRef.current && visibleActions.includes(result.action as string)) {
+      setCallMinimized(true)
+      void window.ipc.invoke('app:focusMainWindow', null).catch(() => {})
+    }
+
+    // Views the assistant can open (or auto-open while reading them via
+    // read-view — the user should SEE what's being read).
+    const navigateToNamedView = (view: string) => {
+      switch (view) {
+        case 'graph': void navigateToView({ type: 'graph' }); break
+        case 'bases': void navigateToView({ type: 'file', path: BASES_DEFAULT_TAB_PATH }); break
+        case 'home': void navigateToView({ type: 'home' }); break
+        case 'email': void navigateToView({ type: 'email' }); break
+        case 'meetings': void navigateToView({ type: 'meetings' }); break
+        case 'live-notes': void navigateToView({ type: 'live-notes' }); break
+        case 'bg-tasks': void navigateToView({ type: 'bg-tasks' }); break
+        case 'chat-history': void navigateToView({ type: 'chat-history' }); break
+        case 'knowledge': void navigateToView({ type: 'knowledge-view' }); break
+        case 'workspace': void navigateToView({ type: 'workspace' }); break
+        case 'code': void navigateToView({ type: 'code' }); break
+      }
+    }
 
     switch (result.action) {
       case 'open-note':
         navigateToFile(result.path as string)
         break
       case 'open-view':
-        if (result.view === 'graph') void navigateToView({ type: 'graph' })
-        if (result.view === 'bases') {
-          void navigateToView({ type: 'file', path: BASES_DEFAULT_TAB_PATH })
+      case 'read-view':
+        // A read-view email search runs against the whole mailbox, so drive
+        // the email view's own search box with the same query — matched
+        // threads get real rows even when they're outside the synced inbox
+        // (and a follow-up open-item can then select them).
+        if (result.action === 'read-view' && result.view === 'email' && typeof result.query === 'string' && result.query.trim()) {
+          void navigateToView({ type: 'email', searchQuery: result.query.trim() })
+        } else {
+          navigateToNamedView(result.view as string)
         }
         break
+      case 'open-item': {
+        switch (result.kind) {
+          case 'email-thread':
+            void navigateToView({ type: 'email', threadId: result.threadId as string })
+            break
+          case 'note':
+            navigateToFile(result.path as string)
+            break
+          case 'bg-task':
+            void navigateToView({ type: 'task', name: result.taskName as string })
+            break
+          case 'session':
+            void navigateToView({ type: 'chat', runId: result.sessionId as string })
+            break
+        }
+        break
+      }
       case 'update-base-view': {
         // Navigate to bases if not already there
         const targetPath = selectedPath && isBaseFilePath(selectedPath) ? selectedPath : BASES_DEFAULT_TAB_PATH
@@ -4487,7 +4778,40 @@ function App() {
         }
         break
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navigateToFile, navigateToView, selectedPath])
+
+  // Legacy runs:events path: handleRunEvent stashes the result in a ref;
+  // polled every render (the triggering event always causes one).
+  useEffect(() => {
+    const result = pendingAppNavRef.current
+    if (!result) return
+    pendingAppNavRef.current = null
+    applyAppNavigation(result)
   })
+
+  // Turn-runtime path: the session-chat store surfaces tool results in the
+  // conversation; apply newly completed app-navigation calls exactly once.
+  // On session switch/load, everything already in the transcript happened in
+  // the past — seed as processed without replaying navigations.
+  const processedAppNavRef = useRef<{ key: string | null; ids: Set<string> }>({ key: null, ids: new Set() })
+  useEffect(() => {
+    const conversation = sessionChat.chatState?.conversation
+    if (!conversation) return
+    const completed = conversation.filter(
+      (item): item is ToolCall => isToolCall(item) && item.name === 'app-navigation' && item.status === 'completed'
+    )
+    if (processedAppNavRef.current.key !== runId) {
+      processedAppNavRef.current = { key: runId, ids: new Set(completed.map((t) => t.id)) }
+      return
+    }
+    for (const tool of completed) {
+      if (processedAppNavRef.current.ids.has(tool.id)) continue
+      processedAppNavRef.current.ids.add(tool.id)
+      const result = tool.result as Record<string, unknown> | undefined
+      if (result && result.success) applyAppNavigation(result)
+    }
+  }, [sessionChat.chatState?.conversation, runId, applyAppNavigation])
 
   const navigateToFullScreenChat = useCallback(() => {
     // Only treat this as navigation when coming from another view
@@ -4689,6 +5013,25 @@ function App() {
       if (e.shiftKey && (e.key === ']' || e.key === '[')) {
         e.preventDefault()
         const direction = e.key === ']' ? 1 : -1
+        if (inFileView) {
+          const currentIdx = fileTabs.findIndex(t => t.id === targetFileTabId)
+          if (currentIdx === -1) return
+          const nextIdx = (currentIdx + direction + fileTabs.length) % fileTabs.length
+          switchFileTab(fileTabs[nextIdx].id)
+        } else {
+          const currentIdx = chatTabs.findIndex(t => t.id === activeChatTabId)
+          if (currentIdx === -1) return
+          const nextIdx = (currentIdx + direction + chatTabs.length) % chatTabs.length
+          switchChatTab(chatTabs[nextIdx].id)
+        }
+        return
+      }
+
+      // Ctrl+Tab — next tab, Ctrl+Shift+Tab — previous tab (browser-style).
+      // Bound to Ctrl specifically (Cmd+Tab is the OS app switcher on macOS).
+      if (e.ctrlKey && e.key === 'Tab') {
+        e.preventDefault()
+        const direction = e.shiftKey ? -1 : 1
         if (inFileView) {
           const currentIdx = fileTabs.findIndex(t => t.id === targetFileTabId)
           if (currentIdx === -1) return
@@ -5006,6 +5349,33 @@ function App() {
     },
   }), [tree, selectedPath, isGraphOpen, selectedBackgroundTask, workspaceRoot, navigateToFile, navigateToView, openFileInNewTab, fileTabs, closeFileTab, removeEditorCacheForPath])
 
+  // Drives the mascot product tour through the app's main sections
+  const handleTourNavigate = useCallback((target: TourNavTarget) => {
+    switch (target) {
+      case 'home':
+        void navigateToView({ type: 'home' })
+        break
+      case 'email':
+        openEmailView()
+        break
+      case 'meetings':
+        openMeetingsView()
+        break
+      case 'code':
+        openCodeView()
+        break
+      case 'knowledge':
+        knowledgeActions.openKnowledgeView()
+        break
+      case 'agents':
+        openBgTasksView()
+        break
+      case 'workspaces':
+        knowledgeActions.openWorkspaceAt()
+        break
+    }
+  }, [navigateToView, openEmailView, openMeetingsView, openCodeView, knowledgeActions, openBgTasksView])
+
   // Handler for when a voice note is created/updated
   const handleVoiceNoteCreated = useCallback(async (notePath: string) => {
     // Refresh the tree to show the new file/folder
@@ -5191,6 +5561,20 @@ function App() {
     }
     window.addEventListener('email-block:draft-with-assistant', handler)
     return () => window.removeEventListener('email-block:draft-with-assistant', handler)
+  }, [])
+
+  // Meeting prep: create a person note for an unmatched attendee via Copilot.
+  useEffect(() => {
+    const handler = () => {
+      const pending = window.__pendingMeetingPrepCreate
+      if (pending) {
+        setPresetMessage(pending.prompt)
+        setIsChatSidebarOpen(true)
+        window.__pendingMeetingPrepCreate = undefined
+      }
+    }
+    window.addEventListener('meeting-prep:create-note', handler)
+    return () => window.removeEventListener('meeting-prep:create-note', handler)
   }, [])
 
   const resolveWikiFilePath = useCallback((wikiPath: string) => {
@@ -5528,16 +5912,24 @@ function App() {
     return null
   }
 
-  const activeChatTabState = React.useMemo<ChatTabViewState>(() => ({
+  // The active chat's view state, backed by the sessions hook (legacy
+  // standalone states remain only as the pre-load fallback until stage 7).
+  const activeChatTabState = React.useMemo<ChatTabViewState>(() => (
+    sessionChat.chatState
+      ? { runId, ...sessionChat.chatState }
+      : {
+          runId,
+          conversation: sessionLoadErrorItems.length > 0 ? sessionLoadErrorItems : conversation,
+          currentAssistantMessage,
+          pendingAskHumanRequests,
+          allPermissionRequests,
+          permissionResponses,
+          autoPermissionDecisions,
+        }
+  ), [
     runId,
-    conversation,
-    currentAssistantMessage,
-    pendingAskHumanRequests,
-    allPermissionRequests,
-    permissionResponses,
-    autoPermissionDecisions,
-  }), [
-    runId,
+    sessionChat.chatState,
+    sessionLoadErrorItems,
     conversation,
     currentAssistantMessage,
     pendingAskHumanRequests,
@@ -5550,6 +5942,10 @@ function App() {
     if (tabId === activeChatTabId) return activeChatTabState
     return chatViewStateByTab[tabId] ?? emptyChatTabState
   }, [activeChatTabId, activeChatTabState, chatViewStateByTab, emptyChatTabState])
+  const chatTabStatesForRender = React.useMemo(() => ({
+    ...chatViewStateByTab,
+    [activeChatTabId]: activeChatTabState,
+  }), [chatViewStateByTab, activeChatTabId, activeChatTabState])
   const selectedTask = selectedBackgroundTask
     ? backgroundTasks.find(t => t.name === selectedBackgroundTask)
     : null
@@ -5639,6 +6035,7 @@ function App() {
               onNewChat={handleNewChatTab}
               onToggleBrowser={handleToggleBrowser}
               onVoiceNoteCreated={handleVoiceNoteCreated}
+              onStartTour={() => setTourActive(true)}
               meetingRecordingState={meetingTranscription.state}
               recordingMeetingSource={recordingMeetingSource}
               onToggleMeetingRecording={() => { void handleToggleMeeting() }}
@@ -5862,7 +6259,7 @@ function App() {
                 </div>
               ) : isEmailOpen ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-                  <EmailView initialThreadId={emailInitialThreadId} threadIdVersion={emailThreadIdVersion} />
+                  <EmailView initialThreadId={emailInitialThreadId} threadIdVersion={emailThreadIdVersion} initialSearchQuery={emailInitialSearchQuery} searchQueryVersion={emailSearchQueryVersion} />
                 </div>
               ) : isWorkspaceOpen ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
@@ -5874,12 +6271,14 @@ function App() {
                       copyPath: knowledgeActions.copyPath,
                       revealInFileManager: knowledgeActions.revealInFileManager,
                       createNote: knowledgeActions.createNote,
+                      addGoogleDoc: knowledgeActions.addGoogleDoc,
                       createFolder: knowledgeActions.createFolder,
                       onOpenInNewTab: knowledgeActions.onOpenInNewTab,
                     }}
                     onNavigate={(path) => { void navigateToView({ type: 'workspace', path: path === WORKSPACE_ROOT ? undefined : path }) }}
                     onOpenNote={(path) => navigateToFile(path)}
                     onCreateWorkspace={async (name) => { await knowledgeActions.createWorkspace(name) }}
+                    onOpenRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
                   />
                 </div>
               ) : isKnowledgeViewOpen ? (
@@ -5946,7 +6345,7 @@ function App() {
                     onSelectRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
                     onDeleteRun={async (rid) => {
                       try {
-                        await window.ipc.invoke('runs:delete', { runId: rid })
+                        await window.ipc.invoke('sessions:delete', { sessionId: rid })
                         await loadRuns()
                       } catch (err) {
                         console.error('Failed to delete run:', err)
@@ -6194,9 +6593,6 @@ function App() {
                             {!tabHasConversation ? (
                               <ChatEmptyState
                                 wide
-                                recentRuns={runs}
-                                onSelectRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
-                                onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
                                 onPickPrompt={setPresetMessage}
                               />
                             ) : (
@@ -6248,7 +6644,7 @@ function App() {
                                               onApproveSession={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'session')}
                                               onApproveAlways={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'always')}
                                               onDeny={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
-                                              isProcessing={isActive && isProcessing}
+                                              isProcessing={isActive && activeIsThinking}
                                               response={response}
                                             />
                                           )}
@@ -6266,7 +6662,7 @@ function App() {
                                     query={request.query}
                                     options={request.options}
                                     onResponse={(response) => handleAskHumanResponse(request.toolCallId, request.subflow, response)}
-                                    isProcessing={isActive && isProcessing}
+                                    isProcessing={isActive && activeIsThinking}
                                   />
                                 ))}
 
@@ -6278,7 +6674,7 @@ function App() {
                                   </Message>
                                 )}
 
-                                {isActive && isProcessing && !tabState.currentAssistantMessage && (
+                                {isActive && activeIsThinking && !tabState.currentAssistantMessage && (
                                   <Message from="assistant">
                                     <MessageContent>
                                       <Shimmer duration={1}>Thinking...</Shimmer>
@@ -6314,7 +6710,7 @@ function App() {
                             visibleFiles={visibleKnowledgeFiles}
                             onSubmit={handlePromptSubmit}
                             onStop={handleStop}
-                            isProcessing={isActive && isProcessing}
+                            isProcessing={isActive && activeIsProcessing}
                             isStopping={isActive && isStopping}
                             isActive={isActive}
                             presetMessage={isActive ? presetMessage : undefined}
@@ -6334,17 +6730,16 @@ function App() {
                             onWorkDirChange={(v) => setTabWorkDir(tab.id, v)}
                             isRecording={isActive && isRecording}
                             recordingText={isActive ? voice.interimText : undefined}
-                            recordingState={isActive ? (voice.state === 'connecting' ? 'connecting' : 'listening') : undefined}
+                            recordingState={isActive ? (voice.state === 'submitting' ? 'stopping' : voice.state === 'connecting' ? 'connecting' : 'listening') : undefined}
                             audioLevelsRef={voice.audioLevelsRef}
                             onStartRecording={isActive ? handleStartRecording : undefined}
                             onSubmitRecording={isActive ? handleSubmitRecording : undefined}
                             onCancelRecording={isActive ? handleCancelRecording : undefined}
                             voiceAvailable={isActive && voiceAvailable}
-                            ttsAvailable={isActive && ttsAvailable}
-                            ttsEnabled={ttsEnabled}
-                            ttsMode={ttsMode}
-                            onToggleTts={isActive ? handleToggleTts : undefined}
-                            onTtsModeChange={isActive ? handleTtsModeChange : undefined}
+                            inCall={inCall}
+                            onStartCall={isActive ? startCall : undefined}
+                            onEndCall={isActive ? endCall : undefined}
+                            callAvailable={voiceAvailable && ttsAvailable}
                           />
                         </div>
                       )
@@ -6369,6 +6764,7 @@ function App() {
                   session={activeCodeSession.session}
                   status={activeCodeSession.status}
                   onOpenDiff={setCodeDiffPath}
+                  voiceAvailable={voiceAvailable}
                 />
               </ResizableRightPane>
             ) : isRightPaneContext && (
@@ -6395,11 +6791,11 @@ function App() {
                 }}
                 onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
                 onOpenFullScreen={toggleRightPaneMaximize}
-                conversation={conversation}
-                currentAssistantMessage={currentAssistantMessage}
-                chatTabStates={chatViewStateByTab}
+                conversation={activeChatTabState.conversation}
+                currentAssistantMessage={activeChatTabState.currentAssistantMessage}
+                chatTabStates={chatTabStatesForRender}
                 viewportAnchors={chatViewportAnchorByTab}
-                isProcessing={isProcessing}
+                isProcessing={activeIsProcessing}
                 isStopping={isStopping}
                 onStop={handleStop}
                 onSubmit={handlePromptSubmit}
@@ -6430,10 +6826,11 @@ function App() {
                     ? { title: activeCodeSession.session.title }
                     : null
                 }
-                pendingAskHumanRequests={pendingAskHumanRequests}
-                allPermissionRequests={allPermissionRequests}
-                permissionResponses={permissionResponses}
-                autoPermissionDecisions={autoPermissionDecisions}
+                pendingAskHumanRequests={activeChatTabState.pendingAskHumanRequests}
+                allPermissionRequests={activeChatTabState.allPermissionRequests}
+                permissionResponses={activeChatTabState.permissionResponses}
+                autoPermissionDecisions={activeChatTabState.autoPermissionDecisions}
+                isThinking={activeIsThinking}
                 onPermissionResponse={handlePermissionResponse}
                 onAskHumanResponse={handleAskHumanResponse}
                 isToolOpenForTab={isToolOpenForTab}
@@ -6443,18 +6840,53 @@ function App() {
                 collapsedLeftPaddingPx={collapsedLeftPaddingPx}
                 isRecording={isRecording}
                 recordingText={voice.interimText}
-                recordingState={voice.state === 'connecting' ? 'connecting' : 'listening'}
+                recordingState={voice.state === 'submitting' ? 'stopping' : voice.state === 'connecting' ? 'connecting' : 'listening'}
                 audioLevelsRef={voice.audioLevelsRef}
                 onStartRecording={handleStartRecording}
                 onSubmitRecording={handleSubmitRecording}
                 onCancelRecording={handleCancelRecording}
                 voiceAvailable={voiceAvailable}
-                ttsAvailable={ttsAvailable}
-                ttsEnabled={ttsEnabled}
-                ttsMode={ttsMode}
-                onToggleTts={handleToggleTts}
-                onTtsModeChange={handleTtsModeChange}
+                inCall={inCall}
+                onStartCall={startCall}
+                onEndCall={endCall}
+                callAvailable={voiceAvailable && ttsAvailable}
                 onComposioConnected={handleComposioConnected}
+              />
+            )}
+            {/* Full-screen call: user tile + animated mascot tile. Shown only
+                when the derived surface says so (camera on, no screen share,
+                not minimized) — otherwise the call lives in the floating
+                popout window. */}
+            {callSurface === 'fullscreen' && (
+              <VideoCallView
+                streamRef={video.streamRef}
+                onToggleScreenShare={handleToggleScreenShare}
+                cameraOn={video.cameraOn}
+                onToggleCamera={handleToggleCamera}
+                micMuted={micMuted}
+                onToggleMic={handleToggleMic}
+                practiceMode={practiceMode}
+                onMinimize={() => void handleMinimizeCall()}
+                onInterrupt={handleInterruptAssistant}
+                ttsState={tts.state}
+                getTtsLevel={tts.getLevel}
+                status={videoCallStatus ?? 'listening'}
+                interimText={voice.interimText}
+                assistantCaption={assistantCaption}
+                onLeave={endCall}
+              />
+            )}
+            {/* Mascot-guided product tour */}
+            {tourActive && (
+              <ProductTour
+                onClose={() => setTourActive(false)}
+                onNavigate={handleTourNavigate}
+                ttsAvailable={ttsAvailable}
+                ttsState={tts.state}
+                speak={tts.speak}
+                speakUrl={tts.speakUrl}
+                cancelSpeech={tts.cancel}
+                getLevel={tts.getLevel}
               />
             )}
             {/* Rendered last so its no-drag region paints over the sidebar drag region */}

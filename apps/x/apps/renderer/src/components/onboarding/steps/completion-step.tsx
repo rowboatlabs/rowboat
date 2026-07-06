@@ -13,34 +13,25 @@ export function CompletionStep({ state }: CompletionStepProps) {
 
   return (
     <div className="flex flex-col items-center justify-center text-center flex-1">
-      {/* Animated checkmark */}
+      {/* Title with checkmark on the right */}
       <motion.div
-        initial={{ scale: 0 }}
-        animate={{ scale: 1 }}
-        transition={{ type: "spring", stiffness: 260, damping: 20, delay: 0.1 }}
-        className="relative mb-8"
-      >
-        {/* Pulsing ring */}
-        <motion.div
-          initial={{ scale: 0.8, opacity: 0.6 }}
-          animate={{ scale: 1.5, opacity: 0 }}
-          transition={{ duration: 1.2, repeat: 2, ease: "easeOut" }}
-          className="absolute inset-0 rounded-full bg-green-500/20"
-        />
-        <div className="relative size-20 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
-          <CheckCircle2 className="size-10 text-green-600 dark:text-green-400" />
-        </div>
-      </motion.div>
-
-      {/* Title */}
-      <motion.h2
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.25 }}
-        className="text-3xl font-bold tracking-tight mb-3"
+        className="flex items-center gap-3 mb-3"
       >
-        You're All Set!
-      </motion.h2>
+        <h2 className="text-3xl font-bold tracking-tight">
+          You're All Set!
+        </h2>
+        <motion.span
+          initial={{ scale: 0 }}
+          animate={{ scale: 1 }}
+          transition={{ type: "spring", stiffness: 260, damping: 20, delay: 0.35 }}
+          className="shrink-0"
+        >
+          <CheckCircle2 className="size-9 text-green-600 dark:text-green-400" />
+        </motion.span>
+      </motion.div>
 
       <motion.p
         initial={{ opacity: 0 }}

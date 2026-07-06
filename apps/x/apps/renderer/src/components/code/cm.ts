@@ -29,6 +29,12 @@ const darkHighlight = HighlightStyle.define([
 ])
 
 export function cmBaseExtensions(isDark: boolean): Extension[] {
+  const bg = isDark ? '#0f1117' : '#ffffff'
+  const panelBg = isDark ? '#151821' : '#f6f8fa'
+  const text = isDark ? '#d4d4d8' : '#24292f'
+  const muted = isDark ? '#7d8590' : '#6e7781'
+  const border = isDark ? '#2f3542' : '#d0d7de'
+
   return [
     lineNumbers(),
     bracketMatching(),
@@ -39,18 +45,62 @@ export function cmBaseExtensions(isDark: boolean): Extension[] {
     EditorView.theme(
       {
         '&': {
-          backgroundColor: 'transparent',
+          backgroundColor: bg,
+          color: text,
           fontSize: '12px',
           height: '100%',
+        },
+        '.cm-editor': {
+          backgroundColor: bg,
+          color: text,
+        },
+        '.cm-content': {
+          caretColor: text,
         },
         '.cm-scroller': {
           fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
           overflow: 'auto',
         },
+        '.cm-line': {
+          color: text,
+        },
         '.cm-gutters': {
-          backgroundColor: 'transparent',
-          border: 'none',
-          color: isDark ? '#6b7280' : '#9ca3af',
+          backgroundColor: panelBg,
+          borderRight: `1px solid ${border}`,
+          color: muted,
+        },
+        '.cm-activeLine': {
+          backgroundColor: isDark ? 'rgba(110, 118, 129, 0.16)' : 'rgba(175, 184, 193, 0.18)',
+        },
+        '.cm-activeLineGutter': {
+          backgroundColor: isDark ? 'rgba(110, 118, 129, 0.16)' : 'rgba(175, 184, 193, 0.18)',
+        },
+        '.cm-selectionBackground, &.cm-focused .cm-selectionBackground, .cm-content ::selection': {
+          backgroundColor: isDark ? 'rgba(88, 166, 255, 0.32)' : 'rgba(9, 105, 218, 0.22)',
+        },
+        '.cm-panels, .cm-panel': {
+          backgroundColor: panelBg,
+          color: text,
+          borderColor: border,
+        },
+        '.cm-mergeView': {
+          backgroundColor: bg,
+          color: text,
+        },
+        '.cm-mergeViewEditors': {
+          backgroundColor: bg,
+        },
+        '.cm-mergeView .cm-editor': {
+          borderColor: border,
+        },
+        '.cm-changedLine': {
+          backgroundColor: isDark ? 'rgba(56, 139, 253, 0.14)' : 'rgba(9, 105, 218, 0.08)',
+        },
+        '.cm-deletedChunk': {
+          backgroundColor: isDark ? 'rgba(248, 81, 73, 0.14)' : 'rgba(255, 235, 233, 0.95)',
+        },
+        '.cm-insertedLine, .cm-insertedChunk': {
+          backgroundColor: isDark ? 'rgba(63, 185, 80, 0.14)' : 'rgba(234, 255, 234, 0.95)',
         },
         '&.cm-focused': { outline: 'none' },
         // GitHub-style expander bar for folded unchanged regions (@codemirror/merge).

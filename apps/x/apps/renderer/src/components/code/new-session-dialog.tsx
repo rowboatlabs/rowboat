@@ -78,8 +78,8 @@ export function NewSessionDialog({
 }) {
   const [agentStatus, setAgentStatus] = useState<{ claude: AgentStatus; codex: AgentStatus } | null>(null)
   const [agent, setAgent] = useState<CodingAgent>('claude')
-  // Rowboat drives by default — direct CLI access is the power-user opt-in.
-  const [mode, setMode] = useState<CodeSessionMode>('rowboat')
+  // Direct drive by default; Rowboat orchestration remains an opt-in per session.
+  const [mode, setMode] = useState<CodeSessionMode>('direct')
   const [policy, setPolicy] = useState<ApprovalPolicy>('auto-approve-reads')
   const [isolation, setIsolation] = useState<'in-repo' | 'worktree'>('in-repo')
   const [title, setTitle] = useState('')
@@ -101,7 +101,7 @@ export function NewSessionDialog({
     setTitle('')
     setCreating(false)
     setIsolation('in-repo')
-    setMode('rowboat')
+    setMode('direct')
     setModelKey('default')
     setAgentModel('default')
     setAgentEffort('default')

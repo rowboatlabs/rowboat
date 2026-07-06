@@ -63,6 +63,7 @@ import {
 import { cn } from "@/lib/utils"
 import { isOutOfCredits, CREDIT_EXHAUSTED_EVENT, CREDIT_REPLENISHED_EVENT } from "@/lib/credit-status"
 import { SettingsDialog } from "@/components/settings-dialog"
+import { MascotFaceIcon } from "@/components/talking-head"
 import { extractConferenceLink } from "@/lib/calendar-event"
 import { useBilling } from "@/hooks/useBilling"
 import { toast } from "@/lib/toast"
@@ -174,6 +175,8 @@ type SidebarContentPanelProps = {
   onNewChat?: () => void
   onToggleBrowser?: () => void
   onVoiceNoteCreated?: (path: string) => void
+  /** Starts the mascot-guided product tour. */
+  onStartTour?: () => void
   /** Which primary destination is currently active, for nav highlighting. */
   activeNav?: 'home' | 'email' | 'meetings' | 'code' | 'knowledge' | 'agents' | 'workspaces' | null
   /** Live meeting recording state, so the recording row can show its indicator/stop. */
@@ -422,6 +425,7 @@ export function SidebarContentPanel({
   onNewChat,
   onToggleBrowser,
   onVoiceNoteCreated,
+  onStartTour,
   activeNav,
   meetingRecordingState = 'idle',
   recordingMeetingSource = null,
@@ -747,13 +751,14 @@ export function SidebarContentPanel({
           <SidebarGroupContent>
             <SidebarMenu>
               <SidebarMenuItem>
-                <SidebarMenuButton isActive={activeNav === 'home'} onClick={onOpenHome}>
+                <SidebarMenuButton data-tour-id="nav-home" isActive={activeNav === 'home'} onClick={onOpenHome}>
                   <Home className="size-4 shrink-0" />
                   <span className="flex-1 truncate">Home</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
+                  data-tour-id="nav-email"
                   isActive={activeNav === 'email'}
                   onClick={() => onOpenEmail?.()}
                   className={previewEmail ? 'h-auto py-1.5' : undefined}
@@ -776,6 +781,7 @@ export function SidebarContentPanel({
               </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
+                  data-tour-id="nav-meetings"
                   isActive={activeNav === 'meetings'}
                   onClick={onOpenMeetings}
                   className={meetingSublabel ? 'h-auto py-1.5' : undefined}
@@ -854,7 +860,7 @@ export function SidebarContentPanel({
               </SidebarMenuItem>
               {codeModeEnabled && (
                 <SidebarMenuItem>
-                  <SidebarMenuButton isActive={activeNav === 'code'} onClick={onOpenCode}>
+                  <SidebarMenuButton data-tour-id="nav-code" isActive={activeNav === 'code'} onClick={onOpenCode}>
                     <Code2 className="size-4 shrink-0" />
                     <span className="flex-1 truncate">Code</span>
                   </SidebarMenuButton>
@@ -862,6 +868,7 @@ export function SidebarContentPanel({
               )}
               <SidebarMenuItem>
                 <SidebarMenuButton
+                  data-tour-id="nav-knowledge"
                   isActive={activeNav === 'knowledge'}
                   onClick={() => knowledgeActions.openKnowledgeView()}
                   className={knowledgeUpdatedLabel ? 'h-auto py-1.5' : undefined}
@@ -882,6 +889,7 @@ export function SidebarContentPanel({
             <SidebarMenu>
               <SidebarMenuItem>
                 <SidebarMenuButton
+                  data-tour-id="nav-agents"
                   isActive={activeNav === 'agents'}
                   onClick={onOpenBgTasks}
                   className={bgAgentsLabel ? 'h-auto py-1.5' : undefined}
@@ -902,6 +910,7 @@ export function SidebarContentPanel({
               </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
+                  data-tour-id="nav-workspaces"
                   isActive={activeNav === 'workspaces'}
                   onClick={() => knowledgeActions.openWorkspaceAt()}
                   className="h-auto py-1.5"
@@ -926,6 +935,7 @@ export function SidebarContentPanel({
           <SidebarGroupContent>
             <button
               type="button"
+              data-tour-id="nav-chats"
               onClick={() => setChatsExpanded((v) => !v)}
               className="flex w-full items-center gap-1.5 px-3 py-1 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground"
             >
@@ -1125,6 +1135,15 @@ export function SidebarContentPanel({
               </AlertDialog>
             )}
           </div>
+          {onStartTour && (
+            <button
+              onClick={onStartTour}
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+            >
+              <MascotFaceIcon className="size-4" />
+              <span>Take a tour</span>
+            </button>
+          )}
           <SettingsDialog>
             <button className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors">
               <Settings className="size-4" />

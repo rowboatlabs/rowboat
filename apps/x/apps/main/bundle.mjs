@@ -11,6 +11,7 @@
 
 import * as esbuild from 'esbuild';
 import { readFile } from 'node:fs/promises';
+import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -65,6 +66,28 @@ const prebuildsDir = path.join(ptyDest, 'prebuilds');
 for (const dir of fs.readdirSync(prebuildsDir)) {
   const helper = path.join(prebuildsDir, dir, 'spawn-helper');
   if (fs.existsSync(helper)) fs.chmodSync(helper, 0o755);
+}
+
+// Self-heal: node-pty ships prebuilt binaries only for darwin/win32, so on any
+// host whose prebuild is absent (notably Linux) the staged package has no loadable
+// pty.node and the app crashes on launch. Compile the native module for the host
+// platform+arch if needed and stage it under prebuilds/<platform>-<arch>/, where
+// node-pty's loader looks first. Keeps dev and CI working without a manual node-gyp
+// step (the CI workflow's explicit build is the fast path; this is the safety net).
+const hostTriple = `${process.platform}-${process.arch}`;
+const stagedBinary = path.join(prebuildsDir, hostTriple, 'pty.node');
+if (!fs.existsSync(stagedBinary)) {
+  const builtBinary = path.join(ptySrc, 'build', 'Release', 'pty.node');
+  if (!fs.existsSync(builtBinary)) {
+    console.log(`node-pty: no prebuilt binary for ${hostTriple}; compiling with node-gyp…`);
+    execSync('npx node-gyp rebuild', { cwd: ptySrc, stdio: 'inherit' });
+  }
+  if (!fs.existsSync(builtBinary)) {
+    throw new Error(`node-pty: failed to produce a native binary for ${hostTriple}`);
+  }
+  fs.mkdirSync(path.dirname(stagedBinary), { recursive: true });
+  fs.copyFileSync(builtBinary, stagedBinary);
+  console.log(`✅ node-pty: staged ${hostTriple}/pty.node`);
 }
 console.log('✅ node-pty staged in .package/node_modules');
 

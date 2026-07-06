@@ -11,11 +11,9 @@ import {
   ChevronDown, ChevronRight,
 } from 'lucide-react'
 import { LiveNoteSchema, type LiveNote, type Triggers } from '@x/shared/dist/live-note.js'
-import type { Run } from '@x/shared/dist/runs.js'
-import type z from 'zod'
 import { useLiveNoteAgentStatus } from '@/hooks/use-live-note-agent-status'
 import { formatRelativeTime } from '@/lib/relative-time'
-import { runLogToConversation } from '@/lib/run-to-conversation'
+import { fetchAgentRunTranscript, type AgentRunTranscript } from '@/lib/agent-transcript'
 import { CompactConversation } from '@/components/compact-conversation'
 
 export type OpenLiveNotePanelDetail = {
@@ -661,7 +659,7 @@ function SectionRegion({ label, children }: { label?: string; children: React.Re
 }
 
 function LastRunTab({ live }: { live: LiveNote }) {
-  const [run, setRun] = useState<z.infer<typeof Run> | null>(null)
+  const [transcript, setTranscript] = useState<AgentRunTranscript | null>(null)
   const [loadingRun, setLoadingRun] = useState(false)
   const [fetchError, setFetchError] = useState<string | null>(null)
 
@@ -669,7 +667,7 @@ function LastRunTab({ live }: { live: LiveNote }) {
 
   useEffect(() => {
     if (!runId) {
-      setRun(null)
+      setTranscript(null)
       setFetchError(null)
       setLoadingRun(false)
       return
@@ -679,13 +677,13 @@ function LastRunTab({ live }: { live: LiveNote }) {
     setFetchError(null)
     void (async () => {
       try {
-        const r = await window.ipc.invoke('runs:fetch', { runId })
+        const t = await fetchAgentRunTranscript(runId)
         if (cancelled) return
-        setRun(r)
+        setTranscript(t)
       } catch (err) {
         if (cancelled) return
         setFetchError(err instanceof Error ? err.message : String(err))
-        setRun(null)
+        setTranscript(null)
       } finally {
         if (!cancelled) setLoadingRun(false)
       }
@@ -704,7 +702,7 @@ function LastRunTab({ live }: { live: LiveNote }) {
   }
 
   const isError = !!live.lastRunError
-  const items = run ? runLogToConversation(run.log) : []
+  const items = transcript?.items ?? []
 
   return (
     <div className="flex-1 overflow-auto px-4 py-4 space-y-4">
@@ -751,10 +749,10 @@ function LastRunTab({ live }: { live: LiveNote }) {
             Couldn't load transcript: {fetchError}
           </div>
         )}
-        {run && !loadingRun && items.length === 0 && (
+        {transcript && !loadingRun && items.length === 0 && (
           <p className="text-xs italic text-muted-foreground">No messages or tool calls recorded.</p>
         )}
-        {run && !loadingRun && items.length > 0 && (
+        {transcript && !loadingRun && items.length > 0 && (
           <CompactConversation items={items} />
         )}
       </div>

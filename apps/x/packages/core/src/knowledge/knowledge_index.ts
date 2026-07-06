@@ -73,8 +73,10 @@ export interface KnowledgeIndex {
  * Looks for patterns like **Field:** value or **Field:** [[Link]]
  */
 function extractField(content: string, fieldName: string): string | undefined {
-    // Match **Field:** value (handles [[links]] and plain text)
-    const pattern = new RegExp(`\\*\\*${fieldName}:\\*\\*\\s*(.+?)(?:\\n|$)`, 'i');
+    // Match **Field:** value (handles [[links]] and plain text). Only consume
+    // spaces/tabs after the label — NOT newlines — so an empty field returns
+    // undefined instead of bleeding the next line's value into it.
+    const pattern = new RegExp(`\\*\\*${fieldName}:\\*\\*[ \\t]*(.+?)(?:\\r?\\n|$)`, 'i');
     const match = content.match(pattern);
     if (match) {
         let value = match[1].trim();
@@ -273,6 +275,34 @@ export function buildKnowledgeIndex(): KnowledgeIndex {
     }
 
     return index;
+}
+
+// ---------------------------------------------------------------------------
+// Cached access
+// ---------------------------------------------------------------------------
+// buildKnowledgeIndex() does a synchronous recursive scan + read of the whole
+// knowledge dir, so callers that run often (e.g. meeting prep) should use the
+// cached accessor and rely on invalidateKnowledgeIndex() being called whenever
+// a knowledge file changes (wired to the workspace watcher in the main process).
+
+let cachedIndex: KnowledgeIndex | null = null;
+
+/**
+ * Return the knowledge index, building it once and reusing it until invalidated.
+ */
+export function getKnowledgeIndex(): KnowledgeIndex {
+    if (!cachedIndex) {
+        cachedIndex = buildKnowledgeIndex();
+    }
+    return cachedIndex;
+}
+
+/**
+ * Drop the cached index so the next getKnowledgeIndex() rebuilds it. Call this
+ * whenever a file under knowledge/ is created, changed, moved, or deleted.
+ */
+export function invalidateKnowledgeIndex(): void {
+    cachedIndex = null;
 }
 
 /**

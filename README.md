@@ -1,8 +1,7 @@
-<a href="https://www.youtube.com/watch?v=5AWoGo-L16I" target="_blank" rel="noopener noreferrer">
-  <img width="1339" height="607" alt="rowboat-github-2" src="https://github.com/user-attachments/assets/fc463b99-01b3-401c-b4a4-044dad480901" />
-</a>
-
 <h5 align="center">
+
+<h1 align="center">Rowboat</h1>
+<p align="center">A desktop AI coworker with a memory of your work and built-in surfaces to act on it.</p>
 
 <p align="center" style="display: flex; justify-content: center; gap: 20px; align-items: center;">
   <a href="https://trendshift.io/repositories/13609" target="blank">
@@ -25,28 +24,95 @@
   </a>
 </p>
 
-# Rowboat  
-**Open-source AI coworker that turns work into a knowledge graph and acts on it**
-
 </h5>
 
-Rowboat connects to your email and meeting notes, builds a long-lived knowledge graph, and uses that context to help you get work done - privately, on your machine.
+Rowboat indexes your work into a living knowledge graph and uses that to get work done on your machine. It includes work surfaces for collaborating with AI: email client, notes, browser, code mode, meeting note taker, and workspaces for different projects. 
 
-You can do things like:
-- `Build me a deck about our next quarter roadmap` → generates a PDF using context from your knowledge graph
-- `Prep me for my meeting with Alex` → pulls past decisions, open questions, and relevant threads into a crisp brief (or a voice note)
-- Track a person, company or topic through live notes
-- Visualize, edit, and update your knowledge graph anytime (it’s just Markdown)
-- Record voice memos that automatically capture and update key takeaways in the graph
 
 Download latest for Mac/Windows/Linux: [Download](https://www.rowboatlabs.com/downloads)
 
+<p align="center">
+  <img width="1502" height="938" alt="Screenshot 2026-06-24 at 11 40 45 PM" src="https://github.com/user-attachments/assets/d84cbdf2-42a6-4767-9dec-81cfa435f310" />
+</p>
+
+
+<p align="center">
+  <a href="https://youtu.be/NcWGdwQ7Cpo"> Demo - email to code</a> · <a href="https://www.youtube.com/watch?v=7xTpciZCfpw"> Demo - knowledge graph</a>
+</p>
+
+
 ⭐ If you find Rowboat useful, please star the repo. It helps more people find it.
 
-## Demo
-[![Demo](https://github.com/user-attachments/assets/8b9a859b-d4f1-47ca-9d1d-9d26d982e15d)](https://www.youtube.com/watch?v=7xTpciZCfpw)
+---
+## Overview
 
-[Watch the full video](https://www.youtube.com/watch?v=7xTpciZCfpw)
+<table>
+<tr>
+<td width="40%" valign="middle">
+<h3>Brain</h3>
+Rowboat indexes email, meetings, slack and assistant conversations into a living Obsidian-style backlinked knowledge graph. 
+</td>
+<td width="60%">
+<img width="1499" height="940" alt="Screenshot 2026-06-24 at 11 22 52 PM" src="https://github.com/user-attachments/assets/203ca1d5-2f40-43dd-8da7-c5cef4e31a41" />
+</td>
+</tr>
+<tr>
+<td width="40%" valign="middle">
+<h3>Email</h3>
+The built-in email client sorts emails into important and everything else. Rowboat automatically drafts responses for important email using all the work context.
+</td>
+<td width="60%">
+<img width="1512" height="948" alt="Email screenshot" src="https://github.com/user-attachments/assets/4392b3ca-cc4c-473a-849a-eea0e97388f2" />
+</td>
+</tr>
+<tr>
+<td width="40%" valign="middle">
+<h3>Background agents</h3>
+You can set up background agents that run on events like new email or on schedule like every day at 8am. They can connect to tools, search the web, use the browser and write code using Claude Code or Codex.  
+</td>
+<td width="60%">
+<img width="1512" height="951" alt="Background agents screenshot" src="https://github.com/user-attachments/assets/5b73a3c3-f0d3-4151-83e7-0997457074e6" />
+
+</td>
+</tr>
+<tr>
+<td width="40%" valign="middle">
+<h3>Built-in Browser</h3>
+Rowboat includes a browser that lets you and assistant collaborate on web tasks. Because its isolated from your main browser, you can log in only to the accounts that want the assistant to access. 
+</td>
+<td width="60%">
+<img width="1512" height="948" alt="Browser screenshot" src="https://github.com/user-attachments/assets/ce04871f-4477-40eb-8310-13ef7f125b11" />
+</td>
+</tr>
+<tr>
+<td width="40%" valign="middle">
+<h3>Meeting Notes</h3>
+A local meeting note-taker that taps into mic & speaker, produces live transcript and summarizes the meeting in a markdown file and updates the knowledge graph. 
+</td>
+<td width="60%">
+<img width="1512" height="947" alt="Meeting notes screenshot" src="https://github.com/user-attachments/assets/c3729952-3c75-4c84-88e0-2a9070136502" />
+</td>
+</tr>
+<tr>
+<td width="40%" valign="middle">
+<h3>Code Mode</h3>
+Code mode lets you spin up parallel coding agents with Claude Code or Codex, and have Rowboat drive them with all the work context where needed.
+</td>
+<td width="60%">
+<img width="1512" height="949" alt="Code mode screenshot" src="https://github.com/user-attachments/assets/306618b5-9aaf-4ef8-9117-91ea58e5e4e7" />
+</td>
+</tr>
+<tr>
+<td width="40%" valign="middle">
+<h3>Integrations</h3>
+Includes one-click integrations to most popular products. 
+</td>
+<td width="60%">
+<img width="1512" height="948" alt="Integrations screenshot" src="https://github.com/user-attachments/assets/402e89db-8229-468a-8881-a763b9f20ad9" />
+</td>
+</tr>
+
+</table>
 
 ---
 
@@ -81,23 +147,6 @@ All API key files use the same format:
 }
 ```
 
-## What it does
-
-Rowboat is a **local-first AI coworker** that can:
-- **Remember** the important context you don’t want to re-explain (people, projects, decisions, commitments)
-- **Understand** what’s relevant right now (before a meeting, while replying to an email, when writing a doc)
-- **Help you act** by drafting, summarizing, planning, and producing real artifacts (briefs, emails, docs, PDF slides)
-
-Under the hood, Rowboat maintains an **Obsidian-compatible vault** of plain Markdown notes with backlinks — a transparent “working memory” you can inspect and edit.
-
-## Integrations
-
-Rowboat builds memory from the work you already do, including:
-- **Gmail** (email)
-- **Google Calendar** 
-- **Rowboat meeting notes** or **Fireflies**
-
-It also contains a library of product integrations through Composio.dev
 
 ## How it’s different
 
@@ -110,24 +159,6 @@ Rowboat maintains **long-lived knowledge** instead:
 - everything lives on your machine as plain Markdown
 
 The result is memory that compounds, rather than retrieval that starts cold every time.
-
-## What you can do with it
-
-- **Meeting prep** from prior decisions, threads, and open questions
-- **Email drafting** grounded in history and commitments
-- **Docs & decks** generated from your ongoing context (including PDF slides)
-- **Follow-ups**: capture decisions, action items, and owners so nothing gets dropped
-- **On-your-machine help**: create files, summarize into notes, and run workflows using local tools (with explicit, reviewable actions)
-
-## Live notes
-
-Live notes are notes that stay updated automatically. You can create one by typing '@rowboat' on a note. 
-
-- Track a competitor or market topic across X, Reddit, and the news
-- Monitor a person, project, or deal across web or your communications
-- Keep a running summary of any subject you care about
-
-Everything is written back into your local Markdown vault. You control what runs and when.
 
 ## Bring your own model
 

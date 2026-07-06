@@ -2,7 +2,8 @@ import { app, BrowserWindow, desktopCapturer, protocol, net, shell, session, typ
 import path from "node:path";
 import {
   setupIpcHandlers,
-  startRunsWatcher,
+  startRunsWatcher, startSessionsWatcher, markSessionsIndexReady,
+  startChannelsWatcher,
   startCodeSessionStatusWatcher,
   startServicesWatcher,
   startLiveNoteAgentWatcher,
@@ -25,8 +26,10 @@ import { init as initEmailLabeling } from "@x/core/dist/knowledge/label_emails.j
 import { init as initNoteTagging } from "@x/core/dist/knowledge/tag_notes.js";
 import { init as initInlineTasks } from "@x/core/dist/knowledge/inline_tasks.js";
 import { init as initAgentRunner } from "@x/core/dist/agent-schedule/runner.js";
+import { init as initChannels } from "@x/core/dist/channels/service.js";
 import { init as initAgentNotes } from "@x/core/dist/knowledge/agent_notes.js";
 import { init as initCalendarNotifications } from "@x/core/dist/knowledge/notify_calendar_meetings.js";
+import { init as initMeetingPrep } from "@x/core/dist/knowledge/meeting_prep_scheduler.js";
 import { init as initLiveNoteScheduler } from "@x/core/dist/knowledge/live-note/scheduler.js";
 import { init as initEventProcessor, registerConsumer } from "@x/core/dist/events/init.js";
 import { liveNoteEventConsumer } from "@x/core/dist/knowledge/live-note/event-consumer.js";
@@ -35,6 +38,7 @@ import { backgroundTaskEventConsumer } from "@x/core/dist/background-tasks/event
 import { init as initLocalSites, shutdown as shutdownLocalSites } from "@x/core/dist/local-sites/server.js";
 import { shutdown as shutdownAnalytics } from "@x/core/dist/analytics/posthog.js";
 import { identifyIfSignedIn } from "@x/core/dist/analytics/identify.js";
+import { migrateRuns } from "@x/core/dist/migrations/runs/migrate.js";
 
 import { initConfigs } from "@x/core/dist/config/initConfigs.js";
 import { getAgentSlackCliStatus } from "@x/core/dist/slack/agent-slack-exec.js";
@@ -44,6 +48,7 @@ import { execFileSync } from "node:child_process";
 import { init as initChromeSync } from "@x/core/dist/knowledge/chrome-extension/server/server.js";
 import container, { registerBrowserControlService, registerNotificationService } from "@x/core/dist/di/container.js";
 import type { CodeModeManager } from "@x/core/dist/code-mode/acp/manager.js";
+import type { ISessions } from "@x/core/dist/sessions/index.js";
 import { browserViewManager, BROWSER_PARTITION } from "./browser/view.js";
 import { setupBrowserEventForwarding } from "./browser/ipc.js";
 import { ElectronBrowserControlService } from "./browser/control-service.js";
@@ -55,6 +60,11 @@ import {
   setMainWindowForDeepLinks,
 } from "./deeplink.js";
 import { disconnectGoogleIfScopesStale } from "./oauth-handler.js";
+
+// Captured as early as possible so it reflects actual process start. Used to
+// gate grace-eligible notifications (e.g. the burst of background-task
+// completions a reopen replays) — see ElectronNotificationService.
+const APP_LAUNCHED_AT = Date.now();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -211,6 +221,38 @@ function configureSessionPermissions(targetSession: Session): void {
   });
 }
 
+// Wire Ctrl/Cmd + (+ / − / 0) to zoom the renderer in/out/reset.
+// The app sets no application menu, so the default menu's zoom roles aren't
+// available — and on Linux the menu bar is suppressed by the frameless
+// `hiddenInset` title bar — so handle the accelerators directly here.
+// `event.preventDefault()` stops the keystroke from leaking into the editor.
+function setupZoomShortcuts(win: BrowserWindow) {
+  const ZOOM_STEP = 0.5; // zoom-level units (factor = 1.2 ^ level, ~9.5% per step)
+  const MIN_ZOOM_LEVEL = -3;
+  const MAX_ZOOM_LEVEL = 3;
+  const wc = win.webContents;
+
+  wc.on("before-input-event", (event, input) => {
+    if (input.type !== "keyDown") return;
+    // Cmd on macOS, Ctrl elsewhere.
+    if (!(process.platform === "darwin" ? input.meta : input.control)) return;
+
+    // input.key is the produced character: "+"/"=" share a physical key (as do
+    // "-"/"_"), and numpad +/- produce the same characters, so this covers both.
+    const key = input.key;
+    if (key === "+" || key === "=") {
+      wc.setZoomLevel(Math.min(wc.getZoomLevel() + ZOOM_STEP, MAX_ZOOM_LEVEL));
+      event.preventDefault();
+    } else if (key === "-" || key === "_") {
+      wc.setZoomLevel(Math.max(wc.getZoomLevel() - ZOOM_STEP, MIN_ZOOM_LEVEL));
+      event.preventDefault();
+    } else if (key === "0") {
+      wc.setZoomLevel(0);
+      event.preventDefault();
+    }
+  });
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1280,
@@ -287,6 +329,9 @@ function createWindow() {
   // The WebContentsView is created lazily on first `browser:setVisible`.
   browserViewManager.attach(win);
 
+  // Cmd/Ctrl + (+ / − / 0) zoom shortcuts for the renderer UI.
+  setupZoomShortcuts(win);
+
   if (app.isPackaged) {
     win.loadURL("app://-/index.html");
   } else {
@@ -330,7 +375,7 @@ app.whenReady().then(async () => {
   });
 
   registerBrowserControlService(new ElectronBrowserControlService());
-  registerNotificationService(new ElectronNotificationService());
+  registerNotificationService(new ElectronNotificationService(APP_LAUNCHED_AT));
 
   setupIpcHandlers();
   setupBrowserEventForwarding();
@@ -346,6 +391,44 @@ app.whenReady().then(async () => {
 
   // start runs watcher
   startRunsWatcher();
+
+  // One-time: port legacy runs/*.jsonl into the new turn/session runtime.
+  // Must run BEFORE the session index is built so migrated sessions are picked
+  // up by the startup scan. Fully defensive — never blocks boot.
+  try {
+    const migration = migrateRuns();
+    if (migration.scanned > 0) {
+      console.log(
+        `[runs-migration] migrated ${migration.migratedTurns} turn(s) across ` +
+        `${migration.migratedSessions} session(s) from ${migration.scanned} run(s) ` +
+        `(${migration.skipped} skipped, ${migration.failed.length} failed)`,
+      );
+      for (const failure of migration.failed) {
+        console.warn(`[runs-migration] left in place (failed): ${failure.file} — ${failure.error}`);
+      }
+    }
+  } catch (error) {
+    console.error('[runs-migration] pass failed:', error);
+  }
+
+  // New runtime: build the in-memory session index (startup scan), then
+  // forward the session bus to windows. The renderer window is already up and
+  // may have called sessions:list — that handler blocks on
+  // markSessionsIndexReady, which must fire even if the scan throws so the
+  // list never hangs.
+  try {
+    await container.resolve<ISessions>('sessions').initialize();
+  } finally {
+    markSessionsIndexReady();
+  }
+  startSessionsWatcher();
+
+  // Mobile channels (WhatsApp/Telegram bridge): needs the session index, so
+  // start after initialize(). Failures must never block boot.
+  startChannelsWatcher();
+  initChannels().catch((error) => {
+    console.error('[Channels] Failed to start mobile channels:', error);
+  });
 
   // start code-session status tracker (derives working/needs-you/idle + notifications)
   startCodeSessionStatusWatcher();
@@ -409,6 +492,9 @@ app.whenReady().then(async () => {
 
   // start calendar meeting notification service (fires 1-minute warnings)
   initCalendarNotifications();
+
+  // start meeting prep scheduler (generates prep notes ~6h before a meeting)
+  void initMeetingPrep();
 
   // start chrome extension sync server
   initChromeSync();

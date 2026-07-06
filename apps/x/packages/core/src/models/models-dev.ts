@@ -224,3 +224,22 @@ export async function listOnboardingModels(): Promise<{ providers: ProviderSumma
 
   return { providers, lastUpdated: fetchedAt };
 }
+
+export async function getChatModelIds(
+  flavor: "openai" | "anthropic" | "google",
+): Promise<Set<string>> {
+  try {
+    const { data } = await getModelsDevData();
+    const provider = pickProvider(data, flavor);
+    if (!provider) return new Set();
+    const ids = new Set<string>();
+    for (const [id, model] of Object.entries(provider.models)) {
+      if (isStableModel(model) && supportsToolCall(model)) {
+        ids.add(model.id ?? id);
+      }
+    }
+    return ids;
+  } catch {
+    return new Set();
+  }
+}
