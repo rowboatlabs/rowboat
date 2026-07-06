@@ -1228,6 +1228,13 @@ const ipcSchemas = {
     }),
   },
   // Rowboat Apps (spec §13) — M1 local channels.
+  'apps:serverStatus': {
+    req: z.object({}),
+    res: z.object({
+      running: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
   'apps:list': {
     req: z.object({}),
     res: z.object({

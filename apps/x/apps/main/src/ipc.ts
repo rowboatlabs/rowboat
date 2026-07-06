@@ -1565,6 +1565,9 @@ export function setupIpcHandlers() {
       return qualifyAndDisconnectComposioGoogle();
     },
     // Rowboat Apps handlers (spec §13)
+    'apps:serverStatus': async () => {
+      return appsServer.getServerStatus();
+    },
     'apps:list': async () => {
       const status = appsServer.getServerStatus();
       const apps = await appsIndexer.listApps();
