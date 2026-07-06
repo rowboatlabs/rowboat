@@ -28,8 +28,9 @@ export class PublishError extends Error {
     }
 }
 
-const STEPS = ['packaged', 'repo_created', 'source_pushed', 'release_created', 'assets_uploaded', 'registered', 'published'] as const;
-export type PublishStep = typeof STEPS[number];
+export type PublishStep =
+    | 'packaged' | 'repo_created' | 'source_pushed' | 'release_created'
+    | 'assets_uploaded' | 'registered' | 'published';
 
 export type PublishProgress = (step: PublishStep | 'polling', detail?: string) => void;
 
