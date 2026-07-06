@@ -31,7 +31,8 @@ import type { INotificationService } from "../application/notification/service.j
 import { SystemClock, type IClock } from "../turns/clock.js";
 import { FSTurnRepo } from "../turns/fs-repo.js";
 import type { ITurnRepo } from "../turns/repo.js";
-import { TurnRepoContextResolver, type IContextResolver } from "../turns/context-resolver.js";
+import type { IContextResolver } from "../turns/context-resolver.js";
+import { createContextResolver } from "../turns/context-elision.js";
 import { EmitterTurnLifecycleBus, type ITurnLifecycleBus } from "../turns/bus.js";
 import { RealUsageReporter } from "../turns/bridges/real-usage-reporter.js";
 import type { IUsageReporter } from "../turns/usage-reporter.js";
@@ -117,7 +118,9 @@ container.register({
     turnsRootDir: asValue(path.join(WorkDir, "storage", "turns")),
     sessionsRootDir: asValue(path.join(WorkDir, "storage", "sessions")),
     turnRepo: asClass<ITurnRepo>(FSTurnRepo).singleton(),
-    contextResolver: asClass<IContextResolver>(TurnRepoContextResolver).singleton(),
+    contextResolver: asFunction<IContextResolver>(({ turnRepo }) =>
+        createContextResolver({ turnRepo }),
+    ).singleton(),
     lifecycleBus: asClass<ITurnLifecycleBus>(EmitterTurnLifecycleBus).singleton(),
     usageReporter: asClass<IUsageReporter>(RealUsageReporter).singleton(),
     agentResolver: asFunction<IAgentResolver>(() => new RealAgentResolver()).singleton(),

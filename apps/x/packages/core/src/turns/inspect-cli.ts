@@ -27,7 +27,7 @@ import { convertFromMessages } from "../agents/runtime.js";
 import { WorkDir } from "../config/config.js";
 import { FSSessionRepo } from "../sessions/fs-repo.js";
 import { composeModelRequest } from "./compose-model-request.js";
-import { TurnRepoContextResolver } from "./context-resolver.js";
+import { createContextResolver } from "./context-elision.js";
 import { FSTurnRepo } from "./fs-repo.js";
 
 const turnRepo = new FSTurnRepo({
@@ -36,7 +36,7 @@ const turnRepo = new FSTurnRepo({
 const sessionRepo = new FSSessionRepo({
     sessionsRootDir: path.join(WorkDir, "storage", "sessions"),
 });
-const resolver = new TurnRepoContextResolver({ turnRepo });
+const resolver = createContextResolver({ turnRepo });
 const encode = (messages: Parameters<typeof convertFromMessages>[0]) =>
     convertFromMessages(messages) as unknown as JsonValue[];
 

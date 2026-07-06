@@ -390,6 +390,18 @@ Rules:
   It rejects the execution and does not append `turn_failed`.
 - The reducer treats `context` as opaque data and never resolves references.
 
+The app wires the resolver through a decorator (`context-elision.ts`) that
+applies transmit-time elision to the materialized prefix: tool results from
+prior turns above a size threshold are replaced with a short placeholder
+telling the model to re-run the tool if it needs the output. The durable log
+is untouched; only the transmitted bytes change. Elision is a pure function
+of each message, so resolved prefixes stay byte-stable across calls (provider
+prefix caches keep working), and the current turn's own in-flight tool
+results never pass through the resolver, so they are always sent verbatim.
+Policy lives in `config/context.json` (`elideHistoricToolResults`, default
+true; `elideHistoricToolResultsThresholdChars`, default 10000). The inspect
+CLI composes through the same decorated resolver.
+
 ### 6.7 Agent snapshot inheritance
 
 Session turns whose resolved system prompt and tool set are byte-identical
