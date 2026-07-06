@@ -69,6 +69,7 @@ import { capture } from '@x/core/dist/analytics/posthog.js';
 import * as githubAuth from '@x/core/dist/apps/github-auth.js';
 import * as appsInstaller from '@x/core/dist/apps/installer.js';
 import { registryClient } from '@x/core/dist/apps/registry.js';
+import * as appsPublisher from '@x/core/dist/apps/publisher.js';
 
 // D18 install previews awaiting confirmation, keyed by app name.
 const appInstallPreviews = new Map<string, Awaited<ReturnType<typeof appsInstaller.previewInstall>>>();
@@ -1672,6 +1673,22 @@ export function setupIpcHandlers() {
     },
     'apps:rollback': async (_event, args) => {
       return { app: await appsInstaller.rollbackApp(args.folder) };
+    },
+    'apps:publish': async (event, args) => {
+      const win = BrowserWindow.fromWebContents(event.sender);
+      const result = await appsPublisher.publishApp(args.folder, (step, detail) => {
+        win?.webContents.send('apps:progress', { folder: args.folder, step, detail });
+      });
+      capture('app_published', { firstPublish: true });
+      return result;
+    },
+    'apps:publishUpdate': async (_event, args) => {
+      const result = await appsPublisher.publishUpdate(args.folder, args.increment);
+      capture('app_published', { version: result.version, firstPublish: false });
+      return result;
+    },
+    'apps:registerExisting': async (_event, args) => {
+      return appsPublisher.registerExisting(args.name, args.repo);
     },
     'githubAuth:start': async () => {
       const result = await githubAuth.startDeviceFlow();

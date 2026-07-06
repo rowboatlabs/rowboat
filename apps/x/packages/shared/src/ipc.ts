@@ -1319,6 +1319,28 @@ const ipcSchemas = {
     req: z.object({ folder: z.string() }),
     res: z.object({ app: AppSummarySchema }),
   },
+  // Advisory progress pushes for long-running app operations (§13).
+  'apps:progress': {
+    req: z.object({ folder: z.string(), step: z.string(), detail: z.string().optional() }),
+    res: z.null(),
+  },
+  'apps:publish': {
+    req: z.object({ folder: z.string() }),
+    res: z.object({
+      status: z.enum(['published', 'pending']),
+      repoUrl: z.string(),
+      releaseUrl: z.string(),
+      prUrl: z.string().optional(),
+    }),
+  },
+  'apps:publishUpdate': {
+    req: z.object({ folder: z.string(), increment: z.enum(['patch', 'minor', 'major']) }),
+    res: z.object({ version: z.string(), releaseUrl: z.string() }),
+  },
+  'apps:registerExisting': {
+    req: z.object({ name: z.string(), repo: z.string() }),
+    res: z.object({ status: z.enum(['published', 'pending']), prUrl: z.string() }),
+  },
   // GitHub auth (device flow) — required only for publishing apps (spec §10).
   'githubAuth:start': {
     req: z.object({}),
