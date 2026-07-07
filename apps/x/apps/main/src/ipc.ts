@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow, shell, dialog, systemPreferences, desktopCapturer, app, screen } from 'electron';
+import { ipcMain, BrowserWindow, shell, dialog, systemPreferences, desktopCapturer, app, screen, powerSaveBlocker } from 'electron';
 import { ipc } from '@x/shared';
 import path from 'node:path';
 import os from 'node:os';
@@ -22,6 +22,9 @@ import { promisify } from 'node:util';
 import z from 'zod';
 
 const execFileAsync = promisify(execFile);
+
+// Active powerSaveBlocker id while Caffeinate is toggled on; null when off.
+let caffeinateBlockerId: number | null = null;
 
 import { RunEvent } from '@x/shared/dist/runs.js';
 import { ServiceEvent } from '@x/shared/dist/service-events.js';
@@ -1309,6 +1312,29 @@ export function setupIpcHandlers() {
       }
 
       return { success: true };
+    },
+    // ── Caffeinate (keep system awake, like macOS `caffeinate`) ──
+    'power:getCaffeinate': async () => {
+      return { enabled: caffeinateBlockerId !== null && powerSaveBlocker.isStarted(caffeinateBlockerId) };
+    },
+    'power:setCaffeinate': async (_event, args) => {
+      if (args.enabled) {
+        if (caffeinateBlockerId === null || !powerSaveBlocker.isStarted(caffeinateBlockerId)) {
+          caffeinateBlockerId = powerSaveBlocker.start('prevent-app-suspension');
+        }
+      } else if (caffeinateBlockerId !== null) {
+        if (powerSaveBlocker.isStarted(caffeinateBlockerId)) {
+          powerSaveBlocker.stop(caffeinateBlockerId);
+        }
+        caffeinateBlockerId = null;
+      }
+      const enabled = caffeinateBlockerId !== null;
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed() && win.webContents) {
+          win.webContents.send('power:caffeinateChanged', { enabled });
+        }
+      }
+      return { enabled };
     },
     // ── Mobile channels (WhatsApp / Telegram bridge) ─────────────
     'channels:getConfig': async () => {

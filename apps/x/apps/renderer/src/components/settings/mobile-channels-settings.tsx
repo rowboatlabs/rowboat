@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import type { z } from "zod"
-import { Loader2, MessageCircle, Send, Smartphone } from "lucide-react"
+import { Coffee, Loader2, MessageCircle, Send, Smartphone } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
@@ -30,19 +30,22 @@ export function MobileChannelsSettings({ dialogOpen }: { dialogOpen: boolean }) 
   const [waAllowDraft, setWaAllowDraft] = useState("")
   const [tgAllowDraft, setTgAllowDraft] = useState("")
   const [saving, setSaving] = useState(false)
+  const [caffeinated, setCaffeinated] = useState(false)
 
   useEffect(() => {
     if (!dialogOpen) return
     let cancelled = false
     void (async () => {
       try {
-        const [cfg, st] = await Promise.all([
+        const [cfg, st, caf] = await Promise.all([
           window.ipc.invoke("channels:getConfig", null),
           window.ipc.invoke("channels:getStatus", null),
+          window.ipc.invoke("power:getCaffeinate", null),
         ])
         if (cancelled) return
         setConfig(cfg)
         setStatus(st)
+        setCaffeinated(caf.enabled)
         setTokenDraft(cfg.telegram.botToken)
         setWaAllowDraft(cfg.whatsapp.allowFrom.join(", "))
         setTgAllowDraft(cfg.telegram.allowFrom.join(", "))
@@ -53,9 +56,13 @@ export function MobileChannelsSettings({ dialogOpen }: { dialogOpen: boolean }) 
     const unsubscribe = window.ipc.on("channels:status", (st) => {
       setStatus(st)
     })
+    const unsubscribeCaffeinate = window.ipc.on("power:caffeinateChanged", ({ enabled }) => {
+      setCaffeinated(enabled)
+    })
     return () => {
       cancelled = true
       unsubscribe()
+      unsubscribeCaffeinate()
     }
   }, [dialogOpen])
 
@@ -93,6 +100,38 @@ export function MobileChannelsSettings({ dialogOpen }: { dialogOpen: boolean }) 
           else is a message to the current chat. Your computer must be on with Rowboat running.
         </p>
       </div>
+
+      {/* Caffeinate */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <div className="flex size-8 items-center justify-center rounded-md bg-muted">
+            <Coffee className="size-4" />
+          </div>
+          <div className="flex flex-col">
+            <span className="text-sm font-medium">Caffeinate</span>
+            <span className="text-xs text-muted-foreground">
+              {caffeinated
+                ? "Your computer will stay awake while Rowboat is running"
+                : "Keep your computer awake so channels stay connected"}
+            </span>
+          </div>
+        </div>
+        <Switch
+          checked={caffeinated}
+          onCheckedChange={(enabled) => {
+            setCaffeinated(enabled)
+            void window.ipc
+              .invoke("power:setCaffeinate", { enabled })
+              .then((res) => setCaffeinated(res.enabled))
+              .catch(() => {
+                setCaffeinated(!enabled)
+                toast.error("Failed to update Caffeinate")
+              })
+          }}
+        />
+      </div>
+
+      <Separator />
 
       {/* WhatsApp */}
       <div className="space-y-3">

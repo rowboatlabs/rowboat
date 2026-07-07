@@ -95,6 +95,7 @@ import { MarkdownPreOverride } from '@/components/ai-elements/markdown-code-over
 import { defaultRemarkPlugins } from 'streamdown'
 import remarkBreaks from 'remark-breaks'
 import { TabBar, type ChatTab, type FileTab } from '@/components/tab-bar'
+import { CaffeinateIndicator } from '@/components/caffeinate-indicator'
 import {
   type ChatMessage,
   type ChatViewportAnchorState,
@@ -6262,6 +6263,7 @@ function App() {
                     <TooltipContent side="bottom">New chat</TooltipContent>
                   </Tooltip>
                 )}
+                <CaffeinateIndicator />
                 {/* Trailing layout control. Always mounted (just toggled invisible
                     when inactive) so its -webkit-app-region:no-drag rect is stable —
                     a freshly-mounted no-drag button inside the drag-region header
