@@ -36,7 +36,7 @@ Download latest for Mac/Windows/Linux: [Download](https://www.rowboatlabs.com/do
 </p>
 
 <p align="center">
-  <a href="https://youtu.be/NcWGdwQ7Cpo"> Demo - email to code</a> · <a href="https://www.youtube.com/watch?v=7xTpciZCfpw"> Demo - knowledge graph</a>
+  <a href="https://www.youtube.com/watch?v=et5yQABJ3xI"> Demo - apps to code </a> · <a href="https://www.youtube.com/watch?v=7xTpciZCfpw"> Demo - knowledge graph</a>
 </p>
 
 
