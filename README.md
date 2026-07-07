@@ -104,6 +104,15 @@ Code mode lets you spin up parallel coding agents with Claude Code or Codex, and
 </tr>
 <tr>
 <td width="40%" valign="middle">
+<h3>Apps</h3>
+You can bulild your own work surfaces inside Rowboat — they get acess to all the tools and integrations, and you can share them with other people.  
+</td>
+<td width="60%">
+<img width="1512" height="949" alt="Apps screenshot" src="https://github.com/user-attachments/assets/aaedc79b-3e72-45e8-995c-e8a3d127fdac" />
+</td>
+</tr>
+<tr>
+<td width="40%" valign="middle">
 <h3>Integrations</h3>
 Includes one-click integrations to most popular products. 
 </td>
