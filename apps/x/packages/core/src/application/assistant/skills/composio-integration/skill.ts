@@ -22,30 +22,71 @@ export const skill = String.raw`
 | Google Calendar | \`googlecalendar\` |
 | Google Sheets | \`googlesheets\` |
 | Google Docs | \`googledocs\` |
+| Google Slides | \`googleslides\` |
 | Google Drive | \`googledrive\` |
+| Google Tasks | \`googletasks\` |
+| Google Meet | \`googlemeet\` |
+| Google Photos | \`googlephotos\` |
+| Google Maps | \`google_maps\` |
+| Google Analytics | \`google_analytics\` |
+| Google Search Console | \`google_search_console\` |
+| Google Ads | \`googleads\` |
+| Google BigQuery | \`googlebigquery\` |
 | Slack | \`slack\` |
+| Discord | \`discord\` |
 | GitHub | \`github\` |
+| GitLab | \`gitlab\` |
+| Bitbucket | \`bitbucket\` |
 | Notion | \`notion\` |
 | Linear | \`linear\` |
 | Jira | \`jira\` |
+| Confluence | \`confluence\` |
 | Asana | \`asana\` |
 | Trello | \`trello\` |
+| ClickUp | \`clickup\` |
+| monday.com | \`monday\` |
+| Wrike | \`wrike\` |
+| Basecamp | \`basecamp\` |
+| Todoist | \`todoist\` |
+| Productboard | \`productboard\` |
+| Miro | \`miro\` |
+| Figma | \`figma\` |
+| Canva | \`canva\` |
 | HubSpot | \`hubspot\` |
 | Salesforce | \`salesforce\` |
+| Attio | \`attio\` |
 | LinkedIn | \`linkedin\` |
 | X (Twitter) | \`twitter\` |
 | Reddit | \`reddit\` |
+| Reddit Ads | \`reddit_ads\` |
+| Facebook | \`facebook\` |
+| Instagram | \`instagram\` |
+| YouTube | \`youtube\` |
+| WhatsApp | \`whatsapp\` |
 | Dropbox | \`dropbox\` |
-| OneDrive | \`onedrive\` |
-| Microsoft Outlook | \`microsoft_outlook\` |
+| Box | \`box\` |
+| OneDrive | \`one_drive\` |
+| SharePoint | \`share_point\` |
+| Microsoft Outlook | \`outlook\` |
 | Microsoft Teams | \`microsoft_teams\` |
+| Microsoft Excel | \`excel\` |
 | Calendly | \`calendly\` |
 | Cal.com | \`cal\` |
+| Zoom | \`zoom\` |
 | Intercom | \`intercom\` |
 | Zendesk | \`zendesk\` |
 | Airtable | \`airtable\` |
+| Mailchimp | \`mailchimp\` |
+| Typeform | \`typeform\` |
+| Eventbrite | \`eventbrite\` |
+| Stripe | \`stripe\` |
+| Square | \`square\` |
+| QuickBooks | \`quickbooks\` |
+| Supabase | \`supabase\` |
+| Sentry | \`sentry\` |
+| PagerDuty | \`pagerduty\` |
 
-**IMPORTANT:** Always use these exact slugs. Do NOT guess — e.g., Google Sheets is \`googlesheets\` (no underscore), not \`google_sheets\`.
+**IMPORTANT:** Always use these exact slugs. Do NOT guess — e.g., Google Sheets is \`googlesheets\` (no underscore), not \`google_sheets\`, while OneDrive IS \`one_drive\` (with underscore) and Microsoft Outlook is just \`outlook\`.
 
 ## Critical: Check First, Connect Second
 
