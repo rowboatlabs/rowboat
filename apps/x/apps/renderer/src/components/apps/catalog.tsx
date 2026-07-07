@@ -74,16 +74,41 @@ function InstallConfirmDialog({ preview, busy, onConfirm, onCancel }: {
   )
 }
 
+type ModelChoice = { provider: string; model: string }
+
 /** Post-install opt-in (§8.3): bundled agents land disabled; without this
  * prompt a fresh installer opens an empty app with no hint that the refresher
- * exists, buried in bg-tasks. */
-function EnableAgentsDialog({ appName, names, busy, onEnable, onSkip }: {
+ * exists, buried in bg-tasks. The model picker defaults to the host-pinned
+ * model but lets the user override before the first run. */
+function EnableAgentsDialog({ appName, names, defaultModel, busy, onEnable, onSkip }: {
   appName: string
   names: string[]
+  defaultModel?: ModelChoice
   busy: boolean
-  onEnable: () => void
+  onEnable: (model: ModelChoice | null) => void
   onSkip: () => void
 }) {
+  const [options, setOptions] = useState<Array<ModelChoice & { label: string }>>([])
+  const [selected, setSelected] = useState<string>(defaultModel ? `${defaultModel.provider}::${defaultModel.model}` : '')
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const r = await window.ipc.invoke('models:list', null)
+        setOptions(r.providers.flatMap((p) => p.models.map((m) => ({
+          provider: p.id,
+          model: m.id,
+          label: `${m.name ?? m.id} (${p.name})`,
+        }))))
+      } catch { /* no picker — enable keeps the pinned model */ }
+    })()
+  }, [])
+
+  const choice = (): ModelChoice | null => {
+    const [provider, model] = selected.split('::')
+    return provider && model ? { provider, model } : null
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div className="w-full max-w-md rounded-xl border border-border bg-background p-5 shadow-xl">
@@ -97,10 +122,24 @@ function EnableAgentsDialog({ appName, names, busy, onEnable, onSkip }: {
         <ul className="mb-3 list-inside list-disc text-sm text-muted-foreground">
           {names.map((n) => <li key={n}>{n}</li>)}
         </ul>
+        {options.length > 0 && (
+          <label className="mb-3 flex items-center gap-2 text-sm text-muted-foreground">
+            Run with
+            <select value={selected} onChange={(e) => setSelected(e.target.value)}
+              className="min-w-0 flex-1 truncate rounded-md border border-border bg-background px-2 py-1 text-sm">
+              {defaultModel && !options.some((o) => o.provider === defaultModel.provider && o.model === defaultModel.model) && (
+                <option value={`${defaultModel.provider}::${defaultModel.model}`}>{defaultModel.model} (default)</option>
+              )}
+              {options.map((o) => (
+                <option key={`${o.provider}::${o.model}`} value={`${o.provider}::${o.model}`}>{o.label}</option>
+              ))}
+            </select>
+          </label>
+        )}
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onSkip} disabled={busy}
             className="rounded-md border border-border px-3 py-1.5 text-sm font-medium hover:bg-accent">Not now</button>
-          <button type="button" onClick={onEnable} disabled={busy}
+          <button type="button" onClick={() => onEnable(choice())} disabled={busy}
             className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50">
             {busy ? 'Turning on…' : 'Turn on & run now'}
           </button>
@@ -119,7 +158,7 @@ export function CatalogTab({ onInstalled }: { onInstalled: (folder: string) => v
   const [busy, setBusy] = useState(false)
   const [urlDialog, setUrlDialog] = useState(false)
   const [url, setUrl] = useState('')
-  const [agentPrompt, setAgentPrompt] = useState<{ folder: string; appName: string; slugs: string[]; names: string[] } | null>(null)
+  const [agentPrompt, setAgentPrompt] = useState<{ folder: string; appName: string; slugs: string[]; names: string[]; defaultModel?: ModelChoice } | null>(null)
   const [enabling, setEnabling] = useState(false)
 
   const load = async (force = false) => {
@@ -165,12 +204,15 @@ export function CatalogTab({ onInstalled }: { onInstalled: (folder: string) => v
     }
   }
 
-  const enableAgents = async () => {
+  const enableAgents = async (model: ModelChoice | null) => {
     if (!agentPrompt) return
     setEnabling(true)
     try {
       for (const slug of agentPrompt.slugs) {
-        await window.ipc.invoke('bg-task:patch', { slug, partial: { active: true } })
+        await window.ipc.invoke('bg-task:patch', {
+          slug,
+          partial: { active: true, ...(model ? { model: model.model, provider: model.provider } : {}) },
+        })
         // First run so the app opens with data; resolves when the run ends, so
         // fire-and-forget.
         void window.ipc.invoke('bg-task:run', { slug }).catch(() => { /* surfaced in bg-tasks */ })
@@ -194,15 +236,17 @@ export function CatalogTab({ onInstalled }: { onInstalled: (folder: string) => v
       if (r.status === 'installed' && r.app) {
         if (r.app.agentSlugs.length > 0) {
           // Offer to switch the bundled agents on (they install disabled).
+          let defaultModel: ModelChoice | undefined
           const names = await Promise.all(r.app.agentSlugs.map(async (slug) => {
             try {
               const g = await window.ipc.invoke('bg-task:get', { slug })
+              if (g.task?.model && g.task.provider) defaultModel = { model: g.task.model, provider: g.task.provider }
               return g.task?.name ?? slug
             } catch {
               return slug
             }
           }))
-          setAgentPrompt({ folder: r.app.folder, appName: r.app.manifest?.name ?? r.app.folder, slugs: r.app.agentSlugs, names })
+          setAgentPrompt({ folder: r.app.folder, appName: r.app.manifest?.name ?? r.app.folder, slugs: r.app.agentSlugs, names, defaultModel })
         } else {
           onInstalled(r.app.folder)
         }
@@ -301,8 +345,9 @@ export function CatalogTab({ onInstalled }: { onInstalled: (folder: string) => v
         <EnableAgentsDialog
           appName={agentPrompt.appName}
           names={agentPrompt.names}
+          defaultModel={agentPrompt.defaultModel}
           busy={enabling}
-          onEnable={() => void enableAgents()}
+          onEnable={(model) => void enableAgents(model)}
           onSkip={() => {
             const folder = agentPrompt.folder
             setAgentPrompt(null)
