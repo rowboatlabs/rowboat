@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Bot, Download, Link2, RefreshCw, Search, ShieldAlert } from 'lucide-react'
+import { BadgeCheck, Bot, Download, Link2, RefreshCw, Search, ShieldAlert } from 'lucide-react'
 import type { rowboatApp } from '@x/shared'
 
 // Catalog tab (spec §14): search the registry, install with the D18 capability
@@ -160,6 +160,18 @@ export function CatalogTab({ onInstalled }: { onInstalled: (folder: string) => v
   const [url, setUrl] = useState('')
   const [agentPrompt, setAgentPrompt] = useState<{ folder: string; appName: string; slugs: string[]; names: string[]; defaultModel?: ModelChoice } | null>(null)
   const [enabling, setEnabling] = useState(false)
+  // Registry name → local folder, for apps already installed from the catalog.
+  const [installedByName, setInstalledByName] = useState<Map<string, string>>(new Map())
+
+  const loadInstalled = async () => {
+    try {
+      const r = await window.ipc.invoke('apps:list', {})
+      setInstalledByName(new Map(
+        r.apps.filter((a) => a.kind === 'installed' && a.install).map((a) => [a.install!.name, a.folder]),
+      ))
+    } catch { /* cards just show Install */ }
+  }
+  useEffect(() => { void loadInstalled() }, [])
 
   const load = async (force = false) => {
     setError(null)
@@ -233,6 +245,7 @@ export function CatalogTab({ onInstalled }: { onInstalled: (folder: string) => v
         ? await window.ipc.invoke('apps:installFromUrl', { url: preview.url, confirmed: true })
         : await window.ipc.invoke('apps:install', { name: preview.name ?? '', confirmed: true })
       setPreview(null)
+      void loadInstalled()
       if (r.status === 'installed' && r.app) {
         if (r.app.agentSlugs.length > 0) {
           // Offer to switch the bundled agents on (they install disabled).
@@ -300,10 +313,18 @@ export function CatalogTab({ onInstalled }: { onInstalled: (folder: string) => v
                 </div>
                 <p className="truncate text-xs text-muted-foreground">{r.description || 'No description.'}</p>
               </div>
-              <button type="button" onClick={() => void startInstall(r.name)}
-                className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm font-medium hover:bg-accent">
-                <Download className="size-4" /> Install
-              </button>
+              {installedByName.has(r.name) ? (
+                <button type="button" title="Installed — open it"
+                  onClick={() => onInstalled(installedByName.get(r.name)!)}
+                  className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium text-green-600 hover:bg-green-500/10 dark:text-green-500">
+                  <BadgeCheck className="size-4" /> Installed
+                </button>
+              ) : (
+                <button type="button" onClick={() => void startInstall(r.name)}
+                  className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm font-medium hover:bg-accent">
+                  <Download className="size-4" /> Install
+                </button>
+              )}
             </div>
           ))}
         </div>
