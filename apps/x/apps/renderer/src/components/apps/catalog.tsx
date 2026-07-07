@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Download, Link2, RefreshCw, Search, ShieldAlert } from 'lucide-react'
+import { Bot, Download, Link2, RefreshCw, Search, ShieldAlert } from 'lucide-react'
 import type { rowboatApp } from '@x/shared'
 
 // Catalog tab (spec §14): search the registry, install with the D18 capability
@@ -74,6 +74,42 @@ function InstallConfirmDialog({ preview, busy, onConfirm, onCancel }: {
   )
 }
 
+/** Post-install opt-in (§8.3): bundled agents land disabled; without this
+ * prompt a fresh installer opens an empty app with no hint that the refresher
+ * exists, buried in bg-tasks. */
+function EnableAgentsDialog({ appName, names, busy, onEnable, onSkip }: {
+  appName: string
+  names: string[]
+  busy: boolean
+  onEnable: () => void
+  onSkip: () => void
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="w-full max-w-md rounded-xl border border-border bg-background p-5 shadow-xl">
+        <div className="mb-1 flex items-center gap-2 text-base font-semibold">
+          <Bot className="size-5" /> Turn on {names.length === 1 ? 'its background agent' : 'its background agents'}?
+        </div>
+        <p className="mb-3 text-sm text-muted-foreground">
+          {appName} ships {names.length === 1 ? 'an agent' : 'agents'} that keep{names.length === 1 ? 's' : ''} its
+          data fresh on a schedule, using your connected accounts and AI models. {names.length === 1 ? 'It is' : 'They are'} currently off.
+        </p>
+        <ul className="mb-3 list-inside list-disc text-sm text-muted-foreground">
+          {names.map((n) => <li key={n}>{n}</li>)}
+        </ul>
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={onSkip} disabled={busy}
+            className="rounded-md border border-border px-3 py-1.5 text-sm font-medium hover:bg-accent">Not now</button>
+          <button type="button" onClick={onEnable} disabled={busy}
+            className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50">
+            {busy ? 'Turning on…' : 'Turn on & run now'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function CatalogTab({ onInstalled }: { onInstalled: (folder: string) => void }) {
   const [records, setRecords] = useState<rowboatApp.RegistryRecord[]>([])
   const [stale, setStale] = useState(false)
@@ -83,6 +119,8 @@ export function CatalogTab({ onInstalled }: { onInstalled: (folder: string) => v
   const [busy, setBusy] = useState(false)
   const [urlDialog, setUrlDialog] = useState(false)
   const [url, setUrl] = useState('')
+  const [agentPrompt, setAgentPrompt] = useState<{ folder: string; appName: string; slugs: string[]; names: string[] } | null>(null)
+  const [enabling, setEnabling] = useState(false)
 
   const load = async (force = false) => {
     setError(null)
@@ -127,6 +165,23 @@ export function CatalogTab({ onInstalled }: { onInstalled: (folder: string) => v
     }
   }
 
+  const enableAgents = async () => {
+    if (!agentPrompt) return
+    setEnabling(true)
+    try {
+      for (const slug of agentPrompt.slugs) {
+        await window.ipc.invoke('bg-task:patch', { slug, partial: { active: true } })
+        // First run so the app opens with data; resolves when the run ends, so
+        // fire-and-forget.
+        void window.ipc.invoke('bg-task:run', { slug }).catch(() => { /* surfaced in bg-tasks */ })
+      }
+    } catch { /* patch failures land the user in the same place as "Not now" */ }
+    const folder = agentPrompt.folder
+    setAgentPrompt(null)
+    setEnabling(false)
+    onInstalled(folder)
+  }
+
   const confirmInstall = async () => {
     if (!preview) return
     setBusy(true)
@@ -136,7 +191,22 @@ export function CatalogTab({ onInstalled }: { onInstalled: (folder: string) => v
         ? await window.ipc.invoke('apps:installFromUrl', { url: preview.url, confirmed: true })
         : await window.ipc.invoke('apps:install', { name: preview.name ?? '', confirmed: true })
       setPreview(null)
-      if (r.status === 'installed' && r.app) onInstalled(r.app.folder)
+      if (r.status === 'installed' && r.app) {
+        if (r.app.agentSlugs.length > 0) {
+          // Offer to switch the bundled agents on (they install disabled).
+          const names = await Promise.all(r.app.agentSlugs.map(async (slug) => {
+            try {
+              const g = await window.ipc.invoke('bg-task:get', { slug })
+              return g.task?.name ?? slug
+            } catch {
+              return slug
+            }
+          }))
+          setAgentPrompt({ folder: r.app.folder, appName: r.app.manifest?.name ?? r.app.folder, slugs: r.app.agentSlugs, names })
+        } else {
+          onInstalled(r.app.folder)
+        }
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -224,6 +294,20 @@ export function CatalogTab({ onInstalled }: { onInstalled: (folder: string) => v
           busy={busy}
           onConfirm={() => void confirmInstall()}
           onCancel={() => setPreview(null)}
+        />
+      )}
+
+      {agentPrompt && (
+        <EnableAgentsDialog
+          appName={agentPrompt.appName}
+          names={agentPrompt.names}
+          busy={enabling}
+          onEnable={() => void enableAgents()}
+          onSkip={() => {
+            const folder = agentPrompt.folder
+            setAgentPrompt(null)
+            onInstalled(folder)
+          }}
         />
       )}
     </div>
