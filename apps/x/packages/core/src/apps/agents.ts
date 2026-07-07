@@ -5,6 +5,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { TriggersSchema, type BackgroundTask } from '@x/shared/dist/background-task.js';
 import type { AppSummary } from '@x/shared/dist/rowboat-app.js';
 import { WorkDir } from '../config/config.js';
+import { getDefaultModelAndProvider } from '../models/defaults.js';
 import { appDir, agentTaskSlug } from './indexer.js';
 
 // Bundled background agents (spec §8). Definitions ship in the app package at
@@ -94,6 +95,17 @@ async function materializeAgent(folder: string, agentFile: string): Promise<stri
         sourceApp: folder,
         createdAt: new Date().toISOString(),
     };
+    // Packages can't pin a model (§8.1 — the author's providers aren't the
+    // installer's), but the bg-task category default is a lite model that
+    // reliably mangles large tool payloads (invalid JSON → contract
+    // rejections → the app never gets data). Pin the HOST's default model at
+    // materialization instead — the installer's machine decides, exactly like
+    // the copilot does for tasks it authors.
+    try {
+        const sel = await getDefaultModelAndProvider();
+        task.model = sel.model;
+        task.provider = sel.provider;
+    } catch { /* no model config — leave the category default */ }
     await fs.mkdir(taskDir, { recursive: true });
     await fs.writeFile(taskYaml, stringifyYaml(task), 'utf-8');
     await fs.writeFile(path.join(taskDir, 'index.md'), '', 'utf-8').catch(() => undefined);

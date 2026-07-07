@@ -143,9 +143,16 @@ shell**; never generate a refresh script) and store it via the
 **\`app-set-data\`** builtin: \`{ appFolder, file: "data.json", data: <object> }\`
 — pass the object directly, never \`JSON.stringify\` it. The write is atomic and
 contract-checked; on a failed fetch keep the last good data (never overwrite
-good series with empties). If the app should ship the agent, mirror the
-definition into \`agents/<slug>.yaml\` with ONLY \`name\`, \`instructions\`,
-\`triggers\`, and list the filename in \`manifest.agents\`.
+good series with empties).
+
+**ALWAYS bundle the agent into the app as well** (required, not optional):
+mirror the definition into \`agents/<slug>.yaml\` with ONLY \`name\`,
+\`instructions\`, \`triggers\` (no \`active\`, no \`model\` — the schema rejects
+them) and list the filename in \`manifest.agents\`. The app package ships only
+what's inside the app folder: without this mirror, a published copy of the app
+is dead on arrival — installers get a UI whose data never refreshes. The
+bundled copy materializes as a disabled bg-task for installers (they opt in);
+the \`create-background-task\` task you made stays the author's live agent.
 
 ## 6. Prohibitions
 

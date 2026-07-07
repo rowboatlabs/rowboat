@@ -1646,6 +1646,9 @@ export function setupIpcHandlers() {
       const preview = appInstallPreviews.get(args.name) ?? await appsInstaller.previewInstall(record);
       const result = await appsInstaller.installFromRegistry(record, preview);
       appInstallPreviews.delete(args.name);
+      // Materialize bundled agents NOW, not on the next apps:list poll — the
+      // renderer's post-install enable dialog patches these tasks immediately.
+      if (result.app) await appsAgents.syncAppAgents(result.app);
       capture('app_installed', { name: args.name });
       return result;
     },
@@ -1654,6 +1657,7 @@ export function setupIpcHandlers() {
         return appsInstaller.previewUrlInstall(args.url);
       }
       const result = await appsInstaller.confirmUrlInstall(args.url);
+      if (result.app) await appsAgents.syncAppAgents(result.app);
       capture('app_installed', { name: result.app.manifest?.name ?? result.app.folder });
       return result;
     },
