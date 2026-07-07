@@ -29,6 +29,14 @@ function assistantCalls(...parts: Array<ReturnType<typeof toolCallPart>>) {
   return { role: 'assistant' as const, content: parts }
 }
 
+function modelStep(
+  turnId: string,
+  modelCallIndex: number,
+  event: Extract<TEvent, { type: 'model_step_event' }>['event'],
+): Extract<TEvent, { type: 'model_step_event' }> {
+  return { type: 'model_step_event', turnId, ts: TS, modelCallIndex, event }
+}
+
 describe('applyOverlay', () => {
   it('accumulates text and reasoning deltas', () => {
     let overlay = emptyOverlay()
@@ -333,17 +341,19 @@ describe('buildSessionChatState', () => {
       state.conversation.filter(isChatMessage).map((m) => m.content),
     ).toEqual(['first?', 'first answer', 'second?'])
     expect(state.isProcessing).toBe(true) // latest turn idle = actively working
-    expect(state.isThinking).toBe(true)
+    expect(state.isReasoning).toBe(false)
+    expect(state.isWaitingOnHuman).toBe(false)
   })
 
   it('is settled (not processing) when the latest turn is terminal', () => {
     const turn = reduceTurn(completedTurnLog(T1, S1, 'q', 'a'))
     const state = buildSessionChatState([turn], emptyOverlay())
     expect(state.isProcessing).toBe(false)
-    expect(state.isThinking).toBe(false)
+    expect(state.isReasoning).toBe(false)
+    expect(state.isWaitingOnHuman).toBe(false)
   })
 
-  it('exposes pending permissions as request events; waiting is not thinking', () => {
+  it('exposes pending permissions as request events and marks the turn as waiting', () => {
     const turn = reduceTurn([
       created(T1, S1),
       requested(T1, 0),
@@ -375,7 +385,78 @@ describe('buildSessionChatState', () => {
       permission: { kind: 'command', commandNames: ['rm'] },
     })
     expect(state.isProcessing).toBe(true)
-    expect(state.isThinking).toBe(false)
+    expect(state.isReasoning).toBe(false)
+    expect(state.isWaitingOnHuman).toBe(true)
+  })
+
+  it('does not mark automatic permission classification as waiting on a human', () => {
+    const turnCreated = created(T1, S1)
+    const turn = reduceTurn([
+      {
+        ...turnCreated,
+        config: { ...turnCreated.config, autoPermission: true },
+      },
+      requested(T1, 0),
+      completed(T1, 0, assistantCalls(toolCallPart('p1', 'executeCommand'))),
+      {
+        type: 'tool_permission_required',
+        turnId: T1,
+        ts: TS,
+        toolCallId: 'p1',
+        toolName: 'executeCommand',
+        request: { kind: 'command', commandNames: ['echo'] },
+      },
+    ])
+    const state = buildSessionChatState([turn], emptyOverlay())
+    expect(state.allPermissionRequests.has('p1')).toBe(false)
+    expect(state.isProcessing).toBe(true)
+    expect(state.isReasoning).toBe(false)
+    expect(state.isWaitingOnHuman).toBe(false)
+  })
+
+  it('marks the turn as waiting when automatic permission classification defers', () => {
+    const turnCreated = created(T1, S1)
+    const turn = reduceTurn([
+      {
+        ...turnCreated,
+        config: { ...turnCreated.config, autoPermission: true },
+      },
+      requested(T1, 0),
+      completed(T1, 0, assistantCalls(toolCallPart('p1', 'executeCommand'))),
+      {
+        type: 'tool_permission_required',
+        turnId: T1,
+        ts: TS,
+        toolCallId: 'p1',
+        toolName: 'executeCommand',
+        request: { kind: 'command', commandNames: ['rm'] },
+      },
+      {
+        type: 'tool_permission_classified',
+        turnId: T1,
+        ts: TS,
+        toolCallId: 'p1',
+        decision: 'defer',
+        reason: 'needs human review',
+      },
+    ])
+    const state = buildSessionChatState([turn], emptyOverlay())
+    expect(state.allPermissionRequests.has('p1')).toBe(true)
+    expect(state.isProcessing).toBe(true)
+    expect(state.isReasoning).toBe(false)
+    expect(state.isWaitingOnHuman).toBe(true)
+  })
+
+  it('tracks reasoning only between reasoning_start and reasoning_end', () => {
+    const events: TEvent[] = [
+      created(T1, S1),
+      requested(T1, 0),
+      modelStep(T1, 0, { type: 'reasoning_start' }),
+    ]
+    expect(buildSessionChatState([reduceTurn(events)], emptyOverlay()).isReasoning).toBe(true)
+
+    events.push(modelStep(T1, 0, { type: 'reasoning_end', text: 'considering' }))
+    expect(buildSessionChatState([reduceTurn(events)], emptyOverlay()).isReasoning).toBe(false)
   })
 
   it('maps human decisions to responses and classifier decisions to auto-decisions', () => {
@@ -420,7 +501,8 @@ describe('buildSessionChatState', () => {
       query: 'Deploy?',
       options: ['Yes', 'No'],
     })
-    expect(state.isThinking).toBe(false) // waiting on the human, no shimmer
+    expect(state.isReasoning).toBe(false)
+    expect(state.isWaitingOnHuman).toBe(true)
   })
 
   it('stitches live tool output onto the matching tool item', () => {
@@ -440,5 +522,6 @@ describe('buildSessionChatState', () => {
     const turn = reduceTurn([created(T1, S1), requested(T1, 0)])
     const state = buildSessionChatState([turn], { ...emptyOverlay(), text: 'typing…' })
     expect(state.currentAssistantMessage).toBe('typing…')
+    expect(state.isReasoning).toBe(false)
   })
 })

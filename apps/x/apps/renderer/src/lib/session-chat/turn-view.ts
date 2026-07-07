@@ -330,9 +330,12 @@ export type SessionChatState = {
   // Composer blocked / Stop shown until the latest turn settles (waiting on a
   // permission or ask-human still counts as processing).
   isProcessing: boolean
-  // Actively working (non-terminal, nothing waiting on the user) — drives the
-  // "Thinking…" shimmer; deliberately false under permission/ask-human cards.
-  isThinking: boolean
+  // True only between reasoning_start and reasoning_end for the latest open
+  // model call. This describes model activity, not whole-turn liveness.
+  isReasoning: boolean
+  // Kept separate from processing so permission/ask-human controls remain
+  // interactive while the turn is suspended for user input.
+  isWaitingOnHuman: boolean
 }
 
 function toolCallPartOf(tc: ToolCallState) {
@@ -342,6 +345,34 @@ function toolCallPartOf(tc: ToolCallState) {
     toolName: tc.toolName,
     arguments: tc.input,
   }
+}
+
+// An unresolved permission is not necessarily waiting on the user. In auto
+// mode the classifier advances it without human input unless it defers (or
+// cannot classify the request). Keeping this distinction here prevents both
+// a transient permission card and a false human-wait state while the classifier
+// is working.
+function permissionNeedsHuman(state: TurnState, tc: ToolCallState): boolean {
+  if (!state.definition.config.humanAvailable) return false
+  if (!state.definition.config.autoPermission) return true
+  const permission = tc.permission
+  return (
+    permission?.required.checkerError !== undefined ||
+    permission?.classificationFailed === true ||
+    permission?.classification?.decision === 'defer'
+  )
+}
+
+function isModelReasoning(state: TurnState): boolean {
+  const call = state.modelCalls[state.modelCalls.length - 1]
+  if (!call || call.response !== undefined || call.error !== undefined) return false
+
+  let reasoning = false
+  for (const event of call.stepEvents) {
+    if (event.type === 'reasoning_start') reasoning = true
+    if (event.type === 'reasoning_end') reasoning = false
+  }
+  return reasoning
 }
 
 // Compose the whole session's conversation: prior (settled) turns plus the
@@ -375,6 +406,7 @@ export function buildSessionChatState(
 
   if (latest) {
     for (const tc of outstandingPermissions(latest)) {
+      if (!permissionNeedsHuman(latest, tc)) continue
       allPermissionRequests.set(tc.toolCallId, {
         runId: latestTurnId,
         type: 'tool-permission-request',
@@ -418,6 +450,7 @@ export function buildSessionChatState(
   }
 
   const settled = status === 'completed' || status === 'failed' || status === 'cancelled'
+  const waitingOnHuman = allPermissionRequests.size > 0 || pendingAskHumanRequests.size > 0
   return {
     conversation,
     currentAssistantMessage: stripVoiceTags(overlay.text),
@@ -427,6 +460,7 @@ export function buildSessionChatState(
     permissionResponses,
     autoPermissionDecisions,
     isProcessing: latest !== undefined && !settled,
-    isThinking: status === 'idle',
+    isReasoning: latest !== undefined && !settled && isModelReasoning(latest),
+    isWaitingOnHuman: waitingOnHuman,
   }
 }

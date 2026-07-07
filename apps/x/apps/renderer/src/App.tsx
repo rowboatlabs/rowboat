@@ -57,7 +57,7 @@ import {
   type FileMention,
 } from '@/components/ai-elements/prompt-input';
 
-import { Shimmer } from '@/components/ai-elements/shimmer';
+import { TurnActivityIndicator } from '@/components/turn-activity-indicator';
 import { useSmoothedText } from './hooks/useSmoothedText';
 import { Tool, ToolContent, ToolGroupComponent, ToolHeader, ToolTabbedContent } from '@/components/ai-elements/tool';
 import { WebSearchResult } from '@/components/ai-elements/web-search-result';
@@ -968,12 +968,13 @@ function App() {
   const streamingBuffersRef = useRef<Map<string, { assistant: string }>>(new Map())
   const [isStopping, setIsStopping] = useState(false)
   const [, setStopClickedAt] = useState<number | null>(null)
-  // Sessions runtime: hook-derived activity for the ACTIVE chat.
-  // activeIsProcessing blocks the composer until the turn settles;
-  // activeIsThinking ("actively working") drives shimmers and disables
-  // permission/ask-human buttons — false while waiting on the user.
+  // Sessions runtime: whole-turn liveness drives the composer Stop control
+  // and running indicator. Model reasoning is a narrower state used only to
+  // label that indicator "Thinking..." while reasoning is actually streaming.
   const activeIsProcessing = sessionChat.chatState?.isProcessing ?? isProcessing
-  const activeIsThinking = sessionChat.chatState ? sessionChat.chatState.isThinking : isProcessing
+  const activeIsReasoning = sessionChat.chatState?.isReasoning ?? false
+  const activeIsWaitingOnHuman = sessionChat.chatState?.isWaitingOnHuman ?? false
+  const activeIsWorking = activeIsProcessing && !activeIsWaitingOnHuman
   // A failed session load must be visible, not a blank chat.
   const sessionLoadErrorItems = React.useMemo<ConversationItem[]>(() => (
     sessionChat.error
@@ -6766,7 +6767,7 @@ function App() {
                                               onApproveSession={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'session')}
                                               onApproveAlways={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'always')}
                                               onDeny={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
-                                              isProcessing={isActive && activeIsThinking}
+                                              isProcessing={isActive && activeIsWorking}
                                               response={response}
                                             />
                                           )}
@@ -6784,7 +6785,7 @@ function App() {
                                     query={request.query}
                                     options={request.options}
                                     onResponse={(response) => handleAskHumanResponse(request.toolCallId, request.subflow, response)}
-                                    isProcessing={isActive && activeIsThinking}
+                                    isProcessing={isActive && activeIsWorking}
                                   />
                                 ))}
 
@@ -6796,10 +6797,10 @@ function App() {
                                   </Message>
                                 )}
 
-                                {isActive && activeIsThinking && !tabState.currentAssistantMessage && (
+                                {isActive && activeIsProcessing && (
                                   <Message from="assistant">
                                     <MessageContent>
-                                      <Shimmer duration={1}>Thinking...</Shimmer>
+                                      <TurnActivityIndicator isReasoning={activeIsReasoning} />
                                     </MessageContent>
                                   </Message>
                                 )}
@@ -6952,7 +6953,8 @@ function App() {
                 allPermissionRequests={activeChatTabState.allPermissionRequests}
                 permissionResponses={activeChatTabState.permissionResponses}
                 autoPermissionDecisions={activeChatTabState.autoPermissionDecisions}
-                isThinking={activeIsThinking}
+                isReasoning={activeIsReasoning}
+                isWaitingOnHuman={activeIsWaitingOnHuman}
                 onPermissionResponse={handlePermissionResponse}
                 onAskHumanResponse={handleAskHumanResponse}
                 isToolOpenForTab={isToolOpenForTab}
