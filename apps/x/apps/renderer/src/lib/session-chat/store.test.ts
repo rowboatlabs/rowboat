@@ -5,6 +5,7 @@ import type { SessionsClient } from './client'
 import type { SessionFeedListener } from './feed'
 import { SessionChatStore, SessionListStore } from './store'
 import {
+  TS,
   assistantText,
   completed,
   completedTurnLog,
@@ -144,7 +145,25 @@ describe('SessionChatStore', () => {
 
     emit(turnEvent(S1, 'turn-1', created('turn-1', S1, user('go'))))
     emit(turnEvent(S1, 'turn-1', requested('turn-1', 0)))
-    expect(store.getSnapshot().chatState?.isThinking).toBe(true)
+    expect(store.getSnapshot().chatState?.isProcessing).toBe(true)
+    expect(store.getSnapshot().chatState?.isReasoning).toBe(false)
+
+    emit(turnEvent(S1, 'turn-1', {
+      type: 'model_step_event',
+      turnId: 'turn-1',
+      ts: TS,
+      modelCallIndex: 0,
+      event: { type: 'reasoning_start' },
+    }))
+    expect(store.getSnapshot().chatState?.isReasoning).toBe(true)
+    emit(turnEvent(S1, 'turn-1', {
+      type: 'model_step_event',
+      turnId: 'turn-1',
+      ts: TS,
+      modelCallIndex: 0,
+      event: { type: 'reasoning_end', text: 'done reasoning' },
+    }))
+    expect(store.getSnapshot().chatState?.isReasoning).toBe(false)
 
     emit(turnEvent(S1, 'turn-1', completed('turn-1', 0, assistantText('done'))))
     emit(turnEvent(S1, 'turn-1', turnCompleted('turn-1')))

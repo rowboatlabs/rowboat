@@ -32,7 +32,7 @@ export function created(
   turnId: string,
   sessionId: string,
   input: ReturnType<typeof user> = user('hello'),
-): TEvent {
+): Extract<TEvent, { type: 'turn_created' }> {
   return {
     type: 'turn_created',
     schemaVersion: 1,

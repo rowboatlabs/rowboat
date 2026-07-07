@@ -23,7 +23,7 @@ import {
   MessageContent,
   MessageResponse,
 } from '@/components/ai-elements/message'
-import { Shimmer } from '@/components/ai-elements/shimmer'
+import { TurnActivityIndicator } from '@/components/turn-activity-indicator'
 import { Tool, ToolContent, ToolGroupComponent, ToolHeader, ToolTabbedContent } from '@/components/ai-elements/tool'
 import { WebSearchResult } from '@/components/ai-elements/web-search-result'
 import { ComposioConnectCard } from '@/components/ai-elements/composio-connect-card'
@@ -143,10 +143,8 @@ interface ChatSidebarProps {
   chatTabStates?: Record<string, ChatTabViewState>
   viewportAnchors?: Record<string, ChatViewportAnchorState>
   isProcessing: boolean
-  // Actively working (sessions runtime). When provided, drives the shimmer
-  // instead of isProcessing so waiting on a permission/ask-human doesn't
-  // render a "Thinking…" under the card.
-  isThinking?: boolean
+  isReasoning?: boolean
+  isWaitingOnHuman?: boolean
   isStopping?: boolean
   onStop?: () => void
   onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => void
@@ -215,7 +213,8 @@ export function ChatSidebar({
   chatTabStates = {},
   viewportAnchors = {},
   isProcessing,
-  isThinking,
+  isReasoning = false,
+  isWaitingOnHuman = false,
   isStopping,
   onStop,
   onSubmit,
@@ -736,7 +735,7 @@ export function ChatSidebar({
                                             onApproveSession={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'session')}
                                             onApproveAlways={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'always')}
                                             onDeny={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
-                                            isProcessing={isActive && (isThinking ?? isProcessing)}
+                                            isProcessing={isActive && isProcessing && !isWaitingOnHuman}
                                             response={response}
                                           />
                                         )}
@@ -753,7 +752,7 @@ export function ChatSidebar({
                                   key={request.toolCallId}
                                   query={request.query}
                                   onResponse={(response) => onAskHumanResponse(request.toolCallId, request.subflow, response)}
-                                  isProcessing={isActive && (isThinking ?? isProcessing)}
+                                  isProcessing={isActive && isProcessing && !isWaitingOnHuman}
                                 />
                               ))}
 
@@ -765,10 +764,10 @@ export function ChatSidebar({
                                 </Message>
                               )}
 
-                              {isActive && (isThinking ?? isProcessing) && !tabState.currentAssistantMessage && (
+                              {isActive && isProcessing && (
                                 <Message from="assistant">
                                   <MessageContent>
-                                    <Shimmer duration={1}>Thinking...</Shimmer>
+                                    <TurnActivityIndicator isReasoning={isReasoning} />
                                   </MessageContent>
                                 </Message>
                               )}
