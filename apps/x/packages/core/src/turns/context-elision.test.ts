@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { z } from "zod";
 import type { TurnContext, TurnEvent } from "@x/shared/dist/turns.js";
 import {
+    DEFAULT_ELISION_POLICY,
     ElidingContextResolver,
+    createContextResolver,
     elideHistoricImages,
     elideHistoricMiddlePaneContent,
     elideHistoricToolResults,
@@ -306,6 +308,32 @@ const POLICY_OFF = {
     images: false,
     middlePaneContent: false,
 };
+
+describe("createContextResolver", () => {
+    // The factory is the app's one sanctioned constructor (DI container and
+    // inspect CLI). If this stops returning the eliding decorator, every
+    // construction site silently regresses to full historic replay.
+    it("wraps the repo resolver in the eliding decorator", () => {
+        const resolver = createContextResolver({
+            turnRepo: new InMemoryTurnRepo(),
+        });
+        expect(resolver).toBeInstanceOf(ElidingContextResolver);
+    });
+
+    it("applies the default policy through the decorated resolver", async () => {
+        const repo = new InMemoryTurnRepo();
+        repo.seed(toolTurnLog(T1, [], "x".repeat(5000)));
+        // Pinned to the shipped defaults (not the machine's context.json) so
+        // the test is hermetic while still exercising the full wiring.
+        const resolved = await createContextResolver({
+            turnRepo: repo,
+            loadPolicy: () => DEFAULT_ELISION_POLICY,
+        }).resolve({ previousTurnId: T1 });
+        const tool = resolved.find((m) => m.role === "tool");
+        expect(tool?.content).toContain("elided");
+        expect(tool?.content.length).toBeLessThan(1000);
+    });
+});
 
 describe("ElidingContextResolver", () => {
     function resolver(

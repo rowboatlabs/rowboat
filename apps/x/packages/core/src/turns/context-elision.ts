@@ -230,10 +230,14 @@ export class ElidingContextResolver implements IContextResolver {
 // the loop transmits.
 export function createContextResolver({
     turnRepo,
+    loadPolicy,
 }: {
     turnRepo: ITurnRepo;
+    // Injectable for tests; the app default reads config/context.json.
+    loadPolicy?: () => ElisionPolicy;
 }): IContextResolver {
     return new ElidingContextResolver({
         inner: new TurnRepoContextResolver({ turnRepo }),
+        ...(loadPolicy ? { loadPolicy } : {}),
     });
 }
