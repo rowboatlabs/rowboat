@@ -1,3 +1,4 @@
+// Electron main process entry point.
 import { app, BrowserWindow, desktopCapturer, protocol, net, shell, session, safeStorage, type Session } from "electron";
 import path from "node:path";
 import {
