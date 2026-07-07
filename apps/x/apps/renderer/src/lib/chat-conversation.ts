@@ -10,6 +10,9 @@ export interface MessageAttachment {
   mimeType: string
   size?: number
   thumbnailUrl?: string
+  /** Live webcam frame from video chat mode — rendered as a compact filmstrip.
+   *  Carries no path; thumbnailUrl holds the frame as a data: URL. */
+  isVideoFrame?: boolean
 }
 
 export interface ChatMessage {
@@ -118,6 +121,19 @@ export const normalizeToolOutput = (
   return output
 }
 
+export const getToolErrorText = (tool: ToolCall): string | undefined => {
+  if (tool.status !== 'error') return undefined
+  if (typeof tool.result === 'string' && tool.result.trim()) return tool.result
+  if (tool.result !== undefined) {
+    try {
+      return JSON.stringify(tool.result, null, 2)
+    } catch {
+      // Fall through to the generic label for non-serializable legacy values.
+    }
+  }
+  return 'Tool error'
+}
+
 export type WebSearchCardResult = { title: string; url: string; description: string }
 
 export type WebSearchCardData = {
@@ -198,6 +214,22 @@ const summarizeFilterUpdates = (updates: Record<string, unknown>): string => {
   return parts.length > 0 ? parts.join(', ') : 'Updated view'
 }
 
+const APP_VIEW_LABELS: Record<string, string> = {
+  home: 'home',
+  email: 'email',
+  meetings: 'meetings',
+  'live-notes': 'live notes',
+  'bg-tasks': 'background agents',
+  'chat-history': 'chat history',
+  knowledge: 'knowledge',
+  workspace: 'workspace',
+  code: 'code',
+  bases: 'bases',
+  graph: 'graph',
+}
+
+const appViewLabel = (view: unknown): string => APP_VIEW_LABELS[view as string] ?? String(view ?? 'view')
+
 export const getAppActionCardData = (tool: ToolCall): AppActionCardData | null => {
   if (tool.name !== 'app-navigation') return null
   const result = tool.result as Record<string, unknown> | undefined
@@ -209,7 +241,10 @@ export const getAppActionCardData = (tool: ToolCall): AppActionCardData | null =
     const action = input.action as string
     switch (action) {
       case 'open-note': return { action, label: `Opening ${(input.path as string || '').split('/').pop()?.replace(/\.md$/, '') || 'note'}...` }
-      case 'open-view': return { action, label: `Opening ${input.view} view...` }
+      case 'open-view': return { action, label: `Opening ${appViewLabel(input.view)}...` }
+      case 'open-app': return { action, label: `Opening ${input.appId || 'app'}...` }
+      case 'read-view': return { action, label: `Reading ${appViewLabel(input.view)}...` }
+      case 'open-item': return { action, label: 'Opening...' }
       case 'update-base-view': return { action, label: 'Updating view...' }
       case 'create-base': return { action, label: `Creating "${input.name}"...` }
       case 'get-base-state': return null // renders as normal tool block
@@ -224,7 +259,33 @@ export const getAppActionCardData = (tool: ToolCall): AppActionCardData | null =
       return { action: 'open-note', label: `Opened ${name}` }
     }
     case 'open-view':
-      return { action: 'open-view', label: `Opened ${result.view} view` }
+      return { action: 'open-view', label: `Opened ${appViewLabel(result.view)}` }
+    case 'open-app':
+      return { action: 'open-app', label: `Opened ${result.appName || result.appId || 'app'}` }
+    case 'read-view': {
+      const counted =
+        (result.threads as unknown[] | undefined)?.length ??
+        (result.agents as unknown[] | undefined)?.length ??
+        (result.sessions as unknown[] | undefined)?.length
+      return {
+        action: 'read-view',
+        label: counted !== undefined
+          ? `Read ${appViewLabel(result.view)} (${counted} item${counted === 1 ? '' : 's'})`
+          : `Read ${appViewLabel(result.view)}`,
+      }
+    }
+    case 'open-item': {
+      switch (result.kind) {
+        case 'email-thread': return { action: 'open-item', label: 'Opened email thread' }
+        case 'note': {
+          const name = (result.path as string || '').split('/').pop()?.replace(/\.md$/, '') || 'note'
+          return { action: 'open-item', label: `Opened ${name}` }
+        }
+        case 'bg-task': return { action: 'open-item', label: `Opened agent "${result.taskName}"` }
+        case 'session': return { action: 'open-item', label: 'Opened chat' }
+        default: return { action: 'open-item', label: 'Opened item' }
+      }
+    }
     case 'update-base-view':
       return {
         action: 'update-base-view',

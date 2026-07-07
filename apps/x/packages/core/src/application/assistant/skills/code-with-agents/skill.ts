@@ -79,7 +79,7 @@ After \`code_agent_run\` returns:
 - Pass through the agent's \`summary\` as-is. Do not rewrite it.
 - Refer to file paths as plain text. Do NOT use \`\`\`file:path\`\`\` reference blocks. (This overrides the global "always wrap paths in filepath blocks" rule — for code-mode output, plain text.)
 - Only add your own explanation if it failed:
-  - \`success: false\` with a message — surface the message. If it mentions the agent isn't installed or signed in, tell the user to install or sign in via **Settings → Code Mode**.
+  - A tool error with a message — surface the message. If it mentions the agent isn't installed or signed in, tell the user to install or sign in via **Settings → Code Mode**.
   - \`stopReason: "cancelled"\` — the run was stopped; acknowledge briefly and ask if they want to continue.
 
 ---

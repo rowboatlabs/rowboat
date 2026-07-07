@@ -7,6 +7,7 @@ import {
     isErrorMessage,
     isToolCall,
     getToolDisplayName,
+    getToolErrorText,
     toToolState,
     normalizeToolOutput,
 } from '@/lib/chat-conversation'
@@ -62,7 +63,7 @@ function CompactToolRow({ tool }: { tool: ToolCall }) {
     const [open, setOpen] = useState(false)
     const title = getToolDisplayName(tool)
     const state = toToolState(tool.status)
-    const errorText = tool.status === 'error' && typeof tool.result === 'string' ? tool.result : undefined
+    const errorText = getToolErrorText(tool)
     return (
         <Tool open={open} onOpenChange={setOpen} className="mb-0 text-xs">
             <ToolHeader title={title} type={`tool-${tool.name}` as `tool-${string}`} state={state} />

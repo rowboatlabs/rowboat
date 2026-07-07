@@ -1,0 +1,40 @@
+name: apps/x tests
+
+on:
+  pull_request:
+    paths:
+      - "apps/x/**"
+      - ".github/workflows/x-tests.yml"
+  push:
+    branches: [main]
+    paths:
+      - "apps/x/**"
+      - ".github/workflows/x-tests.yml"
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/x
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/x/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Builds @x/shared (core/renderer tests import its dist), then runs
+      # the shared, core, and renderer vitest suites in order.
+      - name: Run tests
+        run: npm test

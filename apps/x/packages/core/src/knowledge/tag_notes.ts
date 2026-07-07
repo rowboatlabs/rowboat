@@ -1,10 +1,9 @@
 import fs from 'fs';
 import path from 'path';
 import { WorkDir } from '../config/config.js';
-import { createRun, createMessage } from '../runs/runs.js';
+import { runWhenPossible, toolInputPaths } from '../agents/headless-app.js';
 import { getKgModel } from '../models/defaults.js';
-import { bus } from '../runs/bus.js';
-import { getErrorDetails, waitForRunCompletion } from '../agents/utils.js';
+import { getErrorDetails } from '../agents/utils.js';
 import { serviceLogger } from '../services/service_logger.js';
 import { limitEventItems } from './limit_event_items.js';
 import {
@@ -83,13 +82,6 @@ function getUntaggedNotes(state: NoteTaggingState): string[] {
 async function tagNoteBatch(
     files: { path: string; content: string }[]
 ): Promise<{ runId: string; filesEdited: Set<string> }> {
-    const run = await createRun({
-        agentId: NOTE_TAGGING_AGENT,
-        model: await getKgModel(),
-        useCase: 'knowledge_sync',
-        subUseCase: 'tag_notes',
-    });
-
     let message = `Tag the following ${files.length} knowledge notes by prepending YAML frontmatter with appropriate tags.\n\n`;
     message += `**Important:** Use workspace-relative paths with file-editText (e.g. "knowledge/People/Sarah Chen.md", NOT absolute paths).\n\n`;
 
@@ -105,33 +97,16 @@ async function tagNoteBatch(
         message += `\n\n---\n\n`;
     }
 
-    const filesEdited = new Set<string>();
-
-    const unsubscribe = await bus.subscribe(run.id, async (event) => {
-        if (event.type !== 'tool-invocation') {
-            return;
-        }
-        if (event.toolName !== 'file-editText') {
-            return;
-        }
-        try {
-            const parsed = JSON.parse(event.input) as { path?: string };
-            if (typeof parsed.path === 'string') {
-                filesEdited.add(parsed.path);
-            }
-        } catch {
-            // ignore parse errors
-        }
+    const { turnId, state } = await runWhenPossible({
+        agentId: NOTE_TAGGING_AGENT,
+        message,
+        ...(await getKgModel()),
+        throwOnError: true,
     });
 
-    await createMessage(run.id, message);
-    try {
-        await waitForRunCompletion(run.id, { throwOnError: true });
-    } finally {
-        unsubscribe();
-    }
-
-    return { runId: run.id, filesEdited };
+    // Edited paths come from the durable turn state instead of streaming
+    // bus subscriptions.
+    return { runId: turnId, filesEdited: toolInputPaths(state, ['file-editText']) };
 }
 
 /**

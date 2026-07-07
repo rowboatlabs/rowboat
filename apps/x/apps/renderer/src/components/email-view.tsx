@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Archive, Bold, CheckCheck, Forward, Italic, Link as LinkIcon, List, ListOrdered, LoaderIcon, Mail, Paperclip, Quote, RefreshCw, Reply, ReplyAll, Search, Send, Sparkles, Strikethrough, Trash2 } from 'lucide-react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Archive, Bold, CheckCheck, Forward, Italic, Link as LinkIcon, List, ListOrdered, LoaderIcon, Mail, Paperclip, Quote, Redo2, RefreshCw, Reply, ReplyAll, Search, Send, Sparkles, SquarePen, Star, StarOff, Strikethrough, Trash2, Undo2, X } from 'lucide-react'
 import { useEditor, EditorContent, type Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
@@ -9,6 +9,9 @@ import { cn } from '@/lib/utils'
 import { toast } from '@/lib/toast'
 import { useTheme } from '@/contexts/theme-context'
 import { SettingsDialog } from '@/components/settings-dialog'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 
 type GmailThread = blocks.GmailThread
 type GmailThreadMessage = blocks.GmailThreadMessage
@@ -163,6 +166,11 @@ function buildRecipients(
   selfEmail: string,
 ): { to: string[]; cc: string[] } {
   if (mode === 'forward') return { to: [], cc: [] }
+  // Editing an existing draft: recipients are whatever the draft already has.
+  if (mode === 'draft') {
+    const draftMsg = latestMessage(thread)
+    return { to: splitAddresses(draftMsg?.to), cc: splitAddresses(draftMsg?.cc) }
+  }
 
   const latest = latestMessage(thread)
   const self = selfEmail.toLowerCase()
@@ -189,9 +197,41 @@ function buildRecipients(
   return { to, cc }
 }
 
+// Reply-chain headers (and thread placement) for the outgoing message.
+// Replies rebuild the chain from the thread's messages. An edited draft is a
+// single-message pseudo-thread whose own Message-ID must never be referenced
+// (it dies on send, which would break recipients' threading) — reuse the
+// In-Reply-To/References the draft already carries instead. Forwards and new
+// messages start fresh.
+function threadingHeaders(
+  mode: ComposeMode,
+  thread: GmailThread | undefined,
+): { threadId?: string; inReplyTo?: string; references?: string } {
+  if (!thread || mode === 'forward' || mode === 'new') return {}
+  if (mode === 'draft') {
+    const draftMsg = latestMessage(thread)
+    return {
+      // Only a reply draft stays on its thread — a standalone draft's
+      // threadId is the phantom thread holding just the draft itself.
+      threadId: draftMsg?.inReplyToHeader ? thread.threadId : undefined,
+      inReplyTo: draftMsg?.inReplyToHeader,
+      references: draftMsg?.referencesHeader,
+    }
+  }
+  const messageIds = thread.messages
+    .map((m) => m.messageIdHeader)
+    .filter((v): v is string => Boolean(v))
+  return {
+    threadId: thread.threadId,
+    inReplyTo: latestMessage(thread)?.messageIdHeader,
+    references: messageIds.join(' ') || undefined,
+  }
+}
+
 // Subject line for a reply ("Re: …") or forward ("Fwd: …"), avoiding double prefixes.
 function composeSubject(mode: ComposeMode, rawSubject?: string): string {
   const raw = (rawSubject || '').trim()
+  if (mode === 'draft') return raw // keep the draft's own subject verbatim
   if (mode === 'forward') return /^fwd:/i.test(raw) ? raw : `Fwd: ${raw}`.trim()
   return /^re:/i.test(raw) ? raw : `Re: ${raw}`.trim()
 }
@@ -258,6 +298,15 @@ function escapeHtml(text: string): string {
     .replace(/'/g, '&#39;')
 }
 
+// Convert AI-generated plain text into the simple paragraph HTML the Tiptap
+// editor expects (blank lines → paragraphs, single newlines → <br />).
+function plainTextToHtml(text: string): string {
+  return text
+    .split(/\n{2,}/)
+    .map((para) => `<p>${escapeHtml(para.trim()).replace(/\n/g, '<br />')}</p>`)
+    .join('')
+}
+
 function splitPlainTextQuote(text: string): { visible: string; quoted: string | null } {
   const re = /(?:^|\n)On\s+.+?\swrote:\s*(?:\n|$)/
   const match = re.exec(text)
@@ -300,7 +349,10 @@ function buildEmailDocument(
   opts: { theme: 'light' | 'dark'; adaptToTheme: boolean },
 ): string {
   const useDark = opts.theme === 'dark' && opts.adaptToTheme
-  const colorScheme = opts.theme === 'dark' ? 'light dark' : 'light'
+  // Only opt into the dark color scheme when the email actually adapts to the
+  // theme — otherwise Chromium paints the canvas dark under emails that
+  // assume a white background.
+  const colorScheme = useDark ? 'light dark' : 'light'
   const bodyColor = useDark ? '#d4d4d8' : '#202124'
   const linkColor = useDark ? '#a78bfa' : '#1a73e8'
   const quoteBorder = useDark ? '#2e2e35' : '#dadce0'
@@ -386,6 +438,10 @@ function HtmlMessageBody({ message, threadId }: { message: GmailThreadMessage; t
   const [height, setHeight] = useState(message.bodyHeight ?? 80)
   const [hasQuote, setHasQuote] = useState(false)
   const [showQuotes, setShowQuotes] = useState(false)
+  // Read by handleLoad so a reload (theme switch rebuilds srcDoc) restores the
+  // expanded-quotes state on the fresh document.
+  const showQuotesRef = useRef(showQuotes)
+  useEffect(() => { showQuotesRef.current = showQuotes }, [showQuotes])
 
   const adaptToTheme = useMemo(() => !isStyledHtml(message.bodyHtml!), [message.bodyHtml])
   const srcDoc = useMemo(
@@ -398,6 +454,16 @@ function HtmlMessageBody({ message, threadId }: { message: GmailThreadMessage; t
     const doc = iframe?.contentDocument
     if (!doc?.body) return
     setHasQuote(!!doc.querySelector('.gmail_quote, .gmail_attr, blockquote[type="cite"]'))
+    if (showQuotesRef.current) doc.documentElement.dataset.showQuotes = 'true'
+    // Clicking into the email body focuses the iframe document, which would
+    // otherwise swallow every list/thread shortcut (the parent's document
+    // keydown listeners never fire). The sandbox has allow-same-origin but no
+    // allow-scripts, so we forward from out here; the listener dies with the
+    // document on the next load.
+    doc.addEventListener('keydown', (event) => {
+      const clone = new KeyboardEvent('keydown', event)
+      if (!document.dispatchEvent(clone)) event.preventDefault()
+    })
     const measure = () => {
       // Measure off body only. documentElement.scrollHeight stretches to fill
       // the iframe viewport, so once we size the iframe up (e.g. user expanded
@@ -477,16 +543,32 @@ function formatAttachmentSize(bytes?: number): string {
 }
 
 function MessageAttachments({ attachments }: { attachments: NonNullable<GmailThreadMessage['attachments']> }) {
-  const openAttachment = (path: string, filename: string) => {
-    void window.ipc
-      .invoke('shell:openPath', { path })
-      .then((result) => {
-        if (result?.error) toast(`Could not open ${filename}: ${result.error}`, 'error')
-      })
-      .catch((err) => {
-        const message = err instanceof Error ? err.message : String(err)
-        toast(`Could not open ${filename}: ${message}`, 'error')
-      })
+  const openAttachment = async (att: NonNullable<GmailThreadMessage['attachments']>[number]) => {
+    try {
+      // Ensure the file is on disk before handing off to the OS opener. Inbox
+      // attachments are saved during sync, but search-result attachments are
+      // only fetched on demand. gmail:downloadAttachment short-circuits when the
+      // file already exists, so calling it first is cheap and guarantees the
+      // file is present — we can't rely on shell:openPath reporting a missing
+      // file as an error (xdg-open on Linux reports success even when the path
+      // doesn't exist, so the old open-then-download fallback never fired).
+      if (att.messageId) {
+        const dl = await window.ipc.invoke('gmail:downloadAttachment', {
+          messageId: att.messageId,
+          savedPath: att.savedPath,
+          attachmentId: att.attachmentId,
+        })
+        if (!dl.ok) {
+          toast(`Could not download ${att.filename}: ${dl.error ?? 'unknown error'}`, 'error')
+          return
+        }
+      }
+      const result = await window.ipc.invoke('shell:openPath', { path: att.savedPath })
+      if (result?.error) toast(`Could not open ${att.filename}: ${result.error}`, 'error')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      toast(`Could not open ${att.filename}: ${message}`, 'error')
+    }
   }
 
   return (
@@ -498,7 +580,7 @@ function MessageAttachments({ attachments }: { attachments: NonNullable<GmailThr
             key={att.savedPath}
             type="button"
             className="gmail-attachment"
-            onClick={() => openAttachment(att.savedPath, att.filename)}
+            onClick={() => void openAttachment(att)}
             title={`Open ${att.filename}`}
           >
             <Paperclip size={13} />
@@ -511,7 +593,20 @@ function MessageAttachments({ attachments }: { attachments: NonNullable<GmailThr
   )
 }
 
-type ComposeMode = 'reply' | 'replyAll' | 'forward'
+type ComposeMode = 'reply' | 'replyAll' | 'forward' | 'new' | 'draft'
+
+// Platform-aware modifier: Cmd on macOS, Ctrl on Windows/Linux (App.tsx pattern).
+const isMac = typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac')
+
+// True when a keyboard event originated in a text-entry context, so
+// single-letter shortcuts must stay inert.
+function isEditableTarget(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null
+  return Boolean(
+    el &&
+    (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)
+  )
+}
 
 function ComposeToolbarButton({
   editor,
@@ -527,9 +622,11 @@ function ComposeToolbarButton({
   children: React.ReactNode
 }) {
   return (
-    <button
+    <Button
       type="button"
-      className={cn('gmail-compose-tool', isActive && 'is-active')}
+      variant="ghost"
+      size="icon-sm"
+      className={cn('size-7 text-muted-foreground', isActive && 'bg-accent text-foreground')}
       onMouseDown={(event) => event.preventDefault()}
       onClick={() => {
         command()
@@ -540,20 +637,51 @@ function ComposeToolbarButton({
       title={label}
     >
       {children}
-    </button>
+    </Button>
   )
 }
 
 function ComposeToolbar({ editor, onOpenLink }: { editor: Editor; onOpenLink: () => void }) {
+  // Content-sized (no flex-1: a 0 basis always "fits" the current flex line,
+  // so the toolbar would never wrap — it would get squeezed until its
+  // fixed-size buttons overflowed the neighbors). The inner flex-wrap stacks
+  // the buttons if even a full line is too narrow to hold them.
   return (
-    <div className="gmail-compose-toolbar">
+    <div className="flex flex-wrap items-center gap-0.5 border-l border-border pl-2.5">
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        className="size-7 text-muted-foreground"
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => editor.chain().focus().undo().run()}
+        disabled={!editor.can().undo()}
+        aria-label="Undo"
+        title="Undo"
+      >
+        <Undo2 className="size-3.5" />
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        className="size-7 text-muted-foreground"
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => editor.chain().focus().redo().run()}
+        disabled={!editor.can().redo()}
+        aria-label="Redo"
+        title="Redo"
+      >
+        <Redo2 className="size-3.5" />
+      </Button>
+      <span className="mx-1.5 h-4 w-px bg-border" />
       <ComposeToolbarButton
         editor={editor}
         command={() => editor.chain().focus().toggleBold().run()}
         isActive={editor.isActive('bold')}
         label="Bold"
       >
-        <Bold size={14} />
+        <Bold className="size-3.5" />
       </ComposeToolbarButton>
       <ComposeToolbarButton
         editor={editor}
@@ -561,7 +689,7 @@ function ComposeToolbar({ editor, onOpenLink }: { editor: Editor; onOpenLink: ()
         isActive={editor.isActive('italic')}
         label="Italic"
       >
-        <Italic size={14} />
+        <Italic className="size-3.5" />
       </ComposeToolbarButton>
       <ComposeToolbarButton
         editor={editor}
@@ -569,16 +697,16 @@ function ComposeToolbar({ editor, onOpenLink }: { editor: Editor; onOpenLink: ()
         isActive={editor.isActive('strike')}
         label="Strikethrough"
       >
-        <Strikethrough size={14} />
+        <Strikethrough className="size-3.5" />
       </ComposeToolbarButton>
-      <span className="gmail-compose-tool-sep" />
+      <span className="mx-1.5 h-4 w-px bg-border" />
       <ComposeToolbarButton
         editor={editor}
         command={() => editor.chain().focus().toggleBulletList().run()}
         isActive={editor.isActive('bulletList')}
         label="Bulleted list"
       >
-        <List size={14} />
+        <List className="size-3.5" />
       </ComposeToolbarButton>
       <ComposeToolbarButton
         editor={editor}
@@ -586,7 +714,7 @@ function ComposeToolbar({ editor, onOpenLink }: { editor: Editor; onOpenLink: ()
         isActive={editor.isActive('orderedList')}
         label="Numbered list"
       >
-        <ListOrdered size={14} />
+        <ListOrdered className="size-3.5" />
       </ComposeToolbarButton>
       <ComposeToolbarButton
         editor={editor}
@@ -594,21 +722,60 @@ function ComposeToolbar({ editor, onOpenLink }: { editor: Editor; onOpenLink: ()
         isActive={editor.isActive('blockquote')}
         label="Quote"
       >
-        <Quote size={14} />
+        <Quote className="size-3.5" />
       </ComposeToolbarButton>
-      <span className="gmail-compose-tool-sep" />
-      <button
+      <span className="mx-1.5 h-4 w-px bg-border" />
+      <Button
         type="button"
-        className={cn('gmail-compose-tool', editor.isActive('link') && 'is-active')}
+        variant="ghost"
+        size="icon-sm"
+        className={cn('size-7 text-muted-foreground', editor.isActive('link') && 'bg-accent text-foreground')}
         onMouseDown={(event) => event.preventDefault()}
         onClick={onOpenLink}
         aria-label="Link"
         aria-pressed={editor.isActive('link')}
         title="Link"
       >
-        <LinkIcon size={14} />
-      </button>
+        <LinkIcon className="size-3.5" />
+      </Button>
     </div>
+  )
+}
+
+type ContactSuggestion = {
+  name: string
+  email: string
+}
+
+function formatContactToken(c: ContactSuggestion): string {
+  return c.name ? `${c.name} <${c.email}>` : c.email
+}
+
+// Stable hue per email so the avatar circle keeps a consistent color.
+function contactHue(email: string): number {
+  let h = 0
+  for (let i = 0; i < email.length; i++) h = (h * 31 + email.charCodeAt(i)) >>> 0
+  return h % 360
+}
+
+function contactInitial(c: ContactSuggestion): string {
+  const src = (c.name || c.email).trim()
+  return (src[0] || '?').toUpperCase()
+}
+
+// Renders a string with the matched substring wrapped in <mark>.
+function HighlightedText({ text, query }: { text: string; query: string }) {
+  if (!query) return <>{text}</>
+  const lower = text.toLowerCase()
+  const q = query.toLowerCase()
+  const idx = lower.indexOf(q)
+  if (idx < 0) return <>{text}</>
+  return (
+    <>
+      {text.slice(0, idx)}
+      <mark className="bg-transparent p-0 font-bold text-inherit">{text.slice(idx, idx + q.length)}</mark>
+      {text.slice(idx + q.length)}
+    </>
   )
 }
 
@@ -618,63 +785,187 @@ function RecipientField({
   onChange,
   autoFocus,
   trailing,
+  focusSignal,
 }: {
   label: string
   value: string[]
   onChange: (next: string[]) => void
   autoFocus?: boolean
   trailing?: React.ReactNode
+  /** Bump to move focus into this field (e.g. after a Cc/Bcc shortcut). */
+  focusSignal?: number
 }) {
   const [draft, setDraft] = useState('')
+  const [suggestions, setSuggestions] = useState<ContactSuggestion[]>([])
+  const [activeIndex, setActiveIndex] = useState(0)
+  const [isFocused, setIsFocused] = useState(false)
+  const [queryShown, setQueryShown] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
+  const fieldRef = useRef<HTMLDivElement>(null)
+  const listRef = useRef<HTMLUListElement>(null)
+  const queryTokenRef = useRef(0)
 
   useEffect(() => {
     if (autoFocus) inputRef.current?.focus()
   }, [autoFocus])
+
+  useEffect(() => {
+    if (focusSignal) inputRef.current?.focus()
+  }, [focusSignal])
+
+  const excludeEmails = useMemo(
+    () => value.map((token) => extractAddress(token).toLowerCase()).filter(Boolean),
+    [value],
+  )
+
+  // Debounced contact search — only runs when the user has actually typed
+  // something. An emptied draft closes the menu via the onChange handler (and
+  // commit() clears it after a pick); here we just invalidate in-flight
+  // queries so a stale response can't reopen it.
+  useEffect(() => {
+    const trimmed = draft.trim()
+    if (!isFocused || !trimmed) {
+      queryTokenRef.current++
+      return
+    }
+    const token = ++queryTokenRef.current
+    const timer = window.setTimeout(async () => {
+      try {
+        const result = (await window.ipc.invoke('gmail:searchContacts', {
+          query: draft,
+          limit: 8,
+          excludeEmails,
+        })) as { contacts?: ContactSuggestion[] } | undefined
+        if (token !== queryTokenRef.current) return
+        setSuggestions(result?.contacts ?? [])
+        setQueryShown(trimmed)
+        setActiveIndex(0)
+      } catch {
+        if (token !== queryTokenRef.current) return
+        setSuggestions([])
+      }
+    }, 60)
+    return () => window.clearTimeout(timer)
+  }, [draft, isFocused, excludeEmails])
+
+  // Keep the active row scrolled into view during keyboard navigation.
+  useEffect(() => {
+    const list = listRef.current
+    if (!list) return
+    const node = list.children[activeIndex] as HTMLElement | undefined
+    node?.scrollIntoView({ block: 'nearest' })
+  }, [activeIndex, suggestions])
 
   const commit = (raw: string) => {
     const additions = splitAddresses(raw)
     if (additions.length === 0) return
     onChange(dedupeRecipients([...value, ...additions], new Set()))
     setDraft('')
+    setSuggestions([])
+  }
+
+  const pickSuggestion = (c: ContactSuggestion) => {
+    commit(formatContactToken(c))
+    // Keep focus in the input so the user can keep typing more recipients.
+    inputRef.current?.focus()
   }
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === 'Enter' || event.key === ',' || event.key === ';' || (event.key === 'Tab' && draft.trim())) {
+    const hasSuggestions = suggestions.length > 0
+    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+      // Cmd/Ctrl+Enter is "send" — commit any half-typed address on the way
+      // and let the event bubble to the composer's send handler.
+      if (draft.trim()) commit(draft)
+      return
+    }
+    if (event.key === 'ArrowDown' && hasSuggestions) {
+      event.preventDefault()
+      setActiveIndex((i) => (i + 1) % suggestions.length)
+      return
+    }
+    if (event.key === 'ArrowUp' && hasSuggestions) {
+      event.preventDefault()
+      setActiveIndex((i) => (i - 1 + suggestions.length) % suggestions.length)
+      return
+    }
+    if (event.key === 'Escape' && hasSuggestions) {
+      event.preventDefault()
+      event.stopPropagation()
+      setSuggestions([])
+      return
+    }
+    if (event.key === 'Enter' || (event.key === 'Tab' && hasSuggestions)) {
+      // Prefer the highlighted suggestion when one is present.
+      if (hasSuggestions) {
+        event.preventDefault()
+        pickSuggestion(suggestions[activeIndex])
+        return
+      }
+      if (event.key === 'Enter' && draft.trim()) {
+        event.preventDefault()
+        commit(draft)
+        return
+      }
+    }
+    if (event.key === ',' || event.key === ';') {
       if (draft.trim()) {
         event.preventDefault()
         commit(draft)
       }
-    } else if (event.key === 'Backspace' && !draft && value.length > 0) {
+      return
+    }
+    if (event.key === 'Backspace' && !draft && value.length > 0) {
       onChange(value.slice(0, -1))
     }
   }
 
+  const showSuggestions = isFocused && suggestions.length > 0
+
   return (
-    <div className="gmail-recipient-row">
-      <span className="gmail-recipient-label">{label}</span>
-      <div className="gmail-recipient-field">
+    <div
+      className="flex items-start gap-2 border-b border-border px-3 py-1.5 text-sm"
+      data-suggestions-open={showSuggestions || undefined}
+    >
+      <span className="min-w-7 pt-1.5 text-muted-foreground">{label}</span>
+      <div className="relative flex min-w-0 flex-1 flex-wrap items-center gap-1" ref={fieldRef}>
         {value.map((token, index) => (
-          <span key={`${token}-${index}`} className="gmail-recipient-chip" title={extractAddress(token)}>
-            <span className="gmail-recipient-chip-label">{recipientLabel(token)}</span>
+          <span
+            key={`${token}-${index}`}
+            className="inline-flex h-6 max-w-full items-center gap-1 rounded-md bg-muted pl-2 pr-1 text-xs text-foreground"
+            title={extractAddress(token)}
+          >
+            <span className="max-w-[240px] truncate">{recipientLabel(token)}</span>
             <button
               type="button"
-              className="gmail-recipient-chip-remove"
+              className="inline-flex size-4 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               aria-label={`Remove ${extractAddress(token)}`}
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => onChange(value.filter((_, idx) => idx !== index))}
             >
-              ×
+              <X className="size-3" />
             </button>
           </span>
         ))}
         <input
           ref={inputRef}
-          className="gmail-recipient-input"
+          className="h-6 min-w-[80px] flex-1 border-0 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
           value={draft}
-          onChange={(event) => setDraft(event.target.value)}
+          onChange={(event) => {
+            const next = event.target.value
+            setDraft(next)
+            if (!next.trim()) setSuggestions([])
+          }}
           onKeyDown={onKeyDown}
-          onBlur={() => { if (draft.trim()) commit(draft) }}
+          onFocus={() => setIsFocused(true)}
+          onBlur={() => {
+            // Defer so a mousedown on a suggestion can pick it before the menu closes.
+            window.setTimeout(() => {
+              setIsFocused(false)
+              if (inputRef.current && draft.trim() && document.activeElement !== inputRef.current) {
+                commit(draft)
+              }
+            }, 80)
+          }}
           onPaste={(event) => {
             const text = event.clipboardData.getData('text')
             if (text && /[,;\n]/.test(text)) {
@@ -683,26 +974,153 @@ function RecipientField({
             }
           }}
         />
+        {showSuggestions && (
+          <ul
+            className="absolute left-0 top-[calc(100%+6px)] z-30 m-0 max-h-[296px] w-max min-w-[280px] max-w-[min(440px,100%)] list-none overflow-y-auto overscroll-contain rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
+            role="listbox"
+            ref={listRef}
+          >
+            {suggestions.map((c, idx) => {
+              const hue = contactHue(c.email)
+              return (
+                <li
+                  key={c.email}
+                  role="option"
+                  aria-selected={idx === activeIndex}
+                  className={cn(
+                    'flex cursor-pointer items-center gap-2.5 rounded-sm px-2.5 py-1.5 text-sm transition-colors',
+                    idx === activeIndex ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/60'
+                  )}
+                  onMouseDown={(event) => {
+                    // Prevent input blur before click fires.
+                    event.preventDefault()
+                    pickSuggestion(c)
+                  }}
+                  onMouseEnter={() => setActiveIndex(idx)}
+                >
+                  <span
+                    className="inline-flex size-6 flex-none items-center justify-center rounded-full text-xs font-semibold uppercase text-white"
+                    style={{ background: `hsl(${hue}, 60%, 42%)` }}
+                    aria-hidden="true"
+                  >
+                    {contactInitial(c)}
+                  </span>
+                  <span className="flex min-w-0 flex-1 flex-col leading-tight">
+                    <span className="truncate font-medium">
+                      <HighlightedText text={c.name || c.email} query={queryShown} />
+                    </span>
+                    {c.name && (
+                      <span className="mt-0.5 truncate text-xs text-muted-foreground">
+                        <HighlightedText text={c.email} query={queryShown} />
+                      </span>
+                    )}
+                  </span>
+                </li>
+              )
+            })}
+          </ul>
+        )}
       </div>
-      {trailing && <div className="gmail-recipient-trailing">{trailing}</div>}
+      {trailing && <div className="flex-none pt-1.5">{trailing}</div>}
     </div>
   )
 }
 
-function ComposeBox({
+const AI_GENERATE_SYSTEM =
+  'You write complete emails. Given an instruction, produce a subject line and a body. ' +
+  'Respond in EXACTLY this format and nothing else:\n' +
+  'Subject: <a concise, specific subject line>\n' +
+  '\n' +
+  '<the email body as plain text>\n' +
+  'Do not use markdown. Do not add any commentary, labels, or surrounding quotes. ' +
+  'When recipient names are provided, address them naturally (e.g. "Hi <first name>,"). ' +
+  'When the sender\'s first name is provided, sign off with that first name only; otherwise omit the sign-off name ' +
+  '(never write a placeholder like "[Your Name]").'
+
+const AI_REWRITE_SYSTEM =
+  'You rewrite emails. Given the current subject and body plus an edit instruction, ' +
+  'produce the revised subject line and body. Keep the subject if it still fits, or ' +
+  'refine it so it matches the rewritten body. Respond in EXACTLY this format and nothing else:\n' +
+  'Subject: <the subject line>\n' +
+  '\n' +
+  '<the rewritten email body as plain text>\n' +
+  'Do not use markdown. Do not add any commentary, labels, or surrounding quotes. ' +
+  'Preserve the existing sign-off; do not invent placeholder names like "[Your Name]".'
+
+// Split AI output of the form "Subject: …\n\n<body>" into its parts. If no
+// subject line is present, the whole text is treated as the body.
+function parseGeneratedEmail(text: string): { subject: string | null; body: string } {
+  const match = text.match(/^\s*Subject:\s*(.+?)(?:\r?\n|$)/i)
+  if (match) {
+    const subject = match[1].trim()
+    const body = text.slice(match.index! + match[0].length).replace(/^\s+/, '')
+    return { subject, body }
+  }
+  return { subject: null, body: text }
+}
+
+function firstNameFromDisplayName(name: string): string {
+  const trimmed = name.trim().replace(/^["']|["']$/g, '')
+  return trimmed.split(/\s+/)[0] || ''
+}
+
+// Guarantee the sender's first name signs off the email. If the model already
+// ended with the name (e.g. "Best,\nHarsh"), leave it; otherwise append it.
+function ensureSignature(body: string, name: string): string {
+  const signer = name.trim()
+  if (!signer) return body
+  const trimmed = body.replace(/\s+$/, '')
+  // Check the last couple of lines so we don't double up an existing sign-off.
+  const tail = trimmed.split('\n').slice(-2).join('\n').toLowerCase()
+  if (tail.includes(signer.toLowerCase())) return trimmed
+  return `${trimmed}\n\n${signer}`
+}
+
+const TONE_PRESETS: Array<{ key: string; label: string; instruction: string }> = [
+  { key: 'formal', label: 'Formal', instruction: 'Rewrite this email to be more formal and professional.' },
+  { key: 'casual', label: 'Casual', instruction: 'Rewrite this email to be more casual and friendly.' },
+  { key: 'shorter', label: 'Shorter', instruction: 'Rewrite this email to be more concise, keeping the key points.' },
+  { key: 'longer', label: 'Longer', instruction: 'Rewrite this email to be more detailed and thorough.' },
+]
+
+// Debounce before autosaving the composer to a Gmail draft after the last edit.
+const DRAFT_AUTOSAVE_MS = 1500
+
+// Shape of the gmail:saveDraft request, kept here so we can stash a snapshot in
+// a ref for the close/unmount flush without re-reading a torn-down editor.
+type DraftPayload = {
+  draftId?: string
+  threadId?: string
+  to?: string
+  cc?: string
+  bcc?: string
+  subject: string
+  bodyHtml: string
+  bodyText: string
+  inReplyTo?: string
+  references?: string
+  attachments?: Array<{ filename: string; mimeType: string; contentBase64: string }>
+}
+
+// Composer for replies, forwards, and (mode 'new') from-scratch emails. With a
+// thread it renders as an inline card under the thread; in 'new' mode it has no
+// thread and renders as a centered modal with the AI writing bar.
+const ComposeBox = memo(function ComposeBox({
   mode,
   thread,
-  selfEmail,
+  selfEmail = '',
   onClose,
 }: {
   mode: ComposeMode
-  thread: GmailThread
-  selfEmail: string
+  thread?: GmailThread
+  selfEmail?: string
   onClose: () => void
 }) {
-  const latest = latestMessage(thread)
+  const isNew = mode === 'new'
+  // Drafts and new messages share the full-modal layout (subject line, AI bar).
+  const isModal = isNew || mode === 'draft'
   const initialRecipients = useMemo(
-    () => buildRecipients(mode, thread, selfEmail),
+    () => (thread ? buildRecipients(mode, thread, selfEmail) : { to: [], cc: [] }),
     [mode, thread, selfEmail],
   )
 
@@ -711,11 +1129,20 @@ function ComposeBox({
   const [bccList, setBccList] = useState<string[]>([])
   const [showCc, setShowCc] = useState<boolean>(initialRecipients.cc.length > 0)
   const [showBcc, setShowBcc] = useState<boolean>(false)
-  const [subject, setSubject] = useState<string>(() => composeSubject(mode, thread.subject))
-  const modeLabel = mode === 'forward' ? 'Forward' : mode === 'replyAll' ? 'Reply all' : 'Reply'
+  // Bumped by the Cc/Bcc shortcuts so the freshly revealed field grabs focus.
+  const [ccFocusSignal, setCcFocusSignal] = useState(0)
+  const [bccFocusSignal, setBccFocusSignal] = useState(0)
+  const [subject, setSubject] = useState<string>(() => (thread ? composeSubject(mode, thread.subject) : ''))
+  const modeLabel = mode === 'draft' ? 'Draft' : isNew ? 'New message' : mode === 'forward' ? 'Forward' : mode === 'replyAll' ? 'Reply All' : 'Reply'
 
   const initialContent = useMemo(() => {
+    if (!thread) return ''
     if (mode === 'forward') return buildForwardedContent(thread)
+    // For a saved draft, reopen the exact HTML we stored so formatting survives.
+    if (mode === 'draft') {
+      const draftMsg = latestMessage(thread)
+      if (draftMsg?.bodyHtml) return draftMsg.bodyHtml
+    }
     // Gmail-side draft (user's own work) wins over the AI-generated draft.
     const source = stripQuotedReplyText(thread.gmail_draft || thread.draft_response || '')
     if (!source) return ''
@@ -725,16 +1152,27 @@ function ComposeBox({
       .join('')
   }, [mode, thread])
 
+  // Ref so the Tiptap keydown handler (captured once at editor creation)
+  // always calls the latest send closure; assigned below sendInGmail.
+  const sendRef = useRef<() => void>(() => {})
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ link: false }),
       Link.configure({ openOnClick: false, autolink: true }),
       Placeholder.configure({
-        placeholder: mode === 'forward' ? 'Write a message…' : 'Write your reply…',
+        placeholder: isModal || mode === 'forward' ? 'Write a message…' : 'Write your reply…',
       }),
     ],
     editorProps: {
-      attributes: { class: 'gmail-compose-content' },
+      attributes: { class: 'compose-content' },
+      handleKeyDown: (_view, event) => {
+        if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && !event.shiftKey) {
+          sendRef.current()
+          return true
+        }
+        return false
+      },
     },
     content: initialContent,
   })
@@ -782,13 +1220,358 @@ function ComposeBox({
     if (editor && sel) editor.chain().focus().setTextSelection(sel).run()
   }
 
+  // The signed-in account's display name, used to sign off AI-generated emails.
+  // Loaded in every mode (new, reply, forward) since the AI writer is available
+  // throughout and needs a name to sign off with.
+  const [selfName, setSelfName] = useState<string>('')
+  const selfFirstName = useMemo(() => firstNameFromDisplayName(selfName), [selfName])
+  useEffect(() => {
+    let cancelled = false
+    window.ipc.invoke('gmail:getAccountName', {})
+      .then((res) => { if (!cancelled && res?.name) setSelfName(res.name) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+
+  const [aiPrompt, setAiPrompt] = useState('')
+  const [generating, setGenerating] = useState(false)
+  // Once a draft has been generated, show a follow-up bar for iterative edits
+  // ("add a line about…", "remove the last paragraph", etc.). It hides again if
+  // the draft is emptied (e.g. undone), tracked via hasContent below.
+  const [hasGenerated, setHasGenerated] = useState(false)
+  const [hasContent, setHasContent] = useState(false)
+
+  // Keep hasContent in sync with the editor across typing, undo/redo, and clears.
+  useEffect(() => {
+    if (!editor) return
+    const sync = () => setHasContent(!editor.isEmpty)
+    sync()
+    editor.on('update', sync)
+    return () => { editor.off('update', sync) }
+  }, [editor])
+
+  // Clearing the body reverts the AI control to its "Write" state and drops the
+  // generated subject, so an emptied composer behaves like a fresh one. The
+  // hasGenerated guard avoids wiping a subject typed before any generation.
+  useEffect(() => {
+    if (hasGenerated && !hasContent) {
+      setHasGenerated(false)
+      setSubject('')
+    }
+  }, [hasGenerated, hasContent])
+
+  const runAi = async (instruction: string, aiMode: 'generate' | 'rewrite') => {
+    if (!editor || generating) return
+    const current = editor.getText().trim()
+    let prompt: string
+    let system: string
+    if (aiMode === 'generate') {
+      if (!instruction.trim()) { toast('Describe what to write.', 'error'); return }
+      system = AI_GENERATE_SYSTEM
+      const ctx: string[] = []
+      // When replying or forwarding, give the model the thread it's responding
+      // to (oldest first) so the draft is on-topic and references the right
+      // points. New emails have no thread and skip this.
+      if (thread) {
+        const threadText = thread.messages
+          .map((message, index) => {
+            const header = message.from ? `From: ${message.from}\n` : ''
+            return `--- Message ${index + 1} ---\n${header}${(message.body || '').trim()}`
+          })
+          .join('\n\n')
+        ctx.push(`This is a ${modeLabel.toLowerCase()} to the following email thread (oldest first):\n${threadText}`)
+      }
+      // Use the recipients' names (from the contacts picker) so the AI can
+      // address them naturally; fall back to the address when there's no name.
+      const recipientNames = toList
+        .map((token) => {
+          const name = extractName(token)
+          return name && name !== 'Unknown' ? name : extractAddress(token)
+        })
+        .filter(Boolean)
+      if (recipientNames.length) ctx.push(`Recipient(s): ${recipientNames.join(', ')}`)
+      if (selfFirstName) ctx.push(`Sender's first name (sign off as this): ${selfFirstName}`)
+      if (isNew && subject.trim()) ctx.push(`Desired subject hint: ${subject.trim()}`)
+      if (current) ctx.push(`Existing draft (revise or build on it):\n${current}`)
+      prompt = `${ctx.length ? ctx.join('\n') + '\n\n' : ''}Instruction: ${instruction.trim()}`
+    } else {
+      if (!instruction.trim()) { toast('Describe the edit to make.', 'error'); return }
+      if (!current) { toast('Write something first.', 'error'); return }
+      system = AI_REWRITE_SYSTEM
+      const subjectLine = subject.trim() ? `Subject: ${subject.trim()}\n\n` : ''
+      prompt = `Instruction: ${instruction}\n\n---\n${subjectLine}${current}`
+    }
+
+    setGenerating(true)
+    try {
+      // Draft through Copilot: no model override, so the backend resolves the
+      // same default model/provider the Copilot chat uses (models.json).
+      const res = await window.ipc.invoke('llm:generate', { prompt, system })
+      if (res.error || !res.text) {
+        toast(res.error || 'No text was generated.', 'error')
+        return
+      }
+      // Replace via a tracked transaction (selectAll + insertContent) so the AI
+      // draft lands in the editor's undo history and the toolbar's Undo reverts it.
+      if (aiMode === 'generate') {
+        const { subject: generatedSubject, body } = parseGeneratedEmail(res.text)
+        // Only new emails take the AI's subject; replies/forwards keep their
+        // derived "Re:"/"Fwd:" subject (and don't expose a subject field).
+        if (generatedSubject && isNew) setSubject(generatedSubject)
+        // Always sign off with the account first name, even if the model omitted it.
+        const signed = ensureSignature(body, selfFirstName)
+        editor.chain().focus().selectAll().insertContent(plainTextToHtml(signed)).run()
+        setHasGenerated(true)
+      } else {
+        // Rewrites also regenerate the subject so it stays in sync with the body —
+        // but only for new emails, to preserve a reply/forward's threaded subject.
+        const { subject: rewrittenSubject, body } = parseGeneratedEmail(res.text)
+        if (rewrittenSubject && isNew) setSubject(rewrittenSubject)
+        editor.chain().focus().selectAll().insertContent(plainTextToHtml(body)).run()
+      }
+    } catch (err) {
+      toast(`Generation failed: ${err instanceof Error ? err.message : String(err)}`, 'error')
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  // The single Write/Edit bar: generate a fresh draft until one exists, then
+  // switch to rewriting it. Clears the prompt after a run kicks off.
+  const runAiBar = async () => {
+    await runAi(aiPrompt, hasGenerated ? 'rewrite' : 'generate')
+    setAiPrompt('')
+  }
+
+  // Attachments staged for this message. contentBase64 is the raw file bytes,
+  // read in the renderer; the main process wraps them into the MIME on send.
+  const [attachments, setAttachments] = useState<
+    Array<{ id: string; filename: string; mimeType: string; size: number; contentBase64: string }>
+  >([])
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Gmail rejects messages over ~25MB; base64 inflates bytes by ~33%.
+  const MAX_TOTAL_BYTES = 25 * 1024 * 1024
+
+  // Read a file's bytes as raw base64 (the part after the data: URL prefix).
+  const readAsBase64 = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onerror = () => reject(reader.error ?? new Error('read failed'))
+      reader.onload = () => {
+        const result = String(reader.result)
+        const comma = result.indexOf(',')
+        resolve(comma >= 0 ? result.slice(comma + 1) : result)
+      }
+      reader.readAsDataURL(file)
+    })
+
+  const addFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return
+    const staged: typeof attachments = []
+    for (const file of Array.from(files)) {
+      try {
+        staged.push({
+          id: `${file.name}-${file.size}-${file.lastModified}`,
+          filename: file.name,
+          mimeType: file.type || 'application/octet-stream',
+          size: file.size,
+          contentBase64: await readAsBase64(file),
+        })
+      } catch {
+        toast(`Could not read ${file.name}.`, 'error')
+      }
+    }
+    setAttachments((prev) => {
+      const merged = [...prev]
+      for (const item of staged) {
+        if (!merged.some((a) => a.id === item.id)) merged.push(item)
+      }
+      const total = merged.reduce((sum, a) => sum + a.size, 0)
+      if (total > MAX_TOTAL_BYTES) {
+        toast('Attachments exceed the 25MB limit.', 'error')
+        return prev
+      }
+      return merged
+    })
+  }
+
+  const removeAttachment = (id: string) => {
+    setAttachments((prev) => prev.filter((a) => a.id !== id))
+  }
+
+  // ── Draft autosave ─────────────────────────────────────────────────────────
+  // Keep a real Gmail draft in sync with the composer while the user types
+  // (debounced) and flush a final save on close, so closing keeps the work in
+  // Gmail's Drafts folder (synced to every device) instead of discarding it.
+  // Empty/whitespace drafts are skipped. The core saveThreadDraft reuses an
+  // existing thread draft and tracks the id so edits update in place.
+  // Seeded when editing an existing draft so the first save updates it in place.
+  const draftIdRef = useRef<string | undefined>(thread?.draftId)
+  const lastPayloadRef = useRef<DraftPayload | null>(null)
+  const savingRef = useRef(false)        // a saveDraft IPC is in flight
+  const pendingRef = useRef(false)        // edits arrived mid-flight; save once more
+  const sentRef = useRef(false)           // suppress autosave after a successful send
+  const discardedRef = useRef(false)      // suppress autosave after discard
+  const closedRef = useRef(false)         // close already handled; skip unmount flush
+  const dirtyRef = useRef(false)          // user has edited since open
+  const fieldsMounted = useRef(false)     // skip the field effect's initial run
+  const autosaveTimer = useRef<number | null>(null)
+  const saveDraftNowRef = useRef<() => Promise<void>>(undefined)
+
+  const buildDraftPayload = useCallback((): DraftPayload | null => {
+    if (!editor || editor.isDestroyed) return null
+    const text = editor.getText().trim()
+    if (!text) return null // skip empty/whitespace drafts
+    const html = editor.getHTML()
+    const { threadId, inReplyTo, references } = threadingHeaders(mode, thread)
+    return {
+      draftId: draftIdRef.current,
+      threadId,
+      to: toList.join(', '),
+      cc: ccList.length ? ccList.join(', ') : undefined,
+      bcc: bccList.length ? bccList.join(', ') : undefined,
+      subject: subject.trim() || (thread ? composeSubject(mode, thread.subject) : ''),
+      bodyHtml: html,
+      bodyText: text,
+      inReplyTo,
+      references,
+      attachments: attachments.length
+        ? attachments.map(({ filename, mimeType, contentBase64 }) => ({ filename, mimeType, contentBase64 }))
+        : undefined,
+    }
+  }, [editor, thread, mode, toList, ccList, bccList, subject, attachments])
+
+  const saveDraftNow = useCallback(async () => {
+    if (sentRef.current || discardedRef.current) return
+    if (savingRef.current) { pendingRef.current = true; return }
+    const payload = lastPayloadRef.current
+    if (!payload && !draftIdRef.current) return
+    savingRef.current = true
+    pendingRef.current = false
+    try {
+      if (!payload) {
+        // The composer was deliberately emptied after edits — mirror Gmail and
+        // delete the autosaved draft rather than leaving its stale content.
+        const id = draftIdRef.current
+        if (id && dirtyRef.current) {
+          await window.ipc.invoke('gmail:deleteDraft', { draftId: id })
+          // Only forget the id once the delete succeeded (404/410 count as
+          // success server-side); a thrown failure keeps it for a retry.
+          if (draftIdRef.current === id) draftIdRef.current = undefined
+        }
+        return
+      }
+      payload.draftId = draftIdRef.current
+      const res = await window.ipc.invoke('gmail:saveDraft', payload)
+      if (res?.draftId && !discardedRef.current) draftIdRef.current = res.draftId
+    } catch {
+      // Autosave is best-effort; a failure just leaves the prior draft in place.
+    } finally {
+      savingRef.current = false
+      // Coalesce edits that landed mid-flight into one more save.
+      if (pendingRef.current && !sentRef.current && !discardedRef.current) {
+        pendingRef.current = false
+        void saveDraftNowRef.current?.()
+      }
+    }
+  }, [])
+  useEffect(() => { saveDraftNowRef.current = saveDraftNow }, [saveDraftNow])
+
+  const scheduleAutosave = useCallback(() => {
+    if (autosaveTimer.current) window.clearTimeout(autosaveTimer.current)
+    autosaveTimer.current = window.setTimeout(() => { void saveDraftNow() }, DRAFT_AUTOSAVE_MS)
+  }, [saveDraftNow])
+
+  // Wait (briefly, capped) for any in-flight autosave to settle so send/discard
+  // don't race it into a duplicate or orphaned draft.
+  const waitForSaveIdle = useCallback(async () => {
+    for (let guard = 0; savingRef.current && guard < 40; guard++) {
+      await new Promise((r) => window.setTimeout(r, 50))
+    }
+  }, [])
+
+  // Autosave on body edits (typing, AI insert, undo/redo).
+  useEffect(() => {
+    if (!editor) return
+    const onUpdate = () => {
+      dirtyRef.current = true
+      lastPayloadRef.current = buildDraftPayload()
+      scheduleAutosave()
+    }
+    editor.on('update', onUpdate)
+    return () => { editor.off('update', onUpdate) }
+  }, [editor, buildDraftPayload, scheduleAutosave])
+
+  // Autosave on header edits (recipients, subject, attachments), skipping mount.
+  useEffect(() => {
+    if (!fieldsMounted.current) { fieldsMounted.current = true; return }
+    dirtyRef.current = true
+    lastPayloadRef.current = buildDraftPayload()
+    scheduleAutosave()
+  }, [toList, ccList, bccList, subject, attachments, buildDraftPayload, scheduleAutosave])
+
+  // Safety net: if the composer is torn down without an explicit close (e.g.
+  // navigating away), still flush unsaved edits. closedRef guards the common
+  // path where handleClose already saved.
+  useEffect(() => {
+    return () => {
+      if (autosaveTimer.current) window.clearTimeout(autosaveTimer.current)
+      if (closedRef.current || sentRef.current || discardedRef.current || savingRef.current) return
+      if (!dirtyRef.current) return
+      const payload = lastPayloadRef.current
+      if (!payload) {
+        // Edited down to empty, then torn down — drop the stale draft.
+        if (draftIdRef.current) {
+          void window.ipc.invoke('gmail:deleteDraft', { draftId: draftIdRef.current }).catch(() => {})
+        }
+        return
+      }
+      payload.draftId = draftIdRef.current
+      void window.ipc.invoke('gmail:saveDraft', payload).catch(() => {})
+    }
+  }, [])
+
+  // Close (X / click-away): keep the draft. Flush a final save when there are
+  // unsaved edits. If a save is already in flight it will persist the latest
+  // content, so we skip here to avoid creating a duplicate.
+  const handleClose = useCallback(() => {
+    closedRef.current = true
+    if (autosaveTimer.current) window.clearTimeout(autosaveTimer.current)
+    if (!sentRef.current && !discardedRef.current && !savingRef.current && dirtyRef.current) {
+      const payload = buildDraftPayload()
+      if (payload) {
+        payload.draftId = draftIdRef.current
+        void window.ipc.invoke('gmail:saveDraft', payload).catch(() => {})
+      } else if (draftIdRef.current) {
+        // Closed with the body edited down to empty — mirror Gmail and drop
+        // the autosaved draft instead of keeping its stale content.
+        void window.ipc.invoke('gmail:deleteDraft', { draftId: draftIdRef.current }).catch(() => {})
+      }
+    }
+    onClose()
+  }, [buildDraftPayload, onClose])
+
+  // Discard: delete the autosaved draft (if any), then close.
+  const handleDiscard = useCallback(() => {
+    discardedRef.current = true
+    closedRef.current = true
+    if (autosaveTimer.current) window.clearTimeout(autosaveTimer.current)
+    void (async () => {
+      await waitForSaveIdle()
+      const id = draftIdRef.current
+      if (id) await window.ipc.invoke('gmail:deleteDraft', { draftId: id }).catch(() => {})
+    })()
+    onClose()
+  }, [onClose, waitForSaveIdle])
+
   const [sending, setSending] = useState(false)
   const sendInGmail = async () => {
     if (!editor || sending) return
     const html = editor.getHTML()
     const text = editor.getText().trim()
     if (!text) {
-      toast('Draft is empty.', 'error')
+      toast(isNew ? 'Message is empty.' : 'Draft is empty.', 'error')
       return
     }
 
@@ -797,42 +1580,92 @@ function ComposeBox({
       return
     }
 
-    // Build References chain from all known message ids (newest last).
-    const messageIds = thread.messages
-      .map((m) => m.messageIdHeader)
-      .filter((v): v is string => Boolean(v))
-    const references = messageIds.join(' ')
-    const inReplyTo = latest?.messageIdHeader
-    const isForward = mode === 'forward'
+    const { threadId, inReplyTo, references } = threadingHeaders(mode, thread)
 
+    // Stop autosave from racing the send (it would leave an orphaned draft), and
+    // let any in-flight save settle so we know the draft id to clean up.
+    sentRef.current = true
+    if (autosaveTimer.current) window.clearTimeout(autosaveTimer.current)
     setSending(true)
+    await waitForSaveIdle()
     try {
       const result = await window.ipc.invoke('gmail:sendReply', {
-        threadId: isForward ? undefined : thread.threadId,
+        threadId,
         to: toList.join(', '),
         cc: ccList.length ? ccList.join(', ') : undefined,
         bcc: bccList.length ? bccList.join(', ') : undefined,
-        subject: subject.trim() || composeSubject(mode, thread.subject),
+        subject: subject.trim() || (thread ? composeSubject(mode, thread.subject) : '(No subject)'),
         bodyHtml: html,
         bodyText: text,
-        inReplyTo: isForward ? undefined : inReplyTo,
-        references: isForward ? undefined : references || undefined,
+        inReplyTo,
+        references,
+        attachments: attachments.length
+          ? attachments.map(({ filename, mimeType, contentBase64 }) => ({ filename, mimeType, contentBase64 }))
+          : undefined,
       })
       if (result.error) {
+        sentRef.current = false // allow autosave to resume on a failed send
         toast(`Send failed: ${result.error}`, 'error')
         return
       }
+      // Gmail only auto-cleans drafts on a threaded send; remove any draft we
+      // autosaved for a brand-new message so it doesn't linger after sending.
+      const leftover = draftIdRef.current
+      if (leftover) {
+        draftIdRef.current = undefined
+        void window.ipc.invoke('gmail:deleteDraft', { draftId: leftover }).catch(() => {})
+      }
       toast('Sent.', 'success')
+      closedRef.current = true
       onClose()
     } catch (err) {
+      sentRef.current = false
       toast(`Send failed: ${err instanceof Error ? err.message : String(err)}`, 'error')
     } finally {
       setSending(false)
     }
   }
+  sendRef.current = () => { void sendInGmail() }
+
+  // Composer-level shortcuts, on the wrapper so they work from any field.
+  // Inner handlers (recipient menu, link bar, AI Enter) preventDefault first
+  // and keep priority via the defaultPrevented check.
+  const onComposerKeyDown = (e: React.KeyboardEvent) => {
+    if (e.defaultPrevented) return
+    const mod = e.metaKey || e.ctrlKey
+    if (mod && e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      e.stopPropagation()
+      // Deferred one tick: a recipient field may have just committed a
+      // half-typed address, and send must read the re-rendered list.
+      window.setTimeout(() => sendRef.current(), 0)
+      return
+    }
+    if (mod && e.shiftKey && e.key.toLowerCase() === 'c') {
+      e.preventDefault()
+      e.stopPropagation()
+      setShowCc(true)
+      setCcFocusSignal((n) => n + 1)
+      return
+    }
+    if (mod && e.shiftKey && e.key.toLowerCase() === 'b') {
+      e.preventDefault()
+      e.stopPropagation()
+      setShowBcc(true)
+      setBccFocusSignal((n) => n + 1)
+      return
+    }
+    // The modal variant closes via Radix's own Escape handling.
+    if (!isModal && e.key === 'Escape') {
+      e.preventDefault()
+      e.stopPropagation()
+      if (linkOpen) cancelLink()
+      else handleClose()
+    }
+  }
 
   const refineWithCopilot = () => {
-    if (!editor) return
+    if (!editor || !thread) return
     const currentDraft = editor.getText().trim()
     const threadSubject = thread.subject || '(No subject)'
 
@@ -862,42 +1695,140 @@ function ComposeBox({
     window.dispatchEvent(new Event('email-block:draft-with-assistant'))
   }
 
-  return (
-    <div className="gmail-compose-card">
-      <div className="gmail-compose-header">
-        <span>{modeLabel}</span>
-        <button type="button" onClick={onClose} aria-label="Close compose">×</button>
-      </div>
+  const inner = (
+    <>
       <RecipientField
         label="To"
         value={toList}
         onChange={setToList}
-        autoFocus={mode === 'forward'}
+        autoFocus={isNew || mode === 'forward'}
         trailing={
-          <div className="gmail-recipient-toggles">
-            {!showCc && <button type="button" onClick={() => setShowCc(true)}>Cc</button>}
-            {!showBcc && <button type="button" onClick={() => setShowBcc(true)}>Bcc</button>}
+          <div className="flex gap-2.5">
+            {!showCc && (
+              <button
+                type="button"
+                className="text-xs text-muted-foreground hover:text-foreground hover:underline"
+                onClick={() => setShowCc(true)}
+              >Cc</button>
+            )}
+            {!showBcc && (
+              <button
+                type="button"
+                className="text-xs text-muted-foreground hover:text-foreground hover:underline"
+                onClick={() => setShowBcc(true)}
+              >Bcc</button>
+            )}
           </div>
         }
       />
-      {showCc && <RecipientField label="Cc" value={ccList} onChange={setCcList} />}
-      {showBcc && <RecipientField label="Bcc" value={bccList} onChange={setBccList} />}
-      {mode === 'forward' && (
-        <div className="gmail-compose-line">
-          <span className="gmail-compose-label">Subject</span>
+      {showCc && <RecipientField label="Cc" value={ccList} onChange={setCcList} focusSignal={ccFocusSignal} />}
+      {showBcc && <RecipientField label="Bcc" value={bccList} onChange={setBccList} focusSignal={bccFocusSignal} />}
+      <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+        <Input
+          className="h-8"
+          value={aiPrompt}
+          onChange={(event) => setAiPrompt(event.target.value)}
+          placeholder={hasGenerated
+            ? 'Edit the draft (e.g. add a line about…, remove the last paragraph)…'
+            : isNew
+              ? 'Describe the email and let AI write it…'
+              : 'Describe your reply and let AI write it…'}
+          disabled={generating}
+          onKeyDown={(event) => {
+            // Plain Enter runs the AI writer; Cmd/Ctrl+Enter bubbles to send.
+            if (event.key === 'Enter' && !event.metaKey && !event.ctrlKey) {
+              event.preventDefault()
+              void runAiBar()
+            }
+          }}
+        />
+        <Button
+          type="button"
+          size="sm"
+          onClick={() => { void runAiBar() }}
+          disabled={generating}
+          title={hasGenerated ? 'Apply this edit to the draft' : 'Write a draft with AI'}
+        >
+          {generating ? <LoaderIcon className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+          {generating
+            ? (hasGenerated ? 'Editing…' : 'Writing…')
+            : (hasGenerated ? 'Edit' : 'Write')}
+        </Button>
+      </div>
+      <div className="flex flex-wrap gap-x-1.5 gap-y-2 border-b border-border px-3 pb-2.5">
+        <Button
+          type="button"
+          variant="outline"
+          size="xs"
+          className="rounded-md"
+          onClick={() => { void runAi('Improve the clarity, grammar, and flow of this email while preserving its meaning.', 'rewrite') }}
+          disabled={generating}
+        >Improve</Button>
+        {TONE_PRESETS.map((preset) => (
+          <Button
+            key={preset.key}
+            type="button"
+            variant="outline"
+            size="xs"
+            className="rounded-md"
+            onClick={() => { void runAi(preset.instruction, 'rewrite') }}
+            disabled={generating}
+          >{preset.label}</Button>
+        ))}
+      </div>
+      {(isModal || mode === 'forward') && (
+        <div className="flex min-h-8 items-center gap-2 border-b border-border px-3 text-sm">
+          <span className="text-muted-foreground">Subject</span>
           <input
-            className="gmail-compose-subject-input"
+            className="min-w-0 flex-1 border-0 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
             value={subject}
             onChange={(event) => setSubject(event.target.value)}
-            placeholder="Subject"
           />
         </div>
       )}
-      <EditorContent editor={editor} className="gmail-compose-editor" />
+      <EditorContent
+        editor={editor}
+        className={cn('w-full overflow-y-auto', isModal ? 'min-h-0 flex-1' : 'max-h-[360px]')}
+      />
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        style={{ display: 'none' }}
+        onChange={(event) => {
+          void addFiles(event.target.value ? event.currentTarget.files : null)
+          event.currentTarget.value = ''
+        }}
+      />
+      {attachments.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 px-3 pt-2">
+          {attachments.map((att) => (
+            <div
+              key={att.id}
+              className="inline-flex max-w-60 items-center gap-1.5 rounded-md border border-border bg-muted/50 px-2 py-1 text-xs text-foreground"
+              title={att.filename}
+            >
+              <Paperclip className="size-3 shrink-0" />
+              <span className="truncate">{att.filename}</span>
+              <span className="shrink-0 text-muted-foreground">{formatAttachmentSize(att.size)}</span>
+              <button
+                type="button"
+                className="shrink-0 rounded-sm text-muted-foreground transition-colors hover:text-foreground"
+                onClick={() => removeAttachment(att.id)}
+                aria-label={`Remove ${att.filename}`}
+              ><X className="size-3" /></button>
+            </div>
+          ))}
+        </div>
+      )}
       {linkOpen && (
-        <div className="gmail-compose-link-popover" onMouseDown={(event) => event.preventDefault()}>
-          <input
+        <div
+          className="flex items-center gap-1.5 border-t border-border bg-muted/30 px-3 py-2"
+          onMouseDown={(event) => event.preventDefault()}
+        >
+          <Input
             ref={linkInputRef}
+            className="h-7 flex-1 text-xs"
             value={linkUrl}
             onChange={(event) => setLinkUrl(event.target.value)}
             placeholder="https://example.com"
@@ -911,47 +1842,142 @@ function ComposeBox({
               }
             }}
           />
-          <button type="button" className="gmail-compose-link-popover-apply" onClick={applyLink}>Apply</button>
-          <button type="button" className="gmail-compose-link-popover-cancel" onClick={cancelLink}>Cancel</button>
+          <Button type="button" size="xs" onClick={applyLink}>Apply</Button>
+          <Button type="button" variant="outline" size="xs" onClick={cancelLink}>Cancel</Button>
         </div>
       )}
-      <div className="gmail-compose-actions">
-        <div className="gmail-compose-actions-primary">
-          <button
+      {/* flex-wrap: every button here is shrink-0, so on a narrow pane the
+          formatting toolbar wraps to its own line instead of overflowing
+          into (and clipping) the Discard button. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-border px-3 py-2.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
             type="button"
-            className="gmail-send-button"
+            size="sm"
             onClick={() => { void sendInGmail() }}
             disabled={sending}
-            title="Send this reply via Gmail"
+            title={isNew ? 'Send this email via Gmail' : 'Send this reply via Gmail'}
           >
-            {sending ? <LoaderIcon size={15} className="animate-spin" /> : <Send size={15} />}
+            {sending ? <LoaderIcon className="size-4 animate-spin" /> : <Send className="size-4" />}
             {sending ? 'Sending…' : 'Send'}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="gmail-refine-button"
-            onClick={refineWithCopilot}
-            title="Refine this draft with Copilot"
+            variant="outline"
+            size="sm"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={sending}
+            title="Attach files"
           >
-            <Sparkles size={15} />
-            Refine
-          </button>
+            <Paperclip className="size-4" />
+            Attach
+          </Button>
+          {thread && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={refineWithCopilot}
+              title="Refine this draft with Copilot"
+            >
+              <Sparkles className="size-4" />
+              Refine
+            </Button>
+          )}
         </div>
-        {editor && <ComposeToolbar editor={editor} onOpenLink={openLink} />}
-        <button type="button" className="gmail-compose-link" onClick={onClose}>Discard</button>
+        {/* Toolbar + Discard share one wrap unit so Discard never strands on
+            a line of its own: wide panes show a single row (unit grows, so
+            ml-auto pins Discard to the right edge); narrow panes wrap the
+            whole unit to a second full-width row with the same alignment.
+            flex-auto (content basis) is what makes the unit wrap at all —
+            a flex-1 zero basis would "fit" forever and squeeze instead. */}
+        <div className="flex flex-auto flex-wrap items-center gap-x-3 gap-y-2">
+          {editor && <ComposeToolbar editor={editor} onOpenLink={openLink} />}
+          <Button type="button" variant="ghost" size="sm" className="ml-auto text-muted-foreground" onClick={handleDiscard}>
+            Discard
+          </Button>
+        </div>
       </div>
+    </>
+  )
+
+  if (isModal) {
+    return (
+      <Dialog open onOpenChange={(open) => { if (!open) handleClose() }}>
+        <DialogContent
+          showCloseButton={false}
+          aria-describedby={undefined}
+          className="flex h-[min(720px,calc(100vh-4rem))] flex-col gap-0 overflow-hidden p-0 font-sans sm:max-w-[840px]"
+          onKeyDown={onComposerKeyDown}
+          onEscapeKeyDown={(event) => {
+            // Radix's Escape runs document-capture, before the inner fields
+            // can claim it — let the link bar and an open recipient-suggestion
+            // menu win; only a bare Escape closes the whole composer.
+            if (linkOpen) {
+              event.preventDefault()
+              cancelLink()
+              return
+            }
+            const target = event.target as HTMLElement | null
+            if (target?.closest('[data-suggestions-open]')) event.preventDefault()
+          }}
+        >
+          <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-3">
+            <DialogTitle className="flex-1 text-sm font-medium text-foreground">{modeLabel}</DialogTitle>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              className="size-7 text-muted-foreground"
+              onClick={handleClose}
+              aria-label="Close compose"
+            >
+              <X className="size-4" />
+            </Button>
+          </div>
+          {inner}
+        </DialogContent>
+      </Dialog>
+    )
+  }
+
+  return (
+    <div
+      className="gmail-compose-inline ml-10 max-w-[720px] overflow-hidden rounded-lg border border-border bg-background font-sans"
+      onKeyDown={onComposerKeyDown}
+    >
+      <div className="flex h-8 items-center justify-between border-b border-border px-3">
+        <span className="text-xs font-medium text-muted-foreground">{modeLabel}</span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          className="text-muted-foreground"
+          onClick={handleClose}
+          aria-label="Close compose"
+        >
+          <X className="size-3.5" />
+        </Button>
+      </div>
+      {inner}
     </div>
   )
-}
+})
 
 function ThreadDetail({
   thread,
   onClose,
   hidden,
+  keysDisabled,
+  onComposingChange,
 }: {
   thread: GmailThread
   onClose: () => void
   hidden?: boolean
+  /** True while a dialog is open above the inbox; suspends the reply keys. */
+  keysDisabled?: boolean
+  /** Reports whether the inline composer is open, so list shortcuts pause. */
+  onComposingChange?: (composing: boolean) => void
 }) {
   const [composeMode, setComposeMode] = useState<ComposeMode | null>(null)
   const [selfEmail, setSelfEmail] = useState<string>('')
@@ -968,10 +1994,17 @@ function ThreadDetail({
     return () => { cancelled = true }
   }, [])
 
-  const canReplyAll = useMemo(() => {
-    const { to, cc } = buildRecipients('replyAll', thread, selfEmail)
-    return cc.length > 0 || to.length > 1
-  }, [thread, selfEmail])
+  const replyAllRecipients = useMemo(
+    () => buildRecipients('replyAll', thread, selfEmail),
+    [thread, selfEmail],
+  )
+  const canReplyAll = replyAllRecipients.cc.length > 0 || replyAllRecipients.to.length > 1
+  const replyAllButton = canReplyAll ? (
+    <button type="button" onClick={() => setComposeMode('replyAll')}>
+      <ReplyAll size={16} />
+      Reply All
+    </button>
+  ) : null
 
   const toggleExpand = useCallback((index: number) => {
     setExpandedIndices((prev) => {
@@ -981,6 +2014,46 @@ function ThreadDetail({
       return next
     })
   }, [])
+
+  // Let EmailView pause its list shortcuts while our composer is open. The
+  // cleanup resets on hide/unmount so a hidden-but-mounted detail (up to 5 are
+  // kept alive) can't block them.
+  useEffect(() => {
+    if (hidden) return
+    onComposingChange?.(composeMode !== null)
+    return () => onComposingChange?.(false)
+  }, [hidden, composeMode, onComposingChange])
+
+  // Superhuman-style reply keys for the visible thread. Scoped by `hidden` so
+  // only the on-screen ThreadDetail listens. Escape closes the inline composer
+  // first; with none open it falls through to EmailView's close-thread.
+  useEffect(() => {
+    if (hidden || keysDisabled) return
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.isComposing || e.defaultPrevented) return
+      if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return
+      if (e.key === 'Escape') {
+        if (composeMode !== null) {
+          e.preventDefault()
+          setComposeMode(null)
+        }
+        return
+      }
+      if (composeMode !== null || isEditableTarget(e.target)) return
+      if (e.key === 'r') {
+        e.preventDefault()
+        setComposeMode('reply')
+      } else if (e.key === 'a') {
+        e.preventDefault()
+        setComposeMode(canReplyAll ? 'replyAll' : 'reply')
+      } else if (e.key === 'f') {
+        e.preventDefault()
+        setComposeMode('forward')
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [hidden, keysDisabled, composeMode, canReplyAll])
 
   return (
     <div className={cn('gmail-detail gmail-detail-inline', hidden && 'gmail-detail-hidden')}>
@@ -1041,16 +2114,11 @@ function ThreadDetail({
         </div>
 
         <div className="gmail-thread-actions">
+          {replyAllButton}
           <button type="button" onClick={() => setComposeMode('reply')}>
             <Reply size={16} />
             Reply
           </button>
-          {canReplyAll && (
-            <button type="button" onClick={() => setComposeMode('replyAll')}>
-              <ReplyAll size={16} />
-              Reply all
-            </button>
-          )}
           <button type="button" onClick={() => setComposeMode('forward')}>
             <Forward size={16} />
             Forward
@@ -1071,8 +2139,217 @@ function ThreadDetail({
   )
 }
 
+// One inbox/search row (plus its kept-alive ThreadDetail). Memoized so cursor
+// moves and page appends only re-render the rows whose props actually changed
+// — re-rendering the whole list mid-scroll is what janks the frame.
+const ThreadRow = memo(function ThreadRow({
+  thread,
+  isSelected,
+  isFocused,
+  isMounted,
+  isLeaving,
+  keysDisabled,
+  section,
+  onToggle,
+  onMarkRead,
+  onArchive,
+  onTrash,
+  onSetImportance,
+  onHoverIn,
+  onHoverOut,
+  onCloseThread,
+  onComposingChange,
+}: {
+  thread: GmailThread
+  isSelected: boolean
+  isFocused: boolean
+  isMounted: boolean
+  isLeaving: boolean
+  keysDisabled: boolean
+  /** Which inbox section the row is rendered in; null hides the importance toggle (e.g. search results). */
+  section: 'important' | 'other' | null
+  onToggle: (thread: GmailThread) => void
+  onMarkRead: (threadId: string, read?: boolean) => Promise<void>
+  onArchive: (threadId: string) => Promise<void>
+  onTrash: (threadId: string) => Promise<void>
+  onSetImportance: (threadId: string, importance: 'important' | 'other') => Promise<void>
+  onHoverIn: (thread: GmailThread) => void
+  onHoverOut: () => void
+  onCloseThread: () => void
+  onComposingChange: (composing: boolean) => void
+}) {
+  const latest = latestMessage(thread)
+  const isUnread = thread.unread === true
+  const stop = (e: React.MouseEvent | React.KeyboardEvent) => {
+    e.stopPropagation()
+  }
+  return (
+    <div className={cn('gmail-row-group', !isMounted && 'gmail-row-group-cv', isLeaving && 'gmail-row-group-leaving')}>
+      <div
+        className={cn('gmail-row-shell', isSelected && 'gmail-row-shell-selected')}
+        data-thread-id={thread.threadId}
+        onMouseEnter={() => onHoverIn(thread)}
+        onMouseLeave={onHoverOut}
+      >
+        <button
+          type="button"
+          className={cn('gmail-row', isSelected && 'gmail-row-selected', isUnread && 'gmail-row-unread', isFocused && 'gmail-row-focused')}
+          onClick={() => onToggle(thread)}
+        >
+          <span className="gmail-row-dot" aria-hidden />
+          <span className="gmail-row-sender">{extractName(latest?.from || thread.from)}</span>
+          <span className="gmail-row-content">
+            <strong>{thread.summary || thread.subject || '(No subject)'}</strong>
+            <span>{thread.summary ? thread.subject : snippet(latest?.body || thread.latest_email)}</span>
+          </span>
+          <span className="gmail-row-date">{formatInboxTime(latest?.date || thread.date)}</span>
+        </button>
+        <div className="gmail-row-actions" onMouseDown={stop} onClick={stop}>
+          {section && (
+            <button
+              type="button"
+              className="gmail-row-action"
+              title={section === 'important' ? 'Not important — teach the classifier' : 'Important — teach the classifier'}
+              aria-label={section === 'important' ? 'Mark as not important' : 'Mark as important'}
+              onClick={(e) => { stop(e); void onSetImportance(thread.threadId, section === 'important' ? 'other' : 'important') }}
+            >
+              {section === 'important' ? <StarOff size={15} /> : <Star size={15} />}
+            </button>
+          )}
+          <button
+            type="button"
+            className="gmail-row-action"
+            title={isUnread ? 'Mark as read' : 'Mark as unread'}
+            aria-label={isUnread ? 'Mark as read' : 'Mark as unread'}
+            onClick={(e) => { stop(e); void onMarkRead(thread.threadId, isUnread) }}
+          >
+            {isUnread ? <CheckCheck size={15} /> : <Mail size={15} />}
+          </button>
+          <button
+            type="button"
+            className="gmail-row-action"
+            title="Archive"
+            aria-label="Archive"
+            onClick={(e) => { stop(e); void onArchive(thread.threadId) }}
+          >
+            <Archive size={15} />
+          </button>
+          <button
+            type="button"
+            className="gmail-row-action gmail-row-action-danger"
+            title="Delete"
+            aria-label="Delete"
+            onClick={(e) => { stop(e); void onTrash(thread.threadId) }}
+          >
+            <Trash2 size={15} />
+          </button>
+        </div>
+      </div>
+      {/* Drop the detail as soon as the row starts leaving — the collapse
+          keyframe assumes row height, and the thread is being removed anyway. */}
+      {isMounted && !isLeaving && (
+        <ThreadDetail
+          thread={thread}
+          onClose={onCloseThread}
+          hidden={!isSelected}
+          keysDisabled={keysDisabled}
+          onComposingChange={onComposingChange}
+        />
+      )}
+    </div>
+  )
+})
+
+function ShortcutKey({ children }: { children: React.ReactNode }) {
+  return (
+    <kbd className="inline-flex h-5 min-w-5 items-center justify-center rounded border border-border bg-muted px-1.5 font-mono text-[11px] font-medium text-foreground">
+      {children}
+    </kbd>
+  )
+}
+
+// One shortcut line: `combo` keys render as adjacent chips (a chord or a
+// two-key sequence); `alt` is an equivalent alternative shown after "or".
+function ShortcutRow({ combo, alt, label }: { combo: string[]; alt?: string[]; label: string }) {
+  return (
+    <div className="flex items-center justify-between gap-4 py-1">
+      <span className="text-sm text-muted-foreground">{label}</span>
+      <span className="flex shrink-0 items-center gap-1">
+        {combo.map((key) => <ShortcutKey key={key}>{key}</ShortcutKey>)}
+        {alt && (
+          <>
+            <span className="px-0.5 text-xs text-muted-foreground">or</span>
+            {alt.map((key) => <ShortcutKey key={key}>{key}</ShortcutKey>)}
+          </>
+        )}
+      </span>
+    </div>
+  )
+}
+
+function ShortcutSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</div>
+      {children}
+    </div>
+  )
+}
+
+// The "?" cheat sheet. Static list — keep in sync with the handlers in
+// EmailView, ThreadDetail, and ComposeBox.
+function ShortcutsHelpDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+  const mod = isMac ? '⌘' : 'Ctrl'
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent aria-describedby={undefined} className="font-sans sm:max-w-[620px]">
+        <DialogTitle className="text-base font-semibold">Keyboard shortcuts</DialogTitle>
+        <div className="grid grid-cols-1 gap-x-10 gap-y-5 sm:grid-cols-2">
+          <ShortcutSection title="Inbox">
+            <ShortcutRow combo={['J']} alt={['↓']} label="Next thread" />
+            <ShortcutRow combo={['K']} alt={['↑']} label="Previous thread" />
+            <ShortcutRow combo={['Enter']} alt={['O']} label="Open / close thread" />
+            <ShortcutRow combo={['Esc']} label="Close thread / clear search" />
+            <ShortcutRow combo={['E']} label="Archive" />
+            <ShortcutRow combo={['#']} label="Move to trash" />
+            <ShortcutRow combo={['U']} label="Mark read / unread" />
+            <ShortcutRow combo={['I']} label="Toggle important (teaches the classifier)" />
+            <ShortcutRow combo={['C']} alt={['N']} label="New message" />
+            <ShortcutRow combo={['/']} label="Search" />
+            <ShortcutRow combo={['G', 'I']} label="Go to inbox" />
+            <ShortcutRow combo={['G', 'D']} label="Go to drafts" />
+            <ShortcutRow combo={['?']} label="Keyboard shortcuts" />
+          </ShortcutSection>
+          <div className="flex flex-col gap-5">
+            <ShortcutSection title="Thread">
+              <ShortcutRow combo={['R']} label="Reply" />
+              <ShortcutRow combo={['A']} label="Reply all" />
+              <ShortcutRow combo={['F']} label="Forward" />
+            </ShortcutSection>
+            <ShortcutSection title="Composer">
+              <ShortcutRow combo={[mod, 'Enter']} label="Send" />
+              <ShortcutRow combo={[mod, 'Shift', 'C']} label="Add Cc" />
+              <ShortcutRow combo={[mod, 'Shift', 'B']} label="Add Bcc" />
+              <ShortcutRow combo={['Esc']} label="Close (saves draft)" />
+            </ShortcutSection>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 const MAX_KEPT_OPEN = 5
 const PAGE_SIZE = 25
+// Duration of the row slide-out on archive/trash — matches gmail-row-leave.
+const ROW_LEAVE_MS = 160
+// Sticky .gmail-list-header height — rows scrolled to the top stay clear of it.
+const LIST_STICKY_HEADER_PX = 32
+
+function listScrollerFor(row: HTMLElement): HTMLElement | null {
+  const list = row.closest('.gmail-list')
+  return list instanceof HTMLElement ? list : null
+}
 type InboxSection = 'important' | 'other'
 
 interface SectionState {
@@ -1093,6 +2370,8 @@ const initialSectionState: SectionState = {
 // panels and coming back doesn't reload from scratch.
 let persistedImportant: SectionState | null = null
 let persistedOther: SectionState | null = null
+// Last-loaded drafts, kept across EmailView remounts so reopening is instant.
+let persistedDrafts: GmailThread[] | null = null
 
 function clearLoadingFlag(state: SectionState | null): SectionState {
   if (!state) return initialSectionState
@@ -1104,9 +2383,13 @@ export type EmailViewProps = {
   initialThreadId?: string | null
   /** Bump to re-focus on the same threadId after navigating away inside the view. */
   threadIdVersion?: number
+  /** Query to load into the search box (e.g. the assistant's read-view email search). */
+  initialSearchQuery?: string | null
+  /** Bump to re-apply the same search query. */
+  searchQueryVersion?: number
 }
 
-export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps = {}) {
+export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery, searchQueryVersion }: EmailViewProps = {}) {
   const [important, setImportant] = useState<SectionState>(() => clearLoadingFlag(persistedImportant))
   const [other, setOther] = useState<SectionState>(() => clearLoadingFlag(persistedOther))
   const hadPersistedDataOnMount = useRef(persistedImportant !== null)
@@ -1114,6 +2397,7 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
   const [openedThreadIds, setOpenedThreadIds] = useState<string[]>(initialThreadId ? [initialThreadId] : [])
   useEffect(() => {
     setSelectedThreadId(initialThreadId ?? null)
+    setFocusedThreadId(initialThreadId ?? null)
     if (initialThreadId) {
       setOpenedThreadIds((prev) => {
         const without = prev.filter((id) => id !== initialThreadId)
@@ -1124,9 +2408,124 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
   const [refreshing, setRefreshing] = useState(!hadPersistedDataOnMount.current)
   const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
+  // Externally-driven search (assistant read-view email query): load it into
+  // the search box so the debounced full-mailbox search below runs — matched
+  // threads get real rows even when they're not in the synced inbox.
+  useEffect(() => {
+    const q = initialSearchQuery?.trim()
+    if (q) setQuery(q)
+  }, [initialSearchQuery, searchQueryVersion])
+  const [composeOpen, setComposeOpen] = useState(false)
+  // Stable so the open composer isn't re-rendered on every inbox sync tick.
+  const closeCompose = useCallback(() => setComposeOpen(false), [])
+  // Inbox vs Drafts. Drafts are fetched live (they're not in the inbox cache).
+  const [view, setView] = useState<'inbox' | 'drafts'>('inbox')
+  const [drafts, setDrafts] = useState<GmailThread[]>(() => persistedDrafts ?? [])
+  const [draftsLoading, setDraftsLoading] = useState(false)
+  const [draftsError, setDraftsError] = useState<string | null>(null)
+  const [editingDraft, setEditingDraft] = useState<GmailThread | null>(null)
+  // Server-side search across the whole Gmail mailbox (results indexed locally).
+  const [searchResults, setSearchResults] = useState<GmailThread[]>([])
+  const [searching, setSearching] = useState(false)
+  const [searchError, setSearchError] = useState<string | null>(null)
+  const searchEpoch = useRef(0)
   // Gmail sync uses the native Google OAuth connection.
   const [emailConnection, setEmailConnection] = useState<GmailConnectionStatus | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // Keyboard navigation: the j/k focus cursor over the visible rows, plus the
+  // "?" shortcuts overlay. lastFocusedIndexRef remembers the cursor's position
+  // so it can re-anchor when the focused row disappears (archive/trash/reload).
+  const [focusedThreadId, setFocusedThreadId] = useState<string | null>(null)
+  const [helpOpen, setHelpOpen] = useState(false)
+  // Set while the visible ThreadDetail's inline composer is open; list
+  // shortcuts stay inert so typing a reply can't archive threads.
+  const [activeThreadComposing, setActiveThreadComposing] = useState(false)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const lastFocusedIndexRef = useRef(0)
+  const listModeRef = useRef<string | null>(null)
+  // Timestamp of a pending "g" for the two-key g→i / g→d sequences.
+  const gPendingRef = useRef(0)
+  // Rows currently animating out (archive/trash/draft-delete in flight).
+  const [leavingThreadIds, setLeavingThreadIds] = useState<ReadonlySet<string>>(() => new Set())
+  const markLeaving = useCallback((rowId: string, leaving: boolean) => {
+    setLeavingThreadIds((prev) => {
+      if (prev.has(rowId) === leaving) return prev
+      const next = new Set(prev)
+      if (leaving) next.add(rowId)
+      else next.delete(rowId)
+      return next
+    })
+  }, [])
+
+  const loadDrafts = useCallback(async () => {
+    setDraftsLoading(true)
+    setDraftsError(null)
+    try {
+      const res = await window.ipc.invoke('gmail:getDrafts', {})
+      if (res.error) setDraftsError(res.error)
+      setDrafts(res.threads ?? [])
+    } catch (err) {
+      setDraftsError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setDraftsLoading(false)
+    }
+  }, [])
+
+  // Load drafts when the Drafts view is opened.
+  useEffect(() => {
+    if (view === 'drafts') void loadDrafts()
+  }, [view, loadDrafts])
+
+  // Debounced full-mailbox search. Each keystroke bumps an epoch so stale
+  // responses are ignored; an empty query clears results.
+  useEffect(() => {
+    const q = query.trim()
+    searchEpoch.current += 1
+    const epoch = searchEpoch.current
+    if (!q) {
+      setSearchResults([])
+      setSearchError(null)
+      setSearching(false)
+      return
+    }
+    setSearching(true)
+    const handle = window.setTimeout(async () => {
+      try {
+        const res = await window.ipc.invoke('gmail:search', { query: q, limit: 100 })
+        if (searchEpoch.current !== epoch) return
+        setSearchError(res.error ?? null)
+        setSearchResults(res.threads ?? [])
+      } catch (err) {
+        if (searchEpoch.current === epoch) setSearchError(err instanceof Error ? err.message : String(err))
+      } finally {
+        if (searchEpoch.current === epoch) setSearching(false)
+      }
+    }, 400)
+    return () => window.clearTimeout(handle)
+  }, [query])
+
+  const deleteDraftAction = useCallback(async (thread: GmailThread) => {
+    const id = thread.draftId
+    if (!id) return
+    // Slide the row out before dropping it from the list.
+    markLeaving(id, true)
+    await new Promise((resolve) => window.setTimeout(resolve, ROW_LEAVE_MS))
+    setDrafts((prev) => prev.filter((d) => d.draftId !== id))
+    markLeaving(id, false)
+    try {
+      await window.ipc.invoke('gmail:deleteDraft', { draftId: id })
+    } catch (err) {
+      toast(`Could not delete draft: ${err instanceof Error ? err.message : String(err)}`, 'error')
+      void loadDrafts()
+    }
+  }, [loadDrafts, markLeaving])
+
+  // Closing the draft composer may have edited/sent/deleted it — refresh.
+  const closeDraftEditor = useCallback(() => {
+    setEditingDraft(null)
+    void loadDrafts()
+  }, [loadDrafts])
 
   useEffect(() => {
     let cancelled = false
@@ -1155,6 +2554,7 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
 
   useEffect(() => { persistedImportant = important }, [important])
   useEffect(() => { persistedOther = other }, [other])
+  useEffect(() => { persistedDrafts = drafts }, [drafts])
 
   const setSection = useCallback((section: InboxSection, updater: (prev: SectionState) => SectionState) => {
     if (section === 'important') setImportant(updater)
@@ -1168,6 +2568,7 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
     })
     setImportant(mapSection)
     setOther(mapSection)
+    setSearchResults((prev) => prev.map((t) => (t.threadId === threadId ? updater(t) : t)))
   }, [])
 
   const removeThreadFromState = useCallback((threadId: string) => {
@@ -1177,18 +2578,19 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
     })
     setImportant(filterSection)
     setOther(filterSection)
+    setSearchResults((prev) => prev.filter((t) => t.threadId !== threadId))
     setSelectedThreadId((current) => (current === threadId ? null : current))
     setOpenedThreadIds((prev) => prev.filter((id) => id !== threadId))
   }, [])
 
-  const markThreadReadAction = useCallback(async (threadId: string) => {
+  const markThreadReadAction = useCallback(async (threadId: string, read: boolean = true) => {
     updateThreadInState(threadId, (t) => ({
       ...t,
-      unread: false,
-      messages: t.messages.map((m) => ({ ...m, unread: false })),
+      unread: !read,
+      messages: t.messages.map((m) => ({ ...m, unread: !read })),
     }))
     try {
-      const result = await window.ipc.invoke('gmail:markThreadRead', { threadId })
+      const result = await window.ipc.invoke('gmail:markThreadRead', { threadId, read })
       if (!result.ok && result.error) console.warn('[Gmail] mark-read failed:', result.error)
     } catch (err) {
       console.warn('[Gmail] mark-read failed:', err)
@@ -1196,8 +2598,14 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
   }, [updateThreadInState])
 
   const archiveThreadAction = useCallback(async (threadId: string) => {
+    // Start the slide-out right away; the row is removed once both the IPC
+    // and the animation have finished. A failure clears the flag → snap back.
+    markLeaving(threadId, true)
     try {
-      const result = await window.ipc.invoke('gmail:archiveThread', { threadId })
+      const [result] = await Promise.all([
+        window.ipc.invoke('gmail:archiveThread', { threadId }),
+        new Promise((resolve) => window.setTimeout(resolve, ROW_LEAVE_MS)),
+      ])
       if (result.ok) {
         removeThreadFromState(threadId)
       } else if (result.error) {
@@ -1205,12 +2613,49 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
       }
     } catch (err) {
       toast(`Archive failed: ${err instanceof Error ? err.message : String(err)}`, 'error')
+    } finally {
+      markLeaving(threadId, false)
     }
-  }, [removeThreadFromState])
+  }, [removeThreadFromState, markLeaving])
+
+  // User flips a thread's verdict: sticky on the thread + recorded as a
+  // correction the importance classifier learns from. The row slides out of
+  // its current section and lands on top of the other one.
+  const setImportanceAction = useCallback(async (threadId: string, importance: 'important' | 'other') => {
+    const source = [...important.threads, ...other.threads].find((t) => t.threadId === threadId)
+    markLeaving(threadId, true)
+    try {
+      const [result] = await Promise.all([
+        window.ipc.invoke('gmail:setImportance', { threadId, importance }),
+        new Promise((resolve) => window.setTimeout(resolve, ROW_LEAVE_MS)),
+      ])
+      if (result.ok) {
+        const from = importance === 'important' ? 'other' as const : 'important' as const
+        setSection(from, (prev) => ({ ...prev, threads: prev.threads.filter((t) => t.threadId !== threadId) }))
+        if (source) {
+          setSection(importance, (prev) => ({
+            ...prev,
+            threads: [source, ...prev.threads.filter((t) => t.threadId !== threadId)],
+          }))
+        }
+        toast(importance === 'important' ? 'Marked important — noted for future emails.' : 'Marked not important — noted for future emails.', 'success')
+      } else if (result.error) {
+        toast(`Could not update importance: ${result.error}`, 'error')
+      }
+    } catch (err) {
+      toast(`Could not update importance: ${err instanceof Error ? err.message : String(err)}`, 'error')
+    } finally {
+      markLeaving(threadId, false)
+    }
+  }, [important.threads, other.threads, markLeaving, setSection])
 
   const trashThreadAction = useCallback(async (threadId: string) => {
+    markLeaving(threadId, true)
     try {
-      const result = await window.ipc.invoke('gmail:trashThread', { threadId })
+      const [result] = await Promise.all([
+        window.ipc.invoke('gmail:trashThread', { threadId }),
+        new Promise((resolve) => window.setTimeout(resolve, ROW_LEAVE_MS)),
+      ])
       if (result.ok) {
         removeThreadFromState(threadId)
       } else if (result.error) {
@@ -1218,10 +2663,13 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
       }
     } catch (err) {
       toast(`Delete failed: ${err instanceof Error ? err.message : String(err)}`, 'error')
+    } finally {
+      markLeaving(threadId, false)
     }
-  }, [removeThreadFromState])
+  }, [removeThreadFromState, markLeaving])
 
   const toggleThread = useCallback((thread: GmailThread) => {
+    setFocusedThreadId(thread.threadId)
     setSelectedThreadId((current) => {
       const next = current === thread.threadId ? null : thread.threadId
       if (next) {
@@ -1349,12 +2797,18 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
   // when files change. Throttled to at most one reload per ~3s so a burst of
   // backend writes (sync processing many threads sequentially) coalesces into
   // a small number of in-place updates rather than a flicker storm.
-  // Suppressed while a thread is open (composing/reading); deferred until close.
+  // Suppressed while a thread is open (reading/replying) or the compose-new
+  // modal is open; deferred until whichever is open closes. A reload replaces
+  // the threads array and re-renders the whole inbox list (and any mounted
+  // ThreadDetail iframes) on the main thread — that re-render janks an open
+  // composer even though ComposeBox itself is memoized, so we pause it.
   const pendingReloadRef = useRef(false)
   const reloadDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastReloadAtRef = useRef(0)
   const isSelectedRef = useRef<string | null>(null)
   isSelectedRef.current = selectedThreadId
+  const composeOpenRef = useRef(false)
+  composeOpenRef.current = composeOpen
   const isRefreshingRef = useRef(false)
   isRefreshingRef.current = refreshing
   const otherHasThreadsRef = useRef(false)
@@ -1364,7 +2818,7 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
 
   const doReload = useCallback(() => {
     if (isRefreshingRef.current) return
-    if (isSelectedRef.current !== null) {
+    if (isSelectedRef.current !== null || composeOpenRef.current) {
       pendingReloadRef.current = true
       return
     }
@@ -1419,9 +2873,10 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
     }
   }, [triggerLiveReload])
 
-  // When user closes a thread, if updates arrived while they were reading, flush now.
+  // When the user closes the open thread or the compose-new modal, if updates
+  // arrived while it was open, flush them now.
   useEffect(() => {
-    if (selectedThreadId !== null) return
+    if (selectedThreadId !== null || composeOpen) return
     if (!pendingReloadRef.current) return
     pendingReloadRef.current = false
     lastReloadAtRef.current = Date.now()
@@ -1429,7 +2884,7 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
     if (otherHasThreadsRef.current) {
       void reloadFirstPage('other', { silent: true })
     }
-  }, [selectedThreadId, reloadFirstPage])
+  }, [selectedThreadId, composeOpen, reloadFirstPage])
 
   // Manual refresh: wake the background sync loop. It updates inbox_lists/,
   // the watcher fires, and triggerLiveReload picks up the changes. The
@@ -1479,101 +2934,425 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
 
   const visibleImportant = useMemo(() => filterThreads(important.threads), [important.threads, filterThreads])
   const visibleOther = useMemo(() => filterThreads(other.threads), [other.threads, filterThreads])
+  const visibleDrafts = useMemo(() => filterThreads(drafts), [drafts, filterThreads])
+
+  // ── Keyboard shortcuts (Superhuman-style) ───────────────────────────────────
+  // EmailView only mounts while the email tab is open, so these are naturally
+  // scoped to that view. Single-letter keys stay inert while typing in any
+  // field, while a dialog is up, or while the inline reply composer is open.
+
+  const listMode: 'search' | 'drafts' | 'inbox' = query.trim() ? 'search' : view === 'drafts' ? 'drafts' : 'inbox'
+  const anyModalOpen = composeOpen || settingsOpen || Boolean(editingDraft) || helpOpen
+
+  // Row identity for the focus cursor — must match each row's data-thread-id.
+  const rowIdOf = useCallback((thread: GmailThread) => (
+    listMode === 'drafts' ? (thread.draftId || thread.threadId) : thread.threadId
+  ), [listMode])
+
+  // Flattened, ordered list of the rows currently on screen — the domain of
+  // the j/k cursor. Mirrors the render branches below: search results, drafts,
+  // or Important followed by Everything else (which only renders once
+  // Important is exhausted).
+  const visibleList = useMemo<GmailThread[]>(() => {
+    if (query.trim()) return searchResults
+    if (view === 'drafts') return visibleDrafts
+    if (important.hasReachedEnd && other.threads.length > 0) return [...visibleImportant, ...visibleOther]
+    return visibleImportant
+  }, [query, searchResults, view, visibleDrafts, visibleImportant, visibleOther, important.hasReachedEnd, other.threads.length])
+
+  // Keep the cursor valid as the list changes: switching between inbox,
+  // search, and drafts resets it; if the focused row vanished (archived,
+  // trashed, or replaced by a live reload), re-anchor to the same position.
+  useEffect(() => {
+    if (listModeRef.current !== listMode) {
+      const isFirstRun = listModeRef.current === null
+      listModeRef.current = listMode
+      if (!isFirstRun) {
+        lastFocusedIndexRef.current = 0
+        setFocusedThreadId(null)
+        return
+      }
+    }
+    if (!focusedThreadId || visibleList.length === 0) return
+    const idx = visibleList.findIndex((t) => rowIdOf(t) === focusedThreadId)
+    if (idx >= 0) {
+      lastFocusedIndexRef.current = idx
+      return
+    }
+    const fallback = visibleList[Math.min(lastFocusedIndexRef.current, visibleList.length - 1)]
+    setFocusedThreadId(fallback ? rowIdOf(fallback) : null)
+  }, [visibleList, focusedThreadId, listMode, rowIdOf])
+
+  // ── Smooth list scrolling ──────────────────────────────────────────────────
+  // Short ease-out scroll instead of native behavior:'smooth' — it finishes in
+  // ~140ms and retargets cleanly under key-repeat, where the native animation
+  // lags behind and rubber-bands.
+  const scrollAnimRef = useRef<number | null>(null)
+  const smoothScrollTo = useCallback((container: HTMLElement, top: number) => {
+    if (scrollAnimRef.current !== null) window.cancelAnimationFrame(scrollAnimRef.current)
+    const from = container.scrollTop
+    const max = container.scrollHeight - container.clientHeight
+    const target = Math.min(Math.max(top, 0), max)
+    const delta = target - from
+    if (delta === 0) return
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      container.scrollTop = target
+      return
+    }
+    const start = performance.now()
+    const duration = 140
+    const step = (now: number) => {
+      const t = Math.min(1, (now - start) / duration)
+      const eased = 1 - (1 - t) ** 3
+      container.scrollTop = from + delta * eased
+      scrollAnimRef.current = t < 1 ? window.requestAnimationFrame(step) : null
+    }
+    scrollAnimRef.current = window.requestAnimationFrame(step)
+  }, [])
+
+  useEffect(() => () => {
+    if (scrollAnimRef.current !== null) window.cancelAnimationFrame(scrollAnimRef.current)
+  }, [])
+
+  const rowElementFor = useCallback((rowId: string) => {
+    const el = rootRef.current?.querySelector(`[data-thread-id="${CSS.escape(rowId)}"]`)
+    return el instanceof HTMLElement ? el : null
+  }, [])
+
+  // Keep the focused row on screen during keyboard navigation — "nearest"
+  // semantics with the animated scroll, minding the sticky section header.
+  useEffect(() => {
+    if (!focusedThreadId) return
+    const row = rowElementFor(focusedThreadId)
+    const list = row ? listScrollerFor(row) : null
+    if (!row || !list) return
+    const listRect = list.getBoundingClientRect()
+    const rowRect = row.getBoundingClientRect()
+    const topEdge = listRect.top + LIST_STICKY_HEADER_PX
+    if (rowRect.top < topEdge) {
+      smoothScrollTo(list, list.scrollTop + rowRect.top - topEdge)
+    } else if (rowRect.bottom > listRect.bottom) {
+      smoothScrollTo(list, list.scrollTop + rowRect.bottom - listRect.bottom)
+    }
+  }, [focusedThreadId, rowElementFor, smoothScrollTo])
+
+  // Opening a thread glides its row to the top of the list so the expanded
+  // conversation gets the full viewport. Runs after the focus effect above and
+  // cancels its animation via the shared ref, so on open this scroll wins.
+  useEffect(() => {
+    if (!selectedThreadId) return
+    const row = rowElementFor(selectedThreadId)
+    const list = row ? listScrollerFor(row) : null
+    if (!row || !list) return
+    const rowTop = list.scrollTop + row.getBoundingClientRect().top - list.getBoundingClientRect().top
+    smoothScrollTo(list, rowTop - LIST_STICKY_HEADER_PX)
+  }, [selectedThreadId, rowElementFor, smoothScrollTo])
+
+  // While the list is scrolling, flag the shell so CSS turns off row pointer
+  // events (see .gmail-shell[data-scrolling]) — otherwise every row passing
+  // under the cursor restyles for :hover and schedules a prefetch timer,
+  // stealing frame time. The attribute is toggled straight on the DOM node so
+  // scrolling itself never causes a React render.
+  useEffect(() => {
+    const root = rootRef.current
+    if (!root) return
+    let timer: number | null = null
+    const onScroll = (event: Event) => {
+      const target = event.target
+      if (!(target instanceof Element) || !target.classList.contains('gmail-list')) return
+      if (timer === null) root.setAttribute('data-scrolling', '')
+      else window.clearTimeout(timer)
+      timer = window.setTimeout(() => {
+        timer = null
+        root.removeAttribute('data-scrolling')
+      }, 150)
+    }
+    // Capture phase: scroll events don't bubble, so listen above the scroller.
+    root.addEventListener('scroll', onScroll, { capture: true, passive: true })
+    return () => {
+      root.removeEventListener('scroll', onScroll, { capture: true })
+      if (timer !== null) window.clearTimeout(timer)
+    }
+  }, [])
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.isComposing || e.defaultPrevented) return
+      // All list keys are unmodified. Shift is allowed through because "#" and
+      // "?" need it; shifted letters produce uppercase e.key and match nothing.
+      if (e.ctrlKey || e.metaKey || e.altKey) return
+      const inEditable = isEditableTarget(e.target)
+
+      if (e.key === 'Escape') {
+        // The search input, recipient fields, and composers own their Escape;
+        // this level only closes the open thread or clears the search.
+        if (inEditable || anyModalOpen || activeThreadComposing) return
+        if (selectedThreadId) {
+          e.preventDefault()
+          setSelectedThreadId(null)
+          return
+        }
+        if (query.trim()) {
+          e.preventDefault()
+          setQuery('')
+        }
+        return
+      }
+
+      if (inEditable || anyModalOpen || activeThreadComposing) return
+
+      // Two-key "go to" sequences: g then i (inbox) / g then d (drafts).
+      if (gPendingRef.current && Date.now() - gPendingRef.current < 1000) {
+        gPendingRef.current = 0
+        if (e.key === 'i' || e.key === 'd') {
+          e.preventDefault()
+          setQuery('')
+          setView(e.key === 'i' ? 'inbox' : 'drafts')
+          return
+        }
+        // Any other key cancels the sequence and is handled normally below.
+      }
+      if (e.key === 'g') {
+        gPendingRef.current = Date.now()
+        return
+      }
+
+      const focusedIndex = focusedThreadId
+        ? visibleList.findIndex((t) => rowIdOf(t) === focusedThreadId)
+        : -1
+
+      const moveFocus = (delta: number) => {
+        if (visibleList.length === 0) return
+        e.preventDefault() // stop arrow keys from also scrolling the list
+        const next = visibleList[Math.min(Math.max(focusedIndex + delta, 0), visibleList.length - 1)]
+        if (next) setFocusedThreadId(rowIdOf(next))
+      }
+
+      switch (e.key) {
+        case 'j':
+        case 'ArrowDown':
+          moveFocus(1)
+          return
+        case 'k':
+        case 'ArrowUp':
+          moveFocus(-1)
+          return
+        case 'Enter':
+        case 'o': {
+          const focused = focusedIndex >= 0 ? visibleList[focusedIndex] : undefined
+          if (!focused) return
+          e.preventDefault()
+          if (listMode === 'drafts') setEditingDraft(focused)
+          else toggleThread(focused)
+          return
+        }
+        case 'c':
+        case 'n':
+          e.preventDefault()
+          setComposeOpen(true)
+          return
+        case '/':
+          e.preventDefault()
+          searchInputRef.current?.focus()
+          return
+        case '?':
+          e.preventDefault()
+          setHelpOpen(true)
+          return
+        case 'e':
+        case '#':
+        case 'u':
+        case 'i': {
+          if (listMode === 'drafts') return // drafts have no archive/trash/read state
+          // The open thread takes precedence over the cursor.
+          const targetId = selectedThreadId ?? (focusedIndex >= 0 ? visibleList[focusedIndex]?.threadId : undefined)
+          const target = targetId ? visibleList.find((t) => t.threadId === targetId) : undefined
+          if (!target) return
+          e.preventDefault()
+          if (e.key === 'u') void markThreadReadAction(target.threadId, target.unread === true)
+          else if (e.key === 'e') void archiveThreadAction(target.threadId)
+          else if (e.key === 'i') {
+            const isImportant = important.threads.some((t) => t.threadId === target.threadId)
+            void setImportanceAction(target.threadId, isImportant ? 'other' : 'important')
+          }
+          else void trashThreadAction(target.threadId)
+          return
+        }
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [
+    visibleList, focusedThreadId, selectedThreadId, query, listMode, anyModalOpen,
+    activeThreadComposing, rowIdOf, toggleThread, markThreadReadAction,
+    archiveThreadAction, trashThreadAction, setImportanceAction, important.threads,
+  ])
 
   const hasAny = important.threads.length > 0 || other.threads.length > 0
   const initialLoading = !hasAny && refreshing
   const needsEmailConnect = emailConnection?.connected === false
   const needsEmailReconnect = emailConnection?.connected === true && !emailConnection.hasRequiredScope
 
-  const renderRow = (thread: GmailThread) => {
-    const latest = latestMessage(thread)
-    const isSelected = thread.threadId === selectedThreadId
-    const isUnread = thread.unread === true
+  const closeThread = useCallback(() => setSelectedThreadId(null), [])
+
+  const renderRow = (thread: GmailThread, section: 'important' | 'other' | null = null) => {
     const isMounted = openedThreadIds.includes(thread.threadId)
-    const stop = (e: React.MouseEvent | React.KeyboardEvent) => {
-      e.stopPropagation()
-    }
     return (
-      <div key={thread.threadId} className="gmail-row-group">
-        <div
-          className={cn('gmail-row-shell', isSelected && 'gmail-row-shell-selected')}
-          onMouseEnter={() => scheduleHoverPrefetch(thread)}
-          onMouseLeave={cancelHoverPrefetch}
-        >
+      <ThreadRow
+        key={thread.threadId}
+        thread={thread}
+        isSelected={thread.threadId === selectedThreadId}
+        isFocused={thread.threadId === focusedThreadId}
+        isMounted={isMounted}
+        isLeaving={leavingThreadIds.has(thread.threadId)}
+        keysDisabled={isMounted && anyModalOpen}
+        section={section}
+        onToggle={toggleThread}
+        onMarkRead={markThreadReadAction}
+        onArchive={archiveThreadAction}
+        onTrash={trashThreadAction}
+        onSetImportance={setImportanceAction}
+        onHoverIn={scheduleHoverPrefetch}
+        onHoverOut={cancelHoverPrefetch}
+        onCloseThread={closeThread}
+        onComposingChange={setActiveThreadComposing}
+      />
+    )
+  }
+
+  const renderDraftRow = (thread: GmailThread) => {
+    const stop = (e: React.MouseEvent | React.KeyboardEvent) => { e.stopPropagation() }
+    const recipient = thread.to ? extractName(thread.to) : 'No recipient'
+    const rowId = thread.draftId || thread.threadId
+    const isFocused = rowId === focusedThreadId
+    const isLeaving = leavingThreadIds.has(rowId)
+    return (
+      <div key={rowId} className={cn('gmail-row-group', 'gmail-row-group-cv', isLeaving && 'gmail-row-group-leaving')}>
+        <div className="gmail-row-shell" data-thread-id={rowId}>
           <button
             type="button"
-            className={cn('gmail-row', isSelected && 'gmail-row-selected', isUnread && 'gmail-row-unread')}
-            onClick={() => toggleThread(thread)}
+            className={cn('gmail-row', isFocused && 'gmail-row-focused')}
+            onClick={() => setEditingDraft(thread)}
           >
             <span className="gmail-row-dot" aria-hidden />
-            <span className="gmail-row-sender">{extractName(latest?.from || thread.from)}</span>
+            <span className="gmail-row-sender">To: {recipient}</span>
             <span className="gmail-row-content">
-              <strong>{thread.summary || thread.subject || '(No subject)'}</strong>
-              <span>{thread.summary ? thread.subject : snippet(latest?.body || thread.latest_email)}</span>
+              <strong>{thread.subject || '(No subject)'}</strong>
+              <span>{snippet(thread.gmail_draft || thread.latest_email)}</span>
             </span>
-            <span className="gmail-row-date">{formatInboxTime(latest?.date || thread.date)}</span>
+            <span className="gmail-row-date">{formatInboxTime(thread.date)}</span>
           </button>
           <div className="gmail-row-actions" onMouseDown={stop} onClick={stop}>
-            {isUnread && (
-              <button
-                type="button"
-                className="gmail-row-action"
-                title="Mark as read"
-                aria-label="Mark as read"
-                onClick={(e) => { stop(e); void markThreadReadAction(thread.threadId) }}
-              >
-                <CheckCheck size={15} />
-              </button>
-            )}
-            <button
-              type="button"
-              className="gmail-row-action"
-              title="Archive"
-              aria-label="Archive"
-              onClick={(e) => { stop(e); void archiveThreadAction(thread.threadId) }}
-            >
-              <Archive size={15} />
-            </button>
             <button
               type="button"
               className="gmail-row-action gmail-row-action-danger"
-              title="Delete"
-              aria-label="Delete"
-              onClick={(e) => { stop(e); void trashThreadAction(thread.threadId) }}
+              title="Delete draft"
+              aria-label="Delete draft"
+              onClick={(e) => { stop(e); void deleteDraftAction(thread) }}
             >
               <Trash2 size={15} />
             </button>
           </div>
         </div>
-        {isMounted && (
-          <ThreadDetail
-            thread={thread}
-            onClose={() => setSelectedThreadId(null)}
-            hidden={!isSelected}
-          />
-        )}
       </div>
     )
   }
 
   return (
-    <div className="gmail-shell">
+    <div className="gmail-shell" ref={rootRef}>
       <div className="gmail-main">
         <div className="gmail-topbar">
           <div className="gmail-search">
             <Search size={18} />
             <input
+              ref={searchInputRef}
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search loaded mail"
+              placeholder="Search all mail"
+              onKeyDown={(event) => {
+                if (event.key !== 'Escape') return
+                event.preventDefault()
+                event.stopPropagation()
+                if (query) setQuery('')
+                else event.currentTarget.blur()
+              }}
             />
+            {query && (
+              <button
+                type="button"
+                className="gmail-search-clear"
+                onClick={() => setQuery('')}
+                title="Clear search"
+                aria-label="Clear search"
+              >
+                <X size={16} />
+              </button>
+            )}
           </div>
-          <button type="button" className="gmail-icon-button" onClick={() => void refresh()} aria-label="Refresh">
-            {refreshing ? <LoaderIcon size={18} className="animate-spin" /> : <RefreshCw size={18} />}
-          </button>
+          <div className="gmail-topbar-actions">
+            <div className="flex items-center rounded-md border border-border p-0.5 text-xs font-medium">
+              <button
+                type="button"
+                className={cn('rounded px-2.5 py-1 transition-colors', view === 'inbox' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground')}
+                onClick={() => setView('inbox')}
+              >Inbox</button>
+              <button
+                type="button"
+                className={cn('rounded px-2.5 py-1 transition-colors', view === 'drafts' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground')}
+                onClick={() => setView('drafts')}
+              >Drafts{drafts.length > 0 ? ` (${drafts.length})` : ''}</button>
+            </div>
+            <button
+              type="button"
+              className="gmail-icon-button"
+              onClick={() => { if (view === 'drafts') void loadDrafts(); else void refresh() }}
+              aria-label="Refresh"
+            >
+              {(view === 'drafts' ? draftsLoading : refreshing) ? <LoaderIcon size={18} className="animate-spin" /> : <RefreshCw size={18} />}
+            </button>
+            <button type="button" className="gmail-icon-button" onClick={() => setComposeOpen(true)} aria-label="Compose new email">
+              <SquarePen size={18} />
+            </button>
+          </div>
         </div>
 
-        {error && !hasAny ? (
+        {query.trim() ? (
+          searchError && searchResults.length === 0 ? (
+            <div className="gmail-empty-state">Could not search: {searchError}</div>
+          ) : searchResults.length > 0 ? (
+            <div className="gmail-list" aria-label="Search results">
+              <section className="gmail-section">
+                <div className="gmail-list-header">
+                  <span>Search results</span>
+                  <span>{searchResults.length} thread{searchResults.length === 1 ? '' : 's'}</span>
+                </div>
+                {searchResults.map((t) => renderRow(t))}
+              </section>
+            </div>
+          ) : (
+            <div className="gmail-empty-state">
+              {searching ? 'Searching all mail…' : `No results for “${query.trim()}”.`}
+            </div>
+          )
+        ) : view === 'drafts' ? (
+          draftsError && drafts.length === 0 ? (
+            <div className="gmail-empty-state">Could not load drafts: {draftsError}</div>
+          ) : drafts.length > 0 ? (
+            <div className="gmail-list" aria-label="Drafts">
+              <section className="gmail-section">
+                <div className="gmail-list-header">
+                  <span>Drafts</span>
+                  <span>{drafts.length} draft{drafts.length === 1 ? '' : 's'}</span>
+                </div>
+                {visibleDrafts.map(renderDraftRow)}
+              </section>
+            </div>
+          ) : (
+            <div className="gmail-empty-state">
+              {draftsLoading ? 'Loading drafts…' : 'No drafts yet.'}
+            </div>
+          )
+        ) : error && !hasAny ? (
           <div className="gmail-empty-state">Could not load mail: {error}</div>
         ) : hasAny ? (
           <div className="gmail-list" aria-label="Recent emails">
@@ -1585,7 +3364,7 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
                     {important.threads.length}{important.hasReachedEnd ? '' : '+'} thread{important.threads.length === 1 ? '' : 's'}
                   </span>
                 </div>
-                {visibleImportant.map(renderRow)}
+                {visibleImportant.map((t) => renderRow(t, 'important'))}
                 {!important.hasReachedEnd && (
                   <SectionSentinel
                     disabled={important.loadingPage || important.hasReachedEnd}
@@ -1603,7 +3382,7 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
                     {other.threads.length}{other.hasReachedEnd ? '' : '+'} thread{other.threads.length === 1 ? '' : 's'}
                   </span>
                 </div>
-                {visibleOther.map(renderRow)}
+                {visibleOther.map((t) => renderRow(t, 'other'))}
                 {!other.hasReachedEnd && (
                   <SectionSentinel
                     disabled={other.loadingPage || other.hasReachedEnd}
@@ -1637,7 +3416,17 @@ export function EmailView({ initialThreadId, threadIdVersion }: EmailViewProps =
           </div>
         )}
       </div>
+      {composeOpen && <ComposeBox mode="new" onClose={closeCompose} />}
+      {editingDraft && (
+        <ComposeBox
+          mode="draft"
+          thread={editingDraft}
+          selfEmail={emailConnection?.email ?? ''}
+          onClose={closeDraftEditor}
+        />
+      )}
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} defaultTab="connections" />
+      <ShortcutsHelpDialog open={helpOpen} onOpenChange={setHelpOpen} />
     </div>
   )
 }

@@ -32,46 +32,57 @@ export async function getVoiceConfig(): Promise<VoiceConfig> {
     };
 }
 
-export async function synthesizeSpeech(text: string): Promise<{ audioBase64: string; mimeType: string }> {
+async function resolveTtsEndpoint(streaming: boolean): Promise<{ url: string; headers: Record<string, string> }> {
     const config = await getVoiceConfig();
     const signedIn = await isSignedIn();
 
-    let url: string;
-    let headers: Record<string, string>;
-
     if (signedIn) {
-        const voiceId = config.elevenlabs?.voiceId || 'UgBBYS2sOqTuMpoF3BR0';
+        const voiceId = config.elevenlabs?.voiceId || 's3TPKV1kjDlVtZbl4Ksh';
         const accessToken = await getAccessToken();
-        url = `${API_URL}/v1/voice/text-to-speech/${voiceId}`;
-        headers = {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
+        // The proxy has no dedicated /stream route — the same endpoint is
+        // used and the body is consumed progressively; if the proxy buffers,
+        // streaming degrades to today's full-body latency, never worse.
+        return {
+            url: `${API_URL}/v1/voice/text-to-speech/${voiceId}`,
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Content-Type': 'application/json',
+            },
         };
-        console.log('[voice] synthesizing speech via Rowboat proxy, text length:', text.length, 'voiceId:', voiceId);
-    } else {
-        if (!config.elevenlabs) {
-            throw new Error(`ElevenLabs not configured. Create ${path.join(WorkDir, 'config', 'elevenlabs.json')} with { "apiKey": "<your-key>" }`);
-        }
-        const voiceId = config.elevenlabs.voiceId || 'UgBBYS2sOqTuMpoF3BR0';
-        url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`;
-        headers = {
+    }
+
+    if (!config.elevenlabs) {
+        throw new Error(`ElevenLabs not configured. Create ${path.join(WorkDir, 'config', 'elevenlabs.json')} with { "apiKey": "<your-key>" }`);
+    }
+    const voiceId = config.elevenlabs.voiceId || 's3TPKV1kjDlVtZbl4Ksh';
+    return {
+        url: `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}${streaming ? '/stream' : ''}`,
+        headers: {
             'xi-api-key': config.elevenlabs.apiKey,
             'Content-Type': 'application/json',
-        };
-        console.log('[voice] synthesizing speech via ElevenLabs, text length:', text.length, 'voiceId:', voiceId);
-    }
+        },
+    };
+}
+
+function ttsRequestBody(text: string): string {
+    return JSON.stringify({
+        text,
+        model_id: 'eleven_flash_v2_5',
+        voice_settings: {
+            stability: 0.5,
+            similarity_boost: 0.75,
+        },
+    });
+}
+
+export async function synthesizeSpeech(text: string): Promise<{ audioBase64: string; mimeType: string }> {
+    const { url, headers } = await resolveTtsEndpoint(false);
+    console.log('[voice] synthesizing speech, text length:', text.length);
 
     const response = await fetch(url, {
         method: 'POST',
         headers,
-        body: JSON.stringify({
-            text,
-            model_id: 'eleven_flash_v2_5',
-            voice_settings: {
-                stability: 0.5,
-                similarity_boost: 0.75,
-            },
-        }),
+        body: ttsRequestBody(text),
     });
 
     if (!response.ok) {
@@ -84,4 +95,43 @@ export async function synthesizeSpeech(text: string): Promise<{ audioBase64: str
     const audioBase64 = Buffer.from(arrayBuffer).toString('base64');
     console.log('[voice] synthesized audio, base64 length:', audioBase64.length);
     return { audioBase64, mimeType: 'audio/mpeg' };
+}
+
+/**
+ * Streaming synthesis: invokes `onChunk` with MP3 bytes as they arrive so
+ * playback can start on the first chunk. Resolves when the stream ends;
+ * rejects on HTTP/stream errors. Abort via the provided signal.
+ */
+export async function synthesizeSpeechStream(
+    text: string,
+    onChunk: (chunk: Buffer) => void,
+    signal?: AbortSignal,
+): Promise<void> {
+    const { url, headers } = await resolveTtsEndpoint(true);
+    console.log('[voice] streaming speech synthesis, text length:', text.length);
+
+    const response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: ttsRequestBody(text),
+        signal: signal ?? null,
+    });
+
+    if (!response.ok) {
+        const errText = await response.text().catch(() => 'Unknown error');
+        console.error('[voice] TTS stream API error:', response.status, errText);
+        throw new Error(`TTS API error ${response.status}: ${errText}`);
+    }
+    if (!response.body) {
+        throw new Error('TTS API returned no body');
+    }
+
+    const reader = response.body.getReader();
+    for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value && value.byteLength > 0) {
+            onChunk(Buffer.from(value));
+        }
+    }
 }

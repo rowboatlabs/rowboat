@@ -1,7 +1,8 @@
-import { ipcMain, BrowserWindow, shell, dialog, systemPreferences, desktopCapturer, app } from 'electron';
+import { ipcMain, BrowserWindow, shell, dialog, systemPreferences, desktopCapturer, app, screen } from 'electron';
 import { ipc } from '@x/shared';
 import path from 'node:path';
 import os from 'node:os';
+import { fileURLToPath } from 'node:url';
 import {
   connectProvider,
   disconnectProvider,
@@ -16,16 +17,20 @@ import { bus } from '@x/core/dist/runs/bus.js';
 import { serviceBus } from '@x/core/dist/services/service_bus.js';
 import type { FSWatcher } from 'chokidar';
 import fs from 'node:fs/promises';
-import { exec } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import z from 'zod';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
+
 import { RunEvent } from '@x/shared/dist/runs.js';
 import { ServiceEvent } from '@x/shared/dist/service-events.js';
+import type { SessionBusEvent } from '@x/shared/dist/sessions.js';
+import type { ISessions, EmitterSessionBus } from '@x/core/dist/sessions/index.js';
 import container from '@x/core/dist/di/container.js';
 import { listOnboardingModels } from '@x/core/dist/models/models-dev.js';
-import { testModelConnection } from '@x/core/dist/models/models.js';
+import { testModelConnection, listModelsForProvider, generateOneShot } from '@x/core/dist/models/models.js';
+import { getDefaultModelAndProvider } from '@x/core/dist/models/defaults.js';
 import { isSignedIn } from '@x/core/dist/account/account.js';
 import { listGatewayModels } from '@x/core/dist/models/gateway.js';
 import type { IModelConfigRepo } from '@x/core/dist/models/repo.js';
@@ -33,18 +38,50 @@ import type { IOAuthRepo } from '@x/core/dist/auth/repo.js';
 import { IGranolaConfigRepo } from '@x/core/dist/knowledge/granola/repo.js';
 import { ICodeModeConfigRepo } from '@x/core/dist/code-mode/repo.js';
 import { CodePermissionRegistry } from '@x/core/dist/code-mode/acp/permission-registry.js';
+import type { CodeRunFeed } from '@x/core/dist/code-mode/feed.js';
 import { checkCodeModeAgentStatus } from '@x/core/dist/code-mode/status.js';
+import { ensureEngine } from '@x/core/dist/code-mode/acp/engine-provisioner.js';
+import type { ICodeProjectsRepo } from '@x/core/dist/code-mode/projects/repo.js';
+import type { ICodeSessionsRepo } from '@x/core/dist/code-mode/sessions/repo.js';
+import { CodeSessionService } from '@x/core/dist/code-mode/sessions/service.js';
+import { CodeSessionStatusTracker } from '@x/core/dist/code-mode/sessions/status-tracker.js';
+import type { CodeModeManager } from '@x/core/dist/code-mode/acp/manager.js';
+import * as codeGit from '@x/core/dist/code-mode/git/service.js';
+import { readProjectDir, readProjectFile } from '@x/core/dist/code-mode/projects/fs.js';
+import { ensureTerminal, writeTerminal, resizeTerminal, disposeTerminal } from './terminal.js';
+import type { CodeSession } from '@x/shared/dist/code-sessions.js';
 import { invalidateCopilotInstructionsCache } from '@x/core/dist/application/assistant/instructions.js';
 import { triggerSync as triggerGranolaSync } from '@x/core/dist/knowledge/granola/sync.js';
 import { ISlackConfigRepo } from '@x/core/dist/slack/repo.js';
+import { IChannelsConfigRepo } from '@x/core/dist/channels/repo.js';
+import { applyChannelsConfig, getChannelsStatus, logoutWhatsApp, subscribeChannelsStatus } from '@x/core/dist/channels/service.js';
+import { runAgentSlack, getAgentSlackCliStatus, AgentSlackRunError } from '@x/core/dist/slack/agent-slack-exec.js';
+import { knowledgeSourcesRepo } from '@x/core/dist/knowledge/sources/repo.js';
+import { rankSlackHomeMessages } from '@x/core/dist/knowledge/sources/rank_slack_home.js';
+import { syncSlackKnowledgeSources, triggerSync as triggerSlackKnowledgeSync, getSlackKnowledgeSyncStatus } from '@x/core/dist/knowledge/sources/sync_slack.js';
 import { isOnboardingComplete, markOnboardingComplete } from '@x/core/dist/config/note_creation_config.js';
+import { loadNotificationSettings, saveNotificationSettings } from '@x/core/dist/config/notification_config.js';
 import * as composioHandler from './composio-handler.js';
+import * as appsIndexer from '@x/core/dist/apps/indexer.js';
+import * as appsServer from '@x/core/dist/apps/server.js';
+import * as appsAgents from '@x/core/dist/apps/agents.js';
+import { capture } from '@x/core/dist/analytics/posthog.js';
+import * as githubAuth from '@x/core/dist/apps/github-auth.js';
+import * as appsInstaller from '@x/core/dist/apps/installer.js';
+import { registryClient } from '@x/core/dist/apps/registry.js';
+import * as appsPublisher from '@x/core/dist/apps/publisher.js';
+
+// D18 install previews awaiting confirmation, keyed by app name.
+const appInstallPreviews = new Map<string, Awaited<ReturnType<typeof appsInstaller.previewInstall>>>();
 import { consumePendingDeepLink } from './deeplink.js';
 import { qualifyAndDisconnectComposioGoogle } from '@x/core/dist/migrations/composio-google-migration.js';
 import { IAgentScheduleRepo } from '@x/core/dist/agent-schedule/repo.js';
 import { IAgentScheduleStateRepo } from '@x/core/dist/agent-schedule/state-repo.js';
 import { triggerRun as triggerAgentScheduleRun } from '@x/core/dist/agent-schedule/runner.js';
 import { search } from '@x/core/dist/search/search.js';
+import { resolveMeetingPrep } from '@x/core/dist/knowledge/meeting_prep.js';
+import { readPrepNoteForEvent } from '@x/core/dist/knowledge/meeting_prep_brief.js';
+import { invalidateKnowledgeIndex } from '@x/core/dist/knowledge/knowledge_index.js';
 import { versionHistory, voice } from '@x/core';
 import { classifySchedule, processRowboatInstruction } from '@x/core/dist/knowledge/inline_tasks.js';
 import { getBillingInfo } from '@x/core/dist/billing/billing.js';
@@ -52,7 +89,11 @@ import { summarizeMeeting } from '@x/core/dist/knowledge/summarize_meeting.js';
 import { getAccessToken } from '@x/core/dist/auth/tokens.js';
 import { getRowboatConfig } from '@x/core/dist/config/rowboat.js';
 import { runLiveNoteAgent } from '@x/core/dist/knowledge/live-note/runner.js';
-import { listImportantThreads, listEverythingElseThreads, saveMessageBodyHeight, triggerSync as triggerGmailSync, sendThreadReply, archiveThread, trashThread, markThreadRead, getAccountEmail, getConnectionStatus as getGmailConnectionStatus } from '@x/core/dist/knowledge/sync_gmail.js';
+import { listImportantThreads, listEverythingElseThreads, saveMessageBodyHeight, triggerSync as triggerGmailSync, sendThreadReply, saveThreadDraft, deleteThreadDraft, listDraftThreads, searchThreads, archiveThread, trashThread, markThreadRead, downloadAttachment, getAccountEmail, getAccountName, getConnectionStatus as getGmailConnectionStatus, setThreadImportance } from '@x/core/dist/knowledge/sync_gmail.js';
+import { searchContacts as searchGmailContacts, warmContactIndex } from '@x/core/dist/knowledge/gmail_contacts.js';
+import { searchSentContacts, warmSentContacts } from '@x/core/dist/knowledge/gmail_sent_contacts.js';
+import { getGoogleDocsConnectionStatus, importGoogleDoc, syncGoogleDocDown, syncGoogleDocUp, getGoogleDocLink } from '@x/core/dist/knowledge/google_docs.js';
+import { startManagedGooglePick } from './google-picker-managed.js';
 import { liveNoteBus } from '@x/core/dist/knowledge/live-note/bus.js';
 import { getInstallationId } from '@x/core/dist/analytics/installation.js';
 import { API_URL } from '@x/core/dist/config/env.js';
@@ -73,6 +114,190 @@ import {
   listTasks,
   readRunIds as readTaskRunIds,
 } from '@x/core/dist/background-tasks/fileops.js';
+
+type SlackHomeChannel = {
+  id: string;
+  name: string;
+  workspaceUrl?: string;
+  workspaceName?: string;
+};
+
+type SlackHomeMessage = {
+  id: string;
+  workspaceName?: string;
+  workspaceUrl?: string;
+  channelId?: string;
+  channelName?: string;
+  author?: string;
+  text: string;
+  ts: string;
+  url?: string;
+};
+
+function parseWhoamiWorkspaces(data: unknown): Array<{ url: string; name: string }> {
+  const parsed = (data ?? {}) as { workspaces?: Array<{ workspace_url?: string; workspace_name?: string }> };
+  return (parsed.workspaces || []).map((w) => ({
+    url: w.workspace_url || '',
+    name: w.workspace_name || '',
+  }));
+}
+
+type SlackAuthResult = {
+  ok: boolean;
+  workspaces: Array<{ url: string; name: string }>;
+  error?: string;
+  errorKind?: 'not_installed' | 'timeout' | 'parse_error' | 'not_authed' | 'rate_limited' | 'network' | 'bad_channel' | 'unknown';
+};
+
+// Run `auth import-desktop`, then read back the workspaces via `auth whoami`.
+// Shared by the plain and the quit-Slack-first import handlers.
+async function importDesktopAndReadWorkspaces(): Promise<SlackAuthResult> {
+  const imported = await runAgentSlack(['auth', 'import-desktop'], { timeoutMs: 20000, parseJson: false });
+  if (!imported.ok) {
+    return { ok: false, workspaces: [], error: imported.message, errorKind: imported.kind };
+  }
+  const whoami = await runAgentSlack(['auth', 'whoami'], { timeoutMs: 10000 });
+  if (!whoami.ok) {
+    return { ok: false, workspaces: [], error: whoami.message, errorKind: whoami.kind };
+  }
+  const workspaces = parseWhoamiWorkspaces(whoami.data);
+  if (workspaces.length === 0) {
+    return { ok: false, workspaces: [], error: 'No signed-in Slack workspaces found in the desktop app.', errorKind: 'not_authed' };
+  }
+  return { ok: true, workspaces };
+}
+
+// Windows force-quits Slack so its exclusive Cookies-DB lock releases before
+// desktop import (the EBUSY cause). No-op on mac/Linux, where import works with
+// Slack open. taskkill exits non-zero when nothing matches — that's fine.
+async function quitSlackIfWindows(): Promise<void> {
+  if (process.platform !== 'win32') return;
+  try {
+    await execFileAsync('taskkill', ['/F', '/IM', 'Slack.exe'], { timeout: 10000, windowsHide: true });
+  } catch {
+    // No running Slack process to kill — nothing to do.
+  }
+  // Give Windows a moment to release the file handles before we copy them.
+  await new Promise(resolve => setTimeout(resolve, 800));
+}
+
+function extractArrayPayload(parsed: unknown): unknown[] {
+  if (Array.isArray(parsed)) return parsed;
+  if (parsed && typeof parsed === 'object') {
+    const obj = parsed as Record<string, unknown>;
+    for (const key of ['messages', 'channels', 'items', 'results', 'data']) {
+      if (Array.isArray(obj[key])) return obj[key] as unknown[];
+    }
+  }
+  return [];
+}
+
+function slackMessageText(message: Record<string, unknown>): string {
+  const value = message.text ?? message.body ?? message.content;
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function slackMessageAuthor(message: Record<string, unknown>): string | undefined {
+  const value = message.username ?? message.user ?? message.author;
+  return typeof value === 'string' ? value : undefined;
+}
+
+function extractSlackUserName(raw: unknown): string | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const obj = raw as Record<string, unknown>;
+  const profile = obj.profile && typeof obj.profile === 'object' ? obj.profile as Record<string, unknown> : undefined;
+  const user = obj.user && typeof obj.user === 'object' ? obj.user as Record<string, unknown> : undefined;
+  const userProfile = user?.profile && typeof user.profile === 'object' ? user.profile as Record<string, unknown> : undefined;
+
+  const candidates = [
+    profile?.display_name,
+    profile?.real_name,
+    userProfile?.display_name,
+    userProfile?.real_name,
+    obj.display_name,
+    obj.displayName,
+    obj.real_name,
+    obj.realName,
+    user?.display_name,
+    user?.displayName,
+    user?.real_name,
+    user?.realName,
+    obj.name,
+    user?.name,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+
+  return null;
+}
+
+async function resolveSlackUserName(
+  userId: string,
+  workspaceUrl: string | undefined,
+  cache: Map<string, string>,
+): Promise<string | null> {
+  const key = `${workspaceUrl ?? ''}:${userId}`;
+  if (cache.has(key)) return cache.get(key) ?? null;
+
+  const args = ['user', 'get', userId];
+  if (workspaceUrl) {
+    args.push('--workspace', workspaceUrl);
+  }
+
+  const result = await runAgentSlack(args, { timeoutMs: 10000, maxBuffer: 512 * 1024 });
+  if (result.ok) {
+    const name = extractSlackUserName(result.data ?? {});
+    if (name) {
+      cache.set(key, name);
+      return name;
+    }
+  } else {
+    console.warn(`[Slack] Failed to resolve user ${userId}: ${result.message}`);
+  }
+
+  cache.set(key, userId);
+  return null;
+}
+
+async function resolveSlackMessageText(
+  text: string,
+  workspaceUrl: string | undefined,
+  cache: Map<string, string>,
+): Promise<string> {
+  const matches = Array.from(text.matchAll(/<@([UW][A-Z0-9]+)(?:\|([^>]+))?>|@([UW][A-Z0-9]{6,})\b/g));
+  if (matches.length === 0) return text;
+
+  let resolved = text;
+  for (const match of matches) {
+    const userId = match[1] ?? match[3];
+    if (!userId) continue;
+    const fallback = match[2] ?? match[0];
+    const name = await resolveSlackUserName(userId, workspaceUrl, cache);
+    resolved = resolved.replaceAll(match[0], name ?? fallback);
+  }
+  return resolved;
+}
+
+async function resolveSlackAuthor(
+  author: string | undefined,
+  workspaceUrl: string | undefined,
+  cache: Map<string, string>,
+): Promise<string | undefined> {
+  if (!author) return undefined;
+  if (!/^[UW][A-Z0-9]{6,}$/.test(author)) return author;
+  return await resolveSlackUserName(author, workspaceUrl, cache) ?? author;
+}
+
+function slackMessageUrl(message: Record<string, unknown>, workspaceUrl: string | undefined, channelId: string | undefined, ts: string): string | undefined {
+  const direct = message.permalink ?? message.url;
+  if (typeof direct === 'string' && direct) return direct;
+  if (!workspaceUrl || !channelId) return undefined;
+  return `${workspaceUrl.replace(/\/$/, '')}/archives/${channelId}/p${ts.replace('.', '')}`;
+}
 import { browserIpcHandlers } from './browser/ipc.js';
 
 /**
@@ -171,9 +396,37 @@ type InvokeHandlers = {
   [K in InvokeChannels]: InvokeHandler<K>;
 };
 
+// In-flight streaming TTS requests, keyed by renderer-chosen requestId.
+const activeTtsStreams = new Map<string, AbortController>();
+
+// Video-mode popout window (shown for the whole duration of a screen share,
+// floating over every app including Rowboat itself) and the last call state
+// pushed by the main window — replayed to the popout when it finishes loading.
+let videoPopoutWin: BrowserWindow | null = null;
+let lastVideoPopoutState: {
+  ttsState: 'idle' | 'synthesizing' | 'speaking';
+  status: 'listening' | 'thinking' | 'speaking' | null;
+  cameraOn: boolean;
+  micMuted: boolean;
+  screenSharing: boolean;
+  interimText: string | null;
+} | null = null;
+
+// Match only real app windows — getAllWindows() can also contain the popout
+// itself and hidden utility windows (e.g. PDF-export renderers), which must
+// not be shown, focused, or sent app events.
+function findMainAppWindow(): BrowserWindow | undefined {
+  return BrowserWindow.getAllWindows().find((w) => {
+    if (w === videoPopoutWin || w.isDestroyed()) return false;
+    const url = w.webContents.getURL();
+    const isAppWindow = url.startsWith('app://') || url.startsWith('http://localhost');
+    return isAppWindow && !url.includes('#video-popout');
+  });
+}
+
 /**
  * Register all IPC handlers with type safety and runtime validation
- * 
+ *
  * This function ensures:
  * 1. All invoke channels have handlers (exhaustiveness checking)
  * 2. Handler signatures match channel definitions
@@ -302,7 +555,25 @@ function queueChange(relPath: string): void {
 /**
  * Handle workspace change event from core watcher
  */
+function touchesKnowledge(event: z.infer<typeof workspaceShared.WorkspaceChangeEvent>): boolean {
+  const hit = (p: string | undefined) => typeof p === 'string' && p.startsWith('knowledge/');
+  switch (event.type) {
+    case 'created':
+    case 'changed':
+    case 'deleted':
+      return hit(event.path);
+    case 'moved':
+      return hit(event.from) || hit(event.to);
+    case 'bulkChanged':
+      return !event.paths || event.paths.some(hit);
+    default:
+      return false;
+  }
+}
+
 function handleWorkspaceChange(event: z.infer<typeof workspaceShared.WorkspaceChangeEvent>): void {
+  // Any knowledge-base change drops the cached index so the next read rebuilds.
+  if (touchesKnowledge(event)) invalidateKnowledgeIndex();
   // Debounce 'changed' events, emit others immediately
   if (event.type === 'changed' && event.path) {
     queueChange(event.path);
@@ -364,12 +635,41 @@ function emitServiceEvent(event: z.infer<typeof ServiceEvent>): void {
 }
 
 export function emitOAuthEvent(event: { provider: string; success: boolean; error?: string; userId?: string }): void {
+  // Native connection status (e.g. Google) is baked into the Copilot system
+  // prompt, so any OAuth state change must rebuild it.
+  invalidateCopilotInstructionsCache();
   const windows = BrowserWindow.getAllWindows();
   for (const win of windows) {
     if (!win.isDestroyed() && win.webContents) {
       win.webContents.send('oauth:didConnect', event);
     }
   }
+}
+
+async function requireCodeSession(sessionId: string): Promise<CodeSession> {
+  const repo = container.resolve<ICodeSessionsRepo>('codeSessionsRepo');
+  const session = await repo.get(sessionId);
+  if (!session) {
+    throw new Error(`Unknown code session: ${sessionId}`);
+  }
+  return session;
+}
+
+let codeSessionStatusWatcher: (() => void) | null = null;
+export async function startCodeSessionStatusWatcher(): Promise<void> {
+  if (codeSessionStatusWatcher) {
+    return;
+  }
+  const tracker = container.resolve<CodeSessionStatusTracker>('codeSessionStatusTracker');
+  await tracker.start();
+  codeSessionStatusWatcher = tracker.onTransition((sessionId, status) => {
+    const windows = BrowserWindow.getAllWindows();
+    for (const win of windows) {
+      if (!win.isDestroyed() && win.webContents) {
+        win.webContents.send('codeSession:status', { sessionId, status });
+      }
+    }
+  });
 }
 
 let runsWatcher: (() => void) | null = null;
@@ -380,6 +680,71 @@ export async function startRunsWatcher(): Promise<void> {
   runsWatcher = await bus.subscribe('*', async (event) => {
     emitRunEvent(event);
   });
+}
+
+// New runtime: session bus → renderer windows (session-design.md §10).
+function emitSessionEvent(event: SessionBusEvent): void {
+  const windows = BrowserWindow.getAllWindows();
+  for (const win of windows) {
+    if (!win.isDestroyed() && win.webContents) {
+      win.webContents.send('sessions:events', event);
+    }
+  }
+}
+
+// Mobile channels: status changes (QR pairing, connect/disconnect) → renderer.
+let channelsWatcher: (() => void) | null = null;
+export function startChannelsWatcher(): void {
+  if (channelsWatcher) return;
+  channelsWatcher = subscribeChannelsStatus((status) => {
+    const windows = BrowserWindow.getAllWindows();
+    for (const win of windows) {
+      if (!win.isDestroyed() && win.webContents) {
+        win.webContents.send('channels:status', status);
+      }
+    }
+  });
+}
+
+let sessionsWatcher: (() => void) | null = null;
+export function startSessionsWatcher(): void {
+  if (sessionsWatcher) {
+    return;
+  }
+  const sessionBus = container.resolve<EmitterSessionBus>('sessionBus');
+  sessionsWatcher = sessionBus.subscribe((event) => emitSessionEvent(event));
+}
+
+// Ephemeral code-run stream: CodeRunFeed → all renderer windows. A direct
+// tool→renderer side-channel that bypasses the turn runtime; the durable
+// record is the settle-time code-run-events-batch tool progress.
+let codeRunFeedWatcher: (() => void) | null = null;
+export function startCodeRunFeedWatcher(): void {
+  if (codeRunFeedWatcher) {
+    return;
+  }
+  const feed = container.resolve<CodeRunFeed>('codeRunFeed');
+  codeRunFeedWatcher = feed.subscribe((event) => {
+    const windows = BrowserWindow.getAllWindows();
+    for (const win of windows) {
+      if (!win.isDestroyed() && win.webContents) {
+        win.webContents.send('codeRun:events', event);
+      }
+    }
+  });
+}
+
+// The renderer window is created before the session-index startup scan
+// finishes, so an early sessions:list could observe a partially built index
+// (the scan runs oldest-first — exactly the newest chats would be missing).
+// sessions:list awaits this deferred; main.ts resolves it when the scan
+// settles (success or failure, so the list never hangs).
+let resolveSessionsIndexReady: () => void;
+const sessionsIndexReady = new Promise<void>((resolve) => {
+  resolveSessionsIndexReady = resolve;
+});
+export function markSessionsIndexReady(): void {
+  resolveSessionsIndexReady();
 }
 
 let servicesWatcher: (() => void) | null = null;
@@ -444,6 +809,13 @@ export function setupIpcHandlers() {
   // Forward knowledge commit events to renderer for panel refresh
   versionHistory.onCommit(() => emitKnowledgeCommitEvent());
 
+  // Pre-warm the Gmail contact indices so the first compose-box keystroke is instant.
+  // - warmContactIndex(): synchronous local-snapshot fallback (instant, narrow coverage).
+  // - warmSentContacts(): kicks off a background Gmail API sync of the SENT label
+  //   for full historical coverage of people you've actually emailed.
+  warmContactIndex();
+  warmSentContacts();
+
   registerIpcHandlers({
     'app:getVersions': async () => {
       // args is null for this channel (no request payload)
@@ -502,11 +874,30 @@ export function setupIpcHandlers() {
     'gmail:sendReply': async (_event, args) => {
       return sendThreadReply(args);
     },
+    'gmail:saveDraft': async (_event, args) => {
+      return saveThreadDraft(args);
+    },
+    'gmail:deleteDraft': async (_event, args) => {
+      return deleteThreadDraft(args.draftId);
+    },
+    'gmail:getDrafts': async () => {
+      return listDraftThreads();
+    },
+    'gmail:search': async (_event, args) => {
+      return searchThreads(args.query, { limit: args.limit });
+    },
     'gmail:getConnectionStatus': async () => {
       return getGmailConnectionStatus();
     },
     'gmail:getAccountEmail': async () => {
       return { email: await getAccountEmail() };
+    },
+    'gmail:getAccountName': async () => {
+      return { name: await getAccountName() };
+    },
+    'gmail:setImportance': async (_event, args) => {
+      const result = setThreadImportance(args.threadId, args.importance);
+      return { ok: result.success, previous: result.previous, error: result.error };
     },
     'gmail:archiveThread': async (_event, args) => {
       return archiveThread(args.threadId);
@@ -515,11 +906,30 @@ export function setupIpcHandlers() {
       return trashThread(args.threadId);
     },
     'gmail:markThreadRead': async (_event, args) => {
-      return markThreadRead(args.threadId);
+      return markThreadRead(args.threadId, args.read);
+    },
+    'gmail:downloadAttachment': async (_event, args) => {
+      return downloadAttachment(args);
     },
     'gmail:saveMessageHeight': async (_event, args) => {
       saveMessageBodyHeight(args.threadId, args.messageId, args.height);
       return {};
+    },
+    'gmail:searchContacts': async (_event, args) => {
+      const query = args?.query ?? '';
+      const limit = args?.limit;
+      const excludeEmails = args?.excludeEmails;
+
+      // Primary source: people you've actually sent mail to (Gmail SENT label,
+      // cached + refreshed via the Gmail API). Fallback: local-snapshot index
+      // — used only when the SENT index hasn't been populated yet (very first
+      // launch, before the background sync finishes).
+      const sent = await searchSentContacts(query, { limit, excludeEmails }).catch(() => []);
+      if (sent.length > 0) {
+        return { contacts: sent };
+      }
+      const fallback = await searchGmailContacts(query, { limit, excludeEmails });
+      return { contacts: fallback };
     },
     'mcp:listTools': async (_event, args) => {
       return mcpCore.listTools(args.serverName, args.cursor);
@@ -531,7 +941,7 @@ export function setupIpcHandlers() {
       return runsCore.createRun(args);
     },
     'runs:createMessage': async (_event, args) => {
-      return { messageId: await runsCore.createMessage(args.runId, args.message, args.voiceInput, args.voiceOutput, args.searchEnabled, args.middlePaneContext, args.codeMode) };
+      return { messageId: await runsCore.createMessage(args.runId, args.message, args.voiceInput, args.voiceOutput, args.searchEnabled, args.middlePaneContext, args.codeMode, args.codeCwd, args.codePolicy) };
     },
     'runs:authorizePermission': async (_event, args) => {
       await runsCore.authorizePermission(args.runId, args.authorization);
@@ -556,9 +966,89 @@ export function setupIpcHandlers() {
     'runs:list': async (_event, args) => {
       return runsCore.listRuns(args.cursor);
     },
+    'runs:listByWorkDir': async (_event, args) => {
+      return runsCore.listRunsByWorkDir(args.dir);
+    },
     'runs:delete': async (_event, args) => {
       await runsCore.deleteRun(args.runId);
       return { success: true };
+    },
+    // ── New runtime: sessions + turns ─────────────────────────
+    // Thin pass-throughs to the sessions service. sendMessage returns the
+    // turnId immediately; the turn advances in the background and the
+    // renderer reconciles via the sessions:events feed. Input-routing calls
+    // settle with that advance's outcome (the renderer fire-and-forgets).
+    'sessions:create': async (_event, args) => {
+      const sessionId = await container.resolve<ISessions>('sessions').createSession(args);
+      return { sessionId };
+    },
+    'sessions:list': async () => {
+      await sessionsIndexReady;
+      return { sessions: container.resolve<ISessions>('sessions').listSessions() };
+    },
+    'sessions:get': async (_event, args) => {
+      return container.resolve<ISessions>('sessions').getSession(args.sessionId);
+    },
+    'sessions:getTurn': async (_event, args) => {
+      return container.resolve<ISessions>('sessions').getTurn(args.turnId);
+    },
+    'sessions:sendMessage': async (_event, args) => {
+      return container.resolve<ISessions>('sessions').sendMessage(args.sessionId, args.input, args.config);
+    },
+    'sessions:respondToPermission': async (_event, args) => {
+      await container.resolve<ISessions>('sessions').respondToPermission(args.turnId, args.toolCallId, args.decision, args.metadata);
+      return { success: true };
+    },
+    'sessions:respondToAskHuman': async (_event, args) => {
+      await container.resolve<ISessions>('sessions').respondToAskHuman(args.turnId, args.toolCallId, args.answer);
+      return { success: true };
+    },
+    'sessions:stopTurn': async (_event, args) => {
+      await container.resolve<ISessions>('sessions').stopTurn(args.turnId, args.reason);
+      return { success: true };
+    },
+    'sessions:resumeTurn': async (_event, args) => {
+      await container.resolve<ISessions>('sessions').resumeTurn(args.sessionId);
+      return { success: true };
+    },
+    'sessions:setTitle': async (_event, args) => {
+      await container.resolve<ISessions>('sessions').setTitle(args.sessionId, args.title);
+      return { success: true };
+    },
+    'sessions:delete': async (_event, args) => {
+      await container.resolve<ISessions>('sessions').deleteSession(args.sessionId);
+      return { success: true };
+    },
+    'sessions:downloadLog': async (event, args) => {
+      // Concatenate the session's turn logs into one JSONL for debugging.
+      const sessions = container.resolve<ISessions>('sessions');
+      const state = await sessions.getSession(args.sessionId);
+      const win = BrowserWindow.fromWebContents(event.sender);
+      const result = await dialog.showSaveDialog(win!, {
+        defaultPath: `${args.sessionId}.jsonl.log`,
+        filters: [
+          { name: 'Chat Log', extensions: ['log'] },
+          { name: 'JSONL', extensions: ['jsonl'] },
+          { name: 'All Files', extensions: ['*'] },
+        ],
+      });
+      if (result.canceled || !result.filePath) {
+        return { success: false };
+      }
+      try {
+        const lines: string[] = [];
+        for (const ref of state.turns) {
+          const turn = await sessions.getTurn(ref.turnId);
+          for (const turnEvent of turn.events) {
+            lines.push(JSON.stringify(turnEvent));
+          }
+        }
+        await fs.writeFile(result.filePath, lines.join('\n') + '\n');
+        return { success: true };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to download chat log';
+        return { success: false, error: message };
+      }
     },
     'runs:downloadLog': async (event, args) => {
       const runFileName = `${args.runId}.jsonl`;
@@ -598,9 +1088,32 @@ export function setupIpcHandlers() {
     'models:test': async (_event, args) => {
       return await testModelConnection(args.provider, args.model);
     },
+    'models:listForProvider': async (_event, args) => {
+      try {
+        const models = await listModelsForProvider(args.provider);
+        return { success: true, models };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to list models';
+        return { success: false, error: message };
+      }
+    },
+    'llm:getDefaultModel': async () => {
+      return await getDefaultModelAndProvider();
+    },
+    'llm:generate': async (_event, args) => {
+      console.log(`[llm:generate] requested provider=${args.provider ?? '(default)'} model=${args.model ?? '(default)'}`);
+      const result = await generateOneShot(args);
+      console.log(`[llm:generate] -> provider=${result.provider ?? '?'} model=${result.model ?? '?'} chars=${result.text?.length ?? 0}${result.error ? ` error=${result.error}` : ''}`);
+      return result;
+    },
     'models:saveConfig': async (_event, args) => {
       const repo = container.resolve<IModelConfigRepo>('modelConfigRepo');
       await repo.setConfig(args);
+      return { success: true };
+    },
+    'models:updateConfig': async (_event, args) => {
+      const repo = container.resolve<IModelConfigRepo>('modelConfigRepo');
+      await repo.updateConfig(args);
       return { success: true };
     },
     'oauth:connect': async (_event, args) => {
@@ -654,6 +1167,138 @@ export function setupIpcHandlers() {
     'codeMode:checkAgentStatus': async () => {
       return await checkCodeModeAgentStatus();
     },
+    'codeMode:provisionEngine': async (_event, args) => {
+      // Download + install the agent's engine, streaming progress back to the
+      // requesting window so Settings can show a live bar. 'check' is instant — skip it.
+      try {
+        await ensureEngine(args.agent, {
+          onProgress: (p) => {
+            if (p.phase === 'check') return;
+            _event.sender.send('codeMode:engineProgress', {
+              agent: args.agent,
+              phase: p.phase,
+              receivedBytes: p.receivedBytes,
+              totalBytes: p.totalBytes,
+            });
+          },
+        });
+        return { success: true };
+      } catch (e) {
+        return { success: false, error: e instanceof Error ? e.message : String(e) };
+      }
+    },
+    'codeProject:add': async (_event, args) => {
+      const repo = container.resolve<ICodeProjectsRepo>('codeProjectsRepo');
+      const project = await repo.add(args.path);
+      const git = await codeGit.repoInfo(project.path);
+      return { project, git };
+    },
+    'codeProject:remove': async (_event, args) => {
+      const repo = container.resolve<ICodeProjectsRepo>('codeProjectsRepo');
+      await repo.remove(args.projectId);
+      return { success: true };
+    },
+    'codeProject:list': async () => {
+      const repo = container.resolve<ICodeProjectsRepo>('codeProjectsRepo');
+      const projects = await repo.list();
+      return {
+        projects: await Promise.all(projects.map(async (project) => ({
+          project,
+          git: await codeGit.repoInfo(project.path),
+        }))),
+      };
+    },
+    'codeSession:create': async (_event, args) => {
+      const service = container.resolve<CodeSessionService>('codeSessionService');
+      const session = await service.create(args);
+      return { session };
+    },
+    'codeSession:list': async () => {
+      const repo = container.resolve<ICodeSessionsRepo>('codeSessionsRepo');
+      const tracker = container.resolve<CodeSessionStatusTracker>('codeSessionStatusTracker');
+      return { sessions: await repo.list(), statuses: tracker.getStatuses() };
+    },
+    'codeSession:update': async (_event, args) => {
+      const service = container.resolve<CodeSessionService>('codeSessionService');
+      return { session: await service.update(args.sessionId, args.patch) };
+    },
+    'codeMode:listModelOptions': async (_event, args) => {
+      const manager = container.resolve<CodeModeManager>('codeModeManager');
+      return manager.listModelOptions(args.agent);
+    },
+    'codeSession:delete': async (_event, args) => {
+      const service = container.resolve<CodeSessionService>('codeSessionService');
+      disposeTerminal(args.sessionId);
+      await service.delete(args.sessionId, {
+        removeWorktree: args.removeWorktree,
+        deleteBranch: args.deleteBranch,
+      });
+      return { success: true };
+    },
+    'codeSession:sendMessage': async (_event, args) => {
+      const service = container.resolve<CodeSessionService>('codeSessionService');
+      // Intentionally not awaited: the turn can run for minutes and streams over
+      // runs:events. sendMessage validates synchronously enough that busy/unknown
+      // errors are reported via the run's error events instead.
+      const resultPromise = service.sendMessage(args.sessionId, args.text);
+      // Surface immediate rejections (busy session, unknown id) to the caller.
+      const result = await Promise.race([
+        resultPromise,
+        new Promise<{ accepted: true }>((resolve) => setTimeout(() => resolve({ accepted: true }), 300)),
+      ]);
+      resultPromise.catch((err) => console.error('codeSession:sendMessage failed', err));
+      return result;
+    },
+    'codeSession:stop': async (_event, args) => {
+      const service = container.resolve<CodeSessionService>('codeSessionService');
+      await service.stop(args.sessionId);
+      return { success: true };
+    },
+    'codeSession:gitStatus': async (_event, args) => {
+      const session = await requireCodeSession(args.sessionId);
+      const info = await codeGit.repoInfo(session.cwd);
+      if (!info.isGitRepo) {
+        return { isRepo: false, branch: null, hasCommits: false, files: [] };
+      }
+      let files = await codeGit.status(session.cwd);
+      if (session.worktree && !session.worktree.removedAt && session.worktree.baseBranch) {
+        const branchFiles = await codeGit.changedSinceBase(session.cwd, session.worktree.baseBranch);
+        const byPath = new Map(branchFiles.map((file) => [file.path, file]));
+        for (const file of files) {
+          if (!byPath.has(file.path)) byPath.set(file.path, file);
+        }
+        files = [...byPath.values()];
+      }
+      return { isRepo: true, branch: info.branch, hasCommits: info.hasCommits, files };
+    },
+    'codeSession:fileDiff': async (_event, args) => {
+      const session = await requireCodeSession(args.sessionId);
+      return codeGit.fileDiff(session.cwd, args.path, {
+        baseRef: session.worktree && !session.worktree.removedAt ? session.worktree.baseBranch : null,
+      });
+    },
+    'codeSession:readdir': async (_event, args) => {
+      const session = await requireCodeSession(args.sessionId);
+      return { entries: await readProjectDir(session.cwd, args.relPath) };
+    },
+    'codeSession:readFile': async (_event, args) => {
+      const session = await requireCodeSession(args.sessionId);
+      return readProjectFile(session.cwd, args.relPath);
+    },
+    'codeSession:mergeBack': async (_event, args) => {
+      const service = container.resolve<CodeSessionService>('codeSessionService');
+      return service.mergeBack(args.sessionId);
+    },
+    'codeSession:cleanupWorktree': async (_event, args) => {
+      const service = container.resolve<CodeSessionService>('codeSessionService');
+      try {
+        await service.cleanupWorktree(args.sessionId, args.deleteBranch);
+        return { success: true };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to clean up worktree';
+        return { success: false, error: message };
+      }
+    },
     'granola:setConfig': async (_event, args) => {
       const repo = container.resolve<IGranolaConfigRepo>('granolaConfigRepo');
       await repo.setConfig({ enabled: args.enabled });
@@ -665,6 +1310,22 @@ export function setupIpcHandlers() {
 
       return { success: true };
     },
+    // ── Mobile channels (WhatsApp / Telegram bridge) ─────────────
+    'channels:getConfig': async () => {
+      return container.resolve<IChannelsConfigRepo>('channelsConfigRepo').getConfig();
+    },
+    'channels:setConfig': async (_event, args) => {
+      await container.resolve<IChannelsConfigRepo>('channelsConfigRepo').setConfig(args);
+      await applyChannelsConfig(args);
+      return { success: true };
+    },
+    'channels:getStatus': async () => {
+      return getChannelsStatus();
+    },
+    'channels:whatsappLogout': async () => {
+      await logoutWhatsApp();
+      return { success: true };
+    },
     'slack:getConfig': async () => {
       const repo = container.resolve<ISlackConfigRepo>('slackConfigRepo');
       const config = await repo.getConfig();
@@ -673,21 +1334,191 @@ export function setupIpcHandlers() {
     'slack:setConfig': async (_event, args) => {
       const repo = container.resolve<ISlackConfigRepo>('slackConfigRepo');
       await repo.setConfig({ enabled: args.enabled, workspaces: args.workspaces });
+      // Connecting/disconnecting Slack changes the Copilot's routing (native
+      // `slack` skill vs. Composio), so rebuild its cached instructions.
+      invalidateCopilotInstructionsCache();
       return { success: true };
     },
+    'slack:cliStatus': async () => {
+      return await getAgentSlackCliStatus();
+    },
+    'slack:knowledgeStatus': async () => {
+      return {
+        cli: await getAgentSlackCliStatus(),
+        sources: getSlackKnowledgeSyncStatus(),
+      };
+    },
     'slack:listWorkspaces': async () => {
-      try {
-        const { stdout } = await execAsync('agent-slack auth whoami', { timeout: 10000 });
-        const parsed = JSON.parse(stdout);
-        const workspaces = (parsed.workspaces || []).map((w: { workspace_url?: string; workspace_name?: string }) => ({
-          url: w.workspace_url || '',
-          name: w.workspace_name || '',
-        }));
-        return { workspaces };
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : 'Failed to list Slack workspaces';
-        return { workspaces: [], error: message };
+      const result = await runAgentSlack(['auth', 'whoami'], { timeoutMs: 10000 });
+      if (!result.ok) {
+        return { workspaces: [], error: result.message, errorKind: result.kind };
       }
+      const workspaces = parseWhoamiWorkspaces(result.data);
+      return { workspaces };
+    },
+    'slack:importDesktopAuth': async () => {
+      // Pull xoxc token(s) + cookie from the running/installed Slack desktop
+      // app into agent-slack's credential store, then read back the workspaces.
+      return await importDesktopAndReadWorkspaces();
+    },
+    'slack:quitAndImportDesktop': async () => {
+      // Windows-only convenience: kill Slack (which locks its Cookies DB) then
+      // run the normal desktop import in one click.
+      await quitSlackIfWindows();
+      return await importDesktopAndReadWorkspaces();
+    },
+    'slack:parseCurlAuth': async (_event, args) => {
+      // Cross-OS fallback to desktop import: the user pastes a "Copy as cURL"
+      // request from a signed-in Slack web tab; parse-curl reads it from stdin
+      // and extracts the xoxc token + xoxd cookie. No leveldb, no OS keychain.
+      const curl = (args.curl ?? '').trim();
+      if (!curl) {
+        return { ok: false, workspaces: [], error: 'Paste the copied cURL command first.', errorKind: 'unknown' as const };
+      }
+      const imported = await runAgentSlack(['auth', 'parse-curl'], { timeoutMs: 15000, parseJson: false, input: curl });
+      if (!imported.ok) {
+        return { ok: false, workspaces: [], error: imported.message, errorKind: imported.kind };
+      }
+      const whoami = await runAgentSlack(['auth', 'whoami'], { timeoutMs: 10000 });
+      if (!whoami.ok) {
+        return { ok: false, workspaces: [], error: whoami.message, errorKind: whoami.kind };
+      }
+      const workspaces = parseWhoamiWorkspaces(whoami.data);
+      if (workspaces.length === 0) {
+        return { ok: false, workspaces: [], error: 'Tokens were saved but no workspace was found. Double-check the copied request.', errorKind: 'not_authed' as const };
+      }
+      return { ok: true, workspaces };
+    },
+    'slack:listChannels': async (_event, args) => {
+      const result = await runAgentSlack(['channel', 'list', '--all', '--workspace', args.workspaceUrl, '--limit', '200'], { timeoutMs: 15000 });
+      if (!result.ok) {
+        return { channels: [], error: result.message };
+      }
+      const rawChannels = extractArrayPayload(result.data) as Array<{
+        id?: string;
+        name?: string;
+        is_private?: boolean;
+        isPrivate?: boolean;
+        is_member?: boolean;
+        isMember?: boolean;
+      }>;
+      const channels = rawChannels.map((ch) => ({
+        id: ch.id || ch.name || '',
+        name: ch.name || ch.id || '',
+        isPrivate: ch.is_private ?? ch.isPrivate,
+        isMember: ch.is_member ?? ch.isMember,
+      })).filter((ch) => ch.id && ch.name);
+      return { channels };
+    },
+    'slack:getRecentMessages': async (_event, args) => {
+      const repo = container.resolve<ISlackConfigRepo>('slackConfigRepo');
+      const config = await repo.getConfig();
+      if (!config.enabled || config.workspaces.length === 0) {
+        return { enabled: false, messages: [] };
+      }
+
+      const limit = Math.min(Math.max(args.limit ?? 5, 1), 20);
+      const messages: SlackHomeMessage[] = [];
+      const userNameCache = new Map<string, string>();
+
+      try {
+        const knowledgeConfig = knowledgeSourcesRepo.getConfig();
+        const slackSource = knowledgeConfig.sources.find(source => source.id === 'slack' && source.provider === 'slack' && source.enabled);
+        let channels: SlackHomeChannel[] = (slackSource?.scopes ?? [])
+          .filter(scope => scope.type === 'channel')
+          .map(scope => ({
+            id: scope.id,
+            name: scope.name ?? scope.id,
+            workspaceUrl: scope.workspaceUrl,
+            workspaceName: config.workspaces.find(workspace => workspace.url === scope.workspaceUrl)?.name,
+          }));
+
+        if (channels.length === 0) {
+          for (const workspace of config.workspaces) {
+            const channelList = await runAgentSlack(['channel', 'list', '--workspace', workspace.url, '--limit', '12'], { timeoutMs: 15000 });
+            if (!channelList.ok) {
+              throw new AgentSlackRunError(channelList.kind, channelList.message);
+            }
+            const rawChannels = extractArrayPayload(channelList.data);
+            for (const raw of rawChannels) {
+              if (!raw || typeof raw !== 'object') continue;
+              const channel = raw as Record<string, unknown>;
+              const id = typeof channel.id === 'string' ? channel.id : undefined;
+              const name = typeof channel.name === 'string' ? channel.name : id;
+              const isMember = channel.is_member ?? channel.isMember;
+              if (!id || !name || isMember === false) continue;
+              channels.push({ id, name, workspaceUrl: workspace.url, workspaceName: workspace.name });
+            }
+          }
+        }
+
+        channels = channels.slice(0, 8);
+
+        for (const channel of channels) {
+          const commandArgs = ['message', 'list', channel.id, '--limit', '5', '--max-body-chars', '500'];
+          if (channel.workspaceUrl) {
+            commandArgs.push('--workspace', channel.workspaceUrl);
+          }
+          const messageList = await runAgentSlack(commandArgs, { timeoutMs: 15000, maxBuffer: 1024 * 1024 });
+          if (!messageList.ok) {
+            console.warn(`[Slack] Failed to load messages for ${channel.name}: ${messageList.message}`);
+            continue;
+          }
+          const rawMessages = extractArrayPayload(messageList.data);
+          for (const raw of rawMessages) {
+            if (!raw || typeof raw !== 'object') continue;
+            const message = raw as Record<string, unknown>;
+            const ts = typeof message.ts === 'string' ? message.ts : undefined;
+            const text = slackMessageText(message);
+            if (!ts || !text) continue;
+            const channelId = typeof message.channel_id === 'string'
+              ? message.channel_id
+              : typeof message.channel === 'string'
+                ? message.channel
+                : channel.id;
+            const resolvedAuthor = await resolveSlackAuthor(slackMessageAuthor(message), channel.workspaceUrl, userNameCache);
+            const resolvedText = await resolveSlackMessageText(text, channel.workspaceUrl, userNameCache);
+            messages.push({
+              id: `${channel.workspaceUrl ?? 'workspace'}:${channelId}:${ts}`,
+              workspaceName: channel.workspaceName,
+              workspaceUrl: channel.workspaceUrl,
+              channelId,
+              channelName: channel.name,
+              author: resolvedAuthor,
+              text: resolvedText,
+              ts,
+              url: slackMessageUrl(message, channel.workspaceUrl, channelId, ts),
+            });
+          }
+        }
+
+        const rankedIds = await rankSlackHomeMessages(messages, limit);
+        const byId = new Map(messages.map(message => [message.id, message]));
+        const rankedMessages = rankedIds
+          .map(id => byId.get(id))
+          .filter((message): message is SlackHomeMessage => Boolean(message));
+        return { enabled: true, messages: rankedMessages };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Failed to load Slack messages';
+        const errorKind = err instanceof AgentSlackRunError ? err.kind : undefined;
+        return { enabled: true, messages: [], error: message, errorKind };
+      }
+    },
+    'knowledgeSources:getConfig': async () => {
+      return knowledgeSourcesRepo.getConfig();
+    },
+    'knowledgeSources:upsert': async (_event, args) => {
+      const config = knowledgeSourcesRepo.upsertSource(args);
+      if (args.provider === 'slack') {
+        // The Copilot prompt lists the selected Slack channels, so refresh it
+        // whenever the channel selection changes.
+        invalidateCopilotInstructionsCache();
+        triggerSlackKnowledgeSync();
+        void syncSlackKnowledgeSources().catch(error => {
+          console.error('[SlackKnowledge] Immediate sync after settings update failed:', error);
+        });
+      }
+      return config;
     },
     'onboarding:getStatus': async () => {
       // Show onboarding if it hasn't been completed yet
@@ -724,8 +1555,165 @@ export function setupIpcHandlers() {
     'composio:list-toolkits': async () => {
       return composioHandler.listToolkits();
     },
+    'composio:execute-tool': async (_event, args) => {
+      return composioHandler.executeTool(args.toolkitSlug, args.toolSlug, args.arguments);
+    },
+    'composio:search-tools': async (_event, args) => {
+      return composioHandler.searchToolsInToolkit(args.toolkitSlug, args.query);
+    },
     'migration:check-composio-google': async () => {
       return qualifyAndDisconnectComposioGoogle();
+    },
+    // Rowboat Apps handlers (spec §13)
+    'apps:serverStatus': async () => {
+      return appsServer.getServerStatus();
+    },
+    'apps:list': async () => {
+      const status = appsServer.getServerStatus();
+      const apps = await appsIndexer.listApps();
+      // Keep bundled agents materialized (idempotent; disabled by default).
+      for (const app of apps) {
+        if (app.agentSlugs.length) await appsAgents.syncAppAgents(app);
+      }
+      return {
+        serverRunning: status.running,
+        ...(status.error ? { serverError: status.error } : {}),
+        apps,
+      };
+    },
+    'apps:get': async (_event, args) => {
+      const app = await appsIndexer.getApp(args.folder);
+      if (!app) throw new Error(`no such app: ${args.folder}`);
+      const readme = await appsIndexer.readAppReadme(args.folder);
+      return {
+        app,
+        ...(readme ? { readme } : {}),
+        rollbackAvailable: await appsIndexer.rollbackAvailable(args.folder),
+      };
+    },
+    'apps:create': async (_event, args) => {
+      const app = await appsIndexer.createApp(args);
+      capture('app_created', { folder: app.folder });
+      return { app };
+    },
+    'apps:delete': async (_event, args) => {
+      await appsIndexer.deleteApp(args.folder);
+      // Remove app-owned bg-tasks too — orphaned app--<folder>-- tasks firing
+      // against a deleted app was a painful prototype failure mode.
+      await appsAgents.deleteAppAgents(args.folder);
+      capture('app_deleted', { folder: args.folder });
+      return { ok: true as const };
+    },
+    'apps:setTheme': async (_event, args) => {
+      appsServer.setAppsTheme(args.theme);
+      return { ok: true as const };
+    },
+    // GitHub auth (device flow) — publishing only
+    // Catalog + install/update (spec §12–13)
+    'apps:catalogIndex': async (_event, args) => {
+      return registryClient.refreshIndex(args.force);
+    },
+    'apps:catalogSearch': async (_event, args) => {
+      return { records: await registryClient.search(args.query) };
+    },
+    'apps:catalogDetail': async (_event, args) => {
+      const record = await registryClient.resolve(args.name);
+      if (!record) throw new Error(`no such app in the catalog: ${args.name}`);
+      let manifest;
+      try { manifest = await registryClient.latestManifest(record); } catch { /* best effort */ }
+      let readme: string | undefined;
+      try {
+        const res = await fetch(`https://raw.githubusercontent.com/${record.repo}/HEAD/README.md`);
+        if (res.ok) readme = await res.text();
+      } catch { /* best effort */ }
+      const installed = (await appsIndexer.listApps()).find((a) => a.install?.name === args.name);
+      return {
+        record,
+        ...(manifest ? { manifest } : {}),
+        ...(readme ? { readme } : {}),
+        ...(installed ? { installedFolder: installed.folder } : {}),
+      };
+    },
+    'apps:install': async (_event, args) => {
+      const record = await registryClient.resolve(args.name);
+      if (!record) throw new Error(`no such app in the catalog: ${args.name}`);
+      if (!args.confirmed) {
+        const preview = await appsInstaller.previewInstall(record);
+        appInstallPreviews.set(args.name, preview);
+        return preview;
+      }
+      // D18: the confirmed phase checks the bundle against what was previewed.
+      const preview = appInstallPreviews.get(args.name) ?? await appsInstaller.previewInstall(record);
+      const result = await appsInstaller.installFromRegistry(record, preview);
+      appInstallPreviews.delete(args.name);
+      // Materialize bundled agents NOW, not on the next apps:list poll — the
+      // renderer's post-install enable dialog patches these tasks immediately.
+      if (result.app) await appsAgents.syncAppAgents(result.app);
+      capture('app_installed', { name: args.name });
+      return result;
+    },
+    'apps:installFromUrl': async (_event, args) => {
+      if (!args.confirmed) {
+        return appsInstaller.previewUrlInstall(args.url);
+      }
+      const result = await appsInstaller.confirmUrlInstall(args.url);
+      if (result.app) await appsAgents.syncAppAgents(result.app);
+      capture('app_installed', { name: result.app.manifest?.name ?? result.app.folder });
+      return result;
+    },
+    'apps:uninstall': async (_event, args) => {
+      await appsInstaller.uninstallApp(args.folder);
+      capture('app_uninstalled', { folder: args.folder });
+      return { ok: true as const };
+    },
+    'apps:checkUpdate': async (_event, args) => {
+      return appsInstaller.checkUpdate(args.folder);
+    },
+    'apps:update': async (_event, args) => {
+      const before = (await appsIndexer.getApp(args.folder))?.manifest?.version;
+      const app = await appsInstaller.updateApp(args.folder, {
+        confirmOverwriteModified: args.confirmOverwriteModified,
+        confirmNewCapabilities: args.confirmNewCapabilities,
+      });
+      capture('app_updated', { from: before, to: app.manifest?.version });
+      return { app };
+    },
+    'apps:rollback': async (_event, args) => {
+      return { app: await appsInstaller.rollbackApp(args.folder) };
+    },
+    'apps:publish': async (event, args) => {
+      const win = BrowserWindow.fromWebContents(event.sender);
+      const result = await appsPublisher.publishApp(args.folder, (step, detail) => {
+        win?.webContents.send('apps:progress', { folder: args.folder, step, detail });
+      });
+      capture('app_published', { firstPublish: true });
+      return result;
+    },
+    'apps:publishUpdate': async (_event, args) => {
+      const result = await appsPublisher.publishUpdate(args.folder, args.increment);
+      capture('app_published', { version: result.version, firstPublish: false });
+      return result;
+    },
+    'apps:registerExisting': async (_event, args) => {
+      return appsPublisher.registerExisting(args.name, args.repo);
+    },
+    'githubAuth:start': async () => {
+      const result = await githubAuth.startDeviceFlow();
+      // Surface the code and open GitHub's verification page externally (§10).
+      void shell.openExternal(result.verificationUri);
+      return result;
+    },
+    'githubAuth:poll': async () => {
+      const result = await githubAuth.pollDeviceFlow();
+      console.log(`[GitHubAuth] poll result → ${result.status}`);
+      return result;
+    },
+    'githubAuth:status': async () => {
+      return githubAuth.getAuthStatus();
+    },
+    'githubAuth:signOut': async () => {
+      await githubAuth.clearAuth();
+      return { ok: true as const };
     },
     // Agent schedule handlers
     'agent-schedule:getConfig': async () => {
@@ -804,6 +1792,30 @@ export function setupIpcHandlers() {
       }
       return { path: result.filePaths[0] ?? null };
     },
+    'terminal:ensure': async (_event, args) => {
+      return ensureTerminal(args.id, args.cwd, args.cols, args.rows);
+    },
+    'terminal:input': async (_event, args) => {
+      writeTerminal(args.id, args.data);
+      return { success: true };
+    },
+    'terminal:resize': async (_event, args) => {
+      resizeTerminal(args.id, args.cols, args.rows);
+      return { success: true };
+    },
+    'terminal:dispose': async (_event, args) => {
+      disposeTerminal(args.id);
+      return { success: true };
+    },
+    'dialog:openFiles': async (event, args) => {
+      const win = BrowserWindow.fromWebContents(event.sender);
+      const result = await dialog.showOpenDialog(win!, {
+        title: args.title ?? 'Attach files',
+        ...(args.defaultPath ? { defaultPath: resolveShellPath(args.defaultPath) } : {}),
+        properties: ['openFile', 'multiSelections'],
+      });
+      return { paths: result.canceled ? [] : result.filePaths };
+    },
     // Knowledge version history handlers
     'knowledge:history': async (_event, args) => {
       const commits = await versionHistory.getFileHistory(args.path);
@@ -816,6 +1828,40 @@ export function setupIpcHandlers() {
     'knowledge:restore': async (_event, args) => {
       await versionHistory.restoreFile(args.path, args.oid);
       return { ok: true };
+    },
+    'google-docs:getStatus': async () => {
+      return getGoogleDocsConnectionStatus();
+    },
+    'google-docs:import': async (_event, args) => {
+      console.log(`[GoogleDocs] import fileId=${args.fileId} -> ${args.targetFolder}`);
+      try {
+        const result = await importGoogleDoc(args.fileId, args.targetFolder);
+        console.log(`[GoogleDocs] import OK -> ${result.path}`);
+        return result;
+      } catch (err) {
+        console.error('[GoogleDocs] import FAILED:', err instanceof Error ? err.message : err);
+        throw err;
+      }
+    },
+    // Managed (rowboat-mode) OAuth-redirect Picker: the Rowboat backend runs the
+    // pick with the company Google client; the desktop opens the start URL,
+    // waits for the deep link, and imports the picked doc with the existing
+    // managed token. No API key, appId, or local credentials.
+    'google-docs:pickViaManaged': async (_event, args) => {
+      console.log(`[GoogleDocs] managed pick -> ${args.targetFolder}`);
+      const result = await startManagedGooglePick(args.targetFolder);
+      if (!result) return null;
+      console.log(`[GoogleDocs] managed pick import OK -> ${result.path}`);
+      return result;
+    },
+    'google-docs:refreshSnapshot': async (_event, args) => {
+      return syncGoogleDocDown(args.path);
+    },
+    'google-docs:sync': async (_event, args) => {
+      return syncGoogleDocUp(args.path, { force: args.force });
+    },
+    'google-docs:getLink': async (_event, args) => {
+      return { link: await getGoogleDocLink(args.path) };
     },
     // Search handler
     'search:query': async (_event, args) => {
@@ -906,6 +1952,11 @@ export function setupIpcHandlers() {
       const notes = await summarizeMeeting(args.transcript, args.meetingStartTime, args.calendarEventJson);
       return { notes };
     },
+    'meeting-prep:resolve': async (_event, args) => {
+      const result = await resolveMeetingPrep(args.attendees);
+      const prepNote = args.eventId ? await readPrepNoteForEvent(args.eventId) : null;
+      return { ...result, prepNote };
+    },
     'inline-task:classifySchedule': async (_event, args) => {
       const schedule = await classifySchedule(args.instruction);
       return { schedule };
@@ -918,6 +1969,176 @@ export function setupIpcHandlers() {
     },
     'voice:synthesize': async (_event, args) => {
       return voice.synthesizeSpeech(args.text);
+    },
+    'voice:synthesizeStreamStart': async (event, args) => {
+      const { requestId, text } = args;
+      const sender = event.sender;
+      const controller = new AbortController();
+      activeTtsStreams.set(requestId, controller);
+      // Fire-and-forget: chunks are pushed to the renderer as they arrive so
+      // playback can begin immediately; the invoke returns once started.
+      void voice
+        .synthesizeSpeechStream(
+          text,
+          (chunk) => {
+            if (!sender.isDestroyed()) {
+              sender.send('voice:tts-chunk', {
+                requestId,
+                chunkBase64: chunk.toString('base64'),
+                done: false,
+              });
+            }
+          },
+          controller.signal,
+        )
+        .then(() => {
+          if (!sender.isDestroyed()) {
+            sender.send('voice:tts-chunk', { requestId, done: true });
+          }
+        })
+        .catch((err: unknown) => {
+          if (!sender.isDestroyed() && !controller.signal.aborted) {
+            sender.send('voice:tts-chunk', {
+              requestId,
+              done: true,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        })
+        .finally(() => {
+          activeTtsStreams.delete(requestId);
+        });
+      return { ok: true };
+    },
+    'voice:synthesizeStreamCancel': async (_event, args) => {
+      activeTtsStreams.get(args.requestId)?.abort();
+      activeTtsStreams.delete(args.requestId);
+      return {};
+    },
+    'voice:ensureMicAccess': async () => {
+      if (process.platform !== 'darwin') return { granted: true };
+      const status = systemPreferences.getMediaAccessStatus('microphone');
+      console.log('[voice] Microphone permission status:', status);
+      if (status === 'granted') return { granted: true };
+      // 'not-determined' shows the native TCC prompt and resolves once the
+      // user responds; 'denied'/'restricted' resolve false without prompting.
+      // Awaiting this here means the triggering mic click proceeds to
+      // getUserMedia only after permission is settled — fixing the first
+      // click silently failing while the prompt was still up.
+      try {
+        const granted = await systemPreferences.askForMediaAccess('microphone');
+        console.log('[voice] Microphone permission after prompt:', granted);
+        return { granted };
+      } catch {
+        return { granted: false };
+      }
+    },
+    'voice:ensureCameraAccess': async () => {
+      if (process.platform !== 'darwin') return { granted: true };
+      const status = systemPreferences.getMediaAccessStatus('camera');
+      console.log('[video] Camera permission status:', status);
+      if (status === 'granted') return { granted: true };
+      // Same flow as the microphone: settle the native TCC prompt before the
+      // renderer's getUserMedia so the first video click doesn't silently fail.
+      try {
+        const granted = await systemPreferences.askForMediaAccess('camera');
+        console.log('[video] Camera permission after prompt:', granted);
+        return { granted };
+      } catch {
+        return { granted: false };
+      }
+    },
+    'video:setPopout': async (_event, args) => {
+      if (!args.show) {
+        if (videoPopoutWin && !videoPopoutWin.isDestroyed()) videoPopoutWin.destroy();
+        videoPopoutWin = null;
+        return {};
+      }
+      if (videoPopoutWin && !videoPopoutWin.isDestroyed()) return {};
+
+      const workArea = screen.getPrimaryDisplay().workArea;
+      const width = 340;
+      const height = 184;
+      const ipcDir = path.dirname(fileURLToPath(import.meta.url));
+      const preloadPath = app.isPackaged
+        ? path.join(ipcDir, '../preload/dist/preload.js')
+        : path.join(ipcDir, '../../../preload/dist/preload.js');
+      const win = new BrowserWindow({
+        width,
+        height,
+        x: workArea.x + workArea.width - width - 24,
+        y: workArea.y + 24,
+        frame: false,
+        resizable: false,
+        alwaysOnTop: true,
+        skipTaskbar: true,
+        show: false,
+        hasShadow: true,
+        backgroundColor: '#171717',
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true,
+          sandbox: true,
+          preload: preloadPath,
+        },
+      });
+      // Float above other apps on every workspace. Deliberately NOT
+      // `visibleOnFullScreen: true`: on macOS that flag hides the app's Dock
+      // icon for as long as such a window exists (the app becomes an
+      // "agent" app), which reads as Rowboat having vanished. The trade-off
+      // is the popout won't hover over other apps' fullscreen Spaces.
+      win.setAlwaysOnTop(true, 'floating');
+      win.setVisibleOnAllWorkspaces(true);
+      win.webContents.once('did-finish-load', () => {
+        if (lastVideoPopoutState) {
+          win.webContents.send('video:popout-state', lastVideoPopoutState);
+        }
+        // showInactive: appearing must not steal focus from the app the user
+        // switched to — that would immediately re-hide the popout.
+        if (!win.isDestroyed()) win.showInactive();
+      });
+      win.on('closed', () => {
+        if (videoPopoutWin === win) videoPopoutWin = null;
+      });
+      videoPopoutWin = win;
+      if (app.isPackaged) {
+        win.loadURL('app://-/index.html#video-popout');
+      } else {
+        win.loadURL('http://localhost:5173/#video-popout');
+      }
+      return {};
+    },
+    'video:popoutState': async (_event, args) => {
+      lastVideoPopoutState = args;
+      if (videoPopoutWin && !videoPopoutWin.isDestroyed()) {
+        videoPopoutWin.webContents.send('video:popout-state', args);
+      }
+      return {};
+    },
+    'app:focusMainWindow': async () => {
+      const main = findMainAppWindow();
+      if (main) {
+        if (main.isMinimized()) main.restore();
+        main.show();
+        main.focus();
+      }
+      return {};
+    },
+    'video:getPopoutState': async () => {
+      return { state: lastVideoPopoutState };
+    },
+    'video:popoutAction': async (_event, args) => {
+      // Relay a popout control-bar action to the app window, which owns the
+      // call (mic, camera, screen capture) and executes it there. 'expand'
+      // additionally brings the app window back to the foreground.
+      const main = findMainAppWindow();
+      if (args.action === 'expand' && main) {
+        if (main.isMinimized()) main.restore();
+        main.show();
+        main.focus();
+      }
+      main?.webContents.send('video:popout-action', args);
+      return {};
     },
     // Live-note handlers
     'live-note:run': async (_event, args) => {
@@ -1013,6 +2234,7 @@ export function setupIpcHandlers() {
           name: args.name,
           instructions: args.instructions,
           ...(args.triggers ? { triggers: args.triggers } : {}),
+          ...(args.projectId ? { projectId: args.projectId } : {}),
           ...(args.model ? { model: args.model } : {}),
           ...(args.provider ? { provider: args.provider } : {}),
         });
@@ -1051,6 +2273,13 @@ export function setupIpcHandlers() {
     // Billing handler
     'billing:getInfo': async () => {
       return await getBillingInfo();
+    },
+    'notifications:getSettings': async () => {
+      return loadNotificationSettings();
+    },
+    'notifications:setSettings': async (_event, args) => {
+      saveNotificationSettings(args);
+      return { success: true };
     },
     // Embedded browser handlers (WebContentsView + navigation)
     ...browserIpcHandlers,

@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { BrowserWindow, WebContentsView, session, shell, type Session } from 'electron';
+import { BrowserWindow, WebContentsView, session, shell, type Session, type WebContents } from 'electron';
 import type {
   BrowserPageElement,
   BrowserPageSnapshot,
   BrowserState,
   BrowserTabState,
+  HttpAuthRequest,
 } from '@x/shared/dist/browser-control.js';
 import { normalizeNavigationTarget } from './navigation.js';
 import {
@@ -20,7 +21,7 @@ import {
   type RawBrowserPageSnapshot,
 } from './page-scripts.js';
 
-export type { BrowserPageSnapshot, BrowserState, BrowserTabState };
+export type { BrowserPageSnapshot, BrowserState, BrowserTabState, HttpAuthRequest };
 
 /**
  * Embedded browser pane implementation.
@@ -36,13 +37,33 @@ export type { BrowserPageSnapshot, BrowserState, BrowserTabState };
 
 export const BROWSER_PARTITION = 'persist:rowboat-browser';
 
-// Claims Chrome 130 on macOS — close enough to recent stable for OAuth servers
-// that sniff the UA looking for "real browser" shapes.
-const SPOOF_UA =
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
+// Spoof a real Chrome UA so OAuth servers don't reject the embedded browser.
+// The Chrome major version is derived from the running Chromium at startup:
+// pinning a fixed version goes stale as Electron upgrades, and Chromium keeps
+// emitting Sec-CH-UA client hints with the *real* version — a UA/client-hint
+// version mismatch is a classic bot-detection signal (Google sign-in,
+// Cloudflare). Minor version is frozen at 0.0.0, exactly like real Chrome's
+// reduced UA. The platform token matches the actual OS for the same reason.
+function getChromeMajorVersion(): number {
+  const major = Number.parseInt(process.versions.chrome ?? '', 10);
+  return Number.isFinite(major) && major > 0 ? major : 130;
+}
+
+function buildChromeUserAgent(): string {
+  const platformToken =
+    process.platform === 'darwin'
+      ? 'Macintosh; Intel Mac OS X 10_15_7'
+      : process.platform === 'win32'
+        ? 'Windows NT 10.0; Win64; x64'
+        : 'X11; Linux x86_64';
+  return `Mozilla/5.0 (${platformToken}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${getChromeMajorVersion()}.0.0.0 Safari/537.36`;
+}
+
+const SPOOF_UA = buildChromeUserAgent();
 
 const HOME_URL = 'https://www.google.com';
 const NAVIGATION_TIMEOUT_MS = 10000;
+const HTTP_AUTH_TIMEOUT_MS = 120000;
 const POST_ACTION_IDLE_MS = 400;
 const POST_ACTION_MAX_ELEMENTS = 25;
 const POST_ACTION_MAX_TEXT_LENGTH = 4000;
@@ -66,6 +87,13 @@ type BrowserTab = {
 type CachedSnapshot = {
   snapshotId: string;
   elements: Array<{ index: number; selector: string }>;
+};
+
+type PendingHttpAuth = {
+  callback: (username?: string, password?: string) => void;
+  timer: NodeJS.Timeout;
+  // The webContents that raised the challenge, so its teardown can cancel it.
+  webContents: WebContents;
 };
 
 const EMPTY_STATE: BrowserState = {
@@ -109,6 +137,12 @@ export class BrowserViewManager extends EventEmitter {
   private visible = false;
   private bounds: BrowserBounds = { x: 0, y: 0, width: 0, height: 0 };
   private snapshotCache = new Map<string, CachedSnapshot>();
+  private pendingHttpAuth = new Map<string, PendingHttpAuth>();
+  // Child windows created by page window.open() (OAuth/SSO popups). Tracked so
+  // they can be closed when the host window goes away — otherwise an orphaned
+  // popup keeps BrowserWindow.getAllWindows() non-empty and, on macOS, blocks
+  // the app from reopening via the Dock (see main.ts 'activate' handler).
+  private popupWindows = new Set<BrowserWindow>();
   private cleanupWindowListeners: (() => void) | null = null;
 
   attach(window: BrowserWindow): void {
@@ -137,6 +171,7 @@ export class BrowserViewManager extends EventEmitter {
       if (this.window !== window) return;
 
       const tabs = [...this.tabs.values()];
+      const popups = [...this.popupWindows];
       this.cleanupWindowListeners = null;
       this.window = null;
       this.browserSession = null;
@@ -150,6 +185,14 @@ export class BrowserViewManager extends EventEmitter {
       this.attachedTabId = null;
       this.visible = false;
       this.snapshotCache.clear();
+      for (const requestId of [...this.pendingHttpAuth.keys()]) {
+        this.finishHttpAuth(requestId);
+      }
+      // Close any OAuth/SSO popups so they don't outlive the app window.
+      for (const popup of popups) {
+        if (!popup.isDestroyed()) popup.close();
+      }
+      this.popupWindows.clear();
     };
 
     hostWebContents.on('did-start-loading', handleDidStartLoading);
@@ -171,6 +214,36 @@ export class BrowserViewManager extends EventEmitter {
     if (this.browserSession) return this.browserSession;
     const browserSession = session.fromPartition(BROWSER_PARTITION);
     browserSession.setUserAgent(SPOOF_UA);
+
+    // Electron's Sec-CH-UA client hints only carry the "Chromium" brand;
+    // real Chrome also sends "Google Chrome". Some sign-in flows (notably
+    // Google's) distinguish the two, so rewrite the brand list to match what
+    // Chrome sends. Both the low-entropy header (`sec-ch-ua`, major versions)
+    // and the high-entropy one (`sec-ch-ua-full-version-list`, requested via
+    // Accept-CH and carrying full versions) must be rewritten together — a
+    // header that claims "Google Chrome" alongside one that doesn't is a
+    // stronger bot signal than the original. Only headers Chromium already
+    // attached are rewritten — none are added. (navigator.userAgentData JS
+    // brands still report only Chromium; there is no reliable hook to spoof
+    // that under sandbox+contextIsolation, and header-based detection is the
+    // common case.)
+    const chromeMajor = getChromeMajorVersion();
+    const chromeFull = process.versions.chrome ?? `${chromeMajor}.0.0.0`;
+    const brandLists: Record<string, string> = {
+      'sec-ch-ua': `"Chromium";v="${chromeMajor}", "Google Chrome";v="${chromeMajor}", "Not-A.Brand";v="99"`,
+      'sec-ch-ua-full-version-list': `"Chromium";v="${chromeFull}", "Google Chrome";v="${chromeFull}", "Not-A.Brand";v="99.0.0.0"`,
+    };
+    browserSession.webRequest.onBeforeSendHeaders((details, callback) => {
+      const requestHeaders = details.requestHeaders;
+      for (const name of Object.keys(requestHeaders)) {
+        const replacement = brandLists[name.toLowerCase()];
+        if (replacement !== undefined) {
+          requestHeaders[name] = replacement;
+        }
+      }
+      callback({ requestHeaders });
+    });
+
     this.browserSession = browserSession;
     return browserSession;
   }
@@ -196,17 +269,34 @@ export class BrowserViewManager extends EventEmitter {
     return /^https?:\/\//i.test(url) || url === 'about:blank';
   }
 
+  /**
+   * webPreferences shared by browser tabs and OAuth popups. Kept in one place
+   * so the security-sensitive popup surface can never drift from tabs.
+   */
+  private browserWebPreferences(): Electron.WebPreferences {
+    return {
+      session: this.getSession(),
+      contextIsolation: true,
+      sandbox: true,
+      nodeIntegration: false,
+      // Chromium's built-in PDFium viewer, so PDFs render inline instead
+      // of showing a blank page.
+      plugins: true,
+      // Remove the WebAuthn API from the embedded browser only. Electron ships
+      // the API but not Chrome's authenticator UI (Touch ID sheet, QR/phone
+      // hybrid), so passkey challenges hang forever on "Verifying it's you...".
+      // With the API absent, sites feature-detect it and fall back to
+      // password/other verification. Scoped here (not app-wide) so the app's
+      // own renderer keeps WebAuthn.
+      disableBlinkFeatures: 'WebAuth',
+    };
+  }
+
   private createView(): WebContentsView {
     const view = new WebContentsView({
-      webPreferences: {
-        session: this.getSession(),
-        contextIsolation: true,
-        sandbox: true,
-        nodeIntegration: false,
-      },
+      webPreferences: this.browserWebPreferences(),
     });
 
-    view.webContents.setUserAgent(SPOOF_UA);
     return view;
   }
 
@@ -266,14 +356,143 @@ export class BrowserViewManager extends EventEmitter {
     });
     wc.on('page-title-updated', this.emitState.bind(this));
 
-    wc.setWindowOpenHandler(({ url }) => {
-      if (this.isEmbeddedTabUrl(url)) {
-        void this.newTab(url);
-      } else {
-        void shell.openExternal(url);
+    this.wireWindowPolicy(wc);
+  }
+
+  /**
+   * Window-open, popup, and HTTP-auth wiring shared by tabs and popups.
+   */
+  private wireWindowPolicy(wc: WebContents): void {
+    wc.setWindowOpenHandler((details) => this.handleWindowOpen(details));
+    wc.on('did-create-window', (child) => this.wirePopupWindow(child));
+    this.wireHttpAuth(wc);
+  }
+
+  /**
+   * Shared window.open / target=_blank policy for tabs and popups.
+   *
+   * An open that hands a handle back to the opener must become a real child
+   * window so window.opener / postMessage survive — this is how OAuth/SSO
+   * popups (Google, Microsoft, Plaid, ...) return their result; denying them
+   * also makes sites report "popup blocked". Those are: a sized popup
+   * (disposition 'new-window'), a *named* window.open(url, 'name') (non-empty
+   * frameName), or a scripted blank window the opener will populate
+   * (about:blank). A nameless target=_blank link (foreground-tab, empty
+   * frameName) has no opener contract and opens as a tab, matching browser
+   * behavior. Non-web schemes go to the system handler.
+   *
+   * Residual gap: a nameless, featureless window.open(url) is indistinguishable
+   * from a _blank link (both foreground-tab + empty frameName) and opens as a
+   * tab, losing its opener — rare for OAuth, which virtually always names or
+   * sizes its popup.
+   */
+  private handleWindowOpen(details: Electron.HandlerDetails): Electron.WindowOpenHandlerResponse {
+    const { url, disposition, frameName } = details;
+
+    if (this.isEmbeddedTabUrl(url)) {
+      const needsOpener =
+        disposition === 'new-window' || frameName !== '' || url === 'about:blank';
+      if (needsOpener) {
+        return {
+          action: 'allow',
+          overrideBrowserWindowOptions: {
+            autoHideMenuBar: true,
+            webPreferences: this.browserWebPreferences(),
+          },
+        };
       }
+      void this.newTab(url);
       return { action: 'deny' };
+    }
+
+    void shell.openExternal(url);
+    return { action: 'deny' };
+  }
+
+  private wirePopupWindow(child: BrowserWindow): void {
+    this.popupWindows.add(child);
+    child.once('closed', () => this.popupWindows.delete(child));
+    this.wireWindowPolicy(child.webContents);
+  }
+
+  /** True if `win` is an OAuth/SSO popup created by page window.open(). */
+  isPopupWindow(win: BrowserWindow): boolean {
+    return this.popupWindows.has(win);
+  }
+
+  /**
+   * HTTP basic/proxy auth. Chromium's default is to cancel the challenge, so
+   * 401-protected sites and authenticating proxies dead-end. When the browser
+   * pane is on screen to answer, forward the challenge to it as a credential
+   * prompt (cancelled after a timeout if unanswered). When the pane is closed
+   * — e.g. agent-driven navigation — don't preventDefault, so Chromium cancels
+   * immediately and the 401 page is readable rather than hanging.
+   */
+  private wireHttpAuth(wc: WebContents): void {
+    wc.on('login', (event, _details, authInfo, callback) => {
+      if (!this.visible || !this.window) return;
+      event.preventDefault();
+
+      const requestId = randomUUID();
+      const timer = setTimeout(() => {
+        this.finishHttpAuth(requestId);
+      }, HTTP_AUTH_TIMEOUT_MS);
+      this.pendingHttpAuth.set(requestId, { callback, timer, webContents: wc });
+      // If the challenging contents dies before an answer, resolve now so the
+      // native callback and timer don't leak (backstop for paths other than
+      // destroyTab, which cancels explicitly before removeAllListeners()).
+      wc.once('destroyed', () => this.finishHttpAuth(requestId));
+
+      const request: HttpAuthRequest = {
+        requestId,
+        host: authInfo.host,
+        isProxy: authInfo.isProxy,
+        ...(authInfo.realm ? { realm: authInfo.realm } : {}),
+      };
+      this.emit('http-auth-request', request);
     });
+  }
+
+  /**
+   * Resolve a pending auth challenge. `username === undefined` cancels it; an
+   * empty-string username is a valid submission (token-style Basic auth).
+   * Always notifies the renderer so a dialog it may still be showing (e.g.
+   * after a timeout or tab close) is pruned.
+   */
+  private finishHttpAuth(requestId: string, username?: string, password?: string): boolean {
+    const pending = this.pendingHttpAuth.get(requestId);
+    if (!pending) return false;
+    this.pendingHttpAuth.delete(requestId);
+    clearTimeout(pending.timer);
+    try {
+      if (username == null) {
+        pending.callback();
+      } else {
+        pending.callback(username, password ?? '');
+      }
+    } catch {
+      // The challenged webContents may already be destroyed.
+    }
+    this.emit('http-auth-resolved', requestId);
+    return true;
+  }
+
+  private cancelHttpAuthForWebContents(wc: WebContents): void {
+    const ids: string[] = [];
+    for (const [requestId, pending] of this.pendingHttpAuth) {
+      if (pending.webContents === wc) ids.push(requestId);
+    }
+    for (const requestId of ids) {
+      this.finishHttpAuth(requestId);
+    }
+  }
+
+  respondToHttpAuth(input: {
+    requestId: string;
+    username?: string;
+    password?: string;
+  }): { ok: boolean } {
+    return { ok: this.finishHttpAuth(input.requestId, input.username, input.password) };
   }
 
   private snapshotTabState(tab: BrowserTab): BrowserTabState {
@@ -364,6 +583,10 @@ export class BrowserViewManager extends EventEmitter {
 
   private destroyTab(tab: BrowserTab): void {
     this.invalidateSnapshot(tab.id);
+    // Cancel any auth challenge this tab raised before we drop its listeners,
+    // so the native callback + timer don't leak and the renderer prunes its
+    // dialog (removeAllListeners() below would kill the 'destroyed' backstop).
+    this.cancelHttpAuthForWebContents(tab.view.webContents);
     tab.view.webContents.removeAllListeners();
     if (!tab.view.webContents.isDestroyed()) {
       tab.view.webContents.close();

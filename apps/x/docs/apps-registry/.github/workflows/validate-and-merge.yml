@@ -1,0 +1,102 @@
+# Validates publish PRs against the Rowboat Apps registry and auto-merges on
+# success (spec §9.3). On any failure the PR is closed with a comment whose
+# first line is machine-readable: `rejected: <code>`.
+name: validate-and-merge
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    # Per-name concurrency: two racing PRs for one name serialize; the loser
+    # fails the name-collision check.
+    concurrency:
+      group: publish-${{ github.event.pull_request.title }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout base (main)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Fetch PR diff and validate
+        id: validate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          reject() { echo "code=$1" >> "$GITHUB_OUTPUT"; echo "detail=$2" >> "$GITHUB_OUTPUT"; exit 1; }
+
+          # 1. The diff adds exactly one file, under apps/, and changes nothing else.
+          files_json=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --paginate)
+          count=$(echo "$files_json" | jq 'length')
+          [ "$count" = "1" ] || reject invalid_diff "PR must add exactly one file (found $count changes)"
+          status=$(echo "$files_json" | jq -r '.[0].status')
+          [ "$status" = "added" ] || reject invalid_diff "PR must ADD a record; modifications are not accepted in V1"
+          filepath=$(echo "$files_json" | jq -r '.[0].filename')
+          case "$filepath" in apps/*.json) ;; *) reject invalid_path "record must be apps/<name>.json (got $filepath)";; esac
+
+          # 2. Filename is <name>.json with a valid name.
+          name=$(basename "$filepath" .json)
+          echo "$name" | grep -Eq '^[a-z0-9]+(-[a-z0-9]+)*$' || reject invalid_name "\"$name\" is not a valid package name"
+          len=${#name}; [ "$len" -ge 3 ] && [ "$len" -le 64 ] || reject invalid_name "name length must be 3-64"
+
+          # 3. Content validates against the schema and name matches the filename stem.
+          gh api "repos/${GITHUB_REPOSITORY}/contents/${filepath}?ref=${HEAD_SHA}" --jq .content | base64 -d > /tmp/record.json
+          npx --yes ajv-cli@5 validate -s schema/registry-record.schema.json -d /tmp/record.json --strict=false \
+            || reject invalid_record "record does not match schema/registry-record.schema.json"
+          rec_name=$(jq -r .name /tmp/record.json)
+          [ "$rec_name" = "$name" ] || reject name_mismatch "record.name \"$rec_name\" != filename stem \"$name\""
+
+          # 4. record.owner equals the PR author.
+          rec_owner=$(jq -r .owner /tmp/record.json)
+          [ "$rec_owner" = "$PR_AUTHOR" ] || reject owner_mismatch "record.owner \"$rec_owner\" != PR author \"$PR_AUTHOR\""
+
+          # 5. Name not taken and not retired.
+          [ ! -f "apps/${name}.json" ] || reject name_taken "apps/${name}.json already exists"
+          [ ! -f "removed/${name}.json" ] || reject name_retired "\"$name\" was removed and stays retired"
+
+          # 6. record.repo is public and the author has push/admin on it.
+          repo=$(jq -r .repo /tmp/record.json)
+          visibility=$(gh api "repos/${repo}" --jq .visibility 2>/dev/null) || reject repo_unreachable "cannot read ${repo}"
+          [ "$visibility" = "public" ] || reject repo_not_public "${repo} is not public"
+          perm=$(gh api "repos/${repo}/collaborators/${PR_AUTHOR}/permission" --jq .permission 2>/dev/null) \
+            || reject permission_check_failed "cannot check ${PR_AUTHOR}'s permission on ${repo}"
+          case "$perm" in admin|write) ;; *) reject not_repo_collaborator "PR author has \"$perm\" on ${repo}; needs push or admin";; esac
+
+          # 7. Latest release carries the bundle asset (existence probe only — D14).
+          http=$(curl -s -o /dev/null -w "%{http_code}" -I -L "https://github.com/${repo}/releases/latest/download/${name}.rowboat-app")
+          case "$http" in 200|302) ;; *) reject missing_release_asset "releases/latest has no ${name}.rowboat-app (HTTP $http)";; esac
+
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      - name: Merge on success
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr comment "${{ github.event.pull_request.number }}" --repo "$GITHUB_REPOSITORY" \
+            --body "published: ${{ steps.validate.outputs.name }}"
+          gh pr merge "${{ github.event.pull_request.number }}" --repo "$GITHUB_REPOSITORY" --squash --admin
+
+      - name: Close on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          code="${{ steps.validate.outputs.code }}"
+          detail="${{ steps.validate.outputs.detail }}"
+          gh pr comment "${{ github.event.pull_request.number }}" --repo "$GITHUB_REPOSITORY" \
+            --body "rejected: ${code:-validation_error}
+
+          ${detail:-Validation failed; see the Action log.}"
+          gh pr close "${{ github.event.pull_request.number }}" --repo "$GITHUB_REPOSITORY"

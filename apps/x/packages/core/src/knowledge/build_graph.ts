@@ -2,9 +2,8 @@ import fs from 'fs';
 import path from 'path';
 import { WorkDir } from '../config/config.js';
 import { getKgModel } from '../models/defaults.js';
-import { createRun, createMessage } from '../runs/runs.js';
-import { bus } from '../runs/bus.js';
-import { getErrorDetails, waitForRunCompletion } from '../agents/utils.js';
+import { runWhenPossible, toolInputPaths } from '../agents/headless-app.js';
+import { getErrorDetails } from '../agents/utils.js';
 import { serviceLogger, type ServiceRunContext } from '../services/service_logger.js';
 import {
     loadState,
@@ -18,6 +17,10 @@ import { buildKnowledgeIndex, formatIndexForPrompt } from './knowledge_index.js'
 import { limitEventItems } from './limit_event_items.js';
 import { commitAll } from './version_history.js';
 import { getTagDefinitions } from './tag_system.js';
+import { knowledgeSourcesRepo } from './sources/repo.js';
+import { syncSlackKnowledgeSources } from './sources/sync_slack.js';
+import type { KnowledgeSourceConfig } from './sources/types.js';
+import { loadUserConfig } from '../config/user_config.js';
 
 /**
  * Build obsidian-style knowledge graph by running topic extraction
@@ -35,19 +38,24 @@ const LEGACY_SUGGESTED_TOPICS_KNOWLEDGE_PATH = path.join(WorkDir, 'knowledge', '
 
 // Configuration for the graph builder service
 const SYNC_INTERVAL_MS = 15 * 1000; // 15 seconds
-const SOURCE_FOLDERS = [
-    'gmail_sync',
-    path.join('knowledge', 'Meetings', 'fireflies'),
-    path.join('knowledge', 'Meetings', 'granola'),
-    path.join('knowledge', 'Meetings', 'rowboat'),
-];
+function getEnabledFileSources(): KnowledgeSourceConfig[] {
+    return knowledgeSourcesRepo
+        .listEnabledSources()
+        .filter(source => source.provider !== 'voice_memo');
+}
 
 // Voice memos are now created directly in knowledge/Voice Memos/<date>/
 const VOICE_MEMOS_KNOWLEDGE_DIR = path.join(NOTES_OUTPUT_DIR, 'Voice Memos');
 
 /**
- * Check if email frontmatter contains any noise/skip filter tags.
- * Returns true if the email should be skipped.
+ * Check if email frontmatter contains any noise/skip tags. Returns true if the
+ * email should be skipped.
+ *
+ * Noise tags are matched ANYWHERE in the labels block, not just under
+ * `filter:` — the labeling agent sometimes files a noise-class tag under a
+ * different bucket (observed: `candidate` under `relationship:`), and a noise
+ * tag is noise regardless of which key it landed on. Tag names are distinct
+ * from all non-noise tag values, so a match is unambiguous.
  */
 function hasNoiseLabels(content: string): boolean {
     if (!content.startsWith('---')) return false;
@@ -63,38 +71,28 @@ function hasNoiseLabels(content: string): boolean {
             .map(t => t.tag)
     );
 
-    // Match list items under filter: key
-    const filterMatch = frontmatter.match(/filter:\s*\n((?:\s+-\s+.+\n?)*)/);
-    if (filterMatch) {
-        const filterLines = filterMatch[1].match(/^\s+-\s+(.+)$/gm);
-        if (filterLines) {
-            for (const line of filterLines) {
-                const tag = line.replace(/^\s+-\s+/, '').trim().replace(/['"]/g, '');
-                if (noiseTags.has(tag)) return true;
-            }
-        }
+    const values: string[] = [];
+    // List items: "  - tag"
+    for (const m of frontmatter.matchAll(/^\s+-\s+(.+)$/gm)) {
+        values.push(m[1]);
+    }
+    // Inline arrays: "key: [a, b]"
+    for (const m of frontmatter.matchAll(/:\s*\[([^\]]*)\]/g)) {
+        values.push(...m[1].split(','));
+    }
+    // Simple scalars: "key: value"
+    for (const m of frontmatter.matchAll(/^\s*[\w-]+:\s*([^\n[\]{}|>-][^\n]*)$/gm)) {
+        values.push(m[1]);
     }
 
-    // Match inline array like filter: ['cold-outreach'] or filter: [cold-outreach]
-    const inlineMatch = frontmatter.match(/filter:\s*\[([^\]]*)\]/);
-    if (inlineMatch && inlineMatch[1].trim()) {
-        const tags = inlineMatch[1].split(',').map(t => t.trim().replace(/['"]/g, ''));
-        for (const tag of tags) {
-            if (noiseTags.has(tag)) return true;
-        }
+    for (const raw of values) {
+        const tag = raw.trim().replace(/['"]/g, '');
+        if (noiseTags.has(tag)) return true;
     }
 
     return false;
 }
 
-function extractPathFromToolInput(input: string): string | null {
-    try {
-        const parsed = JSON.parse(input) as { path?: string };
-        return typeof parsed.path === 'string' ? parsed.path : null;
-    } catch {
-        return null;
-    }
-}
 
 function ensureSuggestedTopicsFileLocation(): string {
     if (fs.existsSync(SUGGESTED_TOPICS_PATH)) {
@@ -237,6 +235,91 @@ async function readFileContents(filePaths: string[]): Promise<{ path: string; co
     return files;
 }
 
+// Free-mail providers: a shared domain here does NOT mean two people are colleagues.
+const FREE_MAIL_DOMAINS = new Set([
+    'gmail.com', 'googlemail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'live.com',
+    'icloud.com', 'me.com', 'aol.com', 'proton.me', 'protonmail.com', 'hey.com', 'fastmail.com',
+]);
+
+/**
+ * Build the "Owner of this memory" block injected into every note-creation /
+ * curation run. The whole prompt's identity logic (self-exclusion, email reply
+ * gate, first-person perspective, outbound-email handling) depends on the
+ * agent knowing exactly who the user is — never make it guess from headers.
+ */
+export function buildOwnerBlock(): string {
+    const user = loadUserConfig();
+    const email = user?.email ?? '';
+    const domainFromEmail = email.includes('@') ? email.split('@')[1].toLowerCase() : '';
+    const domain = (user?.domain ?? domainFromEmail).toLowerCase();
+    const isFreeMail = FREE_MAIL_DOMAINS.has(domain);
+
+    // Optional profile lines from Agent Notes/user.md (e.g. role, company) —
+    // gives the agent context like "the owner runs Rowboat" so it correctly
+    // reads outbound product email as the owner's own actions.
+    let profileLines = '';
+    try {
+        const userNotesPath = path.join(NOTES_OUTPUT_DIR, 'Agent Notes', 'user.md');
+        if (fs.existsSync(userNotesPath)) {
+            const lines = fs.readFileSync(userNotesPath, 'utf-8')
+                .split('\n')
+                .map(l => l.trim())
+                .filter(l => l.startsWith('- '))
+                // Strip "[timestamp]" prefixes for compactness
+                .map(l => l.replace(/^- \[[^\]]*\]\s*/, '- '))
+                .slice(0, 6);
+            if (lines.length > 0) profileLines = lines.join('\n');
+        }
+    } catch {
+        // profile lines are best-effort
+    }
+
+    let block = `# Owner Of This Memory (authoritative — do not infer identity from email headers)\n\n`;
+    block += `- **Name:** ${user?.name || '(not set — resolve from the email address below when needed)'}\n`;
+    block += `- **Email:** ${email || '(not set)'}\n`;
+    block += `- **Email domain:** ${domain || '(not set)'}${isFreeMail ? ' (personal free-mail domain — do NOT treat same-domain senders as the owner\'s colleagues)' : ' (company domain — same-domain senders are the owner\'s teammates)'}\n`;
+    if (profileLines) {
+        block += `- **Profile:**\n${profileLines.split('\n').map(l => `  ${l}`).join('\n')}\n`;
+    }
+    block += `\nEvery note is written from this person's first-person perspective: "I"/"me"/"my" = the owner above. `;
+    block += `Messages sent FROM the owner's address are the owner's own actions (including outbound sales/marketing/product email from their company). `;
+    block += `Never create a People note for the owner, and never describe the owner in third person. Apply the "Owner Identity" rules in your instructions.\n`;
+    return block;
+}
+
+/**
+ * Compute the Email Reply Gate mechanically and stamp the verdict on each email
+ * source. The gate ("cold inbound never creates notes") is the single most
+ * important selectivity rule, and leaving it to the model's judgment proved
+ * unreliable — 7 of 14 notes in one test corpus came from unanswered cold
+ * outreach. Code decides "did the user's side ever send a message in this
+ * thread"; the model only decides what the reply *means*.
+ */
+export function emailReplyGateBanner(filePath: string, content: string): string | null {
+    // Only email sources have the ### From: thread structure.
+    if (!filePath.split(path.sep).includes('gmail_sync')) return null;
+    const user = loadUserConfig();
+    if (!user?.email) return null;
+    const email = user.email.toLowerCase();
+    const domainRaw = (user.domain ?? email.split('@')[1] ?? '').toLowerCase();
+    // On a free-mail domain, same-domain senders are strangers, not teammates.
+    const teamDomain = domainRaw && !FREE_MAIL_DOMAINS.has(domainRaw) ? '@' + domainRaw : null;
+    const froms = [...content.matchAll(/^### From: (.+)$/gm)].map(m => m[1].toLowerCase());
+    if (froms.length === 0) return null;
+    // Google Groups rewrites external senders to look like the list address:
+    // `'Jane Doe' via Founders <founders@user-domain.com>`. Such a From is an
+    // EXTERNAL person routed through a group on the user's domain — it must
+    // not count as the user's side having replied. Exact user-email matches
+    // are also disqualified by the rewrite marker (the group addr differs).
+    const isGroupRewrite = (f: string) => /\bvia\b[^<]*</.test(f);
+    const replied = froms.some(f =>
+        !isGroupRewrite(f) && (f.includes(email) || (teamDomain !== null && f.includes(teamDomain)))
+    );
+    return replied
+        ? `> **REPLY-GATE (computed by the system, authoritative): the user HAS sent a message in this thread.** New People/Organization notes are allowed IF the user's reply shows real engagement AND the other gates pass. A decline, brush-off, or unsubscribe-style reply ("not interested", "please remove me", a bare "no thanks") is NOT engagement — treat those threads like purely inbound ones.`
+        : `> **REPLY-GATE (computed by the system, authoritative): the user has NOT sent any message in this thread — purely inbound.** You MUST NOT create ANY new note from this file — no People, no Organizations, no Projects, no Topics, no event notes. Not for the sender, and not for anyone or anything mentioned in the content (companies, speakers, events, products). No matter how important it sounds. Allowed: updating notes that already exist, and suggestion cards in suggested-topics.md. Sole exception: a calendar invite for a real 1:1/small-group meeting scheduled with the user by name may create the primary contact's note.`;
+}
+
 /**
  * Run note creation agent on a batch of files to extract entities and create/update notes
  */
@@ -250,17 +333,12 @@ async function createNotesFromBatch(
         fs.mkdirSync(NOTES_OUTPUT_DIR, { recursive: true });
     }
 
-    // Create a run for the note creation agent
-    const run = await createRun({
-        agentId: NOTE_CREATION_AGENT,
-        model: await getKgModel(),
-        useCase: 'knowledge_sync',
-        subUseCase: 'build_graph',
-    });
     const suggestedTopicsContent = readSuggestedTopicsFile();
 
-    // Build message with index and all files in the batch
+    // Build message with owner identity, index, and all files in the batch
     let message = `Process the following ${files.length} source files and create/update obsidian notes.\n\n`;
+    message += buildOwnerBlock();
+    message += `\n---\n\n`;
     message += `**Instructions:**\n`;
     message += `- Use the KNOWLEDGE BASE INDEX below to resolve entities - DO NOT grep/search for existing notes\n`;
     message += `- Extract entities (people, organizations, projects, topics) from ALL files below\n`;
@@ -287,41 +365,39 @@ async function createNotesFromBatch(
         // Pass workspace-relative path so the agent can link back to meeting notes
         const relativePath = path.relative(WorkDir, file.path);
         message += `## Source File ${idx + 1}: ${relativePath}\n\n`;
+        const gateBanner = emailReplyGateBanner(file.path, file.content);
+        if (gateBanner) {
+            message += gateBanner + `\n\n`;
+        }
         message += file.content;
         message += `\n\n---\n\n`;
     });
 
-    const notesCreated = new Set<string>();
-    const notesModified = new Set<string>();
-
-    const unsubscribe = await bus.subscribe(run.id, async (event) => {
-        if (event.type !== "tool-invocation") {
-            return;
-        }
-        if (event.toolName !== "file-writeText" && event.toolName !== "file-editText") {
-            return;
-        }
-        const toolPath = extractPathFromToolInput(event.input);
-        if (!toolPath) {
-            return;
-        }
-        if (event.toolName === "file-writeText") {
-            notesCreated.add(toolPath);
-        } else if (event.toolName === "file-editText") {
-            notesModified.add(toolPath);
-        }
-    });
-
-    await createMessage(run.id, message);
-
-    // Wait for the run to complete
-    try {
-        await waitForRunCompletion(run.id, { throwOnError: true });
-    } finally {
-        unsubscribe();
+    // Recency-position reminder: small models weight the end of the prompt
+    // heavily, and the identity rules are the ones that corrupt the graph
+    // when missed. Repeat the critical three right before generation.
+    const user = loadUserConfig();
+    if (user?.email) {
+        const ownerLabel = user.name ? `${user.name} <${user.email}>` : user.email;
+        message += `**FINAL REMINDER — the owner of this memory is ${ownerLabel}.** `;
+        message += `(1) Never create or update a People note for them; in prose they are "I", never their name. `;
+        message += `(2) Emails FROM ${user.email} are the owner's own actions ("I emailed…"), not an external contact. `;
+        message += `(3) No placeholder text ("Unknown"/"-") and no links between entities that didn't co-occur in one source file.\n`;
     }
 
-    return { runId: run.id, notesCreated, notesModified };
+    const { turnId, state } = await runWhenPossible({
+        agentId: NOTE_CREATION_AGENT,
+        message,
+        ...(await getKgModel()),
+        throwOnError: true,
+    });
+
+    // Created/modified paths come from the durable turn state instead of
+    // streaming bus subscriptions.
+    const notesCreated = toolInputPaths(state, ["file-writeText"]);
+    const notesModified = toolInputPaths(state, ["file-editText"]);
+
+    return { runId: turnId, notesCreated, notesModified };
 }
 
 /**
@@ -643,6 +719,15 @@ export async function processAllSources(): Promise<void> {
 
     let anyFilesProcessed = false;
 
+    try {
+        const slackFiles = await syncSlackKnowledgeSources();
+        if (slackFiles.length > 0) {
+            console.log(`[GraphBuilder] Slack sync wrote ${slackFiles.length} artifact files`);
+        }
+    } catch (error) {
+        console.error('[GraphBuilder] Error syncing Slack knowledge sources:', error);
+    }
+
     // Process voice memos first (they get moved to knowledge/)
     try {
         const voiceMemosProcessed = await processVoiceMemosForKnowledge();
@@ -654,12 +739,13 @@ export async function processAllSources(): Promise<void> {
     }
 
     const state = loadState();
-    const folderChanges: { folder: string; sourceDir: string; files: string[] }[] = [];
+    const folderChanges: { source: KnowledgeSourceConfig; sourceDir: string; files: string[] }[] = [];
     const countsByFolder: Record<string, number> = {};
     const allFiles: string[] = [];
+    const fileSources = getEnabledFileSources();
 
-    for (const folder of SOURCE_FOLDERS) {
-        const sourceDir = path.join(WorkDir, folder);
+    for (const source of fileSources) {
+        const sourceDir = path.join(WorkDir, source.artifactDir);
 
         // Skip if folder doesn't exist
         if (!fs.existsSync(sourceDir)) {
@@ -671,7 +757,7 @@ export async function processAllSources(): Promise<void> {
             let filesToProcess = getFilesToProcess(sourceDir, state);
 
             // For gmail_sync, only process emails that have been labeled AND don't have noise filter tags
-            if (folder === 'gmail_sync') {
+            if (source.provider === 'gmail') {
                 filesToProcess = filesToProcess.filter(filePath => {
                     try {
                         const content = fs.readFileSync(filePath, 'utf-8');
@@ -690,13 +776,13 @@ export async function processAllSources(): Promise<void> {
             }
 
             if (filesToProcess.length > 0) {
-                console.log(`[GraphBuilder] Found ${filesToProcess.length} new/changed files in ${folder}`);
-                folderChanges.push({ folder, sourceDir, files: filesToProcess });
-                countsByFolder[folder] = filesToProcess.length;
+                console.log(`[GraphBuilder] Found ${filesToProcess.length} new/changed files in ${source.id}`);
+                folderChanges.push({ source, sourceDir, files: filesToProcess });
+                countsByFolder[source.id] = filesToProcess.length;
                 allFiles.push(...filesToProcess);
             }
         } catch (error) {
-            console.error(`[GraphBuilder] Error processing ${folder}:`, error);
+            console.error(`[GraphBuilder] Error processing ${source.id}:`, error);
             // Continue with other folders even if one fails
         }
     }
@@ -706,7 +792,7 @@ export async function processAllSources(): Promise<void> {
             service: 'graph',
             message: 'Syncing knowledge graph',
             trigger: 'timer',
-            config: { sources: SOURCE_FOLDERS },
+            config: { sources: fileSources.map(source => source.id) },
         });
 
         const relativeFiles = allFiles.map(filePath => path.relative(WorkDir, filePath));
@@ -765,12 +851,154 @@ export async function processAllSources(): Promise<void> {
     }
 }
 
+// ── Curation ("gardener") pass ───────────────────────────────────────────────
+// note_creation only appends; without periodic consolidation, notes bloat and
+// rot (duplicate activity, stale open items, frontmatter drift, patterns never
+// promoted to facts). Daily, rewrite the notes that need it — one at a time —
+// with the note_curation agent. This is the graph's compounding loop.
+
+const CURATION_AGENT = 'note_curation';
+const CURATION_INTERVAL_MS = 24 * 60 * 60 * 1000; // daily
+const CURATION_MAX_NOTES_PER_RUN = 8;
+const CURATION_ENTITY_FOLDERS = ['People', 'Organizations', 'Projects', 'Topics'];
+// A note qualifies when it has accumulated enough activity to be worth a pass,
+// and has been modified since it was last curated (with a cooldown so we don't
+// re-curate on every small append).
+const CURATION_MIN_ACTIVITY_LINES = 8;
+const CURATION_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
+
+function countActivityEntries(content: string): number {
+    // Activity/Timeline/Log entries all start with a bolded date bullet or header
+    const matches = content.match(/^-?\s*\*\*\d{4}-\d{2}(-\d{2})?\*\*/gm);
+    return matches ? matches.length : 0;
+}
+
+function parseCuratedAt(content: string): Date | null {
+    const m = content.match(/^curated_at:\s*"?([^"\n]+)"?\s*$/m);
+    if (!m) return null;
+    const d = new Date(m[1].trim());
+    return isNaN(d.getTime()) ? null : d;
+}
+
+function findCurationCandidates(): { path: string; activityCount: number }[] {
+    const candidates: { path: string; activityCount: number; mtime: number }[] = [];
+    for (const folder of CURATION_ENTITY_FOLDERS) {
+        const dir = path.join(NOTES_OUTPUT_DIR, folder);
+        if (!fs.existsSync(dir)) continue;
+        for (const entry of fs.readdirSync(dir)) {
+            if (!entry.endsWith('.md')) continue;
+            const filePath = path.join(dir, entry);
+            try {
+                const stat = fs.statSync(filePath);
+                if (!stat.isFile()) continue;
+                const content = fs.readFileSync(filePath, 'utf-8');
+                const activityCount = countActivityEntries(content);
+                if (activityCount < CURATION_MIN_ACTIVITY_LINES) continue;
+                const curatedAt = parseCuratedAt(content);
+                if (curatedAt) {
+                    const modifiedSinceCuration = stat.mtime.getTime() > curatedAt.getTime();
+                    const cooledDown = Date.now() - curatedAt.getTime() > CURATION_COOLDOWN_MS;
+                    if (!modifiedSinceCuration || !cooledDown) continue;
+                }
+                candidates.push({ path: filePath, activityCount, mtime: stat.mtime.getTime() });
+            } catch {
+                // unreadable note — skip
+            }
+        }
+    }
+    // Most-bloated first
+    candidates.sort((a, b) => b.activityCount - a.activityCount);
+    return candidates.slice(0, CURATION_MAX_NOTES_PER_RUN);
+}
+
+export async function curateNotes(): Promise<void> {
+    const state = loadState();
+    const last = state.lastCurationTime ? new Date(state.lastCurationTime).getTime() : 0;
+    if (Date.now() - last < CURATION_INTERVAL_MS) return;
+
+    const candidates = findCurationCandidates();
+    // Stamp the attempt time even when there is nothing to do, so we only scan daily.
+    state.lastCurationTime = new Date().toISOString();
+    saveState(state);
+    if (candidates.length === 0) {
+        console.log('[GraphBuilder] Curation: no notes need consolidation');
+        return;
+    }
+
+    console.log(`[GraphBuilder] Curation: consolidating ${candidates.length} note(s)`);
+    const run = await serviceLogger.startRun({
+        service: 'graph',
+        message: `Curating ${candidates.length} knowledge note${candidates.length === 1 ? '' : 's'}`,
+        trigger: 'timer',
+    });
+
+    let curated = 0;
+    let hadError = false;
+    for (const candidate of candidates) {
+        const relPath = path.relative(WorkDir, candidate.path);
+        try {
+            const content = fs.readFileSync(candidate.path, 'utf-8');
+            let message = buildOwnerBlock();
+            message += `\n---\n\n`;
+            message += `Curate the following knowledge note per your instructions. Rewrite it in place with a single file-writeText to the SAME path.\n\n`;
+            message += `**Note path:** ${relPath}\n\n`;
+            message += `**Current content:**\n\n${content}\n`;
+            await runWhenPossible({
+                agentId: CURATION_AGENT,
+                message,
+                ...(await getKgModel()),
+                throwOnError: true,
+            });
+            curated++;
+            await serviceLogger.log({
+                type: 'progress',
+                service: run.service,
+                runId: run.runId,
+                level: 'info',
+                message: `Curated ${relPath}`,
+                step: 'curate',
+                current: curated,
+                total: candidates.length,
+            });
+        } catch (error) {
+            hadError = true;
+            console.error(`[GraphBuilder] Curation failed for ${relPath}:`, error);
+            await serviceLogger.log({
+                type: 'error',
+                service: run.service,
+                runId: run.runId,
+                level: 'error',
+                message: `Curation failed for ${relPath}`,
+                error: getErrorDetails(error),
+            });
+        }
+    }
+
+    try {
+        await commitAll('Knowledge curation', 'Rowboat');
+    } catch (err) {
+        console.error('[GraphBuilder] Failed to commit curation to version history:', err);
+    }
+
+    await serviceLogger.log({
+        type: 'run_complete',
+        service: run.service,
+        runId: run.runId,
+        level: hadError ? 'error' : 'info',
+        message: `Curation complete: ${curated}/${candidates.length} notes consolidated`,
+        durationMs: Date.now() - run.startedAt,
+        outcome: hadError ? 'error' : 'ok',
+        summary: { notesCurated: curated },
+    });
+}
+
 /**
  * Main entry point - runs as independent service monitoring all source folders
  */
 export async function init() {
     console.log('[GraphBuilder] Starting Knowledge Graph Builder Service...');
-    console.log(`[GraphBuilder] Monitoring folders: ${SOURCE_FOLDERS.join(', ')}, knowledge/Voice Memos`);
+    const sourceFolders = getEnabledFileSources().map(source => source.artifactDir);
+    console.log(`[GraphBuilder] Monitoring folders: ${sourceFolders.join(', ')}, knowledge/Voice Memos`);
     console.log(`[GraphBuilder] Will check for new content every ${SYNC_INTERVAL_MS / 1000} seconds`);
 
     // Initial run
@@ -784,6 +1012,12 @@ export async function init() {
             await processAllSources();
         } catch (error) {
             console.error('[GraphBuilder] Error in main loop:', error);
+        }
+
+        try {
+            await curateNotes(); // no-ops unless the daily interval has elapsed
+        } catch (error) {
+            console.error('[GraphBuilder] Error in curation pass:', error);
         }
     }
 }

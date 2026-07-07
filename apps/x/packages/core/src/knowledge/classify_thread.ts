@@ -1,19 +1,19 @@
 import fs from 'fs';
 import path from 'path';
 import { z } from 'zod';
-import { generateObject } from 'ai';
 import { google } from 'googleapis';
 import type { OAuth2Client } from 'google-auth-library';
 import { WorkDir } from '../config/config.js';
-import { createProvider } from '../models/models.js';
+import { createLanguageModel } from '../models/models.js';
+import { generateObjectSafe } from '../models/structured.js';
 import {
-    getDefaultModelAndProvider,
     getKgModel,
     resolveProviderConfig,
 } from '../models/defaults.js';
 import { captureLlmUsage } from '../analytics/usage.js';
 import { withUseCase } from '../analytics/use_case.js';
 import type { GmailThreadSnapshot } from './sync_gmail.js';
+import { formatImportanceFeedbackForPrompt, maybeDistillImportanceRules } from './email_importance_feedback.js';
 
 const STYLE_GUIDE_PATH = path.join(WorkDir, 'knowledge', 'Agent Notes', 'style', 'email.md');
 const CALENDAR_DIR = path.join(WorkDir, 'calendar_sync');
@@ -109,7 +109,7 @@ export interface Classification {
 const ClassificationSchema = z.object({
     importance: z.enum(['important', 'other']).describe('important = real correspondence, action-required, or content worth referencing later. other = newsletters, marketing, automated notifications, transactional receipts, cold outreach.'),
     summary: z.string().optional().describe('One or two sentences capturing what the thread is about and any implied action. Required when importance is important. Omit when other.'),
-    draftResponse: z.string().optional().describe('A complete draft reply the user can send as-is or edit. Plain text with real line breaks (\\n): greeting on its own line, a blank line between paragraphs, and the sign-off on its own line(s) — e.g. "Hi Tyrone,\\n\\nThanks for the follow-up.\\n\\nBest,\\nJohn". Required when importance is important AND the thread implies a response is wanted. Omit when other, or when no response is appropriate (e.g. an FYI from a colleague that does not need a reply).'),
+    draftResponse: z.string().optional().describe('A complete draft reply the user can send as-is or edit. Plain text with real line breaks (\\n): greeting on its own line, a blank line between paragraphs, and the sign-off on its own line(s) — e.g. "Hi Tyrone,\\n\\nThanks for the follow-up.\\n\\nBest,\\nJohn". If a sign-off name is included, use only the user\'s first name. Required when importance is important AND the thread implies a response is wanted. Omit when other, or when no response is appropriate (e.g. an FYI from a colleague that does not need a reply).'),
 });
 
 const SYSTEM_PROMPT = `You classify a Gmail thread for a personal inbox view and, when appropriate, draft a reply on behalf of the user.
@@ -138,6 +138,8 @@ Could you resend it with a bit more context so I can get back to you properly?
 
 Best,
 John
+
+If you include the user's name in the sign-off, use only their first name, never their full name.
 
 When an email-style guide is provided below, it takes precedence: follow it for greeting, tone, sign-off, length, and phrasing patterns (while keeping the line-break structure shown above). If no style guide is provided, default to a brief, warm, professional voice.
 
@@ -220,27 +222,50 @@ export async function classifyThread(
     options: ClassifyOptions = {},
 ): Promise<Classification> {
     if (userSentLatest(snapshot, userEmail)) {
-        return { importance: 'important' };
+        // Force-important only for real conversations the user replied in.
+        // Threads where the user is the ONLY sender (outbound campaigns,
+        // first-touch outreach, self-test sends) are not inbox-important —
+        // when a recipient replies, the thread updates and is re-classified,
+        // and this shortcut then correctly marks it important.
+        const needle = (userEmail ?? '').toLowerCase();
+        const othersParticipated = needle
+            ? snapshot.messages.some((m) => m.from && !m.from.toLowerCase().includes(needle))
+            : false;
+        if (othersParticipated) {
+            return { importance: 'important' };
+        }
+        return { importance: 'other' };
     }
 
     try {
         const styleGuide = readEmailStyleGuide();
         const calendar = readUpcomingCalendar();
 
-        const modelId = await getKgModel();
-        const { provider } = await getDefaultModelAndProvider();
-        const config = await resolveProviderConfig(provider);
-        const model = createProvider(config).languageModel(modelId);
+        // Opportunistically distill accumulated user corrections into rules
+        // (no-ops unless enough new corrections exist).
+        await maybeDistillImportanceRules();
 
-        const systemPrompt = options.skipDraft
+        const { model: modelId, provider } = await getKgModel();
+        const config = await resolveProviderConfig(provider);
+        const model = createLanguageModel(config, modelId);
+
+        let systemPrompt = options.skipDraft
             ? `${SYSTEM_PROMPT}\n\n# Skip the draft\n\nThe user already has their own draft in progress for this thread — DO NOT generate a draftResponse. Always omit the draftResponse field.`
             : SYSTEM_PROMPT;
 
-        const result = await withUseCase({ useCase: 'knowledge_sync', subUseCase: 'email_classifier' }, () => generateObject({
+        // The user's learned importance preferences override the generic
+        // criteria — appended last so they take precedence.
+        const feedback = formatImportanceFeedbackForPrompt();
+        if (feedback) {
+            systemPrompt = `${systemPrompt}\n\n${feedback}`;
+        }
+
+        const result = await withUseCase({ useCase: 'knowledge_sync', subUseCase: 'email_classifier' }, () => generateObjectSafe({
             model,
             system: systemPrompt,
             prompt: buildPrompt(snapshot, userEmail, styleGuide, calendar),
             schema: ClassificationSchema,
+            retry: true,
         }));
 
         captureLlmUsage({

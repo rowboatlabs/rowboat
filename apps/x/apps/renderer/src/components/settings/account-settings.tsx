@@ -17,15 +17,10 @@ import {
 import { Separator } from "@/components/ui/separator"
 import { useBilling } from "@/hooks/useBilling"
 import { toast } from "sonner"
-import type { BillingUsageBucket } from "@x/shared/dist/billing.js"
+import { getBillingPlanData, type BillingUsageBucket } from "@x/shared/dist/billing.js"
 
 interface AccountSettingsProps {
   dialogOpen: boolean
-}
-
-function formatPlanName(plan: string | null | undefined) {
-  if (!plan) return 'No Plan'
-  return `${plan.charAt(0).toUpperCase()}${plan.slice(1)} Plan`
 }
 
 function CreditUsageBar({ label, bucket, helper }: {
@@ -62,7 +57,8 @@ export function AccountSettings({ dialogOpen }: AccountSettingsProps) {
   const [connecting, setConnecting] = useState(false)
   const [appUrl, setAppUrl] = useState<string | null>(null)
   const { billing, isLoading: billingLoading } = useBilling(isRowboatConnected)
-  const hasPaidSubscription = billing?.subscriptionPlan === 'starter' || billing?.subscriptionPlan === 'pro'
+  const currentPlan = billing ? getBillingPlanData(billing.catalog, billing.subscriptionPlanId) : null
+  const hasPaidSubscription = currentPlan?.category === 'starter' || currentPlan?.category === 'pro'
 
   const checkConnection = useCallback(async () => {
     try {
@@ -197,7 +193,7 @@ export function AccountSettings({ dialogOpen }: AccountSettingsProps) {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium capitalize">
-                  {formatPlanName(billing.subscriptionPlan)}
+                  {currentPlan?.displayName ?? (billing.subscriptionPlanId ? 'Unknown' : 'No plan')}
                 </p>
                 {billing.subscriptionStatus === 'trialing' && billing.trialExpiresAt ? (() => {
                   const days = Math.max(0, Math.ceil((new Date(billing.trialExpiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
@@ -209,12 +205,12 @@ export function AccountSettings({ dialogOpen }: AccountSettingsProps) {
                 })() : billing.subscriptionStatus ? (
                   <p className="text-xs text-muted-foreground capitalize">{billing.subscriptionStatus}</p>
                 ) : null}
-                {!billing.subscriptionPlan && (
+                {!billing.subscriptionPlanId && (
                   <p className="text-xs text-muted-foreground">Subscribe to access AI features</p>
                 )}
               </div>
               <Button variant="outline" size="sm" onClick={() => appUrl && window.open(`${appUrl}?intent=upgrade`)}>
-                {!billing.subscriptionPlan ? 'Subscribe' : billing.subscriptionPlan === 'free' ? 'Upgrade' : 'Change plan'}
+                {!billing.subscriptionPlanId ? 'Subscribe' : currentPlan?.category === 'free' ? 'Upgrade' : 'Change plan'}
               </Button>
             </div>
             <div className="space-y-3 border-t pt-3">

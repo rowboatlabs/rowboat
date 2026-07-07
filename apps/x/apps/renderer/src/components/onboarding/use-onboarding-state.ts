@@ -8,7 +8,7 @@ export interface ProviderState {
   isConnecting: boolean
 }
 
-export type Step = 0 | 1 | 2 | 3
+export type Step = 0 | 1 | 2 | 3 | 4
 
 export type OnboardingPath = 'rowboat' | 'byok' | null
 
@@ -20,7 +20,7 @@ export interface LlmModelOption {
   release_date?: string
 }
 
-export function useOnboardingState(open: boolean, onComplete: () => void) {
+export function useOnboardingState(open: boolean, onComplete: (opts?: { startTour?: boolean }) => void) {
   const [currentStep, setCurrentStep] = useState<Step>(0)
   const [onboardingPath, setOnboardingPath] = useState<OnboardingPath>(null)
 
@@ -41,6 +41,7 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
   const [testState, setTestState] = useState<{ status: "idle" | "testing" | "success" | "error"; error?: string }>({
     status: "idle",
   })
+  const [connectedFlavors, setConnectedFlavors] = useState<Set<LlmProviderFlavor>>(new Set())
   const [showMoreProviders, setShowMoreProviders] = useState(false)
 
   // OAuth provider states
@@ -98,7 +99,6 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
   const showBaseURL = llmProvider === "ollama" || llmProvider === "openai-compatible" || llmProvider === "aigateway"
   const isLocalProvider = llmProvider === "ollama" || llmProvider === "openai-compatible"
   const canTest =
-    activeConfig.model.trim().length > 0 &&
     (!requiresApiKey || activeConfig.apiKey.trim().length > 0) &&
     (!requiresBaseURL || activeConfig.baseURL.trim().length > 0)
 
@@ -155,8 +155,8 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
 
   // Preferred default models for each provider
   const preferredDefaults: Partial<Record<LlmProviderFlavor, string>> = {
-    openai: "gpt-5.2",
-    anthropic: "claude-opus-4-6-20260202",
+    openai: "gpt-5.4",
+    anthropic: "claude-opus-4-8",
   }
 
   // Initialize default models from catalog
@@ -377,8 +377,8 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
   }, [startGoogleCalendarConnect])
 
   // New step flow:
-  // Rowboat path: 0 (welcome) → 2 (connect) → 3 (done)
-  // BYOK path: 0 (welcome) → 1 (llm setup) → 2 (connect) → 3 (done)
+  // Rowboat path: 0 (welcome) → 2 (connect) → 3 (code mode) → 4 (done)
+  // BYOK path: 0 (welcome) → 1 (llm setup) → 2 (connect) → 3 (code mode) → 4 (done)
   const handleNext = useCallback(() => {
     if (currentStep === 0) {
       if (onboardingPath === 'byok') {
@@ -390,6 +390,8 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
       setCurrentStep(2)
     } else if (currentStep === 2) {
       setCurrentStep(3)
+    } else if (currentStep === 3) {
+      setCurrentStep(4)
     }
   }, [currentStep, onboardingPath])
 
@@ -403,50 +405,103 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
       } else {
         setCurrentStep(1)
       }
+    } else if (currentStep === 3) {
+      setCurrentStep(2)
     }
   }, [currentStep, onboardingPath])
 
+  // Kept as no-arg handlers (rather than one that takes options) so the
+  // completion step can pass them straight to onClick without the mouse
+  // event leaking in as the options object.
   const handleComplete = useCallback(() => {
     onComplete()
   }, [onComplete])
 
-  const handleTestAndSaveLlmConfig = useCallback(async () => {
-    if (!canTest) return
+  const handleCompleteWithTour = useCallback(() => {
+    onComplete({ startTour: true })
+  }, [onComplete])
+
+  // Test the active provider's credentials and persist its config. Returns
+  // whether it succeeded so callers can decide whether to advance or stay.
+  const testAndSaveActiveProvider = useCallback(async (): Promise<boolean> => {
+    if (!canTest) return false
     setTestState({ status: "testing" })
     try {
       const apiKey = activeConfig.apiKey.trim() || undefined
       const baseURL = activeConfig.baseURL.trim() || undefined
-      const model = activeConfig.model.trim()
-      const knowledgeGraphModel = activeConfig.knowledgeGraphModel.trim() || undefined
-      const meetingNotesModel = activeConfig.meetingNotesModel.trim() || undefined
-      const liveNoteAgentModel = activeConfig.liveNoteAgentModel.trim() || undefined
-      const providerConfig = {
-        provider: {
-          flavor: llmProvider,
-          apiKey,
-          baseURL,
-        },
-        model,
-        knowledgeGraphModel,
-        meetingNotesModel,
-        liveNoteAgentModel,
-      }
-      const result = await window.ipc.invoke("models:test", providerConfig)
-      if (result.success) {
-        setTestState({ status: "success" })
-        await window.ipc.invoke("models:saveConfig", providerConfig)
-        window.dispatchEvent(new Event('models-config-changed'))
-        handleNext()
-      } else {
+      const provider = { flavor: llmProvider, apiKey, baseURL }
+
+      // Fetch the provider's models from the key — this both validates the
+      // credentials and gives us the list to populate the chat picker.
+      const result = await window.ipc.invoke("models:listForProvider", { provider })
+      if (!result.success) {
         setTestState({ status: "error", error: result.error })
         toast.error(result.error || "Connection test failed")
+        return false
       }
+
+      const catalog: string[] = result.models ?? []
+      const typed = activeConfig.model.trim()
+      // Hosted providers hide the model field (it holds an auto-seeded
+      // default), so only treat it as user intent where the field is shown —
+      // mirrors showModelInput in llm-setup-step.
+      const hostedProviders: LlmProviderFlavor[] = ["openai", "anthropic", "google"]
+      const modelInputShown = !hostedProviders.includes(llmProvider)
+
+      if (modelInputShown && typed && llmProvider === "ollama" && catalog.length > 0 && !catalog.includes(typed)) {
+        // Ollama's tag list is authoritative: an unlisted model isn't pulled,
+        // so saving it would break chat at runtime with no obvious cause.
+        const error = `Model '${typed}' is not available on this Ollama server. Pull it first (ollama pull ${typed}) or pick one of: ${catalog.slice(0, 5).join(", ")}${catalog.length > 5 ? ", …" : ""}`
+        setTestState({ status: "error", error })
+        toast.error(error)
+        return false
+      }
+
+      const preferred = preferredDefaults[llmProvider]
+      // A model the user explicitly entered always wins — this used to prefer
+      // catalog[0], which silently replaced the user's Ollama model with
+      // whatever model the local server happened to list first.
+      const model = modelInputShown
+        ? (typed || catalog[0] || "")
+        : ((preferred && catalog.includes(preferred) && preferred) || catalog[0] || typed || "")
+
+      // `models` is the user's curated assistant-model list (shown in Settings),
+      // NOT the full provider catalog. Onboarding seeds it with just the selected
+      // model; users add more from Settings. Persisting the whole catalog here
+      // rendered every model as a separate assistant-model row.
+      await window.ipc.invoke("models:saveConfig", { provider, model, models: model ? [model] : [] })
+      window.dispatchEvent(new Event('models-config-changed'))
+      setTestState({ status: "success" })
+      setConnectedFlavors(prev => new Set(prev).add(llmProvider))
+      return true
     } catch (error) {
       console.error("Connection test failed:", error)
       setTestState({ status: "error", error: "Connection test failed" })
       toast.error("Connection test failed")
+      return false
     }
-  }, [activeConfig.apiKey, activeConfig.baseURL, activeConfig.model, activeConfig.knowledgeGraphModel, activeConfig.meetingNotesModel, activeConfig.liveNoteAgentModel, canTest, llmProvider, handleNext])
+  }, [activeConfig.apiKey, activeConfig.baseURL, activeConfig.model, canTest, llmProvider])
+
+  // Save the active provider and advance to the next step.
+  const handleTestAndSaveLlmConfig = useCallback(async () => {
+    const ok = await testAndSaveActiveProvider()
+    if (ok) handleNext()
+  }, [testAndSaveActiveProvider, handleNext])
+
+  // Save the active provider but stay on the step. Switch to the next provider the
+  // user hasn't connected yet so the form is fresh and the buttons re-enable once
+  // they enter that key. (Clearing the current field instead left the buttons
+  // disabled on an empty form with no clear next step.)
+  const handleTestAndAddAnother = useCallback(async () => {
+    const ok = await testAndSaveActiveProvider()
+    if (!ok) return
+    // setConnectedFlavors is async, so include the just-saved provider here.
+    const connectedNow = new Set(connectedFlavors).add(llmProvider)
+    const order: LlmProviderFlavor[] = ["openai", "anthropic", "google", "openrouter", "aigateway", "ollama", "openai-compatible"]
+    const next = order.find(p => !connectedNow.has(p))
+    if (next) setLlmProvider(next)
+    setTestState({ status: "idle" })
+  }, [testAndSaveActiveProvider, connectedFlavors, llmProvider])
 
   // Check connection status for all providers
   const refreshAllStatuses = useCallback(async () => {
@@ -632,10 +687,12 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
     showBaseURL,
     isLocalProvider,
     canTest,
+    connectedFlavors,
     showMoreProviders,
     setShowMoreProviders,
     updateProviderConfig,
     handleTestAndSaveLlmConfig,
+    handleTestAndAddAnother,
 
     // OAuth state
     providers,
@@ -693,6 +750,7 @@ export function useOnboardingState(open: boolean, onComplete: () => void) {
     handleNext,
     handleBack,
     handleComplete,
+    handleCompleteWithTour,
     handleSwitchToRowboat,
   }
 }

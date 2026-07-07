@@ -2,10 +2,35 @@ packages:
   - apps/*
   - packages/*
 
+allowBuilds:
+  baileys: true
+  core-js: true
+  electron: true
+  electron-winstaller: true
+  esbuild: true
+  fs-xattr: true
+  macos-alias: true
+  node-pty: true
+  protobufjs: true
+
+blockExoticSubdeps: false
+
+overrides:
+  vscode-jsonrpc: 8.2.0
+
+# langium imports vscode-jsonrpc/lib/common/events.js but doesn't declare the
+# dependency (it only gets it transitively via vscode-languageserver), which
+# breaks resolution under pnpm's strict layout. Graft it on.
+packageExtensions:
+  langium:
+    dependencies:
+      vscode-jsonrpc: '*'
+
 catalog:
   vitest: 4.1.7
 
 onlyBuiltDependencies:
+  - baileys
   - core-js
   - electron
   - electron-winstaller
@@ -13,5 +38,3 @@ onlyBuiltDependencies:
   - fs-xattr
   - macos-alias
   - protobufjs
-patchedDependencies:
-  '@openai/codex@0.128.0': patches/@openai__codex@0.128.0.patch

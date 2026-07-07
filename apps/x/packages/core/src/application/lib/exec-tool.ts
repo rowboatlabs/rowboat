@@ -18,6 +18,11 @@ export interface ToolContext {
     // it is the authoritative coding agent — code_agent_run uses it rather than the
     // agent the model guessed, so switching the chip deterministically switches agents.
     codeMode?: 'claude' | 'codex' | null;
+    // Set for Code-section sessions in Rowboat mode: the session's working directory
+    // and approval policy. code_agent_run honors these over the model's cwd argument
+    // and the global approval policy.
+    codeCwd?: string | null;
+    codePolicy?: 'ask' | 'auto-approve-reads' | 'yolo' | null;
 }
 
 async function execMcpTool(agentTool: z.infer<typeof ToolAttachment> & { type: "mcp" }, input: Record<string, unknown>): Promise<unknown> {

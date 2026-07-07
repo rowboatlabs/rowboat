@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   ArrowUp,
@@ -15,15 +15,19 @@ import {
   FolderCog,
   FolderOpen,
   Globe,
-  Headphones,
   ImagePlus,
   LoaderIcon,
+  Lock,
   Mic,
   MoreHorizontal,
+  Phone,
+  PhoneOff,
   Plus,
+  Presentation,
   ShieldCheck,
   Square,
   Terminal,
+  Video,
   X,
 } from 'lucide-react'
 
@@ -71,6 +75,7 @@ export type StagedAttachment = {
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024 // 10MB
 const MAX_VISIBLE_RECENT_WORK_DIRS = 3
 const MAX_STORED_RECENT_WORK_DIRS = 8
+const CHAT_INPUT_TOOLTIP_DELAY_MS = 1000
 // Stored in the workspace (~/.rowboat/config) so it travels with the workspace and
 // stays consistent with the other config/*.json files (e.g. coding-agents.json).
 const RECENT_WORK_DIRS_CONFIG_PATH = 'config/recent-work-dirs.json'
@@ -208,6 +213,18 @@ function compactWorkDirPath(path: string) {
   return path.replace(/^\/Users\/[^/]+/, '~')
 }
 
+// Call presets: front doors into the same call engine, differing only in
+// starting devices. 'share' is the call button's main click — the "work
+// together" default (screen shared, camera off, floating pill). The chevron
+// menu holds the deviations.
+export type CallPreset = 'voice' | 'video' | 'share' | 'practice'
+
+const CALL_PRESET_MENU: Array<{ preset: CallPreset; label: string; description: string; Icon: typeof Phone }> = [
+  { preset: 'voice', label: 'Voice call', description: 'Just talk — nothing is shared, the mascot hovers while you work', Icon: AudioLines },
+  { preset: 'video', label: 'Video call', description: 'Camera on, face to face — it sees your expressions', Icon: Video },
+  { preset: 'practice', label: 'Practice session', description: 'Rehearse a pitch or interview with live coaching', Icon: Presentation },
+]
+
 interface ChatInputInnerProps {
   onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => void
   onStop?: () => void
@@ -221,22 +238,32 @@ interface ChatInputInnerProps {
   onDraftChange?: (text: string) => void
   isRecording?: boolean
   recordingText?: string
-  recordingState?: 'connecting' | 'listening'
+  recordingState?: 'connecting' | 'listening' | 'stopping'
+  /** Live mic amplitude history (RMS per frame) driving the recording waveform. */
+  audioLevelsRef?: React.MutableRefObject<number[]>
   onStartRecording?: () => void
-  onSubmitRecording?: () => void
+  onSubmitRecording?: () => void | Promise<void>
   onCancelRecording?: () => void
   voiceAvailable?: boolean
-  ttsAvailable?: boolean
-  ttsEnabled?: boolean
-  ttsMode?: 'summary' | 'full'
-  onToggleTts?: () => void
-  onTtsModeChange?: (mode: 'summary' | 'full') => void
+  /** A call is live (hands-free voice loop + spoken responses). */
+  inCall?: boolean
+  /** Start a call with the given preset's device defaults. */
+  onStartCall?: (preset: CallPreset) => void
+  onEndCall?: () => void
+  /** Calls need both voice input (STT) and voice output (TTS) configured. */
+  callAvailable?: boolean
   /** Fired when the user picks a different model in the dropdown (only when no run exists yet). */
   onSelectedModelChange?: (model: SelectedModel | null) => void
   /** Work directory for this chat (per-chat). Null when none is set. */
   workDir?: string | null
   /** Fired when the user sets/changes/clears the work directory for this chat. */
   onWorkDirChange?: (value: string | null) => void
+  /**
+   * Set when this chat is bound to a Code-section session: the work directory
+   * and coding agent come from the session and are FROZEN — the backend pins
+   * them server-side regardless, so the composer must not pretend otherwise.
+   */
+  codeSessionLock?: { cwd: string; agent: 'claude' | 'codex' } | null
 }
 
 function ChatInputInner({
@@ -253,18 +280,19 @@ function ChatInputInner({
   isRecording,
   recordingText,
   recordingState,
+  audioLevelsRef,
   onStartRecording,
   onSubmitRecording,
   onCancelRecording,
   voiceAvailable,
-  ttsAvailable,
-  ttsEnabled,
-  ttsMode,
-  onToggleTts,
-  onTtsModeChange,
+  inCall,
+  onStartCall,
+  onEndCall,
+  callAvailable,
   onSelectedModelChange,
   workDir = null,
   onWorkDirChange,
+  codeSessionLock = null,
 }: ChatInputInnerProps) {
   const controller = usePromptInputController()
   const message = controller.textInput.value
@@ -275,6 +303,11 @@ function ChatInputInner({
 
   const [configuredModels, setConfiguredModels] = useState<ConfiguredModel[]>([])
   const [activeModelKey, setActiveModelKey] = useState('')
+  // The effective runtime default (what a run actually uses when the user
+  // hasn't picked a model) — shown in the picker instead of guessing from
+  // list order, which can disagree with the real default.
+  const [defaultModel, setDefaultModel] = useState<ConfiguredModel | null>(null)
+  const loadModelConfigEpoch = useRef(0)
   const [lockedModel, setLockedModel] = useState<SelectedModel | null>(null)
   const [searchEnabled, setSearchEnabled] = useState(false)
   const [searchAvailable, setSearchAvailable] = useState(false)
@@ -330,22 +363,15 @@ function ChatInputInner({
     }
   })
 
-  // When a run exists, freeze the dropdown to the run's resolved model+provider.
+  // Sessions runtime: model and permission mode are per-message turn config,
+  // so nothing is frozen for an existing chat — the picker stays live.
   useEffect(() => {
     if (!runId) {
       setLockedModel(null)
       setPermissionMode('auto')
       return
     }
-    let cancelled = false
-    window.ipc.invoke('runs:fetch', { runId }).then((run) => {
-      if (cancelled) return
-      if (run.provider && run.model) {
-        setLockedModel({ provider: run.provider, model: run.model })
-      }
-      setPermissionMode(run.permissionMode ?? 'manual')
-    }).catch(() => { /* legacy run or fetch failure — leave unlocked */ })
-    return () => { cancelled = true }
+    setLockedModel(null)
   }, [runId])
 
   useEffect(() => {
@@ -374,40 +400,93 @@ function ChatInputInner({
     return cleanup
   }, [])
 
-  // Load the list of models the user can choose from.
-  // Signed-in: gateway model list. Signed-out: providers configured in models.json.
+  // Load the list of models the user can choose from. Hybrid mode: signed-in
+  // users get the gateway list AND every BYOK provider configured in
+  // models.json (selecting a BYOK model routes that message through the
+  // user's own key / local server). Signed-out users get BYOK only.
   const loadModelConfig = useCallback(async () => {
+    // Concurrent runs race (mount fires one before the sign-in state resolves,
+    // which fires another) — only the newest run may write state, else a slow
+    // stale run can clobber the fresh list with an empty one.
+    const epoch = ++loadModelConfigEpoch.current
     try {
-      if (isRowboatConnected) {
+      const def = await window.ipc.invoke('llm:getDefaultModel', null)
+      if (loadModelConfigEpoch.current !== epoch) return
+      setDefaultModel({ provider: def.provider as ProviderName, model: def.model })
+    } catch {
+      if (loadModelConfigEpoch.current === epoch) setDefaultModel(null)
+    }
+    try {
+      const models: ConfiguredModel[] = []
+      const seen = new Set<string>()
+      const push = (provider: string, model: string) => {
+        if (!model) return
+        const key = `${provider}/${model}`
+        if (seen.has(key)) return
+        seen.add(key)
+        models.push({ provider: provider as ProviderName, model })
+      }
+
+      // Full catalog per provider (gateway + cloud). Providers with no
+      // catalog (Ollama, OpenAI-compatible) fall back to the models saved in
+      // config below.
+      const catalog: Record<string, string[]> = {}
+      try {
         const listResult = await window.ipc.invoke('models:list', null)
-        const rowboatProvider = listResult.providers?.find(
-          (p: { id: string }) => p.id === 'rowboat'
-        )
-        const models: ConfiguredModel[] = (rowboatProvider?.models || []).map(
-          (m: { id: string }) => ({ provider: 'rowboat', model: m.id })
-        )
-        setConfiguredModels(models)
-      } else {
+        for (const p of listResult.providers || []) {
+          catalog[p.id] = (p.models || []).map((m: { id: string }) => m.id)
+        }
+      } catch { /* offline / no catalog — fall back to saved config below */ }
+
+      if (isRowboatConnected) {
+        for (const m of catalog['rowboat'] || []) push('rowboat', m)
+      }
+
+      try {
         const result = await window.ipc.invoke('workspace:readFile', { path: 'config/models.json' })
         const parsed = JSON.parse(result.data)
-        const models: ConfiguredModel[] = []
-        if (parsed?.providers) {
-          for (const [flavor, entry] of Object.entries(parsed.providers)) {
-            const e = entry as Record<string, unknown>
-            const modelList: string[] = Array.isArray(e.models) ? e.models as string[] : []
-            const singleModel = typeof e.model === 'string' ? e.model : ''
-            const allModels = modelList.length > 0 ? modelList : singleModel ? [singleModel] : []
-            for (const model of allModels) {
-              if (model) {
-                models.push({ provider: flavor as ProviderName, model })
-              }
-            }
+
+        // List the default provider first so its default model leads the
+        // BYOK section of the picker.
+        const defaultFlavor = typeof parsed?.provider?.flavor === 'string' ? parsed.provider.flavor : ''
+        const flavors = Object.keys(parsed?.providers || {})
+          .sort((a, b) => (a === defaultFlavor ? -1 : b === defaultFlavor ? 1 : 0))
+
+        for (const flavor of flavors) {
+          const e = (parsed.providers[flavor] || {}) as Record<string, unknown>
+          const hasKey = typeof e.apiKey === 'string' && (e.apiKey as string).trim().length > 0
+          const hasBaseURL = typeof e.baseURL === 'string' && (e.baseURL as string).trim().length > 0
+          if (!hasKey && !hasBaseURL) continue // provider not configured
+
+          // The provider's saved default model leads, then the rest of its catalog.
+          push(flavor, typeof e.model === 'string' ? e.model : '')
+          const catalogModels = catalog[flavor] || []
+          if (catalogModels.length > 0) {
+            for (const m of catalogModels) push(flavor, m)
+          } else {
+            // No catalog (local provider) — fall back to whatever is saved.
+            const saved = Array.isArray(e.models) ? e.models as string[] : []
+            for (const m of saved) push(flavor, m)
           }
         }
-        setConfiguredModels(models)
-      }
-    } catch {
-      // No config yet
+
+        // The user's explicit default selection leads the whole picker.
+        const sel = parsed?.defaultSelection
+        if (sel && typeof sel.provider === 'string' && typeof sel.model === 'string') {
+          const selKey = `${sel.provider}/${sel.model}`
+          const index = models.findIndex((m) => `${m.provider}/${m.model}` === selKey)
+          if (index > 0) {
+            const [entry] = models.splice(index, 1)
+            models.unshift(entry)
+          }
+        }
+      } catch { /* no BYOK config yet */ }
+
+      if (loadModelConfigEpoch.current !== epoch) return
+      setConfiguredModels(models)
+    } catch (err) {
+      // No config yet — but surface unexpected failures for diagnosis.
+      console.error('[chat-input] failed to load model list', err)
     }
   }, [isRowboatConnected])
 
@@ -491,22 +570,33 @@ function ChatInputInner({
     })
   }, [])
 
+  // A chat bound to a Code-section session has its work directory and coding
+  // agent frozen to the session's — the backend pins them server-side, so the
+  // composer reflects that instead of offering controls that wouldn't apply.
+  const isCodeLocked = Boolean(codeSessionLock)
+  const effectiveWorkDir = codeSessionLock?.cwd ?? workDir
+
   // Work directory is owned per-chat by the parent (App). This component only
   // drives the picker dialog and reports changes up via onWorkDirChange. Whenever
   // the work directory changes, load its persisted coding-agent preference.
   useEffect(() => {
+    if (codeSessionLock) {
+      setCodingAgent(codeSessionLock.agent)
+      return
+    }
     let cancelled = false
     loadCodingAgentFor(workDir).then((agent) => {
       if (!cancelled) setCodingAgent(agent)
     })
     return () => { cancelled = true }
-  }, [workDir, loadCodingAgentFor])
+  }, [workDir, loadCodingAgentFor, codeSessionLock])
 
   useEffect(() => {
-    if (isActive && workDir) void rememberWorkDir(workDir)
-  }, [isActive, workDir, rememberWorkDir])
+    if (isActive && workDir && !isCodeLocked) void rememberWorkDir(workDir)
+  }, [isActive, workDir, rememberWorkDir, isCodeLocked])
 
   const handleSetWorkDir = useCallback(async () => {
+    if (isCodeLocked) return
     try {
       let defaultPath: string | undefined = workDir ?? undefined
       try {
@@ -533,7 +623,7 @@ function ChatInputInner({
       console.error('Failed to set work directory', err)
       toast.error('Failed to set work directory')
     }
-  }, [workDir, onWorkDirChange, rememberWorkDir, loadCodingAgentFor])
+  }, [workDir, onWorkDirChange, rememberWorkDir, loadCodingAgentFor, isCodeLocked])
 
   const handleSelectRecentWorkDir = useCallback(async (dir: string) => {
     onWorkDirChange?.(dir)
@@ -543,12 +633,14 @@ function ChatInputInner({
   }, [onWorkDirChange, rememberWorkDir, loadCodingAgentFor])
 
   const handleClearWorkDir = useCallback(() => {
+    if (isCodeLocked) return
     onWorkDirChange?.(null)
     setCodingAgent('claude')
     toast.success('Work directory cleared')
-  }, [onWorkDirChange])
+  }, [onWorkDirChange, isCodeLocked])
 
   const handleToggleCodingAgent = useCallback(async () => {
+    if (isCodeLocked) return
     const next: 'claude' | 'codex' = codingAgent === 'claude' ? 'codex' : 'claude'
     setCodingAgent(next)
     // Persist only when scoped to a workdir; without one there's nothing to key on.
@@ -561,7 +653,7 @@ function ChatInputInner({
       // revert on failure
       setCodingAgent(codingAgent)
     }
-  }, [workDir, codingAgent, persistCodingAgent])
+  }, [workDir, codingAgent, persistCodingAgent, isCodeLocked])
 
   // Check search tool availability (exa or signed-in via gateway)
   useEffect(() => {
@@ -581,15 +673,25 @@ function ChatInputInner({
     checkSearch()
   }, [isActive, isRowboatConnected])
 
+  // The dropdown's items: always include the effective default so the picker
+  // is never empty (and never missing the model that actually runs) even
+  // while the full list is still loading.
+  const pickerModels = useMemo<ConfiguredModel[]>(() => {
+    if (!defaultModel) return configuredModels
+    const defaultKey = `${defaultModel.provider}/${defaultModel.model}`
+    if (configuredModels.some((m) => `${m.provider}/${m.model}` === defaultKey)) return configuredModels
+    return [defaultModel, ...configuredModels]
+  }, [configuredModels, defaultModel])
+
   // Selecting a model affects only the *next* run created from this tab.
   // Once a run exists, model is frozen on the run and the dropdown is read-only.
   const handleModelChange = useCallback((key: string) => {
     if (lockedModel) return
-    const entry = configuredModels.find((m) => `${m.provider}/${m.model}` === key)
+    const entry = pickerModels.find((m) => `${m.provider}/${m.model}` === key)
     if (!entry) return
     setActiveModelKey(key)
     onSelectedModelChange?.({ provider: entry.provider, model: entry.model })
-  }, [configuredModels, lockedModel, onSelectedModelChange])
+  }, [pickerModels, lockedModel, onSelectedModelChange])
 
   // Restore the tab draft when this input mounts.
   useEffect(() => {
@@ -647,15 +749,16 @@ function ChatInputInner({
 
   const handleSubmit = useCallback(() => {
     if (!canSubmit) return
-    // codeMode is sticky per conversation — don't reset after send.
-    const effectiveCodeMode = codeModeEnabled ? codingAgent : undefined
+    // codeMode is sticky per conversation — don't reset after send. A code
+    // session forces it (the backend pins the agent anyway).
+    const effectiveCodeMode = codeSessionLock ? codeSessionLock.agent : (codeModeEnabled ? codingAgent : undefined)
     onSubmit({ text: message.trim(), files: [] }, controller.mentions.mentions, attachments, searchEnabled || undefined, effectiveCodeMode, permissionMode)
     controller.textInput.clear()
     controller.mentions.clearMentions()
     setAttachments([])
     // Web search toggle stays on for the rest of the chat session; the user
     // turns it off explicitly. (Not persisted across app restarts.)
-  }, [attachments, canSubmit, controller, message, onSubmit, searchEnabled, codeModeEnabled, codingAgent, permissionMode, workDir])
+  }, [attachments, canSubmit, controller, message, onSubmit, searchEnabled, codeModeEnabled, codingAgent, permissionMode, workDir, codeSessionLock])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -697,11 +800,11 @@ function ChatInputInner({
   const visibleRecentWorkDirs = recentWorkDirs
     .filter((entry) => entry.path !== workDir)
     .slice(0, MAX_VISIBLE_RECENT_WORK_DIRS)
-  const currentWorkDirLabel = workDir ? basename(workDir) || workDir : 'Not set'
-  const currentWorkDirPath = workDir ? compactWorkDirPath(workDir) : ''
+  const currentWorkDirLabel = effectiveWorkDir ? basename(effectiveWorkDir) || effectiveWorkDir : 'Not set'
+  const currentWorkDirPath = effectiveWorkDir ? compactWorkDirPath(effectiveWorkDir) : ''
 
   return (
-    <div className="rowboat-chat-input rounded-lg border border-border bg-background shadow-none">
+    <div data-tour-id="chat-composer" className="rowboat-chat-input rounded-lg border border-border bg-background shadow-none">
       {attachments.length > 0 && (
         <div className="flex flex-wrap gap-2 px-4 pb-1 pt-3">
           {attachments.map((attachment) => {
@@ -772,24 +875,33 @@ function ChatInputInner({
           >
             <X className="h-4 w-4" />
           </button>
-          <div className="flex flex-1 items-center gap-2 overflow-hidden">
-            <VoiceWaveform />
-            <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
-              {recordingState === 'connecting' ? 'Connecting...' : recordingText || 'Listening...'}
-            </span>
+          <div className="flex min-w-0 flex-1 flex-col gap-1 overflow-hidden">
+            <VoiceWaveform audioLevelsRef={audioLevelsRef} />
+            <div
+              className={cn(
+                'min-h-5 truncate text-sm leading-5',
+                recordingText?.trim() ? 'text-foreground' : 'text-muted-foreground'
+              )}
+            >
+              {recordingText?.trim() || (recordingState === 'stopping' ? 'Finalizing...' : 'Listening...')}
+            </div>
           </div>
           <Button
             size="icon"
             onClick={onSubmitRecording}
-            disabled={!recordingText?.trim()}
+            disabled={recordingState === 'stopping'}
             className={cn(
               'h-7 w-7 shrink-0 rounded-full transition-all',
-              recordingText?.trim()
+              recordingState !== 'stopping'
                 ? 'bg-primary text-primary-foreground hover:bg-primary/90'
                 : 'bg-muted text-muted-foreground'
             )}
           >
-            <ArrowUp className="h-4 w-4" />
+            {recordingState === 'stopping' ? (
+              <LoaderIcon className="h-4 w-4 animate-spin" />
+            ) : (
+              <ArrowUp className="h-4 w-4" />
+            )}
           </Button>
         </div>
       ) : (
@@ -807,7 +919,7 @@ function ChatInputInner({
       <div ref={toolbarRef} className="flex items-center gap-2 px-4 pb-3">
         <div ref={leftGroupRef} className="flex min-w-0 items-center gap-2 overflow-hidden">
         <DropdownMenu>
-          <Tooltip>
+          <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
             <TooltipTrigger asChild>
               <DropdownMenuTrigger asChild>
                 <button
@@ -820,7 +932,7 @@ function ChatInputInner({
               </DropdownMenuTrigger>
             </TooltipTrigger>
             <TooltipContent side="top">
-              {workDir ? 'Add files or change work directory' : 'Add files or set work directory'}
+              {isCodeLocked ? 'Add files' : workDir ? 'Add files or change work directory' : 'Add files or set work directory'}
             </TooltipContent>
           </Tooltip>
           <DropdownMenuContent align="start" className="w-72 max-w-[calc(100vw-2rem)] p-2">
@@ -830,8 +942,23 @@ function ChatInputInner({
                 <span>Add files or photos</span>
               </DropdownMenuItem>
 
-              {/* Working directory lives behind a submenu so the main menu stays to two
-                  items. One hover/click away for power users; out of the way otherwise. */}
+              {/* A bound code session pins the directory — show it, no controls. */}
+              {isCodeLocked ? (
+                <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
+                  <TooltipTrigger asChild>
+                    <div className="flex h-auto items-center gap-2 rounded-[9px] px-2.5 py-2 text-muted-foreground">
+                      <FolderCheck className="size-4 shrink-0" />
+                      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                        <span className="truncate text-sm">{currentWorkDirLabel}</span>
+                        <span className="truncate text-xs">Pinned by the coding session</span>
+                      </span>
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">{effectiveWorkDir}</TooltipContent>
+                </Tooltip>
+              ) : (
+              /* Working directory lives behind a submenu so the main menu stays to two
+                 items. One hover/click away for power users; out of the way otherwise. */
               <DropdownMenuSub>
                 <DropdownMenuSubTrigger className="h-9 rounded-[9px] px-2.5">
                   <FolderCog className="size-4" />
@@ -845,18 +972,20 @@ function ChatInputInner({
                 <DropdownMenuSubContent className="w-72 max-w-[calc(100vw-2rem)] p-1">
                   {/* Current selection — shown for context only when one is set. */}
                   {workDir && (
-                    <div
-                      title={workDir}
-                      className="mb-1 flex items-center gap-2 rounded-[9px] bg-blue-50/80 px-2.5 py-2 text-blue-700 dark:bg-blue-950/30 dark:text-blue-300"
-                    >
-                      <FolderCheck className="size-4 shrink-0 text-blue-600 dark:text-blue-300" />
-                      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                        <span className="truncate text-sm font-medium">{currentWorkDirLabel}</span>
-                        <span className="truncate text-xs text-blue-700/70 dark:text-blue-300/70">
-                          {currentWorkDirPath}
-                        </span>
-                      </span>
-                    </div>
+                    <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
+                      <TooltipTrigger asChild>
+                        <div className="mb-1 flex items-center gap-2 rounded-[9px] bg-blue-50/80 px-2.5 py-2 text-blue-700 dark:bg-blue-950/30 dark:text-blue-300">
+                          <FolderCheck className="size-4 shrink-0 text-blue-600 dark:text-blue-300" />
+                          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                            <span className="truncate text-sm font-medium">{currentWorkDirLabel}</span>
+                            <span className="truncate text-xs text-blue-700/70 dark:text-blue-300/70">
+                              {currentWorkDirPath}
+                            </span>
+                          </span>
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent side="right">{workDir}</TooltipContent>
+                    </Tooltip>
                   )}
 
                   {/* Primary action: choose when unset, change when set. Always on top. */}
@@ -877,16 +1006,19 @@ function ChatInputInner({
                         const name = basename(entry.path) || entry.path
                         const when = formatRecentWorkDirTime(entry.lastUsedAt)
                         return (
-                          <DropdownMenuItem
-                            key={entry.path}
-                            title={entry.path}
-                            onSelect={() => { void handleSelectRecentWorkDir(entry.path) }}
-                            className="h-8 rounded-[9px] px-2.5"
-                          >
-                            <FolderClock className="size-4" />
-                            <span className="min-w-0 flex-1 truncate">{name}</span>
-                            {when && <span className="shrink-0 text-xs text-muted-foreground">{when}</span>}
-                          </DropdownMenuItem>
+                          <Tooltip key={entry.path} delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
+                            <TooltipTrigger asChild>
+                              <DropdownMenuItem
+                                onSelect={() => { void handleSelectRecentWorkDir(entry.path) }}
+                                className="h-8 rounded-[9px] px-2.5"
+                              >
+                                <FolderClock className="size-4" />
+                                <span className="min-w-0 flex-1 truncate">{name}</span>
+                                {when && <span className="shrink-0 text-xs text-muted-foreground">{when}</span>}
+                              </DropdownMenuItem>
+                            </TooltipTrigger>
+                            <TooltipContent side="right">{entry.path}</TooltipContent>
+                          </Tooltip>
                         )
                       })}
                     </>
@@ -907,26 +1039,31 @@ function ChatInputInner({
                   )}
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
+              )}
             </div>
           </DropdownMenuContent>
         </DropdownMenu>
-        {workDir && collapseLevel < 8 && (
-          <Tooltip>
+        {effectiveWorkDir && collapseLevel < 8 && (
+          <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
             <TooltipTrigger asChild>
               {/* Level 4: collapse to a square icon */}
               <div className={cn(
-                "group flex h-7 shrink-0 items-center rounded-full border border-border bg-muted/40 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+                "group flex h-7 shrink-0 items-center rounded-full border border-border bg-muted/40 text-xs text-muted-foreground transition-colors",
+                !isCodeLocked && "hover:bg-muted hover:text-foreground",
                 collapseLevel >= 4 ? "w-7 justify-center" : "max-w-[180px] pl-2.5 pr-2"
               )}>
                 <button
                   type="button"
                   onClick={handleSetWorkDir}
-                  className="flex min-w-0 items-center gap-1.5"
+                  disabled={isCodeLocked}
+                  className={cn("flex min-w-0 items-center gap-1.5", isCodeLocked && "cursor-default")}
                 >
-                  <FolderCog className="h-3.5 w-3.5 shrink-0" />
-                  {collapseLevel < 4 && <span className="truncate">{basename(workDir) || workDir}</span>}
+                  {isCodeLocked
+                    ? <Lock className="h-3 w-3 shrink-0" />
+                    : <FolderCog className="h-3.5 w-3.5 shrink-0" />}
+                  {collapseLevel < 4 && <span className="truncate">{basename(effectiveWorkDir) || effectiveWorkDir}</span>}
                 </button>
-                {collapseLevel < 4 && (
+                {collapseLevel < 4 && !isCodeLocked && (
                   <button
                     type="button"
                     onClick={handleClearWorkDir}
@@ -939,7 +1076,9 @@ function ChatInputInner({
               </div>
             </TooltipTrigger>
             <TooltipContent side="top">
-              Work directory: {workDir}
+              {isCodeLocked
+                ? `Pinned by the coding session: ${effectiveWorkDir}`
+                : `Work directory: ${effectiveWorkDir}`}
             </TooltipContent>
           </Tooltip>
         )}
@@ -965,7 +1104,7 @@ function ChatInputInner({
           </button>
         )}
         {collapseLevel < 6 && (
-        <Tooltip>
+        <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
           <TooltipTrigger asChild>
             <button
               type="button"
@@ -997,55 +1136,75 @@ function ChatInputInner({
           </TooltipContent>
         </Tooltip>
         )}
-        {codeModeFeatureEnabled && collapseLevel < 5 && (codeModeEnabled ? (
+        {codeModeFeatureEnabled && collapseLevel < 5 && ((isCodeLocked || codeModeEnabled) ? (
           collapseLevel >= 1 ? (
             /* Level 1: collapse the pill to a single icon */
-            <Tooltip>
+            <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  onClick={() => setCodeModeEnabled(false)}
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-secondary text-foreground transition-colors hover:bg-secondary/70"
+                  onClick={() => { if (!isCodeLocked) setCodeModeEnabled(false) }}
+                  disabled={isCodeLocked}
+                  className={cn(
+                    "flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-secondary text-foreground transition-colors",
+                    isCodeLocked ? "cursor-default" : "hover:bg-secondary/70",
+                  )}
                 >
                   <Terminal className="h-3.5 w-3.5" />
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="top">Code mode on ({codingAgent === 'claude' ? 'Claude Code' : 'Codex'}) — click to disable</TooltipContent>
+              <TooltipContent side="top">
+                {isCodeLocked
+                  ? `Coding session — ${codingAgent === 'claude' ? 'Claude Code' : 'Codex'}`
+                  : `Code mode on (${codingAgent === 'claude' ? 'Claude Code' : 'Codex'}) — click to disable`}
+              </TooltipContent>
             </Tooltip>
           ) : (
             <div className="flex h-7 shrink-0 items-center rounded-full bg-secondary text-xs font-medium text-foreground">
-              <Tooltip>
+              <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
                 <TooltipTrigger asChild>
                   <button
                     type="button"
-                    onClick={() => setCodeModeEnabled(false)}
-                    className="flex h-full items-center gap-1.5 rounded-l-full pl-2.5 pr-2 transition-colors hover:bg-secondary/70"
+                    onClick={() => { if (!isCodeLocked) setCodeModeEnabled(false) }}
+                    disabled={isCodeLocked}
+                    className={cn(
+                      "flex h-full items-center gap-1.5 rounded-l-full pl-2.5 pr-2 transition-colors",
+                      isCodeLocked ? "cursor-default" : "hover:bg-secondary/70",
+                    )}
                   >
-                    <Terminal className="h-3.5 w-3.5" />
+                    {isCodeLocked ? <Lock className="h-3 w-3" /> : <Terminal className="h-3.5 w-3.5" />}
                     <span>Code</span>
                   </button>
                 </TooltipTrigger>
-                <TooltipContent side="top">Code mode on — click to disable</TooltipContent>
+                <TooltipContent side="top">
+                  {isCodeLocked ? 'Pinned by the coding session' : 'Code mode on — click to disable'}
+                </TooltipContent>
               </Tooltip>
               <span className="text-foreground/30">·</span>
-              <Tooltip>
+              <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
                 <TooltipTrigger asChild>
                   <button
                     type="button"
                     onClick={handleToggleCodingAgent}
-                    className="flex h-full items-center rounded-r-full pl-2 pr-2.5 transition-colors hover:bg-secondary/70"
+                    disabled={isCodeLocked}
+                    className={cn(
+                      "flex h-full items-center rounded-r-full pl-2 pr-2.5 transition-colors",
+                      isCodeLocked ? "cursor-default" : "hover:bg-secondary/70",
+                    )}
                   >
                     <span>{codingAgent === 'claude' ? 'Claude' : 'Codex'}</span>
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="top">
-                  Coding agent: {codingAgent === 'claude' ? 'Claude Code' : 'Codex'} — click to swap
+                  {isCodeLocked
+                    ? `Coding agent fixed by the session: ${codingAgent === 'claude' ? 'Claude Code' : 'Codex'}`
+                    : `Coding agent: ${codingAgent === 'claude' ? 'Claude Code' : 'Codex'} — click to swap`}
                 </TooltipContent>
               </Tooltip>
             </div>
           )
         ) : (
-          <Tooltip>
+          <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
             <TooltipTrigger asChild>
               <button
                 type="button"
@@ -1062,7 +1221,7 @@ function ChatInputInner({
         </div>
         {collapseLevel >= 5 && (
           <DropdownMenu>
-            <Tooltip>
+            <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
               <TooltipTrigger asChild>
                 <DropdownMenuTrigger asChild>
                   <button
@@ -1077,10 +1236,10 @@ function ChatInputInner({
               <TooltipContent side="top">More options</TooltipContent>
             </Tooltip>
             <DropdownMenuContent align="start" side="top" className="min-w-52">
-              {workDir && collapseLevel >= 8 && (
-                <DropdownMenuItem onSelect={() => { void handleSetWorkDir() }}>
-                  <FolderCog className="size-4" />
-                  <span className="min-w-0 flex-1 truncate">{basename(workDir) || workDir}</span>
+              {effectiveWorkDir && collapseLevel >= 8 && (
+                <DropdownMenuItem disabled={isCodeLocked} onSelect={() => { void handleSetWorkDir() }}>
+                  {isCodeLocked ? <Lock className="size-4" /> : <FolderCog className="size-4" />}
+                  <span className="min-w-0 flex-1 truncate">{basename(effectiveWorkDir) || effectiveWorkDir}</span>
                 </DropdownMenuItem>
               )}
               {searchAvailable && collapseLevel >= 7 && (
@@ -1105,14 +1264,15 @@ function ChatInputInner({
               {codeModeFeatureEnabled && collapseLevel >= 5 && (
                 <>
                   <DropdownMenuCheckboxItem
-                    checked={codeModeEnabled}
+                    checked={isCodeLocked || codeModeEnabled}
+                    disabled={isCodeLocked}
                     onSelect={(e) => e.preventDefault()}
                     onCheckedChange={(c) => setCodeModeEnabled(Boolean(c))}
                   >
                     Code mode
                   </DropdownMenuCheckboxItem>
-                  {codeModeEnabled && (
-                    <DropdownMenuItem onSelect={(e) => { e.preventDefault(); handleToggleCodingAgent() }}>
+                  {(isCodeLocked || codeModeEnabled) && (
+                    <DropdownMenuItem disabled={isCodeLocked} onSelect={(e) => { e.preventDefault(); handleToggleCodingAgent() }}>
                       <Terminal className="size-4" />
                       <span className="min-w-0 flex-1">Coding agent</span>
                       <span className="text-xs text-muted-foreground">{codingAgent === 'claude' ? 'Claude' : 'Codex'}</span>
@@ -1125,13 +1285,17 @@ function ChatInputInner({
         )}
         <div className="flex-1" />
         {lockedModel ? (
-          <span
-            className="flex h-7 min-w-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground"
-            title={`${providerDisplayNames[lockedModel.provider] || lockedModel.provider} — fixed for this chat`}
-          >
-            <span className="min-w-0 truncate">{getSelectedModelDisplayName(lockedModel.model)}</span>
-          </span>
-        ) : configuredModels.length > 0 ? (
+          <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
+            <TooltipTrigger asChild>
+              <span className="flex h-7 min-w-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground">
+                <span className="min-w-0 truncate">{getSelectedModelDisplayName(lockedModel.model)}</span>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              {providerDisplayNames[lockedModel.provider] || lockedModel.provider} — fixed for this chat
+            </TooltipContent>
+          </Tooltip>
+        ) : pickerModels.length > 0 ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
@@ -1139,14 +1303,22 @@ function ChatInputInner({
                 className="flex h-7 min-w-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               >
                 <span className="min-w-0 truncate">
-                  {getSelectedModelDisplayName(configuredModels.find((m) => `${m.provider}/${m.model}` === activeModelKey)?.model || configuredModels[0]?.model || 'Model')}
+                  {getSelectedModelDisplayName(
+                    pickerModels.find((m) => `${m.provider}/${m.model}` === activeModelKey)?.model
+                      || defaultModel?.model
+                      || pickerModels[0]?.model
+                      || 'Model'
+                  )}
                 </span>
                 <ChevronDown className="h-3 w-3 shrink-0" />
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuRadioGroup value={activeModelKey} onValueChange={handleModelChange}>
-                {configuredModels.map((m) => {
+              <DropdownMenuRadioGroup
+                value={activeModelKey || (defaultModel ? `${defaultModel.provider}/${defaultModel.model}` : '')}
+                onValueChange={handleModelChange}
+              >
+                {pickerModels.map((m) => {
                   const key = `${m.provider}/${m.model}`
                   return (
                     <DropdownMenuRadioItem key={key} value={key}>
@@ -1159,48 +1331,66 @@ function ChatInputInner({
             </DropdownMenuContent>
           </DropdownMenu>
         ) : null}
-        {onToggleTts && ttsAvailable && (
+        {onStartCall && (
           <div className="flex shrink-0 items-center">
-            <Tooltip>
+            <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  onClick={onToggleTts}
+                  onClick={() => {
+                    if (inCall) {
+                      onEndCall?.()
+                    } else if (callAvailable) {
+                      onStartCall('share')
+                    }
+                  }}
                   className={cn(
-                    'relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors',
-                    ttsEnabled
-                      ? 'text-foreground hover:bg-muted'
-                      : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                    'flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors',
+                    inCall
+                      ? 'bg-red-600 text-white hover:bg-red-500'
+                      : callAvailable
+                        ? 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                        : 'cursor-default text-muted-foreground/40'
                   )}
-                  aria-label={ttsEnabled ? 'Disable voice output' : 'Enable voice output'}
+                  aria-label={inCall ? 'End call' : 'Start a call'}
                 >
-                  <Headphones className="h-4 w-4" />
-                  {!ttsEnabled && (
-                    <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                      <span className="block h-[1.5px] w-5 -rotate-45 rounded-full bg-muted-foreground" />
-                    </span>
-                  )}
+                  {inCall ? <PhoneOff className="h-4 w-4" /> : <Phone className="h-4 w-4" />}
                 </button>
               </TooltipTrigger>
               <TooltipContent side="top">
-                {ttsEnabled ? 'Voice output on' : 'Voice output off'}
+                {inCall
+                  ? 'End call'
+                  : callAvailable
+                    ? 'Start a call — it sees your screen while you talk it through'
+                    : 'Calls need voice input and output configured'}
               </TooltipContent>
             </Tooltip>
-            {ttsEnabled && onTtsModeChange && (
+            {!inCall && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
                     className="flex h-7 w-4 shrink-0 items-center justify-center text-muted-foreground transition-colors hover:text-foreground"
+                    aria-label="Call options"
                   >
                     <ChevronDown className="h-3 w-3" />
                   </button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuRadioGroup value={ttsMode ?? 'summary'} onValueChange={(v) => onTtsModeChange(v as 'summary' | 'full')}>
-                    <DropdownMenuRadioItem value="summary">Speak summary</DropdownMenuRadioItem>
-                    <DropdownMenuRadioItem value="full">Speak full response</DropdownMenuRadioItem>
-                  </DropdownMenuRadioGroup>
+                <DropdownMenuContent align="end" className="w-72">
+                  {CALL_PRESET_MENU.map(({ preset, label, description, Icon }) => (
+                    <DropdownMenuItem
+                      key={preset}
+                      disabled={!callAvailable}
+                      onSelect={() => onStartCall(preset)}
+                      className="items-start gap-3 py-2"
+                    >
+                      <Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                      <span className="min-w-0">
+                        <span className="block text-sm font-medium leading-tight">{label}</span>
+                        <span className="block pt-0.5 text-xs leading-tight text-muted-foreground">{description}</span>
+                      </span>
+                    </DropdownMenuItem>
+                  ))}
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
@@ -1217,23 +1407,30 @@ function ChatInputInner({
           </button>
         )}
         {isProcessing ? (
-          <Button
-            size="icon"
-            onClick={onStop}
-            title={isStopping ? 'Click again to force stop' : 'Stop generation'}
-            className={cn(
-              'h-7 w-7 shrink-0 rounded-full transition-all',
-              isStopping
-                ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
-                : 'bg-primary text-primary-foreground hover:bg-primary/90'
-            )}
-          >
-            {isStopping ? (
-              <LoaderIcon className="h-4 w-4 animate-spin" />
-            ) : (
-              <Square className="h-3 w-3 fill-current" />
-            )}
-          </Button>
+          <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
+            <TooltipTrigger asChild>
+              <Button
+                size="icon"
+                onClick={onStop}
+                aria-label={isStopping ? 'Force stop generation' : 'Stop generation'}
+                className={cn(
+                  'h-7 w-7 shrink-0 rounded-full transition-all',
+                  isStopping
+                    ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
+                    : 'bg-primary text-primary-foreground hover:bg-primary/90'
+                )}
+              >
+                {isStopping ? (
+                  <LoaderIcon className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Square className="h-3 w-3 fill-current" />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              {isStopping ? 'Click again to force stop' : 'Stop generation'}
+            </TooltipContent>
+          </Tooltip>
         ) : (
           <Button
             size="icon"
@@ -1257,22 +1454,89 @@ function ChatInputInner({
 }
 
 /** Animated waveform bars for the recording indicator */
-function VoiceWaveform() {
+// Live recording waveform. Each bar is one captured audio frame; bars accumulate
+// from the left and grow rightward until they fill the width, then scroll (oldest
+// drops off the left). Bar height tracks that frame's mic amplitude, so the
+// waveform visibly reacts to how loud the user is speaking.
+const WAVE_BAR_WIDTH = 3 // px
+const WAVE_BAR_GAP = 2 // px
+const WAVE_BAR_PITCH = WAVE_BAR_WIDTH + WAVE_BAR_GAP
+const WAVE_BAR_MIN = 1.5 // px — floor so silence still shows a faint line
+const WAVE_BAR_MAX = 18 // px — fits inside the h-5 (20px) row
+const WAVE_CURVE = 0.8 // <1 lifts quiet speech slightly; near-linear keeps loud peaks tall
+
+function waveBarHeight(level: number): number {
+  // `level` is already auto-gained to ~0..1 in the hook, so map it close to linearly
+  // (a gentle curve) — louder voice ⇒ visibly taller bar, quiet ⇒ short.
+  const amp = Math.min(1, Math.max(0, level)) ** WAVE_CURVE
+  return WAVE_BAR_MIN + amp * (WAVE_BAR_MAX - WAVE_BAR_MIN)
+}
+
+function VoiceWaveform({ audioLevelsRef }: { audioLevelsRef?: React.MutableRefObject<number[]> }) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [bars, setBars] = useState<number[]>([])
+  // How many bars fit in the current width; recomputed on resize.
+  const maxBarsRef = useRef(48)
+
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const measure = () => {
+      maxBarsRef.current = Math.max(1, Math.floor(el.clientWidth / WAVE_BAR_PITCH))
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  useEffect(() => {
+    if (!audioLevelsRef) return
+    let raf = 0
+    let lastSig = ''
+    const tick = () => {
+      const levels = audioLevelsRef.current
+      const maxBars = maxBarsRef.current
+      const next = levels.length > maxBars ? levels.slice(levels.length - maxBars) : levels
+      // Only re-render when the visible window actually changed. Length covers
+      // the growth phase; the trailing value covers the scrolling phase once full.
+      const sig = `${next.length}:${next.length ? next[next.length - 1] : 0}`
+      if (sig !== lastSig) {
+        lastSig = sig
+        setBars(next.slice())
+      }
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [audioLevelsRef])
+
   return (
-    <div className="flex items-center gap-[3px] h-5">
-      {[0, 1, 2, 3, 4].map((i) => (
+    <div
+      ref={containerRef}
+      className="flex h-5 w-full items-center overflow-hidden"
+      style={{ gap: `${WAVE_BAR_GAP}px` }}
+    >
+      {/* Each newly-appended bar mounts with `voice-bar-in` (grows + fades in) so it
+          doesn't pop. Once the strip is full and values scroll through the bars, the
+          height transition makes them flow smoothly instead of stepping. */}
+      {bars.map((level, i) => (
         <span
           key={i}
-          className="w-[3px] rounded-full bg-primary"
+          className="shrink-0 rounded-full bg-primary"
           style={{
-            animation: `voice-wave 1.2s ease-in-out ${i * 0.15}s infinite`,
+            width: `${WAVE_BAR_WIDTH}px`,
+            height: `${waveBarHeight(level)}px`,
+            transformOrigin: 'center',
+            transition: 'height 90ms linear',
+            animation: 'voice-bar-in 130ms ease-out',
           }}
         />
       ))}
       <style>{`
-        @keyframes voice-wave {
-          0%, 100% { height: 4px; }
-          50% { height: 16px; }
+        @keyframes voice-bar-in {
+          from { transform: scaleY(0.15); opacity: 0; }
+          to { transform: scaleY(1); opacity: 1; }
         }
       `}</style>
     </div>
@@ -1295,19 +1559,21 @@ export interface ChatInputWithMentionsProps {
   onDraftChange?: (text: string) => void
   isRecording?: boolean
   recordingText?: string
-  recordingState?: 'connecting' | 'listening'
+  recordingState?: 'connecting' | 'listening' | 'stopping'
+  audioLevelsRef?: React.MutableRefObject<number[]>
   onStartRecording?: () => void
-  onSubmitRecording?: () => void
+  onSubmitRecording?: () => void | Promise<void>
   onCancelRecording?: () => void
   voiceAvailable?: boolean
-  ttsAvailable?: boolean
-  ttsEnabled?: boolean
-  ttsMode?: 'summary' | 'full'
-  onToggleTts?: () => void
-  onTtsModeChange?: (mode: 'summary' | 'full') => void
+  inCall?: boolean
+  onStartCall?: (preset: CallPreset) => void
+  onEndCall?: () => void
+  callAvailable?: boolean
   onSelectedModelChange?: (model: SelectedModel | null) => void
   workDir?: string | null
   onWorkDirChange?: (value: string | null) => void
+  /** Set when this chat is bound to a Code-section session — freezes workdir + agent. */
+  codeSessionLock?: { cwd: string; agent: 'claude' | 'codex' } | null
 }
 
 export function ChatInputWithMentions({
@@ -1327,18 +1593,19 @@ export function ChatInputWithMentions({
   isRecording,
   recordingText,
   recordingState,
+  audioLevelsRef,
   onStartRecording,
   onSubmitRecording,
   onCancelRecording,
   voiceAvailable,
-  ttsAvailable,
-  ttsEnabled,
-  ttsMode,
-  onToggleTts,
-  onTtsModeChange,
+  inCall,
+  onStartCall,
+  onEndCall,
+  callAvailable,
   onSelectedModelChange,
   workDir,
   onWorkDirChange,
+  codeSessionLock,
 }: ChatInputWithMentionsProps) {
   return (
     <PromptInputProvider knowledgeFiles={knowledgeFiles} recentFiles={recentFiles} visibleFiles={visibleFiles}>
@@ -1356,18 +1623,19 @@ export function ChatInputWithMentions({
         isRecording={isRecording}
         recordingText={recordingText}
         recordingState={recordingState}
+        audioLevelsRef={audioLevelsRef}
         onStartRecording={onStartRecording}
         onSubmitRecording={onSubmitRecording}
         onCancelRecording={onCancelRecording}
         voiceAvailable={voiceAvailable}
-        ttsAvailable={ttsAvailable}
-        ttsEnabled={ttsEnabled}
-        ttsMode={ttsMode}
-        onToggleTts={onToggleTts}
-        onTtsModeChange={onTtsModeChange}
+        inCall={inCall}
+        onStartCall={onStartCall}
+        onEndCall={onEndCall}
+        callAvailable={callAvailable}
         onSelectedModelChange={onSelectedModelChange}
         workDir={workDir}
         onWorkDirChange={onWorkDirChange}
+        codeSessionLock={codeSessionLock}
       />
     </PromptInputProvider>
   )

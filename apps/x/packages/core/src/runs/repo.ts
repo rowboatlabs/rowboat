@@ -44,10 +44,46 @@ function runLogPath(runId: string): string {
     return path.join(WorkDir, 'runs', `${runId}.jsonl`);
 }
 
+// Per-run work directory sidecar, written by the renderer when a chat's work
+// directory is set (see `persistRunWorkDir` in the app). A run "belongs to" a
+// workspace folder when its work directory is that folder or nested inside it.
+function runWorkDirConfigPath(runId: string): string {
+    return path.join(WorkDir, 'config', `workdir-${runId}.json`);
+}
+
+function isPathInside(parent: string, child: string): boolean {
+    const relative = path.relative(parent, child);
+    return relative === '' || (!!relative && !relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+async function readRunWorkDir(runId: string): Promise<string | null> {
+    try {
+        const raw = await fsp.readFile(runWorkDirConfigPath(runId), 'utf8');
+        const parsed = JSON.parse(raw) as { path?: unknown };
+        return typeof parsed?.path === 'string' && parsed.path ? parsed.path : null;
+    } catch {
+        return null;
+    }
+}
+
+// Code-section sessions are runs (id == runId) but live in the Code view, not
+// the chat list. Their metadata sidecar identifies them so they can be kept out
+// of the workspace chats panel (opening one as a plain chat wouldn't resume code
+// mode). See FSCodeSessionsRepo — one JSON file per session id.
+async function isCodeSession(runId: string): Promise<boolean> {
+    try {
+        await fsp.access(path.join(WorkDir, 'code-mode', 'sessions-meta', `${runId}.json`));
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 export interface IRunsRepo {
     create(options: CreateRunRepoOptions): Promise<z.infer<typeof Run>>;
     fetch(id: string): Promise<z.infer<typeof Run>>;
     list(cursor?: string): Promise<z.infer<typeof ListRunsResponse>>;
+    listByWorkDir(dir: string): Promise<z.infer<typeof ListRunsResponse>>;
     appendEvents(runId: string, events: z.infer<typeof RunEvent>[]): Promise<void>;
     delete(id: string): Promise<void>;
 }
@@ -298,15 +334,19 @@ export class FSRunsRepo implements IRunsRepo {
 
         for (const name of selected) {
             const runId = name.slice(0, -'.jsonl'.length);
-            const metadata = await this.readRunMetadata(path.join(runsDir, name));
+            const filePath = path.join(runsDir, name);
+            const metadata = await this.readRunMetadata(filePath);
             if (!metadata) {
                 continue;
             }
+            const stat = await fsp.stat(filePath);
             runs.push({
                 id: runId,
                 title: metadata.title,
                 createdAt: metadata.start.ts!,
+                modifiedAt: stat.mtime.toISOString(),
                 agentId: metadata.start.agentName,
+                ...(metadata.start.useCase ? { useCase: metadata.start.useCase } : {}),
             });
         }
 
@@ -319,6 +359,63 @@ export class FSRunsRepo implements IRunsRepo {
             runs,
             ...(nextCursor ? { nextCursor } : {}),
         };
+    }
+
+    /**
+     * List runs whose work directory is `dir` or nested inside it. Unlike
+     * `list`, this scans every run (no pagination) and reads each run's
+     * work-directory sidecar to decide membership, so the caller gets the
+     * complete set of chats scoped to a workspace folder. Newest first.
+     */
+    async listByWorkDir(dir: string): Promise<z.infer<typeof ListRunsResponse>> {
+        const target = path.resolve(dir);
+        const runsDir = path.join(WorkDir, 'runs');
+
+        let files: string[] = [];
+        try {
+            const entries = await fsp.readdir(runsDir, { withFileTypes: true });
+            files = entries
+                .filter(e => e.isFile() && e.name.endsWith('.jsonl'))
+                .map(e => e.name);
+        } catch (err: unknown) {
+            const e = err as { code?: string };
+            if (e.code === 'ENOENT') {
+                return { runs: [] };
+            }
+            throw err;
+        }
+
+        files.sort((a, b) => b.localeCompare(a));
+
+        const runs: z.infer<typeof ListRunsResponse>['runs'] = [];
+        for (const name of files) {
+            const runId = name.slice(0, -'.jsonl'.length);
+            const workDir = await readRunWorkDir(runId);
+            if (!workDir || !isPathInside(target, path.resolve(workDir))) {
+                continue;
+            }
+            // Code-section sessions share the run/workdir machinery but belong
+            // in the Code view, not the workspace chats list.
+            if (await isCodeSession(runId)) {
+                continue;
+            }
+            const filePath = path.join(runsDir, name);
+            const metadata = await this.readRunMetadata(filePath);
+            if (!metadata) {
+                continue;
+            }
+            const stat = await fsp.stat(filePath);
+            runs.push({
+                id: runId,
+                title: metadata.title,
+                createdAt: metadata.start.ts!,
+                modifiedAt: stat.mtime.toISOString(),
+                agentId: metadata.start.agentName,
+                ...(metadata.start.useCase ? { useCase: metadata.start.useCase } : {}),
+            });
+        }
+
+        return { runs };
     }
 
     async delete(id: string): Promise<void> {

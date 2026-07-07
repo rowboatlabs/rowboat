@@ -22,7 +22,7 @@ import {
 import { type ComponentProps, type ReactNode, isValidElement, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import type { ToolCall, ToolGroup as ToolGroupType } from "@/lib/chat-conversation";
-import { getToolActionsSummary, getToolDisplayName, getToolGroupSummary, toToolState } from "@/lib/chat-conversation";
+import { getToolActionsSummary, getToolDisplayName, getToolErrorText, getToolGroupSummary, toToolState } from "@/lib/chat-conversation";
 
 const formatToolValue = (value: unknown) => {
   if (typeof value === "string") return value;
@@ -329,7 +329,7 @@ export const ToolGroupComponent = ({ group, isToolOpen, onToolOpenChange }: Tool
                   <ToolTabbedContent
                     input={tool.input as ToolUIPart["input"]}
                     output={tool.result as ToolUIPart["output"]}
-                    errorText={tool.status === 'error' ? 'Tool error' : undefined}
+                    errorText={getToolErrorText(tool)}
                   />
                 </ToolContent>
               </Tool>

@@ -292,7 +292,7 @@ function computeWithinBlockOffset(
       return 0
   }
 }
-import { EditorToolbar, type LivePillState } from './editor-toolbar'
+import { EditorToolbar, type GoogleDocToolbarState, type LivePillState } from './editor-toolbar'
 import { useLiveNoteForPath } from '@/hooks/use-live-note-for-path'
 import { formatRelativeTime } from '@/lib/relative-time'
 import { FrontmatterProperties } from './frontmatter-properties'
@@ -448,6 +448,7 @@ interface MarkdownEditorProps {
   onFrontmatterChange?: (raw: string | null) => void
   onExport?: (format: 'md' | 'pdf' | 'docx') => void
   notePath?: string
+  googleDoc?: GoogleDocToolbarState
 }
 
 type WikiLinkMatch = {
@@ -645,6 +646,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
   onFrontmatterChange,
   onExport,
   notePath,
+  googleDoc,
 }, ref) {
   const isInternalUpdate = useRef(false)
   const wrapperRef = useRef<HTMLDivElement>(null)
@@ -1628,6 +1630,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
         onSelectionHighlight={setSelectionHighlight}
         onImageUpload={handleImageUploadWithPlaceholder}
         onExport={onExport}
+        googleDoc={googleDoc}
         onOpenLiveNote={notePath ? () => {
           window.dispatchEvent(new CustomEvent('rowboat:open-live-note-panel', {
             detail: { filePath: notePath },

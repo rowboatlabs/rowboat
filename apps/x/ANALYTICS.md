@@ -24,7 +24,7 @@ Emitted whenever ai-sdk returns token usage (one event per LLM call, not per run
 
 | Property | Type | Notes |
 |---|---|---|
-| `use_case` | enum | `copilot_chat` / `live_note_agent` / `meeting_note` / `knowledge_sync` |
+| `use_case` | enum | `copilot_chat` / `live_note_agent` / `meeting_note` / `knowledge_sync` / `code_session` |
 | `sub_use_case` | string? | Refines `use_case` — see taxonomy table below |
 | `agent_name` | string? | Present when the call goes through an agent run (`createRun`); omitted for direct `generateText`/`generateObject` |
 | `model` | string | e.g. `claude-sonnet-4-6` |
@@ -57,6 +57,7 @@ Every `llm_usage` emit point in the codebase:
 | `knowledge_sync` | `inline_task_run` | yes | Inline `@rowboat` task execution (two call sites) | `packages/core/src/knowledge/inline_tasks.ts:471, 552` (createRun) |
 | `knowledge_sync` | `inline_task_classify` | no | Inline task scheduling classifier (`generateText`) | `packages/core/src/knowledge/inline_tasks.ts:673` |
 | `knowledge_sync` | `pre_built` | yes | Pre-built scheduled agents | `packages/core/src/pre_built/runner.ts:43` (createRun) |
+| `code_session` | (none) | yes | Code-section coding session in Rowboat mode (direct mode talks to the on-device coding agent and emits no `llm_usage`) | `packages/core/src/code-mode/sessions/service.ts` (createRun) |
 
 ##### `live_note_agent` sub-use-case shape
 
@@ -91,6 +92,8 @@ All in `apps/renderer/src/lib/analytics.ts`:
 - `chat_message_sent` — `{ voice_input, voice_output, search_enabled }`
 - `oauth_connected` / `oauth_disconnected` — `{ provider }`
 - `voice_input_started` — no properties
+- `call_started` — `{ preset: 'voice' | 'video' | 'share' | 'practice' }` — a hands-free call began (see `apps/x/VIDEO_MODE.md`)
+- `call_turn_latency` — `{ endpoint_to_submit_ms, submit_to_speak_ms, speak_to_audio_ms, total_ms }` — voice-to-voice latency breakdown for one call turn (utterance accepted → submitted → first TTS speak → audio playing)
 - `search_executed` — `{ types: string[] }`
 - `note_exported` — `{ format }`
 

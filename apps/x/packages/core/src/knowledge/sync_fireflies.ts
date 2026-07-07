@@ -4,6 +4,7 @@ import { WorkDir } from '../config/config.js';
 import { FirefliesClientFactory } from './fireflies-client-factory.js';
 import { serviceLogger, type ServiceRunContext } from '../services/service_logger.js';
 import { limitEventItems } from './limit_event_items.js';
+import { publishMeetingNotesReadyEvent } from './meeting-events.js';
 
 // Configuration
 const SYNC_DIR = path.join(WorkDir, 'knowledge', 'Meetings', 'fireflies');
@@ -582,6 +583,15 @@ async function syncMeetings() {
                 
                 fs.writeFileSync(filePath, markdown);
                 console.log(`[Fireflies] Saved: ${filename}`);
+
+                // First-time write for this meeting (guarded by syncedIds above) —
+                // signal that fresh notes are available for downstream agents.
+                await publishMeetingNotesReadyEvent({
+                    source: 'fireflies',
+                    title: meetingData.title || 'untitled',
+                    filePath,
+                    ...(meetingData.dateString ? { when: meetingData.dateString } : {}),
+                });
 
                 syncedIds.add(meetingId);
                 newCount++;

@@ -8,12 +8,14 @@
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "dev": "tsc -w -p tsconfig.build.json",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "inspect-turn": "node dist/turns/inspect-cli.js",
+    "inspect": "node dist/turns/inspect-cli.js"
   },
   "dependencies": {
-    "@agentclientprotocol/claude-agent-acp": "^0.39.0",
-    "@agentclientprotocol/codex-acp": "^0.0.44",
-    "@agentclientprotocol/sdk": "^0.22.1",
+    "@agentclientprotocol/claude-agent-acp": "^0.55.0",
+    "@agentclientprotocol/codex-acp": "^1.1.0",
+    "@agentclientprotocol/sdk": "^1.1.0",
     "@ai-sdk/anthropic": "^2.0.63",
     "@ai-sdk/google": "^2.0.53",
     "@ai-sdk/openai": "^2.0.91",
@@ -28,6 +30,7 @@
     "@x/shared": "workspace:*",
     "ai": "^5.0.133",
     "awilix": "^12.0.5",
+    "baileys": "7.0.0-rc13",
     "chokidar": "^4.0.3",
     "cors": "^2.8.6",
     "cron-parser": "^5.5.0",
@@ -43,9 +46,12 @@
     "papaparse": "^5.5.3",
     "pdf-parse": "^2.4.5",
     "posthog-node": "^4.18.0",
+    "qrcode": "^1.5.4",
     "react": "^19.2.3",
     "xlsx": "^0.18.5",
     "yaml": "^2.8.2",
+    "yauzl": "^3.4.0",
+    "yazl": "^3.3.1",
     "zod": "^4.2.1"
   },
   "devDependencies": {
@@ -54,6 +60,9 @@
     "@types/node": "^25.0.3",
     "@types/papaparse": "^5.5.2",
     "@types/pdf-parse": "^1.1.5",
+    "@types/qrcode": "^1.5.6",
+    "@types/yauzl": "^3.4.0",
+    "@types/yazl": "^3.3.1",
     "vitest": "catalog:"
   }
 }

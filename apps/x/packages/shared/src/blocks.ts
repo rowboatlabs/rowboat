@@ -107,6 +107,10 @@ export const GmailAttachmentSchema = z.object({
   mimeType: z.string().optional(),
   sizeBytes: z.number().int().nonnegative().optional(),
   savedPath: z.string(),
+  // Gmail identifiers used to fetch the attachment on demand when it hasn't
+  // been downloaded to disk yet (e.g. attachments on search results).
+  messageId: z.string().optional(),
+  attachmentId: z.string().optional(),
 });
 
 export type GmailAttachment = z.infer<typeof GmailAttachmentSchema>;
@@ -124,6 +128,14 @@ export const GmailThreadMessageSchema = z.object({
   bodyHeight: z.number().int().positive().optional(),
   attachments: z.array(GmailAttachmentSchema).optional(),
   messageIdHeader: z.string().optional(),
+  // Set on the unsent draft message within a thread (used by the Drafts view).
+  isDraft: z.boolean().optional(),
+  // The draft's own stored In-Reply-To / References headers. Only set on
+  // draft messages: a Drafts-view pseudo-thread contains just the draft, so
+  // the composer can't rebuild the reply chain from thread messages and must
+  // reuse what the draft already carries.
+  inReplyToHeader: z.string().optional(),
+  referencesHeader: z.string().optional(),
 });
 
 export type GmailThreadMessage = z.infer<typeof GmailThreadMessageSchema>;
@@ -134,6 +146,9 @@ export const GmailThreadSchema = EmailBlockSchema.extend({
   unread: z.boolean().optional(),
   importance: z.enum(['important', 'other']).optional(),
   gmail_draft: z.string().optional(),
+  // Gmail-side draft id, present on entries returned by the Drafts list so the
+  // composer can update/delete that exact draft.
+  draftId: z.string().optional(),
   messages: z.array(GmailThreadMessageSchema),
 });
 

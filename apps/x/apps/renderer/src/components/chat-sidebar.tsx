@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, Bug, MoreHorizontal } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Bug, MoreHorizontal, Pin } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
@@ -37,7 +37,7 @@ import { MarkdownPreOverride } from '@/components/ai-elements/markdown-code-over
 import { defaultRemarkPlugins } from 'streamdown'
 import remarkBreaks from 'remark-breaks'
 import { type ChatTab } from '@/components/tab-bar'
-import { ChatInputWithMentions, type PermissionMode, type StagedAttachment, type SelectedModel } from '@/components/chat-input-with-mentions'
+import { ChatInputWithMentions, type CallPreset, type PermissionMode, type StagedAttachment, type SelectedModel } from '@/components/chat-input-with-mentions'
 import { ChatMessageAttachments } from '@/components/chat-message-attachments'
 import { useSidebar } from '@/components/ui/sidebar'
 import { wikiLabel } from '@/lib/wiki-links'
@@ -51,6 +51,7 @@ import {
   getWebSearchCardData,
   getComposioConnectCardData,
   getToolDisplayName,
+  getToolErrorText,
   groupConversationItems,
   isChatMessage,
   isErrorMessage,
@@ -142,6 +143,10 @@ interface ChatSidebarProps {
   chatTabStates?: Record<string, ChatTabViewState>
   viewportAnchors?: Record<string, ChatViewportAnchorState>
   isProcessing: boolean
+  // Actively working (sessions runtime). When provided, drives the shimmer
+  // instead of isProcessing so waiting on a permission/ask-human doesn't
+  // render a "Thinking…" under the card.
+  isThinking?: boolean
   isStopping?: boolean
   onStop?: () => void
   onSubmit: (message: PromptInputMessage, mentions?: FileMention[], attachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => void
@@ -155,6 +160,13 @@ interface ChatSidebarProps {
   onDraftChangeForTab?: (tabId: string, text: string) => void
   onSelectedModelChangeForTab?: (tabId: string, model: SelectedModel | null) => void
   workDirByTab?: Record<string, string | null>
+  /** Composer locks for runs bound to Code-section sessions (cwd + agent frozen). */
+  codeSessionLocks?: Record<string, { cwd: string; agent: 'claude' | 'codex' }>
+  /**
+   * Set while a Rowboat-mode code session owns this pane: the chat is pinned to
+   * the session, so the chat switcher / new-chat / history affordances hide.
+   */
+  pinnedToCodeSession?: { title: string } | null
   onWorkDirChangeForTab?: (tabId: string, value: string | null) => void
   pendingAskHumanRequests?: ChatTabViewState['pendingAskHumanRequests']
   allPermissionRequests?: ChatTabViewState['allPermissionRequests']
@@ -170,16 +182,16 @@ interface ChatSidebarProps {
   // Voice / TTS props
   isRecording?: boolean
   recordingText?: string
-  recordingState?: 'connecting' | 'listening'
+  recordingState?: 'connecting' | 'listening' | 'stopping'
+  audioLevelsRef?: React.MutableRefObject<number[]>
   onStartRecording?: () => void
-  onSubmitRecording?: () => void
+  onSubmitRecording?: () => void | Promise<void>
   onCancelRecording?: () => void
   voiceAvailable?: boolean
-  ttsAvailable?: boolean
-  ttsEnabled?: boolean
-  ttsMode?: 'summary' | 'full'
-  onToggleTts?: () => void
-  onTtsModeChange?: (mode: 'summary' | 'full') => void
+  inCall?: boolean
+  onStartCall?: (preset: CallPreset) => void
+  onEndCall?: () => void
+  callAvailable?: boolean
   onComposioConnected?: (toolkitSlug: string) => void
 }
 
@@ -203,6 +215,7 @@ export function ChatSidebar({
   chatTabStates = {},
   viewportAnchors = {},
   isProcessing,
+  isThinking,
   isStopping,
   onStop,
   onSubmit,
@@ -216,6 +229,8 @@ export function ChatSidebar({
   onDraftChangeForTab,
   onSelectedModelChangeForTab,
   workDirByTab = {},
+  codeSessionLocks = {},
+  pinnedToCodeSession = null,
   onWorkDirChangeForTab,
   pendingAskHumanRequests = new Map(),
   allPermissionRequests = new Map(),
@@ -231,15 +246,15 @@ export function ChatSidebar({
   isRecording,
   recordingText,
   recordingState,
+  audioLevelsRef,
   onStartRecording,
   onSubmitRecording,
   onCancelRecording,
   voiceAvailable,
-  ttsAvailable,
-  ttsEnabled,
-  ttsMode,
-  onToggleTts,
-  onTtsModeChange,
+  inCall,
+  onStartCall,
+  onEndCall,
+  callAvailable,
   onComposioConnected,
 }: ChatSidebarProps) {
   const { state: sidebarState } = useSidebar()
@@ -362,7 +377,14 @@ export function ChatSidebar({
     }
 
     try {
-      const result = await window.ipc.invoke('runs:downloadLog', { runId: activeRunId })
+      // Session-first (new runtime); legacy runs fallback covers old
+      // background tabs until stage 7 removes the runs runtime.
+      let result: { success: boolean; error?: string }
+      try {
+        result = await window.ipc.invoke('sessions:downloadLog', { sessionId: activeRunId })
+      } catch {
+        result = await window.ipc.invoke('runs:downloadLog', { runId: activeRunId })
+      }
       if (result.success) {
         toast.success('Chat log saved')
       } else if (result.error) {
@@ -463,7 +485,7 @@ export function ChatSidebar({
         )
       }
       const toolTitle = getToolDisplayName(item)
-      const errorText = item.status === 'error' ? 'Tool error' : ''
+      const errorText = getToolErrorText(item)
       const output = normalizeToolOutput(item.result, item.status)
       const input = normalizeToolInput(item.input)
       return (
@@ -555,17 +577,34 @@ export function ChatSidebar({
               transition: isMaximized ? 'padding-left 200ms linear' : undefined,
             }}
           >
-            <ChatHeader
-              activeTitle={(() => {
-                const activeTab = chatTabs.find((tab) => tab.id === activeChatTabId)
-                return activeTab ? getChatTabTitle(activeTab) : 'New chat'
-              })()}
-              onNewChatTab={onNewChatTab}
-              recentRuns={recentRuns}
-              activeRunId={runId}
-              onSelectRun={onSelectRun}
-              onOpenChatHistory={onOpenChatHistory}
-            />
+            {pinnedToCodeSession ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="titlebar-no-drag flex min-w-0 flex-1 items-center gap-1.5 px-3 py-2 text-sm font-medium">
+                    <Pin className="size-3.5 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 truncate">{pinnedToCodeSession.title}</span>
+                    <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
+                      Coding session
+                    </span>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">
+                  This chat is pinned to the coding session — leave the Code view to switch chats.
+                </TooltipContent>
+              </Tooltip>
+            ) : (
+              <ChatHeader
+                activeTitle={(() => {
+                  const activeTab = chatTabs.find((tab) => tab.id === activeChatTabId)
+                  return activeTab ? getChatTabTitle(activeTab) : 'New chat'
+                })()}
+                onNewChatTab={onNewChatTab}
+                recentRuns={recentRuns}
+                activeRunId={runId}
+                onSelectRun={onSelectRun}
+                onOpenChatHistory={onOpenChatHistory}
+              />
+            )}
             <DropdownMenu>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -646,9 +685,6 @@ export function ChatSidebar({
                           {!tabHasConversation ? (
                             <ChatEmptyState
                               wide={isMaximized}
-                              recentRuns={recentRuns}
-                              onSelectRun={onSelectRun}
-                              onOpenChatHistory={onOpenChatHistory}
                               onPickPrompt={setLocalPresetMessage}
                             />
                           ) : (
@@ -700,7 +736,7 @@ export function ChatSidebar({
                                             onApproveSession={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'session')}
                                             onApproveAlways={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'always')}
                                             onDeny={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
-                                            isProcessing={isActive && isProcessing}
+                                            isProcessing={isActive && (isThinking ?? isProcessing)}
                                             response={response}
                                           />
                                         )}
@@ -717,7 +753,7 @@ export function ChatSidebar({
                                   key={request.toolCallId}
                                   query={request.query}
                                   onResponse={(response) => onAskHumanResponse(request.toolCallId, request.subflow, response)}
-                                  isProcessing={isActive && isProcessing}
+                                  isProcessing={isActive && (isThinking ?? isProcessing)}
                                 />
                               ))}
 
@@ -729,7 +765,7 @@ export function ChatSidebar({
                                 </Message>
                               )}
 
-                              {isActive && isProcessing && !tabState.currentAssistantMessage && (
+                              {isActive && (isThinking ?? isProcessing) && !tabState.currentAssistantMessage && (
                                 <Message from="assistant">
                                   <MessageContent>
                                     <Shimmer duration={1}>Thinking...</Shimmer>
@@ -779,18 +815,19 @@ export function ChatSidebar({
                           onSelectedModelChange={onSelectedModelChangeForTab ? (m) => onSelectedModelChangeForTab(tab.id, m) : undefined}
                           workDir={workDirByTab[tab.id] ?? null}
                           onWorkDirChange={onWorkDirChangeForTab ? (v) => onWorkDirChangeForTab(tab.id, v) : undefined}
+                          codeSessionLock={tabState.runId ? codeSessionLocks[tabState.runId] ?? null : null}
                           isRecording={isActive && isRecording}
                           recordingText={isActive ? recordingText : undefined}
                           recordingState={isActive ? recordingState : undefined}
+                          audioLevelsRef={audioLevelsRef}
                           onStartRecording={isActive ? onStartRecording : undefined}
                           onSubmitRecording={isActive ? onSubmitRecording : undefined}
                           onCancelRecording={isActive ? onCancelRecording : undefined}
                           voiceAvailable={isActive && voiceAvailable}
-                          ttsAvailable={isActive && ttsAvailable}
-                          ttsEnabled={ttsEnabled}
-                          ttsMode={ttsMode}
-                          onToggleTts={isActive ? onToggleTts : undefined}
-                          onTtsModeChange={isActive ? onTtsModeChange : undefined}
+                          inCall={inCall}
+                          onStartCall={isActive ? onStartCall : undefined}
+                          onEndCall={isActive ? onEndCall : undefined}
+                          callAvailable={callAvailable}
                         />
                       </div>
                     )

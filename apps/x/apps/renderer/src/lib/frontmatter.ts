@@ -139,7 +139,7 @@ export function extractFrontmatterFields(raw: string | null): FrontmatterFields 
  * re-emitted by buildFrontmatter (callers must splice them back from the
  * original raw if they want to preserve them on save — see the helpers below).
  */
-const STRUCTURED_KEYS = new Set(['live'])
+const STRUCTURED_KEYS = new Set(['live', 'google_doc'])
 
 /**
  * Extract editable top-level YAML key/value pairs from raw frontmatter.
