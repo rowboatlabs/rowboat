@@ -1546,7 +1546,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
     'composio-list-toolkits': {
         description: 'List available Composio integrations (Gmail, Slack, GitHub, etc.) and their connection status. Use this to show the user what services they can connect to.',
         inputSchema: z.object({
-            category: z.enum(['all', 'communication', 'productivity', 'development', 'crm', 'social', 'storage', 'support']).optional()
+            category: z.enum(['all', 'communication', 'productivity', 'development', 'crm', 'social', 'storage', 'support', 'design', 'marketing', 'finance']).optional()
                 .describe('Filter by category. Defaults to "all".'),
         }),
         execute: async ({ category }: { category?: string }) => {
