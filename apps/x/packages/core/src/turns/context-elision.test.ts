@@ -12,6 +12,7 @@ import {
     elideHistoricMiddlePaneContent,
     elideHistoricToolResults,
     loadElisionPolicy,
+    type ElisionPolicy,
 } from "./context-elision.js";
 import { TurnRepoContextResolver } from "./context-resolver.js";
 import { InMemoryTurnRepo } from "./in-memory-turn-repo.js";
@@ -189,12 +190,14 @@ describe("elideHistoricToolResults", () => {
         const content = `SKILL GUIDE${"y".repeat(5000)}`;
         const [elided] = elideHistoricToolResults([toolMsg(content)], 2500);
         // Starts with the first 400 chars verbatim, then the marker.
-        expect(elided.content.startsWith(content.slice(0, 400))).toBe(true);
+        expect(String(elided.content).startsWith(content.slice(0, 400))).toBe(true);
         expect(elided.content).toContain("Rest of tool result elided");
-        expect(elided.content.length).toBeLessThan(700);
+        expect(String(elided.content).length).toBeLessThan(700);
         // Preview never exceeds a tiny threshold.
         const [tiny] = elideHistoricToolResults([toolMsg(content)], 50);
-        expect(tiny.content.startsWith(`${content.slice(0, 50)}\n[Rest`)).toBe(true);
+        expect(String(tiny.content).startsWith(`${content.slice(0, 50)}\n[Rest`)).toBe(
+            true,
+        );
     });
 
     it("keeps tool results at or below the threshold verbatim", () => {
@@ -340,14 +343,7 @@ describe("createContextResolver", () => {
 });
 
 describe("ElidingContextResolver", () => {
-    function resolver(
-        repo: InMemoryTurnRepo,
-        policy: {
-            toolResults: boolean;
-            toolResultThresholdChars: number;
-            images: boolean;
-        },
-    ) {
+    function resolver(repo: InMemoryTurnRepo, policy: ElisionPolicy) {
         return new ElidingContextResolver({
             inner: new TurnRepoContextResolver({ turnRepo: repo }),
             loadPolicy: () => policy,
