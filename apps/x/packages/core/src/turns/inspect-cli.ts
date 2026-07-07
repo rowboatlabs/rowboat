@@ -8,6 +8,10 @@
 // messages (user-message context, attachments, tool-result envelopes) are
 // visible; the file itself stores only structural facts and references.
 //
+// Caveat: historic-context elision reads config/context.json at compose
+// time, so recomposition is exact only while that config matches what was
+// live when the call ran. The header prints the policy in effect NOW.
+//
 // Session mode prints the session overview (title, turns, statuses, sizes);
 // pass --turns to cascade full turn inspection for every turn.
 //
@@ -27,7 +31,7 @@ import { convertFromMessages } from "../agents/runtime.js";
 import { WorkDir } from "../config/config.js";
 import { FSSessionRepo } from "../sessions/fs-repo.js";
 import { composeModelRequest } from "./compose-model-request.js";
-import { TurnRepoContextResolver } from "./context-resolver.js";
+import { createContextResolver, loadElisionPolicy } from "./context-elision.js";
 import { FSTurnRepo } from "./fs-repo.js";
 
 const turnRepo = new FSTurnRepo({
@@ -36,7 +40,7 @@ const turnRepo = new FSTurnRepo({
 const sessionRepo = new FSSessionRepo({
     sessionsRootDir: path.join(WorkDir, "storage", "sessions"),
 });
-const resolver = new TurnRepoContextResolver({ turnRepo });
+const resolver = createContextResolver({ turnRepo });
 const encode = (messages: Parameters<typeof convertFromMessages>[0]) =>
     convertFromMessages(messages) as unknown as JsonValue[];
 
@@ -80,6 +84,17 @@ async function inspectTurn(
     console.log(`turn ${turnId}  status ${deriveTurnStatus(state)}`);
     console.log(
         `agent ${agent.agentId}  model ${agent.model.provider}/${agent.model.model}  calls ${state.modelCalls.length}${inherited}`,
+    );
+    const policy = loadElisionPolicy();
+    console.log(
+        `context elision (per config/context.json NOW; transmitted bytes reflect the config live at call time): ` +
+            [
+                policy.toolResults
+                    ? `toolResults>${policy.toolResultThresholdChars}`
+                    : "toolResults off",
+                policy.images ? "images" : "images off",
+                policy.middlePaneContent ? "notes" : "notes off",
+            ].join(", "),
     );
 
     for (const call of state.modelCalls) {

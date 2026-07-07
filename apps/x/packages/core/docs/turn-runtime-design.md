@@ -390,6 +390,40 @@ Rules:
   It rejects the execution and does not append `turn_failed`.
 - The reducer treats `context` as opaque data and never resolves references.
 
+The app wires the resolver through a decorator (`context-elision.ts`) that
+applies transmit-time elision to the materialized prefix: tool results from
+prior turns above a size threshold are replaced with a short placeholder
+telling the model to re-run the tool if it needs the output; inline image
+parts from prior turns (video-mode webcam and screen-share frames) are
+replaced with a text part recording how many frames of each kind were
+dropped; and middle-pane note snapshots on prior-turn user messages keep
+their kind and path but have their content replaced with a placeholder
+pointing at the still-readable file. The durable log is untouched; only the
+transmitted bytes change.
+Elision is a pure function of each message, so resolved prefixes stay
+byte-stable across calls (provider prefix caches keep working), and the
+current turn's own messages never pass through the resolver, so in-flight
+tool results and just-captured frames are always sent verbatim. Policy lives
+in `config/context.json` (`elideHistoricToolResults`, default true;
+`elideHistoricToolResultsThresholdChars`, default 2500;
+`elideHistoricImages`, default true; `elideHistoricMiddlePaneContent`,
+default true). The inspect CLI composes through the same decorated resolver.
+
+Caveat: elision makes the composed payload a function of the durable log
+PLUS the config in effect at compose time — the one deliberate exception to
+"recomposition from durable state alone" (§8.3). Within a turn this is
+harmless (policy is loaded once per execution, at resolve time), but
+inspecting an old turn after a config change may show different prefix
+bytes than were transmitted; the inspect CLI prints the active policy so
+the divergence is visible. If exact-bytes replay ever becomes a hard
+requirement, record the applied policy on the turn and compose from that.
+
+Relatedly, Anthropic-family requests get cache_control breakpoints stamped
+at the transport layer (`models/prompt-caching.ts`, applied inside the
+model registry bridge just before streamText). These are provider metadata
+only — message content is untouched, nothing is persisted, and inspect
+does not render them; non-Anthropic requests pass through byte-identical.
+
 ### 6.7 Agent snapshot inheritance
 
 Session turns whose resolved system prompt and tool set are byte-identical

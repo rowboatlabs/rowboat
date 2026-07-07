@@ -28,6 +28,10 @@ export interface IContextResolver {
     ): Promise<z.infer<typeof ResolvedAgent>>;
 }
 
+// NOTE: app code must not construct this directly — use createContextResolver
+// (context-elision.ts), which wraps it in the eliding decorator. A raw
+// instance silently transmits full historic tool results, frames, and note
+// snapshots. Direct construction is for tests of the raw resolution only.
 export class TurnRepoContextResolver implements IContextResolver {
     private readonly turnRepo: ITurnRepo;
 
