@@ -409,6 +409,15 @@ in `config/context.json` (`elideHistoricToolResults`, default true;
 `elideHistoricImages`, default true; `elideHistoricMiddlePaneContent`,
 default true). The inspect CLI composes through the same decorated resolver.
 
+Caveat: elision makes the composed payload a function of the durable log
+PLUS the config in effect at compose time — the one deliberate exception to
+"recomposition from durable state alone" (§8.3). Within a turn this is
+harmless (policy is loaded once per execution, at resolve time), but
+inspecting an old turn after a config change may show different prefix
+bytes than were transmitted; the inspect CLI prints the active policy so
+the divergence is visible. If exact-bytes replay ever becomes a hard
+requirement, record the applied policy on the turn and compose from that.
+
 ### 6.7 Agent snapshot inheritance
 
 Session turns whose resolved system prompt and tool set are byte-identical
