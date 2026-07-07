@@ -33,6 +33,7 @@ function ensureDirs() {
     ensure(path.join(WorkDir, "agents"));
     ensure(path.join(WorkDir, "config"));
     ensure(path.join(WorkDir, "knowledge"));
+    ensure(path.join(WorkDir, "skills"));
 }
 
 function ensureDefaultConfigs() {

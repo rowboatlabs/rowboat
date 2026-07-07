@@ -429,9 +429,9 @@ export async function buildCopilotInstructions(): Promise<string> {
     const excludeIds: string[] = [];
     if (!composioEnabled) excludeIds.push('composio-integration');
     if (!codeModeEnabled) excludeIds.push('code-with-agents');
-    const catalog = excludeIds.length > 0
-        ? buildSkillCatalog({ excludeIds })
-        : skillCatalog;
+    // Always build from the live skill set so disk skills added/removed at
+    // runtime (after refreshDiskSkills + cache invalidation) are reflected.
+    const catalog = buildSkillCatalog({ excludeIds });
     const baseInstructions = buildStaticInstructions(composioEnabled, catalog, codeModeEnabled, slackConnected, slackChannelsHint, googleConnected);
     const composioPrompt = await getComposioToolsPrompt(slackConnected, googleConnected);
     cachedInstructions = composioPrompt

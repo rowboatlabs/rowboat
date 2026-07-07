@@ -37,6 +37,7 @@ import { init as initEventProcessor, registerConsumer } from "@x/core/dist/event
 import { liveNoteEventConsumer } from "@x/core/dist/knowledge/live-note/event-consumer.js";
 import { init as initBackgroundTaskScheduler } from "@x/core/dist/background-tasks/scheduler.js";
 import { backgroundTaskEventConsumer } from "@x/core/dist/background-tasks/event-consumer.js";
+import { startSkillsWatcher, stopSkillsWatcher } from "@x/core/dist/application/assistant/skills/watcher.js";
 import { init as initAppsServer, shutdown as shutdownAppsServer } from "@x/core/dist/apps/server.js";
 import { registerAppsHostApi } from "@x/core/dist/apps/host-api.js";
 import { setTokenCipher as setGithubTokenCipher } from "@x/core/dist/apps/github-auth.js";
@@ -481,6 +482,10 @@ app.whenReady().then(async () => {
   // start bg-task scheduler (cron / window)
   initBackgroundTaskScheduler();
 
+  // start disk-skills watcher: live-reload skills dropped into
+  // ~/.rowboat/skills or ~/.agents/skills without an app restart
+  startSkillsWatcher();
+
   // register event consumers and start the shared event processor
   // (consumes $WorkDir/events/pending/, routes events to all consumers
   // concurrently for Pass-1, then fires each consumer's candidates in parallel)
@@ -550,6 +555,7 @@ app.on("before-quit", () => {
   stopWorkspaceWatcher();
   stopRunsWatcher();
   stopServicesWatcher();
+stopSkillsWatcher();
   // Tear down any live ACP coding-agent adapter processes so they don't outlive the app.
   try {
     container.resolve<CodeModeManager>('codeModeManager').disposeAll();
