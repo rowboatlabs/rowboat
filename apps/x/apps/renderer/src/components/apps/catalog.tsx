@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { BadgeCheck, Bot, Download, Link2, RefreshCw, Search, ShieldAlert } from 'lucide-react'
+import { BadgeCheck, Bot, Download, Link2, RefreshCw, Search, ShieldAlert, Star } from 'lucide-react'
 import type { rowboatApp } from '@x/shared'
 
 // Catalog tab (spec §14): search the registry, install with the D18 capability
@@ -162,6 +162,35 @@ export function CatalogTab({ onInstalled }: { onInstalled: (folder: string) => v
   const [enabling, setEnabling] = useState(false)
   // Registry name → local folder, for apps already installed from the catalog.
   const [installedByName, setInstalledByName] = useState<Map<string, string>>(new Map())
+  // GitHub star counts rank the list; `starred` is the signed-in user's set.
+  const [stars, setStars] = useState<Record<string, number>>({})
+  const [starred, setStarred] = useState<Record<string, boolean>>({})
+
+  const loadStars = async (recs: rowboatApp.RegistryRecord[]) => {
+    if (recs.length === 0) return
+    try {
+      const r = await window.ipc.invoke('apps:catalogStars', { repos: recs.map((x) => x.repo) })
+      setStars((prev) => ({ ...prev, ...r.stars }))
+      setStarred((prev) => ({ ...prev, ...r.starred }))
+    } catch { /* unranked list is fine */ }
+  }
+
+  const toggleStar = async (repo: string) => {
+    const next = !starred[repo]
+    // Optimistic; revert on failure.
+    setStarred((prev) => ({ ...prev, [repo]: next }))
+    setStars((prev) => ({ ...prev, [repo]: Math.max(0, (prev[repo] ?? 0) + (next ? 1 : -1)) }))
+    try {
+      await window.ipc.invoke('apps:star', { repo, star: next })
+    } catch (e) {
+      setStarred((prev) => ({ ...prev, [repo]: !next }))
+      setStars((prev) => ({ ...prev, [repo]: Math.max(0, (prev[repo] ?? 0) + (next ? -1 : 1)) }))
+      const msg = e instanceof Error ? e.message : String(e)
+      setError(msg.includes('not_signed_in')
+        ? 'Starring uses your GitHub account — sign in once via any app’s Publish flow, then try again.'
+        : msg)
+    }
+  }
 
   const loadInstalled = async () => {
     try {
@@ -179,6 +208,7 @@ export function CatalogTab({ onInstalled }: { onInstalled: (folder: string) => v
       const r = await window.ipc.invoke('apps:catalogIndex', { force })
       setRecords(r.records)
       setStale(r.stale)
+      void loadStars(r.records)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
@@ -192,8 +222,13 @@ export function CatalogTab({ onInstalled }: { onInstalled: (folder: string) => v
         ? await window.ipc.invoke('apps:catalogSearch', { query: q })
         : await window.ipc.invoke('apps:catalogIndex', {})
       setRecords(r.records)
+      void loadStars(r.records)
     } catch { /* keep current list */ }
   }
+
+  // Rank by stars (unknown counts sink), name as the stable tiebreak.
+  const ranked = [...records].sort((a, b) =>
+    ((stars[b.repo] ?? -1) - (stars[a.repo] ?? -1)) || a.name.localeCompare(b.name))
 
   const startInstall = async (name: string) => {
     setError(null)
@@ -304,7 +339,7 @@ export function CatalogTab({ onInstalled }: { onInstalled: (folder: string) => v
         </div>
       ) : (
         <div className="space-y-2">
-          {records.map((r) => (
+          {ranked.map((r) => (
             <div key={r.name} className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3">
               <div className="min-w-0 flex-1">
                 <div className="flex items-baseline gap-2">
@@ -313,6 +348,13 @@ export function CatalogTab({ onInstalled }: { onInstalled: (folder: string) => v
                 </div>
                 <p className="truncate text-xs text-muted-foreground">{r.description || 'No description.'}</p>
               </div>
+              <button type="button"
+                title={starred[r.repo] ? 'Unstar on GitHub' : 'Star on GitHub'}
+                onClick={() => void toggleStar(r.repo)}
+                className={`flex items-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium hover:bg-accent ${starred[r.repo] ? 'text-amber-500' : 'text-muted-foreground'}`}>
+                <Star className={`size-3.5 ${starred[r.repo] ? 'fill-current' : ''}`} />
+                {stars[r.repo] ?? '—'}
+              </button>
               {installedByName.has(r.name) ? (
                 <button type="button" title="Installed — open it"
                   onClick={() => onInstalled(installedByName.get(r.name)!)}

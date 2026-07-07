@@ -67,6 +67,7 @@ import * as appsServer from '@x/core/dist/apps/server.js';
 import * as appsAgents from '@x/core/dist/apps/agents.js';
 import { capture } from '@x/core/dist/analytics/posthog.js';
 import * as githubAuth from '@x/core/dist/apps/github-auth.js';
+import * as appsStars from '@x/core/dist/apps/stars.js';
 import * as appsInstaller from '@x/core/dist/apps/installer.js';
 import { registryClient } from '@x/core/dist/apps/registry.js';
 import * as appsPublisher from '@x/core/dist/apps/publisher.js';
@@ -1615,6 +1616,18 @@ export function setupIpcHandlers() {
     },
     'apps:catalogSearch': async (_event, args) => {
       return { records: await registryClient.search(args.query) };
+    },
+    'apps:catalogStars': async (_event, args) => {
+      const [stars, starred] = await Promise.all([
+        appsStars.repoStars(args.repos),
+        appsStars.starredStatus(args.repos),
+      ]);
+      return { stars, starred };
+    },
+    'apps:star': async (_event, args) => {
+      const result = await appsStars.setStar(args.repo, args.star);
+      capture('app_starred', { repo: args.repo, star: args.star });
+      return result;
     },
     'apps:catalogDetail': async (_event, args) => {
       const record = await registryClient.resolve(args.name);
