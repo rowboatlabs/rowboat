@@ -3,13 +3,18 @@ import { CheckCircle2, Github, Loader2, XCircle } from 'lucide-react'
 
 // Publish dialog (spec §14): device-flow sign-in → confirmation → step
 // progress (§11.2 step names) → success links / typed error (name_taken gets
-// an inline hint to rename and retry).
+// an inline hint to rename and retry). With `published` the dialog runs the
+// UPDATE path instead (§11.3: version bump + new release, no registry) —
+// re-running first-publish on a published app always fails with name_taken.
 
 type Phase = 'auth' | 'device' | 'confirm' | 'publishing' | 'done' | 'error'
+type Increment = 'patch' | 'minor' | 'major'
 
-export function PublishDialog({ folder, appName, onClose, onPublished }: {
+export function PublishDialog({ folder, appName, published, onClose, onPublished }: {
   folder: string
   appName: string
+  /** App already has a publish record — run publish-update instead. */
+  published?: boolean
   onClose: () => void
   onPublished: () => void
 }) {
@@ -18,7 +23,8 @@ export function PublishDialog({ folder, appName, onClose, onPublished }: {
   const [userCode, setUserCode] = useState('')
   const [steps, setSteps] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
-  const [result, setResult] = useState<{ repoUrl: string; releaseUrl: string; prUrl?: string; status: string } | null>(null)
+  const [increment, setIncrement] = useState<Increment>('patch')
+  const [result, setResult] = useState<{ repoUrl?: string; releaseUrl: string; prUrl?: string; status: string; version?: string } | null>(null)
   const pollTimer = useRef<number | null>(null)
 
   useEffect(() => {
@@ -75,8 +81,13 @@ export function PublishDialog({ folder, appName, onClose, onPublished }: {
     setError(null)
     setSteps([])
     try {
-      const r = await window.ipc.invoke('apps:publish', { folder })
-      setResult(r)
+      if (published) {
+        const r = await window.ipc.invoke('apps:publishUpdate', { folder, increment })
+        setResult({ releaseUrl: r.releaseUrl, status: 'published', version: r.version })
+      } else {
+        const r = await window.ipc.invoke('apps:publish', { folder })
+        setResult(r)
+      }
       setPhase('done')
       onPublished()
     } catch (e) {
@@ -128,15 +139,47 @@ export function PublishDialog({ folder, appName, onClose, onPublished }: {
 
         {phase === 'confirm' && (
           <div className="space-y-3 text-sm">
-            <p className="text-muted-foreground">Signed in as <span className="font-medium text-foreground">@{login}</span>. This will publish <span className="font-medium text-foreground">{appName}</span> publicly.</p>
+            <p className="text-muted-foreground">
+              Signed in as <span className="font-medium text-foreground">@{login}</span>.{' '}
+              {published
+                ? <>This will publish a new version of <span className="font-medium text-foreground">{appName}</span> (a new release on the existing repo).</>
+                : <>This will publish <span className="font-medium text-foreground">{appName}</span> publicly.</>}
+            </p>
+            {published && (
+              <label className="flex items-center gap-2 text-muted-foreground">
+                Version bump
+                <select value={increment} onChange={(e) => setIncrement(e.target.value as Increment)}
+                  className="rounded-md border border-border bg-background px-2 py-1 text-sm">
+                  <option value="patch">patch</option>
+                  <option value="minor">minor</option>
+                  <option value="major">major</option>
+                </select>
+              </label>
+            )}
             <button type="button" onClick={() => void publish()}
               className="w-full rounded-md bg-primary py-2 text-sm font-medium text-primary-foreground hover:opacity-90">
-              Publish
+              {published ? 'Publish update' : 'Publish'}
             </button>
           </div>
         )}
 
-        {(phase === 'publishing' || phase === 'done' || phase === 'error') && (
+        {published && (phase === 'publishing' || phase === 'done' || phase === 'error') && (
+          <div className="space-y-3 text-sm">
+            {phase === 'publishing' && (
+              <p className="flex items-center gap-2 text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" /> Publishing update…
+              </p>
+            )}
+            {phase === 'done' && result && (
+              <div className="space-y-1">
+                <p className="flex items-center gap-2"><CheckCircle2 className="size-4 text-green-600" /> Published v{result.version}</p>
+                <div className="text-xs">Release: <a className="text-primary underline" href={result.releaseUrl} target="_blank" rel="noreferrer">{result.releaseUrl}</a></div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {!published && (phase === 'publishing' || phase === 'done' || phase === 'error') && (
           <div className="space-y-1.5 text-sm">
             {Object.entries(STEP_LABELS).map(([key, label]) => {
               const doneStep = steps.includes(key) || phase === 'done'

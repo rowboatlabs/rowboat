@@ -272,6 +272,7 @@ export function AppDetail({ folder, onClose }: { folder: string; onClose: () => 
         <PublishDialog
           folder={folder}
           appName={manifest?.name ?? folder}
+          published={!!app.publish}
           onClose={() => setShowPublish(false)}
           onPublished={() => setReloadNonce((n) => n + 1)}
         />
