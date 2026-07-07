@@ -179,6 +179,18 @@ describe("elideHistoricToolResults", () => {
         expect(elided[0].content).toContain("101");
     });
 
+    it("keeps a head preview ahead of the placeholder", () => {
+        const content = `SKILL GUIDE${"y".repeat(5000)}`;
+        const [elided] = elideHistoricToolResults([toolMsg(content)], 2500);
+        // Starts with the first 400 chars verbatim, then the marker.
+        expect(elided.content.startsWith(content.slice(0, 400))).toBe(true);
+        expect(elided.content).toContain("Rest of tool result elided");
+        expect(elided.content.length).toBeLessThan(700);
+        // Preview never exceeds a tiny threshold.
+        const [tiny] = elideHistoricToolResults([toolMsg(content)], 50);
+        expect(tiny.content.startsWith(`${content.slice(0, 50)}\n[Rest`)).toBe(true);
+    });
+
     it("keeps tool results at or below the threshold verbatim", () => {
         const exact = toolMsg("x".repeat(100));
         expect(elideHistoricToolResults([exact], 100)).toEqual([exact]);

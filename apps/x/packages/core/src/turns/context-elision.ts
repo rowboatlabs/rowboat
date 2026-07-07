@@ -54,6 +54,9 @@ export const DEFAULT_ELISION_POLICY: ElisionPolicy = {
 // placeholder saves nothing and a short note may carry useful context.
 const MIDDLE_PANE_CONTENT_FLOOR_CHARS = 500;
 
+// Head of an elided tool result kept verbatim ahead of the placeholder.
+const TOOL_RESULT_PREVIEW_CHARS = 400;
+
 const ContextConfig = z.object({
     elideHistoricToolResults: z.boolean().optional(),
     elideHistoricToolResultsThresholdChars: z.number().int().min(0).optional(),
@@ -102,9 +105,16 @@ export function elideHistoricToolResults(
         ) {
             return message;
         }
+        // Keep a head preview so the model knows what it is declining to
+        // re-fetch (a skill body reads very differently from a web page).
+        // Capped at the threshold so tiny thresholds still shrink content.
+        const preview = message.content.slice(
+            0,
+            Math.min(TOOL_RESULT_PREVIEW_CHARS, thresholdChars),
+        );
         return {
             ...message,
-            content: `[Tool result elided to save context: "${message.toolName}" returned ${message.content.length} characters in an earlier turn. Call the tool again if you need this output now.]`,
+            content: `${preview}\n[Rest of tool result elided to save context: "${message.toolName}" returned ${message.content.length} characters in an earlier turn. Call the tool again if you need the full output now.]`,
         };
     });
 }
