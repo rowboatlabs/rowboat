@@ -186,6 +186,11 @@ export function AppsView({ initialAppFolder, initialVersion, onNewApp }: {
         const r = await window.ipc.invoke('apps:list', {})
         if (cancelled) return
         setApps(r.apps)
+        // Drop a selection whose app no longer exists (uninstalled while
+        // open). Left stale, a later reinstall makes this view yank the user
+        // into the app frame mid-flow — e.g. while they're in the catalog's
+        // post-install agent dialog.
+        setSelectedFolder((cur) => (cur && !r.apps.some((a) => a.folder === cur) ? null : cur))
         setServerError(r.serverRunning ? null : (r.serverError ?? 'Apps server is not running.'))
       } catch (e) {
         if (!cancelled) setServerError(e instanceof Error ? e.message : String(e))
