@@ -16,6 +16,15 @@ export interface SendMessageConfig {
     agent: z.infer<typeof RequestedAgent>;
     autoPermission?: boolean;
     maxModelCalls?: number;
+    /**
+     * Desktop notifications for this session's settles (response ready /
+     * permission needed). Defaults to true — desktop chats want them. Pass
+     * false for channel-driven sessions (e.g. the Slack/mobile bridge), where
+     * the reply is delivered on the channel and a desktop ping would be
+     * duplicate noise. The choice sticks to the session until a later
+     * sendMessage says otherwise.
+     */
+    notifications?: boolean;
 }
 
 export interface ISessions {

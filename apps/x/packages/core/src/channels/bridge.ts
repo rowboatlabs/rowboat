@@ -400,6 +400,9 @@ export class ChannelBridge {
                         ...(state.model ? { overrides: { model: state.model } } : {}),
                     },
                     autoPermission: true,
+                    // Replies are delivered on the channel; a desktop
+                    // "Response ready" ping would be duplicate noise.
+                    notifications: false,
                 },
             );
             const settled = await watcher.waitFor(sent.turnId, TURN_TIMEOUT_MS);
