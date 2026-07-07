@@ -4,7 +4,7 @@ import { IModelConfigRepo } from "./repo.js";
 import { isSignedIn } from "../account/account.js";
 import container from "../di/container.js";
 
-const SIGNED_IN_DEFAULT_MODEL = "anthropic/claude-opus-4.7";
+const SIGNED_IN_DEFAULT_MODEL = "google/gemini-3.5-flash";
 const SIGNED_IN_DEFAULT_PROVIDER = "rowboat";
 // KG note-creation historically failed on identity (self-notes, perspective
 // flips, misread outbound email) — root cause was the owner block never being
