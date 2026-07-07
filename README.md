@@ -32,12 +32,11 @@ Rowboat indexes your work into a living knowledge graph and uses that to get wor
 Download latest for Mac/Windows/Linux: [Download](https://www.rowboatlabs.com/downloads)
 
 <p align="center">
-  <img width="1502" height="938" alt="Screenshot 2026-06-24 at 11 40 45 PM" src="https://github.com/user-attachments/assets/d84cbdf2-42a6-4767-9dec-81cfa435f310" />
+<img width="1091" height="632" alt="Screenshot 2026-07-07 at 4 22 08 PM" src="https://github.com/user-attachments/assets/440087ae-5674-427a-87bb-831b0bea7de4" />
 </p>
 
-
 <p align="center">
-  <a href="https://youtu.be/NcWGdwQ7Cpo"> Demo - email to code</a> · <a href="https://www.youtube.com/watch?v=7xTpciZCfpw"> Demo - knowledge graph</a>
+  <a href="https://www.youtube.com/watch?v=et5yQABJ3xI"> Demo - apps to code </a> · <a href="https://www.youtube.com/watch?v=7xTpciZCfpw"> Demo - knowledge graph</a>
 </p>
 
 
@@ -100,6 +99,15 @@ Code mode lets you spin up parallel coding agents with Claude Code or Codex, and
 </td>
 <td width="60%">
 <img width="1512" height="949" alt="Code mode screenshot" src="https://github.com/user-attachments/assets/306618b5-9aaf-4ef8-9117-91ea58e5e4e7" />
+</td>
+</tr>
+<tr>
+<td width="40%" valign="middle">
+<h3>Apps</h3>
+You can bulild your own work surfaces inside Rowboat — they get acess to all the tools and integrations, and you can share them with other people.  
+</td>
+<td width="60%">
+<img width="1512" height="949" alt="Apps screenshot" src="https://github.com/user-attachments/assets/aaedc79b-3e72-45e8-995c-e8a3d127fdac" />
 </td>
 </tr>
 <tr>
