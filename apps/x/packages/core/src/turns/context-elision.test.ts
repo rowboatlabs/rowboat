@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { z } from "zod";
 import type { TurnContext, TurnEvent } from "@x/shared/dist/turns.js";
 import {
@@ -8,6 +11,7 @@ import {
     elideHistoricImages,
     elideHistoricMiddlePaneContent,
     elideHistoricToolResults,
+    loadElisionPolicy,
 } from "./context-elision.js";
 import { TurnRepoContextResolver } from "./context-resolver.js";
 import { InMemoryTurnRepo } from "./in-memory-turn-repo.js";
@@ -436,5 +440,155 @@ describe("ElidingContextResolver", () => {
         const middlePane = input.userMessageContext?.middlePane;
         if (middlePane?.kind !== "note") throw new Error("expected note pane");
         expect(middlePane.content).toContain("omitted from history");
+    });
+
+    it("delegates resolveAgent to the inner resolver untouched", async () => {
+        const repo = new InMemoryTurnRepo();
+        const snapshot = {
+            agentId: "copilot",
+            systemPrompt: "SYS",
+            model: { provider: "fake", model: "m" },
+            tools: [],
+        };
+        const agent = await resolver(repo, POLICY_OFF).resolveAgent(snapshot);
+        expect(agent).toEqual(snapshot);
+    });
+
+    it("elides across every turn of a multi-turn reference chain", async () => {
+        const repo = new InMemoryTurnRepo();
+        const T2 = "2026-07-02T11-00-00Z-0000002-000";
+        repo.seed(toolTurnLog(T1, [], "a".repeat(200)));
+        repo.seed(toolTurnLog(T2, { previousTurnId: T1 }, "b".repeat(200)));
+        const resolved = await resolver(repo, {
+            ...POLICY_OFF,
+            toolResults: true,
+        }).resolve({ previousTurnId: T2 });
+        const tools = resolved.filter((m) => m.role === "tool");
+        expect(tools).toHaveLength(2);
+        for (const tool of tools) {
+            expect(tool.content).toContain("elided");
+        }
+    });
+
+    it("reloads the policy on every resolve (hot config)", async () => {
+        const repo = new InMemoryTurnRepo();
+        const output = "x".repeat(200);
+        repo.seed(toolTurnLog(T1, [], output));
+        let loads = 0;
+        const eliding = new ElidingContextResolver({
+            inner: new TurnRepoContextResolver({ turnRepo: repo }),
+            loadPolicy: () => {
+                loads += 1;
+                return { ...POLICY_OFF, toolResults: loads > 1 };
+            },
+        });
+        const first = await eliding.resolve({ previousTurnId: T1 });
+        const second = await eliding.resolve({ previousTurnId: T1 });
+        expect(loads).toBe(2);
+        expect(first.find((m) => m.role === "tool")?.content).toBe(output);
+        expect(second.find((m) => m.role === "tool")?.content).toContain("elided");
+    });
+});
+
+describe("elision policy idempotency and determinism", () => {
+    // Placeholders must never themselves be elided on a second pass, and the
+    // transforms must be pure — both are what keeps replayed prefixes
+    // byte-stable for provider prefix caching.
+    it("elideHistoricImages is idempotent and deterministic", () => {
+        const messages = [
+            {
+                role: "user" as const,
+                content: [
+                    { type: "text" as const, text: "watch" },
+                    frame("camera"),
+                    frame("screen"),
+                ],
+            },
+        ];
+        const once = elideHistoricImages(messages);
+        expect(elideHistoricImages(once)).toEqual(once);
+        expect(elideHistoricImages(messages)).toEqual(once);
+    });
+
+    it("elideHistoricMiddlePaneContent is idempotent and deterministic", () => {
+        const messages = [noteMessage("n".repeat(600))];
+        const once = elideHistoricMiddlePaneContent(messages);
+        expect(elideHistoricMiddlePaneContent(once)).toEqual(once);
+        expect(elideHistoricMiddlePaneContent(messages)).toEqual(once);
+    });
+
+    it("keeps notes at the floor verbatim and elides just above it", () => {
+        const atFloor = noteMessage("n".repeat(500));
+        expect(elideHistoricMiddlePaneContent([atFloor])).toEqual([atFloor]);
+        const [above] = elideHistoricMiddlePaneContent([
+            noteMessage("n".repeat(501)),
+        ]);
+        if (above.role !== "user") throw new Error("expected user message");
+        expect(above.userMessageContext?.middlePane?.kind === "note"
+            ? above.userMessageContext.middlePane.content
+            : "").toContain("omitted from history");
+    });
+});
+
+describe("loadElisionPolicy", () => {
+    let dir: string;
+
+    beforeEach(() => {
+        dir = fs.mkdtempSync(path.join(os.tmpdir(), "elision-config-"));
+    });
+
+    afterEach(() => {
+        fs.rmSync(dir, { recursive: true, force: true });
+    });
+
+    function write(content: string): string {
+        const p = path.join(dir, "context.json");
+        fs.writeFileSync(p, content);
+        return p;
+    }
+
+    it("returns defaults when the file is missing", () => {
+        expect(loadElisionPolicy(path.join(dir, "nope.json"))).toEqual(
+            DEFAULT_ELISION_POLICY,
+        );
+    });
+
+    it("applies a full config", () => {
+        const p = write(
+            JSON.stringify({
+                elideHistoricToolResults: false,
+                elideHistoricToolResultsThresholdChars: 42,
+                elideHistoricImages: false,
+                elideHistoricMiddlePaneContent: false,
+            }),
+        );
+        expect(loadElisionPolicy(p)).toEqual({
+            toolResults: false,
+            toolResultThresholdChars: 42,
+            images: false,
+            middlePaneContent: false,
+        });
+    });
+
+    it("merges a partial config with defaults", () => {
+        const p = write(JSON.stringify({ elideHistoricToolResultsThresholdChars: 42 }));
+        expect(loadElisionPolicy(p)).toEqual({
+            ...DEFAULT_ELISION_POLICY,
+            toolResultThresholdChars: 42,
+        });
+    });
+
+    it("falls back to defaults on unparseable JSON", () => {
+        expect(loadElisionPolicy(write("{nope"))).toEqual(DEFAULT_ELISION_POLICY);
+    });
+
+    it("discards the whole file when any key is malformed (all-or-nothing)", () => {
+        const p = write(
+            JSON.stringify({
+                elideHistoricToolResults: false,
+                elideHistoricToolResultsThresholdChars: "not-a-number",
+            }),
+        );
+        expect(loadElisionPolicy(p)).toEqual(DEFAULT_ELISION_POLICY);
     });
 });

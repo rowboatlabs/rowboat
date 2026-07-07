@@ -71,14 +71,17 @@ const ContextConfig = z.object({
 const CONTEXT_CONFIG_PATH = path.join(WorkDir, "config", "context.json");
 
 // Read the elision policy from config/context.json, falling back to defaults
-// for missing keys or an unreadable file. Read per resolve so a config edit
-// applies to the next turn without a restart.
-export function loadElisionPolicy(): ElisionPolicy {
+// for missing keys or an unreadable file (a single malformed key discards the
+// whole file — all-or-nothing by design, so a typo can't half-apply). Read
+// per resolve so a config edit applies to the next turn without a restart.
+export function loadElisionPolicy(
+    configPath: string = CONTEXT_CONFIG_PATH,
+): ElisionPolicy {
     try {
-        if (!fs.existsSync(CONTEXT_CONFIG_PATH)) {
+        if (!fs.existsSync(configPath)) {
             return DEFAULT_ELISION_POLICY;
         }
-        const raw = fs.readFileSync(CONTEXT_CONFIG_PATH, "utf-8");
+        const raw = fs.readFileSync(configPath, "utf-8");
         const parsed = ContextConfig.parse(JSON.parse(raw));
         return {
             toolResults:
