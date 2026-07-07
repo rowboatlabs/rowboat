@@ -14,6 +14,7 @@ import type { JsonValue, ModelDescriptor, TurnUsage } from "@x/shared/dist/turns
 import { convertFromMessages } from "../../agents/runtime.js";
 import { resolveProviderConfig } from "../../models/defaults.js";
 import { createProvider } from "../../models/models.js";
+import { applyPromptCaching } from "../../models/prompt-caching.js";
 import { applyLocalModelSettings } from "../../models/local.js";
 import type {
     IModelRegistry,
@@ -26,7 +27,9 @@ import type {
 // provider. The bridge always requests exactly one step.
 export type StreamTextInvoker = (options: {
     model: LanguageModel;
-    system: string;
+    // Absent when prompt caching moved the system prompt into messages
+    // (Anthropic-family models; see models/prompt-caching.ts).
+    system?: string;
     messages: ModelMessage[];
     tools: ToolSet;
     abortSignal: AbortSignal;
@@ -79,13 +82,16 @@ export class RealModelRegistry implements IModelRegistry {
             // per-message, so composed requests are byte-stable.
             encodeMessages: (messages) =>
                 convertFromMessages(messages) as unknown as JsonValue[],
-            stream: (request) => this.run(model, request),
+            stream: (request) =>
+                this.run(model, request, providerConfig.flavor, descriptor.model),
         };
     }
 
     private async *run(
         model: LanguageModel,
         request: ModelStreamRequest,
+        flavor: string,
+        modelId: string,
     ): AsyncGenerator<LlmStreamEvent, void, void> {
         const tools: ToolSet = {};
         for (const descriptor of request.tools) {
@@ -121,10 +127,17 @@ export class RealModelRegistry implements IModelRegistry {
         let usage: z.infer<typeof TurnUsage> = {};
         let providerMetadata: JsonValue | undefined;
 
+        // Anthropic-family models get cache_control breakpoints; everything
+        // else passes through byte-identical (transport-only, not persisted).
+        const prompt = applyPromptCaching(flavor, modelId, {
+            system: request.systemPrompt,
+            messages: request.messages,
+        });
+
         const result = this.invoke({
             model,
-            system: request.systemPrompt,
-            messages: request.messages as ModelMessage[],
+            ...(prompt.system === undefined ? {} : { system: prompt.system }),
+            messages: prompt.messages as ModelMessage[],
             tools,
             abortSignal: request.signal,
             ...generationParams,

@@ -418,6 +418,12 @@ bytes than were transmitted; the inspect CLI prints the active policy so
 the divergence is visible. If exact-bytes replay ever becomes a hard
 requirement, record the applied policy on the turn and compose from that.
 
+Relatedly, Anthropic-family requests get cache_control breakpoints stamped
+at the transport layer (`models/prompt-caching.ts`, applied inside the
+model registry bridge just before streamText). These are provider metadata
+only — message content is untouched, nothing is persisted, and inspect
+does not render them; non-Anthropic requests pass through byte-identical.
+
 ### 6.7 Agent snapshot inheritance
 
 Session turns whose resolved system prompt and tool set are byte-identical

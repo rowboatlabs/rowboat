@@ -188,6 +188,64 @@ describe("RealModelRegistry", () => {
         });
     });
 
+    it("applies cache breakpoints for Anthropic-family models", async () => {
+        const capture: InvokerOptions[] = [];
+        const fakeModel = { modelId: "claude-test" } as unknown as LanguageModel;
+        const registry = new RealModelRegistry({
+            resolveProvider: async () => ({ flavor: "anthropic" }),
+            createProviderImpl: (() => ({
+                languageModel: () => fakeModel,
+            })) as never,
+            invoke: (options) => {
+                capture.push(options);
+                return {
+                    fullStream: (async function* () {
+                        yield { type: "finish-step", finishReason: "stop", usage: {} };
+                    })(),
+                };
+            },
+        });
+        const model = await registry.resolve({
+            provider: "anthropic",
+            model: "claude-test",
+        });
+        const drained: unknown[] = [];
+        for await (const event of model.stream(request())) {
+            drained.push(event);
+        }
+        expect(drained.length).toBeGreaterThan(0);
+
+        const [options] = capture;
+        // System prompt rides the message array with a breakpoint; no
+        // separate system string is sent.
+        expect(options.system).toBeUndefined();
+        expect(options.messages[0]).toMatchObject({
+            role: "system",
+            content: "SYS",
+            providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
+        });
+        expect(options.messages[options.messages.length - 1]).toMatchObject({
+            role: "user",
+            providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
+        });
+    });
+
+    it("leaves non-Anthropic requests byte-identical", async () => {
+        const capture: InvokerOptions[] = [];
+        const registry = makeRegistry(
+            [{ type: "finish-step", finishReason: "stop", usage: {} }],
+            capture,
+        );
+        const req = request();
+        const originalMessages = JSON.parse(JSON.stringify(req.messages));
+        await collect(registry, req);
+
+        const [options] = capture;
+        expect(options.system).toBe("SYS");
+        expect(options.messages).toEqual(originalMessages);
+        expect(JSON.stringify(options.messages)).not.toContain("cacheControl");
+    });
+
     it("stops promptly when the signal aborts mid-stream", async () => {
         const controller = new AbortController();
         const registry = makeRegistry(
