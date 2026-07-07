@@ -1004,6 +1004,20 @@ const ipcSchemas = {
       success: z.literal(true),
     }),
   },
+  // ── Caffeinate (keep system awake, like macOS `caffeinate`) ──
+  'power:getCaffeinate': {
+    req: z.null(),
+    res: z.object({ enabled: z.boolean() }),
+  },
+  'power:setCaffeinate': {
+    req: z.object({ enabled: z.boolean() }),
+    res: z.object({ enabled: z.boolean() }),
+  },
+  // Push: main → renderer when caffeinate state changes, so indicators stay live.
+  'power:caffeinateChanged': {
+    req: z.object({ enabled: z.boolean() }),
+    res: z.null(),
+  },
   // ── Mobile channels (WhatsApp / Telegram bridge) ─────────────
   'channels:getConfig': {
     req: z.null(),
