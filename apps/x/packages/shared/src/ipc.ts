@@ -1272,6 +1272,18 @@ const ipcSchemas = {
     req: z.object({ query: z.string() }),
     res: z.object({ records: z.array(RegistryRecordSchema) }),
   },
+  // GitHub star counts (catalog ranking) + the signed-in user's starred set.
+  'apps:catalogStars': {
+    req: z.object({ repos: z.array(z.string()) }),
+    res: z.object({
+      stars: z.record(z.string(), z.number()),
+      starred: z.record(z.string(), z.boolean()),
+    }),
+  },
+  'apps:star': {
+    req: z.object({ repo: z.string(), star: z.boolean() }),
+    res: z.object({ starred: z.boolean() }),
+  },
   'apps:catalogDetail': {
     req: z.object({ name: z.string() }),
     res: z.object({

@@ -81,6 +81,15 @@ export function AppDetail({ folder, onClose }: { folder: string; onClose: () => 
     onClose()
   })
 
+  // Local apps aren't "installed", so they get delete instead of uninstall.
+  const doDelete = () => runAction('delete', async () => {
+    const agentNote = agents.length ? `\n\nThis also deletes its background agents: ${agents.map((a) => a.name).join(', ')}.` : ''
+    const publishNote = app?.publish ? '\n\nThe published copy (GitHub repo + catalog listing) is not touched.' : ''
+    if (!window.confirm(`Delete this app? The whole folder, including data/, is removed from this machine.${publishNote}${agentNote}`)) return
+    await window.ipc.invoke('apps:delete', { folder })
+    onClose()
+  })
+
   useEffect(() => {
     let cancelled = false
     ;(async () => {
@@ -217,10 +226,15 @@ export function AppDetail({ folder, onClose }: { folder: string; onClose: () => 
                     <UploadCloud className="size-3.5" /> {app.publish ? 'Publish update' : 'Publish'}
                   </button>
                 )}
-                {app.kind === 'installed' && (
+                {app.kind === 'installed' ? (
                   <button type="button" disabled={busyAction !== null} onClick={() => void doUninstall()}
                     className="flex items-center gap-1.5 rounded-md border border-destructive/40 px-2.5 py-1 text-xs font-medium text-destructive hover:bg-destructive/10 disabled:opacity-50">
                     <Trash2 className="size-3.5" /> Uninstall
+                  </button>
+                ) : (
+                  <button type="button" disabled={busyAction !== null} onClick={() => void doDelete()}
+                    className="flex items-center gap-1.5 rounded-md border border-destructive/40 px-2.5 py-1 text-xs font-medium text-destructive hover:bg-destructive/10 disabled:opacity-50">
+                    <Trash2 className="size-3.5" /> Delete
                   </button>
                 )}
               </div>
