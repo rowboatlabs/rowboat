@@ -405,7 +405,7 @@ byte-stable across calls (provider prefix caches keep working), and the
 current turn's own messages never pass through the resolver, so in-flight
 tool results and just-captured frames are always sent verbatim. Policy lives
 in `config/context.json` (`elideHistoricToolResults`, default true;
-`elideHistoricToolResultsThresholdChars`, default 10000;
+`elideHistoricToolResultsThresholdChars`, default 2500;
 `elideHistoricImages`, default true; `elideHistoricMiddlePaneContent`,
 default true). The inspect CLI composes through the same decorated resolver.
 

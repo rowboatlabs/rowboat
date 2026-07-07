@@ -43,9 +43,13 @@ export interface ElisionPolicy {
     middlePaneContent: boolean;
 }
 
+// Threshold rationale: ~2,500 chars ≈ 600 tokens. Observed sessions show
+// skill bodies at ~5k chars are the most common oversized result, so 10k
+// would replay them forever; the head preview plus re-run hint makes the
+// lower cut safe. Tunable via config/context.json.
 export const DEFAULT_ELISION_POLICY: ElisionPolicy = {
     toolResults: true,
-    toolResultThresholdChars: 10_000,
+    toolResultThresholdChars: 2_500,
     images: true,
     middlePaneContent: true,
 };
