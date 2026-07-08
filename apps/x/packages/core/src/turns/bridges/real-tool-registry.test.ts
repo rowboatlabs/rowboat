@@ -20,7 +20,9 @@ class FakeAbortRegistry implements IAbortRegistry {
         this.calls.push(`create:${runId}`);
         return new AbortController().signal;
     }
-    registerProcess(): void {}
+    registerProcess(runId: string): void {
+        this.calls.push(`register:${runId}`);
+    }
     unregisterProcess(): void {}
     abort(runId: string): void {
         this.calls.push(`abort:${runId}`);
@@ -94,8 +96,30 @@ describe("RealToolRegistry", () => {
         expect(calls[0].attachment).toEqual({ type: "builtin", name: "echo" });
         expect(calls[0].input).toEqual({ text: "hi" });
         expect(calls[0].ctx).toMatchObject({ runId: "turn-1", toolCallId: "tc-1" });
-        // Abort registry bracketed per call.
-        expect(abortRegistry.calls).toEqual(["create:turn-1", "cleanup:turn-1"]);
+        // Abort registry bracketed and keyed per tool call (sync tools in a
+        // turn execute concurrently; a shared turn key would let one call
+        // tear down its siblings' force-kill scope).
+        expect(abortRegistry.calls).toEqual([
+            "create:turn-1:tc-1",
+            "cleanup:turn-1:tc-1",
+        ]);
+    });
+
+    it("re-keys registry calls a tool makes with ctx.runId to the call scope", async () => {
+        // Builtins address the abort registry with ctx.runId (the turn id).
+        // The scoped wrapper must pin those to the per-call key, or a
+        // process registered by one tool would land in no scope at all.
+        const { registry, abortRegistry } = makeRegistry(async ({ ctx }) => {
+            ctx.abortRegistry.registerProcess(ctx.runId, {} as never);
+            return "ok";
+        });
+        const tool = (await registry.resolve(descriptor())) as SyncRuntimeTool;
+        await tool.execute({}, makeCtx());
+        expect(abortRegistry.calls).toEqual([
+            "create:turn-1:tc-1",
+            "register:turn-1:tc-1",
+            "cleanup:turn-1:tc-1",
+        ]);
     });
 
     it("normalizes undefined results to null and serializes objects", async () => {
@@ -187,9 +211,9 @@ describe("RealToolRegistry", () => {
         const tool = (await registry.resolve(descriptor())) as SyncRuntimeTool;
         await tool.execute({}, makeCtx({ signal: controller.signal }));
         expect(abortRegistry.calls).toEqual([
-            "create:turn-1",
-            "abort:turn-1",
-            "cleanup:turn-1",
+            "create:turn-1:tc-1",
+            "abort:turn-1:tc-1",
+            "cleanup:turn-1:tc-1",
         ]);
     });
 
@@ -199,7 +223,10 @@ describe("RealToolRegistry", () => {
         });
         const tool = (await registry.resolve(descriptor())) as SyncRuntimeTool;
         await expect(tool.execute({}, makeCtx())).rejects.toThrowError("tool exploded");
-        expect(abortRegistry.calls).toEqual(["create:turn-1", "cleanup:turn-1"]);
+        expect(abortRegistry.calls).toEqual([
+            "create:turn-1:tc-1",
+            "cleanup:turn-1:tc-1",
+        ]);
     });
 
     it("resolves mcp descriptors into mcp attachments (server:tool split on first colon)", async () => {

@@ -1,3 +1,4 @@
+import type { ChildProcess } from "child_process";
 import type { z } from "zod";
 import type { ToolAttachment } from "@x/shared/dist/agent.js";
 import type { JsonValue, ToolDescriptor } from "@x/shared/dist/turns.js";
@@ -20,6 +21,47 @@ export interface RealToolRegistryDeps {
     execToolImpl?: typeof execTool;
     abortRegistry?: IAbortRegistry;
     builtins?: typeof BuiltinTools;
+}
+
+// Sync tools within a turn execute concurrently, so abort-registry state must
+// be scoped per tool call: createForRun destroys any existing state under its
+// key, and cleanup would otherwise tear down the force-kill scope of
+// still-running siblings. Builtins address the registry with ctx.runId (the
+// turn id, which keeps its meaning elsewhere), so this wrapper pins every
+// operation to the call-scoped key regardless of the key the caller passes.
+class CallScopedAbortRegistry implements IAbortRegistry {
+    constructor(
+        private readonly inner: IAbortRegistry,
+        private readonly key: string,
+    ) {}
+
+    createForRun(): AbortSignal {
+        return this.inner.createForRun(this.key);
+    }
+
+    registerProcess(_runId: string, process: ChildProcess): void {
+        this.inner.registerProcess(this.key, process);
+    }
+
+    unregisterProcess(_runId: string, process: ChildProcess): void {
+        this.inner.unregisterProcess(this.key, process);
+    }
+
+    abort(): void {
+        this.inner.abort(this.key);
+    }
+
+    forceAbort(): void {
+        this.inner.forceAbort(this.key);
+    }
+
+    isAborted(): boolean {
+        return this.inner.isAborted(this.key);
+    }
+
+    cleanup(): void {
+        this.inner.cleanup(this.key);
+    }
 }
 
 // Bridges persisted tool descriptors to the existing dispatch: builtins via
@@ -89,9 +131,14 @@ export class RealToolRegistry implements IToolRegistry {
             execute: async (input, ctx: ToolExecutionContext) => {
                 // AbortSignal is the primary kill path; the abort registry is
                 // the secondary force-kill for spawned child processes,
-                // bracketed per call and keyed by turn.
-                this.abortRegistry.createForRun(ctx.turnId);
-                const onAbort = () => this.abortRegistry.abort(ctx.turnId);
+                // bracketed and keyed per tool call (sync tools in one turn
+                // run concurrently).
+                const abortRegistry: IAbortRegistry = new CallScopedAbortRegistry(
+                    this.abortRegistry,
+                    `${ctx.turnId}:${ctx.toolCallId}`,
+                );
+                abortRegistry.createForRun(ctx.turnId);
+                const onAbort = () => abortRegistry.abort(ctx.turnId);
                 ctx.signal.addEventListener("abort", onAbort, { once: true });
                 try {
                     const value = await this.execToolImpl(
@@ -101,7 +148,7 @@ export class RealToolRegistry implements IToolRegistry {
                             runId: ctx.turnId,
                             toolCallId: ctx.toolCallId,
                             signal: ctx.signal,
-                            abortRegistry: this.abortRegistry,
+                            abortRegistry,
                             publish: async (event) => {
                                 if (event.type === "tool-output-stream") {
                                     await ctx.reportProgress({
@@ -147,7 +194,7 @@ export class RealToolRegistry implements IToolRegistry {
                     };
                 } finally {
                     ctx.signal.removeEventListener("abort", onAbort);
-                    this.abortRegistry.cleanup(ctx.turnId);
+                    abortRegistry.cleanup(ctx.turnId);
                 }
             },
         };
