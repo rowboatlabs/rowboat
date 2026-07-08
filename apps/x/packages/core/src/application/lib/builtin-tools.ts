@@ -16,6 +16,8 @@ import { composioAccountsRepo } from "../../composio/repo.js";
 import { executeAction as executeComposioAction, isConfigured as isComposioConfigured, searchTools as searchComposioTools } from "../../composio/client.js";
 import { CURATED_TOOLKITS, CURATED_TOOLKIT_SLUGS } from "@x/shared/dist/composio.js";
 import { RowboatAppManifestSchema } from "@x/shared/dist/rowboat-app.js";
+import { SPAWN_AGENT_TOOL_NAME } from "@x/shared/dist/turns.js";
+import { SPAWN_AGENT_DESCRIPTION, SpawnAgentInput } from "../../agents/spawn-agent.js";
 import { BrowserControlInputSchema, type BrowserControlInput } from "@x/shared/dist/browser-control.js";
 import { BackgroundTaskSchema, TriggersSchema } from "@x/shared/dist/background-task.js";
 import type { CodeModeManager } from "../../code-mode/acp/manager.js";
@@ -2009,6 +2011,29 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                     error: error instanceof Error ? error.message : 'Unknown error',
                 };
             }
+        },
+    },
+
+    [SPAWN_AGENT_TOOL_NAME]: {
+        description: SPAWN_AGENT_DESCRIPTION,
+        inputSchema: SpawnAgentInput,
+        // Legacy runs-runtime path only: the turn runtime intercepts
+        // builtin:spawn-agent in RealToolRegistry with a dedicated handler
+        // that also records the parent→child link as durable tool progress.
+        execute: async (input: unknown, ctx?: ToolContext) => {
+            const { runSpawnedAgent } = await import("../../agents/spawn-agent.js");
+            const result = await runSpawnedAgent(input, {
+                parentTurnId: ctx?.runId ?? "",
+                signal: ctx?.signal ?? new AbortController().signal,
+            });
+            if (result.isError) {
+                throw new Error(
+                    typeof result.output === "string"
+                        ? result.output
+                        : JSON.stringify(result.output),
+                );
+            }
+            return result.output;
         },
     },
 };

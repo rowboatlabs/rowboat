@@ -27,7 +27,7 @@ export const ModelDescriptor = z.object({
     model: z.string(),
 });
 
-export const RequestedAgent = z.object({
+export const AgentByIdRequest = z.object({
     agentId: z.string(),
     overrides: z
         .object({
@@ -41,6 +41,42 @@ export const RequestedAgent = z.object({
         })
         .optional(),
 });
+
+// An agent constructed at request time (sub-agents spawned by a parent turn).
+// Persisted verbatim in turn_created.agent.requested, so the definition
+// self-documents in the turn file; the resolver materializes it into the same
+// immutable ResolvedAgent snapshot as a stored agent.
+export const InlineAgentSpec = z.object({
+    name: z.string(),
+    instructions: z.string(),
+    model: ModelDescriptor.optional(),
+    // Builtin tool names; resolution validates against the live catalog and
+    // substitutes the default headless profile when omitted.
+    tools: z.array(z.string()).optional(),
+});
+
+export const InlineAgentRequest = z.object({
+    inline: InlineAgentSpec,
+});
+
+// The builtin that spawns sub-agent turns. Named here (not in core) because
+// resolvers, the tool registry, and the renderer's card dispatch all key on
+// it, and children must never receive it (depth is capped at 1).
+export const SPAWN_AGENT_TOOL_NAME = "spawn-agent";
+
+// The ResolvedAgent.agentId convention for inline agents; also what sessions
+// denormalize into their index for inline-agent turns.
+export function inlineAgentId(name: string): string {
+    return `inline:${name}`;
+}
+
+export const RequestedAgent = z.union([AgentByIdRequest, InlineAgentRequest]);
+
+export function isInlineAgentRequest(
+    requested: z.infer<typeof RequestedAgent>,
+): requested is z.infer<typeof InlineAgentRequest> {
+    return "inline" in requested;
+}
 
 export const ToolDescriptor = z.object({
     toolId: z.string(),

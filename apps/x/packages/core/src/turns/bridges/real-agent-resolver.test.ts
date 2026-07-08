@@ -31,6 +31,11 @@ const fakeBuiltins = {
         execute: async () => null,
         isAvailable: async () => false,
     },
+    "spawn-agent": {
+        description: "Spawn a sub-agent",
+        inputSchema: z.object({ task: z.string() }),
+        execute: async () => null,
+    },
 } as unknown as typeof BuiltinTools;
 
 function makeResolver(agent: z.infer<typeof Agent>, deps: Partial<ConstructorParameters<typeof RealAgentResolver>[0]> = {}) {
@@ -170,6 +175,26 @@ describe("RealAgentResolver", () => {
             overrides: { composition: { someUnknownKey: 42 } },
         });
         expect(b.systemPrompt).toBe(a.systemPrompt);
+    });
+
+    it("strips spawn-agent from by-id children (subagent composition flag)", async () => {
+        const agent = makeAgent({
+            tools: {
+                "spawn-agent": { type: "builtin", name: "spawn-agent" },
+                "file-list": { type: "builtin", name: "file-list" },
+            },
+        });
+        const asParent = await makeResolver(agent).resolve({ agentId: "copilot" });
+        expect(asParent.tools.map((t) => t.name)).toEqual([
+            "spawn-agent",
+            "file-list",
+        ]);
+
+        const asChild = await makeResolver(agent).resolve({
+            agentId: "copilot",
+            overrides: { composition: { subagent: true } },
+        });
+        expect(asChild.tools.map((t) => t.name)).toEqual(["file-list"]);
     });
 
     it("does not load notes/work-dir for non-copilot agents", async () => {

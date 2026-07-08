@@ -1895,6 +1895,17 @@ tool handler may create and execute child turns, forward progress, and return a
 parent tool result. No subflow or parent-turn concept is added to this initial
 turn schema.
 
+Implemented (v1) as the `spawn-agent` builtin: a sync tool whose handler
+(`RealToolRegistry`) runs the child as a standalone headless turn
+(`runSpawnedAgent`), records `{kind: "subagent", childTurnId}` as durable
+tool progress (the only parent→child link), and returns the child's final
+text plus a status envelope. `RequestedAgent` is a union of by-id and inline
+variants; inline agents resolve through `InlineAgentResolver`. Depth is
+capped at 1: both resolvers strip the spawn tool from children, and the
+handler refuses child-shaped parents. Parallel fan-out comes from concurrent
+sync-tool execution (§10.5), not from async suspension; async (restart
+survivability for long children) remains future work.
+
 ### 29.3 Reliability enhancements
 
 - External-input idempotency.

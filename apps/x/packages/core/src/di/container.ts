@@ -43,6 +43,8 @@ import type { IModelRegistry } from "../turns/model-registry.js";
 import type { IToolRegistry } from "../turns/tool-registry.js";
 import type { IPermissionChecker, IPermissionClassifier } from "../turns/permission.js";
 import { RealAgentResolver } from "../turns/bridges/real-agent-resolver.js";
+import { InlineAgentResolver } from "../turns/bridges/inline-agent-resolver.js";
+import { DispatchingAgentResolver } from "../turns/bridges/agent-resolver-dispatch.js";
 import { RealModelRegistry } from "../turns/bridges/real-model-registry.js";
 import { RealToolRegistry } from "../turns/bridges/real-tool-registry.js";
 import { RealPermissionChecker } from "../turns/bridges/real-permission-checker.js";
@@ -123,7 +125,13 @@ container.register({
     ).singleton(),
     lifecycleBus: asClass<ITurnLifecycleBus>(EmitterTurnLifecycleBus).singleton(),
     usageReporter: asClass<IUsageReporter>(RealUsageReporter).singleton(),
-    agentResolver: asFunction<IAgentResolver>(() => new RealAgentResolver()).singleton(),
+    agentResolver: asFunction<IAgentResolver>(
+        () =>
+            new DispatchingAgentResolver(
+                new RealAgentResolver(),
+                new InlineAgentResolver(),
+            ),
+    ).singleton(),
     modelRegistry: asFunction<IModelRegistry>(() => new RealModelRegistry()).singleton(),
     toolRegistry: asFunction<IToolRegistry>(() => new RealToolRegistry()).singleton(),
     permissionChecker: asFunction<IPermissionChecker>(() => new RealPermissionChecker()).singleton(),

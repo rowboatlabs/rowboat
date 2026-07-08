@@ -1,7 +1,11 @@
 import type { ChildProcess } from "child_process";
 import type { z } from "zod";
 import type { ToolAttachment } from "@x/shared/dist/agent.js";
-import type { JsonValue, ToolDescriptor } from "@x/shared/dist/turns.js";
+import {
+    type JsonValue,
+    SPAWN_AGENT_TOOL_NAME,
+    type ToolDescriptor,
+} from "@x/shared/dist/turns.js";
 import { execTool } from "../../application/lib/exec-tool.js";
 import { BuiltinTools } from "../../application/lib/builtin-tools.js";
 import {
@@ -87,6 +91,28 @@ export class RealToolRegistry implements IToolRegistry {
                 descriptor: descriptor as { execution: "async" } & z.infer<
                     typeof ToolDescriptor
                 >,
+            };
+        }
+        if (descriptor.toolId === `builtin:${SPAWN_AGENT_TOOL_NAME}`) {
+            // The dedicated agent-tool handler (turn-runtime-design §29.2):
+            // runs the child as a standalone headless turn and records the
+            // parent→child link as durable tool progress. Bypasses execTool
+            // so it gets the runtime's reportProgress channel.
+            return {
+                descriptor: descriptor as { execution: "sync" } & z.infer<
+                    typeof ToolDescriptor
+                >,
+                execute: async (input, ctx: ToolExecutionContext) => {
+                    const { runSpawnedAgent } = await import(
+                        "../../agents/spawn-agent.js"
+                    );
+                    return runSpawnedAgent(input, {
+                        parentTurnId: ctx.turnId,
+                        signal: ctx.signal,
+                        onChildStarted: (info) =>
+                            ctx.reportProgress({ kind: "subagent", ...info }),
+                    });
+                },
             };
         }
         if (descriptor.toolId.startsWith("builtin:")) {
