@@ -140,20 +140,32 @@ describe("runSpawnedAgent", () => {
         expect(started[0].maxModelCalls).toBe(5);
     });
 
-    it("requires exactly one of agent_id and instructions", async () => {
+    it("rejects agent_id and instructions together", async () => {
         const { services } = fakeServices({});
-        for (const input of [
-            { task: "t" },
+        const result = await runSpawnedAgent(
             { task: "t", agent_id: "a", instructions: "b" },
-        ]) {
-            const result = await runSpawnedAgent(input, {
-                parentTurnId: "parent-1",
-                signal,
-                services,
-            });
-            expect(result.isError).toBe(true);
-            expect(result.output).toMatch(/exactly one/);
-        }
+            { parentTurnId: "parent-1", signal, services },
+        );
+        expect(result.isError).toBe(true);
+        expect(result.output).toMatch(/at most one/);
+    });
+
+    it("spawns a default worker when neither agent_id nor instructions is given", async () => {
+        // Models routinely treat task (+ name/tools) as a complete spec; the
+        // task-only form must work rather than cost a correction round-trip.
+        const { services, started } = fakeServices({});
+        const result = await runSpawnedAgent(
+            { task: "find the weather", name: "london-weather", tools: ["web-search"] },
+            { parentTurnId: "parent-1", signal, services },
+        );
+        expect(result.isError).toBe(false);
+        const agent = started[0].agent as {
+            inline: { name: string; instructions: string; tools?: string[] };
+        };
+        expect(agent.inline.name).toBe("london-weather");
+        expect(agent.inline.tools).toEqual(["web-search"]);
+        expect(agent.inline.instructions).toMatch(/london-weather/);
+        expect(agent.inline.instructions).toMatch(/headlessly/);
     });
 
     it("rejects a model-call budget above the cap at the schema boundary", async () => {

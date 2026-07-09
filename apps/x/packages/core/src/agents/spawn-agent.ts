@@ -34,7 +34,7 @@ export const SpawnAgentInput = z.object({
         .string()
         .optional()
         .describe(
-            "System instructions for an agent constructed on the fly. Mutually exclusive with `agent_id`.",
+            "System instructions for an agent constructed on the fly. Mutually exclusive with `agent_id`. Optional: omitting both `agent_id` and `instructions` spawns a general-purpose worker driven by `task` alone.",
         ),
     model: z
         .string()
@@ -96,9 +96,9 @@ export async function runSpawnedAgent(
         return spawnError(`invalid input: ${parsed.error.message}`);
     }
     const input = parsed.data;
-    if (!input.agent_id === !input.instructions) {
+    if (input.agent_id && input.instructions) {
         return spawnError(
-            "provide exactly one of `agent_id` or `instructions`",
+            "provide at most one of `agent_id` or `instructions`",
         );
     }
 
@@ -149,7 +149,11 @@ export async function runSpawnedAgent(
         : {
               inline: {
                   name: agentName,
-                  instructions: input.instructions!,
+                  // The task alone is usually a complete spec — models
+                  // routinely omit `instructions` for ad-hoc workers, and
+                  // rejecting that just costs a correction round-trip.
+                  instructions:
+                      input.instructions ?? defaultWorkerInstructions(agentName),
                   ...(model ? { model } : {}),
                   ...(input.tools ? { tools: input.tools } : {}),
               },
@@ -229,6 +233,14 @@ async function resolveServices(): Promise<
 
 function spawnError(message: string): z.infer<typeof ToolResultData> {
     return { output: `spawn-agent: ${message}`, isError: true };
+}
+
+function defaultWorkerInstructions(name: string): string {
+    return (
+        `You are ${name}, a sub-agent spawned to complete a single task. ` +
+        "You run headlessly: no user is available to clarify or approve, and your final message is your only output. " +
+        "Work autonomously with the tools you have, then end with a complete, self-contained answer to the task."
+    );
 }
 
 // True for any child-shaped parent: inline agents only exist as spawned
