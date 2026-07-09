@@ -644,7 +644,10 @@ describe("stopTurn and resumeTurn", () => {
 });
 
 describe("event forwarding and index maintenance (13.6, 13.7)", () => {
-    it("forwards stream events to the bus tagged with sessionId in order", async () => {
+    it("drains the execution stream and publishes only index updates", async () => {
+        // Live turn delivery is the turn event bus's job (published by the
+        // runtime itself); the session bus carries index changes only. The
+        // stream must still be consumed so it never buffers until settle.
         const { sessions, fake, bus } = makeSessions();
         const streamed: TurnStreamEvent[] = [
             { type: "text_delta", turnId: "x", modelCallIndex: 0, delta: "he" },
@@ -652,19 +655,12 @@ describe("event forwarding and index maintenance (13.6, 13.7)", () => {
         ];
         fake.script = () => ({ events: streamed, outcome: completedOutcome() });
         const sessionId = await sessions.createSession();
-        const { turnId } = await sessions.sendMessage(sessionId, user("go"), {
+        await sessions.sendMessage(sessionId, user("go"), {
             agent: { agentId: "copilot" },
         });
         await flush();
-        const turnEvents = bus.events.filter((e) => e.kind === "turn-event");
-        expect(turnEvents).toEqual(
-            streamed.map((event) => ({
-                kind: "turn-event",
-                sessionId,
-                turnId,
-                event,
-            })),
-        );
+        expect(bus.events.length).toBeGreaterThan(0);
+        expect(bus.events.every((e) => e.kind === "index-changed")).toBe(true);
     });
 
     it("outcome settlement updates the index entry's latest turn status", async () => {

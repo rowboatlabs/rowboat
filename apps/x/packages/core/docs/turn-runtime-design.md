@@ -1435,9 +1435,10 @@ stream for the initiating caller.
   events with `offset <= snapshot.length` — no gaps, no duplicates, no
   sequence numbers in the durable schema.
 - Text/reasoning deltas are published without an offset (they are not
-  durable). The app-layer IPC bridge (`turns:events`) forwards durable
-  events only in v1; deltas still reach session chat via the session-layer
-  forwarding. Scoping delta delivery to subscribed turns is future work.
+  durable). The app-layer IPC bridge (`turns:events`) broadcasts durable
+  events to every window; deltas are forwarded only to windows that
+  declared they are watching that turn (`turns:subscribe` /
+  `turns:unsubscribe`, a per-webContents registry in the app layer).
 - The bus is ephemeral and observational, like the lifecycle bus: listener
   errors are swallowed, nothing durable depends on delivery, and a crash
   losing listeners accurately reflects that no execution is known active.

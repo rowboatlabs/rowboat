@@ -343,9 +343,11 @@ export class SessionsImpl implements ISessions {
         await execution.outcome;
     }
 
-    // Every advance this layer initiates: forward its stream to the bus
-    // tagged with sessionId, keep the abort controller for stopTurn, and
-    // update the index entry when the outcome settles.
+    // Every advance this layer initiates: keep the abort controller for
+    // stopTurn and update the index entry when the outcome settles. Live
+    // event delivery is not this layer's job — the runtime publishes every
+    // event to the turn event bus; the execution stream is drained so an
+    // unconsumed HotStream never buffers events until settle.
     private startTrackedAdvance(
         sessionId: string | null,
         turnId: string,
@@ -368,14 +370,7 @@ export class SessionsImpl implements ISessions {
         void (async () => {
             try {
                 for await (const event of execution.events) {
-                    if (sessionId !== null) {
-                        this.sessionBus.publish({
-                            kind: "turn-event",
-                            sessionId,
-                            turnId,
-                            event,
-                        });
-                    }
+                    void event;
                 }
             } catch {
                 // Infrastructure failures surface through the outcome.
