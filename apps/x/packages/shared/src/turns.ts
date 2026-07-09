@@ -361,6 +361,22 @@ export const ToolResult = z.object({
     result: ToolResultData,
 });
 
+// A successful sync tool extended the turn's toolset mid-turn (e.g. loadSkill
+// attaching a skill's declared tools). The descriptors are snapshotted in the
+// event so replay needs no external lookups; they apply to every model call
+// requested after this point. This is the one sanctioned exception to the
+// tool-set immutability rule — explicit and durable, never silent.
+export const ToolsExtended = z.object({
+    type: z.literal("tools_extended"),
+    turnId: z.string(),
+    ts: z.string(),
+    // The tool result that carried these additions (metadata.addTools).
+    toolCallId: z.string(),
+    // Human-readable origin, e.g. the skill id that declared the tools.
+    source: z.string(),
+    tools: z.array(ToolDescriptor).min(1),
+});
+
 export const TurnSuspended = z.object({
     type: z.literal("turn_suspended"),
     turnId: z.string(),
@@ -424,6 +440,7 @@ export const TurnEvent = z.discriminatedUnion("type", [
     ToolInvocationRequested,
     ToolProgress,
     ToolResult,
+    ToolsExtended,
     TurnSuspended,
     TurnCompleted,
     TurnFailed,
@@ -496,10 +513,18 @@ export interface ToolCallState {
     result?: z.infer<typeof ToolResult>;
 }
 
+export interface ToolExtensionState {
+    event: z.infer<typeof ToolsExtended>;
+    // Extensions land between model calls; every call requested from this
+    // index onward sees the added tools.
+    firstAffectedModelCallIndex: number;
+}
+
 export interface TurnState {
     definition: z.infer<typeof TurnCreated>;
     modelCalls: ModelCallState[];
     toolCalls: ToolCallState[];
+    toolExtensions: ToolExtensionState[];
     suspension?: z.infer<typeof TurnSuspended>;
     terminal?:
         | z.infer<typeof TurnCompleted>
@@ -675,11 +700,17 @@ function applyModelCallCompleted(
             fail(`duplicate tool call id: ${part.toolCallId}`);
         }
         const resolved = state.definition.agent.resolved;
-        // Inherited snapshots resolve outside the reducer; identity fields
-        // then arrive via tool_invocation_requested events.
-        const descriptor = isInheritedSnapshot(resolved)
-            ? undefined
-            : resolved.tools.find((tool) => tool.name === part.toolName);
+        // Mid-turn extensions are searched first (their descriptors are
+        // always in the log); inherited base snapshots resolve outside the
+        // reducer, so identity fields for those tools arrive via
+        // tool_invocation_requested events instead.
+        const descriptor =
+            extendedToolsFor(state, event.modelCallIndex).find(
+                (tool) => tool.name === part.toolName,
+            ) ??
+            (isInheritedSnapshot(resolved)
+                ? undefined
+                : resolved.tools.find((tool) => tool.name === part.toolName));
         state.toolCalls.push({
             modelCallIndex: event.modelCallIndex,
             order: order++,
@@ -841,6 +872,44 @@ function applyToolResult(
     toolCall.result = event;
 }
 
+function applyToolsExtended(
+    state: TurnState,
+    event: z.infer<typeof ToolsExtended>,
+): void {
+    if (openModelCall(state)) {
+        fail("tools extended while a model call is unsettled");
+    }
+    const toolCall = findToolCall(state, event.toolCallId);
+    if (!toolCall.result) {
+        fail(`tools extended without a tool result: ${event.toolCallId}`);
+    }
+    if (toolCall.result.result.isError) {
+        fail(`tools extended by a failed tool call: ${event.toolCallId}`);
+    }
+    // Collision check covers prior extensions and (when visible) the base
+    // snapshot; inherited snapshots are opaque to the reducer, so their base
+    // names are enforced by the runtime's dedupe instead.
+    const existing = new Set(
+        extendedToolsFor(state, state.modelCalls.length).map((t) => t.name),
+    );
+    const resolved = state.definition.agent.resolved;
+    if (!isInheritedSnapshot(resolved)) {
+        for (const tool of resolved.tools) {
+            existing.add(tool.name);
+        }
+    }
+    for (const tool of event.tools) {
+        if (existing.has(tool.name)) {
+            fail(`tools extended with a colliding tool name: ${tool.name}`);
+        }
+        existing.add(tool.name);
+    }
+    state.toolExtensions.push({
+        event,
+        firstAffectedModelCallIndex: state.modelCalls.length,
+    });
+}
+
 function sortedIds(ids: string[]): string {
     return [...ids].sort().join(",");
 }
@@ -929,6 +998,7 @@ export function reduceTurn(
         definition: first,
         modelCalls: [],
         toolCalls: [],
+        toolExtensions: [],
         usage: {},
     };
 
@@ -978,6 +1048,9 @@ export function reduceTurn(
             case "tool_result":
                 applyToolResult(state, event);
                 break;
+            case "tools_extended":
+                applyToolsExtended(state, event);
+                break;
             case "turn_suspended":
                 applyTurnSuspended(state, event);
                 break;
@@ -1005,6 +1078,29 @@ export function reduceTurn(
 // ---------------------------------------------------------------------------
 // Pure derivations over TurnState
 // ---------------------------------------------------------------------------
+
+// Descriptors added by durable extensions in effect for a given model call.
+export function extendedToolsFor(
+    state: TurnState,
+    modelCallIndex: number,
+): Array<z.infer<typeof ToolDescriptor>> {
+    return state.toolExtensions
+        .filter((ext) => ext.firstAffectedModelCallIndex <= modelCallIndex)
+        .flatMap((ext) => ext.event.tools);
+}
+
+// The full toolset a given model call sees: the agent snapshot's base tools
+// plus every extension recorded before that call was requested. The base set
+// comes from the materialized agent (inherited snapshots are opaque here),
+// so callers pass it in.
+export function effectiveTools(
+    state: TurnState,
+    modelCallIndex: number,
+    baseTools: Array<z.infer<typeof ToolDescriptor>>,
+): Array<z.infer<typeof ToolDescriptor>> {
+    const extended = extendedToolsFor(state, modelCallIndex);
+    return extended.length === 0 ? baseTools : [...baseTools, ...extended];
+}
 
 export function outstandingPermissions(state: TurnState): ToolCallState[] {
     return state.toolCalls.filter(

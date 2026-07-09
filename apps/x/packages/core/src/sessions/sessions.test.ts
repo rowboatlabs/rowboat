@@ -842,3 +842,194 @@ describe("headless standalone turns (13.8)", () => {
         expect(fake.advanceCalls).toEqual([{ turnId, input: undefined }]);
     });
 });
+
+describe("active-skill carry-forward", () => {
+    const skillTool = {
+        toolId: "builtin:file-writeText",
+        name: "file-writeText",
+        description: "Write",
+        inputSchema: {},
+        execution: "sync" as const,
+        requiresHuman: false,
+    };
+
+    // A completed turn whose history loaded a skill mid-turn.
+    function skillLoadLog(
+        turnId: string,
+        sessionId: string,
+        agent: CreateTurnInput["agent"],
+        source = "organize-files",
+    ): TEvent[] {
+        const created = createdEvent(turnId, {
+            agent,
+            sessionId,
+            context: [],
+            input: user("hi"),
+            config: { humanAvailable: true },
+        });
+        return [
+            created,
+            {
+                type: "model_call_requested",
+                turnId,
+                ts: TS,
+                modelCallIndex: 0,
+                request: { messages: ["input"], parameters: {} },
+            },
+            {
+                type: "model_call_completed",
+                turnId,
+                ts: TS,
+                modelCallIndex: 0,
+                message: {
+                    role: "assistant",
+                    content: [
+                        {
+                            type: "tool-call",
+                            toolCallId: "A",
+                            toolName: "loadSkill",
+                            arguments: {},
+                        },
+                    ],
+                },
+                finishReason: "tool-calls",
+                usage: {},
+            },
+            {
+                type: "tool_invocation_requested",
+                turnId,
+                ts: TS,
+                toolCallId: "A",
+                toolId: "builtin:loadSkill",
+                toolName: "loadSkill",
+                execution: "sync",
+                input: {},
+            },
+            {
+                type: "tool_result",
+                turnId,
+                ts: TS,
+                toolCallId: "A",
+                toolName: "loadSkill",
+                source: "sync",
+                result: { output: { success: true }, isError: false },
+            },
+            {
+                type: "tools_extended",
+                turnId,
+                ts: TS,
+                toolCallId: "A",
+                source,
+                tools: [skillTool],
+            },
+            {
+                type: "model_call_requested",
+                turnId,
+                ts: TS,
+                modelCallIndex: 1,
+                request: { messages: ["assistant:0", "toolResult:A"], parameters: {} },
+            },
+            {
+                type: "model_call_completed",
+                turnId,
+                ts: TS,
+                modelCallIndex: 1,
+                message: assistantText("ok"),
+                finishReason: "stop",
+                usage: {},
+            },
+            {
+                type: "turn_completed",
+                turnId,
+                ts: TS,
+                output: assistantText("ok"),
+                finishReason: "stop",
+                usage: {},
+            },
+        ];
+    }
+
+    it("the next turn's composition carries skills recorded by tools_extended", async () => {
+        const { sessions, fake } = makeSessions();
+        const sessionId = await sessions.createSession();
+        const { turnId } = await sessions.sendMessage(sessionId, user("one"), {
+            agent: { agentId: "copilot" },
+        });
+        await flush();
+        fake.setLog(turnId, skillLoadLog(turnId, sessionId, { agentId: "copilot" }));
+
+        await sessions.sendMessage(sessionId, user("two"), {
+            agent: { agentId: "copilot" },
+        });
+        const second = fake.createTurnInputs[1];
+        expect(second.agent).toMatchObject({
+            agentId: "copilot",
+            overrides: { composition: { activeSkills: ["organize-files"] } },
+        });
+    });
+
+    it("accumulates across turns and unions with caller-supplied skills, preserving order", async () => {
+        const { sessions, fake } = makeSessions();
+        const sessionId = await sessions.createSession();
+        const first = await sessions.sendMessage(sessionId, user("one"), {
+            agent: { agentId: "copilot" },
+        });
+        await flush();
+        fake.setLog(
+            first.turnId,
+            skillLoadLog(first.turnId, sessionId, { agentId: "copilot" }),
+        );
+
+        const second = await sessions.sendMessage(sessionId, user("two"), {
+            agent: { agentId: "copilot" },
+        });
+        await flush();
+        // Turn 2 carried organize-files in its request and loaded another
+        // skill mid-turn.
+        fake.setLog(
+            second.turnId,
+            skillLoadLog(
+                second.turnId,
+                sessionId,
+                {
+                    agentId: "copilot",
+                    overrides: {
+                        composition: { activeSkills: ["organize-files"] },
+                    },
+                },
+                "doc-collab",
+            ),
+        );
+
+        await sessions.sendMessage(sessionId, user("three"), {
+            agent: {
+                agentId: "copilot",
+                overrides: { composition: { activeSkills: ["notify-user"] } },
+            },
+        });
+        const third = fake.createTurnInputs[2];
+        expect(third.agent).toMatchObject({
+            overrides: {
+                composition: {
+                    activeSkills: ["organize-files", "doc-collab", "notify-user"],
+                },
+            },
+        });
+    });
+
+    it("a session with no skill loads adds no composition key", async () => {
+        const { sessions, fake } = makeSessions();
+        const sessionId = await sessions.createSession();
+        const { turnId } = await sessions.sendMessage(sessionId, user("one"), {
+            agent: { agentId: "copilot" },
+        });
+        await flush();
+        fake.setLog(turnId, turnLog(turnId, sessionId, "completed"));
+
+        await sessions.sendMessage(sessionId, user("two"), {
+            agent: { agentId: "copilot" },
+        });
+        const second = fake.createTurnInputs[1];
+        expect(second.agent).toEqual({ agentId: "copilot" });
+    });
+});

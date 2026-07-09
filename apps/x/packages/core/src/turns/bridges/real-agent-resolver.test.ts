@@ -222,3 +222,70 @@ describe("RealAgentResolver", () => {
         );
     });
 });
+
+describe("active skills (skill-scoped tools)", () => {
+    const skillTools = (skillId: string): string[] =>
+        skillId === "organize-files"
+            ? ["file-list", "web-search", "ghost"]
+            : [];
+
+    it("appends declared tools of active skills for copilot, skipping unknown and unavailable ones", async () => {
+        const resolver = makeResolver(
+            makeAgent({
+                tools: { "spawn-agent": { type: "builtin", name: "spawn-agent" } },
+            }),
+            { skillTools },
+        );
+        const resolved = await resolver.resolve({
+            agentId: "copilot",
+            overrides: {
+                composition: { activeSkills: ["organize-files", "gone-skill"] },
+            },
+        });
+        // spawn-agent (base) + file-list from the skill; web-search is
+        // unavailable and ghost unknown; gone-skill contributes nothing.
+        expect(resolved.tools.map((t) => t.name)).toEqual([
+            "spawn-agent",
+            "file-list",
+        ]);
+        expect(resolved.tools[1]).toMatchObject({ toolId: "builtin:file-list" });
+    });
+
+    it("never duplicates a tool already in the base set", async () => {
+        const resolver = makeResolver(
+            makeAgent({
+                tools: { "file-list": { type: "builtin", name: "file-list" } },
+            }),
+            { skillTools },
+        );
+        const resolved = await resolver.resolve({
+            agentId: "copilot",
+            overrides: { composition: { activeSkills: ["organize-files"] } },
+        });
+        expect(
+            resolved.tools.filter((t) => t.name === "file-list"),
+        ).toHaveLength(1);
+    });
+
+    it("identical activeSkills yield byte-identical snapshots", async () => {
+        const resolver = makeResolver(makeAgent(), { skillTools });
+        const request = {
+            agentId: "copilot",
+            overrides: { composition: { activeSkills: ["organize-files"] } },
+        };
+        const a = await resolver.resolve(request);
+        const b = await resolver.resolve(request);
+        expect(JSON.stringify(a.tools)).toBe(JSON.stringify(b.tools));
+    });
+
+    it("ignores activeSkills for non-copilot agents", async () => {
+        const resolver = makeResolver(makeAgent({ name: "writer" }), {
+            skillTools,
+        });
+        const resolved = await resolver.resolve({
+            agentId: "writer",
+            overrides: { composition: { activeSkills: ["organize-files"] } },
+        });
+        expect(resolved.tools).toEqual([]);
+    });
+});

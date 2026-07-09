@@ -15,6 +15,7 @@ import {
     ToolPermissionResolved,
     ToolProgress,
     ToolResult,
+    ToolsExtended,
     TurnCancelled,
     TurnCompleted,
     TurnCorruptionError,
@@ -23,6 +24,8 @@ import {
     TurnFailed,
     TurnSuspended,
     deriveTurnStatus,
+    effectiveTools,
+    extendedToolsFor,
     outstandingAsyncTools,
     outstandingPermissions,
     reduceTurn,
@@ -1417,5 +1420,161 @@ describe("derivations", () => {
             completed(0, call0),
         ]);
         expect(() => turnTranscript(state)).toThrowError(/unresolved/);
+    });
+});
+
+describe("mid-turn tool extension", () => {
+    const writeTool: z.infer<typeof ToolDescriptor> = {
+        toolId: "builtin:file-writeText",
+        name: "file-writeText",
+        description: "Write a text file",
+        inputSchema: {},
+        execution: "sync",
+        requiresHuman: false,
+    };
+
+    function extendedEv(
+        toolCallId: string,
+        tools: Array<z.infer<typeof ToolDescriptor>> = [writeTool],
+        source = "organize-files",
+    ): z.infer<typeof ToolsExtended> {
+        return {
+            type: "tools_extended",
+            turnId: TURN_ID,
+            ts: TS,
+            toolCallId,
+            source,
+            tools,
+        };
+    }
+
+    // created → call 0 → echo tc1 (success) → tools_extended riding tc1.
+    function extensionSequence(): TEvent[] {
+        const call0 = assistantCalls(toolCallPart("tc1", "echo"));
+        return [
+            created(),
+            requested(0, ["input"]),
+            completed(0, call0),
+            permRequired("tc1", "echo"),
+            permResolved("tc1", "allow"),
+            invocation("tc1"),
+            result("tc1", "echo"),
+            extendedEv("tc1"),
+        ];
+    }
+
+    it("round-trips through the TurnEvent schema", () => {
+        expect(TurnEvent.parse(extendedEv("tc1"))).toEqual(extendedEv("tc1"));
+    });
+
+    it("records the extension and applies it from the next model call on", () => {
+        const state = reduceTurn(extensionSequence());
+        expect(state.toolExtensions).toHaveLength(1);
+        expect(state.toolExtensions[0].firstAffectedModelCallIndex).toBe(1);
+
+        const base = [echoTool, fetchTool];
+        expect(effectiveTools(state, 0, base)).toEqual(base);
+        expect(effectiveTools(state, 1, base)).toEqual([...base, writeTool]);
+        expect(extendedToolsFor(state, 0)).toEqual([]);
+        expect(extendedToolsFor(state, 1)).toEqual([writeTool]);
+    });
+
+    it("stamps descriptor identity on calls to extended tools", () => {
+        const state = reduceTurn([
+            ...extensionSequence(),
+            requested(1, ["assistant:0", "toolResult:tc1"]),
+            completed(1, assistantCalls(toolCallPart("tc2", "file-writeText"))),
+        ]);
+        const tc2 = state.toolCalls.find((tc) => tc.toolCallId === "tc2");
+        expect(tc2?.toolId).toBe("builtin:file-writeText");
+        expect(tc2?.execution).toBe("sync");
+    });
+
+    it("a full turn with a mid-turn extension completes cleanly", () => {
+        const state = reduceTurn([
+            ...extensionSequence(),
+            requested(1, ["assistant:0", "toolResult:tc1"]),
+            completed(1, assistantText("done")),
+            turnCompletedEv(),
+        ]);
+        expect(state.terminal?.type).toBe("turn_completed");
+    });
+
+    it("rejects an extension referencing an unknown tool call", () => {
+        expectCorruption(
+            [created(), extendedEv("nope")],
+            /unknown tool call/,
+        );
+    });
+
+    it("rejects an extension before its tool call has a result", () => {
+        const call0 = assistantCalls(toolCallPart("tc1", "echo"));
+        expectCorruption(
+            [
+                created(),
+                requested(0, ["input"]),
+                completed(0, call0),
+                permRequired("tc1", "echo"),
+                permResolved("tc1", "allow"),
+                invocation("tc1"),
+                extendedEv("tc1"),
+            ],
+            /without a tool result/,
+        );
+    });
+
+    it("rejects an extension riding a failed tool result", () => {
+        const call0 = assistantCalls(toolCallPart("tc1", "echo"));
+        expectCorruption(
+            [
+                created(),
+                requested(0, ["input"]),
+                completed(0, call0),
+                permRequired("tc1", "echo"),
+                permResolved("tc1", "allow"),
+                invocation("tc1"),
+                result("tc1", "echo", "sync", "boom", true),
+                extendedEv("tc1"),
+            ],
+            /failed tool call/,
+        );
+    });
+
+    it("rejects a name colliding with the base snapshot", () => {
+        expectCorruption(
+            [
+                ...extensionSequence().slice(0, -1),
+                extendedEv("tc1", [{ ...writeTool, name: "echo" }]),
+            ],
+            /colliding tool name: echo/,
+        );
+    });
+
+    it("rejects a name colliding with a prior extension", () => {
+        expectCorruption(
+            [...extensionSequence(), extendedEv("tc1", [writeTool])],
+            /colliding tool name: file-writeText/,
+        );
+    });
+
+    it("rejects duplicate names within one extension", () => {
+        expectCorruption(
+            [
+                ...extensionSequence().slice(0, -1),
+                extendedEv("tc1", [writeTool, { ...writeTool }]),
+            ],
+            /colliding tool name: file-writeText/,
+        );
+    });
+
+    it("rejects an extension while a model call is unsettled", () => {
+        expectCorruption(
+            [
+                ...extensionSequence().slice(0, -1),
+                requested(1, ["assistant:0", "toolResult:tc1"]),
+                extendedEv("tc1"),
+            ],
+            /model call is unsettled/,
+        );
     });
 });

@@ -13,6 +13,7 @@ import {
     type JsonValue,
     type ModelDescriptor,
     type ToolResultData,
+    type TurnState,
     deriveTurnStatus,
     inlineAgentId,
     isInlineAgentRequest,
@@ -151,8 +152,11 @@ export class SessionsImpl implements ISessions {
             const events = await this.sessionRepo.read(sessionId);
             const state = reduceSession(events);
 
+            let agentRequest = config.agent;
             if (state.latestTurnId) {
-                const status = await this.latestTurnStatus(state);
+                const turn = await this.turnRuntime.getTurn(state.latestTurnId);
+                const turnState = reduceTurn(turn.events);
+                const status = deriveTurnStatus(turnState);
                 if (
                     status !== "completed" &&
                     status !== "failed" &&
@@ -164,10 +168,14 @@ export class SessionsImpl implements ISessions {
                         status,
                     );
                 }
+                agentRequest = withActiveSkills(
+                    agentRequest,
+                    deriveActiveSkills(turnState),
+                );
             }
 
             const turnId = await this.turnRuntime.createTurn({
-                agent: config.agent,
+                agent: agentRequest,
                 sessionId,
                 context: state.latestTurnId
                     ? { previousTurnId: state.latestTurnId }
@@ -414,6 +422,72 @@ export class SessionsImpl implements ISessions {
 
 function errorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
+}
+
+// ---- Skill-scoped tool carry-forward --------------------------------------
+// Skills loaded in earlier turns stay active for the whole session: the next
+// turn's activeSkills = the previous turn's requested activeSkills plus any
+// skills its durable tools_extended events recorded, in first-load order.
+// Stable ordering keeps agent snapshots byte-identical across turns, which is
+// what lets snapshot inheritance keep working.
+
+function parseActiveSkills(composition: JsonValue | undefined): string[] {
+    if (
+        composition === undefined ||
+        composition === null ||
+        typeof composition !== "object" ||
+        Array.isArray(composition)
+    ) {
+        return [];
+    }
+    const value = (composition as Record<string, JsonValue>).activeSkills;
+    return Array.isArray(value)
+        ? value.filter((item): item is string => typeof item === "string")
+        : [];
+}
+
+function deriveActiveSkills(turnState: TurnState): string[] {
+    const requested = turnState.definition.agent.requested;
+    const skills = isInlineAgentRequest(requested)
+        ? []
+        : parseActiveSkills(requested.overrides?.composition);
+    for (const extension of turnState.toolExtensions) {
+        if (!skills.includes(extension.event.source)) {
+            skills.push(extension.event.source);
+        }
+    }
+    return skills;
+}
+
+function withActiveSkills(
+    agent: SendMessageConfig["agent"],
+    activeSkills: string[],
+): SendMessageConfig["agent"] {
+    if (isInlineAgentRequest(agent) || activeSkills.length === 0) {
+        return agent;
+    }
+    const composition = agent.overrides?.composition;
+    const base =
+        composition !== undefined &&
+        composition !== null &&
+        typeof composition === "object" &&
+        !Array.isArray(composition)
+            ? composition
+            : {};
+    // Carried-forward skills first (stable order), then any caller-supplied
+    // extras not already present.
+    const provided = parseActiveSkills(composition);
+    const merged = [
+        ...activeSkills,
+        ...provided.filter((id) => !activeSkills.includes(id)),
+    ];
+    return {
+        ...agent,
+        overrides: {
+            ...agent.overrides,
+            composition: { ...base, activeSkills: merged },
+        },
+    };
 }
 
 function defaultTitle(input: z.infer<typeof UserMessage>): string {
