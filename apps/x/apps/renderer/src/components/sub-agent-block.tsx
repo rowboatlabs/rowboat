@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { Bot } from 'lucide-react'
 import { Tool, ToolContent, ToolHeader } from '@/components/ai-elements/tool'
 import { CompactConversation } from '@/components/compact-conversation'
 import { fetchAgentRunTranscript, type AgentRunTranscript } from '@/lib/agent-transcript'
@@ -42,6 +41,12 @@ function useChildTranscript(
   return transcript
 }
 
+// "london-weather" / "meeting_prep" → "London weather" / "Meeting prep".
+function humanizeName(name: string): string {
+  const words = name.replace(/[-_]+/g, ' ').trim()
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : ''
+}
+
 export function SubAgentBlock({
   item,
   open,
@@ -54,27 +59,24 @@ export function SubAgentBlock({
   const input = item.input as
     | { name?: string; agent_id?: string; task?: string }
     | undefined
-  const agentName = item.subAgent?.agentName ?? input?.agent_id ?? input?.name ?? 'subagent'
-  const task = item.subAgent?.task ?? input?.task ?? ''
+  const rawName = item.subAgent?.agentName || input?.agent_id || input?.name || ''
+  const name = rawName === 'subagent' ? '' : humanizeName(rawName)
+  const task = (item.subAgent?.task || input?.task || '').trim()
+  // The collapsed row must say what is happening, not just that an agent
+  // exists: lead with the name when the model gave one, then the task (the
+  // header truncates with a hover tooltip carrying the full text).
+  const title = task ? `${name || 'Agent'}: ${task}` : name || 'Agent'
   const running = item.status === 'pending' || item.status === 'running'
   const transcript = useChildTranscript(item.subAgent?.childTurnId, running, open)
 
   return (
     <Tool open={open} onOpenChange={onOpenChange}>
-      <ToolHeader
-        title={`Sub-agent: ${agentName}`}
-        type="tool-spawn-agent"
-        state={toToolState(item.status)}
-      />
+      <ToolHeader title={title} type="tool-spawn-agent" state={toToolState(item.status)} />
       <ToolContent>
         <div className="flex flex-col gap-3 px-4 pb-4">
-          {task && (
-            <div className="flex items-start gap-2 rounded-2xl bg-secondary/50 px-3 py-2 text-sm text-muted-foreground">
-              <Bot className="mt-0.5 size-4 shrink-0" />
-              <span className="whitespace-pre-wrap">{task}</span>
-            </div>
-          )}
           {transcript ? (
+            // The transcript opens with the child's user message — the task —
+            // so no separate task chip is rendered here.
             <CompactConversation items={transcript.items} />
           ) : (
             <div className="px-1 text-sm text-muted-foreground">
