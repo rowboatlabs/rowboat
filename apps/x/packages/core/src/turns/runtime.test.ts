@@ -2071,3 +2071,246 @@ describe("concurrent sync tool execution (10.5)", () => {
         ]);
     });
 });
+
+describe("mid-turn tool extension", () => {
+    const writeDescriptor: z.infer<typeof ToolDescriptor> = {
+        toolId: "tool.write",
+        name: "write",
+        description: "Write tool",
+        inputSchema: {},
+        execution: "sync",
+        requiresHuman: false,
+    };
+
+    function additionsTool(
+        descriptor: z.infer<typeof ToolDescriptor>,
+        tools: Array<z.infer<typeof ToolDescriptor>>,
+        source = "organize-files",
+    ): SyncRuntimeTool {
+        return syncTool(descriptor, async () => ({
+            output: { success: true },
+            isError: false,
+            metadata: { toolAdditions: { source, tools } },
+        }));
+    }
+
+    const writeImpl = syncTool(writeDescriptor, async () => ({
+        output: "written",
+        isError: false,
+    }));
+
+    it("appends tools_extended and the added tool is callable on the next step", async () => {
+        const { runtime, repo, models } = makeRuntime({
+            models: [
+                respond(completedResp(assistantCalls(toolCallPart("tc1", "echo")))),
+                respond(completedResp(assistantCalls(toolCallPart("tc2", "write")))),
+                respond(completedResp(assistantText("done"))),
+            ],
+            tools: [
+                additionsTool(echoDescriptor, [writeDescriptor]),
+                writeImpl,
+                ...defaultTools.slice(1),
+            ],
+        });
+        const turnId = await newTurn(runtime);
+        const { outcome, error } = await advanceAndSettle(runtime, turnId);
+        expect(error).toBeUndefined();
+        expect(outcome?.status).toBe("completed");
+
+        const log = await persisted(repo, turnId);
+        const extensions = log.filter((e) => e.type === "tools_extended");
+        expect(extensions).toHaveLength(1);
+        expect(extensions[0]).toMatchObject({
+            toolCallId: "tc1",
+            source: "organize-files",
+            tools: [writeDescriptor],
+        });
+
+        // Call 0 was composed without the tool; call 1 carries it natively.
+        expect(models.requests[0].tools.map((t) => t.name)).not.toContain("write");
+        expect(models.requests[1].tools.map((t) => t.name)).toContain("write");
+
+        // The reducer accepts the full history and the added tool executed.
+        const state = reduceTurn(log);
+        const tc2 = state.toolCalls.find((tc) => tc.toolCallId === "tc2");
+        expect(tc2?.toolId).toBe("tool.write");
+        expect(tc2?.result?.result.output).toBe("written");
+    });
+
+    it("additions already attached dedupe to no event", async () => {
+        const { runtime, repo } = makeRuntime({
+            models: [
+                respond(completedResp(assistantCalls(toolCallPart("tc1", "echo")))),
+                respond(completedResp(assistantText("done"))),
+            ],
+            tools: [
+                additionsTool(echoDescriptor, [echoDescriptor], "self"),
+                ...defaultTools.slice(1),
+            ],
+        });
+        const turnId = await newTurn(runtime);
+        const { outcome } = await advanceAndSettle(runtime, turnId);
+        expect(outcome?.status).toBe("completed");
+        const log = await persisted(repo, turnId);
+        expect(log.filter((e) => e.type === "tools_extended")).toHaveLength(0);
+    });
+
+    it("additions without a live implementation are dropped, not fatal", async () => {
+        const ghost: z.infer<typeof ToolDescriptor> = {
+            ...writeDescriptor,
+            toolId: "tool.ghost",
+            name: "ghost",
+        };
+        const { runtime, repo } = makeRuntime({
+            models: [
+                respond(completedResp(assistantCalls(toolCallPart("tc1", "echo")))),
+                respond(completedResp(assistantText("done"))),
+            ],
+            tools: [
+                additionsTool(echoDescriptor, [ghost]),
+                ...defaultTools.slice(1),
+            ],
+        });
+        const turnId = await newTurn(runtime);
+        const { outcome } = await advanceAndSettle(runtime, turnId);
+        expect(outcome?.status).toBe("completed");
+        const log = await persisted(repo, turnId);
+        expect(log.filter((e) => e.type === "tools_extended")).toHaveLength(0);
+    });
+
+    it("concurrent overlapping additions dedupe atomically to one descriptor", async () => {
+        const echo2Descriptor: z.infer<typeof ToolDescriptor> = {
+            ...echoDescriptor,
+            toolId: "tool.echo2",
+            name: "echo2",
+        };
+        const { runtime, repo } = makeRuntime({
+            models: [
+                respond(
+                    completedResp(
+                        assistantCalls(
+                            toolCallPart("tc1", "echo"),
+                            toolCallPart("tc2", "echo2"),
+                        ),
+                    ),
+                ),
+                respond(completedResp(assistantText("done"))),
+            ],
+            tools: [
+                additionsTool(echoDescriptor, [writeDescriptor], "skill-a"),
+                additionsTool(echo2Descriptor, [writeDescriptor], "skill-b"),
+                writeImpl,
+                ...defaultTools.slice(1),
+            ],
+            agent: {
+                ...defaultAgent,
+                tools: [
+                    echoDescriptor,
+                    echo2Descriptor,
+                    fetchDescriptor,
+                    askHumanDescriptor,
+                ],
+            },
+        });
+        const turnId = await newTurn(runtime);
+        const { outcome } = await advanceAndSettle(runtime, turnId);
+        expect(outcome?.status).toBe("completed");
+
+        const log = await persisted(repo, turnId);
+        const added = log
+            .filter((e) => e.type === "tools_extended")
+            .flatMap((e) => (e.type === "tools_extended" ? e.tools : []));
+        expect(added.filter((t) => t.name === "write")).toHaveLength(1);
+        // reduceTurn would throw on a collision; acceptance is the assertion.
+        expect(() => reduceTurn(log)).not.toThrow();
+    });
+
+    it("recovers from a log ending right after tools_extended", async () => {
+        const SEED_ID = "2026-07-02T10-00-00Z-0000009-000";
+        const repo = new InMemoryTurnRepo();
+        repo.seed([
+            {
+                type: "turn_created",
+                schemaVersion: 1,
+                turnId: SEED_ID,
+                ts: TS,
+                sessionId: null,
+                agent: { requested: { agentId: "copilot" }, resolved: defaultAgent },
+                context: [],
+                input: user("hello"),
+                config: {
+                    autoPermission: false,
+                    humanAvailable: true,
+                    maxModelCalls: 20,
+                },
+            },
+            {
+                type: "model_call_requested",
+                turnId: SEED_ID,
+                ts: TS,
+                modelCallIndex: 0,
+                request: { messages: ["input"], parameters: {} },
+            },
+            {
+                type: "model_call_completed",
+                turnId: SEED_ID,
+                ts: TS,
+                modelCallIndex: 0,
+                message: assistantCalls(toolCallPart("tc1", "echo")),
+                finishReason: "stop",
+                usage: {},
+            },
+            {
+                type: "tool_invocation_requested",
+                turnId: SEED_ID,
+                ts: TS,
+                toolCallId: "tc1",
+                toolId: echoDescriptor.toolId,
+                toolName: "echo",
+                execution: "sync",
+                input: {},
+            },
+            {
+                type: "tool_result",
+                turnId: SEED_ID,
+                ts: TS,
+                toolCallId: "tc1",
+                toolName: "echo",
+                source: "sync",
+                result: { output: { success: true }, isError: false },
+            },
+            {
+                type: "tools_extended",
+                turnId: SEED_ID,
+                ts: TS,
+                toolCallId: "tc1",
+                source: "organize-files",
+                tools: [writeDescriptor],
+            },
+        ]);
+        const { runtime, models } = makeRuntime({
+            repo,
+            models: [
+                respond(completedResp(assistantCalls(toolCallPart("tc2", "write")))),
+                respond(completedResp(assistantText("done"))),
+            ],
+            tools: [
+                additionsTool(echoDescriptor, [writeDescriptor]),
+                writeImpl,
+                ...defaultTools.slice(1),
+            ],
+        });
+        const { outcome } = await advanceAndSettle(runtime, SEED_ID);
+        expect(outcome?.status).toBe("completed");
+        // The re-advance rebuilt the extended toolset from the durable log:
+        // its first composed request already includes the added tool, and the
+        // model's call to it executes.
+        expect(models.requests[0].tools.map((t) => t.name)).toContain("write");
+        const log = await persisted(repo, SEED_ID);
+        const state = reduceTurn(log);
+        expect(
+            state.toolCalls.find((tc) => tc.toolCallId === "tc2")?.result?.result
+                .output,
+        ).toBe("written");
+    });
+});

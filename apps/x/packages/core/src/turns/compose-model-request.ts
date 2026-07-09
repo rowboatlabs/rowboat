@@ -5,14 +5,16 @@ import {
     type ResolvedAgent,
     type ToolDescriptor,
     type TurnState,
+    effectiveTools,
     requestMessagesFor,
 } from "@x/shared/dist/turns.js";
 import type { IContextResolver } from "./context-resolver.js";
 
 // The exact provider payload for one model call, rebuilt deterministically
 // from durable state (turn-runtime-design.md §8.3):
-//   - systemPrompt and tools come from the resolved agent snapshot (their
-//     single canonical copy in turn_created),
+//   - systemPrompt and base tools come from the resolved agent snapshot
+//     (their single canonical copy in turn_created); tools_extended events
+//     add descriptors for the calls requested after them,
 //   - messages are the cross-turn prefix plus every request's reference list
 //     resolved against the turn's own events, encoded to wire form.
 // This is the SAME code path the loop sends through, so the debug view and
@@ -47,7 +49,9 @@ export function composeModelRequest(
     return {
         systemPrompt: agent.systemPrompt,
         messages: encode(structural),
-        tools: agent.tools,
+        // The snapshot's base tools plus any durable mid-turn extensions
+        // recorded before this call (tools_extended events).
+        tools: effectiveTools(state, modelCallIndex, agent.tools),
         parameters: call.request.parameters,
     };
 }

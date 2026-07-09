@@ -8,6 +8,7 @@ import { LanguageModel, stepCountIs, streamText, tool, Tool, ToolSet } from "ai"
 import { z } from "zod";
 import { LlmStepStreamEvent } from "@x/shared/dist/llm-step-events.js";
 import { execTool } from "../application/lib/exec-tool.js";
+import { TOOL_ADDITIONS_KEY } from "../application/lib/tool-additions.js";
 import { AskHumanRequestEvent, RunEvent, ToolPermissionMetadata, ToolPermissionRequestEvent } from "@x/shared/dist/runs.js";
 import { BuiltinTools } from "../application/lib/builtin-tools.js";
 import { buildCopilotAgent } from "../application/assistant/agent.js";
@@ -1502,6 +1503,19 @@ export async function* streamAgent({
                     error: message,
                     toolName: toolCall.toolName,
                 };
+            }
+            // This legacy loop has no mid-run tool extension; drop the
+            // reserved tool-additions key (turns-runtime contract) so tool
+            // schemas never leak into the model-visible result text.
+            if (
+                result !== null &&
+                typeof result === "object" &&
+                !Array.isArray(result) &&
+                TOOL_ADDITIONS_KEY in result
+            ) {
+                const rest = { ...(result as Record<string, unknown>) };
+                delete rest[TOOL_ADDITIONS_KEY];
+                result = rest;
             }
             const resultPayload = result === undefined ? null : result;
             const resultMsg: z.infer<typeof ToolMessage> = {

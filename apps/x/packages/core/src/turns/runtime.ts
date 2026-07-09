@@ -1,4 +1,4 @@
-import type { z } from "zod";
+import { z } from "zod";
 import {
     DEFAULT_MAX_MODEL_CALLS,
     MODEL_CALL_LIMIT_ERROR_CODE,
@@ -11,7 +11,7 @@ import {
     assistantRef,
     toolResultRef,
     type ToolCallState,
-    type ToolDescriptor,
+    ToolDescriptor,
     type ToolInvocationRequested,
     type ToolPermissionRequired,
     type ToolPermissionResolved,
@@ -22,6 +22,7 @@ import {
     type TurnState,
     type TurnStreamEvent,
     type TurnSuspended,
+    effectiveTools,
     outstandingAsyncTools,
     outstandingPermissions,
     reduceTurn,
@@ -228,8 +229,14 @@ export class TurnRuntime implements ITurnRuntime {
             definition.agent.resolved,
         );
         const model = await this.modelRegistry.resolve(resolvedAgent.model);
+        // Base snapshot plus every durable mid-turn extension already in the
+        // log — rebuilding from durable state IS the crash-recovery path.
         const toolsByName = new Map<string, RuntimeTool>();
-        for (const descriptor of resolvedAgent.tools) {
+        for (const descriptor of effectiveTools(
+            state,
+            state.modelCalls.length,
+            resolvedAgent.tools,
+        )) {
             const tool = await this.toolRegistry.resolve(descriptor);
             if (
                 tool.descriptor.toolId !== descriptor.toolId ||
@@ -264,6 +271,7 @@ export class TurnRuntime implements ITurnRuntime {
             model,
             usageReporter: this.usageReporter,
             toolsByName,
+            resolveTool: (descriptor) => this.toolRegistry.resolve(descriptor),
             signal: controller.signal,
             turnRepo: this.turnRepo,
             clock: this.clock,
@@ -293,6 +301,9 @@ class TurnAdvance {
     private readonly model: ResolvedModel;
     private readonly usageReporter: IUsageReporter;
     private readonly toolsByName: Map<string, RuntimeTool>;
+    private readonly resolveTool: (
+        descriptor: z.infer<typeof ToolDescriptor>,
+    ) => Promise<RuntimeTool>;
     private readonly signal: AbortSignal;
     private readonly turnRepo: ITurnRepo;
     private readonly clock: IClock;
@@ -315,6 +326,9 @@ class TurnAdvance {
         model: ResolvedModel;
         usageReporter: IUsageReporter;
         toolsByName: Map<string, RuntimeTool>;
+        resolveTool: (
+            descriptor: z.infer<typeof ToolDescriptor>,
+        ) => Promise<RuntimeTool>;
         signal: AbortSignal;
         turnRepo: ITurnRepo;
         clock: IClock;
@@ -330,6 +344,7 @@ class TurnAdvance {
         this.model = init.model;
         this.usageReporter = init.usageReporter;
         this.toolsByName = init.toolsByName;
+        this.resolveTool = init.resolveTool;
         this.signal = init.signal;
         this.turnRepo = init.turnRepo;
         this.clock = init.clock;
@@ -356,6 +371,26 @@ class TurnAdvance {
         const task = this.appendChain.then(() => this.commit(batch));
         // A failed commit rejects for its caller only; the chain stays alive
         // so other in-flight tools can still record their results.
+        this.appendChain = task.then(
+            () => undefined,
+            () => undefined,
+        );
+        return task;
+    }
+
+    // Like append, but the batch is computed inside this task's serialized
+    // commit slot, so the builder reads this.state with no interleaving
+    // commits. Required for the tools_extended dedupe: two concurrent tool
+    // results may each carry overlapping additions, and the second filter
+    // must see the first's committed extension. Returning undefined commits
+    // nothing.
+    private appendWith(build: () => TEvent[] | undefined): Promise<void> {
+        const task = this.appendChain.then(async () => {
+            const batch = build();
+            if (batch && batch.length > 0) {
+                await this.commit(batch);
+            }
+        });
         this.appendChain = task.then(
             () => undefined,
             () => undefined,
@@ -808,6 +843,7 @@ class TurnAdvance {
         tc: ToolCallState,
         syncTool: SyncRuntimeTool,
     ): Promise<void> {
+        let settled: z.infer<typeof ToolResultData> | undefined;
         try {
             const result = await syncTool.execute(tc.input, {
                 turnId: this.turnId,
@@ -824,6 +860,7 @@ class TurnAdvance {
                     });
                 },
             });
+            settled = ToolResultData.parse(result);
             await this.append({
                 type: "tool_result",
                 turnId: this.turnId,
@@ -831,7 +868,7 @@ class TurnAdvance {
                 toolCallId: tc.toolCallId,
                 toolName: tc.toolName,
                 source: "sync",
-                result: ToolResultData.parse(result),
+                result: settled,
             });
         } catch (error) {
             if (this.signal.aborted) {
@@ -852,6 +889,87 @@ class TurnAdvance {
                 source: "sync",
                 result: { output: errorMessage(error), isError: true },
             });
+            return;
+        }
+        await this.maybeExtendTools(tc, settled);
+    }
+
+    // Mid-turn toolset extension (the one sanctioned exception to per-turn
+    // tool immutability): a successful sync tool may carry additional
+    // descriptors in result.metadata.toolAdditions — loadSkill attaching a
+    // skill's declared tools. Descriptors resolve to live implementations
+    // first; unresolvable ones are dropped so the durable event only ever
+    // records tools a re-advance can also resolve. The dedupe against the
+    // current effective set and the tools_extended append run atomically in
+    // one serialized commit slot, so concurrent extensions cannot race the
+    // reducer's collision check. Subsequent model calls in this turn see the
+    // added tools via effectiveTools.
+    private async maybeExtendTools(
+        tc: ToolCallState,
+        result: z.infer<typeof ToolResultData>,
+    ): Promise<void> {
+        if (result.isError) {
+            return;
+        }
+        const additions = parseToolAdditions(result.metadata);
+        if (!additions) {
+            return;
+        }
+        const live = new Map<string, RuntimeTool>();
+        const candidates: Array<z.infer<typeof ToolDescriptor>> = [];
+        for (const descriptor of additions.tools) {
+            if (live.has(descriptor.name)) {
+                continue; // duplicate within the payload
+            }
+            try {
+                const tool = await this.resolveTool(descriptor);
+                if (
+                    tool.descriptor.toolId !== descriptor.toolId ||
+                    tool.descriptor.execution !== descriptor.execution
+                ) {
+                    continue;
+                }
+                live.set(descriptor.name, tool);
+                candidates.push(descriptor);
+            } catch {
+                // No live implementation — skip the tool; the result that
+                // carried it (e.g. the skill guidance) still stands.
+            }
+        }
+        if (candidates.length === 0) {
+            return;
+        }
+        let added: Array<z.infer<typeof ToolDescriptor>> = [];
+        await this.appendWith(() => {
+            const attached = new Set(
+                effectiveTools(
+                    this.state,
+                    this.state.modelCalls.length,
+                    this.resolvedAgent.tools,
+                ).map((tool) => tool.name),
+            );
+            added = candidates.filter(
+                (descriptor) => !attached.has(descriptor.name),
+            );
+            if (added.length === 0) {
+                return undefined;
+            }
+            return [
+                {
+                    type: "tools_extended",
+                    turnId: this.turnId,
+                    ts: this.now(),
+                    toolCallId: tc.toolCallId,
+                    source: additions.source,
+                    tools: added,
+                },
+            ];
+        });
+        for (const descriptor of added) {
+            const tool = live.get(descriptor.name);
+            if (tool) {
+                this.toolsByName.set(descriptor.name, tool);
+            }
         }
     }
 
@@ -1112,6 +1230,27 @@ class TurnAdvance {
             usage: this.state.usage,
         };
     }
+}
+
+// The metadata contract populated by the tool-registry bridge from a
+// builtin's reserved $toolAdditions return key (application/lib/
+// tool-additions.ts). Anything malformed is ignored — a bad payload must
+// never corrupt the turn.
+const ToolAdditionsMetadata = z.object({
+    toolAdditions: z.object({
+        source: z.string(),
+        tools: z.array(ToolDescriptor).min(1),
+    }),
+});
+
+function parseToolAdditions(
+    metadata: JsonValue | undefined,
+): { source: string; tools: Array<z.infer<typeof ToolDescriptor>> } | undefined {
+    if (metadata === undefined) {
+        return undefined;
+    }
+    const parsed = ToolAdditionsMetadata.safeParse(metadata);
+    return parsed.success ? parsed.data.toolAdditions : undefined;
 }
 
 function errorMessage(error: unknown): string {

@@ -13,6 +13,7 @@ import {
     loadUserWorkDir,
 } from "../../agents/runtime.js";
 import { BuiltinTools } from "../../application/lib/builtin-tools.js";
+import { skillToolNames } from "../../application/assistant/skills/index.js";
 import { getDefaultModelAndProvider } from "../../models/defaults.js";
 import {
     builtinToolDescriptor,
@@ -62,6 +63,11 @@ const CompositionOverrides = z.object({
     // Set by spawn-agent for by-id children: strips the spawn tool so depth
     // is capped at 1 regardless of which stored agent is spawned.
     subagent: z.boolean().optional(),
+    // Skills the session has loaded (maintained by the sessions layer from
+    // prior turns' tools_extended events): their declared tools attach on
+    // top of the copilot's base set. Order is preserved so identical sets
+    // produce byte-identical snapshots and inheritance keeps working.
+    activeSkills: z.array(z.string()).optional(),
 });
 
 export interface RealAgentResolverDeps {
@@ -70,6 +76,7 @@ export interface RealAgentResolverDeps {
     defaultModel?: () => Promise<{ model: string; provider: string }>;
     loadNotes?: () => string | null;
     loadWorkDir?: (workDirId: string) => string | null;
+    skillTools?: typeof skillToolNames;
 }
 
 // Bridges the existing agent system (loadAgent + dynamic builders, the
@@ -84,6 +91,7 @@ export class RealAgentResolver {
     private readonly defaultModel: () => Promise<{ model: string; provider: string }>;
     private readonly loadNotes: () => string | null;
     private readonly loadWorkDir: (workDirId: string) => string | null;
+    private readonly skillTools: typeof skillToolNames;
 
     constructor(deps: RealAgentResolverDeps = {}) {
         this.load = deps.load ?? loadAgent;
@@ -91,6 +99,7 @@ export class RealAgentResolver {
         this.defaultModel = deps.defaultModel ?? getDefaultModelAndProvider;
         this.loadNotes = deps.loadNotes ?? loadAgentNotesContext;
         this.loadWorkDir = deps.loadWorkDir ?? loadUserWorkDir;
+        this.skillTools = deps.skillTools ?? skillToolNames;
     }
 
     async resolve(
@@ -138,12 +147,44 @@ export class RealAgentResolver {
         const tools = await this.resolveTools(agent, {
             subagent: composition.subagent ?? false,
         });
+        if (copilotContext && composition.activeSkills?.length) {
+            await this.appendSkillTools(tools, composition.activeSkills);
+        }
         return ResolvedAgent.parse({
             agentId: requested.agentId,
             systemPrompt,
             model,
             tools,
         });
+    }
+
+    // Skill-scoped tools carried across turns: each active skill's declared
+    // BuiltinTools attach on top of the base set. Unknown skill ids (deleted
+    // disk skill) and unknown/unavailable tool names skip gracefully.
+    // Iteration order (skills, then declaration order) is deterministic, so
+    // an unchanged activeSkills list yields a byte-identical snapshot and
+    // agent-snapshot inheritance keeps working.
+    private async appendSkillTools(
+        tools: Array<z.infer<typeof ToolDescriptor>>,
+        activeSkills: string[],
+    ): Promise<void> {
+        const attached = new Set(tools.map((tool) => tool.name));
+        for (const skillId of activeSkills) {
+            for (const name of this.skillTools(skillId)) {
+                if (attached.has(name)) {
+                    continue;
+                }
+                const builtin = this.builtins[name];
+                if (!builtin) {
+                    continue;
+                }
+                if (builtin.isAvailable && !(await builtin.isAvailable())) {
+                    continue;
+                }
+                tools.push(builtinToolDescriptor(name, builtin));
+                attached.add(name);
+            }
+        }
     }
 
     private async resolveTools(

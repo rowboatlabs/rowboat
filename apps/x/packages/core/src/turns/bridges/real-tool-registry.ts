@@ -8,6 +8,7 @@ import {
 } from "@x/shared/dist/turns.js";
 import { execTool } from "../../application/lib/exec-tool.js";
 import { BuiltinTools } from "../../application/lib/builtin-tools.js";
+import { TOOL_ADDITIONS_KEY } from "../../application/lib/tool-additions.js";
 import {
     type IAbortRegistry,
     InMemoryAbortRegistry,
@@ -214,9 +215,15 @@ export class RealToolRegistry implements IToolRegistry {
                             },
                         },
                     );
+                    const { output, additions } = splitToolAdditions(
+                        toJsonValue(value === undefined ? null : value),
+                    );
                     return {
-                        output: toJsonValue(value === undefined ? null : value),
+                        output,
                         isError: false,
+                        ...(additions === undefined
+                            ? {}
+                            : { metadata: { toolAdditions: additions } }),
                     };
                 } finally {
                     ctx.signal.removeEventListener("abort", onAbort);
@@ -225,6 +232,26 @@ export class RealToolRegistry implements IToolRegistry {
             },
         };
     }
+}
+
+// Lift a builtin's reserved tool-additions key out of the model-visible
+// output into result metadata: the model gets the added tools as native
+// definitions on its next call, so repeating their schemas inside the tool
+// result would only burn tokens. Shape validation happens in the runtime.
+function splitToolAdditions(value: JsonValue): {
+    output: JsonValue;
+    additions?: JsonValue;
+} {
+    if (
+        value !== null &&
+        typeof value === "object" &&
+        !Array.isArray(value) &&
+        TOOL_ADDITIONS_KEY in value
+    ) {
+        const { [TOOL_ADDITIONS_KEY]: additions, ...output } = value;
+        return { output, additions };
+    }
+    return { output: value };
 }
 
 function asArgs(input: unknown): Record<string, unknown> {

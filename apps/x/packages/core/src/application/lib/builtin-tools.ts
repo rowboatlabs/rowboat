@@ -4,7 +4,11 @@ import * as os from "os";
 import * as fs from "fs/promises";
 import { executeCommand, executeCommandAbortable } from "./command-executor.js";
 import { agentSlackShimEnv } from "../../slack/agent-slack-exec.js";
-import { resolveSkill, availableSkills } from "../assistant/skills/index.js";
+import { resolveSkill, availableSkills, skillToolNames, setBuiltinToolsSkillTools } from "../assistant/skills/index.js";
+import { COPILOT_BASE_TOOLS } from "../assistant/base-tools.js";
+import { builtinToolDescriptor } from "../../turns/bridges/builtin-descriptors.js";
+import { TOOL_ADDITIONS_KEY } from "./tool-additions.js";
+import type { ToolDescriptor } from "@x/shared/dist/turns.js";
 import { executeTool, listServers, listTools } from "../../mcp/mcp.js";
 import container from "../../di/container.js";
 import { IMcpConfigRepo } from "../..//mcp/repo.js";
@@ -184,11 +188,26 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 };
             }
 
+            // The skill's declared tools ride the reserved additions key: the
+            // turn runtime records a durable tools_extended event and the
+            // model gets them as NATIVE tool definitions on its next call —
+            // never as schema text in this result. attachedTools names them
+            // so the model knows the capability landed.
+            const additions = await skillToolAdditions(resolved.id);
             return {
                 success: true,
                 skillName: resolved.id,
                 path: resolved.catalogPath,
                 content: resolved.content,
+                ...(additions.length > 0
+                    ? {
+                          attachedTools: additions.map((tool) => tool.name),
+                          [TOOL_ADDITIONS_KEY]: {
+                              source: resolved.id,
+                              tools: additions,
+                          },
+                      }
+                    : {}),
             };
         },
     },
@@ -2037,3 +2056,36 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
         },
     },
 };
+
+// Native ToolDescriptors for a skill's declared tools. Unknown names are
+// dropped with a warning (they may come from a downloaded SKILL.md);
+// availability-gated builtins (Composio, browser) drop out exactly as they
+// do at agent resolution.
+async function skillToolAdditions(
+    skillId: string,
+): Promise<Array<z.infer<typeof ToolDescriptor>>> {
+    const descriptors: Array<z.infer<typeof ToolDescriptor>> = [];
+    for (const name of skillToolNames(skillId)) {
+        const builtin = BuiltinTools[name];
+        if (!builtin) {
+            console.warn(
+                `[skills] Skill '${skillId}' declares unknown tool '${name}'; skipping.`,
+            );
+            continue;
+        }
+        if (builtin.isAvailable && !(await builtin.isAvailable())) {
+            continue;
+        }
+        descriptors.push(builtinToolDescriptor(name, builtin));
+    }
+    return descriptors;
+}
+
+// The builtin-tools skill is the escape hatch: loading it attaches every
+// builtin the copilot's base set leaves out. Derived here (not hand-written
+// in the skill catalog) so new builtins can never silently fall outside it.
+setBuiltinToolsSkillTools(
+    Object.keys(BuiltinTools).filter(
+        (name) => !COPILOT_BASE_TOOLS.includes(name),
+    ),
+);

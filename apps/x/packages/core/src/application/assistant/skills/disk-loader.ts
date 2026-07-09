@@ -15,6 +15,11 @@ export type DiskSkill = {
   content: string;   // full raw SKILL.md text
   dir: string;       // absolute path to the skill folder
   skillFile: string; // absolute path to the SKILL.md
+  // Optional frontmatter `tools:` (or the Agent Skills spec's
+  // `allowed-tools:`) — BuiltinTools names the skill attaches when loaded.
+  // Names are validated against the live catalog where descriptors are
+  // built; unknown names are dropped there with a warning.
+  tools?: string[];
 };
 
 // Locations scanned for <skill-name>/SKILL.md subfolders. The rowboat root is
@@ -30,6 +35,25 @@ export const SKILL_ROOTS = [
 
 const slugify = (value: string): string =>
   value.trim().toLowerCase().replace(/[\s_]+/g, "-");
+
+// A YAML list of tool names ("tools: [a, b]" or block form). A single scalar
+// ("tools: a") and comma-separated string are accepted too; anything else
+// yields [].
+const asStringList = (value: unknown): string[] => {
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  if (Array.isArray(value)) {
+    return value
+      .filter((item): item is string => typeof item === "string")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  return [];
+};
 
 /**
  * Synchronously scan the known skill roots (one level deep) for disk skills.
@@ -91,7 +115,16 @@ export function loadDiskSkills(): DiskSkill[] {
       }
       seen.set(id, dir);
 
-      skills.push({ id, title: name, summary: description, content: raw, dir, skillFile });
+      const tools = asStringList(frontmatter.tools ?? frontmatter["allowed-tools"]);
+      skills.push({
+        id,
+        title: name,
+        summary: description,
+        content: raw,
+        dir,
+        skillFile,
+        ...(tools.length > 0 ? { tools } : {}),
+      });
     }
   }
 

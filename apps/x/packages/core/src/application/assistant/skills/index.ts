@@ -29,6 +29,11 @@ type SkillDefinition = {
   title: string;
   summary: string;
   content: string;
+  // BuiltinTools keys this skill owns. Loading the skill attaches these as
+  // native tool definitions (they are NOT in the copilot's base toolset).
+  // Names are validated against the live catalog where descriptors are
+  // built (loadSkill / the agent resolver); unknown names are dropped there.
+  tools?: string[];
 };
 
 type ResolvedSkill = {
@@ -43,18 +48,21 @@ const definitions: SkillDefinition[] = [
     title: "Create Presentations",
     summary: "Create PDF presentations and slide decks from natural language requests using knowledge base context.",
     content: createPresentationsSkill,
+    tools: ["file-writeText", "file-mkdir"],
   },
   {
     id: "doc-collab",
     title: "Document Collaboration",
     summary: "Collaborate on documents - create, edit, and refine notes and documents in the knowledge base.",
     content: docCollabSkill,
+    tools: ["file-writeText", "file-editText", "file-mkdir"],
   },
   {
     id: "draft-emails",
     title: "Draft Emails",
     summary: "Process incoming emails and create draft responses using calendar and knowledge base for context.",
     content: draftEmailsSkill,
+    tools: ["composio-search-tools", "composio-execute-tool"],
   },
   {
     id: "meeting-prep",
@@ -67,36 +75,58 @@ const definitions: SkillDefinition[] = [
     title: "Organize Files",
     summary: "Find, organize, and tidy up files on the user's machine. Move files to folders, clean up Desktop/Downloads, locate specific files.",
     content: organizeFilesSkill,
+    tools: [
+      "file-stat",
+      "file-writeText",
+      "file-editText",
+      "file-mkdir",
+      "file-rename",
+      "file-copy",
+      "file-remove",
+    ],
   },
   {
     id: "builtin-tools",
     title: "Builtin Tools Reference",
-    summary: "Understanding and using builtin tools (especially executeCommand for bash/shell) in agent definitions.",
+    summary: "Understanding and using builtin tools (especially executeCommand for bash/shell) in agent definitions. Loading this attaches the FULL builtin toolset — the escape hatch when no specialized skill covers a tool you need.",
     content: builtinToolsSkill,
+    // Every non-base builtin: kept in sync by a startup assertion in
+    // builtin-tools.ts rather than by hand.
+    tools: [],
   },
   {
     id: "mcp-integration",
     title: "MCP Integration Guidance",
     summary: "Discovering, executing, and integrating MCP tools. Use this to check what external capabilities are available and execute MCP tools on behalf of users.",
     content: mcpIntegrationSkill,
+    tools: ["addMcpServer", "listMcpServers", "listMcpTools", "executeMcpTool"],
   },
   {
     id: "composio-integration",
     title: "Composio Integration",
     summary: "Interact with third-party services (Gmail, GitHub, Slack, LinkedIn, Notion, Jira, Google Sheets, etc.) via Composio. Search, connect, and execute tools.",
     content: composioIntegrationSkill,
+    tools: [
+      "composio-list-toolkits",
+      "composio-search-tools",
+      "composio-execute-tool",
+      "composio-connect-toolkit",
+      "app-navigation",
+    ],
   },
   {
     id: "deletion-guardrails",
     title: "Deletion Guardrails",
     summary: "Following the confirmation process before removing workflows or agents and their dependencies.",
     content: deletionGuardrailsSkill,
+    tools: ["file-remove"],
   },
   {
     id: "app-navigation",
     title: "App Navigation",
     summary: "Navigate the app UI - open notes, switch views, filter/search the knowledge base, and manage saved views.",
     content: appNavigationSkill,
+    tools: ["app-navigation", "app-set-data"],
   },
   {
     id: "code-with-agents",
@@ -109,30 +139,49 @@ const definitions: SkillDefinition[] = [
     title: "Rowboat Apps",
     summary: "Build a Rowboat App the user opens inside Rowboat — a static web app on its own origin, powered by their integrations and an optional background agent. Use when the user asks to make/build/create an app or dashboard; for ambiguous 'show me X' requests, confirm whether they want an app first.",
     content: appsSkill,
+    tools: [
+      "app-navigation",
+      "app-set-data",
+      "list-models",
+      "composio-search-tools",
+      "composio-execute-tool",
+      "create-background-task",
+      "run-background-task-agent",
+    ],
   },
   {
     id: "background-task",
     title: "Background Tasks",
     summary: "Set up a recurring background task — persistent instructions the agent fires on a schedule and/or on matching events (Gmail, Calendar). Either maintains an `index.md` digest (OUTPUT mode) or performs a recurring side-effect like drafting a reply / posting to Slack / calling an API (ACTION mode). Flagship surface for anything recurring.",
     content: backgroundTaskSkill,
+    tools: [
+      "create-background-task",
+      "patch-background-task",
+      "run-background-task-agent",
+      "file-writeText",
+      "file-editText",
+    ],
   },
   {
     id: "live-note",
     title: "Live Notes",
     summary: "Make a specific markdown note self-updating — a single `live:` objective in the frontmatter that the live-note agent maintains on a schedule or on incoming events. Load only when the user explicitly says 'live note' / 'live-note'; for anything else recurring, prefer the background-task skill.",
     content: liveNoteSkill,
+    tools: ["run-live-note-agent", "file-writeText", "file-editText"],
   },
   {
     id: "browser-control",
     title: "Browser Control",
     summary: "Control the embedded browser pane - open sites, inspect page state, and interact with indexed page elements.",
     content: browserControlSkill,
+    tools: ["browser-control", "load-browser-skill"],
   },
   {
     id: "notify-user",
     title: "Notify User",
     summary: "Send native desktop notifications with optional clickable links — including rowboat:// deep links that open a specific note, chat, or view inside the app.",
     content: notifyUserSkill,
+    tools: ["notify-user"],
   },
 ];
 
@@ -167,6 +216,7 @@ function loadDiskEntries(): SkillEntry[] {
       title: skill.title,
       summary: skill.summary,
       content: skill.content,
+      ...(skill.tools ? { tools: skill.tools } : {}),
       // For disk skills the catalog/loadSkill reference is the absolute SKILL.md path.
       catalogPath: skill.skillFile,
       skillFile: skill.skillFile,
@@ -190,6 +240,9 @@ export function buildSkillCatalog(options?: { excludeIds?: string[] }): string {
     `## ${entry.title}`,
     `- **Skill file:** \`${entry.catalogPath}\``,
     `- **Use it for:** ${entry.summary}`,
+    ...(entry.tools && entry.tools.length > 0
+      ? [`- **Tools it attaches:** ${entry.tools.join(", ")}`]
+      : []),
   ].join("\n"));
   return [
     "# Rowboat Skill Catalog",
@@ -309,4 +362,28 @@ export function resolveSkill(identifier: string): ResolvedSkill | null {
 
   // Bundled wins over disk on any alias collision.
   return aliasMap.get(normalized) ?? diskAliasMap.get(normalized) ?? null;
+}
+
+/**
+ * The BuiltinTools names a skill declares (empty for guidance-only skills).
+ * Read live so it reflects disk-skill refreshes and the derived
+ * builtin-tools escape-hatch list.
+ */
+export function skillToolNames(skillId: string): string[] {
+  const entry = getSkillEntries().find((e) => e.id === skillId);
+  return entry?.tools ? [...entry.tools] : [];
+}
+
+/**
+ * The builtin-tools skill attaches the full non-base toolset. Its list is
+ * derived from the live BuiltinTools catalog by builtin-tools.ts at module
+ * init — a hand-written list here would drift, and importing the catalog
+ * from this module would be an import cycle (builtin-tools.ts imports
+ * resolveSkill).
+ */
+export function setBuiltinToolsSkillTools(names: string[]): void {
+  const entry = bundledEntries.find((e) => e.id === "builtin-tools");
+  if (entry) {
+    entry.tools = [...names];
+  }
 }
