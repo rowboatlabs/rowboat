@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Bug, Terminal, AlertTriangle, RefreshCw, PanelRight, Bell, Smartphone } from "lucide-react"
+import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Terminal, AlertTriangle, RefreshCw, PanelRight, Bell, Smartphone } from "lucide-react"
 
 import {
   Dialog,
@@ -23,6 +23,7 @@ import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
 import { useTheme } from "@/contexts/theme-context"
 import { toast } from "sonner"
+import { AnthropicIcon, DiscordIcon, GenericApiIcon, GitHubIcon, GoogleIcon, OllamaIcon, OpenAIIcon, OpenRouterIcon, VercelIcon } from "@/components/onboarding/provider-icons"
 import { AccountSettings } from "@/components/settings/account-settings"
 import { ConnectedAccountsSettings } from "@/components/settings/connected-accounts-settings"
 import { MobileChannelsSettings } from "@/components/settings/mobile-channels-settings"
@@ -112,6 +113,13 @@ const tabs: TabConfig[] = [
   },
 ]
 
+/** Sidebar nav grouping: identity first, capabilities, then app-level. */
+const NAV_SECTIONS: { label: string | null; ids: ConfigTab[] }[] = [
+  { label: null, ids: ["account", "connections", "mobile"] },
+  { label: "Configure", ids: ["models", "mcp", "security", "code-mode", "note-tagging"] },
+  { label: "App", ids: ["appearance", "notifications", "help"] },
+]
+
 interface SettingsDialogProps {
   /** Optional trigger element. Omit when controlling `open` externally. */
   children?: React.ReactNode
@@ -136,9 +144,7 @@ function HelpSettings() {
         className="w-full justify-start gap-3 h-auto py-3"
         onClick={() => window.open("https://github.com/rowboatlabs/rowboat/issues/new", "_blank")}
       >
-        <div className="flex size-8 items-center justify-center rounded-md bg-destructive/10">
-          <Bug className="size-4 text-destructive" />
-        </div>
+        <GitHubIcon className="size-5 shrink-0" />
         <div className="flex flex-col items-start">
           <span className="text-sm font-medium">Report a bug</span>
           <span className="text-xs text-muted-foreground">Send feedback to the Rowboat team</span>
@@ -149,9 +155,7 @@ function HelpSettings() {
         className="w-full justify-start gap-3 h-auto py-3"
         onClick={() => window.open("https://discord.com/invite/wajrgmJQ6b", "_blank")}
       >
-        <div className="flex size-8 items-center justify-center rounded-md bg-[#5865F2]">
-          <MessageCircle className="size-4 text-white" />
-        </div>
+        <DiscordIcon className="size-5 shrink-0" />
         <div className="flex flex-col items-start">
           <span className="text-sm font-medium">Join our Discord</span>
           <span className="text-xs text-muted-foreground">Chat with the community</span>
@@ -162,9 +166,7 @@ function HelpSettings() {
         className="w-full justify-start gap-3 h-auto py-3"
         onClick={() => window.open("mailto:contact@rowboatlabs.com", "_blank")}
       >
-        <div className="flex size-8 items-center justify-center rounded-md bg-muted">
-          <Mail className="size-4" />
-        </div>
+        <Mail className="size-5 shrink-0" />
         <div className="flex flex-col items-start">
           <span className="text-sm font-medium">Contact us</span>
           <span className="text-xs text-muted-foreground">contact@rowboatlabs.com</span>
@@ -313,17 +315,17 @@ interface LlmModelOption {
   release_date?: string
 }
 
-const primaryProviders: Array<{ id: LlmProviderFlavor; name: string; description: string }> = [
-  { id: "openai", name: "OpenAI", description: "GPT models" },
-  { id: "anthropic", name: "Anthropic", description: "Claude models" },
-  { id: "google", name: "Gemini", description: "Google AI Studio" },
-  { id: "ollama", name: "Ollama (Local)", description: "Run models locally" },
+const primaryProviders: Array<{ id: LlmProviderFlavor; name: string; description: string; icon: React.ElementType }> = [
+  { id: "openai", name: "OpenAI", description: "GPT models", icon: OpenAIIcon },
+  { id: "anthropic", name: "Anthropic", description: "Claude models", icon: AnthropicIcon },
+  { id: "google", name: "Gemini", description: "Google AI Studio", icon: GoogleIcon },
+  { id: "ollama", name: "Ollama (Local)", description: "Run models locally", icon: OllamaIcon },
 ]
 
-const moreProviders: Array<{ id: LlmProviderFlavor; name: string; description: string }> = [
-  { id: "openrouter", name: "OpenRouter", description: "Multiple models, one key" },
-  { id: "aigateway", name: "AI Gateway (Vercel)", description: "Vercel's AI Gateway" },
-  { id: "openai-compatible", name: "OpenAI-Compatible", description: "Custom OpenAI-compatible API" },
+const moreProviders: Array<{ id: LlmProviderFlavor; name: string; description: string; icon: React.ElementType }> = [
+  { id: "openrouter", name: "OpenRouter", description: "Multiple models, one key", icon: OpenRouterIcon },
+  { id: "aigateway", name: "AI Gateway (Vercel)", description: "Vercel's AI Gateway", icon: VercelIcon },
+  { id: "openai-compatible", name: "OpenAI-Compatible", description: "Custom OpenAI-compatible API", icon: GenericApiIcon },
 ]
 
 const preferredDefaults: Partial<Record<LlmProviderFlavor, string>> = {
@@ -647,7 +649,7 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
     }
   }, [defaultProvider, providerConfigs, rowboatConnected])
 
-  const renderProviderCard = (p: { id: LlmProviderFlavor; name: string; description: string }) => {
+  const renderProviderCard = (p: { id: LlmProviderFlavor; name: string; description: string; icon: React.ElementType }) => {
     const isDefault = defaultProvider === p.id
     const isSelected = provider === p.id
     const hasModel = providerConfigs[p.id].models[0]?.trim().length > 0
@@ -665,7 +667,8 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
             : "border-border hover:bg-accent"
         )}
       >
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-2">
+          <p.icon className="size-4 shrink-0" />
           <span className="text-sm font-medium">{p.name}</span>
           {isDefault && !rowboatConnected && (
             <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-primary">
@@ -1869,7 +1872,11 @@ function AgentStatusRow({
   const ready = installed && status?.signedIn
   return (
     <div className="rounded-md border px-3 py-2.5 flex items-center gap-3">
-      <Terminal className="size-4 text-muted-foreground shrink-0" />
+      {agent === 'claude' ? (
+        <AnthropicIcon className="size-5 shrink-0" />
+      ) : (
+        <OpenAIIcon className="size-5 shrink-0" />
+      )}
       <div className="flex-1 min-w-0">
         <div className="text-sm font-medium">{name}</div>
         <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-3">
@@ -2323,34 +2330,47 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
         <div className="flex h-full overflow-hidden">
           {/* Sidebar */}
           <div className="w-48 border-r bg-muted/30 p-2 flex flex-col">
-            <div className="px-2 py-3 mb-2">
-              <h2 className="font-semibold text-sm">Settings</h2>
+            <div className="px-2 pt-3.5 pb-3 mb-2">
+              <h2 className="font-semibold text-base tracking-tight">Settings</h2>
             </div>
-            <nav className="flex flex-col gap-1">
-              {visibleTabs.map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => handleTabChange(tab.id)}
-                  className={cn(
-                    "flex items-center gap-2 px-2 py-2 rounded-md text-sm transition-colors text-left",
-                    activeTab === tab.id
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground hover:bg-background/50"
-                  )}
-                >
-                  <tab.icon className="size-4" />
-                  {tab.label}
-                </button>
-              ))}
+            <nav className="flex flex-col">
+              {NAV_SECTIONS.map((section) => {
+                const sectionTabs = visibleTabs.filter((tab) => section.ids.includes(tab.id))
+                if (sectionTabs.length === 0) return null
+                return (
+                  <div key={section.label ?? "main"} className="flex flex-col gap-0.5">
+                    {section.label ? (
+                      <div className="px-2 pb-1 pt-4 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+                        {section.label}
+                      </div>
+                    ) : null}
+                    {sectionTabs.map((tab) => (
+                      <button
+                        key={tab.id}
+                        onClick={() => handleTabChange(tab.id)}
+                        className={cn(
+                          "flex items-center gap-2 px-2 py-1.5 rounded-md text-sm transition-colors text-left",
+                          activeTab === tab.id
+                            ? "bg-background text-foreground shadow-sm"
+                            : "text-muted-foreground hover:text-foreground hover:bg-background/50"
+                        )}
+                      >
+                        <tab.icon className="size-4" />
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+                )
+              })}
             </nav>
           </div>
 
           {/* Main content */}
           <div className="flex-1 flex flex-col min-w-0 min-h-0">
             {/* Header */}
-            <div className="px-4 py-3 border-b">
-              <h3 className="font-medium text-sm">{activeTabConfig.label}</h3>
-              <p className="text-xs text-muted-foreground mt-0.5">
+            <div className="px-6 pb-4 pt-5">
+              <h3 className="text-lg font-semibold tracking-tight">{activeTabConfig.label}</h3>
+              <p className="text-sm text-muted-foreground mt-1">
                 {activeTab === "models" && rowboatConnected
                   ? "Select your default models"
                   : activeTabConfig.description}
@@ -2358,7 +2378,7 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
             </div>
 
             {/* Content */}
-            <div className={cn("flex-1 p-4 min-h-0", (activeTab === "models" || activeTab === "connections" || activeTab === "mobile" || activeTab === "account" || activeTab === "code-mode" || activeTab === "notifications") ? "overflow-y-auto" : activeTab === "note-tagging" ? "overflow-hidden flex flex-col" : "overflow-hidden")}>
+            <div className={cn("flex-1 px-6 pb-5 min-h-0", (activeTab === "models" || activeTab === "connections" || activeTab === "mobile" || activeTab === "account" || activeTab === "code-mode" || activeTab === "notifications") ? "overflow-y-auto" : activeTab === "note-tagging" ? "overflow-hidden flex flex-col" : "overflow-hidden")}>
               {activeTab === "account" ? (
                 <AccountSettings dialogOpen={open} />
               ) : activeTab === "connections" ? (

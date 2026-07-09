@@ -2,10 +2,10 @@
 
 import { useCallback, useEffect, useState } from "react"
 import type { z } from "zod"
-import { Coffee, Loader2, MessageCircle, Send, Smartphone } from "lucide-react"
+import { Coffee, Loader2, Smartphone } from "lucide-react"
+import { TelegramIcon, WhatsAppIcon } from "@/components/onboarding/provider-icons"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
 import { toast } from "sonner"
 import type { ChannelsConfig, ChannelsStatus } from "@x/shared/src/channels.js"
@@ -104,9 +104,7 @@ export function MobileChannelsSettings({ dialogOpen }: { dialogOpen: boolean }) 
       {/* Caffeinate */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <div className="flex size-8 items-center justify-center rounded-md bg-muted">
-            <Coffee className="size-4" />
-          </div>
+          <Coffee className="size-5 shrink-0" />
           <div className="flex flex-col">
             <span className="text-sm font-medium">Caffeinate</span>
             <span className="text-xs text-muted-foreground">
@@ -131,15 +129,12 @@ export function MobileChannelsSettings({ dialogOpen }: { dialogOpen: boolean }) 
         />
       </div>
 
-      <Separator />
 
       {/* WhatsApp */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="flex size-8 items-center justify-center rounded-md bg-muted">
-              <MessageCircle className="size-4" />
-            </div>
+            <WhatsAppIcon className="size-5 shrink-0" />
             <div className="flex flex-col">
               <span className="text-sm font-medium">WhatsApp</span>
               <span className="text-xs text-muted-foreground">
@@ -228,15 +223,12 @@ export function MobileChannelsSettings({ dialogOpen }: { dialogOpen: boolean }) 
         )}
       </div>
 
-      <Separator />
 
       {/* Telegram */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="flex size-8 items-center justify-center rounded-md bg-muted">
-              <Send className="size-4" />
-            </div>
+            <TelegramIcon className="size-5 shrink-0" />
             <div className="flex flex-col">
               <span className="text-sm font-medium">Telegram</span>
               <span className="text-xs text-muted-foreground">
