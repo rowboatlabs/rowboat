@@ -18,6 +18,7 @@ import liveNoteSkill from "./live-note/skill.js";
 import backgroundTaskSkill from "./background-task/skill.js";
 import notifyUserSkill from "./notify-user/skill.js";
 import appsSkill from "./apps/skill.js";
+import slackSkill from "./slack/skill.js";
 
 const CURRENT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const CATALOG_PREFIX = "src/application/assistant/skills";
@@ -175,6 +176,14 @@ const definitions: SkillDefinition[] = [
     summary: "Control the embedded browser pane - open sites, inspect page state, and interact with indexed page elements.",
     content: browserControlSkill,
     tools: ["browser-control", "load-browser-skill"],
+  },
+  {
+    // Excluded from the catalog when Slack isn't connected (see
+    // buildCopilotInstructions excludeIds), mirroring composio-integration.
+    id: "slack",
+    title: "Slack",
+    summary: "Read, search, and send Slack messages via the agent-slack CLI — catch up on channels, summarize threads, list users. Load FIRST for ANY Slack request; Slack is connected natively, never through Composio.",
+    content: slackSkill,
   },
   {
     id: "notify-user",
