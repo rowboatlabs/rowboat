@@ -15,7 +15,10 @@ import { builtinToolDescriptor } from "./builtin-descriptors.js";
 // except the ones that make no sense headlessly or in a child. Mirrors the
 // background-task agent's exclusions (no interactive approval surface) plus
 // the task/session launchers — an ephemeral child should do its own work,
-// not schedule more.
+// not schedule more — and the shared visible surfaces: a headless child
+// navigating the UI the user is looking at, or parallel children fighting
+// over the one embedded browser pane, is broken behavior, not just noise.
+// All remain available via an explicit `tools` selection.
 const DEFAULT_PROFILE_EXCLUDED = new Set([
     "executeCommand", // headless: no interactive approval
     "code_agent_run", // headless: needs interactive permission UI
@@ -24,6 +27,8 @@ const DEFAULT_PROFILE_EXCLUDED = new Set([
     "create-background-task",
     "patch-background-task",
     "run-live-note-agent",
+    "app-navigation", // shared surface: drives the UI the user is watching
+    "browser-control", // shared surface: the single embedded browser pane
     SPAWN_AGENT_TOOL_NAME,
 ]);
 

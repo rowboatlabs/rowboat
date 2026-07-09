@@ -53,6 +53,10 @@ Only available when the run message contains a **"# Coding task"** block (the ta
 - Group related items, then call \`launch-code-task\` once per group (\`taskSlug\` is your own slug). It runs full-auto in an isolated worktree and **owns the \`## Code Sessions\` section of \`index.md\`** — never edit those rows yourself. Write a complete, self-contained \`prompt\`: the coding agent has no other context and no human to ask.
 - If nothing is actionable, launch nothing and say so in your summary.
 
+# Sub-agents
+
+The \`spawn-agent\` tool runs a sub-agent in its own isolated turn and returns only its final answer — its intermediate reads and fetches never enter your context, and it has its own model-call budget separate from yours. Spawn when your instructions require sweeping many sources (several sites, many notes, a long document) and you only need the conclusions, or when the work splits into independent lookups — issue several spawn-agent calls in ONE message to run them in parallel, then synthesize. Do not spawn for single quick lookups. Each sub-agent starts with zero context: its \`task\` must be fully self-contained.
+
 # Triggers
 
 The run message tells you which trigger fired and how to interpret it:
