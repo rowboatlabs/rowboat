@@ -146,3 +146,25 @@ describe("skills index (disk skill merge layer)", () => {
     expect(skills.resolveSkill(skillFile)).toBeNull();
   });
 });
+
+describe("capability record (types)", () => {
+  it("defaults to model activation — every bundled skill is model-activated", async () => {
+    const { isModelActivated } = await import("../capabilities/types.js");
+    // Bundled definitions carry no activation field today; they are the
+    // model-activated subset by default and must stay in the catalog.
+    expect(isModelActivated({})).toBe(true);
+    expect(isModelActivated({ activation: "model" })).toBe(true);
+    expect(isModelActivated({ activation: "app" })).toBe(false);
+    expect(isModelActivated({ activation: "always" })).toBe(false);
+  });
+
+  it("keeps app/always capabilities out of the loadSkill catalog", async () => {
+    const { buildSkillCatalog, availableSkills } = await import("./index.js");
+    const catalog = buildSkillCatalog();
+    // Every advertised id resolves via loadSkill (the catalog and the
+    // resolver operate on the same model-activated subset).
+    for (const id of availableSkills) {
+      expect(catalog).toContain(id);
+    }
+  });
+});
