@@ -1,19 +1,14 @@
-name: apps/x tests
+name: rowboat
 
 on:
   pull_request:
-    paths:
-      - "apps/x/**"
-      - ".github/workflows/x-tests.yml"
   push:
     branches: [main]
-    paths:
-      - "apps/x/**"
-      - ".github/workflows/x-tests.yml"
   workflow_dispatch:
 
 jobs:
-  test:
+  apps-x-vitest:
+    name: apps/x Vitest suites
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -36,5 +31,33 @@ jobs:
 
       # Builds @x/shared (core/renderer tests import its dist), then runs
       # the shared, core, and renderer vitest suites in order.
-      - name: Run tests
+      - name: Run apps/x Vitest suites
         run: npm test
+
+  apps-x-electron-package:
+    name: apps/x Electron package smoke test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/x
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.15.0
+          cache: pnpm
+          cache-dependency-path: apps/x/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Package Electron app without signing
+        env:
+          ROWBOAT_SKIP_CODE_SIGNING: "1"
+        run: npm run package
+        working-directory: apps/x/apps/main
