@@ -7,6 +7,7 @@ import Placeholder from '@tiptap/extension-placeholder'
 import type { blocks } from '@x/shared'
 import { cn } from '@/lib/utils'
 import { toast } from '@/lib/toast'
+import { prepareEmailHtml, splitPlainTextQuote, stripQuotedReplyText, QUOTED_CLASS } from '@/lib/email-quotes'
 import { useTheme } from '@/contexts/theme-context'
 import { SettingsDialog } from '@/components/settings-dialog'
 import { Button } from '@/components/ui/button'
@@ -70,31 +71,6 @@ function extractAddress(from?: string): string {
 
 function snippet(text?: string): string {
   return (text || '').replace(/\s+/g, ' ').trim().slice(0, 180)
-}
-
-function isReplyQuoteBoundary(lines: string[], index: number): boolean {
-  const line = lines[index]?.trim() || ''
-  if (/^On\b.+\bwrote:\s*$/i.test(line)) return true
-  if (/^-{2,}\s*(Original Message|Forwarded message)\s*-{2,}$/i.test(line)) return true
-  if (/^From:\s+\S/i.test(line)) {
-    const next = lines.slice(index + 1, index + 6).map((value) => value.trim())
-    return next.some((value) => /^(Sent|Date):\s+\S/i.test(value))
-      && next.some((value) => /^To:\s+\S/i.test(value))
-      && next.some((value) => /^Subject:\s+\S/i.test(value))
-  }
-  return false
-}
-
-function stripQuotedReplyText(text: string): string {
-  const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')
-  const boundary = lines.findIndex((line, index) => {
-    if (isReplyQuoteBoundary(lines, index)) return true
-    return index > 0
-      && line.trim().startsWith('>')
-      && (lines[index - 1]?.trim() === '' || lines[index - 1]?.trim().startsWith('>'))
-  })
-  const visible = boundary >= 0 ? lines.slice(0, boundary) : lines
-  return visible.join('\n').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
 }
 
 function getInitial(from?: string): string {
@@ -307,43 +283,6 @@ function plainTextToHtml(text: string): string {
     .join('')
 }
 
-function splitPlainTextQuote(text: string): { visible: string; quoted: string | null } {
-  const re = /(?:^|\n)On\s+.+?\swrote:\s*(?:\n|$)/
-  const match = re.exec(text)
-  if (!match) return { visible: text, quoted: null }
-  const start = match.index === 0 ? 0 : match.index + 1
-  const visible = text.slice(0, start).trimEnd()
-  const quoted = text.slice(start)
-  if (!quoted.trim()) return { visible: text, quoted: null }
-  return { visible, quoted }
-}
-
-// True if the HTML — after stripping quoted/hidden content — defines its
-// own visual layout (real images, tables, explicit backgrounds). Unstyled
-// HTML (Gmail replies, Outlook one-liners wrapped in MsoNormal boilerplate,
-// outreach emails with only a tracking pixel, reply HTML whose only image
-// lives inside the inline-quoted thread) gets an iframe that adapts to the
-// app theme; styled HTML keeps the white "paper" look so newsletters /
-// branded designs render as their senders intended.
-function isStyledHtml(html: string): boolean {
-  const doc = new DOMParser().parseFromString(html, 'text/html')
-  doc.querySelectorAll('.gmail_quote, .gmail_attr, blockquote[type="cite"]').forEach((n) => n.remove())
-  if (doc.querySelector('table')) return true
-  for (const img of Array.from(doc.querySelectorAll('img'))) {
-    const w = parseInt(img.getAttribute('width') || '0', 10)
-    const h = parseInt(img.getAttribute('height') || '0', 10)
-    if (w === 1 && h === 1) continue
-    const style = img.getAttribute('style') || ''
-    if (/display\s*:\s*none/i.test(style)) continue
-    if (/visibility\s*:\s*hidden/i.test(style)) continue
-    return true
-  }
-  const visible = doc.body?.innerHTML || ''
-  if (/bgcolor\s*=/i.test(visible)) return true
-  if (/background-(color|image)\s*:/i.test(visible)) return true
-  return false
-}
-
 function buildEmailDocument(
   html: string,
   opts: { theme: 'light' | 'dark'; adaptToTheme: boolean },
@@ -384,12 +323,8 @@ function buildEmailDocument(
     border-left: 2px solid ${quoteBorder};
     color: ${quoteColor};
   }
-  .gmail_quote,
-  .gmail_attr,
-  blockquote[type="cite"] { display: none; }
-  [data-show-quotes="true"] .gmail_quote,
-  [data-show-quotes="true"] .gmail_attr,
-  [data-show-quotes="true"] blockquote[type="cite"] { display: block; }
+  .${QUOTED_CLASS} { display: none; }
+  [data-show-quotes="true"] .${QUOTED_CLASS} { display: revert; }
 </style>
 </head><body>${html}</body></html>`
 }
@@ -436,24 +371,25 @@ function HtmlMessageBody({ message, threadId }: { message: GmailThreadMessage; t
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastSavedHeightRef = useRef<number>(message.bodyHeight ?? 0)
   const [height, setHeight] = useState(message.bodyHeight ?? 80)
-  const [hasQuote, setHasQuote] = useState(false)
   const [showQuotes, setShowQuotes] = useState(false)
   // Read by handleLoad so a reload (theme switch rebuilds srcDoc) restores the
   // expanded-quotes state on the fresh document.
   const showQuotesRef = useRef(showQuotes)
   useEffect(() => { showQuotesRef.current = showQuotes }, [showQuotes])
 
-  const adaptToTheme = useMemo(() => !isStyledHtml(message.bodyHtml!), [message.bodyHtml])
+  // Tag the quotes before the iframe ever paints, so quoted history is hidden
+  // on the first frame and the height we measure is the collapsed height.
+  const { html, hasQuote, styled } = useMemo(() => prepareEmailHtml(message.bodyHtml!), [message.bodyHtml])
+  const adaptToTheme = !styled
   const srcDoc = useMemo(
-    () => buildEmailDocument(message.bodyHtml!, { theme: resolvedTheme, adaptToTheme }),
-    [message.bodyHtml, resolvedTheme, adaptToTheme],
+    () => buildEmailDocument(html, { theme: resolvedTheme, adaptToTheme }),
+    [html, resolvedTheme, adaptToTheme],
   )
 
   const handleLoad = useCallback(() => {
     const iframe = iframeRef.current
     const doc = iframe?.contentDocument
     if (!doc?.body) return
-    setHasQuote(!!doc.querySelector('.gmail_quote, .gmail_attr, blockquote[type="cite"]'))
     if (showQuotesRef.current) doc.documentElement.dataset.showQuotes = 'true'
     // Clicking into the email body focuses the iframe document, which would
     // otherwise swallow every list/thread shortcut (the parent's document
