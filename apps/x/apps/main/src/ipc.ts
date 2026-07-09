@@ -29,7 +29,9 @@ let caffeinateBlockerId: number | null = null;
 import { RunEvent } from '@x/shared/dist/runs.js';
 import { ServiceEvent } from '@x/shared/dist/service-events.js';
 import type { SessionBusEvent } from '@x/shared/dist/sessions.js';
+import { isDurableTurnEvent } from '@x/shared/dist/turns.js';
 import type { ISessions, EmitterSessionBus } from '@x/core/dist/sessions/index.js';
+import type { TurnEventHub } from '@x/core/dist/turns/event-hub.js';
 import container from '@x/core/dist/di/container.js';
 import { listOnboardingModels } from '@x/core/dist/models/models-dev.js';
 import { testModelConnection, listModelsForProvider, generateOneShot } from '@x/core/dist/models/models.js';
@@ -486,24 +488,14 @@ let debounceTimer: ReturnType<typeof setTimeout> | null = null;
  * Emit knowledge commit event to all renderer windows
  */
 function emitKnowledgeCommitEvent(): void {
-  const windows = BrowserWindow.getAllWindows();
-  for (const win of windows) {
-    if (!win.isDestroyed() && win.webContents) {
-      win.webContents.send('knowledge:didCommit', {});
-    }
-  }
+  broadcastToWindows('knowledge:didCommit', {});
 }
 
 /**
  * Emit workspace change event to all renderer windows
  */
 function emitWorkspaceChangeEvent(event: z.infer<typeof workspaceShared.WorkspaceChangeEvent>): void {
-  const windows = BrowserWindow.getAllWindows();
-  for (const win of windows) {
-    if (!win.isDestroyed() && win.webContents) {
-      win.webContents.send('workspace:didChange', event);
-    }
-  }
+  broadcastToWindows('workspace:didChange', event);
 }
 
 /**
@@ -620,34 +612,31 @@ export function stopWorkspaceWatcher(): void {
   changeQueue.clear();
 }
 
-function emitRunEvent(event: z.infer<typeof RunEvent>): void {
+// The one renderer fan-out: send a payload to every live window on a channel.
+// All broadcast feeds (runs, services, sessions, turns, code runs, agent
+// status) go through here.
+function broadcastToWindows(channel: string, payload: unknown): void {
   const windows = BrowserWindow.getAllWindows();
   for (const win of windows) {
     if (!win.isDestroyed() && win.webContents) {
-      win.webContents.send('runs:events', event);
+      win.webContents.send(channel, payload);
     }
   }
 }
 
+function emitRunEvent(event: z.infer<typeof RunEvent>): void {
+  broadcastToWindows('runs:events', event);
+}
+
 function emitServiceEvent(event: z.infer<typeof ServiceEvent>): void {
-  const windows = BrowserWindow.getAllWindows();
-  for (const win of windows) {
-    if (!win.isDestroyed() && win.webContents) {
-      win.webContents.send('services:events', event);
-    }
-  }
+  broadcastToWindows('services:events', event);
 }
 
 export function emitOAuthEvent(event: { provider: string; success: boolean; error?: string; userId?: string }): void {
   // Native connection status (e.g. Google) is baked into the Copilot system
   // prompt, so any OAuth state change must rebuild it.
   invalidateCopilotInstructionsCache();
-  const windows = BrowserWindow.getAllWindows();
-  for (const win of windows) {
-    if (!win.isDestroyed() && win.webContents) {
-      win.webContents.send('oauth:didConnect', event);
-    }
-  }
+  broadcastToWindows('oauth:didConnect', event);
 }
 
 async function requireCodeSession(sessionId: string): Promise<CodeSession> {
@@ -667,12 +656,7 @@ export async function startCodeSessionStatusWatcher(): Promise<void> {
   const tracker = container.resolve<CodeSessionStatusTracker>('codeSessionStatusTracker');
   await tracker.start();
   codeSessionStatusWatcher = tracker.onTransition((sessionId, status) => {
-    const windows = BrowserWindow.getAllWindows();
-    for (const win of windows) {
-      if (!win.isDestroyed() && win.webContents) {
-        win.webContents.send('codeSession:status', { sessionId, status });
-      }
-    }
+    broadcastToWindows('codeSession:status', { sessionId, status });
   });
 }
 
@@ -688,12 +672,7 @@ export async function startRunsWatcher(): Promise<void> {
 
 // New runtime: session bus → renderer windows (session-design.md §10).
 function emitSessionEvent(event: SessionBusEvent): void {
-  const windows = BrowserWindow.getAllWindows();
-  for (const win of windows) {
-    if (!win.isDestroyed() && win.webContents) {
-      win.webContents.send('sessions:events', event);
-    }
-  }
+  broadcastToWindows('sessions:events', event);
 }
 
 // Mobile channels: status changes (QR pairing, connect/disconnect) → renderer.
@@ -701,12 +680,7 @@ let channelsWatcher: (() => void) | null = null;
 export function startChannelsWatcher(): void {
   if (channelsWatcher) return;
   channelsWatcher = subscribeChannelsStatus((status) => {
-    const windows = BrowserWindow.getAllWindows();
-    for (const win of windows) {
-      if (!win.isDestroyed() && win.webContents) {
-        win.webContents.send('channels:status', status);
-      }
-    }
+    broadcastToWindows('channels:status', status);
   });
 }
 
@@ -719,6 +693,27 @@ export function startSessionsWatcher(): void {
   sessionsWatcher = sessionBus.subscribe((event) => emitSessionEvent(event));
 }
 
+// Turn event spine → renderer windows: durable events of every turn the
+// runtime executes (session chat, headless background/knowledge runners,
+// spawned sub-agents), tagged with sessionId and the event's file offset so
+// consumers can join a live turn against a sessions:getTurn snapshot without
+// gaps or duplicates. Deltas are deliberately not broadcast here in v1 —
+// session chat already streams them via sessions:events; scoping deltas to
+// subscribed turns is a follow-up.
+let turnEventsWatcher: (() => void) | null = null;
+export function startTurnEventsWatcher(): void {
+  if (turnEventsWatcher) {
+    return;
+  }
+  const hub = container.resolve<TurnEventHub>('turnEventBus');
+  turnEventsWatcher = hub.subscribeAll((event) => {
+    if (!isDurableTurnEvent(event.event)) {
+      return;
+    }
+    broadcastToWindows('turns:events', event);
+  });
+}
+
 // Ephemeral code-run stream: CodeRunFeed → all renderer windows. A direct
 // tool→renderer side-channel that bypasses the turn runtime; the durable
 // record is the settle-time code-run-events-batch tool progress.
@@ -729,12 +724,7 @@ export function startCodeRunFeedWatcher(): void {
   }
   const feed = container.resolve<CodeRunFeed>('codeRunFeed');
   codeRunFeedWatcher = feed.subscribe((event) => {
-    const windows = BrowserWindow.getAllWindows();
-    for (const win of windows) {
-      if (!win.isDestroyed() && win.webContents) {
-        win.webContents.send('codeRun:events', event);
-      }
-    }
+    broadcastToWindows('codeRun:events', event);
   });
 }
 
@@ -765,12 +755,7 @@ let liveNoteAgentWatcher: (() => void) | null = null;
 export function startLiveNoteAgentWatcher(): void {
   if (liveNoteAgentWatcher) return;
   liveNoteAgentWatcher = liveNoteBus.subscribe((event) => {
-    const windows = BrowserWindow.getAllWindows();
-    for (const win of windows) {
-      if (!win.isDestroyed() && win.webContents) {
-        win.webContents.send('live-note-agent:events', event);
-      }
-    }
+    broadcastToWindows('live-note-agent:events', event);
   });
 }
 
@@ -778,12 +763,7 @@ let backgroundTaskAgentWatcher: (() => void) | null = null;
 export function startBackgroundTaskAgentWatcher(): void {
   if (backgroundTaskAgentWatcher) return;
   backgroundTaskAgentWatcher = backgroundTaskBus.subscribe((event) => {
-    const windows = BrowserWindow.getAllWindows();
-    for (const win of windows) {
-      if (!win.isDestroyed() && win.webContents) {
-        win.webContents.send('bg-task-agent:events', event);
-      }
-    }
+    broadcastToWindows('bg-task-agent:events', event);
   });
 }
 

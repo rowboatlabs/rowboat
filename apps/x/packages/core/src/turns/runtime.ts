@@ -41,6 +41,7 @@ import {
 } from "./api.js";
 import type { ITurnLifecycleBus } from "./bus.js";
 import type { IClock } from "./clock.js";
+import type { ITurnEventBus } from "./event-hub.js";
 import { composeModelRequest } from "./compose-model-request.js";
 import type { IUsageReporter } from "./usage-reporter.js";
 import type { IContextResolver } from "./context-resolver.js";
@@ -70,6 +71,7 @@ export interface TurnRuntimeDependencies {
     permissionChecker: IPermissionChecker;
     permissionClassifier: IPermissionClassifier;
     lifecycleBus: ITurnLifecycleBus;
+    turnEventBus: ITurnEventBus;
     usageReporter: IUsageReporter;
 }
 
@@ -86,6 +88,7 @@ export class TurnRuntime implements ITurnRuntime {
     private readonly permissionChecker: IPermissionChecker;
     private readonly permissionClassifier: IPermissionClassifier;
     private readonly lifecycleBus: ITurnLifecycleBus;
+    private readonly turnEventBus: ITurnEventBus;
     private readonly usageReporter: IUsageReporter;
 
     constructor({
@@ -99,6 +102,7 @@ export class TurnRuntime implements ITurnRuntime {
         permissionChecker,
         permissionClassifier,
         lifecycleBus,
+        turnEventBus,
         usageReporter,
     }: TurnRuntimeDependencies) {
         this.turnRepo = turnRepo;
@@ -111,6 +115,7 @@ export class TurnRuntime implements ITurnRuntime {
         this.permissionChecker = permissionChecker;
         this.permissionClassifier = permissionClassifier;
         this.lifecycleBus = lifecycleBus;
+        this.turnEventBus = turnEventBus;
         this.usageReporter = usageReporter;
     }
 
@@ -162,6 +167,14 @@ export class TurnRuntime implements ITurnRuntime {
             },
         });
         await this.turnRepo.create(event);
+        // turn_created never flows through an advance's execution stream, so
+        // publish it here; it is always line 1 of the turn file.
+        this.turnEventBus.publish({
+            turnId,
+            sessionId: event.sessionId,
+            event,
+            offset: 1,
+        });
         return turnId;
     }
 
@@ -277,6 +290,7 @@ export class TurnRuntime implements ITurnRuntime {
             clock: this.clock,
             permissionChecker: this.permissionChecker,
             permissionClassifier: this.permissionClassifier,
+            turnEventBus: this.turnEventBus,
         });
         try {
             return await run.run(input);
@@ -309,6 +323,7 @@ class TurnAdvance {
     private readonly clock: IClock;
     private readonly permissionChecker: IPermissionChecker;
     private readonly permissionClassifier: IPermissionClassifier;
+    private readonly turnEventBus: ITurnEventBus;
 
     // Checker "allowed" outcomes are deliberately not durable: after a crash
     // the checker is simply re-consulted.
@@ -334,6 +349,7 @@ class TurnAdvance {
         clock: IClock;
         permissionChecker: IPermissionChecker;
         permissionClassifier: IPermissionClassifier;
+        turnEventBus: ITurnEventBus;
     }) {
         this.turnId = init.turnId;
         this.events = init.events;
@@ -350,10 +366,21 @@ class TurnAdvance {
         this.clock = init.clock;
         this.permissionChecker = init.permissionChecker;
         this.permissionClassifier = init.permissionClassifier;
+        this.turnEventBus = init.turnEventBus;
     }
 
     private get definition(): TurnState["definition"] {
         return this.state.definition;
+    }
+
+    // Deltas ride the execution stream and the process-wide bus, never storage.
+    private pushDelta(delta: Extract<TurnStreamEvent, { type: "text_delta" | "reasoning_delta" }>): void {
+        this.stream.push(delta);
+        this.turnEventBus.publish({
+            turnId: this.turnId,
+            sessionId: this.definition.sessionId,
+            event: delta,
+        });
     }
 
     private now(): string {
@@ -400,11 +427,20 @@ class TurnAdvance {
 
     private async commit(batch: TEvent[]): Promise<void> {
         await this.turnRepo.append(this.turnId, batch);
+        // this.events holds the full file history (read at advance start), so
+        // its length is the absolute 1-based line offset of each new event.
+        const base = this.events.length;
         this.events.push(...batch);
         this.state = reduceTurn(this.events);
         this.appended = true;
-        for (const event of batch) {
+        for (const [i, event] of batch.entries()) {
             this.stream.push(event);
+            this.turnEventBus.publish({
+                turnId: this.turnId,
+                sessionId: this.definition.sessionId,
+                event,
+                offset: base + i + 1,
+            });
         }
     }
 
@@ -1107,7 +1143,7 @@ class TurnAdvance {
             })) {
                 switch (event.type) {
                     case "text_delta":
-                        this.stream.push({
+                        this.pushDelta({
                             type: "text_delta",
                             turnId: this.turnId,
                             modelCallIndex: index,
@@ -1115,7 +1151,7 @@ class TurnAdvance {
                         });
                         break;
                     case "reasoning_delta":
-                        this.stream.push({
+                        this.pushDelta({
                             type: "reasoning_delta",
                             turnId: this.turnId,
                             modelCallIndex: index,

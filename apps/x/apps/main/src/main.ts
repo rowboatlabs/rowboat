@@ -2,7 +2,7 @@ import { app, BrowserWindow, desktopCapturer, protocol, net, shell, session, saf
 import path from "node:path";
 import {
   setupIpcHandlers,
-  startRunsWatcher, startSessionsWatcher, markSessionsIndexReady,
+  startRunsWatcher, startSessionsWatcher, startTurnEventsWatcher, markSessionsIndexReady,
   startCodeRunFeedWatcher,
   startChannelsWatcher,
   startCodeSessionStatusWatcher,
@@ -454,6 +454,9 @@ app.whenReady().then(async () => {
     markSessionsIndexReady();
   }
   startSessionsWatcher();
+  // Turn event spine: durable events of every turn (session, headless,
+  // sub-agent) → renderer, for turnId-keyed live views.
+  startTurnEventsWatcher();
   startCodeRunFeedWatcher();
 
   // Mobile channels (WhatsApp/Telegram bridge): needs the session index, so

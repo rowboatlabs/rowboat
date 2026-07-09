@@ -34,6 +34,7 @@ import type { ITurnRepo } from "../turns/repo.js";
 import type { IContextResolver } from "../turns/context-resolver.js";
 import { createContextResolver } from "../turns/context-elision.js";
 import { EmitterTurnLifecycleBus, type ITurnLifecycleBus } from "../turns/bus.js";
+import { TurnEventHub, type ITurnEventBus } from "../turns/event-hub.js";
 import { RealUsageReporter } from "../turns/bridges/real-usage-reporter.js";
 import type { IUsageReporter } from "../turns/usage-reporter.js";
 import { TurnRuntime } from "../turns/runtime.js";
@@ -124,6 +125,9 @@ container.register({
         createContextResolver({ turnRepo }),
     ).singleton(),
     lifecycleBus: asClass<ITurnLifecycleBus>(EmitterTurnLifecycleBus).singleton(),
+    // Process-wide turn event spine: every turn's events, tagged with
+    // sessionId and durable file offsets, regardless of who started the turn.
+    turnEventBus: asClass<ITurnEventBus>(TurnEventHub).singleton(),
     usageReporter: asClass<IUsageReporter>(RealUsageReporter).singleton(),
     agentResolver: asFunction<IAgentResolver>(
         () =>
