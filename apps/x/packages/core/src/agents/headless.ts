@@ -163,6 +163,18 @@ export class HeadlessAgentRunner implements IHeadlessAgentRunner {
         const execution = this.turnRuntime.advanceTurn(turnId, undefined, {
             signal: options.signal,
         });
+        // Drain the execution stream: live delivery rides the turn event bus,
+        // and an unconsumed HotStream would buffer every durable event in
+        // memory until the turn settles.
+        void (async () => {
+            try {
+                for await (const event of execution.events) {
+                    void event;
+                }
+            } catch {
+                // Infrastructure failures surface through the outcome.
+            }
+        })();
         const done = execution.outcome.then(async (outcome) => {
             const state = reduceTurn(
                 (await this.turnRuntime.getTurn(turnId)).events,

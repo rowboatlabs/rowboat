@@ -42,6 +42,7 @@ function harness(fetches: Array<TEvent[] | Error>) {
   let unsubscribed = false
   const states: TurnState[] = []
   const errors: string[] = []
+  const snapshotFailures: string[] = []
   const deps: TurnFollowerDeps = {
     fetchTurn,
     subscribe: (fn) => {
@@ -53,6 +54,7 @@ function harness(fetches: Array<TEvent[] | Error>) {
     },
     onState: (state) => states.push(state),
     onError: (message) => errors.push(message),
+    onSnapshotFailed: (message) => snapshotFailures.push(message),
     maxRetries: 0,
   }
   return {
@@ -60,6 +62,7 @@ function harness(fetches: Array<TEvent[] | Error>) {
     fetchTurn,
     states,
     errors,
+    snapshotFailures,
     emit: (event: TurnBusEvent) => listener?.(event),
     get unsubscribed() {
       return unsubscribed
@@ -152,6 +155,18 @@ describe('followTurn', () => {
 
     expect(h.fetchTurn).toHaveBeenCalledTimes(2)
     expect(h.states[h.states.length - 1].terminal?.type).toBe('turn_completed')
+    detach()
+  })
+
+  it('reports snapshot failure once retries are exhausted', async () => {
+    const h = harness([new Error('turn not found: legacy run id')])
+    const detach = followTurn(TURN, h.deps)
+    await flush()
+
+    // maxRetries 0: the first failure is definitive (legacy-run fallback
+    // hinges on this signal firing).
+    expect(h.snapshotFailures).toEqual(['turn not found: legacy run id'])
+    expect(h.states).toHaveLength(0)
     detach()
   })
 

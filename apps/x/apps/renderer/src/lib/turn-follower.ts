@@ -23,6 +23,10 @@ export interface TurnFollowerDeps {
   subscribe: (listener: (event: TurnBusEvent) => void) => () => void
   onState: (state: TurnState) => void
   onError: (message: string) => void
+  // Fired when snapshot retries are exhausted (the id may not be a turn at
+  // all — e.g. a pre-migration legacy run). A later feed event still retries
+  // and can recover.
+  onSnapshotFailed?: (message: string) => void
   retryDelayMs?: number
   maxRetries?: number
 }
@@ -89,7 +93,7 @@ export function followTurn(turnId: string, deps: TurnFollowerDeps): () => void {
         }
       }
       publish()
-    } catch {
+    } catch (err) {
       if (!alive) return
       // Turn file may not exist yet (subscription raced creation) or the
       // fetch failed transiently.
@@ -97,6 +101,8 @@ export function followTurn(turnId: string, deps: TurnFollowerDeps): () => void {
       if (retries < maxRetries) {
         retries += 1
         retryTimer = setTimeout(() => void fetchSnapshot(), retryDelayMs)
+      } else {
+        deps.onSnapshotFailed?.(err instanceof Error ? err.message : String(err))
       }
     } finally {
       fetching = false

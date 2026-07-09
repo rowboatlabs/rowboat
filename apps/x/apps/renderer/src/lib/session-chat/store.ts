@@ -2,11 +2,12 @@ import type { z } from 'zod'
 import type { UserMessage } from '@x/shared/src/message.js'
 import type { SessionBusEvent, SessionIndexEntry } from '@x/shared/src/sessions.js'
 import {
+  isDurableTurnEvent,
   reduceTurn,
   type JsonValue,
+  type TurnBusEvent,
   type TurnEvent,
   type TurnState,
-  type TurnStreamEvent,
 } from '@x/shared/src/turns.js'
 import type { SendMessageConfig, SessionsClient } from './client'
 import type { SessionFeedListener } from './feed'
@@ -30,7 +31,12 @@ export interface SessionChatSnapshot {
 
 export interface SessionChatStoreDeps {
   client: SessionsClient
-  subscribeFeed: (listener: SessionFeedListener) => () => void
+  // The turns:events spine (durable events with offsets, plus deltas for
+  // turns this window subscribed to).
+  subscribeTurnFeed: (listener: (event: TurnBusEvent) => void) => () => void
+  // Declares "this window is watching turn X" so main forwards its deltas;
+  // returns the unsubscribe.
+  subscribeDeltas: (turnId: string) => () => void
 }
 
 // Framework-agnostic controller for one active session's chat. Owns all the
@@ -39,7 +45,8 @@ export interface SessionChatStoreDeps {
 // hook is a thin useSyncExternalStore subscription over it.
 export class SessionChatStore {
   private readonly client: SessionsClient
-  private readonly subscribeFeed: (listener: SessionFeedListener) => () => void
+  private readonly subscribeTurnFeed: (listener: (event: TurnBusEvent) => void) => () => void
+  private readonly subscribeDeltas: (turnId: string) => () => void
   private feedDisconnect: (() => void) | null = null
   private readonly listeners = new Set<() => void>()
 
@@ -53,6 +60,9 @@ export class SessionChatStore {
   private error: string | null = null
   // Guards stale async loads after a session switch.
   private generation = 0
+  // The turn whose deltas this window currently receives.
+  private deltaTurnId: string | null = null
+  private deltaUnsub: (() => void) | null = null
 
   private snapshot: SessionChatSnapshot = {
     sessionId: null,
@@ -64,7 +74,8 @@ export class SessionChatStore {
 
   constructor(deps: SessionChatStoreDeps) {
     this.client = deps.client
-    this.subscribeFeed = deps.subscribeFeed
+    this.subscribeTurnFeed = deps.subscribeTurnFeed
+    this.subscribeDeltas = deps.subscribeDeltas
   }
 
   // Feed attachment is effect-managed and idempotent so React StrictMode's
@@ -72,11 +83,28 @@ export class SessionChatStore {
   // subscription would be torn down by the first cleanup and never restored).
   connect(): () => void {
     if (!this.feedDisconnect) {
-      this.feedDisconnect = this.subscribeFeed(this.onFeedEvent)
+      this.feedDisconnect = this.subscribeTurnFeed(this.onTurnEvent)
+      this.syncDeltas()
     }
     return () => {
       this.feedDisconnect?.()
       this.feedDisconnect = null
+      this.syncDeltas()
+    }
+  }
+
+  // Keep exactly one delta subscription: the latest turn, while connected.
+  private syncDeltas(): void {
+    const want =
+      this.feedDisconnect && this.latestEvents
+        ? this.latestEvents[0].turnId
+        : null
+    if (want === this.deltaTurnId) return
+    this.deltaUnsub?.()
+    this.deltaUnsub = null
+    this.deltaTurnId = want
+    if (want) {
+      this.deltaUnsub = this.subscribeDeltas(want)
     }
   }
 
@@ -99,6 +127,7 @@ export class SessionChatStore {
     this.overlay = emptyOverlay()
     this.error = null
     this.loading = sessionId !== null
+    this.syncDeltas()
     this.emit()
     if (sessionId === null) return
 
@@ -112,6 +141,7 @@ export class SessionChatStore {
       this.priorTurns = reduced.slice(0, -1)
       this.latestEvents = turns.length > 0 ? turns[turns.length - 1].events : null
       this.loading = false
+      this.syncDeltas()
       this.emit()
     } catch (error) {
       if (generation !== this.generation) return
@@ -122,23 +152,37 @@ export class SessionChatStore {
     }
   }
 
-  private onFeedEvent: SessionFeedListener = (event: SessionBusEvent) => {
-    if (event.kind !== 'turn-event' || event.sessionId !== this.sessionId) return
+  private onTurnEvent = (event: TurnBusEvent): void => {
+    if (this.sessionId === null || event.sessionId !== this.sessionId) return
     const turnEvent = event.event
-    if (isDurable(turnEvent)) {
+    if (isDurableTurnEvent(turnEvent) && event.offset !== undefined) {
       if (turnEvent.type === 'turn_created') {
         // A new turn started for this session: freeze the previous latest.
         this.freezeLatest()
         this.latestEvents = [turnEvent]
         this.overlay = emptyOverlay()
-      } else if (this.latestEvents && this.latestEvents[0].turnId === turnEvent.turnId) {
-        this.latestEvents.push(turnEvent)
+        this.syncDeltas()
+      } else if (this.latestEvents && this.latestEvents[0].turnId === event.turnId) {
+        // Offset join against the local log: drop already-known events,
+        // append the contiguous next line, refetch on a gap.
+        if (event.offset <= this.latestEvents.length) {
+          return
+        }
+        if (event.offset === this.latestEvents.length + 1) {
+          this.latestEvents.push(turnEvent)
+        } else {
+          void this.reloadTurn(event.turnId)
+          return
+        }
       } else {
         // An event for a turn we haven't seen (missed turn_created, e.g. the
         // feed attached mid-turn): reconcile by refetching that turn.
         void this.reloadTurn(event.turnId)
         return
       }
+    } else if (!this.latestEvents || this.latestEvents[0].turnId !== event.turnId) {
+      // Deltas are ephemeral: only the latest turn's deltas paint the overlay.
+      return
     }
     this.overlay = applyOverlay(this.overlay, turnEvent)
     this.emit()
@@ -164,6 +208,7 @@ export class SessionChatStore {
         this.freezeLatest()
       }
       this.latestEvents = turn.events
+      this.syncDeltas()
       this.emit()
     } catch (error) {
       // The next snapshot-worthy event will retry.
@@ -237,10 +282,6 @@ export class SessionChatStore {
   }
 }
 
-function isDurable(event: TurnStreamEvent): event is TEvent {
-  return event.type !== 'text_delta' && event.type !== 'reasoning_delta'
-}
-
 // ---------------------------------------------------------------------------
 // Session list store
 // ---------------------------------------------------------------------------
@@ -248,6 +289,12 @@ function isDurable(event: TurnStreamEvent): event is TEvent {
 export interface SessionListSnapshot {
   sessions: SessionIndexEntry[]
   loading: boolean
+}
+
+export interface SessionListStoreDeps {
+  client: SessionsClient
+  // sessions:events — index-changed entries for the session list.
+  subscribeFeed: (listener: SessionFeedListener) => () => void
 }
 
 export class SessionListStore {
@@ -259,7 +306,7 @@ export class SessionListStore {
   private loading = true
   private snapshot: SessionListSnapshot = { sessions: [], loading: true }
 
-  constructor(deps: SessionChatStoreDeps) {
+  constructor(deps: SessionListStoreDeps) {
     this.client = deps.client
     this.subscribeFeed = deps.subscribeFeed
   }

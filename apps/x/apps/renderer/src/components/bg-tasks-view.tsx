@@ -15,7 +15,8 @@ import { useBackgroundTaskAgentStatus } from '@/hooks/use-bg-task-agent-status'
 import { formatRelativeTime } from '@/lib/relative-time'
 import { toast } from '@/lib/toast'
 import type { ConversationItem } from '@/lib/chat-conversation'
-import { fetchAgentRunTranscript, type AgentRunTranscript } from '@/lib/agent-transcript'
+import { fetchAgentRunTranscript } from '@/lib/agent-transcript'
+import { useAgentRunTranscript } from '@/hooks/use-agent-run-transcript'
 import { CompactConversation } from '@/components/compact-conversation'
 import { RichMarkdownViewer } from '@/components/rich-markdown-viewer'
 import { HtmlFileViewer } from '@/components/html-file-viewer'
@@ -1116,29 +1117,9 @@ function RunTranscriptView({
     isInFlight: boolean
     onBack: () => void
 }) {
-    const [transcript, setTranscript] = useState<AgentRunTranscript | null>(null)
-    const [loading, setLoading] = useState(true)
-    const [error, setError] = useState<string | null>(null)
-
-    useEffect(() => {
-        let cancelled = false
-        setLoading(true)
-        setError(null)
-        void (async () => {
-            try {
-                const t = await fetchAgentRunTranscript(runId)
-                if (cancelled) return
-                setTranscript(t)
-            } catch (err) {
-                if (cancelled) return
-                setError(err instanceof Error ? err.message : String(err))
-                setTranscript(null)
-            } finally {
-                if (!cancelled) setLoading(false)
-            }
-        })()
-        return () => { cancelled = true }
-    }, [runId])
+    // Live via the turns:events spine: an in-flight run's transcript streams
+    // in as the agent works; settled runs render from one snapshot fetch.
+    const { transcript, loading, error } = useAgentRunTranscript(runId)
 
     const summary = transcript ?? undefined
     const items: ConversationItem[] = transcript?.items ?? []

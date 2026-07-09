@@ -697,9 +697,32 @@ export function startSessionsWatcher(): void {
 // runtime executes (session chat, headless background/knowledge runners,
 // spawned sub-agents), tagged with sessionId and the event's file offset so
 // consumers can join a live turn against a sessions:getTurn snapshot without
-// gaps or duplicates. Deltas are deliberately not broadcast here in v1 —
-// session chat already streams them via sessions:events; scoping deltas to
-// subscribed turns is a follow-up.
+// gaps or duplicates. Durable events are broadcast to every window;
+// text/reasoning deltas are high-volume and ephemeral, so they are sent only
+// to windows that subscribed to that turn via turns:subscribe.
+const turnDeltaSubs = new Map<Electron.WebContents, Set<string>>();
+
+export function subscribeTurnDeltas(sender: Electron.WebContents, turnId: string): void {
+  let turnIds = turnDeltaSubs.get(sender);
+  if (!turnIds) {
+    turnIds = new Set();
+    turnDeltaSubs.set(sender, turnIds);
+    sender.once('destroyed', () => turnDeltaSubs.delete(sender));
+  }
+  turnIds.add(turnId);
+}
+
+export function unsubscribeTurnDeltas(sender: Electron.WebContents, turnId: string): void {
+  const turnIds = turnDeltaSubs.get(sender);
+  if (!turnIds) {
+    return;
+  }
+  turnIds.delete(turnId);
+  if (turnIds.size === 0) {
+    turnDeltaSubs.delete(sender);
+  }
+}
+
 let turnEventsWatcher: (() => void) | null = null;
 export function startTurnEventsWatcher(): void {
   if (turnEventsWatcher) {
@@ -707,10 +730,15 @@ export function startTurnEventsWatcher(): void {
   }
   const hub = container.resolve<TurnEventHub>('turnEventBus');
   turnEventsWatcher = hub.subscribeAll((event) => {
-    if (!isDurableTurnEvent(event.event)) {
+    if (isDurableTurnEvent(event.event)) {
+      broadcastToWindows('turns:events', event);
       return;
     }
-    broadcastToWindows('turns:events', event);
+    for (const [sender, turnIds] of turnDeltaSubs) {
+      if (turnIds.has(event.turnId) && !sender.isDestroyed()) {
+        sender.send('turns:events', event);
+      }
+    }
   });
 }
 
@@ -1001,6 +1029,14 @@ export function setupIpcHandlers() {
     },
     'sessions:delete': async (_event, args) => {
       await container.resolve<ISessions>('sessions').deleteSession(args.sessionId);
+      return { success: true };
+    },
+    'turns:subscribe': async (event, args) => {
+      subscribeTurnDeltas(event.sender, args.turnId);
+      return { success: true };
+    },
+    'turns:unsubscribe': async (event, args) => {
+      unsubscribeTurnDeltas(event.sender, args.turnId);
       return { success: true };
     },
     'sessions:downloadLog': async (event, args) => {

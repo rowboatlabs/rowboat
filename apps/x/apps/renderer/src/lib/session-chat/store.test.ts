@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { SessionBusEvent, SessionState } from '@x/shared/src/sessions.js'
+import type { SessionState } from '@x/shared/src/sessions.js'
+import { isDurableTurnEvent, type TurnBusEvent } from '@x/shared/src/turns.js'
 import { isChatMessage } from '@/lib/chat-conversation'
 import type { SessionsClient } from './client'
 import type { SessionFeedListener } from './feed'
@@ -86,17 +87,28 @@ class FakeClient implements SessionsClient {
 
 function makeStore() {
   const client = new FakeClient()
-  let emit: SessionFeedListener = () => undefined
+  let emit: (event: TurnBusEvent) => void = () => undefined
   let subscribed = 0
   let unsubscribed = 0
+  // Live delta subscriptions by turn id (multiset semantics not needed: the
+  // store holds at most one).
+  const deltaSubs: string[] = []
+  offsetByTurn.clear()
   const store = new SessionChatStore({
     client,
-    subscribeFeed: (listener) => {
+    subscribeTurnFeed: (listener) => {
       subscribed += 1
       emit = listener
       return () => {
         unsubscribed += 1
         emit = () => undefined
+      }
+    },
+    subscribeDeltas: (turnId) => {
+      deltaSubs.push(turnId)
+      return () => {
+        const i = deltaSubs.indexOf(turnId)
+        if (i >= 0) deltaSubs.splice(i, 1)
       }
     },
   })
@@ -105,11 +117,17 @@ function makeStore() {
     client,
     store,
     disconnect,
-    emit: (event: SessionBusEvent) => emit(event),
+    emit: (event: TurnBusEvent) => emit(event),
+    deltaSubs,
     getSubscribed: () => subscribed,
     getUnsubscribed: () => unsubscribed,
   }
 }
+
+// Tags an event for the turn feed; durable events get their 1-based per-turn
+// offset assigned automatically (mirroring the file line index the runtime
+// stamps on the bus envelope).
+const offsetByTurn = new Map<string, number>()
 
 function turnEvent(
   sessionId: string,
@@ -117,8 +135,13 @@ function turnEvent(
   event:
     | TEvent
     | { type: 'text_delta' | 'reasoning_delta'; turnId: string; modelCallIndex: number; delta: string },
-): SessionBusEvent {
-  return { kind: 'turn-event', sessionId, turnId, event }
+): TurnBusEvent {
+  if (!isDurableTurnEvent(event)) {
+    return { turnId, sessionId, event }
+  }
+  const offset = (offsetByTurn.get(turnId) ?? 0) + 1
+  offsetByTurn.set(turnId, offset)
+  return { turnId, sessionId, event, offset }
 }
 
 describe('SessionChatStore', () => {
@@ -201,6 +224,35 @@ describe('SessionChatStore', () => {
     expect(
       snapshot.chatState?.conversation.filter(isChatMessage).map((m) => m.content),
     ).toEqual(['q1', 'a1', 'q2'])
+  })
+
+  it('keeps exactly one delta subscription, following the latest turn', async () => {
+    const { client, store, emit, deltaSubs, disconnect } = makeStore()
+    client.sessions.set(S1, sessionState(S1, ['turn-1']))
+    client.turns.set('turn-1', completedTurnLog('turn-1', S1, 'q1', 'a1'))
+    await store.setSession(S1)
+    expect(deltaSubs).toEqual(['turn-1'])
+
+    emit(turnEvent(S1, 'turn-2', created('turn-2', S1, user('q2'))))
+    expect(deltaSubs).toEqual(['turn-2'])
+
+    disconnect()
+    expect(deltaSubs).toEqual([])
+  })
+
+  it('drops duplicate feed events already covered by the snapshot', async () => {
+    const { client, store, emit } = makeStore()
+    client.sessions.set(S1, sessionState(S1, []))
+    await store.setSession(S1)
+    emit(turnEvent(S1, 'turn-1', created('turn-1', S1, user('go'))))
+    emit(turnEvent(S1, 'turn-1', requested('turn-1', 0)))
+    // A replay of line 2 (e.g. snapshot/live race) must not double-apply —
+    // the reducer would throw on the impossible history.
+    emit({ turnId: 'turn-1', sessionId: S1, event: requested('turn-1', 0), offset: 2 })
+    emit(turnEvent(S1, 'turn-1', completed('turn-1', 0, assistantText('done'))))
+    emit(turnEvent(S1, 'turn-1', turnCompleted('turn-1')))
+    expect(store.getSnapshot().error).toBeNull()
+    expect(store.getSnapshot().chatState?.isProcessing).toBe(false)
   })
 
   it('ignores events for other sessions', async () => {

@@ -4,7 +4,7 @@ import { assistantText, lastAssistantText } from "../agents/headless.js";
 import { TurnInputError } from "../turns/api.js";
 import { ASK_HUMAN_TOOL } from "../turns/bridges/real-agent-resolver.js";
 import { TurnNotSettledError, type ISessions } from "../sessions/api.js";
-import type { EmitterSessionBus } from "../sessions/bus.js";
+import type { TurnEventHub } from "../turns/event-hub.js";
 
 // Transport-agnostic command layer: inbound texts from a messaging channel
 // are parsed into commands (list / resume / new / stop / status) or forwarded
@@ -136,7 +136,7 @@ export class ChannelBridge {
     constructor(
         private readonly deps: {
             sessions: ISessions;
-            sessionBus: EmitterSessionBus;
+            turnEventBus: TurnEventHub;
             listModels: () => Promise<ModelChoice[]>;
         },
     ) {}
@@ -502,8 +502,10 @@ export class ChannelBridge {
         const buffered: Array<{ turnId: string; settled: Settled }> = [];
         let waiter: { turnId: string; resolve: (settled: Settled) => void } | null = null;
         let cancelTimer: (() => void) | null = null;
-        const unsubscribe = this.deps.sessionBus.subscribe((event) => {
-            if (event.kind !== "turn-event") return;
+        // The turn event spine carries every turn's events (deltas included
+        // for subscribed windows, but settleOf ignores those); subscribeAll
+        // because the turnId is unknown until sendMessage returns.
+        const unsubscribe = this.deps.turnEventBus.subscribeAll((event) => {
             const settled = settleOf(event.event);
             if (!settled) return;
             if (waiter) {

@@ -461,7 +461,7 @@ const ipcSchemas = {
   },
   // ── New runtime: sessions + turns (session-design.md) ────────────────────
   // Turn-mutating calls return quickly; the renderer follows progress through
-  // the sessions:events feed and the shared reduceTurn reducer.
+  // the turns:events feed and the shared reduceTurn reducer.
   'sessions:create': {
     req: z.object({ title: z.string().optional() }),
     res: z.object({ sessionId: z.string() }),
@@ -545,11 +545,23 @@ const ipcSchemas = {
   },
   // Process-wide turn event spine: every turn's durable events (with file
   // offsets), regardless of who started the turn — session chat, headless
-  // background/knowledge runners, spawned sub-agents. Deltas are not
-  // broadcast here in v1; session chat streams them via sessions:events.
+  // background/knowledge runners, spawned sub-agents. Text/reasoning deltas
+  // ride the same channel but only reach windows that subscribed to that
+  // turn via turns:subscribe.
   'turns:events': {
     req: z.custom<TurnBusEvent>(),
     res: z.null(),
+  },
+  // Per-window delta subscription: deltas are high-volume and ephemeral, so
+  // they cross IPC only for turns this window declared it is watching.
+  // Durable events are always broadcast regardless.
+  'turns:subscribe': {
+    req: z.object({ turnId: z.string() }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  'turns:unsubscribe': {
+    req: z.object({ turnId: z.string() }),
+    res: z.object({ success: z.literal(true) }),
   },
   'services:events': {
     req: ServiceEvent,

@@ -357,18 +357,23 @@ which governs mutation of live logs, not their removal.
 
 ## 10. Event forwarding and live UI
 
-1. For every `advanceTurn` it initiates, the session layer consumes
-   `TurnExecution.events` and forwards each `TurnStreamEvent` — tagged with
-   `sessionId` — through the application bus to renderer windows over one
-   IPC channel (`sessions:events`).
+1. Live turn delivery is not the session layer's job: the turn runtime
+   publishes every turn's events to the process-wide turn event bus
+   (turn-runtime-design.md §17.1), which the app layer bridges to renderer
+   windows over one IPC channel (`turns:events` — durable events broadcast
+   with their file offsets; deltas only to windows subscribed to that turn).
+   The session layer drains each `TurnExecution.events` it initiates so an
+   unconsumed stream never buffers, and `sessions:events` carries only
+   `session-index-changed` entries.
 2. When `outcome` settles, the session layer updates the index entry and
    publishes `session-index-changed`.
 3. The renderer follows the turn spec's historical/live pattern: fetch
    turns via `getTurn`, run the shared `reduceTurn` per turn, compose the
    session timeline turn-by-turn (each turn renders its input and its own
    activity; the referenced prefix is never re-rendered from context),
-   append live durable events and re-reduce, and keep text/reasoning deltas
-   in an ephemeral overlay cleared by canonical responses.
+   join live durable events by file offset (drop covered, append
+   contiguous, refetch on gap) and re-reduce, and keep text/reasoning
+   deltas in an ephemeral overlay cleared by canonical responses.
 4. Pending approvals and ask-human prompts render from the suspended turn's
    reduced state, so they survive restarts without any session-layer
    bookkeeping.
@@ -376,7 +381,10 @@ which governs mutation of live logs, not their removal.
 ## 11. Headless standalone turns
 
 A helper covers the non-session callers (background tasks, live notes,
-knowledge pipelines, scheduled agents):
+knowledge pipelines, scheduled agents). Implemented as
+`HeadlessAgentRunner` in `agents/headless.ts` (start/run handle with
+turn id, reduced state, and final assistant text); the shape below is
+the contract it fulfils:
 
 ```ts
 function runHeadlessTurn(input: {
