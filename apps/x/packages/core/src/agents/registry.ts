@@ -1,6 +1,6 @@
 import type { z } from "zod";
-import { parse } from "yaml";
 import { Agent } from "@x/shared/dist/agent.js";
+import { parseFrontmatter } from "../application/lib/parse-frontmatter.js";
 import { buildCopilotAgent } from "../application/assistant/agent.js";
 import { buildBackgroundTaskAgent } from "../background-tasks/agent.js";
 import { buildLiveNoteAgent } from "../knowledge/live-note/agent.js";
@@ -30,21 +30,16 @@ interface BuiltinAgentDefinition {
 }
 
 // Prompt-file agents: instructions ship as a raw string whose optional YAML
-// frontmatter carries agent config (tools, model). One loader replaces the
-// five copy-pasted parsing blocks the ladder accumulated.
+// frontmatter carries agent config (tools, model). Parsing goes through the
+// same parseFrontmatter helper FSAgentsRepo uses for user agents, so builtin
+// and user-defined agents can never drift on the same file format.
 export function agentFromRaw(id: string, raw: string): z.infer<typeof Agent> {
-    let agent: z.infer<typeof Agent> = { name: id, instructions: raw };
-    if (raw.startsWith("---")) {
-        const end = raw.indexOf("\n---", 3);
-        if (end !== -1) {
-            const frontmatter = raw.slice(3, end).trim();
-            const content = raw.slice(end + 4).trim();
-            const yaml: unknown = parse(frontmatter);
-            const parsed = Agent.omit({ name: true, instructions: true }).parse(yaml);
-            agent = { ...agent, ...parsed, instructions: content };
-        }
+    const { frontmatter, content } = parseFrontmatter(raw);
+    if (frontmatter === null) {
+        return { name: id, instructions: raw };
     }
-    return agent;
+    const parsed = Agent.omit({ name: true, instructions: true }).parse(frontmatter);
+    return { name: id, ...parsed, instructions: content };
 }
 
 function promptFileAgent(id: string, getRaw: () => string): BuiltinAgentDefinition {
@@ -79,12 +74,18 @@ export function builtinAgentIds(): string[] {
 export function hasWorkspaceContext(agentId: string | null | undefined): boolean {
     return (
         agentId != null &&
-        builtinAgents[agentId]?.traits?.workspaceContext === true
+        Object.hasOwn(builtinAgents, agentId) &&
+        builtinAgents[agentId].traits?.workspaceContext === true
     );
 }
 
 export async function loadAgent(id: string): Promise<z.infer<typeof Agent>> {
-    const builtin = builtinAgents[id];
+    // Object.hasOwn: a plain lookup would traverse Object.prototype, so a
+    // user agent named "constructor"/"toString" would hit an inherited
+    // function instead of falling through to the repo.
+    const builtin = Object.hasOwn(builtinAgents, id)
+        ? builtinAgents[id]
+        : undefined;
     if (builtin) {
         return builtin.build();
     }

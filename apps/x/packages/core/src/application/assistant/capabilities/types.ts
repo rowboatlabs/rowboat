@@ -41,8 +41,12 @@ export interface CapabilityContext {
 
 export interface CapabilityDefinition {
     id: string;
-    title: string;
-    summary: string;
+    // Catalog metadata: required for model-activated entries (rendered in
+    // the loadSkill catalog); app/always entries omit them — nothing
+    // consumes them there, and stale copies of fragment headings would
+    // only drift into misinformation.
+    title?: string;
+    summary?: string;
     // Defaults to 'model' (the historical skill behavior).
     activation?: CapabilityActivation;
     // Lazy guidance returned by loadSkill (model activation).

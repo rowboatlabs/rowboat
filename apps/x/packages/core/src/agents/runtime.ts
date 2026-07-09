@@ -302,12 +302,6 @@ ${sections.join('\n\n')}
 `;
 }
 
-// System-prompt assembly lives in compose-instructions.ts (owned by the
-// assembly layer); re-exported so legacy callers keep their import path.
-export {
-    composeSystemInstructions,
-    type ComposeSystemInstructionsInput,
-} from "./compose-instructions.js";
 import { composeSystemInstructions } from "./compose-instructions.js";
 
 export interface IAgentRuntime {
@@ -646,10 +640,6 @@ function formatLlmStreamError(rawError: unknown): string {
     if (responseBody) lines.push(`responseBody: ${responseBody}`);
     return lines.length ? lines.join("\n") : "Model stream error";
 }
-
-// Agent identity now lives in the registry (registry.ts); re-exported here
-// so legacy callers keep their import path until the runs engine dies.
-export { loadAgent };
 
 function formatBytes(bytes: number): string {
     if (bytes < 1024) return `${bytes} B`;

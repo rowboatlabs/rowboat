@@ -1,6 +1,16 @@
 import { MODE_CAPABILITIES } from "../application/assistant/capabilities/modes.js";
-import { WORKSPACE_CONTEXT_CAPABILITY } from "../application/assistant/capabilities/workspace.js";
+import {
+    AGENT_NOTES_CAPABILITY,
+    WORK_DIRECTORY_CAPABILITY,
+} from "../application/assistant/capabilities/workspace.js";
 import type { CapabilityContext } from "../application/assistant/capabilities/types.js";
+
+// Everything that composes into the system prompt, in composition order.
+const PROMPT_CAPABILITIES = [
+    AGENT_NOTES_CAPABILITY,
+    WORK_DIRECTORY_CAPABILITY,
+    ...MODE_CAPABILITIES,
+] as const;
 
 // System-prompt composition for agent assembly: the base instructions plus
 // the mode blocks (voice, video, coach, search, code) appended per turn
@@ -52,26 +62,26 @@ export function composeSystemInstructions({
     videoMode,
     coachMode,
 }: ComposeSystemInstructionsInput): string {
-    let instructionsWithDateTime = `${instructions}\n\n${USER_CONTEXT_SYSTEM_INSTRUCTIONS}`;
-        // App-activated mode capabilities compose here, in MODE_CAPABILITIES
-        // order — a fixed total order, so identical inputs yield identical
-        // bytes. The fragment text lives with the capability records.
-        const ctx: CapabilityContext = {
-            agentNotesContext,
-            userWorkDir,
-            voiceInput,
-            voiceOutput,
-            searchEnabled,
-            codeMode,
-            codeCwd,
-            videoMode: videoMode ?? false,
-            coachMode: coachMode ?? false,
-        };
-        for (const capability of [WORKSPACE_CONTEXT_CAPABILITY, ...MODE_CAPABILITIES]) {
-            const fragment = capability.promptFragment?.(ctx);
-            if (fragment) {
-                instructionsWithDateTime += `\n\n${fragment}`;
-            }
+    let composed = `${instructions}\n\n${USER_CONTEXT_SYSTEM_INSTRUCTIONS}`;
+    // Capabilities compose in PROMPT_CAPABILITIES order — a fixed total
+    // order, so identical inputs yield identical bytes. The fragment text
+    // lives with the capability records.
+    const ctx: CapabilityContext = {
+        agentNotesContext,
+        userWorkDir,
+        voiceInput,
+        voiceOutput,
+        searchEnabled,
+        codeMode,
+        codeCwd,
+        videoMode: videoMode ?? false,
+        coachMode: coachMode ?? false,
+    };
+    for (const capability of PROMPT_CAPABILITIES) {
+        const fragment = capability.promptFragment?.(ctx);
+        if (fragment) {
+            composed += `\n\n${fragment}`;
         }
-        return instructionsWithDateTime;
+    }
+    return composed;
 }

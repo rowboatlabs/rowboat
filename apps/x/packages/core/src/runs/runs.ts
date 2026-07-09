@@ -11,7 +11,7 @@ import { IRunsLock } from "./lock.js";
 import { forceCloseAllMcpClients } from "../mcp/mcp.js";
 import { extractCommandNames } from "../application/lib/command-executor.js";
 import { addFileAccessGrant, addToSecurityConfig } from "../config/security.js";
-import { loadAgent } from "../agents/runtime.js";
+import { loadAgent } from "../agents/registry.js";
 import { getDefaultModelAndProvider } from "../models/defaults.js";
 
 export async function createRun(opts: z.infer<typeof CreateRunOptions>): Promise<z.infer<typeof Run>> {

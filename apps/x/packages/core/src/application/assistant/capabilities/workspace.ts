@@ -1,26 +1,24 @@
 import type { CapabilityContext, CapabilityDefinition } from "./types.js";
 
-// The always-activated workspace-context capability: agent notes and the
+// The always-activated workspace-context capabilities: agent notes and the
 // user work directory, composed for agents with the workspaceContext trait
 // (the resolver loads both inputs and leaves them null for everyone else).
-// Fragment text extracted verbatim from the historical composer; the golden
-// snapshots in agents/compose-instructions.test.ts pin the bytes.
+// Two independent records — the composer's own '\n\n' joining makes their
+// output byte-identical to the historical fused block. Fragment text
+// extracted verbatim from the historical composer; the golden snapshots in
+// agents/compose-instructions.test.ts pin the bytes.
 
-export const WORKSPACE_CONTEXT_CAPABILITY: CapabilityDefinition = {
-    id: "workspace-context",
-    title: "Workspace Context",
-    summary: "Agent notes and the user's chosen work directory.",
+export const AGENT_NOTES_CAPABILITY: CapabilityDefinition = {
+    id: "agent-notes",
     activation: "always",
-    promptFragment: (ctx: CapabilityContext) => {
-        const parts: string[] = [];
-        if (ctx.agentNotesContext) {
-            parts.push(ctx.agentNotesContext);
-        }
-        if (ctx.userWorkDir) {
-            parts.push(WORK_DIR_TEMPLATE(ctx.userWorkDir));
-        }
-        return parts.length > 0 ? parts.join("\n\n") : null;
-    },
+    promptFragment: (ctx: CapabilityContext) => ctx.agentNotesContext,
+};
+
+export const WORK_DIRECTORY_CAPABILITY: CapabilityDefinition = {
+    id: "work-directory",
+    activation: "always",
+    promptFragment: (ctx: CapabilityContext) =>
+        ctx.userWorkDir ? WORK_DIR_TEMPLATE(ctx.userWorkDir) : null,
 };
 
 const WORK_DIR_TEMPLATE = (userWorkDir: string): string => `# User Work Directory

@@ -77,4 +77,22 @@ describe("agent registry", () => {
         expect(agent.instructions).toBe("Just instructions.");
         expect(agent.tools).toBeUndefined();
     });
+
+    it("ids colliding with Object.prototype fall through to the repo, not the table", async () => {
+        // A plain-object lookup would resolve builtinAgents['constructor'] to
+        // the inherited Object constructor and crash on .build() before ever
+        // reaching the user-agents repo. Whether the repo then resolves or
+        // rejects depends on the environment; the contract under test is only
+        // that the table path is not taken.
+        for (const id of ["constructor", "toString", "valueOf", "hasOwnProperty"]) {
+            expect(hasWorkspaceContext(id)).toBe(false);
+            const outcome = await loadAgent(id).then(
+                () => null,
+                (error: unknown) => String(error),
+            );
+            if (outcome !== null) {
+                expect(outcome).not.toMatch(/is not a function/);
+            }
+        }
+    });
 });

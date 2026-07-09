@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import type { Agent } from "@x/shared/dist/agent.js";
-import { composeSystemInstructions } from "../../agents/runtime.js";
+import { composeSystemInstructions } from "../../agents/compose-instructions.js";
 import type { BuiltinTools } from "../../application/lib/builtin-tools.js";
 import { RealAgentResolver } from "./real-agent-resolver.js";
 

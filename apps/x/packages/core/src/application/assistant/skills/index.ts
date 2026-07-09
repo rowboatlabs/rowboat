@@ -28,10 +28,15 @@ const CATALOG_PREFIX = "src/application/assistant/skills";
 
 // A skill is the model-activated subset of the capability record
 // (capabilities/types.ts): lazy guidance the model pulls in via loadSkill,
-// plus the BuiltinTools it owns. `id` doubles as the folder name. Tool names
+// plus the BuiltinTools it owns. `id` doubles as the folder name; title and
+// summary are required here because the catalog renders them. Tool names
 // are validated against the live catalog where descriptors are built
 // (loadSkill / the agent resolver); unknown names are dropped there.
-type SkillDefinition = CapabilityDefinition & { content: string };
+type SkillDefinition = CapabilityDefinition & {
+  title: string;
+  summary: string;
+  content: string;
+};
 
 type ResolvedSkill = {
   id: string;

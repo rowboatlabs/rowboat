@@ -14,32 +14,24 @@ import type { CapabilityContext, CapabilityDefinition } from "./types.js";
 export const MODE_CAPABILITIES: readonly CapabilityDefinition[] = [
     {
         id: "voice-input",
-        title: "Voice Input",
-        summary: "The user's message was transcribed from speech.",
         activation: "app",
         promptFragment: (ctx: CapabilityContext) =>
             ctx.voiceInput ? VOICE_INPUT : null,
     },
     {
         id: "video-mode",
-        title: "Video Mode (Live Camera)",
-        summary: "Webcam (and optionally screen-share) frames arrive with the user's messages.",
         activation: "app",
         promptFragment: (ctx: CapabilityContext) =>
             ctx.videoMode ? VIDEO_MODE : null,
     },
     {
         id: "coach-mode",
-        title: "Practice Session (Coach Mode)",
-        summary: "The user is rehearsing something performative and wants live coaching.",
         activation: "app",
         promptFragment: (ctx: CapabilityContext) =>
             ctx.coachMode ? COACH_MODE : null,
     },
     {
         id: "voice-output",
-        title: "Voice Output",
-        summary: "Responses must lead with <voice> tags for TTS.",
         activation: "app",
         promptFragment: (ctx: CapabilityContext) =>
             ctx.voiceOutput === "summary"
@@ -50,16 +42,12 @@ export const MODE_CAPABILITIES: readonly CapabilityDefinition[] = [
     },
     {
         id: "search",
-        title: "Search",
-        summary: "The user has requested a web search.",
         activation: "app",
         promptFragment: (ctx: CapabilityContext) =>
             ctx.searchEnabled ? SEARCH : null,
     },
     {
         id: "code-mode",
-        title: "Code Mode",
-        summary: "Coding work routes to the on-device coding agent selected by the composer chip.",
         activation: "app",
         promptFragment: (ctx: CapabilityContext) => {
             const { codeMode, codeCwd } = ctx;
