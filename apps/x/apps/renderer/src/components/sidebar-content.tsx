@@ -737,9 +737,16 @@ export function SidebarContentPanel({
         {/* Top spacer to clear the traffic lights + fixed toggle row */}
         <div className="h-8" />
         {/* Quick actions */}
-        <div className="titlebar-no-drag flex items-center gap-1.5 px-3 pb-2">
+        <div className="titlebar-no-drag flex items-center gap-1 pl-3 pr-6 pb-2">
           {onNewChat && (
-            <ActionButton icon={SquarePen} label="New chat" onClick={onNewChat} />
+            <button
+              type="button"
+              onClick={onNewChat}
+              className="flex h-8 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md border border-sidebar-border text-[13px] font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+            >
+              <SquarePen className="size-3.5" />
+              New chat
+            </button>
           )}
           <ActionButton icon={FilePlus} label="New note" onClick={() => knowledgeActions.createNote()} />
           <VoiceNoteButton onNoteCreated={onVoiceNoteCreated} variant="action" />
@@ -764,9 +771,9 @@ export function SidebarContentPanel({
                   data-tour-id="nav-email"
                   isActive={activeNav === 'email'}
                   onClick={() => onOpenEmail?.()}
-                  className={previewEmail ? 'h-auto py-1.5' : undefined}
+                  className={previewEmail ? 'h-auto items-start py-1.5' : undefined}
                 >
-                  <Mail className="size-4 shrink-0" />
+                  <Mail className={cn('size-4 shrink-0', previewEmail && 'mt-0.5')} />
                   <div className="flex min-w-0 flex-1 flex-col">
                     <span className="truncate">Email</span>
                     {previewEmail && (
@@ -787,9 +794,9 @@ export function SidebarContentPanel({
                   data-tour-id="nav-meetings"
                   isActive={activeNav === 'meetings'}
                   onClick={onOpenMeetings}
-                  className={meetingSublabel ? 'h-auto py-1.5' : undefined}
+                  className={meetingSublabel ? 'h-auto items-start py-1.5' : undefined}
                 >
-                  <Mic className={cn('size-4 shrink-0', meetingIsRecording && 'text-red-500')} />
+                  <Mic className={cn('size-4 shrink-0', meetingSublabel && 'mt-1', meetingIsRecording && 'text-red-500')} />
                   <div className="flex min-w-0 flex-1 flex-col">
                     <span className="truncate">Meetings</span>
                     {meetingSublabel && (
@@ -874,9 +881,9 @@ export function SidebarContentPanel({
                   data-tour-id="nav-knowledge"
                   isActive={activeNav === 'knowledge'}
                   onClick={() => knowledgeActions.openKnowledgeView()}
-                  className={knowledgeUpdatedLabel ? 'h-auto py-1.5' : undefined}
+                  className={knowledgeUpdatedLabel ? 'h-auto items-start py-1.5' : undefined}
                 >
-                  <FileText className="size-4 shrink-0" />
+                  <FileText className={cn('size-4 shrink-0', knowledgeUpdatedLabel && 'mt-0.5')} />
                   <div className="flex min-w-0 flex-1 flex-col">
                     <span className="truncate">Brain</span>
                     {knowledgeUpdatedLabel && (
@@ -896,8 +903,8 @@ export function SidebarContentPanel({
                   isActive={activeNav === 'apps'}
                   onClick={onOpenApps}
                 >
-                  <LayoutGrid className="size-4 shrink-0 text-muted-foreground" />
-                  <span className="flex-1 truncate text-muted-foreground">Apps</span>
+                  <LayoutGrid className="size-4 shrink-0" />
+                  <span className="flex-1 truncate">Apps</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
@@ -905,11 +912,11 @@ export function SidebarContentPanel({
                   data-tour-id="nav-agents"
                   isActive={activeNav === 'agents'}
                   onClick={onOpenBgTasks}
-                  className={bgAgentsLabel ? 'h-auto py-1.5' : undefined}
+                  className={bgAgentsLabel ? 'h-auto items-start py-1.5' : undefined}
                 >
-                  <Bot className="size-4 shrink-0 text-muted-foreground" />
+                  <Bot className={cn('size-4 shrink-0', bgAgentsLabel && 'mt-0.5')} />
                   <div className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate text-muted-foreground">Background agents</span>
+                    <span className="truncate">Background agents</span>
                     {bgAgentsLabel && (
                       <span className={cn(
                         'truncate text-[11px]',
@@ -926,11 +933,11 @@ export function SidebarContentPanel({
                   data-tour-id="nav-workspaces"
                   isActive={activeNav === 'workspaces'}
                   onClick={() => knowledgeActions.openWorkspaceAt()}
-                  className="h-auto py-1.5"
+                  className="h-auto items-start py-1.5"
                 >
-                  <Folder className="size-4 shrink-0 text-muted-foreground" />
+                  <Folder className="mt-0.5 size-4 shrink-0" />
                   <div className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate text-muted-foreground">Workspaces</span>
+                    <span className="truncate">Workspaces</span>
                     <span className="truncate text-[11px] text-muted-foreground">
                       {workspaceCount === 0 ? 'No workspaces' : `${workspaceCount} workspace${workspaceCount === 1 ? '' : 's'}`}
                     </span>
@@ -1398,7 +1405,7 @@ path: ${currentRelativePath}
 
   if (!hasDeepgramKey) return null
 
-  const actionClass = "flex h-9 flex-1 items-center justify-center rounded-md border border-sidebar-border text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+  const actionClass = "flex size-8 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
   const iconClass = "text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded p-1.5 transition-colors"
 
   return (
@@ -1432,7 +1439,7 @@ function ActionButton({ icon: Icon, label, onClick }: { icon: typeof Mic; label:
           type="button"
           onClick={onClick}
           aria-label={label}
-          className="flex h-9 flex-1 items-center justify-center rounded-md border border-sidebar-border text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+          className="flex size-8 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
         >
           <Icon className="size-4" />
         </button>
