@@ -1,5 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isModelActivated, type CapabilityDefinition } from "../capabilities/types.js";
 import { loadDiskSkills } from "./disk-loader.js";
 import builtinToolsSkill from "./builtin-tools/skill.js";
 import deletionGuardrailsSkill from "./deletion-guardrails/skill.js";
@@ -25,16 +26,16 @@ const CATALOG_PREFIX = "src/application/assistant/skills";
 
 // console.log(liveNoteSkill);
 
-type SkillDefinition = {
-  id: string;  // Also used as folder name
+// A skill is the model-activated subset of the capability record
+// (capabilities/types.ts): lazy guidance the model pulls in via loadSkill,
+// plus the BuiltinTools it owns. `id` doubles as the folder name; title and
+// summary are required here because the catalog renders them. Tool names
+// are validated against the live catalog where descriptors are built
+// (loadSkill / the agent resolver); unknown names are dropped there.
+type SkillDefinition = CapabilityDefinition & {
   title: string;
   summary: string;
   content: string;
-  // BuiltinTools keys this skill owns. Loading the skill attaches these as
-  // native tool definitions (they are NOT in the copilot's base toolset).
-  // Names are validated against the live catalog where descriptors are
-  // built (loadSkill / the agent resolver); unknown names are dropped there.
-  tools?: string[];
 };
 
 type ResolvedSkill = {
@@ -242,9 +243,13 @@ function getSkillEntries(): SkillEntry[] {
  * Reads the live skill set, so it reflects disk skills added/removed at runtime.
  */
 export function buildSkillCatalog(options?: { excludeIds?: string[] }): string {
+  // The catalog advertises the model-activated subset only: app/always
+  // capabilities are composed into the system prompt by the assembly layer,
+  // not offered for loadSkill.
+  const modelEntries = getSkillEntries().filter(isModelActivated);
   const entries = options?.excludeIds
-    ? getSkillEntries().filter(e => !options.excludeIds!.includes(e.id))
-    : getSkillEntries();
+    ? modelEntries.filter(e => !options.excludeIds!.includes(e.id))
+    : modelEntries;
   const sections = entries.map((entry) => [
     `## ${entry.title}`,
     `- **Skill file:** \`${entry.catalogPath}\``,
