@@ -6,8 +6,8 @@ import {
     SPAWN_AGENT_TOOL_NAME,
     type ToolDescriptor,
 } from "@x/shared/dist/turns.js";
+import { composeSystemInstructions } from "../../agents/compose-instructions.js";
 import {
-    composeSystemInstructions,
     loadAgentNotesContext,
     loadUserWorkDir,
 } from "../../agents/runtime.js";
