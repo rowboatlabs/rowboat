@@ -55,7 +55,7 @@ function ToolkitPreviewIcon({
   )
 }
 
-export function ToolConnectionsCard({ className }: { className?: string }) {
+export function ToolConnectionsCard({ className, compact = false }: { className?: string; compact?: boolean }) {
   const [toolkitPreviews, setToolkitPreviews] = useState<ToolkitPreview[]>(cachedToolkitPreviews ?? [])
   const [toolkitLogosLoaded, setToolkitLogosLoaded] = useState(cachedToolkitLogosLoaded)
   const [connectionsSettingsOpen, setConnectionsSettingsOpen] = useState(false)
@@ -102,7 +102,7 @@ export function ToolConnectionsCard({ className }: { className?: string }) {
       <div className={cn('rounded-xl border border-border bg-card p-4', className)}>
         <div className="flex items-start gap-3">
           <div className="min-w-0 flex-1">
-            <div className="text-[13.5px] leading-snug">
+            <div className={cn('leading-snug', compact ? 'text-[12.5px]' : 'text-[13.5px]')}>
               <span className="text-muted-foreground">Bring context from and take action in the apps you already use.</span>
             </div>
             <div className="mt-3 flex min-h-5 flex-wrap items-center gap-1.5">
@@ -116,7 +116,10 @@ export function ToolConnectionsCard({ className }: { className?: string }) {
               <button
                 type="button"
                 onClick={() => setConnectionsSettingsOpen(true)}
-                className="ml-1 flex h-5 shrink-0 items-center gap-1 rounded-md px-1 text-[12px] font-medium text-primary hover:underline"
+                className={cn(
+                  'ml-1 flex h-5 shrink-0 items-center gap-1 rounded-md px-1 font-medium text-primary hover:underline',
+                  compact ? 'text-[11.5px]' : 'text-[12px]',
+                )}
               >
                 Connections
                 <ArrowRight className="size-3" />

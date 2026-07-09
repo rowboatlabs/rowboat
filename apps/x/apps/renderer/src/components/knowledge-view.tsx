@@ -188,7 +188,7 @@ export function KnowledgeView({
   const currentFolder = folderPath ? findNode(tree, folderPath) : null
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
+    <div className="flex h-full flex-col overflow-hidden bg-[#f8f8f9] dark:bg-[#0b0b0d]">
       <div className="mx-auto w-full max-w-[1120px] shrink-0 flex items-start justify-between gap-4 px-[30px] pt-[34px] pb-5">
         <div className="min-w-0">
           <h1 className="text-[24px] font-[650] tracking-[-0.02em] text-[#0d0e11] dark:text-[#f4f5f7]">Brain</h1>
@@ -250,7 +250,7 @@ export function KnowledgeView({
               {folders.length === 0 ? (
                 <EmptyState text="No folders yet." />
               ) : (
-                <div className="overflow-hidden rounded-xl border border-border">
+                <div className="overflow-hidden rounded-xl border border-black/15 dark:border-border">
                   {folders.map((node, i) => (
                     <div key={node.path} className={cn(i > 0 && 'border-t border-border/60')}>
                       <FolderCard
@@ -270,7 +270,7 @@ export function KnowledgeView({
               {looseNotes.length > 0 && (
                 <div className="mt-8">
                   <SectionHeader label={`Loose notes · ${looseNotes.length}`} />
-                  <div className="overflow-hidden rounded-xl border border-border">
+                  <div className="overflow-hidden rounded-xl border border-black/15 dark:border-border">
                     {looseNotes.map((node, i) => (
                       <div key={node.path} className={cn(i > 0 && 'border-t border-border/60')}>
                         <ItemRow
@@ -394,7 +394,7 @@ function QuickAction({
 function SectionHeader({ label, aside }: { label: string; aside?: string }) {
   return (
     <div className="mb-2.5 flex items-center justify-between">
-      <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+      <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
         {label}
       </span>
       {aside && <span className="text-xs text-muted-foreground">{aside}</span>}
@@ -568,7 +568,7 @@ function FolderDetail({
       {items.length === 0 ? (
         <EmptyState text="This folder is empty." />
       ) : (
-        <div className="overflow-hidden rounded-xl border border-border">
+        <div className="overflow-hidden rounded-xl border border-black/15 dark:border-border">
           {items.map((node, i) => (
             <div key={node.path} className={cn(i > 0 && 'border-t border-border/60')}>
               <ItemRow

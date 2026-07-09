@@ -884,7 +884,7 @@ function NoteRow({
 
   const row = (
     <tr
-      className="border-b border-border/50 hover:bg-accent/50 cursor-pointer transition-colors"
+      className="border-b border-black/10 dark:border-border/50 hover:bg-accent/50 cursor-pointer transition-colors"
       onClick={() => onSelectNote(note.path)}
     >
       {visibleColumns.map((col) => (

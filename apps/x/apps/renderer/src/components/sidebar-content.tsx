@@ -789,6 +789,14 @@ export function SidebarContentPanel({
                   )}
                 </SidebarMenuButton>
               </SidebarMenuItem>
+              {codeModeEnabled && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton data-tour-id="nav-code" isActive={activeNav === 'code'} onClick={onOpenCode}>
+                    <Code2 className="size-4 shrink-0" />
+                    <span className="flex-1 truncate">Code</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
               <SidebarMenuItem>
                 <SidebarMenuButton
                   data-tour-id="nav-meetings"
@@ -868,14 +876,6 @@ export function SidebarContentPanel({
                   </div>
                 ) : null}
               </SidebarMenuItem>
-              {codeModeEnabled && (
-                <SidebarMenuItem>
-                  <SidebarMenuButton data-tour-id="nav-code" isActive={activeNav === 'code'} onClick={onOpenCode}>
-                    <Code2 className="size-4 shrink-0" />
-                    <span className="flex-1 truncate">Code</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              )}
               <SidebarMenuItem>
                 <SidebarMenuButton
                   data-tour-id="nav-knowledge"

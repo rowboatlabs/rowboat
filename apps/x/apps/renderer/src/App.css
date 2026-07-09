@@ -1240,8 +1240,12 @@
 }
 
 .graph-view {
-  background-color: var(--background);
+  background-color: #f8f8f9;
   user-select: none;
+}
+
+.dark .graph-view {
+  background-color: #0b0b0d;
 }
 
 .graph-view::before {

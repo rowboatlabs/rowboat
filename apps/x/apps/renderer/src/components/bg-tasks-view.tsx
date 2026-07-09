@@ -1843,16 +1843,17 @@ export function BgTasksView({ onCreateWithCopilot, onEditWithCopilot, initialSlu
                                             </td>
                                             <td className="px-4 py-3">
                                                 {isRunning ? (
-                                                    <div className="flex items-center gap-2">
+                                                    <div className="flex flex-wrap items-center gap-2 pl-7">
                                                         <span className="inline-flex items-center gap-1.5 rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-foreground animate-pulse">
                                                             <Loader2 className="size-3 animate-spin" />
-                                                            Updating…
+                                                            Updating
                                                         </span>
                                                         <Button
                                                             variant="destructive"
                                                             size="sm"
                                                             onClick={() => handleStop(task.slug)}
                                                             disabled={isStopping}
+                                                            className="h-auto gap-1.5 rounded-md px-2 py-0.5 text-xs font-medium"
                                                         >
                                                             {isStopping ? <Loader2 className="size-3 animate-spin" /> : <Square className="size-3" />}
                                                             Stop
