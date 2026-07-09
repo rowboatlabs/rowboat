@@ -14,6 +14,8 @@ import {
     type ModelDescriptor,
     type ToolResultData,
     deriveTurnStatus,
+    inlineAgentId,
+    isInlineAgentRequest,
     reduceTurn,
 } from "@x/shared/dist/turns.js";
 import type { IMonotonicallyIncreasingIdGenerator } from "../application/lib/id-gen.js";
@@ -189,7 +191,9 @@ export class SessionsImpl implements ISessions {
                     ts: this.clock.now(),
                     turnId,
                     sessionSeq: state.turns.length + 1,
-                    agentId: config.agent.agentId,
+                    agentId: isInlineAgentRequest(config.agent)
+                        ? inlineAgentId(config.agent.inline.name)
+                        : config.agent.agentId,
                     model: await this.resolvedModelOf(turnId),
                 },
             ];

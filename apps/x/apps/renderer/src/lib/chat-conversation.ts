@@ -34,6 +34,8 @@ export interface ToolCall {
   // code_agent_run only: structured ACP stream items + the in-flight permission ask.
   codeRunEvents?: CodeRunEvent[]
   pendingCodePermission?: { requestId: string; ask: PermissionAsk } | null
+  // spawn-agent only: the durable parent→child link recorded as tool progress.
+  subAgent?: { childTurnId: string; agentName: string; task: string }
 }
 
 export interface ErrorMessage {
@@ -668,6 +670,7 @@ export const isToolGroup = (item: GroupedConversationItem): item is ToolGroup =>
 const isPlainToolCall = (item: ConversationItem): item is ToolCall => {
   if (!isToolCall(item)) return false
   if (item.name === 'code_agent_run') return false // rich standalone block, never grouped
+  if (item.name === 'spawn-agent') return false // rich standalone block, never grouped
   if (getWebSearchCardData(item)) return false
   if (getComposioConnectCardData(item)) return false
   if (getAppActionCardData(item)) return false

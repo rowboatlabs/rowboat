@@ -1,9 +1,9 @@
 import { z } from "zod";
 import type { Agent } from "@x/shared/dist/agent.js";
 import {
-    type JsonValue,
-    RequestedAgent,
+    AgentByIdRequest,
     ResolvedAgent,
+    SPAWN_AGENT_TOOL_NAME,
     type ToolDescriptor,
 } from "@x/shared/dist/turns.js";
 import {
@@ -14,7 +14,10 @@ import {
 } from "../../agents/runtime.js";
 import { BuiltinTools } from "../../application/lib/builtin-tools.js";
 import { getDefaultModelAndProvider } from "../../models/defaults.js";
-import type { IAgentResolver } from "../agent-resolver.js";
+import {
+    builtinToolDescriptor,
+    toJsonValue,
+} from "./builtin-descriptors.js";
 
 export const ASK_HUMAN_TOOL = "ask-human";
 
@@ -56,6 +59,9 @@ const CompositionOverrides = z.object({
     codeCwd: z.string().nullable().optional(),
     videoMode: z.boolean().optional(),
     coachMode: z.boolean().optional(),
+    // Set by spawn-agent for by-id children: strips the spawn tool so depth
+    // is capped at 1 regardless of which stored agent is spawned.
+    subagent: z.boolean().optional(),
 });
 
 export interface RealAgentResolverDeps {
@@ -69,8 +75,10 @@ export interface RealAgentResolverDeps {
 // Bridges the existing agent system (loadAgent + dynamic builders, the
 // BuiltinTools catalog, MCP attachments) to the immutable ResolvedAgent
 // snapshot. The composed system prompt is byte-identical to the old
-// runtime's streamAgent assembly for the same inputs.
-export class RealAgentResolver implements IAgentResolver {
+// runtime's streamAgent assembly for the same inputs. Resolves only the
+// by-id RequestedAgent variant; inline agents go through
+// InlineAgentResolver via DispatchingAgentResolver.
+export class RealAgentResolver {
     private readonly load: typeof loadAgent;
     private readonly builtins: typeof BuiltinTools;
     private readonly defaultModel: () => Promise<{ model: string; provider: string }>;
@@ -86,7 +94,7 @@ export class RealAgentResolver implements IAgentResolver {
     }
 
     async resolve(
-        requested: z.infer<typeof RequestedAgent>,
+        requested: z.infer<typeof AgentByIdRequest>,
     ): Promise<z.infer<typeof ResolvedAgent>> {
         const agent = await this.load(requested.agentId);
         if (!agent) {
@@ -127,7 +135,9 @@ export class RealAgentResolver implements IAgentResolver {
             coachMode: composition.coachMode ?? false,
         });
 
-        const tools = await this.resolveTools(agent);
+        const tools = await this.resolveTools(agent, {
+            subagent: composition.subagent ?? false,
+        });
         return ResolvedAgent.parse({
             agentId: requested.agentId,
             systemPrompt,
@@ -138,6 +148,7 @@ export class RealAgentResolver implements IAgentResolver {
 
     private async resolveTools(
         agent: z.infer<typeof Agent>,
+        options: { subagent: boolean },
     ): Promise<Array<z.infer<typeof ToolDescriptor>>> {
         const tools: Array<z.infer<typeof ToolDescriptor>> = [];
         for (const [name, attachment] of Object.entries(agent.tools ?? {})) {
@@ -161,6 +172,14 @@ export class RealAgentResolver implements IAgentResolver {
                 tools.push(ASK_HUMAN_DESCRIPTOR);
                 continue;
             }
+            // Depth cap: a spawned child never spawns, whichever stored
+            // agent it happens to be.
+            if (
+                options.subagent &&
+                attachment.name === SPAWN_AGENT_TOOL_NAME
+            ) {
+                continue;
+            }
             const builtin = this.builtins[attachment.name];
             if (!builtin) {
                 continue;
@@ -169,34 +188,10 @@ export class RealAgentResolver implements IAgentResolver {
                 continue;
             }
             tools.push({
-                toolId: `builtin:${attachment.name}`,
+                ...builtinToolDescriptor(attachment.name, builtin),
                 name,
-                description: builtin.description,
-                inputSchema: toJsonSchema(builtin.inputSchema),
-                execution: "sync",
-                requiresHuman: false,
             });
         }
         return tools;
-    }
-}
-
-function toJsonSchema(schema: unknown): JsonValue {
-    try {
-        return toJsonValue(z.toJSONSchema(schema as z.ZodType)) ?? {
-            type: "object",
-            properties: {},
-        };
-    } catch {
-        // An exotic zod schema must not break the whole turn.
-        return { type: "object", properties: {} };
-    }
-}
-
-function toJsonValue(value: unknown): JsonValue | undefined {
-    try {
-        return JSON.parse(JSON.stringify(value)) as JsonValue;
-    } catch {
-        return undefined;
     }
 }

@@ -33,6 +33,7 @@ import { AppsView } from '@/components/apps/apps-view';
 import { EmailView } from '@/components/email-view';
 import { WorkspaceView } from '@/components/workspace-view';
 import { CodingRunBlock } from '@/components/coding-run';
+import { SubAgentBlock } from '@/components/sub-agent-block';
 import { KnowledgeView, type KnowledgeViewMode } from '@/components/knowledge-view';
 import { GoogleDocPickerDialog } from '@/components/google-doc-picker-dialog';
 import { ChatHistoryView } from '@/components/chat-history-view';
@@ -5947,6 +5948,16 @@ function App() {
                 handleCodePermissionResponse(item.id, item.pendingCodePermission.requestId, decision)
               }
             }}
+          />
+        )
+      }
+      if (item.name === 'spawn-agent') {
+        return (
+          <SubAgentBlock
+            key={item.id}
+            item={item}
+            open={isToolOpenForTab(tabId, item.id)}
+            onOpenChange={(open) => setToolOpenForTab(tabId, item.id, open)}
           />
         )
       }

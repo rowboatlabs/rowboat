@@ -346,8 +346,24 @@ class TurnAdvance {
     }
 
     // Durable barrier: persist, re-reduce (the reducer doubles as a runtime
-    // assertion that the appended history is legal), then stream.
-    private async append(...batch: TEvent[]): Promise<void> {
+    // assertion that the appended history is legal), then stream. Commits are
+    // serialized through an internal queue so concurrently executing tools
+    // can never interleave the persist/reduce/stream ritual — file order,
+    // in-memory order, and stream order stay identical by construction.
+    private appendChain: Promise<void> = Promise.resolve();
+
+    private append(...batch: TEvent[]): Promise<void> {
+        const task = this.appendChain.then(() => this.commit(batch));
+        // A failed commit rejects for its caller only; the chain stays alive
+        // so other in-flight tools can still record their results.
+        this.appendChain = task.then(
+            () => undefined,
+            () => undefined,
+        );
+        return task;
+    }
+
+    private async commit(batch: TEvent[]): Promise<void> {
         await this.turnRepo.append(this.turnId, batch);
         this.events.push(...batch);
         this.state = reduceTurn(this.events);
@@ -741,8 +757,13 @@ class TurnAdvance {
         }
     }
 
-    // §10.5: execute allowed sync tools sequentially and expose allowed async
-    // tools, in source order. Tool failures are conversational, not terminal.
+    // §10.5: record invocations for allowed tools serially in source order,
+    // then execute the sync ones concurrently (async tools are exposed by
+    // their invocation; results arrive through advanceTurn). Invocations are
+    // durable before any execution starts, and commits are serialized by
+    // append's internal queue, so the log prefix is deterministic while
+    // results land in completion order. Tool failures are conversational,
+    // not terminal.
     private async executeAllowedTools(): Promise<void> {
         const executable = this.state.toolCalls.filter(
             (tc) =>
@@ -751,8 +772,11 @@ class TurnAdvance {
                 (this.checkerAllowed.has(tc.toolCallId) ||
                     tc.permission?.resolved?.decision === "allow"),
         );
+        const started: Array<{ tc: ToolCallState; tool: SyncRuntimeTool }> = [];
         for (const tc of executable) {
             if (this.signal.aborted) {
+                // Invoked-but-unexecuted calls get their cancelled results
+                // from cancel(), same as before this loop ran.
                 return;
             }
             const tool = this.toolsByName.get(tc.toolName);
@@ -771,52 +795,63 @@ class TurnAdvance {
             if (tool.descriptor.execution === "async") {
                 continue; // exposed; the result arrives through advanceTurn
             }
-            const syncTool = tool as SyncRuntimeTool;
-            try {
-                const result = await syncTool.execute(tc.input, {
-                    turnId: this.turnId,
-                    toolCallId: tc.toolCallId,
-                    signal: this.signal,
-                    reportProgress: async (progress) => {
-                        await this.append({
-                            type: "tool_progress",
-                            turnId: this.turnId,
-                            ts: this.now(),
-                            toolCallId: tc.toolCallId,
-                            source: "sync",
-                            progress,
-                        });
-                    },
-                });
-                await this.append({
-                    type: "tool_result",
-                    turnId: this.turnId,
-                    ts: this.now(),
-                    toolCallId: tc.toolCallId,
-                    toolName: tc.toolName,
-                    source: "sync",
-                    result: ToolResultData.parse(result),
-                });
-            } catch (error) {
-                if (this.signal.aborted) {
-                    await this.append(
-                        runtimeResultEvent(this.turnId, this.now(), tc, {
-                            output: "Tool execution was cancelled.",
-                            isError: true,
-                        }),
-                    );
-                    return;
-                }
-                await this.append({
-                    type: "tool_result",
-                    turnId: this.turnId,
-                    ts: this.now(),
-                    toolCallId: tc.toolCallId,
-                    toolName: tc.toolName,
-                    source: "sync",
-                    result: { output: errorMessage(error), isError: true },
-                });
+            started.push({ tc, tool: tool as SyncRuntimeTool });
+        }
+        // Each task settles its own call (result or error), so Promise.all
+        // never rejects and one slow tool never blocks its siblings.
+        await Promise.all(
+            started.map(({ tc, tool }) => this.executeSyncTool(tc, tool)),
+        );
+    }
+
+    private async executeSyncTool(
+        tc: ToolCallState,
+        syncTool: SyncRuntimeTool,
+    ): Promise<void> {
+        try {
+            const result = await syncTool.execute(tc.input, {
+                turnId: this.turnId,
+                toolCallId: tc.toolCallId,
+                signal: this.signal,
+                reportProgress: async (progress) => {
+                    await this.append({
+                        type: "tool_progress",
+                        turnId: this.turnId,
+                        ts: this.now(),
+                        toolCallId: tc.toolCallId,
+                        source: "sync",
+                        progress,
+                    });
+                },
+            });
+            await this.append({
+                type: "tool_result",
+                turnId: this.turnId,
+                ts: this.now(),
+                toolCallId: tc.toolCallId,
+                toolName: tc.toolName,
+                source: "sync",
+                result: ToolResultData.parse(result),
+            });
+        } catch (error) {
+            if (this.signal.aborted) {
+                await this.append(
+                    runtimeResultEvent(this.turnId, this.now(), tc, {
+                        output: "Tool execution was cancelled.",
+                        isError: true,
+                    }),
+                );
+                return;
             }
+            await this.append({
+                type: "tool_result",
+                turnId: this.turnId,
+                ts: this.now(),
+                toolCallId: tc.toolCallId,
+                toolName: tc.toolName,
+                source: "sync",
+                result: { output: errorMessage(error), isError: true },
+            });
         }
     }
 

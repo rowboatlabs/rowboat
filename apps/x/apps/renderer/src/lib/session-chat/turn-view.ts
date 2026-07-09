@@ -241,6 +241,33 @@ function codeRunViewOf(
   }
 }
 
+// spawn-agent's durable trail in tool_progress: one 'subagent' entry recorded
+// the moment the child turn exists (see the spawn-agent branch in
+// real-tool-registry.ts). It is the parent→child link the card uses to fetch
+// and render the child transcript.
+function subAgentViewOf(tc: ToolCallState): Pick<ToolCall, 'subAgent'> {
+  for (const p of tc.progress) {
+    const entry = p.progress
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
+    const { kind, childTurnId, agentName, task } = entry as {
+      kind?: unknown
+      childTurnId?: unknown
+      agentName?: unknown
+      task?: unknown
+    }
+    if (kind === 'subagent' && typeof childTurnId === 'string') {
+      return {
+        subAgent: {
+          childTurnId,
+          agentName: typeof agentName === 'string' ? agentName : 'subagent',
+          task: typeof task === 'string' ? task : '',
+        },
+      }
+    }
+  }
+  return {}
+}
+
 // One turn's contribution to the conversation: the user input, then per
 // completed model call its text and tool calls (with live status/results).
 export function buildTurnConversation(state: TurnState): ConversationItem[] {
@@ -295,6 +322,7 @@ export function buildTurnConversation(state: TurnState): ConversationItem[] {
           status: tc ? toolStatus(tc) : 'running',
           timestamp: ts(),
           ...(tc ? codeRunViewOf(tc) : {}),
+          ...(tc ? subAgentViewOf(tc) : {}),
         } satisfies ToolCall)
       }
     }

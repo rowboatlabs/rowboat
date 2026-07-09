@@ -1,6 +1,7 @@
 import type { z } from "zod";
 import type { AssistantMessage } from "@x/shared/dist/message.js";
 import {
+    type RequestedAgent,
     reduceTurn,
     type TurnState,
 } from "@x/shared/dist/turns.js";
@@ -26,7 +27,10 @@ export class HeadlessRunError extends Error {
 }
 
 export interface HeadlessAgentOptions {
-    agentId: string;
+    agentId?: string;
+    // Full agent request, used verbatim when set (inline agents, composition
+    // overrides). Takes precedence over agentId/model/provider.
+    agent?: z.infer<typeof RequestedAgent>;
     message: string;
     // Model id; when set without provider, the app-default provider applies.
     model?: string;
@@ -121,22 +125,29 @@ export class HeadlessAgentRunner implements IHeadlessAgentRunner {
     }
 
     async start(options: HeadlessAgentOptions): Promise<HeadlessAgentHandle> {
-        let modelOverride: { provider: string; model: string } | undefined;
-        if (options.model && options.provider) {
-            modelOverride = { provider: options.provider, model: options.model };
-        } else if (options.model || options.provider) {
-            const defaults = await this.defaultModelResolver.resolve();
-            modelOverride = {
-                provider: options.provider ?? defaults.provider,
-                model: options.model ?? defaults.model,
+        let agent = options.agent;
+        if (!agent) {
+            if (!options.agentId) {
+                throw new Error("headless agent needs an agentId or an agent request");
+            }
+            let modelOverride: { provider: string; model: string } | undefined;
+            if (options.model && options.provider) {
+                modelOverride = { provider: options.provider, model: options.model };
+            } else if (options.model || options.provider) {
+                const defaults = await this.defaultModelResolver.resolve();
+                modelOverride = {
+                    provider: options.provider ?? defaults.provider,
+                    model: options.model ?? defaults.model,
+                };
+            }
+            agent = {
+                agentId: options.agentId,
+                ...(modelOverride ? { overrides: { model: modelOverride } } : {}),
             };
         }
 
         const turnId = await this.turnRuntime.createTurn({
-            agent: {
-                agentId: options.agentId,
-                ...(modelOverride ? { overrides: { model: modelOverride } } : {}),
-            },
+            agent,
             sessionId: null,
             context: [],
             input: { role: "user", content: options.message },

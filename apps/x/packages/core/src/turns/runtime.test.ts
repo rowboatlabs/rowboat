@@ -1757,3 +1757,317 @@ describe("tool progress", () => {
         ]);
     });
 });
+
+describe("concurrent sync tool execution (10.5)", () => {
+    const slowDescriptor: z.infer<typeof ToolDescriptor> = {
+        toolId: "tool.slow",
+        name: "slow",
+        description: "Slow tool",
+        inputSchema: {},
+        execution: "sync",
+        requiresHuman: false,
+    };
+    const fastDescriptor: z.infer<typeof ToolDescriptor> = {
+        toolId: "tool.fast",
+        name: "fast",
+        description: "Fast tool",
+        inputSchema: {},
+        execution: "sync",
+        requiresHuman: false,
+    };
+    const agent: z.infer<typeof ResolvedAgent> = {
+        ...defaultAgent,
+        tools: [slowDescriptor, fastDescriptor],
+    };
+
+    it("executes a batch concurrently: invocations in source order, results in completion order", async () => {
+        // slow (first in source order) only finishes after fast has fully
+        // completed AND reported progress. Under the old sequential loop this
+        // deadlocks (fast never starts), so settling at all proves overlap.
+        const order: string[] = [];
+        let releaseSlow!: () => void;
+        const slowGate = new Promise<void>((resolve) => {
+            releaseSlow = resolve;
+        });
+        const tools: RuntimeTool[] = [
+            syncTool(slowDescriptor, async () => {
+                order.push("slow:start");
+                await slowGate;
+                order.push("slow:end");
+                return { output: "slow-done", isError: false };
+            }),
+            syncTool(fastDescriptor, async (_input, ctx) => {
+                order.push("fast:start");
+                await ctx.reportProgress({ note: "while slow is pending" });
+                order.push("fast:end");
+                releaseSlow();
+                return { output: "fast-done", isError: false };
+            }),
+        ];
+        const { runtime, repo, models } = makeRuntime({
+            agent,
+            tools,
+            models: [
+                respond(
+                    completedResp(
+                        assistantCalls(
+                            toolCallPart("S", "slow"),
+                            toolCallPart("F", "fast"),
+                        ),
+                    ),
+                ),
+                respond(completedResp(assistantText("done"))),
+            ],
+        });
+        const turnId = await newTurn(runtime);
+        const { outcome } = await advanceAndSettle(runtime, turnId);
+        expect(outcome?.status).toBe("completed");
+        expect(order).toEqual(["slow:start", "fast:start", "fast:end", "slow:end"]);
+
+        // The log stays legal under interleaving: both invocations precede
+        // any result (source order), fast's progress and result land while
+        // slow is still open, and the reducer accepts the whole history.
+        const log = await persisted(repo, turnId);
+        expect(typesOf(log)).toEqual([
+            "turn_created",
+            "model_call_requested",
+            "model_call_completed",
+            "tool_invocation_requested",
+            "tool_invocation_requested",
+            "tool_progress",
+            "tool_result",
+            "tool_result",
+            "model_call_requested",
+            "model_call_completed",
+            "turn_completed",
+        ]);
+        const invocations = log.filter(
+            (e) => e.type === "tool_invocation_requested",
+        );
+        expect(invocations.map((e) => e.toolCallId)).toEqual(["S", "F"]);
+        const results = log.filter((e) => e.type === "tool_result");
+        expect(results.map((e) => e.toolCallId)).toEqual(["F", "S"]);
+        const state = reduceTurn(log);
+        expect(state.toolCalls.map((tc) => tc.result?.result.output)).toEqual([
+            "slow-done",
+            "fast-done",
+        ]);
+
+        // Wire ordering is insulated from completion order: the follow-up
+        // request references tool results in the assistant message's source
+        // order, and the composed payload sends them in that order.
+        const followUp = log.find(
+            (e) => e.type === "model_call_requested" && e.modelCallIndex === 1,
+        );
+        expect(followUp).toMatchObject({
+            request: {
+                messages: ["assistant:0", "toolResult:S", "toolResult:F"],
+            },
+        });
+        const sent = sentMessages(models.requests[1]);
+        expect(
+            sent
+                .filter((m) => m.role === "tool")
+                .map((m) => (m as { toolCallId?: string }).toolCallId),
+        ).toEqual(["S", "F"]);
+    });
+
+    it("one tool's failure never disturbs its concurrent siblings", async () => {
+        let releaseSlow!: () => void;
+        const slowGate = new Promise<void>((resolve) => {
+            releaseSlow = resolve;
+        });
+        const tools: RuntimeTool[] = [
+            syncTool(slowDescriptor, async () => {
+                await slowGate;
+                return { output: "slow-done", isError: false };
+            }),
+            syncTool(fastDescriptor, async () => {
+                releaseSlow();
+                throw new Error("fast exploded");
+            }),
+        ];
+        const { runtime, repo } = makeRuntime({
+            agent,
+            tools,
+            models: [
+                respond(
+                    completedResp(
+                        assistantCalls(
+                            toolCallPart("S", "slow"),
+                            toolCallPart("F", "fast"),
+                        ),
+                    ),
+                ),
+                respond(completedResp(assistantText("done"))),
+            ],
+        });
+        const turnId = await newTurn(runtime);
+        const { outcome } = await advanceAndSettle(runtime, turnId);
+        expect(outcome?.status).toBe("completed");
+        const log = await persisted(repo, turnId);
+        const byId = new Map(
+            log
+                .filter((e) => e.type === "tool_result")
+                .map((e) => [e.toolCallId, e]),
+        );
+        expect(byId.get("F")).toMatchObject({
+            result: { output: "fast exploded", isError: true },
+        });
+        expect(byId.get("S")).toMatchObject({
+            result: { output: "slow-done", isError: false },
+        });
+    });
+
+    it("cancellation mid-batch settles every in-flight tool", async () => {
+        const controller = new AbortController();
+        const started: string[] = [];
+        function hangingTool(name: string) {
+            return async (
+                _input: unknown,
+                ctx: ToolExecutionContext,
+            ): Promise<{ output: string; isError: boolean }> => {
+                started.push(name);
+                if (started.length === 2) {
+                    controller.abort();
+                }
+                await new Promise<void>((resolve) => {
+                    if (ctx.signal.aborted) {
+                        resolve();
+                    } else {
+                        ctx.signal.addEventListener("abort", () => resolve(), {
+                            once: true,
+                        });
+                    }
+                });
+                throw new Error("aborted");
+            };
+        }
+        const tools: RuntimeTool[] = [
+            syncTool(slowDescriptor, hangingTool("slow")),
+            syncTool(fastDescriptor, hangingTool("fast")),
+        ];
+        const { runtime, repo } = makeRuntime({
+            agent,
+            tools,
+            models: [
+                respond(
+                    completedResp(
+                        assistantCalls(
+                            toolCallPart("S", "slow"),
+                            toolCallPart("F", "fast"),
+                        ),
+                    ),
+                ),
+            ],
+        });
+        const turnId = await newTurn(runtime);
+        const { outcome } = await advanceAndSettle(runtime, turnId, undefined, {
+            signal: controller.signal,
+        });
+        expect(outcome?.status).toBe("cancelled");
+        expect(started).toEqual(["slow", "fast"]);
+        const log = await persisted(repo, turnId);
+        const results = log.filter((e) => e.type === "tool_result");
+        expect(results).toHaveLength(2);
+        for (const result of results) {
+            expect(result).toMatchObject({
+                result: {
+                    output: "Tool execution was cancelled.",
+                    isError: true,
+                },
+            });
+        }
+        expect(typesOf(log)).toContain("turn_cancelled");
+    });
+
+    it("recovers a crash that left multiple sync invocations open", async () => {
+        const SEED_ID = "2026-07-02T10-00-00Z-0000001-000";
+        const repo = new InMemoryTurnRepo();
+        const batch = assistantCalls(
+            toolCallPart("S", "slow"),
+            toolCallPart("F", "fast"),
+        );
+        repo.seed([
+            {
+                type: "turn_created",
+                schemaVersion: 1,
+                turnId: SEED_ID,
+                ts: TS,
+                sessionId: null,
+                agent: { requested: { agentId: "copilot" }, resolved: agent },
+                context: [],
+                input: user("hello"),
+                config: {
+                    autoPermission: false,
+                    humanAvailable: true,
+                    maxModelCalls: 20,
+                },
+            },
+            {
+                type: "model_call_requested",
+                turnId: SEED_ID,
+                ts: TS,
+                modelCallIndex: 0,
+                request: { messages: ["input"], parameters: {} },
+            },
+            {
+                type: "model_call_completed",
+                turnId: SEED_ID,
+                ts: TS,
+                modelCallIndex: 0,
+                message: batch,
+                finishReason: "stop",
+                usage: {},
+            },
+            {
+                type: "tool_invocation_requested",
+                turnId: SEED_ID,
+                ts: TS,
+                toolCallId: "S",
+                toolId: "tool.slow",
+                toolName: "slow",
+                execution: "sync",
+                input: {},
+            },
+            {
+                type: "tool_invocation_requested",
+                turnId: SEED_ID,
+                ts: TS,
+                toolCallId: "F",
+                toolId: "tool.fast",
+                toolName: "fast",
+                execution: "sync",
+                input: {},
+            },
+        ]);
+        const { runtime } = makeRuntime({
+            repo,
+            agent,
+            tools: [
+                syncTool(slowDescriptor, async () => ({
+                    output: "never",
+                    isError: false,
+                })),
+                syncTool(fastDescriptor, async () => ({
+                    output: "never",
+                    isError: false,
+                })),
+            ],
+            models: [respond(completedResp(assistantText("done")))],
+        });
+        const { outcome } = await advanceAndSettle(runtime, SEED_ID);
+        expect(outcome?.status).toBe("completed");
+        const log = await persisted(repo, SEED_ID);
+        const indeterminate = log.filter(
+            (e) =>
+                e.type === "tool_result" &&
+                e.source === "runtime" &&
+                e.result.isError === true,
+        );
+        expect(indeterminate.map((e) => (e as { toolCallId: string }).toolCallId).sort()).toEqual([
+            "F",
+            "S",
+        ]);
+    });
+});

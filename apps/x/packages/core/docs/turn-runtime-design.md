@@ -154,9 +154,18 @@ semantics after ambiguous interruptions.
 Tool calls may complete in any order. The next model request must always contain
 tool results in the original order emitted by the model.
 
-The initial implementation may execute sync tools sequentially for simplicity.
-Async tools naturally complete independently. No behavior may rely on physical
-completion order.
+Sync tools in one batch execute concurrently: invocation events are appended
+serially in source order before any execution starts, then all sync executions
+run at once, each appending its progress and result as it lands. Result order
+in the log is therefore physical completion order and is not deterministic
+across runs; any given log still replays deterministically. Async tools
+naturally complete independently. No behavior may rely on physical completion
+order.
+
+Durable appends are serialized through a single internal queue per invocation:
+the persist → reduce → stream ritual runs to completion for one batch of
+events before the next begins, so file order, in-memory order, and stream
+order are identical by construction even while executions overlap.
 
 ## 5. Storage design
 
@@ -904,7 +913,12 @@ For one completed assistant response:
 2. Determine permission requirements.
 3. Apply automatic permission decisions when enabled.
 4. Advance each tool independently as its permission is resolved.
-5. Execute allowed sync tools using a simple sequential policy initially.
+5. Record invocations for allowed tools serially in source order (sync and
+   async alike), then execute all allowed sync tools concurrently. There is
+   no concurrency cap and no per-tool serialization; tools that share state
+   must tolerate racing (or reject stale operations, as file edits do via
+   their search/replace precondition). Secondary kill-path state (the abort
+   registry) is scoped per tool call, never per turn.
 6. Expose allowed async tool requests.
 7. Suspend when any permissions or async results remain outstanding.
 8. Once all calls have terminal results, build the next model request with
@@ -1880,6 +1894,17 @@ The main loop treats agent tools as ordinary sync or async tools. A dedicated
 tool handler may create and execute child turns, forward progress, and return a
 parent tool result. No subflow or parent-turn concept is added to this initial
 turn schema.
+
+Implemented (v1) as the `spawn-agent` builtin: a sync tool whose handler
+(`RealToolRegistry`) runs the child as a standalone headless turn
+(`runSpawnedAgent`), records `{kind: "subagent", childTurnId}` as durable
+tool progress (the only parent→child link), and returns the child's final
+text plus a status envelope. `RequestedAgent` is a union of by-id and inline
+variants; inline agents resolve through `InlineAgentResolver`. Depth is
+capped at 1: both resolvers strip the spawn tool from children, and the
+handler refuses child-shaped parents. Parallel fan-out comes from concurrent
+sync-tool execution (§10.5), not from async suspension; async (restart
+survivability for long children) remains future work.
 
 ### 29.3 Reliability enhancements
 

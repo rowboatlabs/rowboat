@@ -309,6 +309,49 @@ describe('buildTurnConversation', () => {
     expect(settled.status).toBe('completed')
   })
 
+  it('derives the sub-agent child link from spawn-agent progress', () => {
+    const state = reduceTurn([
+      created(T1, S1),
+      requested(T1, 0),
+      completed(
+        T1,
+        0,
+        assistantCalls(
+          toolCallPart('sa1', 'spawn-agent', { task: 'research X', instructions: 'You research.' }),
+        ),
+      ),
+      invocation(T1, 'sa1', 'spawn-agent'),
+      {
+        type: 'tool_progress',
+        turnId: T1,
+        ts: TS,
+        toolCallId: 'sa1',
+        source: 'sync',
+        progress: {
+          kind: 'subagent',
+          childTurnId: 'child-turn-1',
+          agentName: 'researcher',
+          task: 'research X',
+        } as never,
+      },
+    ])
+    const tool = buildTurnConversation(state).filter(isToolCall)[0]
+    expect(tool.subAgent).toEqual({
+      childTurnId: 'child-turn-1',
+      agentName: 'researcher',
+      task: 'research X',
+    })
+
+    // Without the progress entry the link is simply absent.
+    const bare = reduceTurn([
+      created(T1, S1),
+      requested(T1, 0),
+      completed(T1, 0, assistantCalls(toolCallPart('sa2', 'spawn-agent', { task: 't' }))),
+      invocation(T1, 'sa2', 'spawn-agent'),
+    ])
+    expect(buildTurnConversation(bare).filter(isToolCall)[0].subAgent).toBeUndefined()
+  })
+
   it('renders user attachments and a failed turn as an error item', () => {
     const input = {
       role: 'user' as const,
