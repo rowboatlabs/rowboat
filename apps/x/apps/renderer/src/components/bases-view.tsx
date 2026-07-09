@@ -466,7 +466,7 @@ export function BasesView({ tree, onSelectNote, config, onConfigChange, isDefaul
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       {/* Toolbar */}
-      <div className="shrink-0 border-b border-border px-4 py-2 flex items-center gap-3">
+      <div className="shrink-0 border-b border-border pr-4 py-2 flex items-center gap-3">
         <Popover>
           <PopoverTrigger asChild>
             <button className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">

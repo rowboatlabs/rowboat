@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ArrowRight, Plug } from 'lucide-react'
+import { ArrowRight } from 'lucide-react'
 
 import { SettingsDialog } from '@/components/settings-dialog'
 import { cn } from '@/lib/utils'
@@ -101,9 +101,6 @@ export function ToolConnectionsCard({ className }: { className?: string }) {
     <>
       <div className={cn('rounded-xl border border-border bg-card p-4', className)}>
         <div className="flex items-start gap-3">
-          <div className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-muted text-muted-foreground">
-            <Plug className="size-[14px]" />
-          </div>
           <div className="min-w-0 flex-1">
             <div className="text-[13.5px] leading-snug">
               <span className="text-muted-foreground">Bring context from and take action in the apps you already use.</span>

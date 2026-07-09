@@ -58,8 +58,8 @@ const CARD_CSS = `
   --ma-pat-opacity:0.05; --ma-glow-opacity:0.10; --ma-glow-hover-opacity:0.16;
   --ma-badge-mix:15%; --ma-pill-mix:13%; --ma-tint:20%; --ma-tint-hover:26%;
 }
-.ma-inner { max-width:1120px; margin:0 auto; padding:clamp(20px,3.5cqw,34px) clamp(16px,3cqw,30px) 48px; }
-.ma-h1 { font-size:clamp(19px,2.6cqw,24px); font-weight:650; letter-spacing:-0.02em; color:var(--ma-h1); margin:0 0 4px; }
+.ma-inner { max-width:1120px; margin:0 auto; padding:34px 30px 48px; }
+.ma-h1 { font-size:24px; font-weight:650; letter-spacing:-0.02em; color:var(--ma-h1); margin:0 0 4px; }
 .ma-sub { font-size:clamp(13px,1.5cqw,14px); color:var(--ma-sub); margin:0 0 clamp(14px,2cqw,20px); }
 .ma-tabs { display:flex; gap:6px; margin-bottom:clamp(14px,2cqw,22px); }
 .ma-tab { border:1px solid var(--ma-border); background:transparent; color:var(--ma-sub); border-radius:999px; padding:5px 14px; font-size:13px; font-weight:600; cursor:pointer; }

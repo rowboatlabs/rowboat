@@ -892,6 +892,16 @@ export function SidebarContentPanel({
             <SidebarMenu>
               <SidebarMenuItem>
                 <SidebarMenuButton
+                  data-tour-id="nav-apps"
+                  isActive={activeNav === 'apps'}
+                  onClick={onOpenApps}
+                >
+                  <LayoutGrid className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="flex-1 truncate text-muted-foreground">Apps</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
                   data-tour-id="nav-agents"
                   isActive={activeNav === 'agents'}
                   onClick={onOpenBgTasks}
@@ -909,16 +919,6 @@ export function SidebarContentPanel({
                       </span>
                     )}
                   </div>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  data-tour-id="nav-apps"
-                  isActive={activeNav === 'apps'}
-                  onClick={onOpenApps}
-                >
-                  <LayoutGrid className="size-4 shrink-0 text-muted-foreground" />
-                  <span className="flex-1 truncate text-muted-foreground">Apps</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
