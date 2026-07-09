@@ -8,7 +8,6 @@ import {
   Folder as FolderIcon,
   FolderOpen,
   FolderPlus,
-  Home,
   Loader2,
   MessageSquare,
   Pencil,
@@ -365,19 +364,18 @@ export function WorkspaceView({ tree, initialPath, actions, onNavigate, onOpenNo
   }, [newName, onCreateWorkspace, resetAddDialog])
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
-      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-6 py-4">
+    <div className="flex h-full flex-col overflow-hidden bg-[#f8f8f9] dark:bg-[#0b0b0d]">
+      <div className="mx-auto flex w-full max-w-[1120px] shrink-0 items-center justify-between gap-3 pl-[22px] pr-[30px] pt-[30px] pb-4">
         <div className="flex min-w-0 items-center gap-1 text-sm">
           <button
             type="button"
             onClick={() => onNavigate(WORKSPACE_ROOT)}
             className={cn(
-              'inline-flex items-center gap-1.5 rounded-md px-2 py-1 transition-colors',
-              isRoot ? 'text-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-accent',
+              'inline-flex items-center rounded-md px-2 py-1 transition-colors',
+              isRoot ? 'text-[#0d0e11] dark:text-[#f4f5f7]' : 'text-muted-foreground hover:text-foreground hover:bg-accent',
             )}
           >
-            <Home className="size-4" />
-            <span className="font-medium">Workspace</span>
+            <span className="text-[24px] font-[650] tracking-[-0.02em]">Workspace</span>
           </button>
           {breadcrumbs.map((crumb, idx) => {
             const isLast = idx === breadcrumbs.length - 1
@@ -482,12 +480,13 @@ export function WorkspaceView({ tree, initialPath, actions, onNavigate, onOpenNo
 
       <div className="flex flex-1 overflow-hidden">
       <div
-        className="relative flex-1 overflow-y-auto px-6 py-6"
+        className="relative flex-1 overflow-y-auto"
         onDragEnter={handleDragEnter}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
+        <div className="mx-auto h-full w-full max-w-[1120px] px-[30px] py-6">
         {items.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-muted-foreground">
             <FolderIcon className="size-10 opacity-50" />
@@ -594,6 +593,7 @@ export function WorkspaceView({ tree, initialPath, actions, onNavigate, onOpenNo
             })}
           </div>
         )}
+        </div>
 
         {dropEnabled && isDraggingOver && (
           <div className="pointer-events-none absolute inset-3 z-10 flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-primary/60 bg-primary/5 text-primary">

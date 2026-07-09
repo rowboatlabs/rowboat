@@ -15,7 +15,11 @@ import {
   Home,
   LayoutGrid,
   Mic,
+  MoreVertical,
+  Pencil,
+  Pin,
   SquarePen,
+  Trash2,
   Plug,
   LoaderIcon,
   Mail,
@@ -61,6 +65,12 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
 import { isOutOfCredits, CREDIT_EXHAUSTED_EVENT, CREDIT_REPLENISHED_EVENT } from "@/lib/credit-status"
 import { SettingsDialog } from "@/components/settings-dialog"
@@ -127,6 +137,8 @@ type ServiceEventType = z.infer<typeof ServiceEvent>
 
 const MAX_SYNC_EVENTS = 1000
 const RUN_STALE_MS = 2 * 60 * 60 * 1000
+const PINNED_CHATS_STORAGE_KEY = 'x:pinned-chats'
+const MAX_PINNED_CHATS = 3
 
 const SERVICE_LABELS: Record<string, string> = {
   gmail: "Syncing Gmail",
@@ -171,6 +183,10 @@ type SidebarContentPanelProps = {
   onOpenAgent?: (slug: string) => void
   recentRuns?: { id: string; title?: string; createdAt: string; modifiedAt?: string }[]
   onOpenRun?: (runId: string) => void
+  /** Persist a custom chat title (sessions:setTitle) and refresh the runs list. */
+  onRenameRun?: (runId: string, title: string) => void
+  /** Delete the chat's session (sessions:delete) and refresh the runs list. */
+  onDeleteRun?: (runId: string) => void
   onOpenChatHistory?: () => void
   onOpenEmail?: (threadId?: string) => void
   onOpenHome?: () => void
@@ -422,6 +438,8 @@ export function SidebarContentPanel({
   onOpenApps,
   recentRuns = [],
   onOpenRun,
+  onRenameRun,
+  onDeleteRun,
   onOpenChatHistory,
   onOpenEmail,
   onOpenHome,
@@ -548,16 +566,54 @@ export function SidebarContentPanel({
       .slice(0, 10)
   }, [tree])
 
-  // Chats: the 5 most recently modified chats, newest first.
+  // Pinned chats: a per-machine UI preference, persisted in localStorage.
+  const [pinnedChatIds, setPinnedChatIds] = useState<string[]>(() => {
+    try {
+      const raw = window.localStorage.getItem(PINNED_CHATS_STORAGE_KEY)
+      const parsed: unknown = raw ? JSON.parse(raw) : []
+      return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : []
+    } catch {
+      return []
+    }
+  })
+  const toggleChatPin = useCallback((chatId: string) => {
+    const isPinned = pinnedChatIds.includes(chatId)
+    if (!isPinned && pinnedChatIds.length >= MAX_PINNED_CHATS) {
+      toast(`You can pin up to ${MAX_PINNED_CHATS} chats`, 'error')
+      return
+    }
+    const next = isPinned ? pinnedChatIds.filter((id) => id !== chatId) : [...pinnedChatIds, chatId]
+    try {
+      window.localStorage.setItem(PINNED_CHATS_STORAGE_KEY, JSON.stringify(next))
+    } catch { /* ignore */ }
+    setPinnedChatIds(next)
+  }, [pinnedChatIds])
+
+  // Chats: pinned first, then the most recently modified, 10 rows total.
   const recentChats = React.useMemo(() => {
     const chatRecency = (r: { createdAt: string; modifiedAt?: string }) => {
       const ms = new Date(r.modifiedAt ?? r.createdAt).getTime()
       return Number.isFinite(ms) ? ms : 0
     }
-    return [...recentRuns]
-      .sort((a, b) => chatRecency(b) - chatRecency(a))
-      .slice(0, 10)
-  }, [recentRuns])
+    const sorted = [...recentRuns].sort((a, b) => chatRecency(b) - chatRecency(a))
+    const pinned = sorted.filter((r) => pinnedChatIds.includes(r.id))
+    const rest = sorted.filter((r) => !pinnedChatIds.includes(r.id))
+    return [...pinned, ...rest.slice(0, Math.max(0, 10 - pinned.length))]
+  }, [recentRuns, pinnedChatIds])
+
+  // Chat pending delete confirmation, if any.
+  const [deleteChatTarget, setDeleteChatTarget] = useState<{ id: string; title: string } | null>(null)
+
+  // Inline chat rename: which row is editing and its draft text.
+  const [renamingChatId, setRenamingChatId] = useState<string | null>(null)
+  const [renameDraft, setRenameDraft] = useState('')
+  const commitChatRename = useCallback((chatId: string) => {
+    const title = renameDraft.trim()
+    const current = recentChats.find((c) => c.id === chatId)
+    setRenamingChatId(null)
+    if (!title || title === (current?.title ?? '')) return
+    onRenameRun?.(chatId, title)
+  }, [renameDraft, recentChats, onRenameRun])
 
   // Workspace count for the Workspaces sublabel — top-level dir children of
   // knowledge/Workspace (matches WorkspaceView's root listing).
@@ -737,9 +793,16 @@ export function SidebarContentPanel({
         {/* Top spacer to clear the traffic lights + fixed toggle row */}
         <div className="h-8" />
         {/* Quick actions */}
-        <div className="titlebar-no-drag flex items-center gap-1.5 px-3 pb-2">
+        <div className="titlebar-no-drag flex items-center gap-1 pl-3 pr-6 pb-2">
           {onNewChat && (
-            <ActionButton icon={SquarePen} label="New chat" onClick={onNewChat} />
+            <button
+              type="button"
+              onClick={onNewChat}
+              className="flex h-8 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md border border-sidebar-border text-[13px] font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+            >
+              <SquarePen className="size-3.5" />
+              New chat
+            </button>
           )}
           <ActionButton icon={FilePlus} label="New note" onClick={() => knowledgeActions.createNote()} />
           <VoiceNoteButton onNoteCreated={onVoiceNoteCreated} variant="action" />
@@ -764,9 +827,9 @@ export function SidebarContentPanel({
                   data-tour-id="nav-email"
                   isActive={activeNav === 'email'}
                   onClick={() => onOpenEmail?.()}
-                  className={previewEmail ? 'h-auto py-1.5' : undefined}
+                  className={previewEmail ? 'h-auto items-start py-1.5' : undefined}
                 >
-                  <Mail className="size-4 shrink-0" />
+                  <Mail className={cn('size-4 shrink-0', previewEmail && 'mt-0.5')} />
                   <div className="flex min-w-0 flex-1 flex-col">
                     <span className="truncate">Email</span>
                     {previewEmail && (
@@ -782,14 +845,22 @@ export function SidebarContentPanel({
                   )}
                 </SidebarMenuButton>
               </SidebarMenuItem>
+              {codeModeEnabled && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton data-tour-id="nav-code" isActive={activeNav === 'code'} onClick={onOpenCode}>
+                    <Code2 className="size-4 shrink-0" />
+                    <span className="flex-1 truncate">Code</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
               <SidebarMenuItem>
                 <SidebarMenuButton
                   data-tour-id="nav-meetings"
                   isActive={activeNav === 'meetings'}
                   onClick={onOpenMeetings}
-                  className={meetingSublabel ? 'h-auto py-1.5' : undefined}
+                  className={meetingSublabel ? 'h-auto items-start py-1.5' : undefined}
                 >
-                  <Mic className={cn('size-4 shrink-0', meetingIsRecording && 'text-red-500')} />
+                  <Mic className={cn('size-4 shrink-0', meetingSublabel && 'mt-1', meetingIsRecording && 'text-red-500')} />
                   <div className="flex min-w-0 flex-1 flex-col">
                     <span className="truncate">Meetings</span>
                     {meetingSublabel && (
@@ -861,22 +932,14 @@ export function SidebarContentPanel({
                   </div>
                 ) : null}
               </SidebarMenuItem>
-              {codeModeEnabled && (
-                <SidebarMenuItem>
-                  <SidebarMenuButton data-tour-id="nav-code" isActive={activeNav === 'code'} onClick={onOpenCode}>
-                    <Code2 className="size-4 shrink-0" />
-                    <span className="flex-1 truncate">Code</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              )}
               <SidebarMenuItem>
                 <SidebarMenuButton
                   data-tour-id="nav-knowledge"
                   isActive={activeNav === 'knowledge'}
                   onClick={() => knowledgeActions.openKnowledgeView()}
-                  className={knowledgeUpdatedLabel ? 'h-auto py-1.5' : undefined}
+                  className={knowledgeUpdatedLabel ? 'h-auto items-start py-1.5' : undefined}
                 >
-                  <FileText className="size-4 shrink-0" />
+                  <FileText className={cn('size-4 shrink-0', knowledgeUpdatedLabel && 'mt-0.5')} />
                   <div className="flex min-w-0 flex-1 flex-col">
                     <span className="truncate">Brain</span>
                     {knowledgeUpdatedLabel && (
@@ -892,14 +955,24 @@ export function SidebarContentPanel({
             <SidebarMenu>
               <SidebarMenuItem>
                 <SidebarMenuButton
+                  data-tour-id="nav-apps"
+                  isActive={activeNav === 'apps'}
+                  onClick={onOpenApps}
+                >
+                  <LayoutGrid className="size-4 shrink-0" />
+                  <span className="flex-1 truncate">Apps</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
                   data-tour-id="nav-agents"
                   isActive={activeNav === 'agents'}
                   onClick={onOpenBgTasks}
-                  className={bgAgentsLabel ? 'h-auto py-1.5' : undefined}
+                  className={bgAgentsLabel ? 'h-auto items-start py-1.5' : undefined}
                 >
-                  <Bot className="size-4 shrink-0 text-muted-foreground" />
+                  <Bot className={cn('size-4 shrink-0', bgAgentsLabel && 'mt-0.5')} />
                   <div className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate text-muted-foreground">Background agents</span>
+                    <span className="truncate">Background agents</span>
                     {bgAgentsLabel && (
                       <span className={cn(
                         'truncate text-[11px]',
@@ -913,24 +986,14 @@ export function SidebarContentPanel({
               </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
-                  data-tour-id="nav-apps"
-                  isActive={activeNav === 'apps'}
-                  onClick={onOpenApps}
-                >
-                  <LayoutGrid className="size-4 shrink-0 text-muted-foreground" />
-                  <span className="flex-1 truncate text-muted-foreground">Apps</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
                   data-tour-id="nav-workspaces"
                   isActive={activeNav === 'workspaces'}
                   onClick={() => knowledgeActions.openWorkspaceAt()}
-                  className="h-auto py-1.5"
+                  className="h-auto items-start py-1.5"
                 >
-                  <Folder className="size-4 shrink-0 text-muted-foreground" />
+                  <Folder className="mt-0.5 size-4 shrink-0" />
                   <div className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate text-muted-foreground">Workspaces</span>
+                    <span className="truncate">Workspaces</span>
                     <span className="truncate text-[11px] text-muted-foreground">
                       {workspaceCount === 0 ? 'No workspaces' : `${workspaceCount} workspace${workspaceCount === 1 ? '' : 's'}`}
                     </span>
@@ -964,10 +1027,75 @@ export function SidebarContentPanel({
                 <SidebarMenu>
                   {recentChats.map((chat) => (
                     <SidebarMenuItem key={chat.id}>
-                      <SidebarMenuButton onClick={() => onOpenRun?.(chat.id)}>
-                        <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
-                        <span className="flex-1 truncate">{chat.title || '(Untitled chat)'}</span>
-                      </SidebarMenuButton>
+                      {renamingChatId === chat.id ? (
+                        <div className="flex h-8 items-center gap-2 rounded-md px-2">
+                          <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
+                          <input
+                            autoFocus
+                            value={renameDraft}
+                            onChange={(e) => setRenameDraft(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault()
+                                commitChatRename(chat.id)
+                              } else if (e.key === 'Escape') {
+                                e.preventDefault()
+                                setRenamingChatId(null)
+                              }
+                            }}
+                            onBlur={() => commitChatRename(chat.id)}
+                            className="h-6 min-w-0 flex-1 rounded-sm border border-border bg-background px-1.5 text-sm outline-none focus:ring-1 focus:ring-ring"
+                          />
+                        </div>
+                      ) : (
+                        <>
+                          <SidebarMenuButton onClick={() => onOpenRun?.(chat.id)} className={onRenameRun ? 'pr-7' : undefined}>
+                            <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
+                            <span className="flex-1 truncate">{chat.title || '(Untitled chat)'}</span>
+                            {pinnedChatIds.includes(chat.id) && (
+                              <Pin className="size-3 shrink-0 text-muted-foreground/70 transition-opacity group-hover/menu-item:opacity-0" />
+                            )}
+                          </SidebarMenuButton>
+                          {onRenameRun && (
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <button
+                                  type="button"
+                                  aria-label="Chat options"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="absolute right-1.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/menu-item:opacity-100 data-[state=open]:opacity-100"
+                                >
+                                  <MoreVertical className="size-4" />
+                                </button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent side="right" align="start">
+                                <DropdownMenuItem onClick={() => toggleChatPin(chat.id)}>
+                                  <Pin className="mr-2 size-3.5" />
+                                  {pinnedChatIds.includes(chat.id) ? 'Unpin' : 'Pin'}
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={() => {
+                                    setRenameDraft(chat.title || '')
+                                    setRenamingChatId(chat.id)
+                                  }}
+                                >
+                                  <Pencil className="mr-2 size-3.5" />
+                                  Rename
+                                </DropdownMenuItem>
+                                {onDeleteRun && (
+                                  <DropdownMenuItem
+                                    className="text-destructive focus:text-destructive"
+                                    onClick={() => setDeleteChatTarget({ id: chat.id, title: chat.title || '(Untitled chat)' })}
+                                  >
+                                    <Trash2 className="mr-2 size-3.5" />
+                                    Delete
+                                  </DropdownMenuItem>
+                                )}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          )}
+                        </>
+                      )}
                     </SidebarMenuItem>
                   ))}
                   {onOpenChatHistory && (
@@ -986,6 +1114,28 @@ export function SidebarContentPanel({
             )}
           </SidebarGroupContent>
         </SidebarGroup>
+        <AlertDialog open={!!deleteChatTarget} onOpenChange={(open) => { if (!open) setDeleteChatTarget(null) }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete chat?</AlertDialogTitle>
+              <AlertDialogDescription>
+                &ldquo;{deleteChatTarget?.title}&rdquo; and its full history will be permanently deleted.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-destructive text-white hover:bg-destructive/90"
+                onClick={() => {
+                  if (deleteChatTarget) onDeleteRun?.(deleteChatTarget.id)
+                  setDeleteChatTarget(null)
+                }}
+              >
+                Delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </SidebarContent>
       {/* Billing / upgrade CTA or Log in CTA */}
       {isRowboatConnected && billing ? (() => {
@@ -1398,7 +1548,7 @@ path: ${currentRelativePath}
 
   if (!hasDeepgramKey) return null
 
-  const actionClass = "flex h-9 flex-1 items-center justify-center rounded-md border border-sidebar-border text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+  const actionClass = "flex size-8 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
   const iconClass = "text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded p-1.5 transition-colors"
 
   return (
@@ -1432,7 +1582,7 @@ function ActionButton({ icon: Icon, label, onClick }: { icon: typeof Mic; label:
           type="button"
           onClick={onClick}
           aria-label={label}
-          className="flex h-9 flex-1 items-center justify-center rounded-md border border-sidebar-border text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+          className="flex size-8 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
         >
           <Icon className="size-4" />
         </button>

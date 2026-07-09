@@ -51,6 +51,7 @@ import {
 import {
   Message,
   MessageContent,
+  MessageCopyButton,
   MessageResponse,
 } from '@/components/ai-elements/message';
 import {
@@ -5891,14 +5892,17 @@ function App() {
                 <ChatMessageAttachments attachments={item.attachments} />
               </MessageContent>
               {item.content && (
-                <MessageContent>
-                  <MessageResponse
-                    components={streamdownComponents}
-                    remarkPlugins={userMessageRemarkPlugins}
-                  >
-                    {item.content}
-                  </MessageResponse>
-                </MessageContent>
+                <div className="flex flex-col items-end">
+                  <MessageContent>
+                    <MessageResponse
+                      components={streamdownComponents}
+                      remarkPlugins={userMessageRemarkPlugins}
+                    >
+                      {item.content}
+                    </MessageResponse>
+                  </MessageContent>
+                  <MessageCopyButton text={item.content} className="mt-0.5" />
+                </div>
               )}
             </Message>
           )
@@ -5906,26 +5910,29 @@ function App() {
         const { message, files } = parseAttachedFiles(item.content)
         return (
           <Message key={item.id} from={item.role} data-message-id={item.id}>
-            <MessageContent>
-              {files.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 mb-2">
-                  {files.map((filePath, index) => (
-                    <span
-                      key={index}
-                      className="inline-flex items-center gap-1 text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full"
-                    >
-                      @{wikiLabel(filePath)}
-                    </span>
-                  ))}
-                </div>
-              )}
-              <MessageResponse
-                components={streamdownComponents}
-                remarkPlugins={userMessageRemarkPlugins}
-              >
-                {message}
-              </MessageResponse>
-            </MessageContent>
+            <div className="flex flex-col items-end">
+              <MessageContent>
+                {files.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mb-2">
+                    {files.map((filePath, index) => (
+                      <span
+                        key={index}
+                        className="inline-flex items-center gap-1 text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full"
+                      >
+                        @{wikiLabel(filePath)}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <MessageResponse
+                  components={streamdownComponents}
+                  remarkPlugins={userMessageRemarkPlugins}
+                >
+                  {message}
+                </MessageResponse>
+              </MessageContent>
+              <MessageCopyButton text={message} className="mt-0.5" />
+            </div>
           </Message>
         )
       }
@@ -6173,6 +6180,20 @@ function App() {
               onOpenApps={openAppsView}
               recentRuns={runs}
               onOpenRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
+              onRenameRun={(rid, title) => {
+                void window.ipc.invoke('sessions:setTitle', { sessionId: rid, title })
+                  .then(() => setRuns((prev) => prev.map((r) => (r.id === rid ? { ...r, title } : r))))
+                  .catch((err) => console.error('Failed to rename chat:', err))
+              }}
+              onDeleteRun={(rid) => {
+                void window.ipc.invoke('sessions:delete', { sessionId: rid })
+                  .then(() => {
+                    setRuns((prev) => prev.filter((r) => r.id !== rid))
+                    const openTab = chatTabs.find((t) => t.runId === rid)
+                    if (openTab) closeChatTab(openTab.id)
+                  })
+                  .catch((err) => console.error('Failed to delete chat:', err))
+              }}
               onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
               onOpenEmail={(threadId) => openEmailView(threadId)}
               onOpenHome={() => void navigateToView({ type: 'home' })}

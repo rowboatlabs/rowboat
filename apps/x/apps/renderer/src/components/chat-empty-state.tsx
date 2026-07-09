@@ -1,4 +1,4 @@
-import { Bot, Mail, Sparkles, Telescope } from 'lucide-react'
+import { ArrowRight, BookOpen, Mail, Zap } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
 import { ToolConnectionsCard } from '@/components/tool-connections-card'
@@ -12,53 +12,55 @@ interface ChatEmptyStateProps {
 
 const SUGGESTED_ACTIONS: { icon: typeof Mail; title: string; sub: string; prompt: string }[] = [
   { icon: Mail, title: 'Draft a reply', sub: 'to an email', prompt: "Let's draft a reply to [name]'s email" },
-  { icon: Bot, title: 'Set up a background agent', sub: 'that automates tasks', prompt: 'Set up a background agent that automates [task]' },
-  { icon: Telescope, title: 'Research a topic', sub: 'create a local wiki for me', prompt: 'Research [topic] and create a local wiki for me' },
+  { icon: Zap, title: 'Set up a background agent', sub: 'that automates tasks', prompt: 'Set up a background agent that automates [task]' },
+  { icon: BookOpen, title: 'Research a topic', sub: 'create a local wiki for me', prompt: 'Research [topic] and create a local wiki for me' },
 ]
 
 /**
  * Empty-state body for the chat surface: greeting and starter action cards.
- * Shown in both the side-pane copilot and full-screen chat.
+ * Shown in both the side-pane copilot and full-screen chat; the side pane
+ * (`wide` unset) uses slightly smaller type to fit the narrow column.
  */
 export function ChatEmptyState({
   onPickPrompt,
   wide = false,
 }: ChatEmptyStateProps) {
   return (
-    <div className={cn('mx-auto flex w-full flex-col gap-6 px-2 py-6', wide ? 'max-w-2xl' : 'max-w-md')}>
-      <div className="flex items-center gap-3">
-        <div className="flex size-9 shrink-0 items-center justify-center rounded-[10px] border border-border bg-background text-foreground">
-          <Sparkles className="size-[17px]" />
-        </div>
-        <div>
-          <div className="text-base font-semibold tracking-tight">What are we working on?</div>
-          <div className="text-xs text-muted-foreground">Ask anything, or start with a suggestion.</div>
-        </div>
-      </div>
-
+    <div className={cn('mx-auto flex w-full flex-col gap-5 py-6', wide ? 'max-w-4xl px-4' : 'max-w-md px-2')}>
       <div>
-        <div className="px-1 pb-2 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
-          Get started
+        <div className={cn('font-semibold tracking-tight', wide ? 'text-2xl' : 'text-lg')}>
+          What are we working on?
         </div>
-        <div className="flex flex-col gap-2">
-          {SUGGESTED_ACTIONS.map((action) => (
-            <button
-              key={action.title}
-              type="button"
-              onClick={() => onPickPrompt(action.prompt)}
-              className="flex items-start gap-2.5 rounded-lg border border-border bg-background px-3 py-2.5 text-left transition-colors hover:bg-accent"
-            >
-              <action.icon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-              <div className="min-w-0 flex-1">
-                <div className="text-[12.8px] font-medium">{action.title}</div>
-                <div className="mt-0.5 text-[11.5px] text-muted-foreground">{action.sub}</div>
-              </div>
-            </button>
-          ))}
+        <div className={cn('mt-1 text-muted-foreground', wide ? 'text-[15px]' : 'text-[13px]')}>
+          Ask anything, or start with a suggestion.
         </div>
       </div>
 
-      <ToolConnectionsCard />
+      <div className="overflow-hidden rounded-xl border border-border">
+        {SUGGESTED_ACTIONS.map((action, i) => (
+          <button
+            key={action.title}
+            type="button"
+            onClick={() => onPickPrompt(action.prompt)}
+            className={cn(
+              'group flex w-full items-center gap-1.5 text-left transition-colors hover:bg-accent/50',
+              wide ? 'px-3.5 py-3' : 'px-3 py-2.5',
+              i > 0 && 'border-t border-border/60',
+            )}
+          >
+            <action.icon className={cn('mr-2 shrink-0 text-foreground/80', wide ? 'size-4' : 'size-3.5')} strokeWidth={1.75} />
+            <span className={cn('shrink-0 font-medium text-foreground', wide ? 'text-sm' : 'text-[13px]')}>
+              {action.title}
+            </span>
+            <span className={cn('truncate text-muted-foreground', wide ? 'text-[13px]' : 'text-[12px]')}>
+              {action.sub}
+            </span>
+            <ArrowRight className={cn('ml-auto shrink-0 text-muted-foreground/50 transition-colors group-hover:text-foreground', wide ? 'size-3.5' : 'size-3')} />
+          </button>
+        ))}
+      </div>
+
+      <ToolConnectionsCard compact={!wide} />
     </div>
   )
 }

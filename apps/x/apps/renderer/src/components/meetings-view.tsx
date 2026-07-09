@@ -711,8 +711,8 @@ function UpcomingEvents({ onOpenNote }: { onOpenNote: (path: string) => void }) 
   const todayKey = localDateKey(now)
 
   return (
-    <section className="border-b border-border/60 px-6 pb-6 pt-5">
-      <div className="mx-auto w-full max-w-[760px]">
+    <section className="border-b border-border/60 pb-6 pt-5">
+      <div className="w-full">
         <div className="mb-3 flex items-baseline justify-between">
           <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
             <Calendar className="size-4 text-muted-foreground" />
@@ -1243,13 +1243,10 @@ export function MeetingsView({ onOpenNote, onTakeMeetingNotes, meetingState, mee
   const isRecording = meetingState === 'recording'
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
-      <div className="shrink-0 border-b border-border px-6 py-5">
+    <div className="flex h-full flex-col overflow-hidden bg-[#f8f8f9] dark:bg-[#0b0b0d]">
+      <div className="mx-auto w-full max-w-[1120px] shrink-0 px-[30px] pt-[34px] pb-5">
         <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <Mic className="size-5 text-primary" />
-            <h2 className="text-base font-semibold text-foreground">Meetings</h2>
-          </div>
+          <h2 className="text-[24px] font-[650] tracking-[-0.02em] text-[#0d0e11] dark:text-[#f4f5f7]">Meetings</h2>
           <Button
             type="button"
             size="sm"
@@ -1267,13 +1264,14 @@ export function MeetingsView({ onOpenNote, onTakeMeetingNotes, meetingState, mee
             {meetingSummarizing ? 'Generating notes...' : getMeetingButtonLabel(meetingState)}
           </Button>
 	        </div>
-        <p className="mt-1 text-xs text-muted-foreground">
+        <p className="mt-1 text-[14px] text-black/50 dark:text-white/[0.52]">
           Upcoming events and meeting notes.
         </p>
       </div>
       <div className="flex-1 overflow-auto">
+        <div className="mx-auto w-full max-w-[1120px] px-[30px] pb-12">
         <UpcomingEvents onOpenNote={onOpenNote} />
-        <div className="p-6">
+        <div className="pt-6">
         {loading ? (
           <div className="flex items-center justify-center py-10">
             <Loader2 className="size-5 animate-spin text-muted-foreground" />
@@ -1328,6 +1326,7 @@ export function MeetingsView({ onOpenNote, onTakeMeetingNotes, meetingState, mee
             </table>
           </div>
         )}
+        </div>
         </div>
       </div>
     </div>

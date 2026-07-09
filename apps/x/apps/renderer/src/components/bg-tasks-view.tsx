@@ -1714,22 +1714,20 @@ export function BgTasksView({ onCreateWithCopilot, onEditWithCopilot, initialSlu
     }
 
     return (
-        <div className="flex h-full flex-col overflow-hidden">
-            <div className="shrink-0 border-b border-border px-6 py-5">
+        <div className="flex h-full flex-col overflow-hidden bg-[#f8f8f9] dark:bg-[#0b0b0d]">
+            <div className="mx-auto w-full max-w-[1120px] shrink-0 px-[30px] pt-[34px] pb-5">
                 <div className="flex items-center justify-between gap-4">
-                    <div className="flex items-center gap-2">
-                        <ListChecks className="size-5 text-primary" />
-                        <h2 className="text-base font-semibold text-foreground">Background tasks</h2>
-                    </div>
+                    <h2 className="text-[24px] font-[650] tracking-[-0.02em] text-[#0d0e11] dark:text-[#f4f5f7]">Background tasks</h2>
                     <Button size="sm" onClick={() => setShowNewDialog(true)}>
                         New task
                     </Button>
                 </div>
-                <p className="mt-1 text-xs text-muted-foreground">
+                <p className="mt-1 text-[14px] text-black/50 dark:text-white/[0.52]">
                     Persistent agents that fire on a schedule or in response to events. Toggle a task inactive to pause it.
                 </p>
             </div>
-            <div className="flex-1 overflow-auto p-6">
+            <div className="flex-1 overflow-auto">
+                <div className="mx-auto h-full w-full max-w-[1120px] px-[30px] pb-12">
                 {loading ? (
                     <div className="flex h-full items-center justify-center">
                         <Loader2 className="size-5 animate-spin text-muted-foreground" />
@@ -1826,16 +1824,17 @@ export function BgTasksView({ onCreateWithCopilot, onEditWithCopilot, initialSlu
                                             </td>
                                             <td className="px-4 py-3">
                                                 {isRunning ? (
-                                                    <div className="flex items-center gap-2">
+                                                    <div className="flex flex-wrap items-center gap-2 pl-7">
                                                         <span className="inline-flex items-center gap-1.5 rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-foreground animate-pulse">
                                                             <Loader2 className="size-3 animate-spin" />
-                                                            Updating…
+                                                            Updating
                                                         </span>
                                                         <Button
                                                             variant="destructive"
                                                             size="sm"
                                                             onClick={() => handleStop(task.slug)}
                                                             disabled={isStopping}
+                                                            className="h-auto gap-1.5 rounded-md px-2 py-0.5 text-xs font-medium"
                                                         >
                                                             {isStopping ? <Loader2 className="size-3 animate-spin" /> : <Square className="size-3" />}
                                                             Stop
@@ -1866,6 +1865,7 @@ export function BgTasksView({ onCreateWithCopilot, onEditWithCopilot, initialSlu
                         </table>
                     </div>
                 )}
+                </div>
             </div>
 
             <NewTaskDialog

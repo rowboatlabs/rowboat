@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ArrowRight, Bot, Calendar, Clock, ExternalLink, FileText, Mail, MessageSquare, Mic, Plus, Video } from 'lucide-react'
 import { extractConferenceLink } from '@/lib/calendar-event'
 import { ToolConnectionsCard } from '@/components/tool-connections-card'
+import { SlackIcon } from '@/components/onboarding/provider-icons'
 
 interface TreeNode {
   path: string
@@ -331,15 +332,12 @@ export function HomeView({
 
           {/* Up-next hero */}
           {nextEvent && (
-            <div className="flex items-center gap-[18px] rounded-xl bg-foreground p-[18px] text-background">
-              <div className="flex size-[52px] shrink-0 items-center justify-center rounded-xl bg-background/10">
-                <Mic className="size-[22px]" />
-              </div>
+            <div className="flex items-center gap-[18px] rounded-xl bg-foreground px-5 py-[18px] text-background">
               <div className="min-w-0 flex-1">
-                <div className="mb-1 text-[11px] uppercase tracking-wide text-background/55">
+                <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-background/50">
                   Up next · {nextEvent.isAllDay ? 'today' : relativeFromNow(nextEvent.start)}
                 </div>
-                <div className="mb-0.5 truncate text-[17px] font-medium">{nextEvent.summary}</div>
+                <div className="mb-0.5 truncate text-[17px] font-semibold">{nextEvent.summary}</div>
                 <div className="truncate text-[13px] text-background/70">
                   {nextEvent.isAllDay ? 'All day' : `${timeOfDay(nextEvent.start)}${nextEvent.end ? ` – ${timeOfDay(nextEvent.end)}` : ''}`}
                   {nextEvent.location ? ` · ${nextEvent.location}` : ''}
@@ -432,7 +430,7 @@ export function HomeView({
           {slackEnabled && (
             <div className={CARD}>
               <div className="mb-3 flex items-center gap-2">
-                <MessageSquare className="size-[15px]" />
+                <SlackIcon className="size-[15px]" />
                 <span className="text-sm font-medium">Slack</span>
                 <span className="flex-1" />
                 <span className="text-xs text-muted-foreground">Latest messages</span>
@@ -548,9 +546,6 @@ export function HomeView({
               onClick={onOpenChat}
               className="flex items-center gap-3.5 rounded-xl border border-border bg-card p-4 text-left transition-colors hover:bg-accent"
             >
-              <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground">
-                <MessageSquare className="size-[15px]" />
-              </div>
               <div className="min-w-0 flex-1 text-[13.5px] leading-snug">
                 <span className="font-medium">Ask anything</span>
                 <span className="text-muted-foreground"> — create presentations, do research, collaborate on docs.</span>

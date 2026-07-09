@@ -1,9 +1,9 @@
 "use client"
 
 import * as React from "react"
-import { Loader2, Mic, Mail, Calendar, MessageSquare } from "lucide-react"
+import { Loader2, Calendar } from "lucide-react"
+import { FirefliesIcon, GoogleIcon, SlackIcon } from "@/components/onboarding/provider-icons"
 import { Button } from "@/components/ui/button"
-import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { GoogleClientIdModal } from "@/components/google-client-id-modal"
@@ -47,9 +47,7 @@ export function ConnectedAccountsSettings({ dialogOpen }: ConnectedAccountsSetti
         className="flex items-center justify-between gap-2 rounded-md px-3 py-2 hover:bg-accent/50 transition-colors"
       >
         <div className="flex items-center gap-2.5 min-w-0">
-          <div className="flex size-8 items-center justify-center rounded-md bg-muted">
-            {icon}
-          </div>
+          {icon}
           <div className="flex flex-col min-w-0">
             <span className="text-sm font-medium truncate">{displayName}</span>
             {state.isLoading ? (
@@ -145,9 +143,7 @@ export function ConnectedAccountsSettings({ dialogOpen }: ConnectedAccountsSetti
             {c.useComposioForGoogle ? (
               <div className="flex items-center justify-between gap-2 rounded-md px-3 py-2 hover:bg-accent/50 transition-colors">
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="flex size-8 items-center justify-center rounded-md bg-muted">
-                    <Mail className="size-4" />
-                  </div>
+                  <GoogleIcon className="size-5 shrink-0" />
                   <div className="flex flex-col min-w-0">
                     <span className="text-sm font-medium truncate">Gmail</span>
                     {c.gmailLoading ? (
@@ -189,14 +185,12 @@ export function ConnectedAccountsSettings({ dialogOpen }: ConnectedAccountsSetti
                 </div>
               </div>
             ) : (
-              c.providers.includes('google') && renderOAuthProvider('google', 'Google', <Mail className="size-4" />, 'Sync emails and calendar')
+              c.providers.includes('google') && renderOAuthProvider('google', 'Google', <GoogleIcon className="size-5" />, 'Sync emails and calendar')
             )}
             {c.useComposioForGoogleCalendar && (
               <div className="flex items-center justify-between gap-2 rounded-md px-3 py-2 hover:bg-accent/50 transition-colors">
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="flex size-8 items-center justify-center rounded-md bg-muted">
-                    <Calendar className="size-4" />
-                  </div>
+                  <Calendar className="size-5 shrink-0" />
                   <div className="flex flex-col min-w-0">
                     <span className="text-sm font-medium truncate">Google Calendar</span>
                     {c.googleCalendarLoading ? (
@@ -238,7 +232,6 @@ export function ConnectedAccountsSettings({ dialogOpen }: ConnectedAccountsSetti
                 </div>
               </div>
             )}
-            <Separator className="my-2" />
           </>
         )}
 
@@ -252,14 +245,13 @@ export function ConnectedAccountsSettings({ dialogOpen }: ConnectedAccountsSetti
             </div>
 
             {/* Fireflies */}
-            {renderOAuthProvider('fireflies-ai', 'Fireflies', <Mic className="size-4" />, 'AI meeting transcripts')}
+            {renderOAuthProvider('fireflies-ai', 'Fireflies', <FirefliesIcon className="size-5" />, 'AI meeting transcripts')}
           </>
         )}
 
         {/* Team Communication Section */}
         <>
-          <Separator className="my-2" />
-          <div className="px-3 pt-1 pb-0.5">
+          <div className="px-3 pt-3 pb-0.5">
             <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
               Team Communication
             </span>
@@ -267,9 +259,7 @@ export function ConnectedAccountsSettings({ dialogOpen }: ConnectedAccountsSetti
           <div className="rounded-md px-3 py-2 hover:bg-accent/50 transition-colors">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2.5 min-w-0">
-                <div className="flex size-8 items-center justify-center rounded-md bg-muted">
-                  <MessageSquare className="size-4" />
-                </div>
+                <SlackIcon className="size-5 shrink-0" />
                 <div className="flex flex-col min-w-0">
                   <span className="text-sm font-medium truncate">Slack</span>
                   {c.slackLoading ? (
@@ -408,8 +398,7 @@ export function ConnectedAccountsSettings({ dialogOpen }: ConnectedAccountsSetti
         {/* Knowledge Sources Section */}
         {c.slackEnabled && (
           <>
-            <Separator className="my-2" />
-            <div className="px-3 pt-1 pb-0.5">
+            <div className="px-3 pt-3 pb-0.5">
               <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
                 Knowledge Sources
               </span>
@@ -417,9 +406,7 @@ export function ConnectedAccountsSettings({ dialogOpen }: ConnectedAccountsSetti
             <div className="rounded-md px-3 py-2 hover:bg-accent/50 transition-colors">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="flex size-8 items-center justify-center rounded-md bg-muted">
-                    <MessageSquare className="size-4" />
-                  </div>
+                  <SlackIcon className="size-5 shrink-0" />
                   <div className="flex flex-col min-w-0">
                     <span className="text-sm font-medium truncate">Slack to knowledge</span>
                     <span className="text-xs text-muted-foreground truncate">

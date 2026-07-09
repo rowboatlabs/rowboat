@@ -466,7 +466,7 @@ export function BasesView({ tree, onSelectNote, config, onConfigChange, isDefaul
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       {/* Toolbar */}
-      <div className="shrink-0 border-b border-border px-4 py-2 flex items-center gap-3">
+      <div className="shrink-0 border-b border-border pr-4 py-2 flex items-center gap-3">
         <Popover>
           <PopoverTrigger asChild>
             <button className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
@@ -884,7 +884,7 @@ function NoteRow({
 
   const row = (
     <tr
-      className="border-b border-border/50 hover:bg-accent/50 cursor-pointer transition-colors"
+      className="border-b border-black/10 dark:border-border/50 hover:bg-accent/50 cursor-pointer transition-colors"
       onClick={() => onSelectNote(note.path)}
     >
       {visibleColumns.map((col) => (
