@@ -47,6 +47,7 @@ import {
   type ChatTabViewState,
   type ConversationItem,
   type PermissionResponse,
+  type TokenUsage,
   createEmptyChatTabViewState,
   getWebSearchCardData,
   getComposioConnectCardData,
@@ -57,12 +58,14 @@ import {
   isErrorMessage,
   isToolCall,
   isToolGroup,
+  isTurnUsageMessage,
   normalizeToolInput,
   normalizeToolOutput,
   parseAttachedFiles,
   toToolState,
 } from '@/lib/chat-conversation'
 import { matchBillingError } from '@/lib/billing-error'
+import { TokenUsageMenu } from '@/components/token-usage-menu'
 
 const streamdownComponents = { pre: MarkdownPreOverride }
 
@@ -140,6 +143,7 @@ interface ChatSidebarProps {
   onOpenFullScreen?: () => void
   conversation: ConversationItem[]
   currentAssistantMessage: string
+  sessionUsage?: TokenUsage
   chatTabStates?: Record<string, ChatTabViewState>
   viewportAnchors?: Record<string, ChatViewportAnchorState>
   isProcessing: boolean
@@ -210,6 +214,7 @@ export function ChatSidebar({
   onOpenFullScreen,
   conversation,
   currentAssistantMessage,
+  sessionUsage = {},
   chatTabStates = {},
   viewportAnchors = {},
   isProcessing,
@@ -350,6 +355,7 @@ export function ChatSidebar({
     runId: runId ?? null,
     conversation,
     currentAssistantMessage,
+    sessionUsage,
     pendingAskHumanRequests,
     allPermissionRequests,
     permissionResponses,
@@ -358,6 +364,7 @@ export function ChatSidebar({
     runId,
     conversation,
     currentAssistantMessage,
+    sessionUsage,
     pendingAskHumanRequests,
     allPermissionRequests,
     permissionResponses,
@@ -508,6 +515,19 @@ export function ChatSidebar({
       )
     }
 
+    if (isTurnUsageMessage(item)) {
+      return (
+        <div key={item.id} className="-mt-6 flex justify-start px-1" data-message-id={item.id}>
+          <TokenUsageMenu
+            usage={item.usage}
+            scope="turn"
+            modelCallCount={item.modelCallCount}
+            align="start"
+          />
+        </div>
+      )
+    }
+
     if (isErrorMessage(item)) {
       if (matchBillingError(item.message)) {
         return null
@@ -600,6 +620,7 @@ export function ChatSidebar({
                 onNewChatTab={onNewChatTab}
                 recentRuns={recentRuns}
                 activeRunId={runId}
+                sessionUsage={activeTabState.sessionUsage}
                 onSelectRun={onSelectRun}
                 onOpenChatHistory={onOpenChatHistory}
               />

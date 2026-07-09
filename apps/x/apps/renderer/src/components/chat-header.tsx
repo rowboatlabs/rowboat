@@ -3,6 +3,9 @@ import { ArrowUpRight, ChevronDown, MessageSquare, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { TokenUsageMenu } from '@/components/token-usage-menu'
+import type { TokenUsage } from '@/lib/chat-conversation'
+import { hasTokenUsage } from '@/lib/token-usage'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,6 +27,7 @@ export interface ChatHeaderProps {
   onNewChatTab: () => void
   recentRuns?: ChatHeaderRecentRun[]
   activeRunId?: string | null
+  sessionUsage?: TokenUsage
   onSelectRun?: (runId: string) => void
   onOpenChatHistory?: () => void
 }
@@ -40,10 +44,12 @@ export function ChatHeader({
   onNewChatTab,
   recentRuns = [],
   activeRunId,
+  sessionUsage,
   onSelectRun,
   onOpenChatHistory,
 }: ChatHeaderProps) {
   const hasHistory = recentRuns.length > 0 || Boolean(onOpenChatHistory)
+  const showUsage = hasTokenUsage(sessionUsage)
 
   return (
     <>
@@ -94,6 +100,14 @@ export function ChatHeader({
           <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
           <span className="truncate">{activeTitle}</span>
         </div>
+      )}
+      {showUsage && (
+        <TokenUsageMenu
+          usage={sessionUsage}
+          scope="session"
+          className="titlebar-no-drag my-1 shrink-0"
+          align="end"
+        />
       )}
       <Tooltip>
         <TooltipTrigger asChild>

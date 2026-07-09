@@ -114,6 +114,7 @@ import {
   isErrorMessage,
   isToolCall,
   isToolGroup,
+  isTurnUsageMessage,
   normalizeToolInput,
   normalizeToolOutput,
   parseAttachedFiles,
@@ -133,6 +134,7 @@ import { useAnalyticsIdentity } from '@/hooks/useAnalyticsIdentity'
 import * as analytics from '@/lib/analytics'
 import { playAckCue } from '@/lib/call-sounds'
 import { useTheme } from '@/contexts/theme-context'
+import { TokenUsageMenu } from '@/components/token-usage-menu'
 
 type DirEntry = z.infer<typeof workspace.DirEntry>
 type RunEventType = z.infer<typeof RunEvent>
@@ -1596,6 +1598,7 @@ function App() {
       runId,
       conversation,
       currentAssistantMessage,
+      sessionUsage: {},
       pendingAskHumanRequests: new Map(pendingAskHumanRequests),
       allPermissionRequests: new Map(allPermissionRequests),
       permissionResponses: new Map(permissionResponses),
@@ -6021,6 +6024,19 @@ function App() {
       )
     }
 
+    if (isTurnUsageMessage(item)) {
+      return (
+        <div key={item.id} className="-mt-6 flex justify-start px-1" data-message-id={item.id}>
+          <TokenUsageMenu
+            usage={item.usage}
+            scope="turn"
+            modelCallCount={item.modelCallCount}
+            align="start"
+          />
+        </div>
+      )
+    }
+
     if (isErrorMessage(item)) {
       if (matchBillingError(item.message)) {
         return null
@@ -6044,6 +6060,7 @@ function App() {
       ? { runId, ...sessionChat.chatState }
       : {
           runId,
+          sessionUsage: {},
           conversation: sessionLoadErrorItems.length > 0 ? sessionLoadErrorItems : conversation,
           currentAssistantMessage,
           pendingAskHumanRequests,
@@ -6206,6 +6223,7 @@ function App() {
                     onNewChatTab={handleNewChatTab}
                     recentRuns={runs}
                     activeRunId={runId}
+                    sessionUsage={activeChatTabState.sessionUsage}
                     onSelectRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
                     onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
                   />
@@ -6929,6 +6947,7 @@ function App() {
                 onOpenFullScreen={toggleRightPaneMaximize}
                 conversation={activeChatTabState.conversation}
                 currentAssistantMessage={activeChatTabState.currentAssistantMessage}
+                sessionUsage={activeChatTabState.sessionUsage}
                 chatTabStates={chatTabStatesForRender}
                 viewportAnchors={chatViewportAnchorByTab}
                 isProcessing={activeIsProcessing}
