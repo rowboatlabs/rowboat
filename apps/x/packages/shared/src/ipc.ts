@@ -14,7 +14,7 @@ import {
     TriggersSchema,
 } from './background-task.js';
 import { UserMessage, UserMessageContent } from './message.js';
-import { RequestedAgent, type TurnEvent } from './turns.js';
+import { RequestedAgent, type TurnBusEvent, type TurnEvent } from './turns.js';
 import type { SessionBusEvent, SessionIndexEntry, SessionState } from './sessions.js';
 import { RowboatApiConfig } from './rowboat-account.js';
 import { ZListToolkitsResponse } from './composio.js';
@@ -541,6 +541,14 @@ const ipcSchemas = {
     // runtime validation (the broadcast path bypasses preload validation,
     // like runs:events).
     req: z.custom<SessionBusEvent>(),
+    res: z.null(),
+  },
+  // Process-wide turn event spine: every turn's durable events (with file
+  // offsets), regardless of who started the turn — session chat, headless
+  // background/knowledge runners, spawned sub-agents. Deltas are not
+  // broadcast here in v1; session chat streams them via sessions:events.
+  'turns:events': {
+    req: z.custom<TurnBusEvent>(),
     res: z.null(),
   },
   'services:events': {

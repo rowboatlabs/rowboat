@@ -1,44 +1,24 @@
-import { useEffect, useState } from 'react'
+import { useMemo } from 'react'
 import { Tool, ToolContent, ToolHeader } from '@/components/ai-elements/tool'
 import { CompactConversation } from '@/components/compact-conversation'
-import { fetchAgentRunTranscript, type AgentRunTranscript } from '@/lib/agent-transcript'
+import { turnStateToTranscript, type AgentRunTranscript } from '@/lib/agent-transcript'
 import { toToolState, type ToolCall } from '@/lib/chat-conversation'
+import { useTurn } from '@/hooks/use-turn'
 
 // Rendered for a spawn-agent tool call: a collapsed status card that expands
 // into the child turn's live transcript. The child is a standalone turn
-// (sessionId null) whose events never reach the session bus, so while it
-// runs we poll sessions:getTurn via fetchAgentRunTranscript — the file is
-// local and append-only, making this cheap — and do one final fetch when the
-// parent tool call settles.
-
-const POLL_MS = 1000
+// (sessionId null); its durable events arrive on the turns:events spine, so
+// useTurn keeps the transcript live without polling.
 
 function useChildTranscript(
   childTurnId: string | undefined,
-  running: boolean,
   open: boolean,
 ): AgentRunTranscript | null {
-  const [transcript, setTranscript] = useState<AgentRunTranscript | null>(null)
-  useEffect(() => {
-    if (!childTurnId || !open) return
-    let alive = true
-    const fetchOnce = async () => {
-      try {
-        const next = await fetchAgentRunTranscript(childTurnId)
-        if (alive) setTranscript(next)
-      } catch {
-        // Child file may not be readable yet; the next tick retries.
-      }
-    }
-    void fetchOnce()
-    if (!running) return () => { alive = false }
-    const timer = setInterval(() => void fetchOnce(), POLL_MS)
-    return () => {
-      alive = false
-      clearInterval(timer)
-    }
-  }, [childTurnId, running, open])
-  return transcript
+  const { state } = useTurn(childTurnId, { enabled: open })
+  return useMemo(
+    () => (childTurnId && state ? turnStateToTranscript(childTurnId, state) : null),
+    [childTurnId, state],
+  )
 }
 
 // "london-weather" / "meeting_prep" → "London weather" / "Meeting prep".
@@ -67,7 +47,7 @@ export function SubAgentBlock({
   // header truncates with a hover tooltip carrying the full text).
   const title = task ? `${name || 'Agent'}: ${task}` : name || 'Agent'
   const running = item.status === 'pending' || item.status === 'running'
-  const transcript = useChildTranscript(item.subAgent?.childTurnId, running, open)
+  const transcript = useChildTranscript(item.subAgent?.childTurnId, open)
 
   return (
     <Tool open={open} onOpenChange={onOpenChange}>

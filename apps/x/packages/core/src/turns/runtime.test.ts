@@ -5,8 +5,10 @@ import {
     type JsonValue,
     type ResolvedAgent,
     type ToolDescriptor,
+    type TurnBusEvent,
     type TurnEvent,
     type TurnStreamEvent,
+    isDurableTurnEvent,
     reduceTurn,
 } from "@x/shared/dist/turns.js";
 import type { IAgentResolver } from "./agent-resolver.js";
@@ -276,6 +278,13 @@ class FakeBus {
     }
 }
 
+class FakeTurnEventBus {
+    events: TurnBusEvent[] = [];
+    publish(event: TurnBusEvent): void {
+        this.events.push(event);
+    }
+}
+
 class FakeIdGen {
     private n: number;
     constructor(start = 0) {
@@ -308,6 +317,7 @@ function makeRuntime(opts: {
     const checker = opts.checker ?? new FakePermissionChecker();
     const classifier = opts.classifier ?? new FakePermissionClassifier();
     const bus = new FakeBus();
+    const turnEventBus = new FakeTurnEventBus();
     const usage = new FakeUsageReporter();
     const runtime = new TurnRuntime({
         turnRepo: repo,
@@ -320,9 +330,10 @@ function makeRuntime(opts: {
         permissionChecker: checker,
         permissionClassifier: classifier,
         lifecycleBus: bus,
+        turnEventBus,
         usageReporter: usage,
     });
-    return { runtime, repo, models, checker, classifier, bus, usage };
+    return { runtime, repo, models, checker, classifier, bus, turnEventBus, usage };
 }
 
 async function newTurn(
@@ -2312,5 +2323,76 @@ describe("mid-turn tool extension", () => {
             state.toolCalls.find((tc) => tc.toolCallId === "tc2")?.result?.result
                 .output,
         ).toBe("written");
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Turn event bus: process-wide tagged event spine
+// ---------------------------------------------------------------------------
+
+describe("turn event bus", () => {
+    it("publishes every durable event with its file offset and deltas without", async () => {
+        const { runtime, repo, turnEventBus } = makeRuntime({
+            models: [
+                respond(
+                    { type: "text_delta", delta: "do" },
+                    { type: "text_delta", delta: "ne" },
+                    completedResp(assistantText("done")),
+                ),
+            ],
+        });
+        const turnId = await newTurn(runtime, { sessionId: "s1" });
+        await advanceAndSettle(runtime, turnId);
+
+        // Durable bus events mirror the persisted file exactly, in order,
+        // with 1-based line offsets — turn_created included.
+        const log = await persisted(repo, turnId);
+        const durable = turnEventBus.events.filter((e) =>
+            isDurableTurnEvent(e.event),
+        );
+        expect(durable.map((e) => e.event)).toEqual(log);
+        expect(durable.map((e) => e.offset)).toEqual(log.map((_, i) => i + 1));
+
+        // Every bus event is tagged with its origin.
+        for (const event of turnEventBus.events) {
+            expect(event.turnId).toBe(turnId);
+            expect(event.sessionId).toBe("s1");
+        }
+
+        // Deltas ride the bus without offsets (they are not durable).
+        const deltas = turnEventBus.events.filter(
+            (e) => !isDurableTurnEvent(e.event),
+        );
+        expect(deltas.map((e) => e.event.type)).toEqual([
+            "text_delta",
+            "text_delta",
+        ]);
+        expect(deltas.every((e) => e.offset === undefined)).toBe(true);
+    });
+
+    it("continues offsets across suspend/resume invocations of one turn", async () => {
+        const { runtime, repo, turnEventBus } = makeRuntime({
+            models: [
+                respond(completedResp(assistantCalls(toolCallPart("c1", "fetch")))),
+                respond(completedResp(assistantText("done"))),
+            ],
+        });
+        const turnId = await newTurn(runtime);
+        const first = await advanceAndSettle(runtime, turnId);
+        expect(first.outcome?.status).toBe("suspended");
+        const second = await advanceAndSettle(runtime, turnId, {
+            type: "async_tool_result",
+            toolCallId: "c1",
+            result: { output: "ok", isError: false },
+        });
+        expect(second.outcome?.status).toBe("completed");
+
+        const log = await persisted(repo, turnId);
+        const durable = turnEventBus.events.filter((e) =>
+            isDurableTurnEvent(e.event),
+        );
+        expect(durable.map((e) => e.event)).toEqual(log);
+        expect(durable.map((e) => e.offset)).toEqual(log.map((_, i) => i + 1));
+        expect(durable.every((e) => e.sessionId === null)).toBe(true);
     });
 });

@@ -1,38 +1,18 @@
 import type { SessionBusEvent } from '@x/shared/src/sessions.js'
-
-export type SessionFeedListener = (event: SessionBusEvent) => void
-export type SessionFeedSource = (listener: SessionFeedListener) => () => void
+import {
+  createBroadcastFeed,
+  type FeedListener,
+  type FeedSource,
+} from '@/lib/broadcast-feed'
 
 // One shared consumer of the sessions:events push channel; stores tap this
-// fan-out instead of each opening their own IPC listener. Factory so tests
-// can drive a fake source.
+// fan-out instead of each opening their own IPC listener.
+
+export type SessionFeedListener = FeedListener<SessionBusEvent>
+export type SessionFeedSource = FeedSource<SessionBusEvent>
+
 export function createSessionFeed(source: SessionFeedSource) {
-  const listeners = new Set<SessionFeedListener>()
-  let detach: (() => void) | null = null
-
-  const ensureStarted = () => {
-    if (detach) return
-    detach = source((event) => {
-      // Copy so (un)subscribing during dispatch is safe.
-      for (const listener of [...listeners]) {
-        try {
-          listener(event)
-        } catch {
-          // A misbehaving subscriber must never break the feed.
-        }
-      }
-    })
-  }
-
-  return {
-    subscribe(listener: SessionFeedListener): () => void {
-      ensureStarted()
-      listeners.add(listener)
-      return () => {
-        listeners.delete(listener)
-      }
-    },
-  }
+  return createBroadcastFeed<SessionBusEvent>(source)
 }
 
 const appFeed = createSessionFeed((listener) => window.ipc.on('sessions:events', listener))

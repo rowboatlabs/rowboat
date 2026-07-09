@@ -1415,6 +1415,33 @@ Lifecycle publication is observational and must not alter durable turn
 semantics. Live durable events and deltas are consumed from `TurnExecution` by
 the application and may be forwarded over the existing bus/IPC bridge.
 
+### 17.1 Turn event bus
+
+Implemented alongside the lifecycle bus: the runtime publishes every turn's
+events to an injected `ITurnEventBus` (`event-hub.ts`), tagged with the
+turn's `sessionId`, regardless of who started the turn — session chat,
+headless runners, spawned sub-agents. This is the process-wide delivery
+spine; `TurnExecution` remains the single-consumer, invocation-scoped
+stream for the initiating caller.
+
+- `turn_created` is published by `createTurn` (it never flows through an
+  execution stream); every other durable event is published by the advance
+  loop immediately after its `stream.push`, inside the serialized commit
+  ritual, so bus order equals file order.
+- Durable events carry `offset`, their 1-based line index in the turn file
+  (`this.events.length` at commit time, which is absolute because each
+  invocation re-reads the full log). A late subscriber joins a live turn by
+  subscribing first, fetching the `getTurn` snapshot, and discarding bus
+  events with `offset <= snapshot.length` — no gaps, no duplicates, no
+  sequence numbers in the durable schema.
+- Text/reasoning deltas are published without an offset (they are not
+  durable). The app-layer IPC bridge (`turns:events`) forwards durable
+  events only in v1; deltas still reach session chat via the session-layer
+  forwarding. Scoping delta delivery to subscribed turns is future work.
+- The bus is ephemeral and observational, like the lifecycle bus: listener
+  errors are swallowed, nothing durable depends on delivery, and a crash
+  losing listeners accurately reflects that no execution is known active.
+
 ## 18. Main execution algorithm
 
 At a high level, `advanceTurn` performs:

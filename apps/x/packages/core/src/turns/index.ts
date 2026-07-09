@@ -4,6 +4,7 @@ export * from "./bus.js";
 export * from "./clock.js";
 export * from "./compose-model-request.js";
 export * from "./context-resolver.js";
+export * from "./event-hub.js";
 export * from "./fs-repo.js";
 export * from "./in-memory-turn-repo.js";
 export * from "./keyed-mutex.js";

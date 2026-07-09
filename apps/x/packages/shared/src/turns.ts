@@ -470,6 +470,26 @@ export type TurnStreamEvent =
     | TextDelta
     | ReasoningDelta;
 
+// One entry on the process-wide turn event bus: every event of every turn the
+// runtime executes, tagged with its origin so consumers can subscribe without
+// knowing who started the turn. `offset` is the 1-based line index of a
+// durable event in the turn's JSONL file — a late subscriber can fetch the
+// turn snapshot and discard bus events with offset <= snapshot length to join
+// a live turn without gaps or duplicates. Deltas are not durable and carry no
+// offset.
+export interface TurnBusEvent {
+    turnId: string;
+    sessionId: string | null;
+    event: TurnStreamEvent;
+    offset?: number;
+}
+
+export function isDurableTurnEvent(
+    event: TurnStreamEvent,
+): event is z.infer<typeof TurnEvent> {
+    return event.type !== "text_delta" && event.type !== "reasoning_delta";
+}
+
 // ---------------------------------------------------------------------------
 // Derived turn state
 // ---------------------------------------------------------------------------
