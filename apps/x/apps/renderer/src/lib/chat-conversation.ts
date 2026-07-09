@@ -4,6 +4,14 @@ import { AskHumanRequestEvent, ToolPermissionAutoDecisionEvent, ToolPermissionRe
 import { COMPOSIO_DISPLAY_NAMES } from '@x/shared/src/composio.js'
 import type { CodeRunEvent, PermissionAsk } from '@x/shared/src/code-mode.js'
 
+export interface TokenUsage {
+  inputTokens?: number
+  outputTokens?: number
+  totalTokens?: number
+  reasoningTokens?: number
+  cachedInputTokens?: number
+}
+
 export interface MessageAttachment {
   path: string
   filename: string
@@ -45,13 +53,22 @@ export interface ErrorMessage {
   timestamp: number
 }
 
-export type ConversationItem = ChatMessage | ToolCall | ErrorMessage
+export interface TurnUsageMessage {
+  id: string
+  kind: 'turn-usage'
+  usage: TokenUsage
+  modelCallCount: number
+  timestamp: number
+}
+
+export type ConversationItem = ChatMessage | ToolCall | ErrorMessage | TurnUsageMessage
 export type PermissionResponse = 'approve' | 'deny'
 
 export type ChatTabViewState = {
   runId: string | null
   conversation: ConversationItem[]
   currentAssistantMessage: string
+  sessionUsage: TokenUsage
   pendingAskHumanRequests: Map<string, z.infer<typeof AskHumanRequestEvent>>
   allPermissionRequests: Map<string, z.infer<typeof ToolPermissionRequestEvent>>
   permissionResponses: Map<string, PermissionResponse>
@@ -67,6 +84,7 @@ export const createEmptyChatTabViewState = (): ChatTabViewState => ({
   runId: null,
   conversation: [],
   currentAssistantMessage: '',
+  sessionUsage: {},
   pendingAskHumanRequests: new Map(),
   allPermissionRequests: new Map(),
   permissionResponses: new Map(),
@@ -79,6 +97,8 @@ export const isChatMessage = (item: ConversationItem): item is ChatMessage => 'r
 export const isToolCall = (item: ConversationItem): item is ToolCall => 'name' in item
 export const isErrorMessage = (item: ConversationItem): item is ErrorMessage =>
   'kind' in item && item.kind === 'error'
+export const isTurnUsageMessage = (item: ConversationItem): item is TurnUsageMessage =>
+  'kind' in item && item.kind === 'turn-usage'
 
 export const toToolState = (status: ToolCall['status']): ToolState => {
   switch (status) {
