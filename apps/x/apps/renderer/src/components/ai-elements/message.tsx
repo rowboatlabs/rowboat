@@ -14,8 +14,10 @@ import {
 import { cn } from "@/lib/utils";
 import type { FileUIPart, UIMessage } from "ai";
 import {
+  CheckIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  CopyIcon,
   PaperclipIcon,
   XIcon,
 } from "lucide-react";
@@ -38,6 +40,37 @@ export const Message = ({ className, from, ...props }: MessageProps) => (
   />
 );
 
+/**
+ * Minimal copy-to-clipboard affordance for a message bubble. Invisible until
+ * the surrounding Message (`.group`) is hovered.
+ */
+export const MessageCopyButton = ({
+  text,
+  className,
+}: {
+  text: string;
+  className?: string;
+}) => {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      aria-label="Copy message"
+      onClick={() => {
+        void navigator.clipboard.writeText(text);
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1200);
+      }}
+      className={cn(
+        "shrink-0 rounded-md p-1.5 text-muted-foreground/60 opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100",
+        className
+      )}
+    >
+      {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
+    </button>
+  );
+};
+
 export type MessageContentProps = HTMLAttributes<HTMLDivElement>;
 
 export const MessageContent = ({
@@ -49,7 +82,7 @@ export const MessageContent = ({
     data-slot="message-content"
     className={cn(
       "is-user:dark flex w-fit max-w-full min-w-0 flex-col gap-2 overflow-hidden text-sm",
-      "group-[.is-user]:ml-auto group-[.is-user]:rounded-lg group-[.is-user]:bg-secondary group-[.is-user]:px-4 group-[.is-user]:py-3 group-[.is-user]:text-foreground",
+      "group-[.is-user]:ml-auto group-[.is-user]:rounded-2xl group-[.is-user]:rounded-tr-md group-[.is-user]:bg-secondary group-[.is-user]:px-4 group-[.is-user]:py-2.5 group-[.is-user]:text-foreground",
       "group-[.is-assistant]:w-full group-[.is-assistant]:text-foreground",
       className
     )}
