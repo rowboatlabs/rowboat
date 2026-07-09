@@ -13,7 +13,7 @@ import {
 import { LiveNoteSchema, type LiveNote, type Triggers } from '@x/shared/dist/live-note.js'
 import { useLiveNoteAgentStatus } from '@/hooks/use-live-note-agent-status'
 import { formatRelativeTime } from '@/lib/relative-time'
-import { fetchAgentRunTranscript, type AgentRunTranscript } from '@/lib/agent-transcript'
+import { useAgentRunTranscript } from '@/hooks/use-agent-run-transcript'
 import { CompactConversation } from '@/components/compact-conversation'
 
 export type OpenLiveNotePanelDetail = {
@@ -659,37 +659,14 @@ function SectionRegion({ label, children }: { label?: string; children: React.Re
 }
 
 function LastRunTab({ live }: { live: LiveNote }) {
-  const [transcript, setTranscript] = useState<AgentRunTranscript | null>(null)
-  const [loadingRun, setLoadingRun] = useState(false)
-  const [fetchError, setFetchError] = useState<string | null>(null)
-
   const runId = live.lastRunId ?? null
-
-  useEffect(() => {
-    if (!runId) {
-      setTranscript(null)
-      setFetchError(null)
-      setLoadingRun(false)
-      return
-    }
-    let cancelled = false
-    setLoadingRun(true)
-    setFetchError(null)
-    void (async () => {
-      try {
-        const t = await fetchAgentRunTranscript(runId)
-        if (cancelled) return
-        setTranscript(t)
-      } catch (err) {
-        if (cancelled) return
-        setFetchError(err instanceof Error ? err.message : String(err))
-        setTranscript(null)
-      } finally {
-        if (!cancelled) setLoadingRun(false)
-      }
-    })()
-    return () => { cancelled = true }
-  }, [runId])
+  // Live via the turns:events spine: an in-flight run's transcript streams
+  // in as the agent works; settled runs render from one snapshot fetch.
+  const {
+    transcript,
+    loading: loadingRun,
+    error: fetchError,
+  } = useAgentRunTranscript(runId)
 
   if (!runId) {
     return (

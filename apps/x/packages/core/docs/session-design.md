@@ -376,7 +376,10 @@ which governs mutation of live logs, not their removal.
 ## 11. Headless standalone turns
 
 A helper covers the non-session callers (background tasks, live notes,
-knowledge pipelines, scheduled agents):
+knowledge pipelines, scheduled agents). Implemented as
+`HeadlessAgentRunner` in `agents/headless.ts` (start/run handle with
+turn id, reduced state, and final assistant text); the shape below is
+the contract it fulfils:
 
 ```ts
 function runHeadlessTurn(input: {

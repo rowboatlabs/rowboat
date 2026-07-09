@@ -17,7 +17,6 @@ import type {
 import { TurnInputError } from "../turns/api.js";
 import { HotStream } from "../turns/stream.js";
 import { TurnNotSettledError } from "./api.js";
-import { runHeadlessTurn } from "./headless.js";
 import { InMemorySessionRepo } from "./in-memory-session-repo.js";
 import type { ISessionRepo } from "./repo.js";
 import { SessionsImpl } from "./sessions.js";
@@ -820,26 +819,6 @@ describe("startup scan (13.6)", () => {
                 latestTurnStatus: "completed",
             }),
         ]);
-    });
-});
-
-describe("headless standalone turns (13.8)", () => {
-    it("runs a standalone turn with sessionId null, auto permission, no human", async () => {
-        const fake = new FakeTurnRuntime();
-        const { turnId, outcome } = await runHeadlessTurn(fake, {
-            agent: { agentId: "background-task-agent" },
-            input: user("summarize"),
-            maxModelCalls: 3,
-        });
-        expect(fake.createTurnInputs[0]).toEqual({
-            agent: { agentId: "background-task-agent" },
-            sessionId: null,
-            context: [],
-            input: user("summarize"),
-            config: { autoPermission: true, humanAvailable: false, maxModelCalls: 3 },
-        });
-        expect(outcome.status).toBe("completed");
-        expect(fake.advanceCalls).toEqual([{ turnId, input: undefined }]);
     });
 });
 
