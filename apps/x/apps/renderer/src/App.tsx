@@ -6163,6 +6163,20 @@ function App() {
               onOpenApps={openAppsView}
               recentRuns={runs}
               onOpenRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
+              onRenameRun={(rid, title) => {
+                void window.ipc.invoke('sessions:setTitle', { sessionId: rid, title })
+                  .then(() => setRuns((prev) => prev.map((r) => (r.id === rid ? { ...r, title } : r))))
+                  .catch((err) => console.error('Failed to rename chat:', err))
+              }}
+              onDeleteRun={(rid) => {
+                void window.ipc.invoke('sessions:delete', { sessionId: rid })
+                  .then(() => {
+                    setRuns((prev) => prev.filter((r) => r.id !== rid))
+                    const openTab = chatTabs.find((t) => t.runId === rid)
+                    if (openTab) closeChatTab(openTab.id)
+                  })
+                  .catch((err) => console.error('Failed to delete chat:', err))
+              }}
               onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
               onOpenEmail={(threadId) => openEmailView(threadId)}
               onOpenHome={() => void navigateToView({ type: 'home' })}

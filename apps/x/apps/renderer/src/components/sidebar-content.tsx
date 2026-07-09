@@ -15,7 +15,11 @@ import {
   Home,
   LayoutGrid,
   Mic,
+  MoreVertical,
+  Pencil,
+  Pin,
   SquarePen,
+  Trash2,
   Plug,
   LoaderIcon,
   Mail,
@@ -61,6 +65,12 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
 import { isOutOfCredits, CREDIT_EXHAUSTED_EVENT, CREDIT_REPLENISHED_EVENT } from "@/lib/credit-status"
 import { SettingsDialog } from "@/components/settings-dialog"
@@ -127,6 +137,8 @@ type ServiceEventType = z.infer<typeof ServiceEvent>
 
 const MAX_SYNC_EVENTS = 1000
 const RUN_STALE_MS = 2 * 60 * 60 * 1000
+const PINNED_CHATS_STORAGE_KEY = 'x:pinned-chats'
+const MAX_PINNED_CHATS = 3
 
 const SERVICE_LABELS: Record<string, string> = {
   gmail: "Syncing Gmail",
@@ -171,6 +183,10 @@ type SidebarContentPanelProps = {
   onOpenAgent?: (slug: string) => void
   recentRuns?: { id: string; title?: string; createdAt: string; modifiedAt?: string }[]
   onOpenRun?: (runId: string) => void
+  /** Persist a custom chat title (sessions:setTitle) and refresh the runs list. */
+  onRenameRun?: (runId: string, title: string) => void
+  /** Delete the chat's session (sessions:delete) and refresh the runs list. */
+  onDeleteRun?: (runId: string) => void
   onOpenChatHistory?: () => void
   onOpenEmail?: (threadId?: string) => void
   onOpenHome?: () => void
@@ -422,6 +438,8 @@ export function SidebarContentPanel({
   onOpenApps,
   recentRuns = [],
   onOpenRun,
+  onRenameRun,
+  onDeleteRun,
   onOpenChatHistory,
   onOpenEmail,
   onOpenHome,
@@ -548,16 +566,54 @@ export function SidebarContentPanel({
       .slice(0, 10)
   }, [tree])
 
-  // Chats: the 5 most recently modified chats, newest first.
+  // Pinned chats: a per-machine UI preference, persisted in localStorage.
+  const [pinnedChatIds, setPinnedChatIds] = useState<string[]>(() => {
+    try {
+      const raw = window.localStorage.getItem(PINNED_CHATS_STORAGE_KEY)
+      const parsed: unknown = raw ? JSON.parse(raw) : []
+      return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : []
+    } catch {
+      return []
+    }
+  })
+  const toggleChatPin = useCallback((chatId: string) => {
+    const isPinned = pinnedChatIds.includes(chatId)
+    if (!isPinned && pinnedChatIds.length >= MAX_PINNED_CHATS) {
+      toast(`You can pin up to ${MAX_PINNED_CHATS} chats`, 'error')
+      return
+    }
+    const next = isPinned ? pinnedChatIds.filter((id) => id !== chatId) : [...pinnedChatIds, chatId]
+    try {
+      window.localStorage.setItem(PINNED_CHATS_STORAGE_KEY, JSON.stringify(next))
+    } catch { /* ignore */ }
+    setPinnedChatIds(next)
+  }, [pinnedChatIds])
+
+  // Chats: pinned first, then the most recently modified, 10 rows total.
   const recentChats = React.useMemo(() => {
     const chatRecency = (r: { createdAt: string; modifiedAt?: string }) => {
       const ms = new Date(r.modifiedAt ?? r.createdAt).getTime()
       return Number.isFinite(ms) ? ms : 0
     }
-    return [...recentRuns]
-      .sort((a, b) => chatRecency(b) - chatRecency(a))
-      .slice(0, 10)
-  }, [recentRuns])
+    const sorted = [...recentRuns].sort((a, b) => chatRecency(b) - chatRecency(a))
+    const pinned = sorted.filter((r) => pinnedChatIds.includes(r.id))
+    const rest = sorted.filter((r) => !pinnedChatIds.includes(r.id))
+    return [...pinned, ...rest.slice(0, Math.max(0, 10 - pinned.length))]
+  }, [recentRuns, pinnedChatIds])
+
+  // Chat pending delete confirmation, if any.
+  const [deleteChatTarget, setDeleteChatTarget] = useState<{ id: string; title: string } | null>(null)
+
+  // Inline chat rename: which row is editing and its draft text.
+  const [renamingChatId, setRenamingChatId] = useState<string | null>(null)
+  const [renameDraft, setRenameDraft] = useState('')
+  const commitChatRename = useCallback((chatId: string) => {
+    const title = renameDraft.trim()
+    const current = recentChats.find((c) => c.id === chatId)
+    setRenamingChatId(null)
+    if (!title || title === (current?.title ?? '')) return
+    onRenameRun?.(chatId, title)
+  }, [renameDraft, recentChats, onRenameRun])
 
   // Workspace count for the Workspaces sublabel — top-level dir children of
   // knowledge/Workspace (matches WorkspaceView's root listing).
@@ -971,10 +1027,75 @@ export function SidebarContentPanel({
                 <SidebarMenu>
                   {recentChats.map((chat) => (
                     <SidebarMenuItem key={chat.id}>
-                      <SidebarMenuButton onClick={() => onOpenRun?.(chat.id)}>
-                        <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
-                        <span className="flex-1 truncate">{chat.title || '(Untitled chat)'}</span>
-                      </SidebarMenuButton>
+                      {renamingChatId === chat.id ? (
+                        <div className="flex h-8 items-center gap-2 rounded-md px-2">
+                          <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
+                          <input
+                            autoFocus
+                            value={renameDraft}
+                            onChange={(e) => setRenameDraft(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault()
+                                commitChatRename(chat.id)
+                              } else if (e.key === 'Escape') {
+                                e.preventDefault()
+                                setRenamingChatId(null)
+                              }
+                            }}
+                            onBlur={() => commitChatRename(chat.id)}
+                            className="h-6 min-w-0 flex-1 rounded-sm border border-border bg-background px-1.5 text-sm outline-none focus:ring-1 focus:ring-ring"
+                          />
+                        </div>
+                      ) : (
+                        <>
+                          <SidebarMenuButton onClick={() => onOpenRun?.(chat.id)} className={onRenameRun ? 'pr-7' : undefined}>
+                            <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
+                            <span className="flex-1 truncate">{chat.title || '(Untitled chat)'}</span>
+                            {pinnedChatIds.includes(chat.id) && (
+                              <Pin className="size-3 shrink-0 text-muted-foreground/70 transition-opacity group-hover/menu-item:opacity-0" />
+                            )}
+                          </SidebarMenuButton>
+                          {onRenameRun && (
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <button
+                                  type="button"
+                                  aria-label="Chat options"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="absolute right-1.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/menu-item:opacity-100 data-[state=open]:opacity-100"
+                                >
+                                  <MoreVertical className="size-4" />
+                                </button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent side="right" align="start">
+                                <DropdownMenuItem onClick={() => toggleChatPin(chat.id)}>
+                                  <Pin className="mr-2 size-3.5" />
+                                  {pinnedChatIds.includes(chat.id) ? 'Unpin' : 'Pin'}
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={() => {
+                                    setRenameDraft(chat.title || '')
+                                    setRenamingChatId(chat.id)
+                                  }}
+                                >
+                                  <Pencil className="mr-2 size-3.5" />
+                                  Rename
+                                </DropdownMenuItem>
+                                {onDeleteRun && (
+                                  <DropdownMenuItem
+                                    className="text-destructive focus:text-destructive"
+                                    onClick={() => setDeleteChatTarget({ id: chat.id, title: chat.title || '(Untitled chat)' })}
+                                  >
+                                    <Trash2 className="mr-2 size-3.5" />
+                                    Delete
+                                  </DropdownMenuItem>
+                                )}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          )}
+                        </>
+                      )}
                     </SidebarMenuItem>
                   ))}
                   {onOpenChatHistory && (
@@ -993,6 +1114,28 @@ export function SidebarContentPanel({
             )}
           </SidebarGroupContent>
         </SidebarGroup>
+        <AlertDialog open={!!deleteChatTarget} onOpenChange={(open) => { if (!open) setDeleteChatTarget(null) }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete chat?</AlertDialogTitle>
+              <AlertDialogDescription>
+                &ldquo;{deleteChatTarget?.title}&rdquo; and its full history will be permanently deleted.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-destructive text-white hover:bg-destructive/90"
+                onClick={() => {
+                  if (deleteChatTarget) onDeleteRun?.(deleteChatTarget.id)
+                  setDeleteChatTarget(null)
+                }}
+              >
+                Delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </SidebarContent>
       {/* Billing / upgrade CTA or Log in CTA */}
       {isRowboatConnected && billing ? (() => {
