@@ -26,6 +26,10 @@ export type CapabilityActivation = "model" | "app" | "always";
 // stay byte-identical for identical inputs (provider prefix caching and
 // agent-snapshot inheritance both depend on it).
 export interface CapabilityContext {
+    // Workspace context (workspaceContext trait agents only; the resolver
+    // loads these and leaves them null for everyone else).
+    agentNotesContext: string | null;
+    userWorkDir: string | null;
     voiceInput: boolean;
     voiceOutput: "summary" | "full" | null;
     searchEnabled: boolean;

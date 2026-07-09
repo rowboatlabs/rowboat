@@ -1,4 +1,5 @@
 import { MODE_CAPABILITIES } from "../application/assistant/capabilities/modes.js";
+import { WORKSPACE_CONTEXT_CAPABILITY } from "../application/assistant/capabilities/workspace.js";
 import type { CapabilityContext } from "../application/assistant/capabilities/types.js";
 
 // System-prompt composition for agent assembly: the base instructions plus
@@ -52,33 +53,12 @@ export function composeSystemInstructions({
     coachMode,
 }: ComposeSystemInstructionsInput): string {
     let instructionsWithDateTime = `${instructions}\n\n${USER_CONTEXT_SYSTEM_INSTRUCTIONS}`;
-        if (agentNotesContext) {
-            instructionsWithDateTime += `\n\n${agentNotesContext}`;
-        }
-        if (userWorkDir) {
-                instructionsWithDateTime += `\n\n# User Work Directory
-The user has chosen the following directory as their current **work directory**:
-
-\`${userWorkDir}\`
-
-Treat this as the **default location** for file operations whenever the user refers to files generically:
-- "list the files", "show me what's in here", "what's the latest report" — list or look in the work directory.
-- "save this", "export it", "write that to a file" — write the output into the work directory unless the user names another location.
-- "open the file I was just working on", "the doc from earlier" — assume the work directory first.
-
-Use absolute paths rooted at this directory with the \`file-*\` tools. For example, list with \`file-list({ path: "${userWorkDir}" })\`, read text with \`file-readText\`, and write text with \`file-writeText\`. For PDFs, Office docs, images, scanned docs, and other non-text files, use \`parseFile\` or \`LLMParse\` with the absolute path; you do NOT need to copy the file into the workspace first.
-
-**Exceptions — these ALWAYS take precedence over the work directory default:**
-1. **Knowledge base questions.** If the user asks about anything in the knowledge graph (notes, people, organizations, projects, topics) or paths starting with \`knowledge/\`, use file tools against \`knowledge/\` as documented above. Do NOT redirect those into the work directory.
-2. **Explicit paths.** If the user names a different directory or gives an absolute/relative path (e.g. "in ~/Downloads", "from /tmp/foo", "the Desktop"), honor that path exactly and ignore the work-directory default for that request.
-3. **Workspace-specific operations.** Anything that obviously belongs in the Rowboat workspace (config files, MCP servers, agent schedules, etc.) stays in the workspace, not the work directory.
-
-Do not announce the work directory unless it's relevant. Just use it.`;
-        }
         // App-activated mode capabilities compose here, in MODE_CAPABILITIES
         // order — a fixed total order, so identical inputs yield identical
         // bytes. The fragment text lives with the capability records.
         const ctx: CapabilityContext = {
+            agentNotesContext,
+            userWorkDir,
             voiceInput,
             voiceOutput,
             searchEnabled,
@@ -87,7 +67,7 @@ Do not announce the work directory unless it's relevant. Just use it.`;
             videoMode: videoMode ?? false,
             coachMode: coachMode ?? false,
         };
-        for (const capability of MODE_CAPABILITIES) {
+        for (const capability of [WORKSPACE_CONTEXT_CAPABILITY, ...MODE_CAPABILITIES]) {
             const fragment = capability.promptFragment?.(ctx);
             if (fragment) {
                 instructionsWithDateTime += `\n\n${fragment}`;
