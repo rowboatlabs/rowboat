@@ -11,19 +11,15 @@ import { execTool } from "../application/lib/exec-tool.js";
 import { TOOL_ADDITIONS_KEY } from "../application/lib/tool-additions.js";
 import { AskHumanRequestEvent, RunEvent, ToolPermissionMetadata, ToolPermissionRequestEvent } from "@x/shared/dist/runs.js";
 import { BuiltinTools } from "../application/lib/builtin-tools.js";
-import { buildCopilotAgent } from "../application/assistant/agent.js";
-import { buildLiveNoteAgent } from "../knowledge/live-note/agent.js";
-import { buildBackgroundTaskAgent } from "../background-tasks/agent.js";
+import { hasWorkspaceContext, loadAgent } from "./registry.js";
 import { isBlocked, extractCommandNames } from "../application/lib/command-executor.js";
 import { getFileAccessAllowList, type FileAccessGrant, type FileAccessOperation } from "../config/security.js";
 import { resolveFilePathForPermission } from "../filesystem/files.js";
-import container from "../di/container.js";
 import { notifyIfEnabled } from "../application/notification/notifier.js";
 import { IModelConfigRepo } from "../models/repo.js";
 import { createLanguageModel } from "../models/models.js";
 import { chatActivity } from "../application/lib/chat-activity.js";
 import { resolveProviderConfig } from "../models/defaults.js";
-import { IAgentsRepo } from "./repo.js";
 import { IMonotonicallyIncreasingIdGenerator } from "../application/lib/id-gen.js";
 import { IBus } from "../application/lib/bus.js";
 import { IMessageQueue, type MiddlePaneContext } from "../application/lib/message-queue.js";
@@ -31,15 +27,8 @@ import { IRunsRepo } from "../runs/repo.js";
 import { IRunsLock } from "../runs/lock.js";
 import { IAbortRegistry } from "../runs/abort-registry.js";
 import { PrefixLogger } from "@x/shared";
-import { parse } from "yaml";
 import { captureLlmUsage } from "../analytics/usage.js";
 import { enterUseCase, withUseCase, type UseCase } from "../analytics/use_case.js";
-import { getRaw as getNoteCreationRaw } from "../knowledge/note_creation.js";
-import { getRaw as getNoteCurationRaw } from "../knowledge/note_curation.js";
-import { getRaw as getLabelingAgentRaw } from "../knowledge/labeling_agent.js";
-import { getRaw as getNoteTaggingAgentRaw } from "../knowledge/note_tagging_agent.js";
-import { getRaw as getInlineTaskAgentRaw } from "../knowledge/inline_task_agent.js";
-import { getRaw as getAgentNotesAgentRaw } from "../knowledge/agent_notes_agent.js";
 import { classifyToolPermissions, type AutoPermissionCandidate } from "../security/auto-permission-classifier.js";
 
 const AGENT_NOTES_DIR = path.join(WorkDir, 'knowledge', 'Agent Notes');
@@ -240,10 +229,6 @@ export function loadAgentNotesContext(): string | null {
     return `# Agent Memory\n\n${sections.join('\n\n')}`;
 }
 
-function isCopilotLikeAgent(agentName: string | null | undefined): boolean {
-    return agentName === 'copilot' || agentName === 'rowboatx';
-}
-
 function formatCurrentDateTime(now: Date): string {
     return now.toLocaleString('en-US', {
         weekday: 'long',
@@ -283,7 +268,7 @@ function buildUserMessageContext({
 }): z.infer<typeof UserMessageContext> {
     return {
         currentDateTime: formatCurrentDateTime(new Date()),
-        ...(isCopilotLikeAgent(agentName)
+        ...(hasWorkspaceContext(agentName)
             ? { middlePane: toUserMessageContextMiddlePane(middlePaneContext) }
             : {}),
     };
@@ -790,148 +775,9 @@ function formatLlmStreamError(rawError: unknown): string {
     return lines.length ? lines.join("\n") : "Model stream error";
 }
 
-export async function loadAgent(id: string): Promise<z.infer<typeof Agent>> {
-    if (id === "copilot" || id === "rowboatx") {
-        return buildCopilotAgent();
-    }
-
-    if (id === "live-note-agent") {
-        return buildLiveNoteAgent();
-    }
-
-    if (id === "background-task-agent") {
-        return buildBackgroundTaskAgent();
-    }
-
-    if (id === 'note_creation' || id === 'note_curation') {
-        const raw = id === 'note_curation' ? getNoteCurationRaw() : getNoteCreationRaw();
-        let agent: z.infer<typeof Agent> = {
-            name: id,
-            instructions: raw,
-        };
-
-        // Parse frontmatter if present
-        if (raw.startsWith("---")) {
-            const end = raw.indexOf("\n---", 3);
-            if (end !== -1) {
-                const fm = raw.slice(3, end).trim();
-                const content = raw.slice(end + 4).trim();
-                const yaml = parse(fm);
-                const parsed = Agent.omit({ name: true, instructions: true }).parse(yaml);
-                agent = {
-                    ...agent,
-                    ...parsed,
-                    instructions: content,
-                };
-            }
-        }
-
-        return agent;
-    }
-
-    if (id === 'labeling_agent') {
-        const labelingAgentRaw = getLabelingAgentRaw();
-        let agent: z.infer<typeof Agent> = {
-            name: id,
-            instructions: labelingAgentRaw,
-        };
-
-        if (labelingAgentRaw.startsWith("---")) {
-            const end = labelingAgentRaw.indexOf("\n---", 3);
-            if (end !== -1) {
-                const fm = labelingAgentRaw.slice(3, end).trim();
-                const content = labelingAgentRaw.slice(end + 4).trim();
-                const yaml = parse(fm);
-                const parsed = Agent.omit({ name: true, instructions: true }).parse(yaml);
-                agent = {
-                    ...agent,
-                    ...parsed,
-                    instructions: content,
-                };
-            }
-        }
-
-        return agent;
-    }
-
-    if (id === 'note_tagging_agent') {
-        const noteTaggingAgentRaw = getNoteTaggingAgentRaw();
-        let agent: z.infer<typeof Agent> = {
-            name: id,
-            instructions: noteTaggingAgentRaw,
-        };
-
-        if (noteTaggingAgentRaw.startsWith("---")) {
-            const end = noteTaggingAgentRaw.indexOf("\n---", 3);
-            if (end !== -1) {
-                const fm = noteTaggingAgentRaw.slice(3, end).trim();
-                const content = noteTaggingAgentRaw.slice(end + 4).trim();
-                const yaml = parse(fm);
-                const parsed = Agent.omit({ name: true, instructions: true }).parse(yaml);
-                agent = {
-                    ...agent,
-                    ...parsed,
-                    instructions: content,
-                };
-            }
-        }
-
-        return agent;
-    }
-
-    if (id === 'inline_task_agent') {
-        const inlineTaskAgentRaw = getInlineTaskAgentRaw();
-        let agent: z.infer<typeof Agent> = {
-            name: id,
-            instructions: inlineTaskAgentRaw,
-        };
-
-        if (inlineTaskAgentRaw.startsWith("---")) {
-            const end = inlineTaskAgentRaw.indexOf("\n---", 3);
-            if (end !== -1) {
-                const fm = inlineTaskAgentRaw.slice(3, end).trim();
-                const content = inlineTaskAgentRaw.slice(end + 4).trim();
-                const yaml = parse(fm);
-                const parsed = Agent.omit({ name: true, instructions: true }).parse(yaml);
-                agent = {
-                    ...agent,
-                    ...parsed,
-                    instructions: content,
-                };
-            }
-        }
-
-        return agent;
-    }
-
-    if (id === 'agent_notes_agent') {
-        const agentNotesAgentRaw = getAgentNotesAgentRaw();
-        let agent: z.infer<typeof Agent> = {
-            name: id,
-            instructions: agentNotesAgentRaw,
-        };
-
-        if (agentNotesAgentRaw.startsWith("---")) {
-            const end = agentNotesAgentRaw.indexOf("\n---", 3);
-            if (end !== -1) {
-                const fm = agentNotesAgentRaw.slice(3, end).trim();
-                const content = agentNotesAgentRaw.slice(end + 4).trim();
-                const yaml = parse(fm);
-                const parsed = Agent.omit({ name: true, instructions: true }).parse(yaml);
-                agent = {
-                    ...agent,
-                    ...parsed,
-                    instructions: content,
-                };
-            }
-        }
-
-        return agent;
-    }
-
-    const repo = container.resolve<IAgentsRepo>('agentsRepo');
-    return await repo.fetch(id);
-}
+// Agent identity now lives in the registry (registry.ts); re-exported here
+// so legacy callers keep their import path until the runs engine dies.
+export { loadAgent };
 
 function formatBytes(bytes: number): string {
     if (bytes < 1024) return `${bytes} B`;
@@ -1604,7 +1450,7 @@ export async function* streamAgent({
         loopLogger.log('running llm turn');
         // stream agent response and build message
         const messageBuilder = new StreamStepMessageBuilder();
-        const composeCopilotContext = state.agentName === 'copilot' || state.agentName === 'rowboatx';
+        const composeCopilotContext = hasWorkspaceContext(state.agentName);
         const instructionsWithDateTime = composeSystemInstructions({
             instructions: agent.instructions,
             agentNotesContext: composeCopilotContext ? loadAgentNotesContext() : null,
