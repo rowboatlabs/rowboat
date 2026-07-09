@@ -20,6 +20,7 @@ import {
 } from "@x/shared/dist/turns.js";
 import type { IMonotonicallyIncreasingIdGenerator } from "../application/lib/id-gen.js";
 import { chatActivity } from "../application/lib/chat-activity.js";
+import { notifyIfEnabled } from "../application/notification/notifier.js";
 import type {
     ITurnRuntime,
     Turn,
@@ -63,6 +64,11 @@ export class SessionsImpl implements ISessions {
         string,
         { sessionId: string | null; controller: AbortController; execution: TurnExecution }
     >();
+    // Sessions whose settles should not raise desktop notifications (channel
+    // -driven chats — see SendMessageConfig.notifications). In-memory only: a
+    // crash-resumed session defaults back to notifying, which errs on the
+    // side of pinging the user.
+    private readonly quiet = new Set<string>();
 
     constructor({
         sessionRepo,
@@ -207,6 +213,12 @@ export class SessionsImpl implements ISessions {
             }
             await this.sessionRepo.append(sessionId, batch);
 
+            if (config.notifications === false) {
+                this.quiet.add(sessionId);
+            } else {
+                this.quiet.delete(sessionId);
+            }
+
             this.publishEntry(
                 sessionIndexEntry(reduceSession([...events, ...batch]), "idle"),
             );
@@ -298,6 +310,7 @@ export class SessionsImpl implements ISessions {
         await this.sessionRepo.withLock(sessionId, async () => {
             await this.sessionRepo.delete(sessionId);
             this.index.remove(sessionId);
+            this.quiet.delete(sessionId);
             this.sessionBus.publish({ kind: "index-changed", sessionId, entry: null });
         });
     }
@@ -400,6 +413,43 @@ export class SessionsImpl implements ISessions {
             latestTurnStatus: outcome.status,
             updatedAt: this.clock.now(),
         });
+        this.notifySettled(sessionId, outcome, entry.lastAgentId);
+    }
+
+    // Desktop notifications for user-facing chat settles. Session turns are
+    // the user's chats by definition (headless/background agents run turns
+    // without a session), so this is the counterpart of the notifications the
+    // legacy agents/runtime.ts fires for legacy runs.
+    private notifySettled(
+        sessionId: string,
+        outcome: TurnOutcome,
+        agentId: string | undefined,
+    ): void {
+        if (this.quiet.has(sessionId)) {
+            return;
+        }
+        if (outcome.status === "completed") {
+            void notifyIfEnabled("chat_completion", {
+                title: "Response ready",
+                message: "Your agent finished responding.",
+                link: `rowboat://open?type=chat&runId=${sessionId}`,
+                actionLabel: "Open",
+                onlyWhenBackground: true,
+            });
+        } else if (
+            outcome.status === "suspended" &&
+            outcome.pendingPermissions.length > 0
+        ) {
+            const { toolName } = outcome.pendingPermissions[0];
+            // Deliberately no onlyWhenBackground: a blocked run must surface
+            // even while the app is focused.
+            void notifyIfEnabled("agent_permission", {
+                title: "Permission needed",
+                message: `${agentId ?? "An agent"} wants to run "${toolName}". Review to continue.`,
+                link: `rowboat://open?type=chat&runId=${sessionId}`,
+                actionLabel: "Review",
+            });
+        }
     }
 
     private publishEntry(entry: SessionIndexEntry): void {
