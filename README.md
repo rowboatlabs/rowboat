@@ -58,7 +58,7 @@ Download latest for Mac/Windows/Linux: [Download](https://www.rowboatlabs.com/do
 Rowboat indexes email, meetings, slack and assistant conversations into a living Obsidian-style backlinked knowledge graph. 
 </td>
 <td width="60%">
-<img width="1499" height="940" alt="Screenshot 2026-06-24 at 11 22 52 PM" src="assets/readme-dark/brain.png" />
+<img width="1502" height="939" alt="Brain graph screenshot" src="assets/readme-dark/brain.png" />
 </td>
 </tr>
 <tr>
