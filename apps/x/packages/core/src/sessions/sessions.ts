@@ -189,6 +189,9 @@ export class SessionsImpl implements ISessions {
                     ...(config.maxModelCalls === undefined
                         ? {}
                         : { maxModelCalls: config.maxModelCalls }),
+                    ...(config.reasoningEffort === undefined
+                        ? {}
+                        : { reasoningEffort: config.reasoningEffort }),
                 },
             });
 

@@ -3,6 +3,7 @@ import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { getAccessToken } from '../auth/tokens.js';
 import { getCurrentUseCase } from '../analytics/use_case.js';
 import { API_URL } from '../config/env.js';
+import { annotateReasoningFlags } from './models-dev.js';
 
 const authedFetch: typeof fetch = async (input, init) => {
     const token = await getAccessToken();
@@ -30,6 +31,7 @@ type ProviderSummary = {
         id: string;
         name?: string;
         release_date?: string;
+        reasoning?: boolean;
     }>;
 };
 
@@ -42,7 +44,9 @@ export async function listGatewayModels(): Promise<{ providers: ProviderSummary[
         throw new Error(`Gateway /v1/models failed: ${response.status}`);
     }
     const body = await response.json() as { data: Array<{ id: string }> };
-    const models = body.data.map((m) => ({ id: m.id }));
+    // The gateway returns bare "vendor/model" ids; the models.dev cache
+    // supplies the reasoning capability the composer's effort control needs.
+    const models = await annotateReasoningFlags(body.data.map((m) => ({ id: m.id })));
     return {
         providers: [{
             id: 'rowboat',

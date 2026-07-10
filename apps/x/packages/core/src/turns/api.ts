@@ -20,6 +20,9 @@ export interface CreateTurnInput {
         autoPermission?: boolean;
         humanAvailable: boolean;
         maxModelCalls?: number;
+        // Canonical per-turn reasoning effort; omitted = auto (provider
+        // default, byte-identical requests to today).
+        reasoningEffort?: "low" | "medium" | "high";
     };
 }
 

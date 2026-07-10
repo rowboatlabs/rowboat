@@ -164,6 +164,9 @@ export class TurnRuntime implements ITurnRuntime {
                 autoPermission: input.config.autoPermission ?? false,
                 humanAvailable: input.config.humanAvailable,
                 maxModelCalls: input.config.maxModelCalls ?? DEFAULT_MAX_MODEL_CALLS,
+                ...(input.config.reasoningEffort === undefined
+                    ? {}
+                    : { reasoningEffort: input.config.reasoningEffort }),
             },
         });
         await this.turnRepo.create(event);
@@ -1110,10 +1113,16 @@ class TurnAdvance {
                       ]
                     : []; // re-issue after an interrupted call adds nothing new
         }
+        // The turn's reasoning effort is stamped on every call's persisted
+        // parameters (turn-runtime-design.md §8.3): each step durably records
+        // what it ran with, and the model bridge maps the canonical value to
+        // provider-specific options at invoke time.
+        const reasoningEffort = this.definition.config.reasoningEffort;
         const request: z.infer<typeof ModelRequest> = {
             ...(isRef && index === 0 ? { contextRef: context } : {}),
             messages: refs,
-            parameters: {},
+            parameters:
+                reasoningEffort === undefined ? {} : { reasoningEffort },
         };
         await this.append({
             type: "model_call_requested",
@@ -1290,7 +1299,22 @@ function parseToolAdditions(
 }
 
 function errorMessage(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
+    const message = error instanceof Error ? error.message : String(error);
+    // Provider API errors carry the actual upstream failure in responseBody
+    // (AI SDK APICallError; RetryError wraps the last one as lastError).
+    // "Failed after 3 attempts" alone is undebuggable — persist the payload,
+    // bounded so request events stay reference-sized.
+    const source = (error as { lastError?: unknown }).lastError ?? error;
+    const statusCode = (source as { statusCode?: unknown }).statusCode;
+    const responseBody = (source as { responseBody?: unknown }).responseBody;
+    const details: string[] = [];
+    if (typeof statusCode === "number") {
+        details.push(`status ${statusCode}`);
+    }
+    if (typeof responseBody === "string" && responseBody.trim().length > 0) {
+        details.push(responseBody.slice(0, 2000));
+    }
+    return details.length > 0 ? `${message} [${details.join(" — ")}]` : message;
 }
 
 function outcomeFromTerminal(state: TurnState): TurnOutcome {

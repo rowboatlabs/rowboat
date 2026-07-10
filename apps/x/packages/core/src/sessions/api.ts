@@ -16,6 +16,7 @@ export interface SendMessageConfig {
     agent: z.infer<typeof RequestedAgent>;
     autoPermission?: boolean;
     maxModelCalls?: number;
+    reasoningEffort?: "low" | "medium" | "high";
 }
 
 export interface ISessions {

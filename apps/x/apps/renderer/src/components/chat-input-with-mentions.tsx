@@ -17,6 +17,7 @@ import {
   Globe,
   ImagePlus,
   LoaderIcon,
+  Brain,
   Lock,
   Mic,
   MoreHorizontal,
@@ -109,6 +110,16 @@ export interface SelectedModel {
   provider: string
   model: string
 }
+
+export type ReasoningEffortLevel = 'low' | 'medium' | 'high'
+
+// '' = auto (provider default). Ordered as shown in the picker.
+const REASONING_EFFORT_OPTIONS: Array<{ value: '' | ReasoningEffortLevel; label: string; hint: string }> = [
+  { value: '', label: 'Auto', hint: 'Provider default' },
+  { value: 'low', label: 'Fast', hint: 'Minimal thinking' },
+  { value: 'medium', label: 'Balanced', hint: 'Moderate thinking' },
+  { value: 'high', label: 'Thorough', hint: 'Deep thinking, costs more' },
+]
 
 export type PermissionMode = 'manual' | 'auto'
 
@@ -254,6 +265,11 @@ interface ChatInputInnerProps {
   callAvailable?: boolean
   /** Fired when the user picks a different model in the dropdown (only when no run exists yet). */
   onSelectedModelChange?: (model: SelectedModel | null) => void
+  /**
+   * Fired when the user picks a reasoning effort (null = auto). Unlike model,
+   * effort is never frozen on a run — it applies per turn.
+   */
+  onReasoningEffortChange?: (effort: ReasoningEffortLevel | null) => void
   /** Work directory for this chat (per-chat). Null when none is set. */
   workDir?: string | null
   /** Fired when the user sets/changes/clears the work directory for this chat. */
@@ -290,6 +306,7 @@ function ChatInputInner({
   onEndCall,
   callAvailable,
   onSelectedModelChange,
+  onReasoningEffortChange,
   workDir = null,
   onWorkDirChange,
   codeSessionLock = null,
@@ -309,6 +326,10 @@ function ChatInputInner({
   const [defaultModel, setDefaultModel] = useState<ConfiguredModel | null>(null)
   const loadModelConfigEpoch = useRef(0)
   const [lockedModel, setLockedModel] = useState<SelectedModel | null>(null)
+  // '' = auto. Per-model reasoning capability ("provider/model" → flag) from
+  // models:list; the effort control renders only for known-reasoning models.
+  const [reasoningEffort, setReasoningEffort] = useState<'' | ReasoningEffortLevel>('')
+  const [reasoningByKey, setReasoningByKey] = useState<Record<string, boolean>>({})
   const [searchEnabled, setSearchEnabled] = useState(false)
   const [searchAvailable, setSearchAvailable] = useState(false)
   const [isRowboatConnected, setIsRowboatConnected] = useState(false)
@@ -431,12 +452,19 @@ function ChatInputInner({
       // catalog (Ollama, OpenAI-compatible) fall back to the models saved in
       // config below.
       const catalog: Record<string, string[]> = {}
+      const reasoningFlags: Record<string, boolean> = {}
       try {
         const listResult = await window.ipc.invoke('models:list', null)
         for (const p of listResult.providers || []) {
           catalog[p.id] = (p.models || []).map((m: { id: string }) => m.id)
+          for (const m of p.models || []) {
+            if (typeof m.reasoning === 'boolean') {
+              reasoningFlags[`${p.id}/${m.id}`] = m.reasoning
+            }
+          }
         }
       } catch { /* offline / no catalog — fall back to saved config below */ }
+      if (loadModelConfigEpoch.current === epoch) setReasoningByKey(reasoningFlags)
 
       if (isRowboatConnected) {
         for (const m of catalog['rowboat'] || []) push('rowboat', m)
@@ -692,6 +720,30 @@ function ChatInputInner({
     setActiveModelKey(key)
     onSelectedModelChange?.({ provider: entry.provider, model: entry.model })
   }, [pickerModels, lockedModel, onSelectedModelChange])
+
+  // Reasoning effort applies to the model the next message will actually use:
+  // the run's frozen model once one exists, else the picker selection, else
+  // the app default. Only known-reasoning models show the control.
+  const effectiveModelKey = lockedModel
+    ? `${lockedModel.provider}/${lockedModel.model}`
+    : activeModelKey
+      || (defaultModel ? `${defaultModel.provider}/${defaultModel.model}` : '')
+  const reasoningAvailable = reasoningByKey[effectiveModelKey] === true
+
+  const handleReasoningEffortChange = useCallback((value: string) => {
+    const effort = value === 'low' || value === 'medium' || value === 'high' ? value : ''
+    setReasoningEffort(effort)
+    onReasoningEffortChange?.(effort === '' ? null : effort)
+  }, [onReasoningEffortChange])
+
+  // Switching to a model without reasoning support drops a stale selection —
+  // otherwise the next message would carry an effort the model rejects.
+  useEffect(() => {
+    if (!reasoningAvailable && reasoningEffort !== '') {
+      setReasoningEffort('')
+      onReasoningEffortChange?.(null)
+    }
+  }, [reasoningAvailable, reasoningEffort, onReasoningEffortChange])
 
   // Restore the tab draft when this input mounts.
   useEffect(() => {
@@ -1284,6 +1336,37 @@ function ChatInputInner({
           </DropdownMenu>
         )}
         <div className="flex-1" />
+        {reasoningAvailable && (
+          <DropdownMenu>
+            <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
+              <TooltipTrigger asChild>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className="flex h-7 shrink-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  >
+                    <Brain className="h-3 w-3 shrink-0" />
+                    {reasoningEffort !== '' && (
+                      <span>{REASONING_EFFORT_OPTIONS.find((o) => o.value === reasoningEffort)?.label}</span>
+                    )}
+                    <ChevronDown className="h-3 w-3 shrink-0" />
+                  </button>
+                </DropdownMenuTrigger>
+              </TooltipTrigger>
+              <TooltipContent side="top">Reasoning effort — applies to your next message</TooltipContent>
+            </Tooltip>
+            <DropdownMenuContent align="end">
+              <DropdownMenuRadioGroup value={reasoningEffort} onValueChange={handleReasoningEffortChange}>
+                {REASONING_EFFORT_OPTIONS.map((option) => (
+                  <DropdownMenuRadioItem key={option.value || 'auto'} value={option.value}>
+                    <span>{option.label}</span>
+                    <span className="ml-2 text-xs text-muted-foreground">{option.hint}</span>
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
         {lockedModel ? (
           <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
             <TooltipTrigger asChild>
@@ -1570,6 +1653,7 @@ export interface ChatInputWithMentionsProps {
   onEndCall?: () => void
   callAvailable?: boolean
   onSelectedModelChange?: (model: SelectedModel | null) => void
+  onReasoningEffortChange?: (effort: ReasoningEffortLevel | null) => void
   workDir?: string | null
   onWorkDirChange?: (value: string | null) => void
   /** Set when this chat is bound to a Code-section session — freezes workdir + agent. */
@@ -1603,6 +1687,7 @@ export function ChatInputWithMentions({
   onEndCall,
   callAvailable,
   onSelectedModelChange,
+  onReasoningEffortChange,
   workDir,
   onWorkDirChange,
   codeSessionLock,
@@ -1633,6 +1718,7 @@ export function ChatInputWithMentions({
         onEndCall={onEndCall}
         callAvailable={callAvailable}
         onSelectedModelChange={onSelectedModelChange}
+        onReasoningEffortChange={onReasoningEffortChange}
         workDir={workDir}
         onWorkDirChange={onWorkDirChange}
         codeSessionLock={codeSessionLock}

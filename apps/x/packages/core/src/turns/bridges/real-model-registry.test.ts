@@ -138,6 +138,335 @@ describe("RealModelRegistry", () => {
         ]);
     });
 
+    it("captures block-level provider metadata opaquely onto parts (Anthropic-style signatures)", async () => {
+        // Anthropic delivers the thinking signature on a reasoning-delta with
+        // an EMPTY text delta, and redacted thinking as metadata on
+        // reasoning-start. Both must land on the right reasoning part, and
+        // distinct blocks must stay distinct parts.
+        const registry = makeRegistry(
+            [
+                { type: "reasoning-start" },
+                { type: "reasoning-delta", text: "let me think" },
+                { type: "reasoning-delta", text: "", providerMetadata: { anthropic: { signature: "sig-1" } } },
+                { type: "reasoning-end" },
+                {
+                    type: "reasoning-start",
+                    providerMetadata: { anthropic: { redactedData: "opaque-blob" } },
+                },
+                { type: "reasoning-end" },
+                { type: "text-start" },
+                { type: "text-delta", text: "answer" },
+                { type: "text-end" },
+                { type: "finish-step", finishReason: "stop", usage: {} },
+            ],
+            [],
+        );
+        const events = await collect(registry, request());
+        const completed = events[events.length - 1];
+        expect(
+            completed.type === "completed" ? completed.message.content : undefined,
+        ).toEqual([
+            {
+                type: "reasoning",
+                text: "let me think",
+                providerOptions: { anthropic: { signature: "sig-1" } },
+            },
+            {
+                type: "reasoning",
+                text: "",
+                providerOptions: { anthropic: { redactedData: "opaque-blob" } },
+            },
+            { type: "text", text: "answer" },
+        ]);
+    });
+
+    it("captures metadata on text and tool-call parts (Gemini-style thoughtSignatures)", async () => {
+        const registry = makeRegistry(
+            [
+                { type: "text-start" },
+                { type: "text-delta", text: "calling a tool" },
+                { type: "text-end", providerMetadata: { google: { thoughtSignature: "ts-text" } } },
+                {
+                    type: "tool-call",
+                    toolCallId: "tc1",
+                    toolName: "echo",
+                    input: { x: 1 },
+                    providerMetadata: { google: { thoughtSignature: "ts-call" } },
+                },
+                { type: "finish-step", finishReason: "tool-calls", usage: {} },
+            ],
+            [],
+        );
+        const events = await collect(registry, request());
+        const completed = events[events.length - 1];
+        expect(
+            completed.type === "completed" ? completed.message.content : undefined,
+        ).toEqual([
+            {
+                type: "text",
+                text: "calling a tool",
+                providerOptions: { google: { thoughtSignature: "ts-text" } },
+            },
+            {
+                type: "tool-call",
+                toolCallId: "tc1",
+                toolName: "echo",
+                arguments: { x: 1 },
+                providerOptions: { google: { thoughtSignature: "ts-call" } },
+            },
+        ]);
+    });
+
+    it("merges metadata from multiple events of one block, later fields winning", async () => {
+        const registry = makeRegistry(
+            [
+                { type: "reasoning-start", providerMetadata: { openai: { itemId: "r-1" } } },
+                { type: "reasoning-delta", text: "…" },
+                {
+                    type: "reasoning-end",
+                    providerMetadata: { openai: { itemId: "r-1", reasoningEncryptedContent: "enc" } },
+                },
+                { type: "finish-step", finishReason: "stop", usage: {} },
+            ],
+            [],
+        );
+        const events = await collect(registry, request());
+        const completed = events[events.length - 1];
+        expect(
+            completed.type === "completed" ? completed.message.content : undefined,
+        ).toEqual([
+            {
+                type: "reasoning",
+                text: "…",
+                providerOptions: { openai: { itemId: "r-1", reasoningEncryptedContent: "enc" } },
+            },
+        ]);
+    });
+
+    it("attaches finish-step metadata as message-level providerOptions (OpenRouter signed reasoning)", async () => {
+        // OpenRouter streams per-delta reasoning_details FRAGMENTS on
+        // reasoning events, but puts the fully accumulated, signed array on
+        // the finish event's providerMetadata — and its read-back gives
+        // message-level reasoning_details precedence over per-part ones.
+        // The message-level attachment is what round-trips thinking
+        // signatures through tool loops (Bedrock rejects unsigned blocks).
+        const signedDetails = [
+            {
+                type: "reasoning.text",
+                text: "full thought",
+                format: "anthropic-claude-v1",
+                index: 0,
+                signature: "sig-full",
+            },
+        ];
+        const registry = makeRegistry(
+            [
+                { type: "reasoning-start" },
+                {
+                    type: "reasoning-delta",
+                    text: "full ",
+                    providerMetadata: { openrouter: { reasoning_details: [{ type: "reasoning.text", text: "full " }] } },
+                },
+                {
+                    type: "reasoning-delta",
+                    text: "thought",
+                    providerMetadata: { openrouter: { reasoning_details: [{ type: "reasoning.text", text: "thought" }] } },
+                },
+                { type: "reasoning-end" },
+                { type: "tool-call", toolCallId: "tc1", toolName: "echo", input: {} },
+                {
+                    type: "finish-step",
+                    finishReason: "tool-calls",
+                    usage: {},
+                    providerMetadata: { openrouter: { reasoning_details: signedDetails, usage: { cost: 1 } } },
+                },
+            ],
+            [],
+        );
+        const events = await collect(registry, request());
+        const completed = events[events.length - 1];
+        expect(
+            completed.type === "completed" ? completed.message.providerOptions : undefined,
+        ).toEqual({
+            openrouter: { reasoning_details: signedDetails, usage: { cost: 1 } },
+        });
+    });
+
+    it("echoes message-level providerOptions through encodeMessages", async () => {
+        const registry = makeRegistry([], []);
+        const model = await registry.resolve({ provider: "openai", model: "gpt-test" });
+        const encoded = model.encodeMessages([
+            {
+                role: "assistant",
+                content: [{ type: "text", text: "done" }],
+                providerOptions: { openrouter: { reasoning_details: [{ type: "reasoning.text", text: "t", signature: "s" }] } },
+            },
+        ] as never) as Array<{ role: string; providerOptions?: unknown }>;
+        expect(encoded[0].providerOptions).toEqual({
+            openrouter: { reasoning_details: [{ type: "reasoning.text", text: "t", signature: "s" }] },
+        });
+    });
+
+    it("drops empty blocks that carry no metadata", async () => {
+        const registry = makeRegistry(
+            [
+                { type: "reasoning-start" },
+                { type: "reasoning-end" },
+                { type: "text-start" },
+                { type: "text-delta", text: "hi" },
+                { type: "text-end" },
+                { type: "finish-step", finishReason: "stop", usage: {} },
+            ],
+            [],
+        );
+        const events = await collect(registry, request());
+        const completed = events[events.length - 1];
+        expect(
+            completed.type === "completed" ? completed.message.content : undefined,
+        ).toEqual([{ type: "text", text: "hi" }]);
+    });
+
+    it("round-trips part-level providerOptions through encodeMessages", async () => {
+        const registry = makeRegistry([], []);
+        const model = await registry.resolve({ provider: "openai", model: "gpt-test" });
+        const encoded = model.encodeMessages([
+            {
+                role: "assistant",
+                content: [
+                    {
+                        type: "reasoning",
+                        text: "thought",
+                        providerOptions: { anthropic: { signature: "sig-1" } },
+                    },
+                    {
+                        type: "tool-call",
+                        toolCallId: "tc1",
+                        toolName: "echo",
+                        arguments: { x: 1 },
+                        providerOptions: { google: { thoughtSignature: "ts-call" } },
+                    },
+                ],
+            },
+        ] as never) as Array<{ role: string; content: Array<Record<string, unknown>> }>;
+
+        expect(encoded[0].content[0]).toMatchObject({
+            type: "reasoning",
+            text: "thought",
+            providerOptions: { anthropic: { signature: "sig-1" } },
+        });
+        expect(encoded[0].content[1]).toMatchObject({
+            type: "tool-call",
+            toolCallId: "tc1",
+            input: { x: 1 },
+            providerOptions: { google: { thoughtSignature: "ts-call" } },
+        });
+    });
+
+    describe("reasoning effort mapping", () => {
+        function makeFlavorRegistry(
+            flavor: string,
+            supportsReasoning: boolean | undefined,
+            capture: InvokerOptions[],
+        ) {
+            const fakeModel = { modelId: "m" } as unknown as LanguageModel;
+            return new RealModelRegistry({
+                resolveProvider: async () => ({ flavor }) as never,
+                createProviderImpl: (() => ({
+                    languageModel: () => fakeModel,
+                })) as never,
+                reasoningSupport: async () => supportsReasoning,
+                invoke: (options) => {
+                    capture.push(options);
+                    return {
+                        fullStream: (async function* () {
+                            yield { type: "finish-step", finishReason: "stop", usage: {} };
+                        })(),
+                    };
+                },
+            });
+        }
+
+        async function invokeWith(
+            flavor: string,
+            model: string,
+            supportsReasoning: boolean | undefined,
+            parameters: Record<string, unknown>,
+        ): Promise<InvokerOptions> {
+            const capture: InvokerOptions[] = [];
+            const registry = makeFlavorRegistry(flavor, supportsReasoning, capture);
+            const resolved = await registry.resolve({ provider: flavor, model });
+            for await (const event of resolved.stream(
+                request({ parameters: parameters as never }),
+            )) {
+                void event;
+            }
+            return capture[0];
+        }
+
+        it("maps a persisted canonical effort to Anthropic thinking options", async () => {
+            const options = await invokeWith("anthropic", "claude-x", true, {
+                reasoningEffort: "medium",
+            });
+            expect(options.providerOptions).toEqual({
+                anthropic: { thinking: { type: "enabled", budgetTokens: 8192 } },
+            });
+            expect(options.maxOutputTokens).toBe(12288);
+        });
+
+        it("fails closed when reasoning support is unknown on strict flavors", async () => {
+            const options = await invokeWith("openai", "gpt-test", undefined, {
+                reasoningEffort: "high",
+            });
+            expect(options.providerOptions).toBeUndefined();
+            expect(options.maxOutputTokens).toBeUndefined();
+        });
+
+        it("maps gateway (rowboat) effort through the OpenRouter shape without known support", async () => {
+            const options = await invokeWith("rowboat", "google/gemini-3.5-flash", undefined, {
+                reasoningEffort: "high",
+            });
+            expect(options.providerOptions).toEqual({
+                openrouter: { reasoning: { effort: "high" } },
+            });
+        });
+
+        it("lets explicit persisted providerOptions win over the mapping", async () => {
+            const options = await invokeWith("openai", "o4-mini", true, {
+                reasoningEffort: "high",
+                providerOptions: { openai: { reasoningEffort: "low" } },
+            });
+            expect(options.providerOptions).toEqual({
+                openai: { reasoningEffort: "low" },
+            });
+        });
+
+        it("raises an explicit maxOutputTokens to the thinking floor but never lowers it", async () => {
+            const raised = await invokeWith("anthropic", "claude-x", true, {
+                reasoningEffort: "high",
+                maxOutputTokens: 4096,
+            });
+            expect(raised.maxOutputTokens).toBe(20480);
+
+            const kept = await invokeWith("anthropic", "claude-x", true, {
+                reasoningEffort: "high",
+                maxOutputTokens: 32000,
+            });
+            expect(kept.maxOutputTokens).toBe(32000);
+        });
+
+        it("sends nothing for unknown effort values or unmapped flavors", async () => {
+            const bogus = await invokeWith("anthropic", "claude-x", true, {
+                reasoningEffort: "xhigh",
+            });
+            expect(bogus.providerOptions).toBeUndefined();
+
+            const local = await invokeWith("openai-compatible", "my-vllm", true, {
+                reasoningEffort: "high",
+            });
+            expect(local.providerOptions).toBeUndefined();
+        });
+    });
+
     it("throws on provider error parts (a model failure, not a completion)", async () => {
         const registry = makeRegistry(
             [{ type: "error", error: new Error("rate limited") }],

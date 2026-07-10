@@ -340,11 +340,13 @@ export function buildTurnConversation(state: TurnState): ConversationItem[] {
   }
 
   if (hasTokenUsage(state.usage)) {
+    const reasoningEffort = state.definition.config.reasoningEffort
     items.push({
       id: `${turnId}:usage`,
       kind: 'turn-usage',
       usage: state.usage,
       modelCallCount: state.modelCalls.filter((call) => call.usage !== undefined).length,
+      ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
       timestamp: ts(),
     })
   }

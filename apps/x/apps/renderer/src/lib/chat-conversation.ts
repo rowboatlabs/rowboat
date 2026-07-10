@@ -53,11 +53,22 @@ export interface ErrorMessage {
   timestamp: number
 }
 
+export type ReasoningEffortLevel = 'low' | 'medium' | 'high'
+
+// User-facing names for the canonical effort ladder ("auto" = absent).
+export const REASONING_EFFORT_LABELS: Record<ReasoningEffortLevel, string> = {
+  low: 'Fast',
+  medium: 'Balanced',
+  high: 'Thorough',
+}
+
 export interface TurnUsageMessage {
   id: string
   kind: 'turn-usage'
   usage: TokenUsage
   modelCallCount: number
+  // The turn's reasoning effort (from turn_created.config); absent = auto.
+  reasoningEffort?: ReasoningEffortLevel
   timestamp: number
 }
 

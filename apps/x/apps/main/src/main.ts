@@ -64,6 +64,7 @@ import {
   setMainWindowForDeepLinks,
 } from "./deeplink.js";
 import { disconnectGoogleIfScopesStale } from "./oauth-handler.js";
+import { startModelsDevRefresh } from "@x/core/dist/models/models-dev.js";
 
 // Captured as early as possible so it reflects actual process start. Used to
 // gate grace-eligible notifications (e.g. the burst of background-task
@@ -380,6 +381,12 @@ app.whenReady().then(async () => {
 
   // Initialize all config files before UI can access them
   await initConfigs();
+
+  // Warm the models.dev catalog cache (single writer; refreshed every 24h
+  // while the app runs). Every consumer — catalog listings, the reasoning
+  // capability gate — reads the on-disk cache only. Best-effort: failures
+  // leave any existing cache in use and never block boot.
+  startModelsDevRefresh();
 
   // PostHog identify() is idempotent — call it on every startup so existing
   // signed-in installs (and every cold start of v0.3.4+) get re-identified.
