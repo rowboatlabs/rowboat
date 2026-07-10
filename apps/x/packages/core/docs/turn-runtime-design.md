@@ -1888,21 +1888,20 @@ tests for:
 This is a suggested organization, not a locked implementation requirement:
 
 ```text
-apps/x/packages/shared/src/turns.ts
+apps/x/packages/shared/src/turns.ts   # durable schemas + reducer (unchanged home)
 
-apps/x/packages/core/src/turns/
-  runtime.ts
-  reducer.ts              # if implementation is re-exported through shared,
-                          # locate pure code to avoid dependency cycles
-  repo.ts
-  fs-repo.ts
-  stream.ts
-  agent-resolver.ts
-  context-resolver.ts
-  model-registry.ts
-  tool-registry.ts
-  permission.ts
-  index.ts
+apps/x/packages/core/src/runtime/
+  turns/          # the engine: runtime.ts, stream, event-hub, context
+                  # resolution/elision, request composer, repos, inspect-cli
+    bridges/      # real implementations of the engine's seams (agent/tool/
+                  # model resolvers, permission checker/classifier)
+  sessions/       # session layer (session-design.md)
+  assembly/       # what an agent is: registry, compose-instructions,
+                  # workspace-context, message-encoding, permission-metadata,
+                  # headless runners, spawn-agent, copilot/, capabilities/,
+                  # skills/
+  tools/          # builtin-tool catalog + domain modules + exec plumbing
+  legacy/         # the dying runs engine (engine.ts + runs.ts + repos)
 ```
 
 The final reducer location must permit both core and renderer to use exactly the
