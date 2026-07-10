@@ -3150,7 +3150,6 @@ function App() {
     toolCallId: string,
     subflow: string[],
     response: 'approve' | 'deny',
-    scope?: 'once' | 'session' | 'always',
   ) => {
     if (!runId) return
 
@@ -3159,7 +3158,6 @@ function App() {
       await sessionChat.respondToPermission(
         toolCallId,
         response === 'approve' ? 'allow' : 'deny',
-        scope ? { scope } : undefined,
       )
     } catch (error) {
       console.error('Failed to authorize permission:', error)
@@ -6834,8 +6832,6 @@ function App() {
                                               toolCall={permRequest.toolCall}
                                               permission={permRequest.permission}
                                               onApprove={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
-                                              onApproveSession={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'session')}
-                                              onApproveAlways={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'always')}
                                               onDeny={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
                                               isProcessing={isActive && activeIsWorking}
                                               response={response}

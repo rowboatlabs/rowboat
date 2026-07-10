@@ -67,6 +67,13 @@ export const PermissionRequest = ({
   const isResponded = response !== null;
   const isApproved = response === 'approve';
 
+  // Scope actions ("Allow for Session"/"Always Allow") render only when the
+  // caller wires them: the legacy code-mode path persists grants, but the
+  // turns path has no grant persistence yet and must not show dead buttons.
+  const hasScopeActions =
+    Boolean(onApproveSession || onApproveAlways) &&
+    Boolean(command || filePermission);
+
   // Once a response is chosen, collapse the details to just the header.
   // Users can click the header to expand them again.
   const [expanded, setExpanded] = useState(false);
@@ -180,12 +187,12 @@ export const PermissionRequest = ({
                 size="sm"
                 onClick={onApprove}
                 disabled={isProcessing}
-                className={cn("flex-1", (command || filePermission) && "rounded-r-none")}
+                className={cn("flex-1", hasScopeActions && "rounded-r-none")}
               >
                 <CheckIcon className="size-4" />
                 Approve
               </Button>
-              {(command || filePermission) && (
+              {hasScopeActions && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
