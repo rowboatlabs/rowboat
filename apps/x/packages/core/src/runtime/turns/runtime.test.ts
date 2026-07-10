@@ -15,6 +15,7 @@ import type { IAgentResolver } from "./agent-resolver.js";
 import type { TurnExecution, TurnOutcome } from "./api.js";
 import { TurnDependencyError, TurnInputError } from "./api.js";
 import type { TurnLifecycleEvent } from "./bus.js";
+import type { ITurnEventBus } from "./event-hub.js";
 import { TurnRepoContextResolver } from "./context-resolver.js";
 import { InMemoryTurnRepo } from "./in-memory-turn-repo.js";
 import type {
@@ -278,10 +279,16 @@ class FakeBus {
     }
 }
 
-class FakeTurnEventBus {
+class FakeTurnEventBus implements ITurnEventBus {
     events: TurnBusEvent[] = [];
     publish(event: TurnBusEvent): void {
         this.events.push(event);
+    }
+    subscribe(): () => void {
+        return () => {};
+    }
+    subscribeAll(): () => void {
+        return () => {};
     }
 }
 
