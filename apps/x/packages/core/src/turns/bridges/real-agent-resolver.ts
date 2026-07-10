@@ -10,7 +10,8 @@ import { composeSystemInstructions } from "../../agents/compose-instructions.js"
 import {
     loadAgentNotesContext,
     loadUserWorkDir,
-} from "../../agents/runtime.js";
+    loadWorkspaceContext,
+} from "../../agents/workspace-context.js";
 import { hasWorkspaceContext, loadAgent } from "../../agents/registry.js";
 import { BuiltinTools } from "../../application/lib/builtin-tools.js";
 import { skillToolNames } from "../../application/assistant/skills/index.js";
@@ -126,14 +127,16 @@ export class RealAgentResolver {
             ? parsed.data
             : CompositionOverrides.parse({});
         const { workDirId, subagent, activeSkills, ...modeFlags } = composition;
-        // Agent notes and work-dir context are scoped to agents with the
-        // workspaceContext trait (the copilot), per the agent registry.
+        // The workspaceContext trait gate lives INSIDE loadWorkspaceContext
+        // (agents/workspace-context.ts) — no assembly site can forget it.
+        const workspace = loadWorkspaceContext(requested.agentId, workDirId, {
+            loadNotes: this.loadNotes,
+            loadWorkDir: this.loadWorkDir,
+        });
         const copilotContext = hasWorkspaceContext(requested.agentId);
         const systemPrompt = composeSystemInstructions({
             instructions: agent.instructions,
-            agentNotesContext: copilotContext ? this.loadNotes() : null,
-            userWorkDir:
-                copilotContext && workDirId ? this.loadWorkDir(workDirId) : null,
+            ...workspace,
             ...modeFlags,
         });
 

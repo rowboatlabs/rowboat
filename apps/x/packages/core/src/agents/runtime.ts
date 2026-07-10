@@ -12,6 +12,7 @@ import { TOOL_ADDITIONS_KEY } from "../application/lib/tool-additions.js";
 import { AskHumanRequestEvent, RunEvent, ToolPermissionMetadata, ToolPermissionRequestEvent } from "@x/shared/dist/runs.js";
 import { BuiltinTools } from "../application/lib/builtin-tools.js";
 import { hasWorkspaceContext, loadAgent } from "./registry.js";
+import { loadWorkspaceContext } from "./workspace-context.js";
 import { isBlocked, extractCommandNames } from "../application/lib/command-executor.js";
 import { getFileAccessAllowList, type FileAccessGrant, type FileAccessOperation } from "../config/security.js";
 import { resolveFilePathForPermission } from "../filesystem/files.js";
@@ -30,14 +31,6 @@ import { PrefixLogger } from "@x/shared";
 import { captureLlmUsage } from "../analytics/usage.js";
 import { enterUseCase, withUseCase, type UseCase } from "../analytics/use_case.js";
 import { classifyToolPermissions, type AutoPermissionCandidate } from "../security/auto-permission-classifier.js";
-
-const AGENT_NOTES_DIR = path.join(WorkDir, 'knowledge', 'Agent Notes');
-
-// Work directory is scoped per run (per chat). Each run gets its own sidecar
-// config file so setting it in one chat does not leak into others.
-function workDirConfigFile(runId: string): string {
-    return path.join(WorkDir, 'config', `workdir-${runId}.json`);
-}
 
 type ToolPermissionMetadataValue = z.infer<typeof ToolPermissionMetadata>;
 
@@ -162,71 +155,6 @@ export async function getToolPermissionMetadata(
         paths: uncovered,
         pathPrefix: grantPrefixForTool(underlyingTool.name, uncovered),
     };
-}
-
-export function loadUserWorkDir(runId: string): string | null {
-    try {
-        const file = workDirConfigFile(runId);
-        if (!fs.existsSync(file)) return null;
-        const raw = fs.readFileSync(file, 'utf-8');
-        const parsed = JSON.parse(raw) as { path?: unknown };
-        const value = typeof parsed.path === 'string' ? parsed.path.trim() : '';
-        return value || null;
-    } catch {
-        return null;
-    }
-}
-
-export function loadAgentNotesContext(): string | null {
-    const sections: string[] = [];
-
-    const userFile = path.join(AGENT_NOTES_DIR, 'user.md');
-    const prefsFile = path.join(AGENT_NOTES_DIR, 'preferences.md');
-
-    try {
-        if (fs.existsSync(userFile)) {
-            const content = fs.readFileSync(userFile, 'utf-8').trim();
-            if (content) {
-                sections.push(`## About the User\nThese are notes you took about the user in previous chats.\n\n${content}`);
-            }
-        }
-    } catch { /* ignore */ }
-
-    try {
-        if (fs.existsSync(prefsFile)) {
-            const content = fs.readFileSync(prefsFile, 'utf-8').trim();
-            if (content) {
-                sections.push(`## User Preferences\nThese are notes you took on their general preferences.\n\n${content}`);
-            }
-        }
-    } catch { /* ignore */ }
-
-    // List other Agent Notes files for on-demand access
-    const otherFiles: string[] = [];
-    const skipFiles = new Set(['user.md', 'preferences.md', 'inbox.md']);
-    try {
-        if (fs.existsSync(AGENT_NOTES_DIR)) {
-            function listMdFiles(dir: string, prefix: string) {
-                for (const entry of fs.readdirSync(dir)) {
-                    const fullPath = path.join(dir, entry);
-                    const stat = fs.statSync(fullPath);
-                    if (stat.isDirectory()) {
-                        listMdFiles(fullPath, `${prefix}${entry}/`);
-                    } else if (entry.endsWith('.md') && !skipFiles.has(`${prefix}${entry}`)) {
-                        otherFiles.push(`${prefix}${entry}`);
-                    }
-                }
-            }
-            listMdFiles(AGENT_NOTES_DIR, '');
-        }
-    } catch { /* ignore */ }
-
-    if (otherFiles.length > 0) {
-        sections.push(`## More Specific Preferences\nFor more specific preferences, you can read these files using file-readText. Only read them when relevant to the current task.\n\n${otherFiles.map(f => `- knowledge/Agent Notes/${f}`).join('\n')}`);
-    }
-
-    if (sections.length === 0) return null;
-    return `# Agent Memory\n\n${sections.join('\n\n')}`;
 }
 
 function formatCurrentDateTime(now: Date): string {
@@ -1312,11 +1240,11 @@ export async function* streamAgent({
         loopLogger.log('running llm turn');
         // stream agent response and build message
         const messageBuilder = new StreamStepMessageBuilder();
-        const composeCopilotContext = hasWorkspaceContext(state.agentName);
+        const workspace = loadWorkspaceContext(state.agentName, runId);
         const instructionsWithDateTime = composeSystemInstructions({
             instructions: agent.instructions,
-            agentNotesContext: composeCopilotContext ? loadAgentNotesContext() : null,
-            userWorkDir: composeCopilotContext ? loadUserWorkDir(runId) : null,
+            agentNotesContext: workspace.agentNotesContext,
+            userWorkDir: workspace.userWorkDir,
             voiceInput,
             voiceOutput,
             searchEnabled,
