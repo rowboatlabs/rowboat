@@ -12,7 +12,7 @@ import {
     loadUserWorkDir,
     loadWorkspaceContext,
 } from "../../agents/workspace-context.js";
-import { hasWorkspaceContext, loadAgent } from "../../agents/registry.js";
+import { carriesSkillsForward, loadAgent } from "../../agents/registry.js";
 import { BuiltinTools } from "../../application/lib/builtin-tools.js";
 import { skillToolNames } from "../../application/assistant/skills/index.js";
 import { ModeFlags } from "../../application/assistant/capabilities/types.js";
@@ -133,7 +133,6 @@ export class RealAgentResolver {
             loadNotes: this.loadNotes,
             loadWorkDir: this.loadWorkDir,
         });
-        const copilotContext = hasWorkspaceContext(requested.agentId);
         const systemPrompt = composeSystemInstructions({
             instructions: agent.instructions,
             ...workspace,
@@ -143,7 +142,7 @@ export class RealAgentResolver {
         const tools = await this.resolveTools(agent, {
             subagent: subagent ?? false,
         });
-        if (copilotContext && activeSkills?.length) {
+        if (carriesSkillsForward(requested.agentId) && activeSkills?.length) {
             await this.appendSkillTools(tools, activeSkills);
         }
         return ResolvedAgent.parse({

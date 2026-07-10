@@ -6,7 +6,7 @@ import { IRunsRepo } from "./repo.js";
 import { ICodeSessionsRepo } from "../code-mode/sessions/repo.js";
 import { IAgentRuntime } from "../agents/runtime.js";
 import { IBus } from "../application/lib/bus.js";
-import { IAbortRegistry } from "./abort-registry.js";
+import { IAbortRegistry } from "../turns/abort-registry.js";
 import { IRunsLock } from "./lock.js";
 import { forceCloseAllMcpClients } from "../mcp/mcp.js";
 import { extractCommandNames } from "../application/lib/command-executor.js";

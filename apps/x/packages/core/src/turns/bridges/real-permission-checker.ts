@@ -1,5 +1,5 @@
 import type { JsonValue } from "@x/shared/dist/turns.js";
-import { getToolPermissionMetadata } from "../../agents/runtime.js";
+import { getToolPermissionMetadata } from "../../agents/permission-metadata.js";
 import type {
     IPermissionChecker,
     PermissionCheckAllowed,

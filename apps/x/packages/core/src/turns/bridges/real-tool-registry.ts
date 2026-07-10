@@ -12,7 +12,7 @@ import { TOOL_ADDITIONS_KEY } from "../../application/lib/tool-additions.js";
 import {
     type IAbortRegistry,
     InMemoryAbortRegistry,
-} from "../../runs/abort-registry.js";
+} from "../abort-registry.js";
 import { TurnDependencyError } from "../api.js";
 import type {
     IToolRegistry,

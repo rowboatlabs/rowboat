@@ -1,21 +1,20 @@
-import { jsonSchema, ModelMessage } from "ai";
-import fs from "fs";
-import path from "path";
-import { WorkDir } from "../config/config.js";
+import { jsonSchema } from "ai";
 import { Agent, ToolAttachment } from "@x/shared/dist/agent.js";
-import { AssistantContentPart, AssistantMessage, Message, MessageList, ProviderOptions, ToolCallPart, ToolMessage, UserMessageContext } from "@x/shared/dist/message.js";
+import { AssistantContentPart, AssistantMessage, MessageList, ProviderOptions, ToolCallPart, ToolMessage, UserMessageContext } from "@x/shared/dist/message.js";
 import { LanguageModel, stepCountIs, streamText, tool, Tool, ToolSet } from "ai";
 import { z } from "zod";
 import { LlmStepStreamEvent } from "@x/shared/dist/llm-step-events.js";
 import { execTool } from "../application/lib/exec-tool.js";
 import { TOOL_ADDITIONS_KEY } from "../application/lib/tool-additions.js";
-import { AskHumanRequestEvent, RunEvent, ToolPermissionMetadata, ToolPermissionRequestEvent } from "@x/shared/dist/runs.js";
+import { AskHumanRequestEvent, RunEvent, ToolPermissionRequestEvent } from "@x/shared/dist/runs.js";
 import { BuiltinTools } from "../application/lib/builtin-tools.js";
 import { hasWorkspaceContext, loadAgent } from "./registry.js";
+import { composeSystemInstructions } from "./compose-instructions.js";
+import { convertFromMessages } from "./message-encoding.js";
+import { getToolPermissionMetadata } from "./permission-metadata.js";
 import { loadWorkspaceContext } from "./workspace-context.js";
-import { isBlocked, extractCommandNames } from "../application/lib/command-executor.js";
-import { getFileAccessAllowList, type FileAccessGrant, type FileAccessOperation } from "../config/security.js";
-import { resolveFilePathForPermission } from "../filesystem/files.js";
+import { extractCommandNames } from "../application/lib/command-executor.js";
+import { type FileAccessGrant } from "../config/security.js";
 import { notifyIfEnabled } from "../application/notification/notifier.js";
 import { IModelConfigRepo } from "../models/repo.js";
 import { createLanguageModel } from "../models/models.js";
@@ -26,136 +25,11 @@ import { IBus } from "../application/lib/bus.js";
 import { IMessageQueue, type MiddlePaneContext } from "../application/lib/message-queue.js";
 import { IRunsRepo } from "../runs/repo.js";
 import { IRunsLock } from "../runs/lock.js";
-import { IAbortRegistry } from "../runs/abort-registry.js";
+import { IAbortRegistry } from "../turns/abort-registry.js";
 import { PrefixLogger } from "@x/shared";
 import { captureLlmUsage } from "../analytics/usage.js";
 import { enterUseCase, withUseCase, type UseCase } from "../analytics/use_case.js";
 import { classifyToolPermissions, type AutoPermissionCandidate } from "../security/auto-permission-classifier.js";
-
-type ToolPermissionMetadataValue = z.infer<typeof ToolPermissionMetadata>;
-
-function isPathInside(parent: string, child: string): boolean {
-    const relative = path.relative(parent, child);
-    return relative === '' || (!!relative && !relative.startsWith('..') && !path.isAbsolute(relative));
-}
-
-function fileGrantCoversPath(grant: FileAccessGrant, operation: FileAccessOperation, resolvedPath: string): boolean {
-    return grant.operation === operation && isPathInside(path.resolve(grant.pathPrefix), path.resolve(resolvedPath));
-}
-
-function commonPathPrefix(paths: string[]): string {
-    if (!paths.length) return path.resolve(WorkDir);
-    const split = paths.map(p => path.resolve(p).split(path.sep).filter(Boolean));
-    const first = split[0];
-    const common: string[] = [];
-    for (let i = 0; i < first.length; i++) {
-        if (split.every(parts => parts[i] === first[i])) {
-            common.push(first[i]);
-        } else {
-            break;
-        }
-    }
-    const prefix = `${path.sep}${common.join(path.sep)}`;
-    return prefix === path.sep ? prefix : path.resolve(prefix);
-}
-
-function grantPrefixForTool(toolName: string, resolvedPaths: string[]): string {
-    if (toolName === 'file-list' || toolName === 'file-glob' || toolName === 'file-grep' || toolName === 'file-mkdir') {
-        return commonPathPrefix(resolvedPaths);
-    }
-    const parentPaths = resolvedPaths.map(p => path.dirname(p));
-    return commonPathPrefix(parentPaths);
-}
-
-function filePermissionTargets(toolName: string, args: Record<string, unknown>): { operation: FileAccessOperation; paths: string[] } | null {
-    const pathArg = typeof args.path === 'string' ? args.path : undefined;
-    switch (toolName) {
-        case 'file-readText':
-        case 'parseFile':
-        case 'LLMParse':
-        case 'file-exists':
-        case 'file-stat':
-            return pathArg ? { operation: 'read', paths: [pathArg] } : null;
-        case 'file-list':
-            return pathArg ? { operation: 'list', paths: [pathArg || '.'] } : null;
-        case 'file-glob':
-            return { operation: 'search', paths: [typeof args.cwd === 'string' && args.cwd ? args.cwd : '.'] };
-        case 'file-grep':
-            return { operation: 'search', paths: [typeof args.searchPath === 'string' && args.searchPath ? args.searchPath : '.'] };
-        case 'file-writeText':
-        case 'file-editText':
-        case 'file-mkdir':
-            return pathArg ? { operation: 'write', paths: [pathArg] } : null;
-        case 'file-copy':
-        case 'file-rename': {
-            const from = typeof args.from === 'string' ? args.from : undefined;
-            const to = typeof args.to === 'string' ? args.to : undefined;
-            return from && to ? { operation: 'write', paths: [from, to] } : null;
-        }
-        case 'file-remove':
-            return pathArg ? { operation: 'delete', paths: [pathArg] } : null;
-        default:
-            return null;
-    }
-}
-
-export async function getToolPermissionMetadata(
-    toolCall: z.infer<typeof ToolCallPart>,
-    underlyingTool: z.infer<typeof ToolAttachment>,
-    sessionAllowedCommands: Set<string>,
-    sessionAllowedFileAccess: FileAccessGrant[],
-): Promise<ToolPermissionMetadataValue | null> {
-    if (underlyingTool.type !== 'builtin') {
-        return null;
-    }
-
-    if (underlyingTool.name === 'executeCommand') {
-        const args = toolCall.arguments;
-        if (!args || typeof args !== 'object' || !('command' in args)) {
-            return null;
-        }
-        const command = String((args as { command: unknown }).command);
-        if (!isBlocked(command, sessionAllowedCommands)) {
-            return null;
-        }
-        return {
-            kind: 'command',
-            commandNames: extractCommandNames(command),
-        };
-    }
-
-    const args = toolCall.arguments && typeof toolCall.arguments === 'object'
-        ? toolCall.arguments as Record<string, unknown>
-        : {};
-    const targets = filePermissionTargets(underlyingTool.name, args);
-    if (!targets) {
-        return null;
-    }
-
-    const resolvedTargets = await Promise.all(targets.paths.map(p => resolveFilePathForPermission(p)));
-    const outsideWorkspacePaths = resolvedTargets
-        .filter(target => !target.isInsideWorkspace)
-        .map(target => target.canonicalPath);
-    if (!outsideWorkspacePaths.length) {
-        return null;
-    }
-
-    const persistentGrants = getFileAccessAllowList();
-    const allGrants = [...persistentGrants, ...sessionAllowedFileAccess];
-    const uncovered = outsideWorkspacePaths.filter(resolvedPath =>
-        !allGrants.some(grant => fileGrantCoversPath(grant, targets.operation, resolvedPath))
-    );
-    if (!uncovered.length) {
-        return null;
-    }
-
-    return {
-        kind: 'file',
-        operation: targets.operation,
-        paths: uncovered,
-        pathPrefix: grantPrefixForTool(underlyingTool.name, uncovered),
-    };
-}
 
 function formatCurrentDateTime(now: Date): string {
     return now.toLocaleString('en-US', {
@@ -202,35 +76,6 @@ function buildUserMessageContext({
     };
 }
 
-function formatUserMessageContextForLlm(userMessageContext: z.infer<typeof UserMessageContext>): string {
-    const sections: string[] = [];
-
-    if (userMessageContext.currentDateTime) {
-        sections.push(`Current date and time: ${userMessageContext.currentDateTime}`);
-    }
-
-    if (userMessageContext.middlePane) {
-        if (userMessageContext.middlePane.kind === 'empty') {
-            sections.push(`Middle pane:\nState: empty`);
-        } else if (userMessageContext.middlePane.kind === 'note') {
-            sections.push(`Middle pane:\nState: note\nPath: ${userMessageContext.middlePane.path}\n\nContent:\n\`\`\`\n${userMessageContext.middlePane.content}\n\`\`\``);
-        } else {
-            sections.push(`Middle pane:\nState: browser\nURL: ${userMessageContext.middlePane.url}\nTitle: ${userMessageContext.middlePane.title}`);
-        }
-    }
-
-    if (sections.length === 0) {
-        return '';
-    }
-
-    return `# User Context
-${sections.join('\n\n')}
-
-# User Message
-`;
-}
-
-import { composeSystemInstructions } from "./compose-instructions.js";
 
 export interface IAgentRuntime {
     trigger(runId: string): Promise<void>;
@@ -406,7 +251,7 @@ export class AgentRuntime implements IAgentRuntime {
     }
 }
 
-export async function mapAgentTool(t: z.infer<typeof ToolAttachment>): Promise<Tool> {
+async function mapAgentTool(t: z.infer<typeof ToolAttachment>): Promise<Tool> {
     switch (t.type) {
         case "mcp":
             return tool({
@@ -449,38 +294,8 @@ export async function mapAgentTool(t: z.infer<typeof ToolAttachment>): Promise<T
     }
 }
 
-export class RunLogger {
-    private logFile: string;
-    private fileHandle: fs.WriteStream;
 
-    ensureRunsDir() {
-        const runsDir = path.join(WorkDir, "runs");
-        if (!fs.existsSync(runsDir)) {
-            fs.mkdirSync(runsDir, { recursive: true });
-        }
-    }
-
-    constructor(runId: string) {
-        this.ensureRunsDir();
-        this.logFile = path.join(WorkDir, "runs", `${runId}.jsonl`);
-        this.fileHandle = fs.createWriteStream(this.logFile, {
-            flags: "a",
-            encoding: "utf8",
-        });
-    }
-
-    log(event: z.infer<typeof RunEvent>) {
-        if (event.type !== "llm-stream-event") {
-            this.fileHandle.write(JSON.stringify(event) + "\n");
-        }
-    }
-
-    close() {
-        this.fileHandle.close();
-    }
-}
-
-export class StreamStepMessageBuilder {
+class StreamStepMessageBuilder {
     private parts: z.infer<typeof AssistantContentPart>[] = [];
     private textBuffer: string = "";
     private reasoningBuffer: string = "";
@@ -567,156 +382,6 @@ function formatLlmStreamError(rawError: unknown): string {
     if (name) lines.push(`name: ${name}`);
     if (responseBody) lines.push(`responseBody: ${responseBody}`);
     return lines.length ? lines.join("\n") : "Model stream error";
-}
-
-function formatBytes(bytes: number): string {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-export function convertFromMessages(messages: z.infer<typeof Message>[]): ModelMessage[] {
-    const result: ModelMessage[] = [];
-    for (const msg of messages) {
-        const { providerOptions } = msg;
-        switch (msg.role) {
-            case "assistant":
-                if (typeof msg.content === 'string') {
-                    result.push({
-                        role: "assistant",
-                        content: msg.content,
-                        providerOptions,
-                    });
-                } else {
-                    result.push({
-                        role: "assistant",
-                        content: msg.content.map(part => {
-                            switch (part.type) {
-                                case 'text':
-                                    return part;
-                                case 'reasoning':
-                                    return part;
-                                case 'tool-call':
-                                    return {
-                                        type: 'tool-call',
-                                        toolCallId: part.toolCallId,
-                                        toolName: part.toolName,
-                                        input: part.arguments,
-                                        providerOptions: part.providerOptions,
-                                    };
-                            }
-                        }),
-                        providerOptions,
-                    });
-                }
-                break;
-            case "system":
-                result.push({
-                    role: "system",
-                    content: msg.content,
-                    providerOptions,
-                });
-                break;
-            case "user": {
-                const userMessageContextPrefix = msg.userMessageContext ? formatUserMessageContextForLlm(msg.userMessageContext) : '';
-                if (typeof msg.content === 'string') {
-                    // Legacy string — pass through unchanged
-                    result.push({
-                        role: "user",
-                        content: `${userMessageContextPrefix}${msg.content}`,
-                        providerOptions,
-                    });
-                } else {
-                    // New content parts array — collapse text/attachments to text
-                    // for the LLM; inline image parts (video-mode webcam and
-                    // screen-share frames) are passed through as real multimodal
-                    // image parts, grouped under labeled text headers so the
-                    // model knows which images show the user vs their screen.
-                    const textSegments: string[] = userMessageContextPrefix ? [userMessageContextPrefix] : [];
-                    const attachmentLines: string[] = [];
-                    type EncodedImagePart = { type: "image"; image: string; mediaType: string };
-                    const cameraParts: EncodedImagePart[] = [];
-                    const screenParts: EncodedImagePart[] = [];
-                    const frameTimes: string[] = [];
-
-                    for (const part of msg.content) {
-                        if (part.type === "attachment") {
-                            const sizeStr = part.size ? `, ${formatBytes(part.size)}` : '';
-                            const lineStr = part.lineNumber ? ` (line ${part.lineNumber})` : '';
-                            attachmentLines.push(`- ${part.filename} (${part.mimeType}${sizeStr}) at ${part.path}${lineStr}`);
-                        } else if (part.type === "image") {
-                            const target = part.source === "screen" ? screenParts : cameraParts;
-                            target.push({ type: "image", image: part.data, mediaType: part.mediaType });
-                            if (part.capturedAt) frameTimes.push(part.capturedAt);
-                        } else {
-                            textSegments.push(part.text);
-                        }
-                    }
-
-                    if (attachmentLines.length > 0) {
-                        if (userMessageContextPrefix) {
-                            textSegments.push("User has attached the following files:", ...attachmentLines, "");
-                        } else {
-                            textSegments.unshift("User has attached the following files:", ...attachmentLines, "");
-                        }
-                    }
-
-                    const imageCount = cameraParts.length + screenParts.length;
-                    if (imageCount > 0) {
-                        const span = frameTimes.length >= 2
-                            ? ` spanning ${frameTimes[0]} to ${frameTimes[frameTimes.length - 1]}`
-                            : frameTimes.length === 1
-                                ? ` captured at ${frameTimes[0]}`
-                                : '';
-                        const kinds: string[] = [];
-                        if (cameraParts.length > 0) kinds.push(`${cameraParts.length} live webcam frame${cameraParts.length === 1 ? '' : 's'} of the user`);
-                        if (screenParts.length > 0) kinds.push(`${screenParts.length} frame${screenParts.length === 1 ? '' : 's'} of the user's shared screen`);
-                        textSegments.push(`[Video mode: ${kinds.join(' and ')} attached below, each group oldest to newest,${span ? span + ',' : ''} recorded while they composed this message.]`);
-                        const content: Array<{ type: "text"; text: string } | EncodedImagePart> = [
-                            { type: "text", text: textSegments.join("\n") },
-                        ];
-                        if (cameraParts.length > 0) {
-                            content.push({ type: "text", text: "Webcam frames (oldest to newest):" }, ...cameraParts);
-                        }
-                        if (screenParts.length > 0) {
-                            content.push({ type: "text", text: "Screen-share frames (oldest to newest):" }, ...screenParts);
-                        }
-                        result.push({
-                            role: "user",
-                            content,
-                            providerOptions,
-                        });
-                    } else {
-                        result.push({
-                            role: "user",
-                            content: textSegments.join("\n"),
-                            providerOptions,
-                        });
-                    }
-                }
-                break;
-            }
-            case "tool":
-                result.push({
-                    role: "tool",
-                    content: [
-                        {
-                            type: "tool-result",
-                            toolCallId: msg.toolCallId,
-                            toolName: msg.toolName,
-                            output: {
-                                type: "text",
-                                value: msg.content,
-                            },
-                        },
-                    ],
-                    providerOptions,
-                });
-                break;
-        }
-    }
-    // doing this because: https://github.com/OpenRouterTeam/ai-sdk-provider/issues/262
-    return JSON.parse(JSON.stringify(result));
 }
 
 async function buildTools(agent: z.infer<typeof Agent>): Promise<ToolSet> {
@@ -1582,7 +1247,3 @@ async function* streamLlm(
         }
     }
 }
-export const MappedToolCall = z.object({
-    toolCall: ToolCallPart,
-    agentTool: ToolAttachment,
-});

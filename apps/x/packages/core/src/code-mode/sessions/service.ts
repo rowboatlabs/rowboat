@@ -9,7 +9,7 @@ import type { IRunsRepo } from '../../runs/repo.js';
 import type { IRunsLock } from '../../runs/lock.js';
 import type { IBus } from '../../application/lib/bus.js';
 import type { IMonotonicallyIncreasingIdGenerator } from '../../application/lib/id-gen.js';
-import type { IAbortRegistry } from '../../runs/abort-registry.js';
+import type { IAbortRegistry } from '../../turns/abort-registry.js';
 import type { CodeModeManager } from '../acp/manager.js';
 import type { CodePermissionRegistry } from '../acp/permission-registry.js';
 import type { ICodeSessionsRepo } from './repo.js';

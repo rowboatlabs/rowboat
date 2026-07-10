@@ -2,7 +2,7 @@ import * as os from "os";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CodeRunEvent } from "@x/shared/dist/code-mode.js";
 import container from "../../di/container.js";
-import { InMemoryAbortRegistry } from "../../runs/abort-registry.js";
+import { InMemoryAbortRegistry } from "../../turns/abort-registry.js";
 import { BuiltinTools, coalesceCodeRunEvents } from "./builtin-tools.js";
 import type { ToolContext } from "./exec-tool.js";
 
