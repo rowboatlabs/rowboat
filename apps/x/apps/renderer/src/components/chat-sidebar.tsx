@@ -170,7 +170,7 @@ interface ChatSidebarProps {
   allPermissionRequests?: ChatTabViewState['allPermissionRequests']
   permissionResponses?: ChatTabViewState['permissionResponses']
   autoPermissionDecisions?: ChatTabViewState['autoPermissionDecisions']
-  onPermissionResponse?: (toolCallId: string, subflow: string[], response: PermissionResponse, scope?: 'once' | 'session' | 'always') => void
+  onPermissionResponse?: (toolCallId: string, subflow: string[], response: PermissionResponse) => void
   onAskHumanResponse?: (toolCallId: string, subflow: string[], response: string) => void
   isToolOpenForTab?: (tabId: string, toolId: string) => boolean
   onToolOpenChangeForTab?: (tabId: string, toolId: string, open: boolean) => void
@@ -706,8 +706,6 @@ export function ChatSidebar({
                                             toolCall={permRequest.toolCall}
                                             permission={permRequest.permission}
                                             onApprove={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
-                                            onApproveSession={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'session')}
-                                            onApproveAlways={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'always')}
                                             onDeny={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
                                             isProcessing={isActive && isProcessing && !isWaitingOnHuman}
                                             response={response}
