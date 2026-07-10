@@ -113,13 +113,20 @@ async function writeCache(data: unknown): Promise<void> {
 }
 
 async function fetchModelsDev(): Promise<unknown> {
-  const response = await fetch("https://models.dev/api.json", {
-    headers: { "User-Agent": "Rowboat" },
-  });
-  if (!response.ok) {
-    throw new Error(`models.dev fetch failed: ${response.status}`);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
+  try {
+    const response = await fetch("https://models.dev/api.json", {
+      headers: { "User-Agent": "Rowboat" },
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      throw new Error(`models.dev fetch failed: ${response.status}`);
+    }
+    return await response.json();
+  } finally {
+    clearTimeout(timeout);
   }
-  return response.json();
 }
 
 function isCacheFresh(fetchedAt: string): boolean {
@@ -127,29 +134,67 @@ function isCacheFresh(fetchedAt: string): boolean {
   return age < CACHE_TTL_MS;
 }
 
-async function getModelsDevData(): Promise<{ data: z.infer<typeof ModelsDevResponse>; fetchedAt?: string }> {
-  const cached = await readCache();
-  if (cached?.fetchedAt && isCacheFresh(cached.fetchedAt)) {
-    const parsed = ModelsDevResponse.safeParse(cached.data);
-    if (parsed.success) {
-      return { data: parsed.data, fetchedAt: cached.fetchedAt };
-    }
-  }
+// ---------------------------------------------------------------------------
+// Single-writer refresh. The ONLY code path that touches the network. Main
+// calls startModelsDevRefresh() once at app start; everything else in the
+// process reads the on-disk cache. Failures are logged and swallowed — a
+// stale or absent cache degrades capability-derived UI (reasoning chip,
+// catalog listings), never chat.
+// ---------------------------------------------------------------------------
 
+let initialRefresh: Promise<void> | null = null;
+let refreshTimer: ReturnType<typeof setInterval> | null = null;
+
+async function refreshCache(force: boolean): Promise<void> {
   try {
+    if (!force) {
+      const cached = await readCache();
+      if (cached?.fetchedAt && isCacheFresh(cached.fetchedAt)) return;
+    }
     const fresh = await fetchModelsDev();
     const parsed = ModelsDevResponse.parse(fresh);
     await writeCache(parsed);
-    return { data: parsed, fetchedAt: new Date().toISOString() };
   } catch (error) {
-    if (cached) {
-      const parsed = ModelsDevResponse.safeParse(cached.data);
-      if (parsed.success) {
-        return { data: parsed.data, fetchedAt: cached.fetchedAt };
-      }
-    }
-    throw error;
+    console.warn(
+      "[models.dev] refresh failed (existing cache, if any, stays in use):",
+      error instanceof Error ? error.message : String(error),
+    );
   }
+}
+
+/**
+ * Kick off the best-effort cache warm-up: refresh now if the cache is
+ * missing or older than the TTL, then again every TTL while the app runs.
+ * Never throws, never blocks boot. Catalog-shaped readers await the first
+ * attempt (so a fresh install's first `models:list` sees the fetched data);
+ * the turn-start path never waits.
+ */
+export function startModelsDevRefresh(): void {
+  if (initialRefresh) return;
+  initialRefresh = refreshCache(false);
+  refreshTimer = setInterval(() => {
+    void refreshCache(true);
+  }, CACHE_TTL_MS);
+  refreshTimer.unref?.();
+}
+
+async function awaitInitialRefresh(): Promise<void> {
+  if (initialRefresh) await initialRefresh;
+}
+
+/**
+ * Cache-only read of the catalog. Waits for the startup refresh's first
+ * attempt (bounded by its 10s fetch timeout) so first-run consumers see the
+ * warmed cache; after that attempt settles the wait is free. Returns null
+ * when no usable cache exists.
+ */
+async function getModelsDevData(): Promise<{ data: z.infer<typeof ModelsDevResponse>; fetchedAt?: string } | null> {
+  await awaitInitialRefresh();
+  const cached = await readCache();
+  if (!cached) return null;
+  const parsed = ModelsDevResponse.safeParse(cached.data);
+  if (!parsed.success) return null;
+  return { data: parsed.data, fetchedAt: cached.fetchedAt };
 }
 
 function scoreProvider(flavor: string, id: string, name: string): number {
@@ -212,7 +257,13 @@ function normalizeModels(models: Record<string, z.infer<typeof ModelsDevModel>>)
 }
 
 export async function listOnboardingModels(): Promise<{ providers: ProviderSummary[]; lastUpdated?: string }> {
-  const { data, fetchedAt } = await getModelsDevData();
+  const catalog = await getModelsDevData();
+  if (!catalog) {
+    // No cache yet (fresh install, models.dev unreachable): an empty catalog,
+    // not an error — the renderer falls back to models saved in config.
+    return { providers: [] };
+  }
+  const { data, fetchedAt } = catalog;
   const providers: ProviderSummary[] = [];
   const flavors: Array<"openai" | "anthropic" | "google"> = ["openai", "anthropic", "google"];
 
@@ -324,11 +375,13 @@ export async function isReasoningModel(
 /**
  * Annotate gateway model ids ("vendor/model" or bare) with the models.dev
  * reasoning flag. Reads the cache once for the whole batch; unknown ids keep
- * `reasoning` absent (= unknown). Cache-only, like isReasoningModel.
+ * `reasoning` absent (= unknown). Waits for the startup warm-up's first
+ * attempt (catalog-shaped path, unlike isReasoningModel on the turn path).
  */
 export async function annotateReasoningFlags<T extends { id: string }>(
   models: T[],
 ): Promise<Array<T & { reasoning?: boolean }>> {
+  await awaitInitialRefresh();
   const index = await readReasoningIndex();
   if (!index) return models;
   return models.map((model) => {
@@ -341,8 +394,9 @@ export async function getChatModelIds(
   flavor: "openai" | "anthropic" | "google",
 ): Promise<Set<string>> {
   try {
-    const { data } = await getModelsDevData();
-    const provider = pickProvider(data, flavor);
+    const catalog = await getModelsDevData();
+    if (!catalog) return new Set();
+    const provider = pickProvider(catalog.data, flavor);
     if (!provider) return new Set();
     const ids = new Set<string>();
     for (const [id, model] of Object.entries(provider.models)) {
