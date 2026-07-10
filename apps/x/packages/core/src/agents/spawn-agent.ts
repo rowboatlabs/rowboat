@@ -59,12 +59,20 @@ export const SpawnAgentInput = z.object({
         .describe(
             `Model-call budget for the sub-agent (default and cap: ${DEFAULT_MAX_MODEL_CALLS}).`,
         ),
+    reasoning_effort: z
+        .enum(["low", "medium", "high"])
+        .optional()
+        .describe(
+            "Optional reasoning-effort override for the sub-agent turn. Omit for auto/provider default. Use `low` for routine extraction or summarization, `medium` for multi-step synthesis, and `high` only when the child task truly needs deeper reasoning.",
+        ),
 });
 
 export const SPAWN_AGENT_DESCRIPTION =
     "Launch a sub-agent that works on a task in its own isolated, headless turn and returns its final answer. " +
-    "Issue several spawn-agent calls in ONE response to run sub-agents in parallel — use this to fan out independent research, analysis, or file work. " +
+    "Use it deliberately for independent, heavy, or parallelizable work; avoid spawning for quick single-step lookups. " +
+    "Issue several spawn-agent calls in ONE response only when the subtasks are genuinely independent and worth running in parallel. " +
     "Provide either `agent_id` (a stored agent) or `instructions` (construct a specialist on the fly, optionally with `name` and `tools`). " +
+    "Optionally set `reasoning_effort` for the child turn; leave it unset for auto/provider default, and reserve `high` for tasks that clearly need deeper reasoning. " +
     "The sub-agent cannot ask the user questions and cannot spawn further sub-agents; give it a complete, self-contained task.";
 
 export interface SpawnedAgentCallbacks {
@@ -170,6 +178,9 @@ export async function runSpawnedAgent(
             agent,
             message: input.task,
             maxModelCalls,
+            ...(input.reasoning_effort === undefined
+                ? {}
+                : { reasoningEffort: input.reasoning_effort }),
             signal: opts.signal,
         });
     } catch (error) {
