@@ -103,7 +103,7 @@ describe("skills index (disk skill merge layer)", () => {
     const skills = await loadSkillsIndex();
 
     const resolved = skills.resolveSkill("meeting-prep");
-    expect(resolved?.catalogPath).toBe("src/application/assistant/skills/meeting-prep/skill.ts");
+    expect(resolved?.catalogPath).toBe("src/runtime/assembly/skills/meeting-prep/skill.ts");
     expect(resolved?.content).not.toContain("DISK CONTENT MARKER");
 
     const catalog = skills.buildSkillCatalog();
@@ -178,7 +178,7 @@ describe("capability activation boundary", () => {
       summary: "a genuine model-activated skill",
       content: "guidance",
       tools: ["file-readText"],
-      catalogPath: "src/application/assistant/skills/real-skill/skill.ts",
+      catalogPath: "src/runtime/assembly/skills/real-skill/skill.ts",
     };
     const mixed = [model, eager];
 
@@ -198,6 +198,18 @@ describe("capability activation boundary", () => {
     for (const id of availableSkills) {
       expect(catalog).toContain(id);
     }
+  });
+
+  it("resolves bundled skills by the advertised path and by the pre-reorg legacy path", async () => {
+    // The catalog advertises the post-reorg source path; agent snapshots baked
+    // before the move still reference the old application/assistant prefix.
+    // Both must resolve to the same skill.
+    const { resolveSkill } = await loadSkillsIndex();
+    const advertised = resolveSkill("src/runtime/assembly/skills/meeting-prep/skill.ts");
+    const legacy = resolveSkill("src/application/assistant/skills/meeting-prep/skill.ts");
+    expect(advertised?.id).toBe("meeting-prep");
+    expect(legacy?.id).toBe("meeting-prep");
+    expect(legacy?.content).toBe(advertised?.content);
   });
 });
 

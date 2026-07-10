@@ -39,7 +39,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
     loadSkill: {
         description: "Load a Rowboat skill definition into context by fetching its guidance string",
         inputSchema: z.object({
-            skillName: z.string().describe("Skill identifier or path (e.g., 'workflow-run-ops' or 'src/application/assistant/skills/workflow-run-ops/skill.ts')"),
+            skillName: z.string().describe("Skill identifier or path (e.g., 'workflow-run-ops' or 'src/runtime/assembly/skills/workflow-run-ops/skill.ts')"),
         }),
         execute: async ({ skillName }: { skillName: string }) => {
             const resolved = resolveSkill(skillName);

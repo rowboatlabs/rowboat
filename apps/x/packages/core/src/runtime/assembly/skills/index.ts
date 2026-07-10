@@ -31,7 +31,10 @@ import appsSkill from "./apps/skill.js";
 import slackSkill from "./slack/skill.js";
 
 const CURRENT_DIR = path.dirname(fileURLToPath(import.meta.url));
-const CATALOG_PREFIX = "src/application/assistant/skills";
+const CATALOG_PREFIX = "src/runtime/assembly/skills";
+// Pre-reorg home of the bundled skills. Agent snapshots baked before the move
+// carry loadSkill references under this prefix, so it stays a resolvable alias.
+const LEGACY_CATALOG_PREFIX = "src/application/assistant/skills";
 
 // console.log(liveNoteSkill);
 
@@ -355,6 +358,8 @@ for (const entry of bundledEntries) {
     `skills/${entry.id}/skill.js`,
     `${CATALOG_PREFIX}/${entry.id}/skill.ts`,
     `${CATALOG_PREFIX}/${entry.id}/skill.js`,
+    `${LEGACY_CATALOG_PREFIX}/${entry.id}/skill.ts`,
+    `${LEGACY_CATALOG_PREFIX}/${entry.id}/skill.js`,
     absoluteTs,
     absoluteJs,
   ];
