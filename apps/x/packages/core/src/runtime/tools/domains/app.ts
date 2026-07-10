@@ -13,9 +13,7 @@ import { listApps } from "../../../apps/indexer.js";
 import { listImportantThreads, searchThreads } from "../../../knowledge/sync_gmail.js";
 import { listTasks as listBackgroundTasks } from "../../../background-tasks/fileops.js";
 import type { ISessions } from "../../sessions/api.js";
-import {
-    BuiltinToolsSchema,
-} from "./support.js";
+import { BuiltinToolsSchema } from "../types.js";
 
 
 export const appNavigationTools: z.infer<typeof BuiltinToolsSchema> = {

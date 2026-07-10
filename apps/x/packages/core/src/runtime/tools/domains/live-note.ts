@@ -3,9 +3,7 @@
 // catalog key order (provider-payload bytes; see the key-order test there).
 
 import { z } from "zod";
-import {
-    BuiltinToolsSchema,
-} from "./support.js";
+import { BuiltinToolsSchema } from "../types.js";
 
 
 export const liveNoteTools: z.infer<typeof BuiltinToolsSchema> = {

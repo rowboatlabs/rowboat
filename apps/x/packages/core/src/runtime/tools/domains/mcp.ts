@@ -7,9 +7,7 @@ import { executeTool, listServers, listTools } from "../../../mcp/mcp.js";
 import container from "../../../di/container.js";
 import { IMcpConfigRepo } from "../../../mcp/repo.js";
 import { McpServerDefinition } from "@x/shared/dist/mcp.js";
-import {
-    BuiltinToolsSchema,
-} from "./support.js";
+import { BuiltinToolsSchema } from "../types.js";
 
 
 export const mcpTools: z.infer<typeof BuiltinToolsSchema> = {

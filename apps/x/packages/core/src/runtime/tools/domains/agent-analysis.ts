@@ -5,9 +5,7 @@
 import { z } from "zod";
 import container from "../../../di/container.js";
 import { IAgentsRepo } from "../../assembly/repo.js";
-import {
-    BuiltinToolsSchema,
-} from "./support.js";
+import { BuiltinToolsSchema } from "../types.js";
 
 
 export const agentAnalysisTools: z.infer<typeof BuiltinToolsSchema> = {

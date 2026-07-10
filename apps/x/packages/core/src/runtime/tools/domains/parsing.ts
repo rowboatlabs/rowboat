@@ -10,11 +10,36 @@ import { createLanguageModel } from "../../../models/models.js";
 import { getDefaultModelAndProvider, resolveProviderConfig } from "../../../models/defaults.js";
 import { captureLlmUsage } from "../../../analytics/usage.js";
 import { getCurrentUseCase, withUseCase } from "../../../analytics/use_case.js";
-import {
-    _importDynamic,
-    BuiltinToolsSchema,
-    LLMPARSE_MIME_TYPES,
-} from "./support.js";
+import { BuiltinToolsSchema } from "../types.js";
+
+
+
+// Parser libraries are loaded dynamically inside parseFile.execute()
+// to avoid pulling pdfjs-dist's DOM polyfills into the main bundle.
+// Import paths are computed so esbuild cannot statically resolve them.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const _importDynamic = new Function('mod', 'return import(mod)') as (mod: string) => Promise<any>;
+
+const LLMPARSE_MIME_TYPES: Record<string, string> = {
+    '.pdf': 'application/pdf',
+    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    '.doc': 'application/msword',
+    '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    '.xls': 'application/vnd.ms-excel',
+    '.csv': 'text/csv',
+    '.txt': 'text/plain',
+    '.html': 'text/html',
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+    '.svg': 'image/svg+xml',
+    '.bmp': 'image/bmp',
+    '.tiff': 'image/tiff',
+};
+
 
 
 export const parsingTools: z.infer<typeof BuiltinToolsSchema> = {

@@ -6,9 +6,7 @@ import { z } from "zod";
 import { composioAccountsRepo } from "../../../composio/repo.js";
 import { executeAction as executeComposioAction, isConfigured as isComposioConfigured, searchTools as searchComposioTools } from "../../../composio/client.js";
 import { CURATED_TOOLKITS, CURATED_TOOLKIT_SLUGS } from "@x/shared/dist/composio.js";
-import {
-    BuiltinToolsSchema,
-} from "./support.js";
+import { BuiltinToolsSchema } from "../types.js";
 
 
 export const composioTools: z.infer<typeof BuiltinToolsSchema> = {

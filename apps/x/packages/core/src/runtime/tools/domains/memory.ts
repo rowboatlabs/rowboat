@@ -6,9 +6,7 @@ import { z } from "zod";
 import * as path from "path";
 import * as fs from "fs/promises";
 import { WorkDir } from "../../../config/config.js";
-import {
-    BuiltinToolsSchema,
-} from "./support.js";
+import { BuiltinToolsSchema } from "../types.js";
 
 
 export const memoryTools: z.infer<typeof BuiltinToolsSchema> = {

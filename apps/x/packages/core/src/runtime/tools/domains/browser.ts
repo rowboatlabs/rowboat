@@ -8,9 +8,7 @@ import { BrowserControlInputSchema, type BrowserControlInput } from "@x/shared/d
 import { ensureLoaded as ensureBrowserSkillsLoaded, readSkillContent as readBrowserSkillContent, refreshFromRemote as refreshBrowserSkills } from "../../../application/browser-skills/index.js";
 import type { ToolContext } from "../exec-tool.js";
 import type { IBrowserControlService } from "../../../application/browser-control/service.js";
-import {
-    BuiltinToolsSchema,
-} from "./support.js";
+import { BuiltinToolsSchema } from "../types.js";
 
 
 export const browserTools: z.infer<typeof BuiltinToolsSchema> = {

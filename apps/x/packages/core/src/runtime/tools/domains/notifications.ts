@@ -8,9 +8,7 @@ import type { ToolContext } from "../exec-tool.js";
 import { getCurrentUseCase } from "../../../analytics/use_case.js";
 import type { INotificationService } from "../../../application/notification/service.js";
 import { notifyIfEnabled } from "../../../application/notification/notifier.js";
-import {
-    BuiltinToolsSchema,
-} from "./support.js";
+import { BuiltinToolsSchema } from "../types.js";
 
 
 export const notificationTools: z.infer<typeof BuiltinToolsSchema> = {

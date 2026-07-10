@@ -5,9 +5,7 @@
 import { z } from "zod";
 import * as files from "../../../filesystem/files.js";
 import { WorkDir } from "../../../config/config.js";
-import {
-    BuiltinToolsSchema,
-} from "./support.js";
+import { BuiltinToolsSchema } from "../types.js";
 
 
 export const fileTools: z.infer<typeof BuiltinToolsSchema> = {

@@ -12,11 +12,32 @@ import { ICodeModeConfigRepo } from "../../../code-mode/repo.js";
 import type { ApprovalPolicy, CodeRunEvent as CodeRunEventType } from "@x/shared/dist/code-mode.js";
 import type { CodeRunFeed } from "../../../code-mode/feed.js";
 import type { ToolContext } from "../exec-tool.js";
-import {
-    expandHome,
-    coalesceCodeRunEvents,
-    BuiltinToolsSchema,
-} from "./support.js";
+import { expandHome } from "../paths.js";
+import { BuiltinToolsSchema } from "../types.js";
+
+
+
+// Shrink a code-run timeline for durable storage: consecutive same-role message
+// chunks merge into one event. Display-lossless — the timeline renderer
+// concatenates consecutive messages anyway (CodingRunTimeline) — and typically
+// collapses the ~90% of a run's events that are per-token text deltas.
+// Everything else (tool calls/updates, plans, permissions) is kept verbatim in
+// order: updates are id-keyed transitions and must not be merged.
+export function coalesceCodeRunEvents(events: CodeRunEventType[]): CodeRunEventType[] {
+    const out: CodeRunEventType[] = [];
+    for (const event of events) {
+        const last = out[out.length - 1];
+        if (
+            event.type === 'message' && last?.type === 'message' && last.role === event.role
+        ) {
+            out[out.length - 1] = { ...last, text: last.text + event.text };
+        } else {
+            out.push(event);
+        }
+    }
+    return out;
+}
+
 
 
 export const codeAgentRunTools: z.infer<typeof BuiltinToolsSchema> = {

@@ -22,8 +22,8 @@ import { modelTools } from "./domains/models.js";
 import { liveNoteTools } from "./domains/live-note.js";
 import { backgroundTaskTools } from "./domains/background-tasks.js";
 import { notificationTools } from "./domains/notifications.js";
-import { BuiltinToolsSchema } from "./domains/support.js";
-export { coalesceCodeRunEvents } from "./domains/support.js";
+import { BuiltinToolsSchema } from "./types.js";
+export { coalesceCodeRunEvents } from "./domains/code.js";
 
 // The builtin-tool catalog, assembled from domain modules
 // (./builtin-tools/*). SPREAD ORDER IS LOAD-BEARING: catalog key order is

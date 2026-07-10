@@ -6,9 +6,7 @@ import { z } from "zod";
 import { getDefaultModelAndProvider } from "../../../models/defaults.js";
 import { listGatewayModels } from "../../../models/gateway.js";
 import { isSignedIn } from "../../../account/account.js";
-import {
-    BuiltinToolsSchema,
-} from "./support.js";
+import { BuiltinToolsSchema } from "../types.js";
 
 
 export const modelTools: z.infer<typeof BuiltinToolsSchema> = {
