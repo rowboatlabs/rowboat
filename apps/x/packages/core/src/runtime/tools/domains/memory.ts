@@ -11,6 +11,7 @@ import { BuiltinToolsSchema } from "../types.js";
 
 export const memoryTools: z.infer<typeof BuiltinToolsSchema> = {
     'save-to-memory': {
+        permission: "none",
         description: "Save a note about the user to the agent memory inbox. Use this when you observe something worth remembering — their preferences, communication patterns, relationship context, scheduling habits, or explicit instructions about how they want things done.",
         inputSchema: z.object({
             note: z.string().describe("The observation or preference to remember. Be specific and concise."),

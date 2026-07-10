@@ -13,6 +13,7 @@ import { BuiltinToolsSchema } from "../types.js";
 
 export const browserTools: z.infer<typeof BuiltinToolsSchema> = {
     'load-browser-skill': {
+        permission: "none",
         description: 'Load a site-specific browser skill (from the browser-use/browser-harness domain-skills library) by id. Returns the full markdown content with selectors, gotchas, and recipes for the target site. Call this after browser-control responses surface a matching skill in suggestedSkills. Pass action="list" to see all available skills. Skills are fetched on first use and cached locally; pass action="refresh" to force an update from upstream.',
         inputSchema: z.object({
             action: z.enum(['load', 'list', 'refresh']).optional().describe('load: fetch a skill by id (default). list: list all cached skills. refresh: re-fetch the library from upstream.'),
@@ -78,6 +79,7 @@ export const browserTools: z.infer<typeof BuiltinToolsSchema> = {
     // ============================================================================,
 
     'browser-control': {
+        permission: "none",
         description: 'Control the embedded browser pane. Read the current page, inspect indexed interactable elements, and navigate/click/type/press keys in the active browser tab.',
         inputSchema: BrowserControlInputSchema,
         isAvailable: async () => {

@@ -10,6 +10,7 @@ import { BuiltinToolsSchema } from "../types.js";
 
 export const fileTools: z.infer<typeof BuiltinToolsSchema> = {
     'file-getRoot': {
+        permission: "none",
         description: 'Get the default root directory for relative file paths. Relative paths passed to file tools resolve against this directory.',
         inputSchema: z.object({}),
         execute: async () => {
@@ -24,6 +25,7 @@ export const fileTools: z.infer<typeof BuiltinToolsSchema> = {
     },
 
     'file-exists': {
+        permission: "file-boundary",
         description: 'Check if a file or directory exists. Accepts absolute paths, ~/ paths, or paths relative to the default root.',
         inputSchema: z.object({
             path: z.string().min(1).describe('File or directory path to check'),
@@ -40,6 +42,7 @@ export const fileTools: z.infer<typeof BuiltinToolsSchema> = {
     },
 
     'file-stat': {
+        permission: "file-boundary",
         description: 'Get file or directory statistics (size, modification time, etc.)',
         inputSchema: z.object({
             path: z.string().min(1).describe('File or directory path to stat'),
@@ -56,6 +59,7 @@ export const fileTools: z.infer<typeof BuiltinToolsSchema> = {
     },
 
     'file-list': {
+        permission: "file-boundary",
         description: 'List directory contents. Can recursively explore directory structure with options.',
         inputSchema: z.object({
             path: z.string().describe('Directory path to list. Use "." for the default root.'),
@@ -93,6 +97,7 @@ export const fileTools: z.infer<typeof BuiltinToolsSchema> = {
     },
 
     'file-readText': {
+        permission: "file-boundary",
         description: 'Read a UTF-8 text file. Returns content with each line prefixed by its 1-indexed line number (e.g. `12: some text`). Use `offset` and `limit` to page through large files; defaults read up to 2000 lines starting at line 1. Output is wrapped in `<path>`, `<resolvedPath>`, `<type>`, `<content>` tags and ends with a footer indicating whether the read reached end-of-file or was truncated. Line numbers are display-only — do NOT include them when later writing or editing the file. Refuses binary files; use parseFile or LLMParse for documents, PDFs, images, and other non-text formats.',
         inputSchema: z.object({
             path: z.string().min(1).describe('Text file path to read'),
@@ -119,6 +124,7 @@ export const fileTools: z.infer<typeof BuiltinToolsSchema> = {
     },
 
     'file-writeText': {
+        permission: "file-boundary",
         description: 'Write or update UTF-8 text file contents. Automatically creates parent directories and supports atomic writes.',
         inputSchema: z.object({
             path: z.string().min(1).describe('Text file path to write'),
@@ -155,6 +161,7 @@ export const fileTools: z.infer<typeof BuiltinToolsSchema> = {
     },
 
     'file-editText': {
+        permission: "file-boundary",
         description: 'Make precise edits to a UTF-8 text file by replacing specific text. Safer than rewriting entire files - produces smaller diffs and reduces risk of data loss. Refuses binary files.',
         inputSchema: z.object({
             path: z.string().min(1).describe('Text file path to edit'),
@@ -182,6 +189,7 @@ export const fileTools: z.infer<typeof BuiltinToolsSchema> = {
     },
 
     'file-mkdir': {
+        permission: "file-boundary",
         description: 'Create a directory',
         inputSchema: z.object({
             path: z.string().min(1).describe('Directory path to create'),
@@ -199,6 +207,7 @@ export const fileTools: z.infer<typeof BuiltinToolsSchema> = {
     },
 
     'file-rename': {
+        permission: "file-boundary",
         description: 'Rename or move a file or directory',
         inputSchema: z.object({
             from: z.string().min(1).describe('Source path'),
@@ -217,6 +226,7 @@ export const fileTools: z.infer<typeof BuiltinToolsSchema> = {
     },
 
     'file-copy': {
+        permission: "file-boundary",
         description: 'Copy a file (directories not supported)',
         inputSchema: z.object({
             from: z.string().min(1).describe('Source file path'),
@@ -235,6 +245,7 @@ export const fileTools: z.infer<typeof BuiltinToolsSchema> = {
     },
 
     'file-remove': {
+        permission: "file-boundary",
         description: 'Remove a file or directory. Files are moved to the Rowboat trash by default for safety.',
         inputSchema: z.object({
             path: z.string().min(1).describe('Path to remove'),
@@ -256,6 +267,7 @@ export const fileTools: z.infer<typeof BuiltinToolsSchema> = {
     },
 
     'file-glob': {
+        permission: "file-boundary",
         description: 'Find files matching a glob pattern (e.g., "**/*.ts", "src/**/*.json"). Much faster than recursive readdir for finding files.',
         inputSchema: z.object({
             pattern: z.string().describe('Glob pattern to match files'),
@@ -271,6 +283,7 @@ export const fileTools: z.infer<typeof BuiltinToolsSchema> = {
     },
 
     'file-grep': {
+        permission: "file-boundary",
         description: 'Search text file contents using regex. Returns matching files and lines. Skips binary files.',
         inputSchema: z.object({
             pattern: z.string().describe('Regex pattern to search for'),

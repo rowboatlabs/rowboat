@@ -700,6 +700,15 @@ interface IPermissionChecker {
 Tool-specific policy, command analysis, filesystem boundaries, and allowlists
 remain outside the loop.
 
+The real checker bridge implements that policy from per-tool declarations in
+the builtin catalog (`tools/types.ts`) and fails closed: any tool without an
+explicit `"none"` declaration — undeclared builtins, `mcp:*` attachments on
+user agents, unknown toolId families — requires permission. Composio and MCP
+executions produce family-specific request payloads (the shared
+`ToolPermissionMetadata` kinds); everything else falls back to a generic
+`{kind: "tool"}` request. The audited set of gated builtins is pinned by a
+catalog test.
+
 When automatic permission is enabled, the injected classifier handles all
 permission-required calls from one model response in one batch:
 

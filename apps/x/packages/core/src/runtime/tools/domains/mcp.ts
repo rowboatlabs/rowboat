@@ -12,6 +12,7 @@ import { BuiltinToolsSchema } from "../types.js";
 
 export const mcpTools: z.infer<typeof BuiltinToolsSchema> = {
     addMcpServer: {
+        permission: "prompt",
         description: 'Add or update an MCP server in the configuration with validation. This ensures the server definition is valid before saving.',
         inputSchema: z.object({
             serverName: z.string().describe('Name/alias for the MCP server'),
@@ -48,6 +49,7 @@ export const mcpTools: z.infer<typeof BuiltinToolsSchema> = {
     },
 
     listMcpServers: {
+        permission: "none",
         description: 'List all available MCP servers from the configuration',
         inputSchema: z.object({}),
         execute: async () => {
@@ -67,6 +69,7 @@ export const mcpTools: z.infer<typeof BuiltinToolsSchema> = {
     },
 
     listMcpTools: {
+        permission: "none",
         description: 'List all available tools from a specific MCP server',
         inputSchema: z.object({
             serverName: z.string().describe('Name of the MCP server to query'),
@@ -89,6 +92,7 @@ export const mcpTools: z.infer<typeof BuiltinToolsSchema> = {
     },
 
     executeMcpTool: {
+        permission: "mcp-execute",
         description: 'Execute a specific tool from an MCP server. Use this to run MCP tools on behalf of the user. IMPORTANT: Always use listMcpTools first to get the tool\'s inputSchema, then match the required parameters exactly in the arguments field.',
         inputSchema: z.object({
             serverName: z.string().describe('Name of the MCP server that provides the tool'),

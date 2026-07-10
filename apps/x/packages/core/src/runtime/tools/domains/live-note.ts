@@ -8,6 +8,7 @@ import { BuiltinToolsSchema } from "../types.js";
 
 export const liveNoteTools: z.infer<typeof BuiltinToolsSchema> = {
     'run-live-note-agent': {
+        permission: "none",
         description: "Manually trigger the live-note agent to run now on a note. Equivalent to the user clicking the Run button in the live-note sidebar, but you can pass extra `context` to bias what the agent does this run — most useful for backfills (e.g. seeding a newly-made-live note from existing synced emails) or focused refreshes. Returns the action taken, summary, and the new note body.",
         inputSchema: z.object({
             filePath: z.string().describe("Workspace-relative path to the note file (e.g., 'knowledge/Notes/my-note.md'). The note must already have a `live:` block in its frontmatter."),

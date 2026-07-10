@@ -13,6 +13,7 @@ import { BuiltinToolsSchema } from "../types.js";
 
 export const shellTools: z.infer<typeof BuiltinToolsSchema> = {
     executeCommand: {
+        permission: "command-allowlist",
         description: 'Execute a shell command and return the output. Use this to run bash/shell commands.',
         inputSchema: z.object({
             command: z.string().describe('The shell command to execute (e.g., "ls -la", "cat file.txt")'),

@@ -42,6 +42,7 @@ export function coalesceCodeRunEvents(events: CodeRunEventType[]): CodeRunEventT
 
 export const codeAgentRunTools: z.infer<typeof BuiltinToolsSchema> = {
     code_agent_run: {
+        permission: "none",
         description: 'Run a coding/software task with the selected on-device coding agent (Claude Code or Codex) inside a project folder. Streams the agent\'s tool calls, file diffs, and plan into the chat and surfaces permission requests inline. Use this for ALL code-mode work (writing/editing/reading code, running tests, debugging, exploring a repo). Reuses one persistent session per chat, so follow-up requests keep context.',
         inputSchema: z.object({
             agent: z.enum(['claude', 'codex']).describe('Which coding agent to use: "claude" (Claude Code) or "codex". Set this to the active code-mode chip agent. Note: when the chip is set, the backend uses the chip agent regardless of this value — this only takes effect in the ask-human flow where no chip is set.'),
@@ -188,6 +189,7 @@ export const codeAgentRunTools: z.infer<typeof BuiltinToolsSchema> = {
 
 export const codeTaskTools: z.infer<typeof BuiltinToolsSchema> = {
     'launch-code-task': {
+        permission: "none",
         description: "Launch an autonomous coding session that implements a unit of work in the bg-task's pinned code repo. ONLY usable from a coding background task (one with a configured code project). The session runs full-auto in its own isolated git worktree/branch — it never touches the user's checkout — and runs asynchronously: this returns as soon as the session is created, so you can launch several (one per group of related items) in the same run. The tool writes and later updates a row under a `## Code Sessions` section in the task's index.md — do NOT edit that section yourself. Write an excellent, fully self-contained `prompt`: the coding agent has no other context and no human to ask. Group related items into one call; split unrelated items into separate calls.",
         inputSchema: z.object({
             taskSlug: z.string().describe("The slug of THIS background task (it's in your run message, e.g. 'implement-meeting-items'). Used to find the pinned repo and to update index.md."),
