@@ -36,8 +36,6 @@ const CATALOG_PREFIX = "src/runtime/assembly/skills";
 // carry loadSkill references under this prefix, so it stays a resolvable alias.
 const LEGACY_CATALOG_PREFIX = "src/application/assistant/skills";
 
-// console.log(liveNoteSkill);
-
 // A skill IS the model-activated variant of the capability record
 // (capabilities/types.ts): lazy guidance the model pulls in via loadSkill,
 // plus the BuiltinTools it owns. `id` doubles as the folder name. Tool names

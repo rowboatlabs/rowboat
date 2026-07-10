@@ -1,9 +1,10 @@
 # Turn Runtime Technical Specification
 
 Status: implemented and live. All chat, background, and knowledge callers
-run on this runtime; the legacy runs runtime remains only for code-mode
-sessions (see the carve-out section in the repo-root `AGENTS.md`). The
-companion session layer is specified in `session-design.md`.
+run on this runtime; the legacy runs runtime (`src/runtime/legacy/`) remains
+only for code-mode sessions and the mini-apps host API, and is deleted as a
+unit when those migrate. The companion session layer is specified in
+`session-design.md`.
 
 This document specifies a new turn-oriented agent loop for `@x/core`. It is
 intended to replace the behavioral responsibilities of the current run runtime
