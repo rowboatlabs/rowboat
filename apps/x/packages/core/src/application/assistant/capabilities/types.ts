@@ -11,11 +11,16 @@
 //              system prompt from token zero and tools attach at assembly.
 // - 'always' — unconditional contributions (workspace context traits).
 //
+// The two shapes are a discriminated union so the design's rules are
+// unrepresentable to break: a model capability MUST carry catalog metadata
+// and lazy content and CANNOT carry an eager fragment; an app/always
+// capability MUST carry a fragment and never appears in the catalog.
+//
 // Trust boundary: disk-loaded skills (~/.rowboat/skills, ~/.agents/skills)
-// are structurally limited to the 'model' subset — eager prompt fragments
-// and app activation are bundled-only powers. A model-activated skill's
-// prose lands in conversation because the model chose to read it; a disk
-// file injecting into every turn's system prompt would be a standing
+// are typed as ModelCapability, so eager prompt fragments and app activation
+// are structurally bundled-only powers. A model-activated skill's prose
+// lands in conversation because the model chose to read it; a disk file
+// injecting into every turn's system prompt would be a standing
 // prompt-injection channel.
 
 export type CapabilityActivation = "model" | "app" | "always";
@@ -39,26 +44,37 @@ export interface CapabilityContext {
     coachMode: boolean;
 }
 
-export interface CapabilityDefinition {
+// Model-activated (a "skill"): advertised in the loadSkill catalog, loaded
+// by the model's judgment, guidance delivered lazily as a tool result.
+export interface ModelCapability {
     id: string;
-    // Catalog metadata: required for model-activated entries (rendered in
-    // the loadSkill catalog); app/always entries omit them — nothing
-    // consumes them there, and stale copies of fragment headings would
-    // only drift into misinformation.
-    title?: string;
-    summary?: string;
-    // Defaults to 'model' (the historical skill behavior).
-    activation?: CapabilityActivation;
-    // Lazy guidance returned by loadSkill (model activation).
-    content?: string;
-    // BuiltinTools keys this capability owns.
+    // The discriminant; omitted means 'model' (the historical default).
+    activation?: "model";
+    // Catalog metadata — the loadSkill catalog renders both.
+    title: string;
+    summary: string;
+    // Lazy guidance returned by loadSkill.
+    content: string;
+    // BuiltinTools keys this capability owns; attached mid-turn on load.
     tools?: string[];
-    // Eager system-prompt fragment (app/always activation). Returns null
-    // when the capability contributes nothing for this context. MUST be
-    // pure: same context, same bytes.
-    promptFragment?: (ctx: CapabilityContext) => string | null;
 }
 
-export function isModelActivated(def: Pick<CapabilityDefinition, "activation">): boolean {
+// App/always-activated: an eager system-prompt contribution composed at
+// assembly time. Bundled-only (see trust boundary above).
+export interface EagerCapability {
+    id: string;
+    activation: "app" | "always";
+    // Returns null when the capability contributes nothing for this
+    // context. MUST be pure: same context, same bytes.
+    promptFragment: (ctx: CapabilityContext) => string | null;
+    // BuiltinTools keys this capability owns; attached at assembly.
+    tools?: string[];
+}
+
+export type CapabilityDefinition = ModelCapability | EagerCapability;
+
+export function isModelActivated(
+    def: CapabilityDefinition,
+): def is ModelCapability {
     return def.activation === undefined || def.activation === "model";
 }

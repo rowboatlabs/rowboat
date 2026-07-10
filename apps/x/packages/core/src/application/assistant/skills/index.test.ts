@@ -147,22 +147,54 @@ describe("skills index (disk skill merge layer)", () => {
   });
 });
 
-describe("capability record (types)", () => {
-  it("defaults to model activation — every bundled skill is model-activated", async () => {
+describe("capability activation boundary", () => {
+  it("defaults to model activation; eager variants are excluded", async () => {
     const { isModelActivated } = await import("../capabilities/types.js");
-    // Bundled definitions carry no activation field today; they are the
-    // model-activated subset by default and must stay in the catalog.
-    expect(isModelActivated({})).toBe(true);
-    expect(isModelActivated({ activation: "model" })).toBe(true);
-    expect(isModelActivated({ activation: "app" })).toBe(false);
-    expect(isModelActivated({ activation: "always" })).toBe(false);
+    const { MODE_CAPABILITIES } = await import("../capabilities/modes.js");
+    const modelSkill = {
+      id: "m1",
+      title: "M1",
+      summary: "model skill",
+      content: "guidance",
+    };
+    expect(isModelActivated(modelSkill)).toBe(true);
+    expect(isModelActivated({ ...modelSkill, activation: "model" as const })).toBe(true);
+    for (const eager of MODE_CAPABILITIES) {
+      expect(isModelActivated(eager)).toBe(false);
+    }
   });
 
-  it("keeps app/always capabilities out of the loadSkill catalog", async () => {
+  it("fences the catalog and the tool lookup against eager capabilities", async () => {
+    // The real failure mode this pins: a future commit merges eager
+    // capabilities into the shared entry list — the catalog must hide them
+    // AND the loadSkill tool-attachment path must refuse them (hiding the
+    // menu entry is not enough; the kitchen must refuse to serve it).
+    const { buildCatalogFromEntries, toolNamesFromEntries } = await import("./index.js");
+    const { MODE_CAPABILITIES } = await import("../capabilities/modes.js");
+    const eager = { ...MODE_CAPABILITIES[0], tools: ["file-writeText"] };
+    const model = {
+      id: "real-skill",
+      title: "Real Skill",
+      summary: "a genuine model-activated skill",
+      content: "guidance",
+      tools: ["file-readText"],
+      catalogPath: "src/application/assistant/skills/real-skill/skill.ts",
+    };
+    const mixed = [model, eager];
+
+    const catalog = buildCatalogFromEntries(mixed);
+    expect(catalog).toContain("real-skill");
+    expect(catalog).not.toContain(eager.id);
+
+    expect(toolNamesFromEntries(mixed, "real-skill")).toEqual(["file-readText"]);
+    // The eager capability's tools must NOT attach via the loadSkill path,
+    // even though the entry is present in the list and declares tools.
+    expect(toolNamesFromEntries(mixed, eager.id)).toEqual([]);
+  });
+
+  it("every advertised catalog id resolves via loadSkill", async () => {
     const { buildSkillCatalog, availableSkills } = await import("./index.js");
     const catalog = buildSkillCatalog();
-    // Every advertised id resolves via loadSkill (the catalog and the
-    // resolver operate on the same model-activated subset).
     for (const id of availableSkills) {
       expect(catalog).toContain(id);
     }

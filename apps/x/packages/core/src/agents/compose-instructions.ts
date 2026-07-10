@@ -78,7 +78,7 @@ export function composeSystemInstructions({
         coachMode: coachMode ?? false,
     };
     for (const capability of PROMPT_CAPABILITIES) {
-        const fragment = capability.promptFragment?.(ctx);
+        const fragment = capability.promptFragment(ctx);
         if (fragment) {
             composed += `\n\n${fragment}`;
         }

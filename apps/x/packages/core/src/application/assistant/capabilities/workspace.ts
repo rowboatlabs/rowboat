@@ -1,4 +1,4 @@
-import type { CapabilityContext, CapabilityDefinition } from "./types.js";
+import type { CapabilityContext, EagerCapability } from "./types.js";
 
 // The always-activated workspace-context capabilities: agent notes and the
 // user work directory, composed for agents with the workspaceContext trait
@@ -8,13 +8,13 @@ import type { CapabilityContext, CapabilityDefinition } from "./types.js";
 // extracted verbatim from the historical composer; the golden snapshots in
 // agents/compose-instructions.test.ts pin the bytes.
 
-export const AGENT_NOTES_CAPABILITY: CapabilityDefinition = {
+export const AGENT_NOTES_CAPABILITY: EagerCapability = {
     id: "agent-notes",
     activation: "always",
     promptFragment: (ctx: CapabilityContext) => ctx.agentNotesContext,
 };
 
-export const WORK_DIRECTORY_CAPABILITY: CapabilityDefinition = {
+export const WORK_DIRECTORY_CAPABILITY: EagerCapability = {
     id: "work-directory",
     activation: "always",
     promptFragment: (ctx: CapabilityContext) =>

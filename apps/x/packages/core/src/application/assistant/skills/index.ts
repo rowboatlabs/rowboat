@@ -1,6 +1,10 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { isModelActivated, type CapabilityDefinition } from "../capabilities/types.js";
+import {
+  isModelActivated,
+  type CapabilityDefinition,
+  type ModelCapability,
+} from "../capabilities/types.js";
 import { loadDiskSkills } from "./disk-loader.js";
 import builtinToolsSkill from "./builtin-tools/skill.js";
 import deletionGuardrailsSkill from "./deletion-guardrails/skill.js";
@@ -26,17 +30,12 @@ const CATALOG_PREFIX = "src/application/assistant/skills";
 
 // console.log(liveNoteSkill);
 
-// A skill is the model-activated subset of the capability record
+// A skill IS the model-activated variant of the capability record
 // (capabilities/types.ts): lazy guidance the model pulls in via loadSkill,
-// plus the BuiltinTools it owns. `id` doubles as the folder name; title and
-// summary are required here because the catalog renders them. Tool names
+// plus the BuiltinTools it owns. `id` doubles as the folder name. Tool names
 // are validated against the live catalog where descriptors are built
 // (loadSkill / the agent resolver); unknown names are dropped there.
-type SkillDefinition = CapabilityDefinition & {
-  title: string;
-  summary: string;
-  content: string;
-};
+type SkillDefinition = ModelCapability;
 
 type ResolvedSkill = {
   id: string;
@@ -243,16 +242,27 @@ function getSkillEntries(): SkillEntry[] {
  * Reads the live skill set, so it reflects disk skills added/removed at runtime.
  */
 export function buildSkillCatalog(options?: { excludeIds?: string[] }): string {
-  // The catalog advertises the model-activated subset only: app/always
-  // capabilities are composed into the system prompt by the assembly layer,
-  // not offered for loadSkill.
-  const modelEntries = getSkillEntries().filter(isModelActivated);
+  return buildCatalogFromEntries(getSkillEntries(), options);
+}
+
+// Pure catalog builder over an explicit entry list (exported for the
+// activation-boundary tests). The catalog advertises the model-activated
+// subset only: app/always capabilities are composed into the system prompt
+// by the assembly layer, never offered for loadSkill.
+export function buildCatalogFromEntries(
+  all: ReadonlyArray<CapabilityDefinition & { catalogPath?: string }>,
+  options?: { excludeIds?: string[] },
+): string {
+  // The type-guard filter must keep the catalogPath intersection alive.
+  const modelEntries = all.filter(
+    (e): e is ModelCapability & { catalogPath?: string } => isModelActivated(e),
+  );
   const entries = options?.excludeIds
     ? modelEntries.filter(e => !options.excludeIds!.includes(e.id))
     : modelEntries;
   const sections = entries.map((entry) => [
     `## ${entry.title}`,
-    `- **Skill file:** \`${entry.catalogPath}\``,
+    `- **Skill file:** \`${entry.catalogPath ?? `${CATALOG_PREFIX}/${entry.id}/skill.ts`}\``,
     `- **Use it for:** ${entry.summary}`,
     ...(entry.tools && entry.tools.length > 0
       ? [`- **Tools it attaches:** ${entry.tools.join(", ")}`]
@@ -384,8 +394,22 @@ export function resolveSkill(identifier: string): ResolvedSkill | null {
  * builtin-tools escape-hatch list.
  */
 export function skillToolNames(skillId: string): string[] {
-  const entry = getSkillEntries().find((e) => e.id === skillId);
-  return entry?.tools ? [...entry.tools] : [];
+  return toolNamesFromEntries(getSkillEntries(), skillId);
+}
+
+// Pure variant over an explicit entry list (exported for the
+// activation-boundary tests). Only model-activated entries may attach tools
+// through the loadSkill path — an eager capability's tools attach at
+// assembly, never mid-turn on the model's request.
+export function toolNamesFromEntries(
+  entries: ReadonlyArray<CapabilityDefinition>,
+  skillId: string,
+): string[] {
+  const entry = entries.find((e) => e.id === skillId);
+  if (!entry || !isModelActivated(entry)) {
+    return [];
+  }
+  return entry.tools ? [...entry.tools] : [];
 }
 
 /**
