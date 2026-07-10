@@ -70,6 +70,11 @@ export interface ModelCapability {
     content: string;
     // BuiltinTools keys this capability owns; attached mid-turn on load.
     tools?: string[];
+    // Catalog visibility: when false, the capability is omitted from the
+    // loadSkill catalog (e.g. slack when no workspace is connected).
+    // Deliberately NOT a loadSkill fence — an explicitly-requested id still
+    // resolves, matching the historical excludeIds behavior. Defaults true.
+    availability?: () => Promise<boolean> | boolean;
 }
 
 // App/always-activated: an eager system-prompt contribution composed at

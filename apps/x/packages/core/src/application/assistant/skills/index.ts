@@ -104,6 +104,7 @@ const definitions: SkillDefinition[] = [
   },
   {
     id: "composio-integration",
+    availability: isComposioAvailable,
     title: "Composio Integration",
     summary: "Interact with third-party services (Gmail, GitHub, Slack, LinkedIn, Notion, Jira, Google Sheets, etc.) via Composio. Search, connect, and execute tools.",
     content: composioIntegrationSkill,
@@ -131,6 +132,7 @@ const definitions: SkillDefinition[] = [
   },
   {
     id: "code-with-agents",
+    availability: isCodeModeAvailable,
     title: "Code with Agents",
     summary: "Write code, build projects, create scripts, or fix bugs by delegating to Claude Code or Codex.",
     content: codeWithAgentsSkill,
@@ -178,9 +180,8 @@ const definitions: SkillDefinition[] = [
     tools: ["browser-control", "load-browser-skill"],
   },
   {
-    // Excluded from the catalog when Slack isn't connected (see
-    // buildCopilotInstructions excludeIds), mirroring composio-integration.
     id: "slack",
+    availability: isSlackAvailable,
     title: "Slack",
     summary: "Read, search, and send Slack messages via the agent-slack CLI — catch up on channels, summarize threads, list users. Load FIRST for ANY Slack request; Slack is connected natively, never through Composio.",
     content: slackSkill,
@@ -237,12 +238,67 @@ function getSkillEntries(): SkillEntry[] {
   return [...bundledEntries, ...diskEntries];
 }
 
+// ---- Availability checks (catalog visibility) ----
+// Connection-state gates for the catalog, evaluated per build. Repos resolve
+// lazily so this module keeps no static edge into the DI graph; any failure
+// reads as "not available" (the historical default).
+
+async function isComposioAvailable(): Promise<boolean> {
+  try {
+    const { isConfigured } = await import("../../../composio/client.js");
+    return await isConfigured();
+  } catch {
+    return false;
+  }
+}
+
+async function isCodeModeAvailable(): Promise<boolean> {
+  try {
+    const { lazyResolve } = await import("../../../di/lazy-resolve.js");
+    const repo = await lazyResolve<import("../../../code-mode/repo.js").ICodeModeConfigRepo>("codeModeConfigRepo");
+    return (await repo.getConfig()).enabled;
+  } catch {
+    return false;
+  }
+}
+
+async function isSlackAvailable(): Promise<boolean> {
+  try {
+    const { lazyResolve } = await import("../../../di/lazy-resolve.js");
+    const repo = await lazyResolve<import("../../../slack/repo.js").ISlackConfigRepo>("slackConfigRepo");
+    const config = await repo.getConfig();
+    return config.enabled && config.workspaces.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+// Pure availability filter over an explicit entry list (exported for tests):
+// entries without an availability check are kept; checks are evaluated
+// concurrently and a false drops the entry from the CATALOG only (loadSkill
+// still resolves explicit ids, matching the historical excludeIds behavior).
+export async function filterAvailableEntries<T extends { availability?: () => Promise<boolean> | boolean }>(
+  entries: readonly T[],
+): Promise<T[]> {
+  const verdicts = await Promise.all(
+    entries.map((entry) => (entry.availability ? entry.availability() : true)),
+  );
+  return entries.filter((_, i) => verdicts[i]);
+}
+
+// The catalog restricted to currently-available skills — what
+// buildCopilotInstructions embeds in the system prompt.
+export async function buildAvailableSkillCatalog(): Promise<string> {
+  return buildCatalogFromEntries(await filterAvailableEntries(getSkillEntries()));
+}
+
 /**
- * Build a skill catalog string, optionally excluding specific skills by ID.
- * Reads the live skill set, so it reflects disk skills added/removed at runtime.
+ * Build a skill catalog string from the live skill set (availability
+ * ignored), so it reflects disk skills added/removed at runtime. The
+ * system prompt uses buildAvailableSkillCatalog instead.
  */
-export function buildSkillCatalog(options?: { excludeIds?: string[] }): string {
-  return buildCatalogFromEntries(getSkillEntries(), options);
+export function buildSkillCatalog(): string {
+  return buildCatalogFromEntries(getSkillEntries());
 }
 
 // Pure catalog builder over an explicit entry list (exported for the
@@ -251,15 +307,11 @@ export function buildSkillCatalog(options?: { excludeIds?: string[] }): string {
 // by the assembly layer, never offered for loadSkill.
 export function buildCatalogFromEntries(
   all: ReadonlyArray<CapabilityDefinition & { catalogPath?: string }>,
-  options?: { excludeIds?: string[] },
 ): string {
   // The type-guard filter must keep the catalogPath intersection alive.
-  const modelEntries = all.filter(
+  const entries = all.filter(
     (e): e is ModelCapability & { catalogPath?: string } => isModelActivated(e),
   );
-  const entries = options?.excludeIds
-    ? modelEntries.filter(e => !options.excludeIds!.includes(e.id))
-    : modelEntries;
   const sections = entries.map((entry) => [
     `## ${entry.title}`,
     `- **Skill file:** \`${entry.catalogPath ?? `${CATALOG_PREFIX}/${entry.id}/skill.ts`}\``,

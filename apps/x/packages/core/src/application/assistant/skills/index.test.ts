@@ -200,3 +200,32 @@ describe("capability activation boundary", () => {
     }
   });
 });
+
+describe("availability (catalog visibility)", () => {
+  it("drops unavailable entries from the catalog but keeps ungated ones", async () => {
+    const { filterAvailableEntries, buildCatalogFromEntries } = await import("./index.js");
+    const entries = [
+      { id: "always-on", title: "Always", summary: "s", content: "c" },
+      { id: "connected", title: "Connected", summary: "s", content: "c", availability: () => true },
+      { id: "disconnected", title: "Disconnected", summary: "s", content: "c", availability: async () => false },
+    ];
+    const available = await filterAvailableEntries(entries);
+    expect(available.map((e) => e.id)).toEqual(["always-on", "connected"]);
+
+    const catalog = buildCatalogFromEntries(available);
+    expect(catalog).toContain("always-on");
+    expect(catalog).toContain("connected");
+    expect(catalog).not.toContain("disconnected");
+  });
+
+  it("the connection-gated bundled skills declare availability", async () => {
+    const skills = await import("./index.js");
+    const catalog = skills.buildSkillCatalog();
+    // The ungated builder still lists them (loadSkill resolves explicit ids
+    // regardless of availability — visibility gating is catalog-only).
+    for (const id of ["composio-integration", "code-with-agents", "slack"]) {
+      expect(catalog).toContain(id);
+      expect(skills.resolveSkill(id)).not.toBeNull();
+    }
+  });
+});
