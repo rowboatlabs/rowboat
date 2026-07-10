@@ -38,7 +38,7 @@ import { MarkdownPreOverride } from '@/components/ai-elements/markdown-code-over
 import { defaultRemarkPlugins } from 'streamdown'
 import remarkBreaks from 'remark-breaks'
 import { type ChatTab } from '@/components/tab-bar'
-import { ChatInputWithMentions, type CallPreset, type PermissionMode, type StagedAttachment, type SelectedModel } from '@/components/chat-input-with-mentions'
+import { ChatInputWithMentions, type CallPreset, type PermissionMode, type StagedAttachment, type SelectedModel, type ReasoningEffortLevel } from '@/components/chat-input-with-mentions'
 import { ChatMessageAttachments } from '@/components/chat-message-attachments'
 import { useSidebar } from '@/components/ui/sidebar'
 import { wikiLabel } from '@/lib/wiki-links'
@@ -63,6 +63,7 @@ import {
   normalizeToolInput,
   normalizeToolOutput,
   parseAttachedFiles,
+  REASONING_EFFORT_LABELS,
   toToolState,
 } from '@/lib/chat-conversation'
 import { matchBillingError } from '@/lib/billing-error'
@@ -162,6 +163,7 @@ interface ChatSidebarProps {
   getInitialDraft?: (tabId: string) => string | undefined
   onDraftChangeForTab?: (tabId: string, text: string) => void
   onSelectedModelChangeForTab?: (tabId: string, model: SelectedModel | null) => void
+  onReasoningEffortChangeForTab?: (tabId: string, effort: ReasoningEffortLevel | null) => void
   workDirByTab?: Record<string, string | null>
   /** Composer locks for runs bound to Code-section sessions (cwd + agent frozen). */
   codeSessionLocks?: Record<string, { cwd: string; agent: 'claude' | 'codex' }>
@@ -233,6 +235,7 @@ export function ChatSidebar({
   getInitialDraft,
   onDraftChangeForTab,
   onSelectedModelChangeForTab,
+  onReasoningEffortChangeForTab,
   workDirByTab = {},
   codeSessionLocks = {},
   pinnedToCodeSession = null,
@@ -524,13 +527,18 @@ export function ChatSidebar({
 
     if (isTurnUsageMessage(item)) {
       return (
-        <div key={item.id} className="-mt-6 flex justify-start px-1" data-message-id={item.id}>
+        <div key={item.id} className="-mt-6 flex items-center justify-start gap-1 px-1" data-message-id={item.id}>
           <TokenUsageMenu
             usage={item.usage}
             scope="turn"
             modelCallCount={item.modelCallCount}
             align="start"
           />
+          {item.reasoningEffort && (
+            <span className="text-xs text-muted-foreground/70">
+              {REASONING_EFFORT_LABELS[item.reasoningEffort]}
+            </span>
+          )}
         </div>
       )
     }
@@ -840,6 +848,7 @@ export function ChatSidebar({
                           initialDraft={getInitialDraft?.(tab.id)}
                           onDraftChange={onDraftChangeForTab ? (text) => onDraftChangeForTab(tab.id, text) : undefined}
                           onSelectedModelChange={onSelectedModelChangeForTab ? (m) => onSelectedModelChangeForTab(tab.id, m) : undefined}
+                          onReasoningEffortChange={onReasoningEffortChangeForTab ? (effort) => onReasoningEffortChangeForTab(tab.id, effort) : undefined}
                           workDir={workDirByTab[tab.id] ?? null}
                           onWorkDirChange={onWorkDirChangeForTab ? (v) => onWorkDirChangeForTab(tab.id, v) : undefined}
                           codeSessionLock={tabState.runId ? codeSessionLocks[tabState.runId] ?? null : null}

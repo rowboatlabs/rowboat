@@ -119,6 +119,7 @@ import {
   normalizeToolInput,
   normalizeToolOutput,
   parseAttachedFiles,
+  REASONING_EFFORT_LABELS,
   toToolState,
 } from '@/lib/chat-conversation'
 import { COMPOSIO_DISPLAY_NAMES as composioDisplayNames } from '@x/shared/src/composio.js'
@@ -1430,6 +1431,9 @@ function App() {
   const chatViewStateByTabRef = useRef(chatViewStateByTab)
   const chatDraftsRef = useRef(new Map<string, string>())
   const selectedModelByTabRef = useRef(new Map<string, { provider: string; model: string }>())
+  // Reasoning effort is per-tab, next-turn intent like the model selection —
+  // but unlike model it is never frozen on a run; it applies turn by turn.
+  const reasoningEffortByTabRef = useRef(new Map<string, 'low' | 'medium' | 'high'>())
   // Work directory is per-chat. Keyed by tab id; null/absent means none set.
   const [workDirByTab, setWorkDirByTab] = useState<Record<string, string | null>>({})
   const workDirByTabRef = useRef(workDirByTab)
@@ -2972,6 +2976,7 @@ function App() {
       // Per-message turn config. Composition inputs land in the system prompt
       // via the agent resolver; keep them session-sticky where possible so the
       // provider prefix cache survives across turns.
+      const reasoningEffort = reasoningEffortByTabRef.current.get(submitTabId)
       const sendConfig = {
         agent: {
           agentId,
@@ -2989,6 +2994,7 @@ function App() {
           },
         },
         autoPermission: (permissionMode ?? 'manual') === 'auto',
+        ...(reasoningEffort ? { reasoningEffort } : {}),
       }
       const userMessageContextFor = (middlePane: Awaited<ReturnType<typeof buildMiddlePaneContext>>) => ({
         currentDateTime: new Date().toISOString(),
@@ -3336,6 +3342,7 @@ function App() {
     })
     chatDraftsRef.current.delete(tabId)
     selectedModelByTabRef.current.delete(tabId)
+    reasoningEffortByTabRef.current.delete(tabId)
     chatScrollTopByTabRef.current.delete(tabId)
     setWorkDirByTab((prev) => {
       if (!(tabId in prev)) return prev
@@ -6033,13 +6040,18 @@ function App() {
 
     if (isTurnUsageMessage(item)) {
       return (
-        <div key={item.id} className="-mt-6 flex justify-start px-1" data-message-id={item.id}>
+        <div key={item.id} className="-mt-6 flex items-center justify-start gap-1 px-1" data-message-id={item.id}>
           <TokenUsageMenu
             usage={item.usage}
             scope="turn"
             modelCallCount={item.modelCallCount}
             align="start"
           />
+          {item.reasoningEffort && (
+            <span className="text-xs text-muted-foreground/70">
+              {REASONING_EFFORT_LABELS[item.reasoningEffort]}
+            </span>
+          )}
         </div>
       )
     }
@@ -6901,6 +6913,13 @@ function App() {
                                 selectedModelByTabRef.current.delete(tab.id)
                               }
                             }}
+                            onReasoningEffortChange={(effort) => {
+                              if (effort) {
+                                reasoningEffortByTabRef.current.set(tab.id, effort)
+                              } else {
+                                reasoningEffortByTabRef.current.delete(tab.id)
+                              }
+                            }}
                             workDir={workDirByTab[tab.id] ?? null}
                             onWorkDirChange={(v) => setTabWorkDir(tab.id, v)}
                             isRecording={isActive && isRecording}
@@ -6988,6 +7007,13 @@ function App() {
                     selectedModelByTabRef.current.set(tabId, m)
                   } else {
                     selectedModelByTabRef.current.delete(tabId)
+                  }
+                }}
+                onReasoningEffortChangeForTab={(tabId, effort) => {
+                  if (effort) {
+                    reasoningEffortByTabRef.current.set(tabId, effort)
+                  } else {
+                    reasoningEffortByTabRef.current.delete(tabId)
                   }
                 }}
                 workDirByTab={workDirByTab}
