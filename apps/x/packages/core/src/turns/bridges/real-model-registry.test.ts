@@ -243,6 +243,70 @@ describe("RealModelRegistry", () => {
         ]);
     });
 
+    it("attaches finish-step metadata as message-level providerOptions (OpenRouter signed reasoning)", async () => {
+        // OpenRouter streams per-delta reasoning_details FRAGMENTS on
+        // reasoning events, but puts the fully accumulated, signed array on
+        // the finish event's providerMetadata — and its read-back gives
+        // message-level reasoning_details precedence over per-part ones.
+        // The message-level attachment is what round-trips thinking
+        // signatures through tool loops (Bedrock rejects unsigned blocks).
+        const signedDetails = [
+            {
+                type: "reasoning.text",
+                text: "full thought",
+                format: "anthropic-claude-v1",
+                index: 0,
+                signature: "sig-full",
+            },
+        ];
+        const registry = makeRegistry(
+            [
+                { type: "reasoning-start" },
+                {
+                    type: "reasoning-delta",
+                    text: "full ",
+                    providerMetadata: { openrouter: { reasoning_details: [{ type: "reasoning.text", text: "full " }] } },
+                },
+                {
+                    type: "reasoning-delta",
+                    text: "thought",
+                    providerMetadata: { openrouter: { reasoning_details: [{ type: "reasoning.text", text: "thought" }] } },
+                },
+                { type: "reasoning-end" },
+                { type: "tool-call", toolCallId: "tc1", toolName: "echo", input: {} },
+                {
+                    type: "finish-step",
+                    finishReason: "tool-calls",
+                    usage: {},
+                    providerMetadata: { openrouter: { reasoning_details: signedDetails, usage: { cost: 1 } } },
+                },
+            ],
+            [],
+        );
+        const events = await collect(registry, request());
+        const completed = events[events.length - 1];
+        expect(
+            completed.type === "completed" ? completed.message.providerOptions : undefined,
+        ).toEqual({
+            openrouter: { reasoning_details: signedDetails, usage: { cost: 1 } },
+        });
+    });
+
+    it("echoes message-level providerOptions through encodeMessages", async () => {
+        const registry = makeRegistry([], []);
+        const model = await registry.resolve({ provider: "openai", model: "gpt-test" });
+        const encoded = model.encodeMessages([
+            {
+                role: "assistant",
+                content: [{ type: "text", text: "done" }],
+                providerOptions: { openrouter: { reasoning_details: [{ type: "reasoning.text", text: "t", signature: "s" }] } },
+            },
+        ] as never) as Array<{ role: string; providerOptions?: unknown }>;
+        expect(encoded[0].providerOptions).toEqual({
+            openrouter: { reasoning_details: [{ type: "reasoning.text", text: "t", signature: "s" }] },
+        });
+    });
+
     it("drops empty blocks that carry no metadata", async () => {
         const registry = makeRegistry(
             [

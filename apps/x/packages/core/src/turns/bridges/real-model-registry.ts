@@ -184,6 +184,12 @@ export class RealModelRegistry implements IModelRegistry {
         let finishReason = "unknown";
         let usage: z.infer<typeof TurnUsage> = {};
         let providerMetadata: JsonValue | undefined;
+        // finish-step metadata also rides the assistant message as
+        // message-level providerOptions: providers put whole-response
+        // round-trip state there (OpenRouter's accumulated reasoning_details
+        // with thinking signatures — message-level wins over per-part
+        // fragments on read-back), and convertFromMessages echoes it.
+        let messageProviderOptions: PartProviderOptions | undefined;
 
         const tagPart = (
             part: TextContentPart | ReasoningContentPart,
@@ -302,6 +308,10 @@ export class RealModelRegistry implements IModelRegistry {
                     finishReason = event.finishReason ?? "unknown";
                     usage = mapUsage(event.usage);
                     providerMetadata = toJsonValue(event.providerMetadata);
+                    messageProviderOptions = mergeProviderOptions(
+                        messageProviderOptions,
+                        event.providerMetadata,
+                    );
                     yield {
                         type: "step_event",
                         event: {
@@ -339,6 +349,9 @@ export class RealModelRegistry implements IModelRegistry {
             message: {
                 role: "assistant",
                 content: content.length > 0 ? content : "",
+                ...(messageProviderOptions === undefined
+                    ? {}
+                    : { providerOptions: messageProviderOptions }),
             },
             finishReason,
             usage,

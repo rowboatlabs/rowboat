@@ -1299,7 +1299,22 @@ function parseToolAdditions(
 }
 
 function errorMessage(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
+    const message = error instanceof Error ? error.message : String(error);
+    // Provider API errors carry the actual upstream failure in responseBody
+    // (AI SDK APICallError; RetryError wraps the last one as lastError).
+    // "Failed after 3 attempts" alone is undebuggable — persist the payload,
+    // bounded so request events stay reference-sized.
+    const source = (error as { lastError?: unknown }).lastError ?? error;
+    const statusCode = (source as { statusCode?: unknown }).statusCode;
+    const responseBody = (source as { responseBody?: unknown }).responseBody;
+    const details: string[] = [];
+    if (typeof statusCode === "number") {
+        details.push(`status ${statusCode}`);
+    }
+    if (typeof responseBody === "string" && responseBody.trim().length > 0) {
+        details.push(responseBody.slice(0, 2000));
+    }
+    return details.length > 0 ? `${message} [${details.join(" — ")}]` : message;
 }
 
 function outcomeFromTerminal(state: TurnState): TurnOutcome {
