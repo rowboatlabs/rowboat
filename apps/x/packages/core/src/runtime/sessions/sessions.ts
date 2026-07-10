@@ -21,12 +21,13 @@ import {
 } from "@x/shared/dist/turns.js";
 import type { IMonotonicallyIncreasingIdGenerator } from "../../application/lib/id-gen.js";
 import { chatActivity } from "../../application/lib/chat-activity.js";
-import type {
-    ITurnRuntime,
-    Turn,
-    TurnExecution,
-    TurnExternalInput,
-    TurnOutcome,
+import {
+    type ITurnRuntime,
+    type Turn,
+    type TurnExecution,
+    type TurnExternalInput,
+    TurnInputError,
+    type TurnOutcome,
 } from "../turns/api.js";
 // traits.js, not registry.js: the registry's builders transitively reach
 // di/container, which imports this module — a cycle. The traits leaf exists
@@ -50,6 +51,12 @@ export interface SessionsDependencies {
     sessionBus: ISessionBus;
 }
 
+interface ActiveAdvance {
+    sessionId: string | null;
+    controller: AbortController;
+    execution: TurnExecution;
+}
+
 // The session layer per session-design.md: owns conversations as ordered
 // chains of turn references, enforces one active turn per session, assembles
 // context as a reference to the previous turn, and maintains the in-memory
@@ -64,10 +71,10 @@ export class SessionsImpl implements ISessions {
 
     private readonly index = new SessionIndex();
     // Ephemeral: executions this process started, for stopTurn's abort path.
-    private readonly active = new Map<
-        string,
-        { sessionId: string | null; controller: AbortController; execution: TurnExecution }
-    >();
+    // A turn can legally have more than one live advance at once — a running
+    // invocation plus external-input invocations queued on the turn lock —
+    // so entries accumulate per turn and each advance removes only its own.
+    private readonly active = new Map<string, Set<ActiveAdvance>>();
 
     constructor({
         sessionRepo,
@@ -270,15 +277,35 @@ export class SessionsImpl implements ISessions {
 
     async stopTurn(turnId: string, reason?: string): Promise<void> {
         const running = this.active.get(turnId);
-        if (running) {
-            running.controller.abort();
-            await running.execution.outcome.catch(() => undefined);
+        if (running && running.size > 0) {
+            // Abort every live advance for this turn: the running invocation
+            // cancels, and queued ones observe their aborted signal once the
+            // turn lock frees. Await them all so stop returns settled.
+            const advances = [...running];
+            for (const advance of advances) {
+                advance.controller.abort();
+            }
+            await Promise.all(
+                advances.map((a) => a.execution.outcome.catch(() => undefined)),
+            );
             return;
         }
-        await this.advanceWithInput(turnId, {
-            type: "cancel",
-            ...(reason === undefined ? {} : { reason }),
-        });
+        try {
+            await this.advanceWithInput(turnId, {
+                type: "cancel",
+                ...(reason === undefined ? {} : { reason }),
+            });
+        } catch (error) {
+            // A cancel input that loses the race with a concurrent settle is
+            // a successful stop: the turn is already terminal.
+            if (error instanceof TurnInputError) {
+                const turn = await this.turnRuntime.getTurn(turnId);
+                if (reduceTurn(turn.events).terminal) {
+                    return;
+                }
+            }
+            throw error;
+        }
     }
 
     // Recovery entry for idle (crash-interrupted) turns. Deliberately not run
@@ -372,7 +399,10 @@ export class SessionsImpl implements ISessions {
         if (sessionId !== null) {
             void execution.outcome.catch(() => undefined).finally(() => chatActivity.exit());
         }
-        this.active.set(turnId, { sessionId, controller, execution });
+        const advance: ActiveAdvance = { sessionId, controller, execution };
+        const live = this.active.get(turnId) ?? new Set<ActiveAdvance>();
+        live.add(advance);
+        this.active.set(turnId, live);
 
         void (async () => {
             try {
@@ -387,7 +417,18 @@ export class SessionsImpl implements ISessions {
         void execution.outcome
             .then((outcome) => this.onSettled(sessionId, turnId, outcome))
             .catch(() => undefined)
-            .finally(() => this.active.delete(turnId));
+            .finally(() => {
+                // Remove only this advance's entry; a sibling advance for the
+                // same turn may still be live and must stay stoppable.
+                const set = this.active.get(turnId);
+                if (!set) {
+                    return;
+                }
+                set.delete(advance);
+                if (set.size === 0) {
+                    this.active.delete(turnId);
+                }
+            });
 
         return execution;
     }
