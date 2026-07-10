@@ -163,6 +163,8 @@ describe("RealAgentResolver", () => {
                 searchEnabled: true,
                 codeMode: "claude",
                 codeCwd: null,
+                videoMode: false,
+                coachMode: false,
             }),
         );
     });

@@ -153,11 +153,11 @@ describe("RealToolRegistry", () => {
         const chunk = { type: "message", role: "agent", text: "hi" } as const;
         const resolution = {
             type: "permission",
-            ask: { toolCallId: "x", title: "write file", options: [] },
+            ask: { toolCallId: "x", title: "write file", isRead: false },
             decision: "allow_once",
             auto: false,
         } as const;
-        const ask = { toolCallId: "x", title: "write file", options: [] };
+        const ask = { toolCallId: "x", title: "write file", isRead: false };
         const { registry } = makeRegistry(async ({ ctx }) => {
             // Chatty stream events are ephemeral (CodeRunFeed) — NOT progress.
             await ctx.publish({

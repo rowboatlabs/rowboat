@@ -252,7 +252,7 @@ describe("HeadlessAgentRunner", () => {
         const { runner, resolve } = createRunner(runtime);
         await runner.start({ agentId: "worker", message: "go" });
         expect(resolve).not.toHaveBeenCalled();
-        expect(runtime.createInputs[0].agent.overrides).toBeUndefined();
+        expect(runtime.createInputs[0].agent).toEqual({ agentId: "worker" });
     });
 
     it("uses an injected default only for a partial model override", async () => {
@@ -264,8 +264,9 @@ describe("HeadlessAgentRunner", () => {
             model: "custom-model",
         });
         expect(resolve).toHaveBeenCalledOnce();
-        expect(runtime.createInputs[0].agent.overrides).toEqual({
-            model: { provider: "default-provider", model: "custom-model" },
+        expect(runtime.createInputs[0].agent).toEqual({
+            agentId: "worker",
+            overrides: { model: { provider: "default-provider", model: "custom-model" } },
         });
     });
 
