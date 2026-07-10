@@ -164,9 +164,17 @@ naturally complete independently. No behavior may rely on physical completion
 order.
 
 Durable appends are serialized through a single internal queue per invocation:
-the persist → reduce → stream ritual runs to completion for one batch of
+the reduce → persist → stream ritual runs to completion for one batch of
 events before the next begins, so file order, in-memory order, and stream
 order are identical by construction even while executions overlap.
+
+The reduce step comes first as a validation gate: the batch is reduced
+against the in-memory history before anything is written, so an illegal
+append (for example, a misbehaving tool reporting progress after its
+terminal result) rejects in memory for its caller only and never becomes
+durable. A persisted illegal event would make every future read of the
+file fail and, through context references (section 6.6), block the whole
+session chain behind it.
 
 ## 5. Storage design
 
@@ -1655,6 +1663,11 @@ but the first turn implementation does not enforce it.
 
 The reducer validates `context` structurally but treats it as opaque; it
 never resolves references (section 6.6).
+
+The runtime also uses the reducer as its append gate: every batch is
+reduced against the existing history before it is persisted (section 4.5),
+so a history that violates these invariants cannot become durable through
+the loop.
 
 ## 25. Historical and live UI behavior
 
