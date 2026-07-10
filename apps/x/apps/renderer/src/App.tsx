@@ -6040,7 +6040,7 @@ function App() {
 
     if (isTurnUsageMessage(item)) {
       return (
-        <div key={item.id} className="-mt-6 flex items-center justify-start gap-1 px-1" data-message-id={item.id}>
+        <div key={item.id} className="-mt-6 -ml-1 flex items-center justify-start gap-1" data-message-id={item.id}>
           <TokenUsageMenu
             usage={item.usage}
             scope="turn"
@@ -6530,6 +6530,11 @@ function App() {
                     currentRunId={runId}
                     processingRunIds={processingRunIds}
                     onSelectRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
+                    onRenameRun={(rid, title) => {
+                      void window.ipc.invoke('sessions:setTitle', { sessionId: rid, title })
+                        .then(() => setRuns((prev) => prev.map((r) => (r.id === rid ? { ...r, title } : r))))
+                        .catch((err) => console.error('Failed to rename chat:', err))
+                    }}
                     onDeleteRun={async (rid) => {
                       try {
                         await window.ipc.invoke('sessions:delete', { sessionId: rid })

@@ -578,7 +578,10 @@ export function SidebarContentPanel({
   })
   const toggleChatPin = useCallback((chatId: string) => {
     const isPinned = pinnedChatIds.includes(chatId)
-    if (!isPinned && pinnedChatIds.length >= MAX_PINNED_CHATS) {
+    // Count only pins that still resolve to a chat — deleted chats leave
+    // stale ids in localStorage and must not eat pin slots.
+    const activePinCount = pinnedChatIds.filter((id) => recentRuns.some((r) => r.id === id)).length
+    if (!isPinned && activePinCount >= MAX_PINNED_CHATS) {
       toast(`You can pin up to ${MAX_PINNED_CHATS} chats`, 'error')
       return
     }
@@ -587,7 +590,7 @@ export function SidebarContentPanel({
       window.localStorage.setItem(PINNED_CHATS_STORAGE_KEY, JSON.stringify(next))
     } catch { /* ignore */ }
     setPinnedChatIds(next)
-  }, [pinnedChatIds])
+  }, [pinnedChatIds, recentRuns])
 
   // Chats: pinned first, then the most recently modified, 10 rows total.
   const recentChats = React.useMemo(() => {
