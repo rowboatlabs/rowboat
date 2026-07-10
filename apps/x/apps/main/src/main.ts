@@ -36,7 +36,7 @@ import { init as initEventProcessor, registerConsumer } from "@x/core/dist/event
 import { liveNoteEventConsumer } from "@x/core/dist/knowledge/live-note/event-consumer.js";
 import { init as initBackgroundTaskScheduler } from "@x/core/dist/background-tasks/scheduler.js";
 import { backgroundTaskEventConsumer } from "@x/core/dist/background-tasks/event-consumer.js";
-import { startSkillsWatcher, stopSkillsWatcher } from "@x/core/dist/application/assistant/skills/watcher.js";
+import { startSkillsWatcher, stopSkillsWatcher } from "@x/core/dist/runtime/assembly/skills/watcher.js";
 import { init as initAppsServer, shutdown as shutdownAppsServer } from "@x/core/dist/apps/server.js";
 import { registerAppsHostApi } from "@x/core/dist/apps/host-api.js";
 import { setTokenCipher as setGithubTokenCipher } from "@x/core/dist/apps/github-auth.js";
@@ -52,7 +52,7 @@ import { execFileSync } from "node:child_process";
 import { init as initChromeSync } from "@x/core/dist/knowledge/chrome-extension/server/server.js";
 import container, { registerBrowserControlService, registerNotificationService } from "@x/core/dist/di/container.js";
 import type { CodeModeManager } from "@x/core/dist/code-mode/acp/manager.js";
-import type { ISessions } from "@x/core/dist/sessions/index.js";
+import type { ISessions } from "@x/core/dist/runtime/sessions/index.js";
 import { browserViewManager, BROWSER_PARTITION } from "./browser/view.js";
 import { setupBrowserEventForwarding } from "./browser/ipc.js";
 import { ElectronBrowserControlService } from "./browser/control-service.js";

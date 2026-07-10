@@ -5,7 +5,7 @@ import container from '../di/container.js';
 import type { CodeSessionService } from '../code-mode/sessions/service.js';
 import type { ICodeProjectsRepo } from '../code-mode/projects/repo.js';
 import * as gitService from '../code-mode/git/service.js';
-import { extractAgentResponse } from '../agents/utils.js';
+import { extractAgentResponse } from '../runtime/legacy/utils.js';
 import { withFileLock } from '../knowledge/file-lock.js';
 import { fetchTask, taskIndexPath } from './fileops.js';
 

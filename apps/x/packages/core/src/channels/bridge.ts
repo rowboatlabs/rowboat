@@ -1,10 +1,10 @@
 import type { SessionIndexEntry } from "@x/shared/dist/sessions.js";
 import { reduceTurn, type TurnStreamEvent } from "@x/shared/dist/turns.js";
-import { assistantText, lastAssistantText } from "../agents/headless.js";
-import { TurnInputError } from "../turns/api.js";
-import { ASK_HUMAN_TOOL } from "../turns/bridges/real-agent-resolver.js";
-import { TurnNotSettledError, type ISessions } from "../sessions/api.js";
-import type { ITurnEventBus } from "../turns/event-hub.js";
+import { assistantText, lastAssistantText } from "../runtime/assembly/headless.js";
+import { TurnInputError } from "../runtime/turns/api.js";
+import { ASK_HUMAN_TOOL } from "../runtime/turns/bridges/real-agent-resolver.js";
+import { TurnNotSettledError, type ISessions } from "../runtime/sessions/api.js";
+import type { ITurnEventBus } from "../runtime/turns/event-hub.js";
 
 // Transport-agnostic command layer: inbound texts from a messaging channel
 // are parsed into commands (list / resume / new / stop / status) or forwarded

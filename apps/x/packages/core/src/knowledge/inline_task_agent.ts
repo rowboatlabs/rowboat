@@ -1,4 +1,4 @@
-import { BuiltinTools } from '../application/lib/builtin-tools.js';
+import { BuiltinTools } from '../runtime/tools/catalog.js';
 
 export function getRaw(): string {
   // code_agent_run needs an interactive UI to answer its permission asks; exclude it

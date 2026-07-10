@@ -1,5 +1,5 @@
-import * as runsCore from '@x/core/dist/runs/runs.js';
-import { bus } from '@x/core/dist/runs/bus.js';
+import * as runsCore from '@x/core/dist/runtime/legacy/runs.js';
+import { bus } from '@x/core/dist/runtime/legacy/bus.js';
 
 async function main() {
     const { id } = await runsCore.createRun({

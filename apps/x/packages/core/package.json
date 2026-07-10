@@ -9,8 +9,8 @@
     "dev": "tsc -w -p tsconfig.build.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "inspect-turn": "node dist/turns/inspect-cli.js",
-    "inspect": "node dist/turns/inspect-cli.js"
+    "inspect-turn": "node dist/runtime/turns/inspect-cli.js",
+    "inspect": "node dist/runtime/turns/inspect-cli.js"
   },
   "dependencies": {
     "@agentclientprotocol/claude-agent-acp": "^0.55.0",

@@ -5,11 +5,11 @@ import { WorkDir } from '../../config/config.js';
 import type { CodeSession, CodeSessionMode } from '@x/shared/dist/code-sessions.js';
 import type { CodingAgent, ApprovalPolicy } from '@x/shared/dist/code-mode.js';
 import { RunEvent, MessageEvent } from '@x/shared/dist/runs.js';
-import type { IRunsRepo } from '../../runs/repo.js';
-import type { IRunsLock } from '../../runs/lock.js';
+import type { IRunsRepo } from '../../runtime/legacy/repo.js';
+import type { IRunsLock } from '../../runtime/legacy/lock.js';
 import type { IBus } from '../../application/lib/bus.js';
 import type { IMonotonicallyIncreasingIdGenerator } from '../../application/lib/id-gen.js';
-import type { IAbortRegistry } from '../../turns/abort-registry.js';
+import type { IAbortRegistry } from '../../runtime/turns/abort-registry.js';
 import type { CodeModeManager } from '../acp/manager.js';
 import type { CodePermissionRegistry } from '../acp/permission-registry.js';
 import type { ICodeSessionsRepo } from './repo.js';
@@ -114,7 +114,7 @@ export class CodeSessionService {
 
         // The session is a real run so Rowboat mode (agent runtime) works on it
         // directly and the existing runs plumbing (fetch/events/stop) applies.
-        const { createRun } = await import('../../runs/runs.js');
+        const { createRun } = await import('../../runtime/legacy/runs.js');
         const run = await createRun({
             agentId: 'copilot',
             useCase: 'code_session',
