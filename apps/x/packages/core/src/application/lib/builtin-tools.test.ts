@@ -150,3 +150,62 @@ describe("coalesceCodeRunEvents", () => {
         expect(coalesceCodeRunEvents([])).toEqual([]);
     });
 });
+
+
+// THE golden test for the tool-catalog split: catalog key order is the
+// order tools are declared to the model, i.e. provider-payload bytes inside
+// the cached prompt prefix. The split into domain modules must reproduce
+// the historical order verbatim — do not alphabetize, do not regroup.
+// (spawn-agent registers dynamically after the literal, hence last.)
+// An intentional addition belongs at the position its domain dictates and
+// updates this list in the same commit.
+const HISTORICAL_KEY_ORDER = [
+    "loadSkill",
+    "file-getRoot",
+    "file-exists",
+    "file-stat",
+    "file-list",
+    "file-readText",
+    "file-writeText",
+    "file-editText",
+    "file-mkdir",
+    "file-rename",
+    "file-copy",
+    "file-remove",
+    "file-glob",
+    "file-grep",
+    "parseFile",
+    "LLMParse",
+    "analyzeAgent",
+    "addMcpServer",
+    "listMcpServers",
+    "listMcpTools",
+    "executeMcpTool",
+    "executeCommand",
+    "code_agent_run",
+    "load-browser-skill",
+    "browser-control",
+    "app-navigation",
+    "web-search",
+    "save-to-memory",
+    "composio-list-toolkits",
+    "composio-search-tools",
+    "composio-execute-tool",
+    "composio-connect-toolkit",
+    "app-set-data",
+    "list-models",
+    "fetch-url",
+    "run-live-note-agent",
+    "create-background-task",
+    "patch-background-task",
+    "run-background-task-agent",
+    "launch-code-task",
+    "notify-user",
+    "spawn-agent",
+];
+
+describe("BuiltinTools catalog key order", () => {
+    it("preserves the historical key order byte-for-byte", () => {
+        expect(Object.keys(BuiltinTools)).toEqual(HISTORICAL_KEY_ORDER);
+    });
+});
