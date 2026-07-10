@@ -52,6 +52,17 @@ export const PermissionRequest = ({
         : JSON.stringify(toolCall.arguments))
     : null;
   const filePermission = permission?.kind === "file" ? permission : null;
+  const externalAction =
+    permission?.kind === "composio"
+      ? { label: "Composio action", detail: `${permission.toolSlug} (${permission.toolkitSlug})` }
+      : permission?.kind === "mcp"
+        ? {
+            label: "MCP tool",
+            detail: permission.serverName
+              ? `${permission.toolName} on ${permission.serverName}`
+              : permission.toolName,
+          }
+        : null;
 
   const isResponded = response !== null;
   const isApproved = response === 'approve';
@@ -137,6 +148,16 @@ export const PermissionRequest = ({
                     {filePermission.pathPrefix}
                   </pre>
                 </div>
+              </div>
+            )}
+            {showDetails && externalAction && (
+              <div className="rounded-md border bg-background/50 p-3 mt-3">
+                <p className="text-xs font-medium text-muted-foreground mb-1.5 uppercase tracking-wide">
+                  {externalAction.label}
+                </p>
+                <p className="text-xs font-mono font-medium text-foreground break-all">
+                  {externalAction.detail}
+                </p>
               </div>
             )}
             {showDetails && !command && !filePermission && toolCall.arguments && (

@@ -37,6 +37,7 @@ export { coalesceCodeRunEvents } from "./domains/code.js";
 // handler.
 export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
     loadSkill: {
+        permission: "none",
         description: "Load a Rowboat skill definition into context by fetching its guidance string",
         inputSchema: z.object({
             skillName: z.string().describe("Skill identifier or path (e.g., 'workflow-run-ops' or 'src/runtime/assembly/skills/workflow-run-ops/skill.ts')"),
@@ -95,6 +96,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
     ...notificationTools,
 
     [SPAWN_AGENT_TOOL_NAME]: {
+        permission: "none",
         description: SPAWN_AGENT_DESCRIPTION,
         inputSchema: SpawnAgentInput,
         // Legacy runs-runtime path only: the turn runtime intercepts

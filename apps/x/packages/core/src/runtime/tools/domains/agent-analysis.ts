@@ -10,6 +10,7 @@ import { BuiltinToolsSchema } from "../types.js";
 
 export const agentAnalysisTools: z.infer<typeof BuiltinToolsSchema> = {
     analyzeAgent: {
+        permission: "none",
         description: 'Read and analyze an agent file to understand its structure, tools, and configuration',
         inputSchema: z.object({
             agentName: z.string().describe('Name of the agent file to analyze (with or without .json extension)'),

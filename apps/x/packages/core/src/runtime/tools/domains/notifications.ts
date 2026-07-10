@@ -14,6 +14,7 @@ import { BuiltinToolsSchema } from "../types.js";
 
 export const notificationTools: z.infer<typeof BuiltinToolsSchema> = {
     'notify-user': {
+        permission: "none",
         description: "Show a native OS notification to the user. Clicking the notification opens the provided link in the default browser, or focuses the Rowboat app if no link is given.",
         inputSchema: z.object({
             title: z.string().min(1).max(120).optional().describe("Bold headline shown at the top of the notification. Defaults to 'Rowboat'."),

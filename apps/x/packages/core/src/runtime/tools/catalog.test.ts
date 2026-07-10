@@ -210,3 +210,35 @@ describe("BuiltinTools catalog key order", () => {
         expect(Object.keys(BuiltinTools)).toEqual(HISTORICAL_KEY_ORDER);
     });
 });
+
+describe("BuiltinTools permission audit", () => {
+    // Pins the set of gated builtins so policy changes are always intentional:
+    // adding a tool with anything other than "none" (or forgetting that a new
+    // side-effecting tool should be gated) must show up in this diff. The
+    // checker independently fails closed for undeclared tools.
+    it("gates exactly the audited set of builtins", () => {
+        const gated = Object.entries(BuiltinTools)
+            .filter(([, tool]) => tool.permission !== "none")
+            .map(([name, tool]) => [name, tool.permission]);
+        expect(Object.fromEntries(gated)).toEqual({
+            "file-readText": "file-boundary",
+            "file-writeText": "file-boundary",
+            "file-editText": "file-boundary",
+            "file-list": "file-boundary",
+            "file-glob": "file-boundary",
+            "file-grep": "file-boundary",
+            "file-exists": "file-boundary",
+            "file-stat": "file-boundary",
+            "file-copy": "file-boundary",
+            "file-rename": "file-boundary",
+            "file-remove": "file-boundary",
+            "file-mkdir": "file-boundary",
+            parseFile: "file-boundary",
+            LLMParse: "file-boundary",
+            executeCommand: "command-allowlist",
+            addMcpServer: "prompt",
+            executeMcpTool: "mcp-execute",
+            "composio-execute-tool": "composio-execute",
+        });
+    });
+});

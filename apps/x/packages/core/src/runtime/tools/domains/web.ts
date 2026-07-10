@@ -14,6 +14,7 @@ import { BuiltinToolsSchema } from "../types.js";
 
 export const webSearchTools: z.infer<typeof BuiltinToolsSchema> = {
     'web-search': {
+        permission: "none",
         description: 'Search the web for articles, blog posts, papers, companies, people, news, or explore a topic in depth. Returns rich results with full text, highlights, and metadata.',
         inputSchema: z.object({
             query: z.string().describe('The search query'),
@@ -140,6 +141,7 @@ export const webSearchTools: z.infer<typeof BuiltinToolsSchema> = {
 
 export const fetchUrlTools: z.infer<typeof BuiltinToolsSchema> = {
     'fetch-url': {
+        permission: "none",
         description: "Fetch an HTTP(S) URL and return the response body as text. Use this to pull data from web APIs or pages (e.g. a JSON endpoint) — especially in background tasks, which have no shell. GET by default; supports POST with a body. Returns { ok, status, statusText, body } (body truncated if very large). For JSON, parse the returned body.",
         inputSchema: z.object({
             url: z.string().describe('The http(s) URL to fetch.'),

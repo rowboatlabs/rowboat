@@ -44,6 +44,7 @@ const LLMPARSE_MIME_TYPES: Record<string, string> = {
 
 export const parsingTools: z.infer<typeof BuiltinToolsSchema> = {
     'parseFile': {
+        permission: "file-boundary",
         description: 'Parse and extract text content from files (PDF, Excel, CSV, Word .docx). Auto-detects format from file extension.',
         inputSchema: z.object({
             path: z.string().min(1).describe('File path to parse. Can be absolute, ~/..., or relative to the default root.'),
@@ -146,6 +147,7 @@ export const parsingTools: z.infer<typeof BuiltinToolsSchema> = {
     },
 
     'LLMParse': {
+        permission: "file-boundary",
         description: 'Send a file to the configured LLM as a multimodal attachment and ask it to extract content as markdown. Best for scanned PDFs, images with text, complex layouts, or any format where local parsing falls short. Supports documents (PDF, Word, Excel, PowerPoint, CSV, TXT, HTML) and images (PNG, JPG, GIF, WebP, SVG, BMP, TIFF).',
         inputSchema: z.object({
             path: z.string().min(1).describe('File path to parse. Can be absolute, ~/..., or relative to the default root.'),

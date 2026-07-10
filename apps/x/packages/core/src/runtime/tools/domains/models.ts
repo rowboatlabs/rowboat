@@ -11,6 +11,7 @@ import { BuiltinToolsSchema } from "../types.js";
 
 export const modelTools: z.infer<typeof BuiltinToolsSchema> = {
     'list-models': {
+        permission: "none",
         description: "List model IDs available for model overrides (e.g. to set a capable model on a background task). Signed-in users get the Rowboat gateway's allowed models; BYOK users get their configured model. Call this BEFORE setting a bg-task `model` so you pick a valid, allowed ID (arbitrary IDs are rejected). Returns { defaultModel, models }.",
         inputSchema: z.object({}),
         execute: async () => {

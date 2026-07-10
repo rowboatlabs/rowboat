@@ -11,6 +11,7 @@ import { BuiltinToolsSchema } from "../types.js";
 
 export const composioTools: z.infer<typeof BuiltinToolsSchema> = {
     'composio-list-toolkits': {
+        permission: "none",
         description: 'List available Composio integrations (Gmail, Slack, GitHub, etc.) and their connection status. Use this to show the user what services they can connect to.',
         inputSchema: z.object({
             category: z.enum(['all', 'communication', 'productivity', 'development', 'crm', 'social', 'storage', 'support', 'design', 'marketing', 'finance']).optional()
@@ -37,6 +38,7 @@ export const composioTools: z.infer<typeof BuiltinToolsSchema> = {
     },
 
     'composio-search-tools': {
+        permission: "none",
         description: 'Search for Composio tools by use case across connected services. Returns tool slugs, descriptions, and input schemas so you can call composio-execute-tool with the right parameters. Example: search "send email" to find Gmail tools, "create issue" to find GitHub/Jira tools.',
         inputSchema: z.object({
             query: z.string().describe('Natural language description of what you want to do (e.g., "send an email", "create a GitHub issue", "schedule a meeting")'),
@@ -79,6 +81,7 @@ export const composioTools: z.infer<typeof BuiltinToolsSchema> = {
     },
 
     'composio-execute-tool': {
+        permission: "composio-execute",
         description: 'Execute a Composio tool by its slug. You MUST pass the arguments field with all required parameters from the search results inputSchema. Example: composio-execute-tool({ toolSlug: "GITHUB_ISSUES_LIST_FOR_REPO", toolkitSlug: "github", arguments: { owner: "rowboatlabs", repo: "rowboat", state: "open", per_page: 100 } })',
         inputSchema: z.object({
             toolSlug: z.string().describe('EXACT tool slug from search results (e.g., "GITHUB_ISSUES_LIST_FOR_REPO"). Copy it exactly — do not modify it.'),
@@ -120,6 +123,7 @@ export const composioTools: z.infer<typeof BuiltinToolsSchema> = {
     },
 
     'composio-connect-toolkit': {
+        permission: "none",
         description: 'Connect a Composio service (Gmail, Slack, GitHub, etc.) via OAuth. Shows a connect card for the user to authenticate.',
         inputSchema: z.object({
             toolkitSlug: z.string().describe('The toolkit slug to connect (e.g., "gmail", "github", "slack", "notion")'),
