@@ -943,6 +943,24 @@ describe("active-skill carry-forward", () => {
         });
     });
 
+    it("does not inject activeSkills for agents without the skillCarryForward trait", async () => {
+        // The resolver would ignore them anyway (real-agent-resolver gates on
+        // the same trait); this pins that sessions doesn't persist an
+        // ever-growing list into the requested composition either.
+        const { sessions, fake } = makeSessions();
+        const sessionId = await sessions.createSession();
+        const { turnId } = await sessions.sendMessage(sessionId, user("one"), {
+            agent: { agentId: "my-user-agent" },
+        });
+        await flush();
+        fake.setLog(turnId, skillLoadLog(turnId, sessionId, { agentId: "my-user-agent" }));
+
+        await sessions.sendMessage(sessionId, user("two"), {
+            agent: { agentId: "my-user-agent" },
+        });
+        expect(fake.createTurnInputs[1].agent).toEqual({ agentId: "my-user-agent" });
+    });
+
     it("accumulates across turns and unions with caller-supplied skills, preserving order", async () => {
         const { sessions, fake } = makeSessions();
         const sessionId = await sessions.createSession();
