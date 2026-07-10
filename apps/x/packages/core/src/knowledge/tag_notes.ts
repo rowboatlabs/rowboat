@@ -3,7 +3,7 @@ import path from 'path';
 import { WorkDir } from '../config/config.js';
 import { runWhenPossible, toolInputPaths } from '../runtime/assembly/headless-app.js';
 import { getKgModel } from '../models/defaults.js';
-import { getErrorDetails } from '../runtime/legacy/utils.js';
+import { getErrorDetails } from '../application/lib/errors.js';
 import { serviceLogger } from '../services/service_logger.js';
 import { limitEventItems } from './limit_event_items.js';
 import {

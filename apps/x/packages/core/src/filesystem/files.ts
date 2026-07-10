@@ -68,7 +68,11 @@ const MAX_BYTES_LABEL = `${MAX_BYTES / 1024} KB`;
 let knowledgeCommitTimer: ReturnType<typeof setTimeout> | null = null;
 let canonicalWorkspaceRoot: string | null = null;
 
-function isPathInside(parent: string, child: string): boolean {
+// Exported as the one live containment check: permission decisions
+// (assembly/permission-metadata) key on it, so a divergent copy is a
+// permission-bypass risk, not a style issue. (legacy/repo.ts keeps its own
+// frozen copy — the quarantine must not import live modules.)
+export function isPathInside(parent: string, child: string): boolean {
   const relative = path.relative(parent, child);
   return relative === '' || (!!relative && !relative.startsWith('..') && !path.isAbsolute(relative));
 }

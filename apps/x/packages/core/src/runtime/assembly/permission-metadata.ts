@@ -11,14 +11,9 @@ import { z } from "zod";
 import { ToolPermissionMetadata } from "@x/shared/dist/runs.js";
 import { isBlocked, extractCommandNames } from "../../application/lib/command-executor.js";
 import { getFileAccessAllowList, type FileAccessGrant, type FileAccessOperation } from "../../config/security.js";
-import { resolveFilePathForPermission } from "../../filesystem/files.js";
+import { isPathInside, resolveFilePathForPermission } from "../../filesystem/files.js";
 
 type ToolPermissionMetadataValue = z.infer<typeof ToolPermissionMetadata>;
-
-function isPathInside(parent: string, child: string): boolean {
-    const relative = path.relative(parent, child);
-    return relative === '' || (!!relative && !relative.startsWith('..') && !path.isAbsolute(relative));
-}
 
 function fileGrantCoversPath(grant: FileAccessGrant, operation: FileAccessOperation, resolvedPath: string): boolean {
     return grant.operation === operation && isPathInside(path.resolve(grant.pathPrefix), path.resolve(resolvedPath));

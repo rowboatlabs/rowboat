@@ -4,7 +4,7 @@ import { google } from 'googleapis';
 import { WorkDir } from '../config/config.js';
 import { runWhenPossible } from '../runtime/assembly/headless-app.js';
 import { getKgModel } from '../models/defaults.js';
-import { getErrorDetails } from '../runtime/legacy/utils.js';
+import { getErrorDetails } from '../application/lib/errors.js';
 import { serviceLogger } from '../services/service_logger.js';
 import { loadUserConfig, updateUserEmail } from '../config/user_config.js';
 import { GoogleClientFactory } from './google-client-factory.js';
