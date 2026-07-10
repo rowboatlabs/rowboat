@@ -1920,7 +1920,10 @@ export function setupIpcHandlers() {
     },
     // Search handler
     'search:query': async (_event, args) => {
-      return search(args.query, args.limit, args.types);
+      await sessionsIndexReady;
+      const sessions = container.resolve<ISessions>('sessions').listSessions()
+        .map((s) => ({ sessionId: s.sessionId, title: s.title }));
+      return search(args.query, args.limit, args.types, sessions);
     },
     // Inline task schedule classification
     'export:note': async (event, args) => {

@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react"
 import { Coffee } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 
 /**
@@ -30,6 +29,10 @@ export function CaffeinateIndicator() {
     }
   }, [])
 
+  // Render nothing while off — an invisible placeholder would leave a
+  // permanent 32px hole between the header controls.
+  if (!enabled) return null
+
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -40,22 +43,15 @@ export function CaffeinateIndicator() {
               toast.error("Failed to turn off Caffeinate")
             })
           }}
-          disabled={!enabled}
-          aria-hidden={!enabled}
           aria-label="Caffeinate is on — click to turn off"
-          className={cn(
-            "titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-amber-500 transition-colors self-center shrink-0",
-            enabled ? "hover:bg-accent hover:text-amber-600" : "invisible pointer-events-none",
-          )}
+          className="titlebar-no-drag flex h-8 w-8 items-center justify-center rounded-md text-amber-500 transition-colors self-center shrink-0 hover:bg-accent hover:text-amber-600"
         >
           <Coffee className="size-4" />
         </button>
       </TooltipTrigger>
-      {enabled && (
-        <TooltipContent side="bottom">
-          Caffeinate is on — your Mac won't sleep. Click to turn off.
-        </TooltipContent>
-      )}
+      <TooltipContent side="bottom">
+        Caffeinate is on — your Mac won't sleep. Click to turn off.
+      </TooltipContent>
     </Tooltip>
   )
 }

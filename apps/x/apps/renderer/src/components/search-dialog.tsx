@@ -6,7 +6,6 @@ import {
   CommandDialog,
   CommandInput,
   CommandList,
-  CommandEmpty,
   CommandGroup,
   CommandItem,
 } from '@/components/ui/command'
@@ -134,6 +133,10 @@ export function CommandPalette({
   const knowledgeResults = results.filter(r => r.type === 'knowledge')
   const chatResults = results.filter(r => r.type === 'chat')
 
+  const scope: SearchType = activeTypes.has('knowledge') ? 'knowledge' : 'chat'
+  const otherScope: SearchType = scope === 'knowledge' ? 'chat' : 'knowledge'
+  const scopeLabel = scope === 'knowledge' ? 'knowledge' : 'chats'
+
   return (
     <CommandDialog
       open={open}
@@ -145,30 +148,54 @@ export function CommandPalette({
     >
       <CommandInput
         ref={searchInputRef}
-        placeholder="Search..."
+        placeholder={scope === 'knowledge' ? 'Search notes and files…' : 'Search chats…'}
         value={query}
         onValueChange={setQuery}
+        onKeyDown={(e) => {
+          if (e.key === 'Tab') {
+            e.preventDefault()
+            toggleType(otherScope)
+          }
+        }}
       />
-      <div className="flex items-center gap-1.5 px-3 py-2 border-b">
-        <FilterToggle
-          active={activeTypes.has('knowledge')}
-          onClick={() => toggleType('knowledge')}
-          icon={<FileTextIcon className="size-3" />}
-          label="Knowledge"
-        />
-        <FilterToggle
-          active={activeTypes.has('chat')}
-          onClick={() => toggleType('chat')}
-          icon={<MessageSquareIcon className="size-3" />}
-          label="Chats"
-        />
+      <div className="flex items-center px-3 py-2">
+        <div className="inline-flex items-center rounded-lg bg-muted/60 p-0.5">
+          <FilterToggle
+            active={scope === 'knowledge'}
+            onClick={() => toggleType('knowledge')}
+            icon={<FileTextIcon className="size-3" />}
+            label="Knowledge"
+          />
+          <FilterToggle
+            active={scope === 'chat'}
+            onClick={() => toggleType('chat')}
+            icon={<MessageSquareIcon className="size-3" />}
+            label="Chats"
+          />
+        </div>
       </div>
       <CommandList>
         {!query.trim() && (
-          <CommandEmpty>Type to search...</CommandEmpty>
+          <div className="px-6 py-10 text-center">
+            <p className="text-sm text-muted-foreground">
+              {scope === 'knowledge' ? 'Search your notes and files' : 'Search your chat history'}
+            </p>
+          </div>
+        )}
+        {query.trim() && isSearching && results.length === 0 && (
+          <div className="px-6 py-10 text-center text-sm text-muted-foreground">Searching…</div>
         )}
         {query.trim() && !isSearching && results.length === 0 && (
-          <CommandEmpty>No results found.</CommandEmpty>
+          <div className="px-6 py-10 text-center">
+            <p className="text-sm text-muted-foreground">No matches in {scopeLabel}.</p>
+            <button
+              type="button"
+              onClick={() => toggleType(otherScope)}
+              className="mt-1.5 text-xs text-primary hover:underline"
+            >
+              Search {otherScope === 'knowledge' ? 'knowledge' : 'chats'} instead
+            </button>
+          </div>
         )}
         {knowledgeResults.length > 0 && (
           <CommandGroup heading="Knowledge">
@@ -205,7 +232,21 @@ export function CommandPalette({
           </CommandGroup>
         )}
       </CommandList>
+      <div className="flex items-center gap-3 border-t border-border px-3 py-2 text-[11px] text-muted-foreground">
+        <span className="flex items-center gap-1"><Kbd>↑↓</Kbd> Navigate</span>
+        <span className="flex items-center gap-1"><Kbd>↵</Kbd> Open</span>
+        <span className="flex items-center gap-1"><Kbd>Tab</Kbd> Switch scope</span>
+        <span className="ml-auto flex items-center gap-1"><Kbd>esc</Kbd> Close</span>
+      </div>
     </CommandDialog>
+  )
+}
+
+function Kbd({ children }: { children: React.ReactNode }) {
+  return (
+    <kbd className="rounded border border-border bg-muted px-1 py-px font-mono text-[10px] text-muted-foreground">
+      {children}
+    </kbd>
   )
 }
 
@@ -224,10 +265,10 @@ function FilterToggle({
     <button
       onClick={onClick}
       className={cn(
-        'inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors',
+        'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
         active
-          ? 'bg-accent text-accent-foreground'
-          : 'text-muted-foreground hover:text-foreground hover:bg-accent/50',
+          ? 'bg-background text-foreground shadow-sm'
+          : 'text-muted-foreground hover:text-foreground',
       )}
     >
       {icon}

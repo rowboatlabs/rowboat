@@ -13,15 +13,31 @@ interface SearchResult {
 }
 
 const KNOWLEDGE_DIR = path.join(WorkDir, 'knowledge');
-const RUNS_DIR = path.join(WorkDir, 'runs');
+// Chats live in the turn-runtime session store: session event logs carry the
+// titles, turn logs carry the message content. (The legacy `runs/` dir holds
+// pre-migration chats the app can no longer open, so search skips it.)
+const TURNS_DIR = path.join(WorkDir, 'storage', 'turns');
 
 type SearchType = 'knowledge' | 'chat';
+
+/** Minimal session metadata the caller passes in (from the sessions index). */
+export type ChatSessionMeta = {
+  sessionId: string;
+  title?: string;
+};
 
 /**
  * Search across knowledge files and chat history.
  * @param types - optional filter to search only specific types (default: both)
+ * @param chatSessions - session index entries used for chat title search and
+ *   for mapping content matches back to a titled, openable session.
  */
-export async function search(query: string, limit = 20, types?: SearchType[]): Promise<{ results: SearchResult[] }> {
+export async function search(
+  query: string,
+  limit = 20,
+  types?: SearchType[],
+  chatSessions: ChatSessionMeta[] = [],
+): Promise<{ results: SearchResult[] }> {
   const trimmed = query.trim();
   if (!trimmed) {
     return { results: [] };
@@ -32,7 +48,7 @@ export async function search(query: string, limit = 20, types?: SearchType[]): P
 
   const [knowledgeResults, chatResults] = await Promise.all([
     searchKnowledgeEnabled ? searchKnowledge(trimmed, limit) : Promise.resolve([]),
-    searchChatsEnabled ? searchChats(trimmed, limit) : Promise.resolve([]),
+    searchChatsEnabled ? searchChats(trimmed, limit, chatSessions) : Promise.resolve([]),
   ]);
 
   const results = [...knowledgeResults, ...chatResults].slice(0, limit);
@@ -100,86 +116,51 @@ async function searchKnowledge(query: string, limit: number): Promise<SearchResu
 }
 
 /**
- * Search chat history by title and message content.
+ * Search chat history: titles come from the sessions index the caller passes
+ * in; message content is grepped from the turn logs, with each matching turn
+ * file mapped back to its session via the turn_created event's sessionId.
  */
-async function searchChats(query: string, limit: number): Promise<SearchResult[]> {
-  if (!fs.existsSync(RUNS_DIR)) {
-    return [];
-  }
-
+async function searchChats(query: string, limit: number, sessions: ChatSessionMeta[]): Promise<SearchResult[]> {
   const results: SearchResult[] = [];
   const seenIds = new Set<string>();
   const lowerQuery = query.toLowerCase();
+  const titleBySession = new Map(sessions.map((s) => [s.sessionId, s.title]));
 
-  // Content search via grep on JSONL files
-  try {
-    const grepMatches = await grepFiles(query, RUNS_DIR, '*.jsonl');
-    for (const match of grepMatches) {
-      if (results.length >= limit) break;
-      const runId = path.basename(match.file, '.jsonl');
-      if (seenIds.has(runId)) continue;
-
-      const meta = await readRunMetadata(match.file);
-      if (meta.agentName !== 'copilot') {
-        seenIds.add(runId);
-        continue;
-      }
-      seenIds.add(runId);
-
-      // Extract a content preview from the matching line
-      let preview = '';
-      try {
-        const parsed = JSON.parse(match.line);
-        if (parsed.message?.content && typeof parsed.message.content === 'string') {
-          preview = parsed.message.content.replace(/<attached-files>[\s\S]*?<\/attached-files>/g, '').trim().substring(0, 150);
-        }
-      } catch {
-        preview = match.line.substring(0, 150);
-      }
-
-      results.push({
-        type: 'chat',
-        title: meta.title || runId,
-        preview,
-        path: runId,
-      });
-    }
-  } catch {
-    // grep failed — continue
+  // Title search — the index is already newest-first.
+  for (const session of sessions) {
+    if (results.length >= limit) break;
+    if (!session.title || !session.title.toLowerCase().includes(lowerQuery)) continue;
+    seenIds.add(session.sessionId);
+    results.push({
+      type: 'chat',
+      title: session.title,
+      preview: session.title,
+      path: session.sessionId,
+    });
   }
 
-  // Title search — scan run files for matching titles
-  try {
-    const entries = await fsp.readdir(RUNS_DIR, { withFileTypes: true });
-    const jsonlFiles = entries
-      .filter(e => e.isFile() && e.name.endsWith('.jsonl'))
-      .map(e => e.name)
-      .sort()
-      .reverse(); // newest first
-
-    for (const name of jsonlFiles) {
-      if (results.length >= limit) break;
-      const runId = path.basename(name, '.jsonl');
-      if (seenIds.has(runId)) continue;
-
-      const filePath = path.join(RUNS_DIR, name);
-      const meta = await readRunMetadata(filePath);
-      if (meta.agentName !== 'copilot') {
-        seenIds.add(runId);
-        continue;
-      }
-      if (meta.title && meta.title.toLowerCase().includes(lowerQuery)) {
-        seenIds.add(runId);
+  // Content search via grep on the turn logs.
+  if (fs.existsSync(TURNS_DIR)) {
+    try {
+      const grepMatches = await grepFiles(query, TURNS_DIR, '*.jsonl');
+      for (const match of grepMatches) {
+        if (results.length >= limit) break;
+        const sessionId = await readTurnSessionId(match.file);
+        // Sessionless turns (background tasks etc.) aren't openable chats.
+        if (!sessionId || seenIds.has(sessionId)) continue;
+        // Only surface sessions the app can actually open.
+        if (!titleBySession.has(sessionId)) continue;
+        seenIds.add(sessionId);
         results.push({
           type: 'chat',
-          title: meta.title,
-          preview: meta.title,
-          path: runId,
+          title: titleBySession.get(sessionId) || sessionId,
+          preview: extractPreview(match.line, lowerQuery),
+          path: sessionId,
         });
       }
+    } catch {
+      // grep failed — continue with title matches only
     }
-  } catch {
-    // ignore errors
   }
 
   return results;
@@ -245,18 +226,14 @@ function getFirstMatchingLine(filePath: string, query: string): Promise<string> 
   });
 }
 
-interface RunMetadata {
-  title: string | undefined;
-  agentName: string | undefined;
-}
-
 /**
- * Read metadata from a run JSONL file (agent name from start event, title from first user message).
+ * Read the sessionId from a turn log's first line (the turn_created event).
+ * Returns null for sessionless turns (background tasks, live notes, etc.).
  */
-function readRunMetadata(filePath: string): Promise<RunMetadata> {
+function readTurnSessionId(filePath: string): Promise<string | null> {
   return new Promise((resolve) => {
     let resolved = false;
-    const done = (value: RunMetadata) => {
+    const done = (value: string | null) => {
       if (resolved) return;
       resolved = true;
       resolve(value);
@@ -264,62 +241,48 @@ function readRunMetadata(filePath: string): Promise<RunMetadata> {
 
     const stream = fs.createReadStream(filePath, { encoding: 'utf8' });
     const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
-    let lineIndex = 0;
-    let agentName: string | undefined;
 
     rl.on('line', (line) => {
-      if (resolved) return;
-      const trimmed = line.trim();
-      if (!trimmed) return;
-
       try {
-        if (lineIndex === 0) {
-          // Start event — extract agentName
-          const start = JSON.parse(trimmed);
-          agentName = start.agentName;
-          lineIndex++;
-          return;
-        }
-
-        const event = JSON.parse(trimmed);
-        if (event.type === 'message') {
-          const msg = event.message;
-          if (msg?.role === 'user') {
-            const content = msg.content;
-            if (typeof content === 'string' && content.trim()) {
-              let cleaned = content.replace(/<attached-files>[\s\S]*?<\/attached-files>/g, '');
-              cleaned = cleaned.replace(/\s+/g, ' ').trim();
-              if (cleaned) {
-                done({ title: cleaned.length > 100 ? cleaned.substring(0, 100) : cleaned, agentName });
-                rl.close();
-                stream.destroy();
-                return;
-              }
-            }
-            done({ title: undefined, agentName });
-            rl.close();
-            stream.destroy();
-            return;
-          } else if (msg?.role === 'assistant') {
-            done({ title: undefined, agentName });
-            rl.close();
-            stream.destroy();
-            return;
-          }
-        }
-        lineIndex++;
+        const parsed = JSON.parse(line);
+        done(typeof parsed.sessionId === 'string' && parsed.sessionId ? parsed.sessionId : null);
       } catch {
-        lineIndex++;
+        done(null);
       }
+      rl.close();
+      stream.destroy();
     });
 
-    rl.on('close', () => done({ title: undefined, agentName }));
-    rl.on('error', () => done({ title: undefined, agentName: undefined }));
-    stream.on('error', () => {
-      rl.close();
-      done({ title: undefined, agentName: undefined });
-    });
+    rl.on('close', () => done(null));
+    stream.on('error', () => done(null));
   });
+}
+
+/**
+ * Pull a human-readable preview out of a matched JSONL line: the first string
+ * value anywhere in the event that contains the query. Falls back to the raw
+ * line so a match is never silently dropped.
+ */
+function extractPreview(line: string, lowerQuery: string): string {
+  const clean = (s: string) =>
+    s.replace(/<attached-files>[\s\S]*?<\/attached-files>/g, '').replace(/\s+/g, ' ').trim().substring(0, 150);
+  try {
+    const parsed: unknown = JSON.parse(line);
+    let found = '';
+    const visit = (value: unknown): void => {
+      if (found) return;
+      if (typeof value === 'string') {
+        if (value.toLowerCase().includes(lowerQuery)) found = value;
+      } else if (value && typeof value === 'object') {
+        for (const v of Object.values(value)) visit(v);
+      }
+    };
+    visit(parsed);
+    if (found) return clean(found);
+  } catch {
+    // fall through to the raw line
+  }
+  return clean(line);
 }
 
 /**

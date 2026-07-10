@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ChevronRight,
   Copy,
@@ -366,36 +366,36 @@ export function WorkspaceView({ tree, initialPath, actions, onNavigate, onOpenNo
   return (
     <div className="flex h-full flex-col overflow-hidden bg-[#f8f8f9] dark:bg-[#0b0b0d]">
       <div className="mx-auto flex w-full max-w-[1120px] shrink-0 items-center justify-between gap-3 pl-[22px] pr-[30px] pt-[30px] pb-4">
-        <div className="flex min-w-0 items-center gap-1 text-sm">
+        <div className="flex min-w-0 items-end gap-1 text-sm">
           <button
             type="button"
             onClick={() => onNavigate(WORKSPACE_ROOT)}
             className={cn(
-              'inline-flex items-center rounded-md px-2 py-1 transition-colors',
+              'inline-flex rounded-md px-2 py-1 transition-colors',
               isRoot ? 'text-[#0d0e11] dark:text-[#f4f5f7]' : 'text-muted-foreground hover:text-foreground hover:bg-accent',
             )}
           >
-            <span className="text-[24px] font-[650] tracking-[-0.02em]">Workspace</span>
+            <span className="text-[24px] leading-none font-[650] tracking-[-0.02em]">Workspace</span>
           </button>
           {breadcrumbs.map((crumb, idx) => {
             const isLast = idx === breadcrumbs.length - 1
             return (
-              <span key={crumb.path} className="flex items-center gap-1">
-                <ChevronRight className="size-4 text-muted-foreground/60" />
+              <Fragment key={crumb.path}>
+                <ChevronRight className="mb-[5px] size-4 shrink-0 text-muted-foreground/60" />
                 {isLast ? (
-                  <span className="rounded-md px-2 py-1 font-medium text-foreground truncate">
+                  <span className="mb-[2px] rounded-md px-2 py-1 leading-none font-medium text-foreground truncate">
                     {crumb.name}
                   </span>
                 ) : (
                   <button
                     type="button"
                     onClick={() => onNavigate(crumb.path)}
-                    className="rounded-md px-2 py-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground truncate"
+                    className="mb-[2px] rounded-md px-2 py-1 leading-none text-muted-foreground transition-colors hover:bg-accent hover:text-foreground truncate"
                   >
                     {crumb.name}
                   </button>
                 )}
-              </span>
+              </Fragment>
             )
           })}
         </div>

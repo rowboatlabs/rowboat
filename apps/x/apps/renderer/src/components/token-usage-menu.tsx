@@ -14,6 +14,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import type { TokenUsage } from '@/lib/chat-conversation'
 import { formatTokenCount, totalTokensOf } from '@/lib/token-usage'
@@ -40,26 +41,47 @@ export function TokenUsageMenu({
 
   return (
     <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            className={cn(
-              'inline-flex size-6 items-center justify-center rounded-md border border-border/60 bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-foreground',
-              className,
-            )}
-            aria-label={`${title} options`}
-          >
-            <MoreHorizontal className="size-3.5" strokeWidth={1.8} />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align={align} className="w-44">
-          <DropdownMenuItem onSelect={() => setDialogOpen(true)}>
-            <BarChart3 className="size-4" />
-            View token usage
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      {scope === 'session' ? (
+        // Header placement: a ghost icon button matching its siblings — hover
+        // explains it, click opens the stats dialog directly.
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={() => setDialogOpen(true)}
+              className={cn(
+                'inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground',
+                className,
+              )}
+              aria-label="View token usage"
+            >
+              <BarChart3 className="size-4" strokeWidth={1.8} />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">View token usage</TooltipContent>
+        </Tooltip>
+      ) : (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className={cn(
+                'inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground',
+                className,
+              )}
+              aria-label={`${title} options`}
+            >
+              <MoreHorizontal className="size-3.5" strokeWidth={1.8} />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align={align} className="w-44">
+            <DropdownMenuItem onSelect={() => setDialogOpen(true)}>
+              <BarChart3 className="size-4" />
+              View token usage
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-sm">

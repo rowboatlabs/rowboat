@@ -39,7 +39,7 @@ export function CompactConversation({ items }: { items: ConversationItem[] }) {
                 }
                 if (isTurnUsageMessage(item)) {
                     return (
-                        <div key={item.id} className="flex items-center justify-start gap-1 px-1">
+                        <div key={item.id} className="-ml-1 flex items-center justify-start gap-1">
                             <TokenUsageMenu
                                 usage={item.usage}
                                 scope="turn"

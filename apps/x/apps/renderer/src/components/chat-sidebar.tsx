@@ -1,18 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, Bug, MoreHorizontal, Pin } from 'lucide-react'
-import { toast } from 'sonner'
+import { ArrowLeft, ArrowRight, Pin } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { ChatHeader } from '@/components/chat-header'
 import { ChatEmptyState } from '@/components/chat-empty-state'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
 import {
   Conversation,
   ConversationContent,
@@ -379,33 +372,6 @@ export function ChatSidebar({
     if (tabId === activeChatTabId) return activeTabState
     return chatTabStates[tabId] ?? emptyTabState
   }, [activeChatTabId, activeTabState, chatTabStates, emptyTabState])
-  const activeRunId = activeTabState.runId
-  const handleDownloadChatLog = useCallback(async () => {
-    if (!activeRunId) {
-      toast.error('No chat log available yet')
-      return
-    }
-
-    try {
-      // Session-first (new runtime); legacy runs fallback covers old
-      // background tabs until stage 7 removes the runs runtime.
-      let result: { success: boolean; error?: string }
-      try {
-        result = await window.ipc.invoke('sessions:downloadLog', { sessionId: activeRunId })
-      } catch {
-        result = await window.ipc.invoke('runs:downloadLog', { runId: activeRunId })
-      }
-      if (result.success) {
-        toast.success('Chat log saved')
-      } else if (result.error) {
-        toast.error(result.error)
-      }
-    } catch (err) {
-      console.error('Download chat log failed:', err)
-      toast.error('Failed to download chat log')
-    }
-  }, [activeRunId])
-
   const renderConversationItem = (
     item: ConversationItem,
     tabId: string,
@@ -527,7 +493,7 @@ export function ChatSidebar({
 
     if (isTurnUsageMessage(item)) {
       return (
-        <div key={item.id} className="-mt-6 flex items-center justify-start gap-1 px-1" data-message-id={item.id}>
+        <div key={item.id} className="-mt-6 -ml-1 flex items-center justify-start gap-1" data-message-id={item.id}>
           <TokenUsageMenu
             usage={item.usage}
             scope="turn"
@@ -640,34 +606,6 @@ export function ChatSidebar({
                 onOpenChatHistory={onOpenChatHistory}
               />
             )}
-            <DropdownMenu>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="titlebar-no-drag my-1 h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
-                      aria-label="Chat options"
-                    >
-                      <MoreHorizontal className="size-5" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">Chat options</TooltipContent>
-              </Tooltip>
-              <DropdownMenuContent align="end" className="min-w-48">
-                <DropdownMenuItem
-                  disabled={!activeRunId}
-                  onSelect={() => {
-                    void handleDownloadChatLog()
-                  }}
-                >
-                  <Bug className="size-4" />
-                  Download chat log
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
             {onOpenFullScreen && (
               <Tooltip>
                 <TooltipTrigger asChild>

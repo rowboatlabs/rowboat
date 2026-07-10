@@ -1,4 +1,6 @@
-import { ArrowUpRight, ChevronDown, MessageSquare, Plus } from 'lucide-react'
+import { useCallback } from 'react'
+import { ArrowUpRight, Bug, ChevronDown, MessageSquare, MoreHorizontal, Plus } from 'lucide-react'
+import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -50,6 +52,31 @@ export function ChatHeader({
 }: ChatHeaderProps) {
   const hasHistory = recentRuns.length > 0 || Boolean(onOpenChatHistory)
   const showUsage = hasTokenUsage(sessionUsage)
+
+  const handleDownloadChatLog = useCallback(async () => {
+    if (!activeRunId) {
+      toast.error('No chat log available yet')
+      return
+    }
+    try {
+      // Session-first (new runtime); legacy runs fallback covers old
+      // background tabs until stage 7 removes the runs runtime.
+      let result: { success: boolean; error?: string }
+      try {
+        result = await window.ipc.invoke('sessions:downloadLog', { sessionId: activeRunId })
+      } catch {
+        result = await window.ipc.invoke('runs:downloadLog', { runId: activeRunId })
+      }
+      if (result.success) {
+        toast.success('Chat log saved')
+      } else if (result.error) {
+        toast.error(result.error)
+      }
+    } catch (err) {
+      console.error('Download chat log failed:', err)
+      toast.error('Failed to download chat log')
+    }
+  }, [activeRunId])
 
   return (
     <>
@@ -123,6 +150,34 @@ export function ChatHeader({
         </TooltipTrigger>
         <TooltipContent side="bottom">New chat</TooltipContent>
       </Tooltip>
+      <DropdownMenu>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="titlebar-no-drag my-1 h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+                aria-label="Chat options"
+              >
+                <MoreHorizontal className="size-5" />
+              </Button>
+            </DropdownMenuTrigger>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">Chat options</TooltipContent>
+        </Tooltip>
+        <DropdownMenuContent align="end" className="min-w-48">
+          <DropdownMenuItem
+            disabled={!activeRunId}
+            onSelect={() => {
+              void handleDownloadChatLog()
+            }}
+          >
+            <Bug className="size-4" />
+            Download chat log
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </>
   )
 }
