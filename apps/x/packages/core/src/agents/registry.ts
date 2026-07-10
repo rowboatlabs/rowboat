@@ -23,6 +23,10 @@ export interface AgentTraits {
     // Receives workspace context — agent notes and the user work directory —
     // composed into its system prompt.
     workspaceContext?: boolean;
+    // Session-loaded skills (activeSkills) re-attach their tools on later
+    // turns. Distinct from workspaceContext: a trait per concern, so neither
+    // silently inherits the other's meaning.
+    skillCarryForward?: boolean;
 }
 
 interface BuiltinAgentDefinition {
@@ -51,7 +55,7 @@ function promptFileAgent(id: string, getRaw: () => string): BuiltinAgentDefiniti
 // definition object.
 const COPILOT: BuiltinAgentDefinition = {
     build: buildCopilotAgent,
-    traits: { workspaceContext: true },
+    traits: { workspaceContext: true, skillCarryForward: true },
 };
 
 const builtinAgents: Record<string, BuiltinAgentDefinition> = {
@@ -71,13 +75,24 @@ export function builtinAgentIds(): string[] {
     return Object.keys(builtinAgents);
 }
 
-// Trait lookup for assembly decisions. Unknown/user agents have no traits.
-export function hasWorkspaceContext(agentId: string | null | undefined): boolean {
+// Trait lookups for assembly decisions. Unknown/user agents have no traits.
+function hasTrait(
+    agentId: string | null | undefined,
+    trait: keyof AgentTraits,
+): boolean {
     return (
         agentId != null &&
         Object.hasOwn(builtinAgents, agentId) &&
-        builtinAgents[agentId].traits?.workspaceContext === true
+        builtinAgents[agentId].traits?.[trait] === true
     );
+}
+
+export function hasWorkspaceContext(agentId: string | null | undefined): boolean {
+    return hasTrait(agentId, "workspaceContext");
+}
+
+export function carriesSkillsForward(agentId: string | null | undefined): boolean {
+    return hasTrait(agentId, "skillCarryForward");
 }
 
 export async function loadAgent(id: string): Promise<z.infer<typeof Agent>> {

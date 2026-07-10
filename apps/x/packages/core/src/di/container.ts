@@ -14,7 +14,7 @@ import { FSOAuthRepo, IOAuthRepo } from "../auth/repo.js";
 import { FSClientRegistrationRepo, IClientRegistrationRepo } from "../auth/client-repo.js";
 import { FSGranolaConfigRepo, IGranolaConfigRepo } from "../knowledge/granola/repo.js";
 import { FSCodeModeConfigRepo, ICodeModeConfigRepo } from "../code-mode/repo.js";
-import { IAbortRegistry, InMemoryAbortRegistry } from "../runs/abort-registry.js";
+import { IAbortRegistry, InMemoryAbortRegistry } from "../turns/abort-registry.js";
 import { FSAgentScheduleRepo, IAgentScheduleRepo } from "../agent-schedule/repo.js";
 import { FSAgentScheduleStateRepo, IAgentScheduleStateRepo } from "../agent-schedule/state-repo.js";
 import { FSSlackConfigRepo, ISlackConfigRepo } from "../slack/repo.js";

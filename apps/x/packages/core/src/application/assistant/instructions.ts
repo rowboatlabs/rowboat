@@ -1,12 +1,14 @@
-import { skillCatalog, buildAvailableSkillCatalog } from "./skills/index.js";
+import { buildAvailableSkillCatalog } from "./skills/index.js";
 import { getRuntimeContext, getRuntimeContextPrompt } from "./runtime-context.js";
+import {
+    isCodeModeAvailable,
+    isComposioAvailable,
+    isGoogleConnected,
+    isSlackAvailable,
+} from "./connections.js";
 import { composioAccountsRepo } from "../../composio/repo.js";
 import { isConfigured as isComposioConfigured } from "../../composio/client.js";
 import { CURATED_TOOLKITS } from "@x/shared/dist/composio.js";
-import container from "../../di/container.js";
-import type { ICodeModeConfigRepo } from "../../code-mode/repo.js";
-import type { ISlackConfigRepo } from "../../slack/repo.js";
-import type { IOAuthRepo } from "../../auth/repo.js";
 import { knowledgeSourcesRepo } from "../../knowledge/sources/repo.js";
 
 const runtimeContextPrompt = getRuntimeContextPrompt(getRuntimeContext());
@@ -356,7 +358,6 @@ Never output raw file paths in plain text when they could be wrapped in a filepa
 }
 
 /** Keep backward-compatible export for any external consumers */
-export const CopilotInstructions = buildStaticInstructions(true, skillCatalog);
 
 let cachedInstructions: string | null = null;
 
@@ -366,31 +367,16 @@ export function invalidateCopilotInstructionsCache(): void {
 
 export async function buildCopilotInstructions(): Promise<string> {
     if (cachedInstructions !== null) return cachedInstructions;
-    const composioEnabled = await isComposioConfigured();
-    let codeModeEnabled = false;
-    try {
-        const repo = container.resolve<ICodeModeConfigRepo>('codeModeConfigRepo');
-        codeModeEnabled = (await repo.getConfig()).enabled;
-    } catch {
-        // repo unavailable — default to disabled
-    }
-    let slackConnected = false;
+    // Connection facts come from the shared checks in connections.ts — the
+    // same source the skill catalog's availability gating uses.
+    const [composioEnabled, codeModeEnabled, slackConnected, googleConnected] =
+        await Promise.all([
+            isComposioAvailable(),
+            isCodeModeAvailable(),
+            isSlackAvailable(),
+            isGoogleConnected(),
+        ]);
     let slackChannelsHint = '';
-    try {
-        const slackRepo = container.resolve<ISlackConfigRepo>('slackConfigRepo');
-        const slackConfig = await slackRepo.getConfig();
-        slackConnected = slackConfig.enabled && slackConfig.workspaces.length > 0;
-    } catch {
-        // repo unavailable — default to not connected
-    }
-    let googleConnected = false;
-    try {
-        const oauthRepo = container.resolve<IOAuthRepo>('oauthRepo');
-        const googleConnection = await oauthRepo.read('google');
-        googleConnected = !!googleConnection.tokens;
-    } catch {
-        // repo unavailable — default to not connected
-    }
     if (slackConnected) {
         try {
             // Surface the channels the user selected for sync so the Copilot

@@ -1,5 +1,5 @@
 import { ToolPermissionMetadata } from "@x/shared/dist/runs.js";
-import { convertFromMessages } from "../../agents/runtime.js";
+import { convertFromMessages } from "../../agents/message-encoding.js";
 import type { UseCase } from "../../analytics/use_case.js";
 import { classifyToolPermissions } from "../../security/auto-permission-classifier.js";
 import type {

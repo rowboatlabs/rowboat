@@ -27,7 +27,7 @@ import {
 } from "@x/shared/dist/turns.js";
 import { reduceSession } from "@x/shared/dist/sessions.js";
 import type { z } from "zod";
-import { convertFromMessages } from "../agents/runtime.js";
+import { convertFromMessages } from "../agents/message-encoding.js";
 import { WorkDir } from "../config/config.js";
 import { FSSessionRepo } from "../sessions/fs-repo.js";
 import { composeModelRequest } from "./compose-model-request.js";

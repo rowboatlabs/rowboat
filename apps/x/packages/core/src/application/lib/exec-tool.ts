@@ -3,7 +3,7 @@ import { RunEvent } from "@x/shared/dist/runs.js";
 import { z } from "zod";
 import { BuiltinTools } from "./builtin-tools.js";
 import { executeTool } from "../../mcp/mcp.js";
-import { IAbortRegistry } from "../../runs/abort-registry.js";
+import { IAbortRegistry } from "../../turns/abort-registry.js";
 
 /**
  * Context passed to every tool execution, providing abort signal and run metadata.

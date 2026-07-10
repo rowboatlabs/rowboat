@@ -31,7 +31,7 @@ import { ServiceEvent } from '@x/shared/dist/service-events.js';
 import type { SessionBusEvent } from '@x/shared/dist/sessions.js';
 import { isDurableTurnEvent } from '@x/shared/dist/turns.js';
 import type { ISessions, EmitterSessionBus } from '@x/core/dist/sessions/index.js';
-import type { TurnEventHub } from '@x/core/dist/turns/event-hub.js';
+import type { ITurnEventBus } from '@x/core/dist/turns/event-hub.js';
 import container from '@x/core/dist/di/container.js';
 import { listOnboardingModels } from '@x/core/dist/models/models-dev.js';
 import { testModelConnection, listModelsForProvider, generateOneShot } from '@x/core/dist/models/models.js';
@@ -728,7 +728,7 @@ export function startTurnEventsWatcher(): void {
   if (turnEventsWatcher) {
     return;
   }
-  const hub = container.resolve<TurnEventHub>('turnEventBus');
+  const hub = container.resolve<ITurnEventBus>('turnEventBus');
   turnEventsWatcher = hub.subscribeAll((event) => {
     if (isDurableTurnEvent(event.event)) {
       broadcastToWindows('turns:events', event);

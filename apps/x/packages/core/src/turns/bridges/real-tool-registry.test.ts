@@ -3,7 +3,7 @@ import type { z } from "zod";
 import type { ToolDescriptor } from "@x/shared/dist/turns.js";
 import type { execTool } from "../../application/lib/exec-tool.js";
 import type { BuiltinTools } from "../../application/lib/builtin-tools.js";
-import type { IAbortRegistry } from "../../runs/abort-registry.js";
+import type { IAbortRegistry } from "../abort-registry.js";
 import { TurnDependencyError } from "../api.js";
 import type { SyncRuntimeTool, ToolExecutionContext } from "../tool-registry.js";
 import { RealToolRegistry } from "./real-tool-registry.js";

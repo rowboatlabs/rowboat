@@ -8,6 +8,9 @@ import type { TurnBusEvent } from "@x/shared/dist/turns.js";
 // listeners accurately reflects that no execution is known active.
 export interface ITurnEventBus {
     publish(event: TurnBusEvent): void;
+    // Tail one turn's events / tail everything (the IPC bridge, watchers).
+    subscribe(turnId: string, listener: (event: TurnBusEvent) => void): () => void;
+    subscribeAll(listener: (event: TurnBusEvent) => void): () => void;
 }
 
 type Listener = (event: TurnBusEvent) => void;

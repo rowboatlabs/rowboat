@@ -5,6 +5,11 @@ import {
   type CapabilityDefinition,
   type ModelCapability,
 } from "../capabilities/types.js";
+import {
+  isCodeModeAvailable,
+  isComposioAvailable,
+  isSlackAvailable,
+} from "../connections.js";
 import { loadDiskSkills } from "./disk-loader.js";
 import builtinToolsSkill from "./builtin-tools/skill.js";
 import deletionGuardrailsSkill from "./deletion-guardrails/skill.js";
@@ -239,39 +244,8 @@ function getSkillEntries(): SkillEntry[] {
 }
 
 // ---- Availability checks (catalog visibility) ----
-// Connection-state gates for the catalog, evaluated per build. Repos resolve
-// lazily so this module keeps no static edge into the DI graph; any failure
-// reads as "not available" (the historical default).
-
-async function isComposioAvailable(): Promise<boolean> {
-  try {
-    const { isConfigured } = await import("../../../composio/client.js");
-    return await isConfigured();
-  } catch {
-    return false;
-  }
-}
-
-async function isCodeModeAvailable(): Promise<boolean> {
-  try {
-    const { lazyResolve } = await import("../../../di/lazy-resolve.js");
-    const repo = await lazyResolve<import("../../../code-mode/repo.js").ICodeModeConfigRepo>("codeModeConfigRepo");
-    return (await repo.getConfig()).enabled;
-  } catch {
-    return false;
-  }
-}
-
-async function isSlackAvailable(): Promise<boolean> {
-  try {
-    const { lazyResolve } = await import("../../../di/lazy-resolve.js");
-    const repo = await lazyResolve<import("../../../slack/repo.js").ISlackConfigRepo>("slackConfigRepo");
-    const config = await repo.getConfig();
-    return config.enabled && config.workspaces.length > 0;
-  } catch {
-    return false;
-  }
-}
+// One source of truth for connection state: ../connections.ts (shared with
+// the copilot prompt's connection blocks in instructions.ts).
 
 // Pure availability filter over an explicit entry list (exported for tests):
 // entries without an availability check are kept; checks are evaluated
@@ -427,10 +401,6 @@ export function refreshDiskSkills(): number {
 // Initial disk load at module init.
 refreshDiskSkills();
 
-// Snapshot of the catalog at module load, kept for backward-compatible
-// consumers (e.g. the legacy CopilotInstructions export). Runtime consumers
-// should call buildSkillCatalog() to get the live set.
-export const skillCatalog = buildSkillCatalog();
 
 export function resolveSkill(identifier: string): ResolvedSkill | null {
   const normalized = normalizeIdentifier(identifier);

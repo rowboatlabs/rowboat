@@ -4,7 +4,7 @@ import { assistantText, lastAssistantText } from "../agents/headless.js";
 import { TurnInputError } from "../turns/api.js";
 import { ASK_HUMAN_TOOL } from "../turns/bridges/real-agent-resolver.js";
 import { TurnNotSettledError, type ISessions } from "../sessions/api.js";
-import type { TurnEventHub } from "../turns/event-hub.js";
+import type { ITurnEventBus } from "../turns/event-hub.js";
 
 // Transport-agnostic command layer: inbound texts from a messaging channel
 // are parsed into commands (list / resume / new / stop / status) or forwarded
@@ -136,7 +136,7 @@ export class ChannelBridge {
     constructor(
         private readonly deps: {
             sessions: ISessions;
-            turnEventBus: TurnEventHub;
+            turnEventBus: ITurnEventBus;
             listModels: () => Promise<ModelChoice[]>;
         },
     ) {}

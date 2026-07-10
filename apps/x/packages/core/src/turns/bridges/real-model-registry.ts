@@ -11,7 +11,7 @@ import type { z } from "zod";
 import type { LlmProvider } from "@x/shared/dist/models.js";
 import type { AssistantContentPart } from "@x/shared/dist/message.js";
 import type { JsonValue, ModelDescriptor, TurnUsage } from "@x/shared/dist/turns.js";
-import { convertFromMessages } from "../../agents/runtime.js";
+import { convertFromMessages } from "../../agents/message-encoding.js";
 import { resolveProviderConfig } from "../../models/defaults.js";
 import { createProvider } from "../../models/models.js";
 import { isReasoningModel } from "../../models/models-dev.js";
