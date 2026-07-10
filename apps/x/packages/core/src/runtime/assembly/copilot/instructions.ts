@@ -7,7 +7,6 @@ import {
     isSlackAvailable,
 } from "../connections.js";
 import { composioAccountsRepo } from "../../../composio/repo.js";
-import { isConfigured as isComposioConfigured } from "../../../composio/client.js";
 import { CURATED_TOOLKITS } from "@x/shared/dist/composio.js";
 import { knowledgeSourcesRepo } from "../../../knowledge/sources/repo.js";
 import { listApps } from "../../../apps/indexer.js";
@@ -52,7 +51,10 @@ When a question matches what an app tracks, PREFER the app over external calls: 
  * Lists connected toolkits and explains the meta-tool discovery flow.
  */
 async function getComposioToolsPrompt(slackConnected: boolean = false, googleConnected: boolean = false): Promise<string> {
-    if (!(await isComposioConfigured())) {
+    // connections.js, not the raw composio client: the skill catalog's
+    // availability filter uses the same check, so the prompt's Composio
+    // section and the catalog's composio skill can never disagree.
+    if (!(await isComposioAvailable())) {
         return '';
     }
 
