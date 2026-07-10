@@ -66,6 +66,7 @@ const ModelsDevModel = z.object({
   name: z.string().optional(),
   release_date: z.string().optional(),
   tool_call: z.boolean().optional(),
+  reasoning: z.boolean().optional(),
   status: z.enum(["alpha", "beta", "deprecated"]).optional(),
 }).passthrough();
 
@@ -223,6 +224,48 @@ export async function listOnboardingModels(): Promise<{ providers: ProviderSumma
   }
 
   return { providers, lastUpdated: fetchedAt };
+}
+
+/**
+ * Whether a model supports reasoning/extended thinking, per the models.dev
+ * catalog. Reads ONLY the on-disk cache (stale is fine) — this sits on the
+ * turn-start path and must never block on the network. Returns undefined
+ * when the model or provider is unknown or no cache exists; callers treat
+ * unknown as "don't send reasoning parameters" (fail closed).
+ *
+ * Accepts gateway/OpenRouter-style "vendor/model" ids by splitting on the
+ * first slash and matching the vendor against the catalog's providers.
+ */
+export async function isReasoningModel(
+  flavor: string,
+  modelId: string,
+): Promise<boolean | undefined> {
+  let vendor = flavor;
+  let id = modelId;
+  if ((flavor === "rowboat" || flavor === "openrouter" || flavor === "aigateway") && modelId.includes("/")) {
+    const slash = modelId.indexOf("/");
+    vendor = modelId.slice(0, slash);
+    id = modelId.slice(slash + 1);
+  }
+  if (vendor !== "openai" && vendor !== "anthropic" && vendor !== "google") {
+    return undefined;
+  }
+  try {
+    const cached = await readCache();
+    if (!cached) return undefined;
+    const parsed = ModelsDevResponse.safeParse(cached.data);
+    if (!parsed.success) return undefined;
+    const provider = pickProvider(parsed.data, vendor);
+    if (!provider) return undefined;
+    for (const [key, model] of Object.entries(provider.models)) {
+      if ((model.id ?? key) === id) {
+        return model.reasoning === true;
+      }
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export async function getChatModelIds(

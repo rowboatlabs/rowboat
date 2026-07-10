@@ -36,6 +36,9 @@ export interface HeadlessAgentOptions {
     model?: string;
     provider?: string;
     maxModelCalls?: number;
+    // Canonical reasoning effort for this run; omitted = auto (provider
+    // default). Background callers that want cheap turns can pin "low".
+    reasoningEffort?: "low" | "medium" | "high";
     signal?: AbortSignal;
     // Old waitForRunCompletion({ throwOnError: true }) semantics: `done`
     // rejects with HeadlessRunError unless the turn completes.
@@ -157,6 +160,9 @@ export class HeadlessAgentRunner implements IHeadlessAgentRunner {
                 ...(options.maxModelCalls === undefined
                     ? {}
                     : { maxModelCalls: options.maxModelCalls }),
+                ...(options.reasoningEffort === undefined
+                    ? {}
+                    : { reasoningEffort: options.reasoningEffort }),
             },
         });
 

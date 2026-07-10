@@ -597,6 +597,13 @@ bytes and the two views cannot diverge.
 Requests exclude credentials, auth headers, functions, model objects, and
 transport objects.
 
+`parameters` holds only canonical, provider-agnostic generation knobs. The
+model bridge whitelists what it forwards (`temperature`, `topP`,
+`maxOutputTokens`, `providerOptions`) and maps `reasoningEffort`
+(`"low" | "medium" | "high"`, stamped from `turn_created.config` onto every
+call) into provider-specific options at invoke time — transport-only, like
+prompt caching, so a persisted turn replays correctly on a different model.
+
 The name `requested` is intentional. The event proves durable intent, not that
 the provider definitely received the request.
 

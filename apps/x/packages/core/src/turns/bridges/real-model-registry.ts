@@ -14,8 +14,10 @@ import type { JsonValue, ModelDescriptor, TurnUsage } from "@x/shared/dist/turns
 import { convertFromMessages } from "../../agents/runtime.js";
 import { resolveProviderConfig } from "../../models/defaults.js";
 import { createProvider } from "../../models/models.js";
+import { isReasoningModel } from "../../models/models-dev.js";
 import { applyPromptCaching } from "../../models/prompt-caching.js";
 import { applyLocalModelSettings } from "../../models/local.js";
+import { mapReasoningEffort, parseReasoningEffort } from "../../models/reasoning.js";
 import type {
     IModelRegistry,
     LlmStreamEvent,
@@ -46,6 +48,9 @@ export interface RealModelRegistryDeps {
     resolveProvider?: (name: string) => Promise<z.infer<typeof LlmProvider>>;
     createProviderImpl?: typeof createProvider;
     invoke?: StreamTextInvoker;
+    // Capability probe for "does this model reason?" (models.dev cache by
+    // default). undefined = unknown; the effort mapping fails closed on it.
+    reasoningSupport?: (flavor: string, modelId: string) => Promise<boolean | undefined>;
 }
 
 // Bridges models.json provider configs to live AI SDK models and normalizes
@@ -57,11 +62,16 @@ export class RealModelRegistry implements IModelRegistry {
     ) => Promise<z.infer<typeof LlmProvider>>;
     private readonly createProviderImpl: typeof createProvider;
     private readonly invoke: StreamTextInvoker;
+    private readonly reasoningSupport: (
+        flavor: string,
+        modelId: string,
+    ) => Promise<boolean | undefined>;
 
     constructor(deps: RealModelRegistryDeps = {}) {
         this.resolveProvider = deps.resolveProvider ?? resolveProviderConfig;
         this.createProviderImpl = deps.createProviderImpl ?? createProvider;
         this.invoke = deps.invoke ?? defaultInvoker;
+        this.reasoningSupport = deps.reasoningSupport ?? isReasoningModel;
     }
 
     async resolve(
@@ -74,6 +84,12 @@ export class RealModelRegistry implements IModelRegistry {
             provider.languageModel(descriptor.model),
             providerConfig,
         );
+        // Cache-only capability lookup (never blocks a turn on the network);
+        // unknown support makes the effort mapping fail closed.
+        const supportsReasoning = await this.reasoningSupport(
+            providerConfig.flavor,
+            descriptor.model,
+        ).catch(() => undefined);
         return {
             descriptor,
             // The structural -> wire conversion the app uses today: weaves
@@ -83,7 +99,13 @@ export class RealModelRegistry implements IModelRegistry {
             encodeMessages: (messages) =>
                 convertFromMessages(messages) as unknown as JsonValue[],
             stream: (request) =>
-                this.run(model, request, providerConfig.flavor, descriptor.model),
+                this.run(
+                    model,
+                    request,
+                    providerConfig.flavor,
+                    descriptor.model,
+                    supportsReasoning,
+                ),
         };
     }
 
@@ -92,6 +114,7 @@ export class RealModelRegistry implements IModelRegistry {
         request: ModelStreamRequest,
         flavor: string,
         modelId: string,
+        supportsReasoning?: boolean,
     ): AsyncGenerator<LlmStreamEvent, void, void> {
         const tools: ToolSet = {};
         for (const descriptor of request.tools) {
@@ -111,13 +134,37 @@ export class RealModelRegistry implements IModelRegistry {
         // Persisted per-call parameters (turn-runtime-design.md §8.3): only
         // the whitelisted generation knobs are forwarded to the provider.
         const params = request.parameters ?? {};
+
+        // Canonical reasoningEffort maps to provider-specific options here,
+        // transport-only (like prompt caching) — persisted events carry only
+        // the canonical value. Explicit persisted providerOptions win over
+        // the mapping; an explicit maxOutputTokens is only ever raised to
+        // the thinking-budget floor, never lowered.
+        const effort = parseReasoningEffort(params.reasoningEffort);
+        const reasoning = effort === undefined
+            ? undefined
+            : mapReasoningEffort(flavor, modelId, effort, supportsReasoning);
+
+        const callerProviderOptions =
+            params.providerOptions && typeof params.providerOptions === "object" && !Array.isArray(params.providerOptions)
+                ? params.providerOptions as Record<string, Record<string, JsonValue>>
+                : undefined;
+        const providerOptions = reasoning === undefined
+            ? callerProviderOptions
+            : mergeProviderOptions(reasoning.providerOptions, callerProviderOptions);
+
+        const callerMaxOutputTokens =
+            typeof params.maxOutputTokens === "number" ? params.maxOutputTokens : undefined;
+        const maxOutputTokens =
+            reasoning?.minOutputTokens === undefined
+                ? callerMaxOutputTokens
+                : Math.max(callerMaxOutputTokens ?? 0, reasoning.minOutputTokens);
+
         const generationParams = {
             ...(typeof params.temperature === "number" ? { temperature: params.temperature } : {}),
             ...(typeof params.topP === "number" ? { topP: params.topP } : {}),
-            ...(typeof params.maxOutputTokens === "number" ? { maxOutputTokens: params.maxOutputTokens } : {}),
-            ...(params.providerOptions && typeof params.providerOptions === "object" && !Array.isArray(params.providerOptions)
-                ? { providerOptions: params.providerOptions as Record<string, Record<string, JsonValue>> }
-                : {}),
+            ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
+            ...(providerOptions === undefined ? {} : { providerOptions }),
         };
 
         const parts: Array<z.infer<typeof AssistantContentPart>> = [];

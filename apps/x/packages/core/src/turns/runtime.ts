@@ -164,6 +164,9 @@ export class TurnRuntime implements ITurnRuntime {
                 autoPermission: input.config.autoPermission ?? false,
                 humanAvailable: input.config.humanAvailable,
                 maxModelCalls: input.config.maxModelCalls ?? DEFAULT_MAX_MODEL_CALLS,
+                ...(input.config.reasoningEffort === undefined
+                    ? {}
+                    : { reasoningEffort: input.config.reasoningEffort }),
             },
         });
         await this.turnRepo.create(event);
@@ -1110,10 +1113,16 @@ class TurnAdvance {
                       ]
                     : []; // re-issue after an interrupted call adds nothing new
         }
+        // The turn's reasoning effort is stamped on every call's persisted
+        // parameters (turn-runtime-design.md §8.3): each step durably records
+        // what it ran with, and the model bridge maps the canonical value to
+        // provider-specific options at invoke time.
+        const reasoningEffort = this.definition.config.reasoningEffort;
         const request: z.infer<typeof ModelRequest> = {
             ...(isRef && index === 0 ? { contextRef: context } : {}),
             messages: refs,
-            parameters: {},
+            parameters:
+                reasoningEffort === undefined ? {} : { reasoningEffort },
         };
         await this.append({
             type: "model_call_requested",

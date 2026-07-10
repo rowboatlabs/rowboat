@@ -511,6 +511,61 @@ describe("plain model response (26.1)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Per-turn reasoning effort (turn_created.config → per-call parameters)
+// ---------------------------------------------------------------------------
+
+describe("per-turn reasoning effort", () => {
+    it("stamps the turn's reasoningEffort into every model call's persisted parameters", async () => {
+        const { runtime, repo, models } = makeRuntime({
+            models: [
+                respond(completedResp(assistantCalls(toolCallPart("A", "echo", { i: 1 })))),
+                respond(completedResp(assistantText("done"))),
+            ],
+        });
+        const turnId = await newTurn(runtime, {
+            config: { humanAvailable: true, reasoningEffort: "high" },
+        });
+        const { outcome } = await advanceAndSettle(runtime, turnId);
+        expect(outcome?.status).toBe("completed");
+
+        const log = await persisted(repo, turnId);
+        const requests = log.filter((e) => e.type === "model_call_requested");
+        expect(requests).toHaveLength(2);
+        for (const event of requests) {
+            expect(
+                event.type === "model_call_requested"
+                    ? event.request.parameters
+                    : undefined,
+            ).toEqual({ reasoningEffort: "high" });
+        }
+        // The live stream received the persisted parameters verbatim.
+        expect(models.requests[0].parameters).toEqual({ reasoningEffort: "high" });
+        expect(models.requests[1].parameters).toEqual({ reasoningEffort: "high" });
+        // And the effort rides the durable turn_created config.
+        const created = log[0];
+        expect(
+            created.type === "turn_created" ? created.config.reasoningEffort : undefined,
+        ).toBe("high");
+    });
+
+    it("leaves parameters empty when no effort is set (auto)", async () => {
+        const { runtime, repo, models } = makeRuntime({
+            models: [respond(completedResp(assistantText("done")))],
+        });
+        const turnId = await newTurn(runtime);
+        await advanceAndSettle(runtime, turnId);
+        const log = await persisted(repo, turnId);
+        const request = log.find((e) => e.type === "model_call_requested");
+        expect(
+            request?.type === "model_call_requested"
+                ? request.request.parameters
+                : undefined,
+        ).toEqual({});
+        expect(models.requests[0].parameters).toEqual({});
+    });
+});
+
+// ---------------------------------------------------------------------------
 // §26.2 Mixed sync and async tools
 // ---------------------------------------------------------------------------
 

@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { RelPath, Encoding, Stat, DirEntry, ReaddirOptions, ReadFileResult, WorkspaceChangeEvent, WriteFileOptions, WriteFileResult, RemoveOptions } from './workspace.js';
 import { ListToolsResponse } from './mcp.js';
 import { AskHumanResponsePayload, CreateRunOptions, Run, ListRunsResponse, ToolPermissionAuthorizePayload } from './runs.js';
-import { LlmModelConfig, LlmProvider, ModelOverride, ModelRef } from './models.js';
+import { LlmModelConfig, LlmProvider, ModelOverride, ModelRef, ReasoningEffort } from './models.js';
 import { AgentScheduleConfig, AgentScheduleEntry } from './agent-schedule.js';
 import { AgentScheduleState } from './agent-schedule-state.js';
 import { ServiceEvent } from './service-events.js';
@@ -488,6 +488,7 @@ const ipcSchemas = {
         agent: RequestedAgent,
         autoPermission: z.boolean().optional(),
         maxModelCalls: z.number().int().positive().optional(),
+        reasoningEffort: ReasoningEffort.optional(),
       }),
     }),
     res: z.object({ turnId: z.string() }),

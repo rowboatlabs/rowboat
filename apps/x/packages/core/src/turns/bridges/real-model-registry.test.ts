@@ -298,6 +298,111 @@ describe("RealModelRegistry", () => {
         });
     });
 
+    describe("reasoning effort mapping", () => {
+        function makeFlavorRegistry(
+            flavor: string,
+            supportsReasoning: boolean | undefined,
+            capture: InvokerOptions[],
+        ) {
+            const fakeModel = { modelId: "m" } as unknown as LanguageModel;
+            return new RealModelRegistry({
+                resolveProvider: async () => ({ flavor }) as never,
+                createProviderImpl: (() => ({
+                    languageModel: () => fakeModel,
+                })) as never,
+                reasoningSupport: async () => supportsReasoning,
+                invoke: (options) => {
+                    capture.push(options);
+                    return {
+                        fullStream: (async function* () {
+                            yield { type: "finish-step", finishReason: "stop", usage: {} };
+                        })(),
+                    };
+                },
+            });
+        }
+
+        async function invokeWith(
+            flavor: string,
+            model: string,
+            supportsReasoning: boolean | undefined,
+            parameters: Record<string, unknown>,
+        ): Promise<InvokerOptions> {
+            const capture: InvokerOptions[] = [];
+            const registry = makeFlavorRegistry(flavor, supportsReasoning, capture);
+            const resolved = await registry.resolve({ provider: flavor, model });
+            for await (const event of resolved.stream(
+                request({ parameters: parameters as never }),
+            )) {
+                void event;
+            }
+            return capture[0];
+        }
+
+        it("maps a persisted canonical effort to Anthropic thinking options", async () => {
+            const options = await invokeWith("anthropic", "claude-x", true, {
+                reasoningEffort: "medium",
+            });
+            expect(options.providerOptions).toEqual({
+                anthropic: { thinking: { type: "enabled", budgetTokens: 8192 } },
+            });
+            expect(options.maxOutputTokens).toBe(12288);
+        });
+
+        it("fails closed when reasoning support is unknown on strict flavors", async () => {
+            const options = await invokeWith("openai", "gpt-test", undefined, {
+                reasoningEffort: "high",
+            });
+            expect(options.providerOptions).toBeUndefined();
+            expect(options.maxOutputTokens).toBeUndefined();
+        });
+
+        it("maps gateway (rowboat) effort through the OpenRouter shape without known support", async () => {
+            const options = await invokeWith("rowboat", "google/gemini-3.5-flash", undefined, {
+                reasoningEffort: "high",
+            });
+            expect(options.providerOptions).toEqual({
+                openrouter: { reasoning: { effort: "high" } },
+            });
+        });
+
+        it("lets explicit persisted providerOptions win over the mapping", async () => {
+            const options = await invokeWith("openai", "o4-mini", true, {
+                reasoningEffort: "high",
+                providerOptions: { openai: { reasoningEffort: "low" } },
+            });
+            expect(options.providerOptions).toEqual({
+                openai: { reasoningEffort: "low" },
+            });
+        });
+
+        it("raises an explicit maxOutputTokens to the thinking floor but never lowers it", async () => {
+            const raised = await invokeWith("anthropic", "claude-x", true, {
+                reasoningEffort: "high",
+                maxOutputTokens: 4096,
+            });
+            expect(raised.maxOutputTokens).toBe(20480);
+
+            const kept = await invokeWith("anthropic", "claude-x", true, {
+                reasoningEffort: "high",
+                maxOutputTokens: 32000,
+            });
+            expect(kept.maxOutputTokens).toBe(32000);
+        });
+
+        it("sends nothing for unknown effort values or unmapped flavors", async () => {
+            const bogus = await invokeWith("anthropic", "claude-x", true, {
+                reasoningEffort: "xhigh",
+            });
+            expect(bogus.providerOptions).toBeUndefined();
+
+            const local = await invokeWith("openai-compatible", "my-vllm", true, {
+                reasoningEffort: "high",
+            });
+            expect(local.providerOptions).toBeUndefined();
+        });
+    });
+
     it("throws on provider error parts (a model failure, not a completion)", async () => {
         const registry = makeRegistry(
             [{ type: "error", error: new Error("rate limited") }],

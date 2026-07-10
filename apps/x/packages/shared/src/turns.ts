@@ -5,6 +5,7 @@ import {
     ToolMessage,
     UserMessage,
 } from "./message.js";
+import { ReasoningEffort } from "./models.js";
 
 // Durable turn contract for the turn runtime (see
 // packages/core/docs/turn-runtime-design.md). This module is the
@@ -176,6 +177,10 @@ export const TurnCreated = z.object({
         autoPermission: z.boolean(),
         humanAvailable: z.boolean(),
         maxModelCalls: z.number().int().positive(),
+        // Canonical per-turn reasoning effort; absent = auto (provider
+        // default). Stamped into every model call's parameters and mapped
+        // to provider-specific options at invoke time.
+        reasoningEffort: ReasoningEffort.optional(),
     }),
 });
 
