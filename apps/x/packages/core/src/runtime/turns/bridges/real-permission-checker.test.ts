@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { getToolPermissionMetadata } from "../../legacy/engine.js";
+import type { getToolPermissionMetadata } from "../../assembly/permission-metadata.js";
 import { RealPermissionChecker } from "./real-permission-checker.js";
 
 type MetadataFn = typeof getToolPermissionMetadata;
