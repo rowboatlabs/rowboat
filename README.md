@@ -37,7 +37,7 @@ Download latest for Mac/Windows/Linux: [Download](https://www.rowboatlabs.com/do
 
 <p align="center">
 <a href="https://www.youtube.com/watch?v=et5yQABJ3xI">
-<img width="1091" height="632" alt="Rowboat demo video" src="assets/readme-dark/demo-video.png" />
+<img width="800" height="450" alt="Rowboat Apps to Code demo" src="apps/x/demo.gif" />
 </a>
 </p>
 
