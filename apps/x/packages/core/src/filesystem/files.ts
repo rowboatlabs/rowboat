@@ -73,7 +73,10 @@ function isPathInside(parent: string, child: string): boolean {
   return relative === '' || (!!relative && !relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
-function expandHomePath(inputPath: string): string {
+// Exported for tool inputs that take user/model-supplied paths (code cwd,
+// bg-task projectDir): the blank guard matters there because callers feed
+// the result to path.resolve, and resolve('') silently becomes process.cwd().
+export function expandHomePath(inputPath: string): string {
   const trimmed = inputPath.trim();
   if (!trimmed) {
     throw new Error('Path is required');
