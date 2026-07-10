@@ -9,6 +9,7 @@ import {
     isTurnUsageMessage,
     getToolDisplayName,
     getToolErrorText,
+    REASONING_EFFORT_LABELS,
     toToolState,
     normalizeToolOutput,
 } from '@/lib/chat-conversation'
@@ -38,7 +39,7 @@ export function CompactConversation({ items }: { items: ConversationItem[] }) {
                 }
                 if (isTurnUsageMessage(item)) {
                     return (
-                        <div key={item.id} className="flex justify-start px-1">
+                        <div key={item.id} className="flex items-center justify-start gap-1 px-1">
                             <TokenUsageMenu
                                 usage={item.usage}
                                 scope="turn"
@@ -46,6 +47,11 @@ export function CompactConversation({ items }: { items: ConversationItem[] }) {
                                 className="size-5 border-transparent bg-transparent hover:bg-transparent"
                                 align="start"
                             />
+                            {item.reasoningEffort && (
+                                <span className="text-xs text-muted-foreground/70">
+                                    {REASONING_EFFORT_LABELS[item.reasoningEffort]}
+                                </span>
+                            )}
                         </div>
                     )
                 }

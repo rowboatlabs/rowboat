@@ -140,6 +140,19 @@ describe("runSpawnedAgent", () => {
         expect(started[0].maxModelCalls).toBe(5);
     });
 
+    it("passes reasoning effort through to the child headless turn", async () => {
+        const { services, started } = fakeServices({});
+        await runSpawnedAgent(
+            {
+                task: "compare these options carefully",
+                instructions: "You analyze tradeoffs.",
+                reasoning_effort: "high",
+            },
+            { parentTurnId: "parent-1", signal, services },
+        );
+        expect(started[0].reasoningEffort).toBe("high");
+    });
+
     it("rejects agent_id and instructions together", async () => {
         const { services } = fakeServices({});
         const result = await runSpawnedAgent(
