@@ -338,9 +338,14 @@ runtime's job; the session layer passes its errors through.
 
 ### 9.3 stopTurn and resumeTurn
 
-- `stopTurn` cancels via the turn runtime: aborting the active invocation's
-  signal if one is running, else advancing a suspended turn with a `cancel`
-  input.
+- `stopTurn` cancels via the turn runtime: aborting the signal of every
+  live advance the layer has started for the turn, else advancing the turn
+  with a `cancel` input. A turn can legally have several live advances at
+  once — one running invocation plus external-input invocations queued on
+  the turn lock — so the layer tracks them per turn and stop aborts them
+  all; the queued ones observe their aborted signal when the lock frees. A
+  cancel input that loses the race with a concurrent settle (the turn is
+  already terminal by the time it applies) counts as a successful stop.
 - `resumeTurn` re-enters the latest turn with no input — the turn spec's
   recovery entry point — for turns left `idle` by a crash. There is no
   automatic resume sweep at startup: recovery re-issues interrupted model
@@ -499,6 +504,11 @@ All tests use the in-memory/mocked turn runtime and repo fakes.
   correct turn with the correct input type.
 - Turn-runtime rejections (unknown call, terminal turn) pass through.
 - `sendMessage` never routes to ask-human.
+- `stopTurn` aborts every live advance when a turn has concurrent
+  invocations, and an earlier advance settling does not untrack a later
+  one.
+- A `stopTurn` cancel input that lost the race with a concurrent settle
+  resolves as a successful stop; a non-terminal rejection still surfaces.
 
 ### 13.6 Index
 

@@ -178,7 +178,8 @@ type AdvanceScript = (call: {
 }) =>
     | { events?: TurnStreamEvent[]; outcome: TurnOutcome }
     | { error: unknown }
-    | { untilAbort: true };
+    | { untilAbort: true }
+    | { pending: Promise<TurnOutcome> };
 
 class FakeTurnRuntime implements ITurnRuntime {
     createTurnInputs: CreateTurnInput[] = [];
@@ -229,6 +230,8 @@ class FakeTurnRuntime implements ITurnRuntime {
         };
         if ("error" in result) {
             stream.fail(result.error);
+        } else if ("pending" in result) {
+            void result.pending.then((outcome) => stream.end(outcome));
         } else if ("untilAbort" in result) {
             const signal = options?.signal;
             if (!signal) {
@@ -639,6 +642,101 @@ describe("stopTurn and resumeTurn", () => {
         const sessionId = await sessions.createSession();
         await expect(sessions.resumeTurn(sessionId)).rejects.toThrowError(
             /no turns to resume/,
+        );
+    });
+
+    it("aborts every live advance when a turn has concurrent invocations", async () => {
+        // A suspended turn with two pending externals gets a permission
+        // response (advance 1, running) and an async result (advance 2,
+        // queued on the turn lock in the real runtime). Stop must abort
+        // both — aborting only the latest leaves the first streaming.
+        const { sessions, fake } = makeSessions();
+        const signals: AbortSignal[] = [];
+        fake.script = ({ signal }) => {
+            signals.push(signal as AbortSignal);
+            return { untilAbort: true };
+        };
+        const sessionId = await sessions.createSession();
+        const { turnId } = await sessions.sendMessage(sessionId, user("go"), {
+            agent: { agentId: "copilot" },
+        });
+        const delivery = sessions
+            .deliverAsyncToolResult(turnId, "B", { output: "done", isError: false })
+            .catch(() => undefined);
+        await flush();
+        expect(fake.advanceCalls).toHaveLength(2);
+        await sessions.stopTurn(turnId);
+        await delivery;
+        expect(signals.map((s) => s.aborted)).toEqual([true, true]);
+        // Abort path only — no third advance carrying a cancel input.
+        expect(fake.advanceCalls).toHaveLength(2);
+    });
+
+    it("an earlier advance settling does not untrack a later one", async () => {
+        // Advance 1 settles while advance 2 is still live. Its cleanup must
+        // remove only its own entry: stop must still find and abort
+        // advance 2 instead of falling back to a cancel input.
+        const { sessions, fake } = makeSessions();
+        let releaseFirst!: (outcome: TurnOutcome) => void;
+        const firstOutcome = new Promise<TurnOutcome>((resolve) => {
+            releaseFirst = resolve;
+        });
+        const signals: AbortSignal[] = [];
+        fake.script = ({ signal }) => {
+            signals.push(signal as AbortSignal);
+            if (signals.length === 1) {
+                return { pending: firstOutcome };
+            }
+            if (signals.length === 2) {
+                return { untilAbort: true };
+            }
+            // A cancel-input advance would land here; it must never happen.
+            return { outcome: completedOutcome() };
+        };
+        const sessionId = await sessions.createSession();
+        const { turnId } = await sessions.sendMessage(sessionId, user("go"), {
+            agent: { agentId: "copilot" },
+        });
+        const delivery = sessions
+            .deliverAsyncToolResult(turnId, "B", { output: "done", isError: false })
+            .catch(() => undefined);
+        await flush();
+        releaseFirst(completedOutcome());
+        await flush();
+        await sessions.stopTurn(turnId);
+        await delivery;
+        expect(signals).toHaveLength(2);
+        expect(signals[1].aborted).toBe(true);
+        expect(fake.advanceCalls).toHaveLength(2);
+    });
+
+    it("treats a cancel input that lost the race with a settle as a successful stop", async () => {
+        const { sessions, fake } = makeSessions();
+        const sessionId = await sessions.createSession();
+        const { turnId } = await sessions.sendMessage(sessionId, user("go"), {
+            agent: { agentId: "copilot" },
+        });
+        await flush();
+        fake.setLog(turnId, turnLog(turnId, sessionId, "completed"));
+        fake.script = () => ({
+            error: new TurnInputError(`turn ${turnId} is terminal; input rejected`),
+        });
+        await expect(sessions.stopTurn(turnId)).resolves.toBeUndefined();
+    });
+
+    it("rethrows a cancel-input rejection when the turn is not terminal", async () => {
+        const { sessions, fake } = makeSessions();
+        const sessionId = await sessions.createSession();
+        const { turnId } = await sessions.sendMessage(sessionId, user("go"), {
+            agent: { agentId: "copilot" },
+        });
+        await flush();
+        fake.setLog(turnId, turnLog(turnId, sessionId, "suspended"));
+        fake.script = () => ({
+            error: new TurnInputError("no pending async tool call B"),
+        });
+        await expect(sessions.stopTurn(turnId)).rejects.toThrowError(
+            /no pending async tool call/,
         );
     });
 });
