@@ -9,6 +9,7 @@ import container from "../../../di/container.js";
 import * as files from "../../../filesystem/files.js";
 import { WorkDir } from "../../../config/config.js";
 import { RowboatAppManifestSchema } from "@x/shared/dist/rowboat-app.js";
+import { listApps } from "../../../apps/indexer.js";
 import { listImportantThreads, searchThreads } from "../../../knowledge/sync_gmail.js";
 import { listTasks as listBackgroundTasks } from "../../../background-tasks/fileops.js";
 import type { ISessions } from "../../../sessions/api.js";
@@ -27,7 +28,7 @@ export const appNavigationTools: z.infer<typeof BuiltinToolsSchema> = {
             // open-app
             appId: z.string().optional().describe("App folder slug under ~/.rowboat/apps (for open-app) — opens the app in the middle pane."),
             // open-view / read-view
-            view: z.enum(["home", "email", "meetings", "live-notes", "bg-tasks", "chat-history", "knowledge", "workspace", "code", "bases", "graph"]).optional().describe("Which view to open (open-view) or read (read-view; supported for read: email, bg-tasks, chat-history)"),
+            view: z.enum(["home", "email", "meetings", "live-notes", "bg-tasks", "chat-history", "knowledge", "workspace", "code", "bases", "graph", "apps"]).optional().describe("Which view to open (open-view) or read (read-view; supported for read: email, bg-tasks, chat-history, apps)"),
             // read-view (email)
             query: z.string().optional().describe("For read-view on email: runs a LIVE Gmail search over the user's ENTIRE mailbox (not just synced mail) via the Gmail API. Supports full Gmail search operators: from:, to:, subject:, before:/after:, has:attachment, quoted phrases, OR, etc. Omit to list the latest important inbox threads."),
             limit: z.number().int().min(1).max(50).optional().describe("For read-view: max items to return (default 15)"),
@@ -144,10 +145,33 @@ export const appNavigationTools: z.infer<typeof BuiltinToolsSchema> = {
                                     }));
                                 return { success: true, action: 'read-view', view, sessions };
                             }
+                            case 'apps': {
+                                // Installed/local Rowboat apps — the copilot uses this to
+                                // route questions to an app's data (app-read-data) and to
+                                // surface the app (open-app). Generic: apps are matched by
+                                // their own name/description, nothing app-specific here.
+                                const summaries = await listApps();
+                                const apps = await Promise.all(summaries.slice(0, limit).map(async (a) => {
+                                    let dataFiles: string[] = [];
+                                    try {
+                                        const entries = await fs.readdir(path.join(WorkDir, 'apps', a.folder, 'data'), { withFileTypes: true });
+                                        dataFiles = entries.filter((e) => e.isFile()).map((e) => e.name).slice(0, 10);
+                                    } catch { /* no data dir */ }
+                                    return {
+                                        folder: a.folder,
+                                        name: a.manifest?.name ?? a.folder,
+                                        description: a.manifest?.description ?? '',
+                                        kind: a.kind,
+                                        dataFiles,
+                                        agentSlugs: a.agentSlugs,
+                                    };
+                                }));
+                                return { success: true, action: 'read-view', view, apps };
+                            }
                             default:
                                 return {
                                     success: false,
-                                    error: `read-view supports: email, bg-tasks, chat-history. For notes/meetings/live-notes use the file-* tools (they are files under the workspace); for other views use open-view and describe what you need.`,
+                                    error: `read-view supports: email, bg-tasks, chat-history, apps. For notes/meetings/live-notes use the file-* tools (they are files under the workspace); for other views use open-view and describe what you need.`,
                                 };
                         }
                     } catch (error) {
@@ -287,7 +311,71 @@ export const appNavigationTools: z.infer<typeof BuiltinToolsSchema> = {
     // ============================================================================,
 };
 
+// Cap what a data file read returns to the model — app data can be large
+// (feeds, series); the copilot needs enough to answer, not the whole store.
+const APP_READ_DATA_MAX_CHARS = 50_000;
+
 export const appDataTools: z.infer<typeof BuiltinToolsSchema> = {
+    'app-read-data': {
+        description: "Read a Rowboat App's data file — the JSON its background agent maintains and its frontend renders. THE way to answer questions an installed app already tracks (fresh, no API calls): find the app via app-navigation read-view apps, read its data file, answer from it. Omit `file` to list the files under the app's data/.",
+        inputSchema: z.object({
+            appFolder: z.string().describe('The app folder slug under ~/.rowboat/apps.'),
+            file: z.string().optional().describe("Path relative to the app's data/ directory, e.g. \"data.json\". Omit to list available files."),
+        }),
+        execute: async ({ appFolder, file }: { appFolder: string; file?: string }) => {
+            try {
+                const dir = path.join(WorkDir, 'apps', appFolder);
+                try {
+                    RowboatAppManifestSchema.parse(JSON.parse(await fs.readFile(path.join(dir, 'rowboat-app.json'), 'utf-8')));
+                } catch {
+                    return { success: false, error: `No app "${appFolder}" (missing or invalid rowboat-app.json).` };
+                }
+                const dataRoot = path.join(dir, 'data');
+
+                if (!file) {
+                    try {
+                        const entries = await fs.readdir(dataRoot, { withFileTypes: true });
+                        const files = await Promise.all(entries.filter((e) => e.isFile()).map(async (e) => {
+                            const stat = await fs.stat(path.join(dataRoot, e.name)).catch(() => null);
+                            return { file: e.name, size: stat?.size ?? 0, mtime: stat ? new Date(stat.mtimeMs).toISOString() : '' };
+                        }));
+                        return { success: true, appFolder, files };
+                    } catch {
+                        return { success: true, appFolder, files: [] };
+                    }
+                }
+
+                // Same path confinement rules as app-set-data / the data API.
+                const relNorm = path.posix.normalize(file).replace(/^\/+/, '');
+                if (!relNorm || relNorm === '.' || relNorm.startsWith('..') || relNorm.includes('\0') || relNorm.includes('\\')) {
+                    return { success: false, error: `invalid file path: ${file}` };
+                }
+                const abs = path.resolve(dataRoot, relNorm);
+                if (abs !== dataRoot && !abs.startsWith(dataRoot + path.sep)) {
+                    return { success: false, error: `file path escapes data/: ${file}` };
+                }
+
+                let text: string;
+                try {
+                    text = await fs.readFile(abs, 'utf-8');
+                } catch {
+                    return { success: false, error: `no such data file: ${relNorm} (omit \`file\` to list what exists)` };
+                }
+                const truncated = text.length > APP_READ_DATA_MAX_CHARS;
+                if (truncated) text = text.slice(0, APP_READ_DATA_MAX_CHARS);
+                // Parsed JSON is easiest for the model to reason over; fall back
+                // to raw text for non-JSON (or truncated-mid-JSON) content.
+                if (!truncated) {
+                    try {
+                        return { success: true, appFolder, file: relNorm, data: JSON.parse(text) as unknown };
+                    } catch { /* not JSON — return as text */ }
+                }
+                return { success: true, appFolder, file: relNorm, text, ...(truncated ? { truncated: true } : {}) };
+            } catch (e) {
+                return { success: false, error: e instanceof Error ? e.message : String(e) };
+            }
+        },
+    },
     'app-set-data': {
         description: "Write a Rowboat App's data file — JSON its frontend reads via GET /_rowboat/data/<file>. Deterministic: you supply the content, code handles the path, atomicity (temp→rename), and the app's dataContracts validation. This is how a background task refreshes an app's data — the agent RETURNS the data; never hand-write files under apps/.",
         inputSchema: z.object({

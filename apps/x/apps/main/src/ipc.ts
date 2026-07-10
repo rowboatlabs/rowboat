@@ -79,6 +79,9 @@ import * as appsPublisher from '@x/core/dist/apps/publisher.js';
 
 // D18 install previews awaiting confirmation, keyed by app name.
 const appInstallPreviews = new Map<string, Awaited<ReturnType<typeof appsInstaller.previewInstall>>>();
+// Last-seen app-set fingerprint; a change invalidates the copilot
+// instructions cache (they embed the installed-apps list).
+let lastAppsFingerprint: string | null = null;
 import { consumePendingDeepLink } from './deeplink.js';
 import { qualifyAndDisconnectComposioGoogle } from '@x/core/dist/migrations/composio-google-migration.js';
 import { IAgentScheduleRepo } from '@x/core/dist/agent-schedule/repo.js';
@@ -1617,6 +1620,15 @@ export function setupIpcHandlers() {
       // Keep bundled agents materialized (idempotent; disabled by default).
       for (const app of apps) {
         if (app.agentSlugs.length) await appsAgents.syncAppAgents(app);
+      }
+      // The copilot instructions embed the installed-apps list. This handler
+      // is the one place that sees every change to the app set (installs,
+      // deletes, copilot-created folders — the renderer polls it), so refresh
+      // the instructions cache when the set actually changes.
+      const fingerprint = JSON.stringify(apps.map((a) => [a.folder, a.manifest?.name, a.manifest?.description, a.hasDist]));
+      if (fingerprint !== lastAppsFingerprint) {
+        lastAppsFingerprint = fingerprint;
+        invalidateCopilotInstructionsCache();
       }
       return {
         serverRunning: status.running,

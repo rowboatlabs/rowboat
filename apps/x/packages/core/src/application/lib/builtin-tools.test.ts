@@ -192,6 +192,7 @@ const HISTORICAL_KEY_ORDER = [
     "composio-search-tools",
     "composio-execute-tool",
     "composio-connect-toolkit",
+    "app-read-data",
     "app-set-data",
     "list-models",
     "fetch-url",

@@ -43,6 +43,7 @@ that view so the user sees it.
   any thread the search returned, including old threads outside the inbox.
 - ` + "`view: \"bg-tasks\"`" + ` → background agents: ` + "`{ name, slug, active, triggers, lastRunAt, lastRunSummary, lastRunError }`" + `.
 - ` + "`view: \"chat-history\"`" + ` → past chats: ` + "`{ sessionId, title, updatedAt, turnCount }`" + `.
+- ` + "`view: \"apps\"`" + ` → installed Rowboat apps: ` + "`{ folder, name, description, kind, dataFiles, agentSlugs }`" + `.
 - ` + "`limit`" + ` (optional, default 15).
 
 For notes, meetings, and live notes use the ` + "`file-*`" + ` tools (they are
@@ -55,8 +56,27 @@ markdown files in the workspace) and then open-note / open-item to show them.
 - ` + "`kind: \"session\"`" + ` + ` + "`sessionId`" + ` (from read-view chat-history)
 
 ### open-view — just switch the screen
-` + "`view`" + `: ` + "`home | email | meetings | live-notes | bg-tasks | chat-history | knowledge | workspace | code | bases | graph`" + `
+` + "`view`" + `: ` + "`home | email | meetings | live-notes | bg-tasks | chat-history | knowledge | workspace | code | bases | graph | apps`" + `
 Use when the user asks to "go to"/"show" a view without a question to answer.
+
+## Answering from Rowboat apps (any app — match by description)
+
+Installed Rowboat apps hold FRESH data their background agents maintain (see
+the "Installed Rowboat Apps" section of your context, or ` + "`read-view view: \"apps\"`" + `).
+When a question matches what an app tracks, the app IS the answer source —
+no external API call needed, and the user gets a visual:
+
+1. Identify the app by its name/description (context list, or ` + "`read-view apps`" + `).
+2. ` + "`app-read-data({ appFolder, file: \"data.json\" })`" + ` — omit ` + "`file`" + ` to list
+   what data files exist. Answer from this data, concisely.
+3. ` + "`app-navigation({ action: \"open-app\", appId: appFolder })`" + ` — the app opens
+   on the user's screen while you answer. Show while telling.
+
+This is GENERIC: never hardcode a mapping from topics to specific apps. A
+PR-dashboard app answers "what PRs do I have?" today; a weather app answers
+"what's the weekend look like?" the moment it's installed — same three steps.
+If the data looks stale and the app has an agent, offer to run it
+(` + "`run-background-task-agent`" + ` via the ` + "`background-task`" + ` skill).
 
 ### open-note
 Open a knowledge file in the editor. ` + "`path`" + `: full workspace-relative path
@@ -89,6 +109,12 @@ Knowledge-base table control (unchanged):
 **"Show me all active customers"**
 1. ` + "`get-base-state`" + ` to see available categories, then
 2. ` + "`update-base-view`" + ` with ` + "`filters.set: [{ category: \"relationship\", value: \"customer\" }]`" + `
+
+**"What PRs do I have?"** (an installed app tracks open PRs)
+1. The context lists an app whose description matches (e.g. ` + "`pr-dashboard`" + ` — "Open PRs on …").
+2. ` + "`app-read-data({ appFolder: \"pr-dashboard\", file: \"data.json\" })`" + `
+3. ` + "`app-navigation({ action: \"open-app\", appId: \"pr-dashboard\" })`" + ` — the dashboard opens.
+4. "Seven open — two need your review: #676 apps M3, and #675 the packaging fix."
 
 ## Notes
 - read-view/open-view/open-item change what the user is looking at — that is
