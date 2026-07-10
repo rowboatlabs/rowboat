@@ -4773,6 +4773,7 @@ function App() {
         case 'knowledge': void navigateToView({ type: 'knowledge-view' }); break
         case 'workspace': void navigateToView({ type: 'workspace' }); break
         case 'code': void navigateToView({ type: 'code' }); break
+        case 'apps': openAppsView(); break
       }
     }
 

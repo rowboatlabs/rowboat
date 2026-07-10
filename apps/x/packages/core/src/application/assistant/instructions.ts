@@ -10,8 +10,42 @@ import { composioAccountsRepo } from "../../composio/repo.js";
 import { isConfigured as isComposioConfigured } from "../../composio/client.js";
 import { CURATED_TOOLKITS } from "@x/shared/dist/composio.js";
 import { knowledgeSourcesRepo } from "../../knowledge/sources/repo.js";
+import { listApps } from "../../apps/indexer.js";
 
 const runtimeContextPrompt = getRuntimeContextPrompt(getRuntimeContext());
+
+/**
+ * Dynamic section listing the user's Rowboat apps, so questions an app
+ * already tracks route to it AMBIENTLY (no discovery call). Deliberately
+ * generic — apps are matched by their own name/description; nothing here is
+ * specific to any app. Cache staleness is handled by the apps:list handler
+ * invalidating the instructions cache when the app set changes.
+ */
+async function getInstalledAppsPrompt(): Promise<string> {
+    let apps;
+    try {
+        apps = await listApps();
+    } catch {
+        return '';
+    }
+    const usable = apps.filter((a) => a.status === 'ok' && a.hasDist);
+    if (usable.length === 0) return '';
+    const lines = usable.map((a) => {
+        const name = a.manifest?.name ?? a.folder;
+        const desc = (a.manifest?.description ?? '').slice(0, 160);
+        const agents = a.agentSlugs.length ? ` (self-updating via ${a.agentSlugs.length} background agent${a.agentSlugs.length > 1 ? 's' : ''})` : '';
+        return `- \`${a.folder}\` — **${name}**: ${desc}${agents}`;
+    });
+    return `
+## Installed Rowboat Apps
+
+The user has these Rowboat apps (mini web apps in the Apps view, each holding fresh data its background agent maintains):
+
+${lines.join('\n')}
+
+When a question matches what an app tracks, PREFER the app over external calls: load the \`app-navigation\` skill, read the app's data with \`app-read-data\` (fresh, instant), answer from it, and surface the app on screen with \`app-navigation\` \`open-app\` — show while telling. This applies to ANY app above; match by its name/description.
+`;
+}
 
 /**
  * Generate dynamic instructions section for Composio integrations.
@@ -312,7 +346,7 @@ ${slackToolsLine}${composioToolsLine}
 Every other builtin is skill-scoped — load the owning skill from the catalog to attach it:
 - Write-side file tools (\`file-writeText\`, \`file-editText\`, \`file-mkdir\`, \`file-rename\`, \`file-copy\`, \`file-remove\`, \`file-stat\`) via \`organize-files\`, \`doc-collab\`, and related skills
 - MCP server management (\`addMcpServer\`, \`listMcpServers\`, \`listMcpTools\`, \`executeMcpTool\`) via \`mcp-integration\`
-- \`app-navigation\` / \`app-set-data\` via the \`app-navigation\` skill; \`browser-control\` via the \`browser-control\` skill; notifications via \`notify-user\`; background tasks via \`background-task\`; everything else via the \`builtin-tools\` escape hatch
+- \`app-navigation\` / \`app-read-data\` / \`app-set-data\` via the \`app-navigation\` skill; \`browser-control\` via the \`browser-control\` skill; notifications via \`notify-user\`; background tasks via \`background-task\`; everything else via the \`builtin-tools\` escape hatch
 
 **Prefer these tools whenever possible.** For file operations anywhere on the machine, use file tools instead of \`executeCommand\`.
 
@@ -404,8 +438,9 @@ export async function buildCopilotInstructions(): Promise<string> {
     const catalog = await buildAvailableSkillCatalog();
     const baseInstructions = buildStaticInstructions(composioEnabled, catalog, codeModeEnabled, slackConnected, slackChannelsHint, googleConnected);
     const composioPrompt = await getComposioToolsPrompt(slackConnected, googleConnected);
-    cachedInstructions = composioPrompt
-        ? baseInstructions + '\n' + composioPrompt
-        : baseInstructions;
+    const appsPrompt = await getInstalledAppsPrompt();
+    cachedInstructions = baseInstructions
+        + (composioPrompt ? '\n' + composioPrompt : '')
+        + (appsPrompt ? '\n' + appsPrompt : '');
     return cachedInstructions;
 }
