@@ -121,11 +121,32 @@ export class RealModelRegistry implements IModelRegistry {
         };
 
         const parts: Array<z.infer<typeof AssistantContentPart>> = [];
+        // Per-block accumulation: providers attach round-trip metadata to
+        // individual content blocks (Anthropic thinking signatures arrive on
+        // reasoning-delta, redacted thinking on reasoning-start; Gemini
+        // thoughtSignatures on text-end / reasoning-end / tool-call; OpenAI
+        // encrypted reasoning on reasoning events). Each -start opens a new
+        // part so distinct blocks keep distinct signatures, and metadata from
+        // every event of a block is merged onto that part's providerOptions —
+        // which is exactly what the AI SDK providers read back when the
+        // message is echoed in later steps.
+        let currentText: TextContentPart | null = null;
+        let currentReasoning: ReasoningContentPart | null = null;
         let textBuffer = "";
         let reasoningBuffer = "";
         let finishReason = "unknown";
         let usage: z.infer<typeof TurnUsage> = {};
         let providerMetadata: JsonValue | undefined;
+
+        const tagPart = (
+            part: TextContentPart | ReasoningContentPart,
+            metadata: unknown,
+        ) => {
+            const merged = mergeProviderOptions(part.providerOptions, metadata);
+            if (merged !== undefined) {
+                part.providerOptions = merged;
+            }
+        };
 
         // Anthropic-family models get cache_control breakpoints; everything
         // else passes through byte-identical (transport-only, not persisted).
@@ -157,56 +178,74 @@ export class RealModelRegistry implements IModelRegistry {
                 error?: unknown;
             };
             switch (event.type) {
-                case "text-start":
+                case "text-start": {
                     textBuffer = "";
+                    currentText = { type: "text", text: "" };
+                    tagPart(currentText, event.providerMetadata);
+                    parts.push(currentText);
                     yield { type: "step_event", event: { type: "text_start" } };
                     break;
+                }
                 case "text-delta": {
                     const delta = event.text ?? "";
                     textBuffer += delta;
-                    const last = parts[parts.length - 1];
-                    if (last?.type === "text") {
-                        last.text += delta;
-                    } else {
-                        parts.push({ type: "text", text: delta });
+                    if (currentText === null) {
+                        currentText = { type: "text", text: "" };
+                        parts.push(currentText);
                     }
+                    currentText.text += delta;
+                    tagPart(currentText, event.providerMetadata);
                     yield { type: "text_delta", delta };
                     break;
                 }
                 case "text-end":
+                    if (currentText !== null) {
+                        tagPart(currentText, event.providerMetadata);
+                        currentText = null;
+                    }
                     yield {
                         type: "step_event",
                         event: { type: "text_end", text: textBuffer },
                     };
                     break;
-                case "reasoning-start":
+                case "reasoning-start": {
                     reasoningBuffer = "";
+                    currentReasoning = { type: "reasoning", text: "" };
+                    tagPart(currentReasoning, event.providerMetadata);
+                    parts.push(currentReasoning);
                     yield { type: "step_event", event: { type: "reasoning_start" } };
                     break;
+                }
                 case "reasoning-delta": {
                     const delta = event.text ?? "";
                     reasoningBuffer += delta;
-                    const last = parts[parts.length - 1];
-                    if (last?.type === "reasoning") {
-                        last.text += delta;
-                    } else {
-                        parts.push({ type: "reasoning", text: delta });
+                    if (currentReasoning === null) {
+                        currentReasoning = { type: "reasoning", text: "" };
+                        parts.push(currentReasoning);
                     }
+                    currentReasoning.text += delta;
+                    tagPart(currentReasoning, event.providerMetadata);
                     yield { type: "reasoning_delta", delta };
                     break;
                 }
                 case "reasoning-end":
+                    if (currentReasoning !== null) {
+                        tagPart(currentReasoning, event.providerMetadata);
+                        currentReasoning = null;
+                    }
                     yield {
                         type: "step_event",
                         event: { type: "reasoning_end", text: reasoningBuffer },
                     };
                     break;
                 case "tool-call": {
+                    const partOptions = mergeProviderOptions(undefined, event.providerMetadata);
                     const toolCall = {
                         type: "tool-call" as const,
                         toolCallId: String(event.toolCallId),
                         toolName: String(event.toolName),
                         arguments: event.input,
+                        ...(partOptions === undefined ? {} : { providerOptions: partOptions }),
                     };
                     parts.push(toolCall);
                     yield { type: "step_event", event: { type: "tool_call", toolCall } };
@@ -238,17 +277,56 @@ export class RealModelRegistry implements IModelRegistry {
             }
         }
 
+        // Blocks that ended up with no text and no round-trip metadata carry
+        // no information; dropping them matches the pre-block-tracking
+        // behavior (parts used to be created lazily on first delta).
+        const content = parts.filter(
+            (part) =>
+                part.type === "tool-call"
+                || part.text !== ""
+                || part.providerOptions !== undefined,
+        );
+
         yield {
             type: "completed",
             message: {
                 role: "assistant",
-                content: parts.length > 0 ? parts : "",
+                content: content.length > 0 ? content : "",
             },
             finishReason,
             usage,
             ...(providerMetadata === undefined ? {} : { providerMetadata }),
         };
     }
+}
+
+type TextContentPart = Extract<z.infer<typeof AssistantContentPart>, { type: "text" }>;
+type ReasoningContentPart = Extract<z.infer<typeof AssistantContentPart>, { type: "reasoning" }>;
+type PartProviderOptions = NonNullable<TextContentPart["providerOptions"]>;
+
+// Round-trip metadata is relayed opaquely: whatever JSON-safe, per-provider
+// record a stream event carries is merged onto the part (later events win
+// per field within a provider's namespace). The bridge never interprets the
+// contents — Anthropic signatures, Gemini thoughtSignatures, and OpenAI
+// encrypted reasoning all ride the same channel, and each provider reads
+// back only its own keys.
+function mergeProviderOptions(
+    base: PartProviderOptions | undefined,
+    incoming: unknown,
+): PartProviderOptions | undefined {
+    const sanitized = toJsonValue(incoming);
+    if (sanitized === undefined || sanitized === null || typeof sanitized !== "object" || Array.isArray(sanitized)) {
+        return base;
+    }
+    let merged: PartProviderOptions | undefined;
+    for (const [provider, fields] of Object.entries(sanitized)) {
+        if (fields === null || typeof fields !== "object" || Array.isArray(fields)) {
+            continue;
+        }
+        merged = merged ?? { ...(base ?? {}) };
+        merged[provider] = { ...(merged[provider] ?? {}), ...fields };
+    }
+    return merged ?? base;
 }
 
 function mapUsage(

@@ -138,6 +138,166 @@ describe("RealModelRegistry", () => {
         ]);
     });
 
+    it("captures block-level provider metadata opaquely onto parts (Anthropic-style signatures)", async () => {
+        // Anthropic delivers the thinking signature on a reasoning-delta with
+        // an EMPTY text delta, and redacted thinking as metadata on
+        // reasoning-start. Both must land on the right reasoning part, and
+        // distinct blocks must stay distinct parts.
+        const registry = makeRegistry(
+            [
+                { type: "reasoning-start" },
+                { type: "reasoning-delta", text: "let me think" },
+                { type: "reasoning-delta", text: "", providerMetadata: { anthropic: { signature: "sig-1" } } },
+                { type: "reasoning-end" },
+                {
+                    type: "reasoning-start",
+                    providerMetadata: { anthropic: { redactedData: "opaque-blob" } },
+                },
+                { type: "reasoning-end" },
+                { type: "text-start" },
+                { type: "text-delta", text: "answer" },
+                { type: "text-end" },
+                { type: "finish-step", finishReason: "stop", usage: {} },
+            ],
+            [],
+        );
+        const events = await collect(registry, request());
+        const completed = events[events.length - 1];
+        expect(
+            completed.type === "completed" ? completed.message.content : undefined,
+        ).toEqual([
+            {
+                type: "reasoning",
+                text: "let me think",
+                providerOptions: { anthropic: { signature: "sig-1" } },
+            },
+            {
+                type: "reasoning",
+                text: "",
+                providerOptions: { anthropic: { redactedData: "opaque-blob" } },
+            },
+            { type: "text", text: "answer" },
+        ]);
+    });
+
+    it("captures metadata on text and tool-call parts (Gemini-style thoughtSignatures)", async () => {
+        const registry = makeRegistry(
+            [
+                { type: "text-start" },
+                { type: "text-delta", text: "calling a tool" },
+                { type: "text-end", providerMetadata: { google: { thoughtSignature: "ts-text" } } },
+                {
+                    type: "tool-call",
+                    toolCallId: "tc1",
+                    toolName: "echo",
+                    input: { x: 1 },
+                    providerMetadata: { google: { thoughtSignature: "ts-call" } },
+                },
+                { type: "finish-step", finishReason: "tool-calls", usage: {} },
+            ],
+            [],
+        );
+        const events = await collect(registry, request());
+        const completed = events[events.length - 1];
+        expect(
+            completed.type === "completed" ? completed.message.content : undefined,
+        ).toEqual([
+            {
+                type: "text",
+                text: "calling a tool",
+                providerOptions: { google: { thoughtSignature: "ts-text" } },
+            },
+            {
+                type: "tool-call",
+                toolCallId: "tc1",
+                toolName: "echo",
+                arguments: { x: 1 },
+                providerOptions: { google: { thoughtSignature: "ts-call" } },
+            },
+        ]);
+    });
+
+    it("merges metadata from multiple events of one block, later fields winning", async () => {
+        const registry = makeRegistry(
+            [
+                { type: "reasoning-start", providerMetadata: { openai: { itemId: "r-1" } } },
+                { type: "reasoning-delta", text: "…" },
+                {
+                    type: "reasoning-end",
+                    providerMetadata: { openai: { itemId: "r-1", reasoningEncryptedContent: "enc" } },
+                },
+                { type: "finish-step", finishReason: "stop", usage: {} },
+            ],
+            [],
+        );
+        const events = await collect(registry, request());
+        const completed = events[events.length - 1];
+        expect(
+            completed.type === "completed" ? completed.message.content : undefined,
+        ).toEqual([
+            {
+                type: "reasoning",
+                text: "…",
+                providerOptions: { openai: { itemId: "r-1", reasoningEncryptedContent: "enc" } },
+            },
+        ]);
+    });
+
+    it("drops empty blocks that carry no metadata", async () => {
+        const registry = makeRegistry(
+            [
+                { type: "reasoning-start" },
+                { type: "reasoning-end" },
+                { type: "text-start" },
+                { type: "text-delta", text: "hi" },
+                { type: "text-end" },
+                { type: "finish-step", finishReason: "stop", usage: {} },
+            ],
+            [],
+        );
+        const events = await collect(registry, request());
+        const completed = events[events.length - 1];
+        expect(
+            completed.type === "completed" ? completed.message.content : undefined,
+        ).toEqual([{ type: "text", text: "hi" }]);
+    });
+
+    it("round-trips part-level providerOptions through encodeMessages", async () => {
+        const registry = makeRegistry([], []);
+        const model = await registry.resolve({ provider: "openai", model: "gpt-test" });
+        const encoded = model.encodeMessages([
+            {
+                role: "assistant",
+                content: [
+                    {
+                        type: "reasoning",
+                        text: "thought",
+                        providerOptions: { anthropic: { signature: "sig-1" } },
+                    },
+                    {
+                        type: "tool-call",
+                        toolCallId: "tc1",
+                        toolName: "echo",
+                        arguments: { x: 1 },
+                        providerOptions: { google: { thoughtSignature: "ts-call" } },
+                    },
+                ],
+            },
+        ] as never) as Array<{ role: string; content: Array<Record<string, unknown>> }>;
+
+        expect(encoded[0].content[0]).toMatchObject({
+            type: "reasoning",
+            text: "thought",
+            providerOptions: { anthropic: { signature: "sig-1" } },
+        });
+        expect(encoded[0].content[1]).toMatchObject({
+            type: "tool-call",
+            toolCallId: "tc1",
+            input: { x: 1 },
+            providerOptions: { google: { thoughtSignature: "ts-call" } },
+        });
+    });
+
     it("throws on provider error parts (a model failure, not a completion)", async () => {
         const registry = makeRegistry(
             [{ type: "error", error: new Error("rate limited") }],
