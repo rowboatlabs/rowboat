@@ -7,6 +7,7 @@ import container from "../../../di/container.js";
 import type { ToolContext } from "../exec-tool.js";
 import { getCurrentUseCase } from "../../../analytics/use_case.js";
 import type { INotificationService } from "../../../application/notification/service.js";
+import type { ITurnRepo } from "../../turns/repo.js";
 import { notifyIfEnabled } from "../../../application/notification/notifier.js";
 import { BuiltinToolsSchema } from "../types.js";
 
@@ -42,14 +43,19 @@ export const notificationTools: z.infer<typeof BuiltinToolsSchema> = {
                     return { success: false, error: 'Notifications are not supported on this system' };
                 }
                 let uc = getCurrentUseCase()?.useCase;
-                // ALS doesn't reliably propagate across the run's async generator,
-                // so when the in-context use-case is missing, fall back to the
-                // persisted use case on the run record via ctx.runId.
+                // The ALS context can be missing when the turn is advanced
+                // outside the chain that started it (crash recovery, resume
+                // paths). The durable signal is the agent id on the turn
+                // record — only the background-task runner starts
+                // 'background-task-agent' turns. ctx.runId is the turn id.
                 if (!uc && ctx?.runId) {
                     try {
-                        const { fetchRun } = await import("../../legacy/runs.js");
-                        const run = await fetchRun(ctx.runId);
-                        uc = run.useCase;
+                        const turnRepo = container.resolve<ITurnRepo>('turnRepo');
+                        const [created] = await turnRepo.read(ctx.runId);
+                        if (created?.type === 'turn_created'
+                            && created.agent.resolved.agentId === 'background-task-agent') {
+                            uc = 'background_task_agent';
+                        }
                     } catch {
                         // best effort — fall through to the default branch
                     }

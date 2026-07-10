@@ -20,16 +20,6 @@ export class RunFailedError extends Error {
     }
 }
 
-export function getErrorDetails(error: unknown): string {
-    if (error instanceof RunFailedError) {
-        return error.errors.join("\n\n");
-    }
-    if (error instanceof Error) {
-        return error.message;
-    }
-    return String(error);
-}
-
 /**
  * Extract the assistant's final text response from a run's log.
  * @param runId

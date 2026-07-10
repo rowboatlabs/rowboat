@@ -10,7 +10,7 @@ import container from "../../../di/container.js";
 import { BackgroundTaskSchema, TriggersSchema } from "@x/shared/dist/background-task.js";
 import * as gitService from "../../../code-mode/git/service.js";
 import type { ICodeProjectsRepo } from "../../../code-mode/projects/repo.js";
-import { expandHome } from "../paths.js";
+import { expandHomePath } from "../../../filesystem/files.js";
 
 // Inputs for the bg-task builtin tools. Reuse the canonical schema field
 // descriptions; only `triggers` gets a tighter contextual override (the
@@ -45,7 +45,7 @@ export const PatchBackgroundTaskInput = BackgroundTaskSchema.pick({
 export async function resolveCodeProject(dirPath: string): Promise<
     { ok: true; projectId: string; path: string; warning?: string } | { ok: false; error: string }
 > {
-    const abs = path.resolve(expandHome(dirPath));
+    const abs = path.resolve(expandHomePath(dirPath));
     const projectsRepo = container.resolve<ICodeProjectsRepo>('codeProjectsRepo');
     let project: Awaited<ReturnType<ICodeProjectsRepo['add']>>;
     try {

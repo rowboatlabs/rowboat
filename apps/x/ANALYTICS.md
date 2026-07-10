@@ -41,9 +41,9 @@ Every `llm_usage` emit point in the codebase:
 
 | `use_case` | `sub_use_case` | `agent_name`? | Where | File:line |
 |---|---|---|---|---|
-| `copilot_chat` | (none) | yes | User chat in renderer (default for any `createRun` without `useCase`) | `packages/core/src/agents/runtime.ts:1313` (finish-step in `streamLlm`) |
+| `copilot_chat` | (none) | yes | User chat in renderer (turn runtime; the ALS default when no caller set a use case) | `packages/core/src/runtime/turns/bridges/real-usage-reporter.ts` (`reportModelUsage`); legacy runs (code-mode carve-out) still emit from `packages/core/src/runtime/legacy/engine.ts` (`streamLlm` finish-step) |
 | `copilot_chat` | `scheduled` | yes | Background scheduled agent runner | `packages/core/src/agent-schedule/runner.ts:167` |
-| `copilot_chat` | `file_parse` | inherits | `parseFile` builtin tool inside any chat | `packages/core/src/application/lib/builtin-tools.ts:770` |
+| `copilot_chat` | `file_parse` | inherits | `parseFile` builtin tool inside any chat | `packages/core/src/runtime/tools/domains/parsing.ts:179` |
 | `live_note_agent` | `routing` | no | Pass 1 routing classifier (`generateObject`) | `packages/core/src/knowledge/live-note/routing.ts:93` |
 | `live_note_agent` | `manual` | yes | Pass 2 agent run — user clicked Run / called the `run-live-note-agent` tool | `packages/core/src/knowledge/live-note/runner.ts:140` (createRun, `subUseCase: trigger`) |
 | `live_note_agent` | `cron` | yes | Pass 2 agent run — cron expression matched | same call site |

@@ -28,6 +28,10 @@ import type {
     TurnExternalInput,
     TurnOutcome,
 } from "../turns/api.js";
+// traits.js, not registry.js: the registry's builders transitively reach
+// di/container, which imports this module — a cycle. The traits leaf exists
+// exactly so upstream layers can gate on traits.
+import { carriesSkillsForward } from "../assembly/traits.js";
 import type { IClock } from "../turns/clock.js";
 import {
     type ISessions,
@@ -461,7 +465,15 @@ function withActiveSkills(
     agent: SendMessageConfig["agent"],
     activeSkills: string[],
 ): SendMessageConfig["agent"] {
-    if (isInlineAgentRequest(agent) || activeSkills.length === 0) {
+    // Mirrors the resolver's carriesSkillsForward gate (real-agent-resolver):
+    // the resolver would ignore activeSkills for a non-trait agent anyway,
+    // but injecting them here would still persist an ever-growing list into
+    // every turn's requested composition.
+    if (
+        isInlineAgentRequest(agent) ||
+        activeSkills.length === 0 ||
+        !carriesSkillsForward(agent.agentId)
+    ) {
         return agent;
     }
     const composition = agent.overrides?.composition;

@@ -14,24 +14,20 @@ import { lazyResolve } from "../../di/lazy-resolve.js";
 import type { IAgentsRepo } from "./repo.js";
 
 // The registry of built-in agents: one table instead of the historical
-// if (id === ...) ladder. An entry owns its builder and its traits; traits
-// replace stringly-typed id comparisons ("copilot" || "rowboatx") scattered
-// across the assembly layer. User-defined agents are the fallthrough,
-// fetched from the agents repo.
+// if (id === ...) ladder. An entry owns its builder. Traits (which replace
+// stringly-typed id comparisons scattered across the assembly layer) live in
+// traits.ts — a leaf module, because this file's builders transitively reach
+// di/container and upstream trait readers would cycle. Re-exported here so
+// assembly-level consumers keep one import.
 
-export interface AgentTraits {
-    // Receives workspace context — agent notes and the user work directory —
-    // composed into its system prompt.
-    workspaceContext?: boolean;
-    // Session-loaded skills (activeSkills) re-attach their tools on later
-    // turns. Distinct from workspaceContext: a trait per concern, so neither
-    // silently inherits the other's meaning.
-    skillCarryForward?: boolean;
-}
+export {
+    carriesSkillsForward,
+    hasWorkspaceContext,
+    type AgentTraits,
+} from "./traits.js";
 
 interface BuiltinAgentDefinition {
     build: () => Promise<z.infer<typeof Agent>> | z.infer<typeof Agent>;
-    traits?: AgentTraits;
 }
 
 // Prompt-file agents: instructions ship as a raw string whose optional YAML
@@ -55,7 +51,6 @@ function promptFileAgent(id: string, getRaw: () => string): BuiltinAgentDefiniti
 // definition object.
 const COPILOT: BuiltinAgentDefinition = {
     build: buildCopilotAgent,
-    traits: { workspaceContext: true, skillCarryForward: true },
 };
 
 const builtinAgents: Record<string, BuiltinAgentDefinition> = {
@@ -73,26 +68,6 @@ const builtinAgents: Record<string, BuiltinAgentDefinition> = {
 
 export function builtinAgentIds(): string[] {
     return Object.keys(builtinAgents);
-}
-
-// Trait lookups for assembly decisions. Unknown/user agents have no traits.
-function hasTrait(
-    agentId: string | null | undefined,
-    trait: keyof AgentTraits,
-): boolean {
-    return (
-        agentId != null &&
-        Object.hasOwn(builtinAgents, agentId) &&
-        builtinAgents[agentId].traits?.[trait] === true
-    );
-}
-
-export function hasWorkspaceContext(agentId: string | null | undefined): boolean {
-    return hasTrait(agentId, "workspaceContext");
-}
-
-export function carriesSkillsForward(agentId: string | null | undefined): boolean {
-    return hasTrait(agentId, "skillCarryForward");
 }
 
 export async function loadAgent(id: string): Promise<z.infer<typeof Agent>> {

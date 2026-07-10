@@ -12,7 +12,7 @@ import { ICodeModeConfigRepo } from "../../../code-mode/repo.js";
 import type { ApprovalPolicy, CodeRunEvent as CodeRunEventType } from "@x/shared/dist/code-mode.js";
 import type { CodeRunFeed } from "../../../code-mode/feed.js";
 import type { ToolContext } from "../exec-tool.js";
-import { expandHome } from "../paths.js";
+import { expandHomePath } from "../../../filesystem/files.js";
 import { BuiltinToolsSchema } from "../types.js";
 
 
@@ -61,7 +61,7 @@ export const codeAgentRunTools: z.infer<typeof BuiltinToolsSchema> = {
             // cwd argument over the session's. Expand `~` and resolve to an absolute path:
             // the engine is spawned with this as the child's cwd, and `child_process.spawn`
             // does NO shell tilde expansion.
-            const effectiveCwd = path.resolve(expandHome(ctx.codeCwd ?? cwd));
+            const effectiveCwd = path.resolve(expandHomePath(ctx.codeCwd ?? cwd));
             // Fail loudly if the directory is missing. Otherwise the spawn below fails with
             // Node's misleading "spawn <command> ENOENT" (it blames the executable, not the
             // bad cwd), which reads as "the coding engine isn't installed" — see the enriched
