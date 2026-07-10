@@ -85,6 +85,8 @@ type ProviderSummary = {
     id: string;
     name?: string;
     release_date?: string;
+    // Supports reasoning/extended thinking per models.dev; absent = unknown.
+    reasoning?: boolean;
   }>;
 };
 
@@ -195,10 +197,11 @@ function normalizeModels(models: Record<string, z.infer<typeof ModelsDevModel>>)
       name: model.name,
       release_date: model.release_date,
       tool_call: model.tool_call,
+      reasoning: model.reasoning,
       status: model.status,
     }))
     .filter((model) => isStableModel(model) && supportsToolCall(model))
-    .map(({ id, name, release_date }) => ({ id, name, release_date }));
+    .map(({ id, name, release_date, reasoning }) => ({ id, name, release_date, reasoning }));
 
   list.sort((a, b) => {
     const aDate = a.release_date ? Date.parse(a.release_date) : 0;
@@ -266,6 +269,44 @@ export async function isReasoningModel(
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Annotate gateway-style "vendor/model" ids with the models.dev reasoning
+ * flag. Reads the cache once for the whole batch; ids whose vendor or model
+ * is unknown keep `reasoning` absent (= unknown). Cache-only, like
+ * isReasoningModel.
+ */
+export async function annotateReasoningFlags<T extends { id: string }>(
+  models: T[],
+): Promise<Array<T & { reasoning?: boolean }>> {
+  let catalog: z.infer<typeof ModelsDevResponse> | null = null;
+  try {
+    const cached = await readCache();
+    if (cached) {
+      const parsed = ModelsDevResponse.safeParse(cached.data);
+      if (parsed.success) catalog = parsed.data;
+    }
+  } catch {
+    catalog = null;
+  }
+  if (!catalog) return models;
+
+  const flags = new Map<string, boolean>();
+  for (const vendor of ["openai", "anthropic", "google"] as const) {
+    const provider = pickProvider(catalog, vendor);
+    if (!provider) continue;
+    for (const [key, model] of Object.entries(provider.models)) {
+      if (typeof model.reasoning === "boolean") {
+        flags.set(`${vendor}/${model.id ?? key}`, model.reasoning);
+      }
+    }
+  }
+
+  return models.map((model) => {
+    const reasoning = flags.get(model.id);
+    return reasoning === undefined ? model : { ...model, reasoning };
+  });
 }
 
 export async function getChatModelIds(

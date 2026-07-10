@@ -586,6 +586,9 @@ const ipcSchemas = {
           id: z.string(),
           name: z.string().optional(),
           release_date: z.string().optional(),
+          // models.dev "supports reasoning/extended thinking" flag; absent =
+          // unknown. Gates the composer's reasoning-effort control.
+          reasoning: z.boolean().optional(),
         })),
       })),
       lastUpdated: z.string().optional(),
