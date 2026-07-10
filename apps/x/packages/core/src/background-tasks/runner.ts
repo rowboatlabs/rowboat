@@ -128,8 +128,8 @@ export async function runBackgroundTask(
         let codeProject: { id: string; path: string; name: string } | undefined;
         if (task.projectId) {
             try {
-                const { default: container } = await import('../di/container.js');
-                const projectsRepo = container.resolve<import('../code-mode/projects/repo.js').ICodeProjectsRepo>('codeProjectsRepo');
+                const { lazyResolve } = await import('../di/lazy-resolve.js');
+                const projectsRepo = await lazyResolve<import('../code-mode/projects/repo.js').ICodeProjectsRepo>('codeProjectsRepo');
                 const project = await projectsRepo.get(task.projectId);
                 if (project) codeProject = { id: project.id, path: project.path, name: project.name };
             } catch (err) {
