@@ -3,7 +3,10 @@ import {
     AGENT_NOTES_CAPABILITY,
     WORK_DIRECTORY_CAPABILITY,
 } from "../application/assistant/capabilities/workspace.js";
-import type { CapabilityContext } from "../application/assistant/capabilities/types.js";
+import type {
+    CapabilityContext,
+    ModeFlags,
+} from "../application/assistant/capabilities/types.js";
 
 // Everything that composes into the system prompt, in composition order.
 const PROMPT_CAPABILITIES = [
@@ -33,50 +36,31 @@ If Middle pane state is note, the supplied path and content are available so you
 If Middle pane state is browser, only the URL and page title are supplied; the page content itself is NOT included. If you need the page content to answer, use the browser tools available to you to read the page. The user may or may not be talking about this page. Only reference or act on this page when the user's message clearly relates to it, such as "this page", "this article", "what I'm looking at", "this site", or "summarize this". For unrelated questions, ignore this page entirely and answer normally. Do not mention that you can see the browser unless it is relevant to the answer.`;
 
 
-export interface ComposeSystemInstructionsInput {
+// The mode flags come straight from the shared ModeFlags shape (all
+// required — callers normalize via ModeFlags.parse or pass explicit
+// values), so a mode added to the schema is a compile error at every call
+// site until it is threaded through, never a silently-absent prompt block.
+export type ComposeSystemInstructionsInput = {
     instructions: string;
     agentNotesContext: string | null;
     userWorkDir: string | null;
-    voiceInput: boolean;
-    voiceOutput: 'summary' | 'full' | null;
-    searchEnabled: boolean;
-    codeMode: 'claude' | 'codex' | null;
-    codeCwd: string | null;
-    // Optional so legacy callers (old streamAgent path) are unaffected.
-    videoMode?: boolean;
-    coachMode?: boolean;
-}
+} & ModeFlags;
 
-// System-prompt assembly, extracted verbatim from streamAgent so the new turn
-// runtime's agent resolver composes byte-identical prompts. Pure: callers
-// load agent notes / work dir themselves.
+// System-prompt assembly: base instructions + hidden-user-context + the
+// capability fragments. Pure: callers load agent notes / work dir
+// themselves.
 export function composeSystemInstructions({
     instructions,
     agentNotesContext,
     userWorkDir,
-    voiceInput,
-    voiceOutput,
-    searchEnabled,
-    codeMode,
-    codeCwd,
-    videoMode,
-    coachMode,
+    ...modeFlags
 }: ComposeSystemInstructionsInput): string {
     let composed = `${instructions}\n\n${USER_CONTEXT_SYSTEM_INSTRUCTIONS}`;
     // Capabilities compose in PROMPT_CAPABILITIES order — a fixed total
     // order, so identical inputs yield identical bytes. The fragment text
-    // lives with the capability records.
-    const ctx: CapabilityContext = {
-        agentNotesContext,
-        userWorkDir,
-        voiceInput,
-        voiceOutput,
-        searchEnabled,
-        codeMode,
-        codeCwd,
-        videoMode: videoMode ?? false,
-        coachMode: coachMode ?? false,
-    };
+    // lives with the capability records; the rest-spread means new schema
+    // keys flow through without a hand-maintained copy list.
+    const ctx: CapabilityContext = { agentNotesContext, userWorkDir, ...modeFlags };
     for (const capability of PROMPT_CAPABILITIES) {
         const fragment = capability.promptFragment(ctx);
         if (fragment) {

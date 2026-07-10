@@ -23,25 +23,38 @@
 // injecting into every turn's system prompt would be a standing
 // prompt-injection channel.
 
+import { z } from "zod";
+
 export type CapabilityActivation = "model" | "app" | "always";
 
-// Inputs an eager fragment may read. All fields mirror persisted
-// RequestedAgent.overrides.composition values, resolved before composition —
-// a fragment must be a pure function of this context so composed prompts
-// stay byte-identical for identical inputs (provider prefix caching and
-// agent-snapshot inheritance both depend on it).
-export interface CapabilityContext {
+// THE single source of truth for the app-toggled mode flags. Every key is a
+// persisted RequestedAgent.overrides.composition value; defaults make the
+// parsed output fully concrete, so the wire shape (all-optional, what turn
+// files carry), the resolver's parse result, and the composition context are
+// one declaration. Adding a mode = one key here + one record in modes.ts;
+// forgetting anything else is a compile error, not a silently-absent prompt
+// block. Every key alters system-prompt bytes, so prompt-affecting inputs
+// must stay session-sticky (prefix caching).
+export const ModeFlags = z.object({
+    voiceInput: z.boolean().default(false),
+    voiceOutput: z.enum(["summary", "full"]).nullable().default(null),
+    searchEnabled: z.boolean().default(false),
+    codeMode: z.enum(["claude", "codex"]).nullable().default(null),
+    codeCwd: z.string().nullable().default(null),
+    videoMode: z.boolean().default(false),
+    coachMode: z.boolean().default(false),
+});
+export type ModeFlags = z.infer<typeof ModeFlags>;
+
+// Inputs an eager fragment may read: the mode flags plus resolved workspace
+// context. A fragment must be a pure function of this context so composed
+// prompts stay byte-identical for identical inputs (provider prefix caching
+// and agent-snapshot inheritance both depend on it).
+export interface CapabilityContext extends ModeFlags {
     // Workspace context (workspaceContext trait agents only; the resolver
     // loads these and leaves them null for everyone else).
     agentNotesContext: string | null;
     userWorkDir: string | null;
-    voiceInput: boolean;
-    voiceOutput: "summary" | "full" | null;
-    searchEnabled: boolean;
-    codeMode: "claude" | "codex" | null;
-    codeCwd: string | null;
-    videoMode: boolean;
-    coachMode: boolean;
 }
 
 // Model-activated (a "skill"): advertised in the loadSkill catalog, loaded

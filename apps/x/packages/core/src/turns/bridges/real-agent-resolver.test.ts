@@ -289,3 +289,43 @@ describe("active skills (skill-scoped tools)", () => {
         expect(resolved.tools).toEqual([]);
     });
 });
+
+describe("historical composition compatibility", () => {
+    // Persisted RequestedAgent.overrides.composition values are replayed
+    // from turn files; the ModeFlags-derived schema must keep accepting
+    // every historical shape byte-for-byte.
+    it("composes identically for sparse, null-heavy, and unknown-key compositions", async () => {
+        const resolver = makeResolver(makeAgent());
+        const sparse = await resolver.resolve({
+            agentId: "copilot",
+            overrides: { composition: { voiceInput: true } },
+        });
+        const explicit = await resolver.resolve({
+            agentId: "copilot",
+            overrides: {
+                composition: {
+                    voiceInput: true,
+                    voiceOutput: null,
+                    searchEnabled: false,
+                    codeMode: null,
+                    codeCwd: null,
+                    videoMode: false,
+                    coachMode: false,
+                    workDirId: null,
+                    // Unknown keys have always been ignored.
+                    futureUnknownKey: "ignored",
+                },
+            },
+        });
+        expect(sparse.systemPrompt).toBe(explicit.systemPrompt);
+        expect(sparse.systemPrompt).toContain("# Voice Input");
+
+        // Garbage compositions fall back to all-defaults, not a throw.
+        const garbage = await resolver.resolve({
+            agentId: "copilot",
+            overrides: { composition: { voiceInput: "yes" } },
+        });
+        const none = await resolver.resolve({ agentId: "copilot" });
+        expect(garbage.systemPrompt).toBe(none.systemPrompt);
+    });
+});

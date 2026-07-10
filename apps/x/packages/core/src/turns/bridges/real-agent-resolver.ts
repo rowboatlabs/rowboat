@@ -14,6 +14,7 @@ import {
 import { hasWorkspaceContext, loadAgent } from "../../agents/registry.js";
 import { BuiltinTools } from "../../application/lib/builtin-tools.js";
 import { skillToolNames } from "../../application/assistant/skills/index.js";
+import { ModeFlags } from "../../application/assistant/capabilities/types.js";
 import { getDefaultModelAndProvider } from "../../models/defaults.js";
 import {
     builtinToolDescriptor,
@@ -51,15 +52,11 @@ const ASK_HUMAN_DESCRIPTOR: z.infer<typeof ToolDescriptor> = {
 // Unknown keys are ignored. Prompt-affecting inputs should be session-sticky:
 // every key here alters system-prompt bytes and therefore busts provider
 // prefix caching when it changes between turns.
-const CompositionOverrides = z.object({
+// The mode-flag keys come from the shared ModeFlags schema (the single
+// source of truth in capabilities/types.ts — defaults make the parse output
+// fully concrete); only the resolver-specific keys are declared here.
+const CompositionOverrides = ModeFlags.extend({
     workDirId: z.string().nullable().optional(),
-    voiceInput: z.boolean().optional(),
-    voiceOutput: z.enum(["summary", "full"]).nullable().optional(),
-    searchEnabled: z.boolean().optional(),
-    codeMode: z.enum(["claude", "codex"]).nullable().optional(),
-    codeCwd: z.string().nullable().optional(),
-    videoMode: z.boolean().optional(),
-    coachMode: z.boolean().optional(),
     // Set by spawn-agent for by-id children: strips the spawn tool so depth
     // is capped at 1 regardless of which stored agent is spawned.
     subagent: z.boolean().optional(),
@@ -123,7 +120,12 @@ export class RealAgentResolver {
         const parsed = CompositionOverrides.safeParse(
             requested.overrides?.composition ?? {},
         );
-        const composition = parsed.success ? parsed.data : {};
+        // An unparseable composition falls back to all defaults (same shape
+        // as parsing {}), preserving the historical "ignore garbage" rule.
+        const composition = parsed.success
+            ? parsed.data
+            : CompositionOverrides.parse({});
+        const { workDirId, subagent, activeSkills, ...modeFlags } = composition;
         // Agent notes and work-dir context are scoped to agents with the
         // workspaceContext trait (the copilot), per the agent registry.
         const copilotContext = hasWorkspaceContext(requested.agentId);
@@ -131,23 +133,15 @@ export class RealAgentResolver {
             instructions: agent.instructions,
             agentNotesContext: copilotContext ? this.loadNotes() : null,
             userWorkDir:
-                copilotContext && composition.workDirId
-                    ? this.loadWorkDir(composition.workDirId)
-                    : null,
-            voiceInput: composition.voiceInput ?? false,
-            voiceOutput: composition.voiceOutput ?? null,
-            searchEnabled: composition.searchEnabled ?? false,
-            codeMode: composition.codeMode ?? null,
-            codeCwd: composition.codeCwd ?? null,
-            videoMode: composition.videoMode ?? false,
-            coachMode: composition.coachMode ?? false,
+                copilotContext && workDirId ? this.loadWorkDir(workDirId) : null,
+            ...modeFlags,
         });
 
         const tools = await this.resolveTools(agent, {
-            subagent: composition.subagent ?? false,
+            subagent: subagent ?? false,
         });
-        if (copilotContext && composition.activeSkills?.length) {
-            await this.appendSkillTools(tools, composition.activeSkills);
+        if (copilotContext && activeSkills?.length) {
+            await this.appendSkillTools(tools, activeSkills);
         }
         return ResolvedAgent.parse({
             agentId: requested.agentId,

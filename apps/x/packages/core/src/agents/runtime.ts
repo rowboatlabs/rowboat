@@ -1322,6 +1322,9 @@ export async function* streamAgent({
             searchEnabled,
             codeMode,
             codeCwd,
+            // The legacy runs engine never composes video/coach modes.
+            videoMode: false,
+            coachMode: false,
         });
         let streamError: string | null = null;
         for await (const event of streamLlm(
