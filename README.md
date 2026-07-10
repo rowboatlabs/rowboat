@@ -1,3 +1,7 @@
+<a href="https://www.youtube.com/watch?v=5AWoGo-L16I" target="_blank" rel="noopener noreferrer">
+  <img width="1339" height="607" alt="rowboat-github-2" src="assets/readme-dark/hero-video.png" />
+</a>
+
 <h5 align="center">
 
 <h1 align="center">Rowboat</h1>
@@ -33,7 +37,7 @@ Download latest for Mac/Windows/Linux: [Download](https://www.rowboatlabs.com/do
 
 <p align="center">
 <a href="https://www.youtube.com/watch?v=et5yQABJ3xI">
-<img width="1091" height="632" alt="Rowboat demo video" src="https://github.com/user-attachments/assets/440087ae-5674-427a-87bb-831b0bea7de4" />
+<img width="1091" height="632" alt="Rowboat demo video" src="assets/readme-dark/demo-video.png" />
 </a>
 </p>
 
@@ -54,7 +58,7 @@ Download latest for Mac/Windows/Linux: [Download](https://www.rowboatlabs.com/do
 Rowboat indexes email, meetings, slack and assistant conversations into a living Obsidian-style backlinked knowledge graph. 
 </td>
 <td width="60%">
-<img width="1499" height="940" alt="Screenshot 2026-06-24 at 11 22 52 PM" src="https://github.com/user-attachments/assets/203ca1d5-2f40-43dd-8da7-c5cef4e31a41" />
+<img width="1499" height="940" alt="Screenshot 2026-06-24 at 11 22 52 PM" src="assets/readme-dark/brain.png" />
 </td>
 </tr>
 <tr>
@@ -63,7 +67,7 @@ Rowboat indexes email, meetings, slack and assistant conversations into a living
 The built-in email client sorts emails into important and everything else. Rowboat automatically drafts responses for important email using all the work context.
 </td>
 <td width="60%">
-<img width="1512" height="948" alt="Email screenshot" src="https://github.com/user-attachments/assets/4392b3ca-cc4c-473a-849a-eea0e97388f2" />
+<img width="1512" height="948" alt="Email screenshot" src="assets/readme-dark/email.png" />
 </td>
 </tr>
 <tr>
@@ -72,7 +76,7 @@ The built-in email client sorts emails into important and everything else. Rowbo
 You can set up background agents that run on events like new email or on schedule like every day at 8am. They can connect to tools, search the web, use the browser and write code using Claude Code or Codex.  
 </td>
 <td width="60%">
-<img width="1512" height="951" alt="Background agents screenshot" src="https://github.com/user-attachments/assets/5b73a3c3-f0d3-4151-83e7-0997457074e6" />
+<img width="1512" height="951" alt="Background agents screenshot" src="assets/readme-dark/background-agents.png" />
 
 </td>
 </tr>
@@ -82,7 +86,7 @@ You can set up background agents that run on events like new email or on schedul
 Rowboat includes a browser that lets you and assistant collaborate on web tasks. Because its isolated from your main browser, you can log in only to the accounts that want the assistant to access. 
 </td>
 <td width="60%">
-<img width="1512" height="948" alt="Browser screenshot" src="https://github.com/user-attachments/assets/ce04871f-4477-40eb-8310-13ef7f125b11" />
+<img width="1512" height="948" alt="Browser screenshot" src="assets/readme-dark/browser.png" />
 </td>
 </tr>
 <tr>
@@ -91,7 +95,7 @@ Rowboat includes a browser that lets you and assistant collaborate on web tasks.
 A local meeting note-taker that taps into mic & speaker, produces live transcript and summarizes the meeting in a markdown file and updates the knowledge graph. 
 </td>
 <td width="60%">
-<img width="1512" height="947" alt="Meeting notes screenshot" src="https://github.com/user-attachments/assets/c3729952-3c75-4c84-88e0-2a9070136502" />
+<img width="1512" height="947" alt="Meeting notes screenshot" src="assets/readme-dark/meeting-notes.png" />
 </td>
 </tr>
 <tr>
@@ -100,7 +104,7 @@ A local meeting note-taker that taps into mic & speaker, produces live transcrip
 Code mode lets you spin up parallel coding agents with Claude Code or Codex, and have Rowboat drive them with all the work context where needed.
 </td>
 <td width="60%">
-<img width="1512" height="949" alt="Code mode screenshot" src="https://github.com/user-attachments/assets/306618b5-9aaf-4ef8-9117-91ea58e5e4e7" />
+<img width="1512" height="949" alt="Code mode screenshot" src="assets/readme-dark/code-mode.png" />
 </td>
 </tr>
 <tr>
@@ -109,7 +113,7 @@ Code mode lets you spin up parallel coding agents with Claude Code or Codex, and
 You can bulild your own work surfaces inside Rowboat — they get acess to all the tools and integrations, and you can share them with other people.  
 </td>
 <td width="60%">
-<img width="1512" height="949" alt="Apps screenshot" src="https://github.com/user-attachments/assets/aaedc79b-3e72-45e8-995c-e8a3d127fdac" />
+<img width="1512" height="949" alt="Apps screenshot" src="assets/readme-dark/apps.png" />
 </td>
 </tr>
 <tr>
@@ -118,7 +122,7 @@ You can bulild your own work surfaces inside Rowboat — they get acess to all t
 Includes one-click integrations to most popular products. 
 </td>
 <td width="60%">
-<img width="1512" height="948" alt="Integrations screenshot" src="https://github.com/user-attachments/assets/402e89db-8229-468a-8881-a763b9f20ad9" />
+<img width="1512" height="948" alt="Integrations screenshot" src="assets/readme-dark/integrations.png" />
 </td>
 </tr>
 
