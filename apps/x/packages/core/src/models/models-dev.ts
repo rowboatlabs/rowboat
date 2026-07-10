@@ -229,82 +229,110 @@ export async function listOnboardingModels(): Promise<{ providers: ProviderSumma
   return { providers, lastUpdated: fetchedAt };
 }
 
+// Gateways spell model ids differently from models.dev: OpenRouter-style ids
+// use dots in versions ("claude-opus-4.8") where models.dev uses dashes
+// ("claude-opus-4-8"), and the rowboat gateway serves OpenAI models with no
+// vendor prefix at all ("gpt-5.4"). Ids are joined case-insensitively with
+// dots folded to dashes.
+function normalizeModelId(id: string): string {
+  return id.toLowerCase().replace(/\./g, "-");
+}
+
+const REASONING_VENDORS = ["openai", "anthropic", "google"] as const;
+
+/**
+ * Pure reasoning-capability index over a parsed models.dev catalog.
+ * Keys: `${vendor}/${normalizedId}` always; bare `normalizedId` too, unless
+ * two vendors disagree on the flag for the same bare id (then ambiguous ids
+ * are dropped rather than guessed).
+ */
+export function buildReasoningIndex(
+  data: z.infer<typeof ModelsDevResponse>,
+): Map<string, boolean> {
+  const index = new Map<string, boolean>();
+  const ambiguous = new Set<string>();
+  for (const vendor of REASONING_VENDORS) {
+    const provider = pickProvider(data, vendor);
+    if (!provider) continue;
+    for (const [key, model] of Object.entries(provider.models)) {
+      if (typeof model.reasoning !== "boolean") continue;
+      const norm = normalizeModelId(model.id ?? key);
+      index.set(`${vendor}/${norm}`, model.reasoning);
+      if (ambiguous.has(norm)) continue;
+      const bare = index.get(norm);
+      if (bare === undefined) {
+        index.set(norm, model.reasoning);
+      } else if (bare !== model.reasoning) {
+        index.delete(norm);
+        ambiguous.add(norm);
+      }
+    }
+  }
+  return index;
+}
+
+/** Pure lookup against buildReasoningIndex. undefined = unknown. */
+export function lookupReasoningFlag(
+  index: Map<string, boolean>,
+  flavor: string,
+  modelId: string,
+): boolean | undefined {
+  const slash = modelId.indexOf("/");
+  if (slash > 0) {
+    const vendor = modelId.slice(0, slash).toLowerCase();
+    if ((REASONING_VENDORS as readonly string[]).includes(vendor)) {
+      return index.get(`${vendor}/${normalizeModelId(modelId.slice(slash + 1))}`);
+    }
+    return undefined;
+  }
+  if ((REASONING_VENDORS as readonly string[]).includes(flavor)) {
+    return index.get(`${flavor}/${normalizeModelId(modelId)}`);
+  }
+  // Unprefixed id on a gateway-ish flavor (rowboat serves "gpt-5.4" bare):
+  // match by bare id across vendors.
+  return index.get(normalizeModelId(modelId));
+}
+
+async function readReasoningIndex(): Promise<Map<string, boolean> | null> {
+  try {
+    const cached = await readCache();
+    if (!cached) return null;
+    const parsed = ModelsDevResponse.safeParse(cached.data);
+    if (!parsed.success) return null;
+    return buildReasoningIndex(parsed.data);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Whether a model supports reasoning/extended thinking, per the models.dev
  * catalog. Reads ONLY the on-disk cache (stale is fine) — this sits on the
  * turn-start path and must never block on the network. Returns undefined
  * when the model or provider is unknown or no cache exists; callers treat
  * unknown as "don't send reasoning parameters" (fail closed).
- *
- * Accepts gateway/OpenRouter-style "vendor/model" ids by splitting on the
- * first slash and matching the vendor against the catalog's providers.
  */
 export async function isReasoningModel(
   flavor: string,
   modelId: string,
 ): Promise<boolean | undefined> {
-  let vendor = flavor;
-  let id = modelId;
-  if ((flavor === "rowboat" || flavor === "openrouter" || flavor === "aigateway") && modelId.includes("/")) {
-    const slash = modelId.indexOf("/");
-    vendor = modelId.slice(0, slash);
-    id = modelId.slice(slash + 1);
-  }
-  if (vendor !== "openai" && vendor !== "anthropic" && vendor !== "google") {
-    return undefined;
-  }
-  try {
-    const cached = await readCache();
-    if (!cached) return undefined;
-    const parsed = ModelsDevResponse.safeParse(cached.data);
-    if (!parsed.success) return undefined;
-    const provider = pickProvider(parsed.data, vendor);
-    if (!provider) return undefined;
-    for (const [key, model] of Object.entries(provider.models)) {
-      if ((model.id ?? key) === id) {
-        return model.reasoning === true;
-      }
-    }
-    return undefined;
-  } catch {
-    return undefined;
-  }
+  const index = await readReasoningIndex();
+  if (!index) return undefined;
+  return lookupReasoningFlag(index, flavor, modelId);
 }
 
 /**
- * Annotate gateway-style "vendor/model" ids with the models.dev reasoning
- * flag. Reads the cache once for the whole batch; ids whose vendor or model
- * is unknown keep `reasoning` absent (= unknown). Cache-only, like
- * isReasoningModel.
+ * Annotate gateway model ids ("vendor/model" or bare) with the models.dev
+ * reasoning flag. Reads the cache once for the whole batch; unknown ids keep
+ * `reasoning` absent (= unknown). Cache-only, like isReasoningModel.
  */
 export async function annotateReasoningFlags<T extends { id: string }>(
   models: T[],
 ): Promise<Array<T & { reasoning?: boolean }>> {
-  let catalog: z.infer<typeof ModelsDevResponse> | null = null;
-  try {
-    const cached = await readCache();
-    if (cached) {
-      const parsed = ModelsDevResponse.safeParse(cached.data);
-      if (parsed.success) catalog = parsed.data;
-    }
-  } catch {
-    catalog = null;
-  }
-  if (!catalog) return models;
-
-  const flags = new Map<string, boolean>();
-  for (const vendor of ["openai", "anthropic", "google"] as const) {
-    const provider = pickProvider(catalog, vendor);
-    if (!provider) continue;
-    for (const [key, model] of Object.entries(provider.models)) {
-      if (typeof model.reasoning === "boolean") {
-        flags.set(`${vendor}/${model.id ?? key}`, model.reasoning);
-      }
-    }
-  }
-
+  const index = await readReasoningIndex();
+  if (!index) return models;
   return models.map((model) => {
-    const reasoning = flags.get(model.id);
+    const reasoning = lookupReasoningFlag(index, "rowboat", model.id);
     return reasoning === undefined ? model : { ...model, reasoning };
   });
 }
