@@ -26,8 +26,8 @@ import { createProvider } from '../models/models.js';
 import { captureLlmUsage } from '../analytics/usage.js';
 import { withUseCase } from '../analytics/use_case.js';
 import { isSignedIn } from '../account/account.js';
-import { createRun, createMessage } from '../runs/runs.js';
-import { extractAgentResponse, waitForRunCompletion } from '../agents/utils.js';
+import { createRun, createMessage } from '../runtime/legacy/runs.js';
+import { extractAgentResponse, waitForRunCompletion } from '../runtime/legacy/utils.js';
 import { getBackgroundTaskAgentModel } from '../models/defaults.js';
 
 // Host API — M2 endpoints (spec §7.4–§7.7): Composio tools, SSRF-guarded fetch

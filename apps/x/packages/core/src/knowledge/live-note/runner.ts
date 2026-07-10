@@ -1,9 +1,9 @@
 import type { LiveNote, LiveNoteTriggerType } from '@x/shared/dist/live-note.js';
 import { fetchLiveNote, patchLiveNote, readNoteBody } from './fileops.js';
 import { getLiveNoteAgentModel } from '../../models/defaults.js';
-import { startHeadlessAgent, startWhenPossible } from '../../agents/headless-app.js';
+import { startHeadlessAgent, startWhenPossible } from '../../runtime/assembly/headless-app.js';
 import { withUseCase } from '../../analytics/use_case.js';
-import { buildTriggerBlock } from '../../agents/build-trigger-block.js';
+import { buildTriggerBlock } from '../../runtime/assembly/build-trigger-block.js';
 import { liveNoteBus } from './bus.js';
 import { PrefixLogger } from '@x/shared/dist/prefix-logger.js';
 

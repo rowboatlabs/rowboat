@@ -16,7 +16,11 @@
     "test": "npm run shared && npm run test:shared && npm run test:core && npm run test:renderer",
     "test:shared": "cd packages/shared && npm test",
     "test:core": "cd packages/core && npm test",
-    "test:renderer": "cd apps/renderer && npm test"
+    "test:renderer": "cd apps/renderer && npm test",
+    "typecheck": "npm run shared && npm run typecheck:shared && npm run typecheck:core && npm run typecheck:renderer",
+    "typecheck:shared": "cd packages/shared && npm run typecheck",
+    "typecheck:core": "cd packages/core && npm run typecheck",
+    "typecheck:renderer": "cd apps/renderer && npm run typecheck"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",

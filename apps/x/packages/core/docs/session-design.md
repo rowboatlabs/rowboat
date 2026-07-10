@@ -520,15 +520,20 @@ All tests use the in-memory/mocked turn runtime and repo fakes.
 ## 14. Suggested module layout
 
 ```text
-apps/x/packages/shared/src/sessions.ts   # event schemas, reducer, index types
+apps/x/packages/shared/src/sessions.ts        # event schemas, reducer, index types
 
-apps/x/packages/core/src/sessions/
+apps/x/packages/core/src/runtime/sessions/
   sessions.ts      # ISessions implementation
+  api.ts           # public contract
   repo.ts          # ISessionRepo contract
   fs-repo.ts       # filesystem implementation
-  index.ts         # in-memory index + startup scan
-  headless.ts      # runHeadlessTurn
+  session-index.ts # in-memory index
+  bus.ts           # index-changed fan-out
 ```
+
+The headless helper of §11 is implemented as `HeadlessAgentRunner` in
+`runtime/assembly/headless.ts` (not under `sessions/`).
+
 
 Awilix registration mirrors the turn runtime: singleton scope, PROXY
 constructor injection, no container resolution from inside the classes.

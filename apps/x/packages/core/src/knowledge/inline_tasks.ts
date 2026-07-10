@@ -3,7 +3,7 @@ import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
 import { generateText } from 'ai';
 import { WorkDir } from '../config/config.js';
-import { runWhenPossible } from '../agents/headless-app.js';
+import { runWhenPossible } from '../runtime/assembly/headless-app.js';
 import { getKgModel } from '../models/defaults.js';
 import container from '../di/container.js';
 import type { IModelConfigRepo } from '../models/repo.js';

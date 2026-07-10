@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import type { SessionIndexEntry } from "@x/shared/dist/sessions.js";
 import type { TurnStreamEvent } from "@x/shared/dist/turns.js";
-import { TurnEventHub } from "../turns/event-hub.js";
-import { TurnInputError } from "../turns/api.js";
-import type { ISessions } from "../sessions/api.js";
+import { TurnEventHub } from "../runtime/turns/event-hub.js";
+import { TurnInputError } from "../runtime/turns/api.js";
+import type { ISessions } from "../runtime/sessions/api.js";
 import { ChannelBridge, type ModelChoice } from "./bridge.js";
 
 const SENDER = "test:1";

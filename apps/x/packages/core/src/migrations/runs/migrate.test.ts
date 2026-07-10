@@ -5,8 +5,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { reduceTurn } from "@x/shared/dist/turns.js";
 import { reduceSession } from "@x/shared/dist/sessions.js";
-import { FSTurnRepo } from "../../turns/fs-repo.js";
-import { FSSessionRepo } from "../../sessions/fs-repo.js";
+import { FSTurnRepo } from "../../runtime/turns/fs-repo.js";
+import { FSSessionRepo } from "../../runtime/sessions/fs-repo.js";
 import { migrateRuns } from "./migrate.js";
 
 const fixturesDir = path.join(
