@@ -10,6 +10,7 @@ import { getRaw as getLabelingAgentRaw } from "../knowledge/labeling_agent.js";
 import { getRaw as getNoteTaggingAgentRaw } from "../knowledge/note_tagging_agent.js";
 import { getRaw as getInlineTaskAgentRaw } from "../knowledge/inline_task_agent.js";
 import { getRaw as getAgentNotesAgentRaw } from "../knowledge/agent_notes_agent.js";
+import { lazyResolve } from "../di/lazy-resolve.js";
 import type { IAgentsRepo } from "./repo.js";
 
 // The registry of built-in agents: one table instead of the historical
@@ -89,9 +90,7 @@ export async function loadAgent(id: string): Promise<z.infer<typeof Agent>> {
     if (builtin) {
         return builtin.build();
     }
-    // User-defined agents. The container is imported lazily so this module
-    // adds no static edge into the DI graph (mirrors spawn-agent).
-    const { default: container } = await import("../di/container.js");
-    const repo = container.resolve<IAgentsRepo>("agentsRepo");
+    // User-defined agents (lazyResolve: no static DI edge from this module).
+    const repo = await lazyResolve<IAgentsRepo>("agentsRepo");
     return repo.fetch(id);
 }

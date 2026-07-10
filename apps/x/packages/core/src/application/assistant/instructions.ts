@@ -1,4 +1,4 @@
-import { skillCatalog, buildSkillCatalog } from "./skills/index.js";
+import { skillCatalog, buildAvailableSkillCatalog } from "./skills/index.js";
 import { getRuntimeContext, getRuntimeContextPrompt } from "./runtime-context.js";
 import { composioAccountsRepo } from "../../composio/repo.js";
 import { isConfigured as isComposioConfigured } from "../../composio/client.js";
@@ -409,13 +409,11 @@ export async function buildCopilotInstructions(): Promise<string> {
             // knowledge sources unavailable — fall back to no channel hint
         }
     }
-    const excludeIds: string[] = [];
-    if (!composioEnabled) excludeIds.push('composio-integration');
-    if (!codeModeEnabled) excludeIds.push('code-with-agents');
-    if (!slackConnected) excludeIds.push('slack');
-    // Always build from the live skill set so disk skills added/removed at
-    // runtime (after refreshDiskSkills + cache invalidation) are reflected.
-    const catalog = buildSkillCatalog({ excludeIds });
+    // Catalog membership is each skill's own availability() (connection
+    // gates declared on the entries in skills/index.ts), evaluated against
+    // the live skill set so disk skills added/removed at runtime (after
+    // refreshDiskSkills + cache invalidation) are reflected.
+    const catalog = await buildAvailableSkillCatalog();
     const baseInstructions = buildStaticInstructions(composioEnabled, catalog, codeModeEnabled, slackConnected, slackChannelsHint, googleConnected);
     const composioPrompt = await getComposioToolsPrompt(slackConnected, googleConnected);
     cachedInstructions = composioPrompt

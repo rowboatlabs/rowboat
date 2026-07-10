@@ -2,24 +2,22 @@ import fs from "node:fs";
 import path from "node:path";
 import { homedir } from "node:os";
 import { WorkDir } from "../../../config/config.js";
+import type { ModelCapability } from "../capabilities/types.js";
 import { splitFrontmatter } from "../../lib/parse-frontmatter.js";
 
 /**
- * A skill discovered on disk. Matches the bundled SkillDefinition shape
- * (id/title/summary/content) plus provenance about where it came from.
+ * A skill discovered on disk: structurally the model-activated capability
+ * variant (id = slugified folder name, title = frontmatter `name`, summary =
+ * frontmatter `description`, content = full raw SKILL.md text, tools =
+ * frontmatter `tools:`/`allowed-tools:` BuiltinTools names — validated where
+ * descriptors are built; unknown names dropped there with a warning) plus
+ * provenance. Typed as ModelCapability on purpose: disk content can never
+ * carry app/always activation or an eager prompt fragment — that is the
+ * trust boundary (capabilities/types.ts), enforced by the type system.
  */
-export type DiskSkill = {
-  id: string;        // slugified folder name
-  title: string;     // frontmatter `name`
-  summary: string;   // frontmatter `description`
-  content: string;   // full raw SKILL.md text
+export type DiskSkill = ModelCapability & {
   dir: string;       // absolute path to the skill folder
   skillFile: string; // absolute path to the SKILL.md
-  // Optional frontmatter `tools:` (or the Agent Skills spec's
-  // `allowed-tools:`) — BuiltinTools names the skill attaches when loaded.
-  // Names are validated against the live catalog where descriptors are
-  // built; unknown names are dropped there with a warning.
-  tools?: string[];
 };
 
 // Locations scanned for <skill-name>/SKILL.md subfolders. The rowboat root is

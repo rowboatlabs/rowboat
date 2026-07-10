@@ -147,24 +147,85 @@ describe("skills index (disk skill merge layer)", () => {
   });
 });
 
-describe("capability record (types)", () => {
-  it("defaults to model activation — every bundled skill is model-activated", async () => {
+describe("capability activation boundary", () => {
+  it("defaults to model activation; eager variants are excluded", async () => {
     const { isModelActivated } = await import("../capabilities/types.js");
-    // Bundled definitions carry no activation field today; they are the
-    // model-activated subset by default and must stay in the catalog.
-    expect(isModelActivated({})).toBe(true);
-    expect(isModelActivated({ activation: "model" })).toBe(true);
-    expect(isModelActivated({ activation: "app" })).toBe(false);
-    expect(isModelActivated({ activation: "always" })).toBe(false);
+    const { MODE_CAPABILITIES } = await import("../capabilities/modes.js");
+    const modelSkill = {
+      id: "m1",
+      title: "M1",
+      summary: "model skill",
+      content: "guidance",
+    };
+    expect(isModelActivated(modelSkill)).toBe(true);
+    expect(isModelActivated({ ...modelSkill, activation: "model" as const })).toBe(true);
+    for (const eager of MODE_CAPABILITIES) {
+      expect(isModelActivated(eager)).toBe(false);
+    }
   });
 
-  it("keeps app/always capabilities out of the loadSkill catalog", async () => {
+  it("fences the catalog and the tool lookup against eager capabilities", async () => {
+    // The real failure mode this pins: a future commit merges eager
+    // capabilities into the shared entry list — the catalog must hide them
+    // AND the loadSkill tool-attachment path must refuse them (hiding the
+    // menu entry is not enough; the kitchen must refuse to serve it).
+    const { buildCatalogFromEntries, toolNamesFromEntries } = await import("./index.js");
+    const { MODE_CAPABILITIES } = await import("../capabilities/modes.js");
+    const eager = { ...MODE_CAPABILITIES[0], tools: ["file-writeText"] };
+    const model = {
+      id: "real-skill",
+      title: "Real Skill",
+      summary: "a genuine model-activated skill",
+      content: "guidance",
+      tools: ["file-readText"],
+      catalogPath: "src/application/assistant/skills/real-skill/skill.ts",
+    };
+    const mixed = [model, eager];
+
+    const catalog = buildCatalogFromEntries(mixed);
+    expect(catalog).toContain("real-skill");
+    expect(catalog).not.toContain(eager.id);
+
+    expect(toolNamesFromEntries(mixed, "real-skill")).toEqual(["file-readText"]);
+    // The eager capability's tools must NOT attach via the loadSkill path,
+    // even though the entry is present in the list and declares tools.
+    expect(toolNamesFromEntries(mixed, eager.id)).toEqual([]);
+  });
+
+  it("every advertised catalog id resolves via loadSkill", async () => {
     const { buildSkillCatalog, availableSkills } = await import("./index.js");
     const catalog = buildSkillCatalog();
-    // Every advertised id resolves via loadSkill (the catalog and the
-    // resolver operate on the same model-activated subset).
     for (const id of availableSkills) {
       expect(catalog).toContain(id);
+    }
+  });
+});
+
+describe("availability (catalog visibility)", () => {
+  it("drops unavailable entries from the catalog but keeps ungated ones", async () => {
+    const { filterAvailableEntries, buildCatalogFromEntries } = await import("./index.js");
+    const entries = [
+      { id: "always-on", title: "Always", summary: "s", content: "c" },
+      { id: "connected", title: "Connected", summary: "s", content: "c", availability: () => true },
+      { id: "disconnected", title: "Disconnected", summary: "s", content: "c", availability: async () => false },
+    ];
+    const available = await filterAvailableEntries(entries);
+    expect(available.map((e) => e.id)).toEqual(["always-on", "connected"]);
+
+    const catalog = buildCatalogFromEntries(available);
+    expect(catalog).toContain("always-on");
+    expect(catalog).toContain("connected");
+    expect(catalog).not.toContain("disconnected");
+  });
+
+  it("the connection-gated bundled skills declare availability", async () => {
+    const skills = await import("./index.js");
+    const catalog = skills.buildSkillCatalog();
+    // The ungated builder still lists them (loadSkill resolves explicit ids
+    // regardless of availability — visibility gating is catalog-only).
+    for (const id of ["composio-integration", "code-with-agents", "slack"]) {
+      expect(catalog).toContain(id);
+      expect(skills.resolveSkill(id)).not.toBeNull();
     }
   });
 });

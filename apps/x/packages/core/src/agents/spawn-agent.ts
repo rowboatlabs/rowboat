@@ -219,13 +219,13 @@ export async function runSpawnedAgent(
 async function resolveServices(): Promise<
     NonNullable<SpawnedAgentCallbacks["services"]>
 > {
-    const { default: container } = await import("../di/container.js");
+    const { lazyResolve } = await import("../di/lazy-resolve.js");
     return {
         turnRuntime:
-            container.resolve<import("../turns/api.js").ITurnRuntime>(
+            await lazyResolve<import("../turns/api.js").ITurnRuntime>(
                 "turnRuntime",
             ),
-        headlessRunner: container.resolve<
+        headlessRunner: await lazyResolve<
             import("./headless.js").IHeadlessAgentRunner
         >("headlessAgentRunner"),
     };

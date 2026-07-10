@@ -1,4 +1,4 @@
-import type { CapabilityContext, CapabilityDefinition } from "./types.js";
+import type { CapabilityContext, EagerCapability } from "./types.js";
 
 // The app-activated capabilities: the modes the app (not the model) toggles —
 // facts about the world like "the camera is on" whose guidance must be in the
@@ -11,7 +11,7 @@ import type { CapabilityContext, CapabilityDefinition } from "./types.js";
 // code_agent_run/launch-code-task, but they stay in COPILOT_BASE_TOOLS until
 // the legacy runs engine (which cannot attach tools mid-run) is retired.
 
-export const MODE_CAPABILITIES: readonly CapabilityDefinition[] = [
+export const MODE_CAPABILITIES: readonly EagerCapability[] = [
     {
         id: "voice-input",
         activation: "app",
