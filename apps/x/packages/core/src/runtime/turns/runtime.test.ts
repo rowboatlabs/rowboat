@@ -2143,6 +2143,91 @@ describe("concurrent sync tool execution (10.5)", () => {
             "S",
         ]);
     });
+
+    it("a misbehaving tool's late progress rejects in memory and never poisons the log", async () => {
+        // fast stashes its reportProgress callback and finishes immediately;
+        // slow keeps the invocation alive, waits until fast's result is
+        // durable, then fires the stashed callback — tool_progress after a
+        // terminal tool_result, which the reducer forbids. The commit gate
+        // must reject that append before it becomes durable: a persisted
+        // illegal event would fail every future read of the file.
+        let lateReport: ToolExecutionContext["reportProgress"] | undefined;
+        const busRef: { current?: FakeTurnEventBus } = {};
+        const fastResultDurable = () =>
+            busRef.current?.events.some(
+                (e) =>
+                    e.event.type === "tool_result" && e.event.toolCallId === "F",
+            ) ?? false;
+        let lateOutcome: { settled: "resolved" } | { settled: "rejected"; error: unknown } | undefined;
+        const tools: RuntimeTool[] = [
+            syncTool(slowDescriptor, async () => {
+                while (!fastResultDurable()) {
+                    await new Promise((resolve) => setTimeout(resolve, 1));
+                }
+                try {
+                    await lateReport?.({ note: "too late" });
+                    lateOutcome = { settled: "resolved" };
+                } catch (error) {
+                    lateOutcome = { settled: "rejected", error };
+                }
+                return { output: "slow-done", isError: false };
+            }),
+            syncTool(fastDescriptor, async (_input, ctx) => {
+                lateReport = ctx.reportProgress;
+                return { output: "fast-done", isError: false };
+            }),
+        ];
+        const { runtime, repo, turnEventBus } = makeRuntime({
+            agent,
+            tools,
+            models: [
+                respond(
+                    completedResp(
+                        assistantCalls(
+                            toolCallPart("F", "fast"),
+                            toolCallPart("S", "slow"),
+                        ),
+                    ),
+                ),
+                respond(completedResp(assistantText("done"))),
+            ],
+        });
+        busRef.current = turnEventBus;
+        const turnId = await newTurn(runtime);
+        const { outcome, events } = await advanceAndSettle(runtime, turnId);
+
+        // The late append rejected for its caller only; the turn carried on.
+        expect(lateOutcome).toMatchObject({ settled: "rejected" });
+        expect(
+            String((lateOutcome as { error: unknown }).error),
+        ).toMatch(/tool progress after terminal result/);
+        expect(outcome?.status).toBe("completed");
+
+        // Nothing illegal became durable, streamed, or published: the file
+        // replays cleanly and holds exactly the legal history.
+        const log = await persisted(repo, turnId);
+        expect(() => reduceTurn(log)).not.toThrow();
+        expect(typesOf(log)).toEqual([
+            "turn_created",
+            "model_call_requested",
+            "model_call_completed",
+            "tool_invocation_requested",
+            "tool_invocation_requested",
+            "tool_result",
+            "tool_result",
+            "model_call_requested",
+            "model_call_completed",
+            "turn_completed",
+        ]);
+        expect(typesOf(events)).not.toContain("tool_progress");
+        expect(
+            turnEventBus.events.filter((e) => e.event.type === "tool_progress"),
+        ).toHaveLength(0);
+
+        // The turn stays readable and re-advanceable.
+        const again = await advanceAndSettle(runtime, turnId);
+        expect(again.outcome?.status).toBe("completed");
+    });
 });
 
 describe("mid-turn tool extension", () => {

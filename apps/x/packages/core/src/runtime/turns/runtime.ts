@@ -390,11 +390,11 @@ class TurnAdvance {
         return this.clock.now();
     }
 
-    // Durable barrier: persist, re-reduce (the reducer doubles as a runtime
-    // assertion that the appended history is legal), then stream. Commits are
-    // serialized through an internal queue so concurrently executing tools
-    // can never interleave the persist/reduce/stream ritual — file order,
-    // in-memory order, and stream order stay identical by construction.
+    // Durable barrier: reduce (the reducer gates the append — see commit),
+    // persist, then stream. Commits are serialized through an internal queue
+    // so concurrently executing tools can never interleave the
+    // reduce/persist/stream ritual — file order, in-memory order, and stream
+    // order stay identical by construction.
     private appendChain: Promise<void> = Promise.resolve();
 
     private append(...batch: TEvent[]): Promise<void> {
@@ -429,12 +429,18 @@ class TurnAdvance {
     }
 
     private async commit(batch: TEvent[]): Promise<void> {
+        // Gate before the write: an illegal batch (e.g. a misbehaving tool
+        // reporting progress after its result) must reject in memory, never
+        // become durable — a persisted illegal event makes the file fail
+        // every future read and, through context references, blocks the
+        // whole session chain.
+        const next = reduceTurn([...this.events, ...batch]);
         await this.turnRepo.append(this.turnId, batch);
         // this.events holds the full file history (read at advance start), so
         // its length is the absolute 1-based line offset of each new event.
         const base = this.events.length;
         this.events.push(...batch);
-        this.state = reduceTurn(this.events);
+        this.state = next;
         this.appended = true;
         for (const [i, event] of batch.entries()) {
             this.stream.push(event);
