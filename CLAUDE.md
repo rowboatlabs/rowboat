@@ -139,6 +139,7 @@ Long-form docs for specific features. Read the relevant file before making chang
 ### Verify compilation
 ```bash
 cd apps/x && npm run deps && npm run lint
+cd apps/x && npm run typecheck   # dev tsconfigs — the only gate that typechecks *.test.ts
 ```
 
 ## Tech Stack
