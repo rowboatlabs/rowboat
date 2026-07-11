@@ -85,6 +85,64 @@ function makeRegistry(execImpl: (call: ExecCall) => Promise<unknown>) {
     return { registry, calls, abortRegistry };
 }
 
+describe("error-envelope mapping", () => {
+    async function resultFor(value: unknown) {
+        const { registry } = makeRegistry(async () => value);
+        const tool = (await registry.resolve(descriptor())) as SyncRuntimeTool;
+        return tool.execute({}, makeCtx());
+    }
+
+    it("maps a bare error envelope to isError", async () => {
+        const result = await resultFor({ error: "File not found: /x" });
+        expect(result.isError).toBe(true);
+        expect(result.output).toEqual({ error: "File not found: /x" });
+    });
+
+    it("maps success:false with a message to isError", async () => {
+        const result = await resultFor({
+            success: false,
+            message: "Failed to analyze agent: boom",
+        });
+        expect(result.isError).toBe(true);
+    });
+
+    it("maps composio's successful:false envelope to isError", async () => {
+        const result = await resultFor({
+            successful: false,
+            data: null,
+            error: null,
+        });
+        expect(result.isError).toBe(true);
+    });
+
+    it("a non-zero exit code is a result, not a tool failure", async () => {
+        const result = await resultFor({
+            success: false,
+            stdout: "",
+            stderr: "no matches",
+            exitCode: 1,
+            command: "grep needle haystack",
+        });
+        expect(result.isError).toBe(false);
+    });
+
+    it("success shapes stay non-error, including composio passthrough", async () => {
+        for (const value of [
+            { ok: 1 },
+            { success: true, analysis: "fine" },
+            { successful: true, data: { id: 1 }, error: null },
+            "plain text",
+            ["a", "b"],
+            null,
+            { error: "" },
+            { error: null },
+        ]) {
+            const result = await resultFor(value);
+            expect(result.isError).toBe(false);
+        }
+    });
+});
+
 describe("RealToolRegistry", () => {
     it("executes builtins through execTool with a turn-scoped ToolContext", async () => {
         const { registry, calls, abortRegistry } = makeRegistry(async () => ({ ok: 1 }));
