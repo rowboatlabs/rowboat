@@ -320,6 +320,8 @@ function makeRuntime(opts: {
     agentError?: string;
     repo?: InMemoryTurnRepo;
     idStart?: number;
+    modelRegistry?: IModelRegistry;
+    toolRegistry?: IToolRegistry;
 } = {}) {
     const repo = opts.repo ?? new InMemoryTurnRepo();
     const models = new FakeModelRegistry(opts.models ?? []);
@@ -333,8 +335,8 @@ function makeRuntime(opts: {
         idGenerator: new FakeIdGen(opts.idStart ?? 0),
         clock: new FakeClock(),
         agentResolver: new FakeAgentResolver(opts.agent ?? defaultAgent, opts.agentError),
-        modelRegistry: models,
-        toolRegistry: new FakeToolRegistry(opts.tools ?? defaultTools),
+        modelRegistry: opts.modelRegistry ?? models,
+        toolRegistry: opts.toolRegistry ?? new FakeToolRegistry(opts.tools ?? defaultTools),
         contextResolver: new TurnRepoContextResolver({ turnRepo: repo }),
         permissionChecker: checker,
         permissionClassifier: classifier,
@@ -2229,6 +2231,169 @@ describe("concurrent sync tool execution (10.5)", () => {
         // The turn stays readable and re-advanceable.
         const again = await advanceAndSettle(runtime, turnId);
         expect(again.outcome?.status).toBe("completed");
+    });
+});
+
+// Registries that can be broken mid-test: resolution throws once `error`
+// is set, simulating a provider removed from config or a renamed builtin.
+class BreakableToolRegistry implements IToolRegistry {
+    error?: Error;
+    constructor(private readonly inner: IToolRegistry) {}
+    async resolve(
+        descriptor: z.infer<typeof ToolDescriptor>,
+    ): Promise<RuntimeTool> {
+        if (this.error) {
+            throw this.error;
+        }
+        return this.inner.resolve(descriptor);
+    }
+}
+
+class BreakableModelRegistry implements IModelRegistry {
+    error?: Error;
+    constructor(private readonly inner: IModelRegistry) {}
+    async resolve(
+        descriptor: ResolvedModel["descriptor"],
+    ): Promise<ResolvedModel> {
+        if (this.error) {
+            throw this.error;
+        }
+        return this.inner.resolve(descriptor);
+    }
+}
+
+describe("cancellation without live dependencies (22)", () => {
+    it("cancels a suspended turn whose tool registry can no longer resolve", async () => {
+        const toolRegistry = new BreakableToolRegistry(
+            new FakeToolRegistry(defaultTools),
+        );
+        const { runtime, repo } = makeRuntime({
+            toolRegistry,
+            models: [
+                respond(
+                    completedResp(assistantCalls(toolCallPart("B", "fetch"))),
+                ),
+            ],
+        });
+        const turnId = await newTurn(runtime);
+        const first = await advanceAndSettle(runtime, turnId);
+        expect(first.outcome?.status).toBe("suspended");
+
+        toolRegistry.error = new TurnDependencyError(
+            "no live tool for tool.fetch",
+        );
+        const before = await persisted(repo, turnId);
+
+        // Continuing the turn is impossible — and must not touch the file.
+        const blocked = await advanceAndSettle(runtime, turnId, {
+            type: "async_tool_result",
+            toolCallId: "B",
+            result: { output: "late", isError: false },
+        });
+        expect(blocked.outcome).toBeUndefined();
+        expect(String(blocked.error)).toContain("no live tool");
+        expect(await persisted(repo, turnId)).toEqual(before);
+
+        // Cancelling must still work: synthetic results + turn_cancelled.
+        const cancelled = await advanceAndSettle(runtime, turnId, {
+            type: "cancel",
+            reason: "environment broken",
+        });
+        expect(cancelled.outcome?.status).toBe("cancelled");
+        const log = await persisted(repo, turnId);
+        expect(typesOf(log)).toEqual([
+            "turn_created",
+            "model_call_requested",
+            "model_call_completed",
+            "tool_invocation_requested",
+            "turn_suspended",
+            "tool_result",
+            "turn_cancelled",
+        ]);
+        expect(log.find((e) => e.type === "tool_result")).toMatchObject({
+            source: "runtime",
+            result: { isError: true },
+        });
+        expect(log.find((e) => e.type === "turn_cancelled")).toMatchObject({
+            reason: "environment broken",
+        });
+
+        // Terminal short-circuit works with the environment still broken.
+        const again = await advanceAndSettle(runtime, turnId);
+        expect(again.outcome?.status).toBe("cancelled");
+    });
+
+    it("cancels a suspended turn whose model can no longer resolve", async () => {
+        const inner = new FakeModelRegistry([
+            respond(completedResp(assistantCalls(toolCallPart("B", "fetch")))),
+        ]);
+        const modelRegistry = new BreakableModelRegistry(inner);
+        const { runtime, repo } = makeRuntime({ modelRegistry });
+        const turnId = await newTurn(runtime);
+        const first = await advanceAndSettle(runtime, turnId);
+        expect(first.outcome?.status).toBe("suspended");
+
+        modelRegistry.error = new Error("provider not configured");
+        const cancelled = await advanceAndSettle(runtime, turnId, {
+            type: "cancel",
+        });
+        expect(cancelled.outcome?.status).toBe("cancelled");
+        const log = await persisted(repo, turnId);
+        expect(typesOf(log)).toContain("turn_cancelled");
+    });
+
+    it("cancels a turn whose context chain is unreadable", async () => {
+        const { runtime, repo } = makeRuntime();
+        const turnId = await runtime.createTurn({
+            agent: { agentId: "copilot" },
+            context: { previousTurnId: "2026-07-02T10-00-00Z-9999999-000" },
+            input: user("hello"),
+            config: { humanAvailable: true },
+        });
+
+        // Resuming rejects: the referenced predecessor does not exist.
+        const blocked = await advanceAndSettle(runtime, turnId);
+        expect(blocked.outcome).toBeUndefined();
+        expect(blocked.error).toBeTruthy();
+
+        const cancelled = await advanceAndSettle(runtime, turnId, {
+            type: "cancel",
+        });
+        expect(cancelled.outcome?.status).toBe("cancelled");
+        expect(typesOf(await persisted(repo, turnId))).toEqual([
+            "turn_created",
+            "turn_cancelled",
+        ]);
+    });
+
+    it("healthy-environment cancellation is byte-identical to before", async () => {
+        const { runtime, repo } = makeRuntime({
+            models: [
+                respond(
+                    completedResp(assistantCalls(toolCallPart("B", "fetch"))),
+                ),
+            ],
+        });
+        const turnId = await newTurn(runtime);
+        await advanceAndSettle(runtime, turnId);
+        const cancelled = await advanceAndSettle(runtime, turnId, {
+            type: "cancel",
+            reason: "user stop",
+        });
+        expect(cancelled.outcome).toEqual({
+            status: "cancelled",
+            reason: "user stop",
+            usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+        });
+        expect(typesOf(await persisted(repo, turnId))).toEqual([
+            "turn_created",
+            "model_call_requested",
+            "model_call_completed",
+            "tool_invocation_requested",
+            "turn_suspended",
+            "tool_result",
+            "turn_cancelled",
+        ]);
     });
 });
 
