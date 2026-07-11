@@ -1,5 +1,4 @@
 import chokidar, { type FSWatcher } from "chokidar";
-import fs from "node:fs";
 import { SKILL_ROOTS } from "./disk-loader.js";
 import { refreshDiskSkills } from "./index.js";
 import { invalidateCopilotInstructionsCache } from "../copilot/instructions.js";
@@ -28,28 +27,18 @@ function scheduleReload(): void {
 
 /**
  * Start watching the disk skill roots (~/.rowboat/skills, ~/.agents/skills) for
- * changes and live-reload the skill catalog. Idempotent. Missing directories
- * are skipped so watching ~/.agents when it doesn't exist never errors.
+ * changes and live-reload the skill catalog. Idempotent. Roots that don't exist
+ * yet (e.g. ~/.agents/skills before the first install) are watched anyway —
+ * chokidar handles absent paths and emits events once they are created.
  */
 export function startSkillsWatcher(): void {
   if (watcher) return;
 
-  const roots = SKILL_ROOTS.filter((root) => {
-    try {
-      return fs.statSync(root).isDirectory();
-    } catch {
-      return false; // Directory absent (e.g. ~/.agents/skills) — nothing to watch.
-    }
-  });
-
-  if (roots.length === 0) {
-    console.log("[disk-skills] no skill directories present; watcher idle");
-    return;
-  }
-
   try {
-    watcher = chokidar.watch(roots, {
+    watcher = chokidar.watch(SKILL_ROOTS, {
       ignoreInitial: true,
+      // Only <root>/<skill>/ one level deep — don't recurse into large skill repos.
+      depth: 1,
       awaitWriteFinish: {
         stabilityThreshold: 150,
         pollInterval: 50,
@@ -67,7 +56,7 @@ export function startSkillsWatcher(): void {
         console.error("[disk-skills] watcher error:", error);
       });
 
-    console.log(`[disk-skills] watching ${roots.length} skill director${roots.length === 1 ? "y" : "ies"} for changes`);
+    console.log(`[disk-skills] watching ${SKILL_ROOTS.length} skill director${SKILL_ROOTS.length === 1 ? "y" : "ies"} for changes`);
   } catch (err) {
     console.error("[disk-skills] failed to start watcher:", err);
     watcher = null;
