@@ -72,8 +72,18 @@ export function loadDiskSkills(): DiskSkill[] {
     }
 
     for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
       const dir = path.join(root, entry.name);
+      // entry.isDirectory() is false for a symlink to a directory, so stat the
+      // full path (statSync follows symlinks) to accept symlinked skill folders.
+      try {
+        if (!fs.statSync(dir).isDirectory()) {
+          console.warn(`[disk-skills] Skipping '${entry.name}': not a directory at ${dir}`);
+          continue;
+        }
+      } catch (err) {
+        console.warn(`[disk-skills] Skipping '${entry.name}': cannot stat ${dir}:`, err);
+        continue;
+      }
       const skillFile = path.join(dir, "SKILL.md");
 
       let raw: string;
