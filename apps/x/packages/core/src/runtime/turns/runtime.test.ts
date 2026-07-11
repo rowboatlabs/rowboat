@@ -45,6 +45,8 @@ import type {
 // Fixtures
 // ---------------------------------------------------------------------------
 
+type TEvent = z.infer<typeof TurnEvent>;
+
 const TS = "2026-07-02T10:00:00Z";
 
 const echoDescriptor: z.infer<typeof ToolDescriptor> = {
@@ -2227,6 +2229,215 @@ describe("concurrent sync tool execution (10.5)", () => {
         // The turn stays readable and re-advanceable.
         const again = await advanceAndSettle(runtime, turnId);
         expect(again.outcome?.status).toBe("completed");
+    });
+});
+
+// Fails appends whose batch matches the predicate; counts the failures.
+class FailingAppendRepo extends InMemoryTurnRepo {
+    failWhen?: (events: TEvent[]) => boolean;
+    failures = 0;
+
+    override async append(turnId: string, events: TEvent[]): Promise<void> {
+        if (this.failWhen?.(events)) {
+            this.failures += 1;
+            throw new Error("disk full");
+        }
+        return super.append(turnId, events);
+    }
+}
+
+describe("sync tool result append failures (21.4)", () => {
+    const isSyncSuccessResult = (events: TEvent[]) =>
+        events.some(
+            (e) =>
+                e.type === "tool_result" &&
+                e.source === "sync" &&
+                e.result.isError === false,
+        );
+
+    it("rejects as infrastructure instead of recording a false tool error, then recovers honestly", async () => {
+        const executed: unknown[] = [];
+        const repo = new FailingAppendRepo();
+        repo.failWhen = isSyncSuccessResult;
+        const { runtime } = makeRuntime({
+            repo,
+            tools: [
+                syncTool(echoDescriptor, async (input) => {
+                    executed.push(input);
+                    return { output: "sent", isError: false };
+                }),
+                ...defaultTools.slice(1),
+            ],
+            models: [
+                respond(
+                    completedResp(assistantCalls(toolCallPart("A", "echo"))),
+                ),
+                respond(completedResp(assistantText("done"))),
+            ],
+        });
+        const turnId = await newTurn(runtime);
+
+        // The tool ran (side effect happened) but its result could not be
+        // persisted: the invocation rejects as infrastructure, and the log
+        // must NOT contain a fabricated error result claiming the tool
+        // failed.
+        const first = await advanceAndSettle(runtime, turnId);
+        expect(first.outcome).toBeUndefined();
+        expect(String(first.error)).toContain("disk full");
+        expect(repo.failures).toBe(1);
+        expect(executed).toHaveLength(1);
+        let log = await persisted(repo, turnId);
+        expect(typesOf(log)).toEqual([
+            "turn_created",
+            "model_call_requested",
+            "model_call_completed",
+            "tool_invocation_requested",
+        ]);
+
+        // Recovery: the interrupted invocation is closed with the honest
+        // indeterminate result — never re-executed — and the turn continues
+        // to completion.
+        repo.failWhen = undefined;
+        const second = await advanceAndSettle(runtime, turnId);
+        expect(second.outcome?.status).toBe("completed");
+        expect(executed).toHaveLength(1);
+        log = await persisted(repo, turnId);
+        const result = log.find((e) => e.type === "tool_result");
+        expect(result).toMatchObject({
+            source: "runtime",
+            result: {
+                output: "Tool execution was interrupted; its outcome is unknown and it was not retried.",
+                isError: true,
+            },
+        });
+        expect(typesOf(log)).toContain("turn_completed");
+    });
+
+    it("one tool's failed result append does not disturb a committed sibling result", async () => {
+        const slowDescriptor: z.infer<typeof ToolDescriptor> = {
+            toolId: "tool.slow",
+            name: "slow",
+            description: "Slow tool",
+            inputSchema: {},
+            execution: "sync",
+            requiresHuman: false,
+        };
+        const agent: z.infer<typeof ResolvedAgent> = {
+            ...defaultAgent,
+            tools: [echoDescriptor, slowDescriptor],
+        };
+        const executions: string[] = [];
+        const repo = new FailingAppendRepo();
+        // Fail only echo's SUCCESS result; slow's must commit. (Old code
+        // would then durably record echo as failed via the catch path — the
+        // recovery assertions below reject that fabrication.)
+        repo.failWhen = (events) =>
+            events.some(
+                (e) =>
+                    e.type === "tool_result" &&
+                    e.source === "sync" &&
+                    e.toolCallId === "E" &&
+                    e.result.isError === false,
+            );
+        const { runtime } = makeRuntime({
+            repo,
+            agent,
+            tools: [
+                syncTool(echoDescriptor, async () => {
+                    executions.push("echo");
+                    return { output: "e-done", isError: false };
+                }),
+                syncTool(slowDescriptor, async () => {
+                    executions.push("slow");
+                    return { output: "s-done", isError: false };
+                }),
+            ],
+            models: [
+                respond(
+                    completedResp(
+                        assistantCalls(
+                            toolCallPart("E", "echo"),
+                            toolCallPart("S", "slow"),
+                        ),
+                    ),
+                ),
+                respond(completedResp(assistantText("done"))),
+            ],
+        });
+        const turnId = await newTurn(runtime);
+
+        const first = await advanceAndSettle(runtime, turnId);
+        expect(first.outcome).toBeUndefined();
+        expect(String(first.error)).toContain("disk full");
+        let log = await persisted(repo, turnId);
+        // Both invocations durable; exactly the sibling's result committed
+        // (the append chain stays alive after a failed commit).
+        const results = log.filter((e) => e.type === "tool_result");
+        expect(results).toHaveLength(1);
+        expect(results[0]).toMatchObject({
+            toolCallId: "S",
+            result: { output: "s-done", isError: false },
+        });
+
+        // Recovery: echo closes as indeterminate, slow's real result is
+        // preserved, neither re-executes, and the batch reaches the model
+        // in source order.
+        repo.failWhen = undefined;
+        const second = await advanceAndSettle(runtime, turnId);
+        expect(second.outcome?.status).toBe("completed");
+        expect(executions.sort()).toEqual(["echo", "slow"]);
+        log = await persisted(repo, turnId);
+        const byId = new Map(
+            log
+                .filter((e) => e.type === "tool_result")
+                .map((e) => [e.toolCallId, e]),
+        );
+        expect(byId.get("E")).toMatchObject({
+            source: "runtime",
+            result: { isError: true },
+        });
+        expect(byId.get("S")).toMatchObject({
+            source: "sync",
+            result: { output: "s-done", isError: false },
+        });
+        const followUp = log.find(
+            (e) => e.type === "model_call_requested" && e.modelCallIndex === 1,
+        );
+        expect(followUp).toMatchObject({
+            request: {
+                messages: ["assistant:0", "toolResult:E", "toolResult:S"],
+            },
+        });
+    });
+
+    it("a tool returning an unparseable result is a tool error, not infrastructure", async () => {
+        const { runtime, repo } = makeRuntime({
+            tools: [
+                syncTool(
+                    echoDescriptor,
+                    async () =>
+                        "garbage" as unknown as Awaited<
+                            ReturnType<SyncRuntimeTool["execute"]>
+                        >,
+                ),
+                ...defaultTools.slice(1),
+            ],
+            models: [
+                respond(
+                    completedResp(assistantCalls(toolCallPart("A", "echo"))),
+                ),
+                respond(completedResp(assistantText("done"))),
+            ],
+        });
+        const turnId = await newTurn(runtime);
+        const { outcome } = await advanceAndSettle(runtime, turnId);
+        expect(outcome?.status).toBe("completed");
+        const log = await persisted(repo, turnId);
+        const result = log.find((e) => e.type === "tool_result");
+        expect(result).toMatchObject({
+            source: "sync",
+            result: { isError: true },
+        });
     });
 });
 
