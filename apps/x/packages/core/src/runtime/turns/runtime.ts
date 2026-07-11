@@ -888,7 +888,13 @@ class TurnAdvance {
         tc: ToolCallState,
         syncTool: SyncRuntimeTool,
     ): Promise<void> {
-        let settled: z.infer<typeof ToolResultData> | undefined;
+        // The try covers tool execution only (including parsing its return —
+        // a tool returning garbage is a tool error). The success-result
+        // append stays OUTSIDE: a repository failure there must reject the
+        // invocation as infrastructure, never masquerade as a failed tool —
+        // the side effect already happened, and a durable false error would
+        // invite the model to retry it (§21.4).
+        let settled: z.infer<typeof ToolResultData>;
         try {
             const result = await syncTool.execute(tc.input, {
                 turnId: this.turnId,
@@ -906,15 +912,6 @@ class TurnAdvance {
                 },
             });
             settled = ToolResultData.parse(result);
-            await this.append({
-                type: "tool_result",
-                turnId: this.turnId,
-                ts: this.now(),
-                toolCallId: tc.toolCallId,
-                toolName: tc.toolName,
-                source: "sync",
-                result: settled,
-            });
         } catch (error) {
             if (this.signal.aborted) {
                 await this.append(
@@ -936,6 +933,15 @@ class TurnAdvance {
             });
             return;
         }
+        await this.append({
+            type: "tool_result",
+            turnId: this.turnId,
+            ts: this.now(),
+            toolCallId: tc.toolCallId,
+            toolName: tc.toolName,
+            source: "sync",
+            result: settled,
+        });
         await this.maybeExtendTools(tc, settled);
     }
 
