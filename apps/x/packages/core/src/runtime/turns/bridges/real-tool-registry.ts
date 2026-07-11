@@ -220,7 +220,7 @@ export class RealToolRegistry implements IToolRegistry {
                     );
                     return {
                         output,
-                        isError: false,
+                        isError: isErrorEnvelope(output),
                         ...(additions === undefined
                             ? {}
                             : { metadata: { toolAdditions: additions } }),
@@ -232,6 +232,33 @@ export class RealToolRegistry implements IToolRegistry {
             },
         };
     }
+}
+
+// Builtins signal failure by returning an envelope rather than throwing:
+//   { error: "…" }                          (files, web, mcp, models, …)
+//   { success: false, error|message: "…" }  (app, browser, loadSkill, …)
+//   { successful: false, … }                (composio's API envelope)
+// Map those to isError so the durable log records failures as failures —
+// the model already sees the error text either way (encoding ignores
+// isError), but the reducer, renderer, telemetry, and the tools_extended
+// gate all key off the flag. Deliberately NOT an error: executeCommand's
+// success:false for a plain non-zero exit (stdout/stderr/exitCode, no
+// error/message) — a failing grep is a result, not a tool failure.
+function isErrorEnvelope(output: JsonValue): boolean {
+    if (output === null || typeof output !== "object" || Array.isArray(output)) {
+        return false;
+    }
+    const record = output as { [key: string]: JsonValue };
+    if (typeof record.error === "string" && record.error.length > 0) {
+        return true;
+    }
+    if (record.successful === false) {
+        return true;
+    }
+    if (record.success === false) {
+        return typeof record.message === "string" && record.message.length > 0;
+    }
+    return false;
 }
 
 // Lift a builtin's reserved tool-additions key out of the model-visible

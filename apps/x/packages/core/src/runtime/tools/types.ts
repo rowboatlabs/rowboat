@@ -1,6 +1,12 @@
 // The builtin-tool catalog schema: every entry is {description, inputSchema,
 // execute, permission, isAvailable?}. Shared typing for the domain modules
 // and the merged catalog.
+//
+// Failure convention: builtins return an error envelope instead of throwing —
+// `{ error: "…" }`, `{ success: false, error|message: "…" }`, or composio's
+// `{ successful: false }`. The turns tool-registry bridge maps those to the
+// durable result's isError flag, so don't put a top-level `error` string on
+// a SUCCESS return.
 
 import { z, ZodType } from "zod";
 
