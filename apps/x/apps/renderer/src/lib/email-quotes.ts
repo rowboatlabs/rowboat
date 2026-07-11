@@ -143,10 +143,12 @@ export function prepareEmailHtml(rawHtml: string): PreparedEmail {
   const doc = new DOMParser().parseFromString(rawHtml, 'text/html')
   const hasQuote = markQuotedNodes(doc) && unmarkIfNothingRemains(doc)
   const styled = isStyledDocument(doc)
-  // Emails ship <style> blocks that the parser hoists into <head>. Only the
-  // body gets re-embedded downstream, so carry the head along with it — a
-  // <style> is just as valid inside <body>.
-  const html = (doc.head?.innerHTML || '') + (doc.body?.innerHTML || '')
+  // Serialize <head> and <body> as *elements*, not just their contents. Most
+  // emails carry a <body bgcolor=… style=…>, and when this HTML is embedded
+  // inside the host <body>, the parser merges those attributes onto it — which
+  // is how backgrounds have always applied. Concatenating innerHTML would drop
+  // the tag and with it the attributes.
+  const html = doc.documentElement?.innerHTML || doc.body?.innerHTML || ''
   return { html, hasQuote, styled }
 }
 

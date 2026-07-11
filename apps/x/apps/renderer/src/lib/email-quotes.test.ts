@@ -79,6 +79,14 @@ describe('prepareEmailHtml — quote detection', () => {
     expect(html).toContain('.a{color:red}')
   })
 
+  it('preserves <body> attributes, which carry the email background', () => {
+    // Embedded in the host <body>, the parser merges these onto it. Dropping
+    // the tag would strip the background off every styled newsletter.
+    const { html } = prepareEmailHtml('<html><body bgcolor="#f4f4f4" style="margin:0"><p>Hi</p></body></html>')
+    expect(html).toContain('bgcolor="#f4f4f4"')
+    expect(html).toContain('margin:0')
+  })
+
   it('ignores quoted content when deciding whether the email is styled', () => {
     // The table lives only in the quote, so the body should still adapt to theme.
     const { styled } = prepareEmailHtml(

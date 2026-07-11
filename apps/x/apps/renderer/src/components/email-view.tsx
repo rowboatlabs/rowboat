@@ -312,6 +312,10 @@ function buildEmailDocument(
     overflow-y: hidden;
     word-wrap: break-word;
     padding-bottom: 4px;
+    /* Contain the first child's top margin. Without this it collapses through
+       <body>, shifting the box down while body.scrollHeight stays short — so
+       the height we hand the iframe cuts the last line off. */
+    display: flow-root;
   }
   body > *:last-child { margin-bottom: 0; }
   img { max-width: 100%; height: auto; }
