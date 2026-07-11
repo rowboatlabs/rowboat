@@ -1325,6 +1325,10 @@ Missing or mismatched runtime dependencies:
 - Do not append `turn_failed`.
 - Leave the turn unchanged so the caller can fix its environment and retry.
 
+Cancel inputs are exempt from this validation: they are applied before
+dependency materialization (section 22), because cancellation is the
+terminal exit for environments that never come back.
+
 Provider failures after actual execution begins are modeled turn failures.
 
 ## 16. Hot TurnExecution stream
@@ -1478,10 +1482,13 @@ At a high level, `advanceTurn` performs:
 3. Publish turn-processing-start.
 4. Read and validate JSONL.
 5. Reduce events to TurnState.
-6. Materialize context through the injected context resolver.
-7. Validate terminal state, input, and runtime dependencies.
-8. Apply the optional single external input.
-9. Repeatedly advance deterministic work:
+6. Validate terminal state and the optional input.
+7. If the input is a cancel, cancel immediately — live dependencies are
+   never materialized for cancellation (section 22).
+8. Materialize context through the injected context resolver and validate
+   runtime dependencies.
+9. Apply the optional single external input.
+10. Repeatedly advance deterministic work:
    a. Recover from the current durable boundary.
    b. Resolve permissions.
    c. Execute eligible sync tools.
@@ -1494,9 +1501,9 @@ At a high level, `advanceTurn` performs:
    j. Persist normalized non-delta events and stream deltas.
    k. Append model_call_completed or model_call_failed.
    l. Complete when the response has no tool calls.
-10. Publish turn-processing-end in finalization.
-11. Release the lock.
-12. Resolve/reject outcome and close/error event stream.
+11. Publish turn-processing-end in finalization.
+12. Release the lock.
+13. Resolve/reject outcome and close/error event stream.
 ```
 
 The loop does not read session queues, accept new user messages, switch agents,
@@ -1592,6 +1599,11 @@ Rules:
 - Append `turn_cancelled`.
 - Never initiate another model call.
 - Reject late permission decisions, progress, and results after cancellation.
+- A cancel input is applied before live-dependency materialization:
+  cancellation never requires the context, agent snapshot, model, or tools
+  to resolve, so a turn whose environment is no longer resolvable (provider
+  removed from config, builtin renamed, context chain unreadable) can
+  always be cancelled — the terminal exit that keeps its session usable.
 
 Sync tools are cooperatively cancellable. A tool that ignores the signal may not
 settle immediately. The runtime cannot guarantee rollback of external side
@@ -1791,6 +1803,9 @@ Assertions:
 - Turn becomes terminal cancelled.
 - No subsequent model request occurs.
 - Late external inputs are rejected.
+- Cancellation succeeds when live dependencies can no longer be resolved,
+  while non-cancel inputs against the same broken environment reject with
+  the turn file unchanged.
 
 ### 26.6 Failures
 

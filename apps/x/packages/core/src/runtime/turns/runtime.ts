@@ -217,10 +217,12 @@ export class TurnRuntime implements ITurnRuntime {
         }
     }
 
-    // §18 steps 4–7: read, reduce, short-circuit terminal turns, materialize
-    // context, and validate live dependencies — all before any mutation.
-    // Failures here are infrastructure errors: the execution rejects and the
-    // turn is left unchanged.
+    // §18 steps 4–7: read, reduce, short-circuit terminal turns, and prepare
+    // live-dependency materialization. Materialization itself is deferred
+    // into run(): non-cancel work awaits it first, so failures there remain
+    // infrastructure errors that reject the execution with the turn
+    // unchanged — but a cancel input never needs it (§22), so a turn whose
+    // environment can no longer be resolved can always be cancelled.
     private async advance(
         turnId: string,
         input: TurnExternalInput | undefined,
@@ -238,32 +240,36 @@ export class TurnRuntime implements ITurnRuntime {
         }
 
         const definition = state.definition;
-        const resolvedContext = await this.contextResolver.resolve(
-            definition.context,
-        );
-        const resolvedAgent = await this.contextResolver.resolveAgent(
-            definition.agent.resolved,
-        );
-        const model = await this.modelRegistry.resolve(resolvedAgent.model);
-        // Base snapshot plus every durable mid-turn extension already in the
-        // log — rebuilding from durable state IS the crash-recovery path.
-        const toolsByName = new Map<string, RuntimeTool>();
-        for (const descriptor of effectiveTools(
-            state,
-            state.modelCalls.length,
-            resolvedAgent.tools,
-        )) {
-            const tool = await this.toolRegistry.resolve(descriptor);
-            if (
-                tool.descriptor.toolId !== descriptor.toolId ||
-                tool.descriptor.execution !== descriptor.execution
-            ) {
-                throw new TurnDependencyError(
-                    `resolved tool ${descriptor.toolId} does not match its persisted descriptor`,
-                );
+        const materialize = async (): Promise<MaterializedEnv> => {
+            const resolvedContext = await this.contextResolver.resolve(
+                definition.context,
+            );
+            const resolvedAgent = await this.contextResolver.resolveAgent(
+                definition.agent.resolved,
+            );
+            const model = await this.modelRegistry.resolve(resolvedAgent.model);
+            // Base snapshot plus every durable mid-turn extension already in
+            // the log — rebuilding from durable state IS the crash-recovery
+            // path.
+            const toolsByName = new Map<string, RuntimeTool>();
+            for (const descriptor of effectiveTools(
+                state,
+                state.modelCalls.length,
+                resolvedAgent.tools,
+            )) {
+                const tool = await this.toolRegistry.resolve(descriptor);
+                if (
+                    tool.descriptor.toolId !== descriptor.toolId ||
+                    tool.descriptor.execution !== descriptor.execution
+                ) {
+                    throw new TurnDependencyError(
+                        `resolved tool ${descriptor.toolId} does not match its persisted descriptor`,
+                    );
+                }
+                toolsByName.set(descriptor.name, tool);
             }
-            toolsByName.set(descriptor.name, tool);
-        }
+            return { resolvedContext, resolvedAgent, model, toolsByName };
+        };
 
         const controller = new AbortController();
         const forwardAbort = () => controller.abort();
@@ -282,11 +288,8 @@ export class TurnRuntime implements ITurnRuntime {
             events,
             state,
             stream,
-            resolvedContext,
-            resolvedAgent,
-            model,
+            materialize,
             usageReporter: this.usageReporter,
-            toolsByName,
             resolveTool: (descriptor) => this.toolRegistry.resolve(descriptor),
             signal: controller.signal,
             turnRepo: this.turnRepo,
@@ -305,6 +308,16 @@ export class TurnRuntime implements ITurnRuntime {
     }
 }
 
+// The live execution environment resolved from a turn's durable snapshot.
+// Materialized lazily by run(): every phase that continues the turn needs
+// it; cancellation deliberately does not (§22).
+interface MaterializedEnv {
+    resolvedContext: Array<z.infer<typeof ConversationMessage>>;
+    resolvedAgent: z.infer<typeof ResolvedAgent>;
+    model: ResolvedModel;
+    toolsByName: Map<string, RuntimeTool>;
+}
+
 // One advanceTurn invocation. Owns the per-invocation context and implements
 // the §18 main loop as one method per phase. All state it acts on is derived
 // from the durable log via the shared reducer after every append.
@@ -313,11 +326,14 @@ class TurnAdvance {
     private readonly events: TEvent[];
     private state: TurnState;
     private readonly stream: HotStream<TurnStreamEvent, TurnOutcome>;
-    private readonly resolvedContext: Array<z.infer<typeof ConversationMessage>>;
-    private readonly resolvedAgent: z.infer<typeof ResolvedAgent>;
-    private readonly model: ResolvedModel;
+    private readonly materialize: () => Promise<MaterializedEnv>;
+    // Assigned by run() immediately after the cancel fast-path, before any
+    // loop phase can touch them. cancel() must never read these.
+    private resolvedContext!: Array<z.infer<typeof ConversationMessage>>;
+    private resolvedAgent!: z.infer<typeof ResolvedAgent>;
+    private model!: ResolvedModel;
+    private toolsByName!: Map<string, RuntimeTool>;
     private readonly usageReporter: IUsageReporter;
-    private readonly toolsByName: Map<string, RuntimeTool>;
     private readonly resolveTool: (
         descriptor: z.infer<typeof ToolDescriptor>,
     ) => Promise<RuntimeTool>;
@@ -339,11 +355,8 @@ class TurnAdvance {
         events: TEvent[];
         state: TurnState;
         stream: HotStream<TurnStreamEvent, TurnOutcome>;
-        resolvedContext: Array<z.infer<typeof ConversationMessage>>;
-        resolvedAgent: z.infer<typeof ResolvedAgent>;
-        model: ResolvedModel;
+        materialize: () => Promise<MaterializedEnv>;
         usageReporter: IUsageReporter;
-        toolsByName: Map<string, RuntimeTool>;
         resolveTool: (
             descriptor: z.infer<typeof ToolDescriptor>,
         ) => Promise<RuntimeTool>;
@@ -358,11 +371,8 @@ class TurnAdvance {
         this.events = init.events;
         this.state = init.state;
         this.stream = init.stream;
-        this.resolvedContext = init.resolvedContext;
-        this.resolvedAgent = init.resolvedAgent;
-        this.model = init.model;
+        this.materialize = init.materialize;
         this.usageReporter = init.usageReporter;
-        this.toolsByName = init.toolsByName;
         this.resolveTool = init.resolveTool;
         this.signal = init.signal;
         this.turnRepo = init.turnRepo;
@@ -457,11 +467,24 @@ class TurnAdvance {
     // appends durable facts and lets the loop continue, or produces the
     // invocation's outcome.
     async run(input: TurnExternalInput | undefined): Promise<TurnOutcome> {
+        // §22: cancel is the one input that must keep working when the
+        // environment is gone (provider unconfigured, builtin renamed,
+        // context chain unreadable) — it needs no live dependencies, so it
+        // runs before materialization.
+        if (input?.type === "cancel") {
+            this.cancelReason = input.reason;
+            return this.cancel();
+        }
+        // §15.3: everything that continues the turn materializes first, so
+        // a broken environment rejects as infrastructure before any input
+        // is persisted and the turn is left unchanged.
+        const env = await this.materialize();
+        this.resolvedContext = env.resolvedContext;
+        this.resolvedAgent = env.resolvedAgent;
+        this.model = env.model;
+        this.toolsByName = env.toolsByName;
         if (input) {
-            const cancelled = await this.applyInput(input);
-            if (cancelled) {
-                return cancelled;
-            }
+            await this.applyInput(input);
         }
         for (;;) {
             if (this.signal.aborted) {
@@ -506,14 +529,12 @@ class TurnAdvance {
     }
 
     // §11.2: exactly one input, validated against durable pending state.
-    // Returns an outcome only for cancel inputs.
+    // Cancel inputs never reach here — run() short-circuits them before
+    // materialization.
     private async applyInput(
-        input: TurnExternalInput,
-    ): Promise<TurnOutcome | undefined> {
+        input: Exclude<TurnExternalInput, { type: "cancel" }>,
+    ): Promise<void> {
         switch (input.type) {
-            case "cancel":
-                this.cancelReason = input.reason;
-                return this.cancel();
             case "permission_decision": {
                 const tc = this.state.toolCalls.find(
                     (t) => t.toolCallId === input.toolCallId,
