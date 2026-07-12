@@ -97,6 +97,15 @@ All in `apps/renderer/src/lib/analytics.ts`:
 - `search_executed` — `{ types: string[] }`
 - `note_exported` — `{ format }`
 
+### Client auto-update funnel
+
+The desktop client's own updates — distinct from the in-app apps feature, which owns `app_updated`:
+
+- `update_prompted` — renderer (`apps/renderer/src/lib/analytics.ts`): the restart-to-update card was shown for a staged update
+- `update_restarted` — main (`apps/main/src/updater.ts`), `{ from, to? }`: the user clicked restart-to-update (`to` is Windows-only; Squirrel.Mac doesn't report the release name)
+- `update_failed` — main (`apps/main/src/updater.ts`), `{ message }`: the auto-updater errored. Network/offline errors are excluded — they go to the soft `offline` state and are not captured (a user offline for hours would otherwise emit one per periodic check)
+- `client_updated` — main (`apps/main/src/ipc.ts`), `{ from, to }`: first launch on a newer version (fires once per update, whatever the restart path; downgrades restamp silently and don't fire)
+
 ## Person properties
 
 Persistent across sessions for the same user. Set via `posthog.people.set` or as the `properties` arg to `identify`.

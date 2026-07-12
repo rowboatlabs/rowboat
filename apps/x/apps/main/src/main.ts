@@ -17,7 +17,8 @@ import {
 import { disposeAllTerminals } from "./terminal.js";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname } from "node:path";
-import { updateElectronApp, UpdateSourceType } from "update-electron-app";
+import { initUpdater } from "./updater.js";
+import { loadWindowState, trackWindowState } from "./window-state.js";
 import { init as initGmailSync } from "@x/core/dist/knowledge/sync_gmail.js";
 import { init as initCalendarSync } from "@x/core/dist/knowledge/sync_calendar.js";
 import { init as initFirefliesSync } from "@x/core/dist/knowledge/sync_fireflies.js";
@@ -258,9 +259,12 @@ function setupZoomShortcuts(win: BrowserWindow) {
 }
 
 function createWindow() {
+  const savedState = loadWindowState();
   const win = new BrowserWindow({
-    width: 1280,
-    height: 800,
+    width: savedState?.width ?? 1280,
+    height: savedState?.height ?? 800,
+    x: savedState?.x,
+    y: savedState?.y,
     minWidth: 600,
     minHeight: 480,
     show: false, // Don't show until ready
@@ -286,11 +290,14 @@ function createWindow() {
   setMainWindowForDeepLinks(win);
   win.on("closed", () => setMainWindowForDeepLinks(null));
 
-  // Show window when content is ready to prevent blank screen
+  // Show window when content is ready to prevent blank screen.
+  // First run keeps the maximize-by-default behavior; afterwards restore
+  // whatever the user last had (a restart-to-update should feel lossless).
   win.once("ready-to-show", () => {
-    win.maximize();
+    if (!savedState || savedState.maximized) win.maximize();
     win.show();
   });
+  trackWindowState(win);
 
   // Open external links in system browser (not sandboxed Electron window)
   // This handles window.open() and target="_blank" links
@@ -359,16 +366,9 @@ app.whenReady().then(async () => {
   // serves workspace files via app://workspace/<rel-path> for media previews.
   registerAppProtocol();
 
-  // Initialize auto-updater (only in production)
-  if (app.isPackaged) {
-    updateElectronApp({
-      updateSource: {
-        type: UpdateSourceType.ElectronPublicUpdateService,
-        repo: "rowboatlabs/rowboat",
-      },
-      notifyUser: true, // Shows native dialog when update is available
-    });
-  }
+  // Initialize auto-updater (no-ops in dev). Update state is pushed to the
+  // renderer (updater:status), which owns the restart prompt — see updater.ts.
+  initUpdater();
 
   // The agent-slack CLI ships bundled with the app (.package/dist/agent-slack.cjs)
   // and is resolved per call by the shared executor in @x/core. Availability is

@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Bug, Terminal, AlertTriangle, RefreshCw, PanelRight, Bell, Smartphone } from "lucide-react"
+import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Bug, Terminal, AlertTriangle, RefreshCw, PanelRight, Bell, Smartphone, WifiOff } from "lucide-react"
 
 import {
   Dialog,
@@ -27,6 +27,7 @@ import { AccountSettings } from "@/components/settings/account-settings"
 import { ConnectedAccountsSettings } from "@/components/settings/connected-accounts-settings"
 import { MobileChannelsSettings } from "@/components/settings/mobile-channels-settings"
 import type { ApprovalPolicy } from "@x/shared/src/code-mode.js"
+import type { ipc as ipcShared } from "@x/shared"
 import { startProvisioning, useProvisioning, enabledOptimistic, type AgentStatus, type CodeModeAgentStatus } from "@/lib/code-mode-provisioning"
 
 type ConfigTab = "account" | "connections" | "mobile" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "notifications" | "note-tagging" | "help"
@@ -122,11 +123,181 @@ interface SettingsDialogProps {
   onOpenChange?: (open: boolean) => void
 }
 
+// --- Updates section (Help tab) ---
+
+type UpdaterStatus = ipcShared.IPCChannels['updater:status']['req']
+
+function UpdateSettings() {
+  const [status, setStatus] = useState<UpdaterStatus | null>(null)
+  // When the user clicked "Check for updates" — the "You're up to date"
+  // confirmation only shows for a check completed after this, so a stale
+  // lastCheckedAt from a background check never reads as click feedback.
+  const [checkStartedAt, setCheckStartedAt] = useState<number | null>(null)
+
+  useEffect(() => {
+    void window.ipc.invoke('updater:getStatus', null).then(setStatus)
+    return window.ipc.on('updater:status', setStatus)
+  }, [])
+
+  const confirmedUpToDate =
+    checkStartedAt !== null &&
+    status?.state === 'idle' &&
+    status.lastCheckedAt !== undefined &&
+    status.lastCheckedAt >= checkStartedAt
+
+  // The confirmation is click feedback, not a status — fade it after a bit
+  // rather than leaving a stale "You're up to date" up indefinitely.
+  useEffect(() => {
+    if (!confirmedUpToDate) return
+    const timer = setTimeout(() => setCheckStartedAt(null), 5000)
+    return () => clearTimeout(timer)
+  }, [confirmedUpToDate])
+
+  if (!status) return null
+
+  const checkNow = () => {
+    setCheckStartedAt(Date.now())
+    // Progress arrives via updater:status pushes; using the invoke's snapshot
+    // here could stomp a newer pushed state.
+    void window.ipc.invoke('updater:check', null)
+  }
+
+  let body: React.ReactNode
+  switch (status.state) {
+    case 'disabled':
+      body = (
+        <p className="text-xs text-muted-foreground">
+          Automatic updates are disabled in development builds.
+        </p>
+      )
+      break
+    case 'unsupported':
+      body = status.reason === 'not-in-applications' ? (
+        <div className="flex items-start justify-between gap-3">
+          <p className="text-xs text-muted-foreground flex items-start gap-1.5">
+            <AlertTriangle className="size-3.5 shrink-0 mt-0.5 text-amber-500" />
+            Move Rowboat to the Applications folder to enable automatic updates.
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            className="shrink-0"
+            onClick={() =>
+              void window.ipc.invoke('updater:moveToApplications', null).then(({ moved }) => {
+                if (!moved) {
+                  toast("Couldn't move Rowboat", {
+                    description: 'Quit Rowboat and drag it into the Applications folder instead.',
+                  })
+                }
+              })
+            }
+          >
+            Move to Applications
+          </Button>
+        </div>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          {"Automatic updates aren't available on this platform. "}
+          <a
+            href="https://github.com/rowboatlabs/rowboat/releases/latest"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline hover:text-foreground transition-colors"
+          >
+            Get the latest release
+          </a>
+        </p>
+      )
+      break
+    case 'checking':
+    case 'downloading':
+      body = (
+        <Button size="sm" variant="outline" disabled>
+          <Loader2 className="size-3.5 animate-spin" />
+          {status.state === 'checking' ? 'Checking for updates…' : 'Downloading update…'}
+        </Button>
+      )
+      break
+    case 'ready':
+      body = (
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-xs text-muted-foreground">
+            {status.newVersion
+              ? `Rowboat ${status.newVersion} is ready to install.`
+              : 'An update is ready to install.'}
+          </p>
+          <Button
+            size="sm"
+            className="shrink-0"
+            onClick={() => void window.ipc.invoke('updater:quitAndInstall', null)}
+          >
+            Restart to update
+          </Button>
+        </div>
+      )
+      break
+    case 'error':
+      body = (
+        <div className="flex items-start justify-between gap-3">
+          <p className="text-xs text-muted-foreground flex items-start gap-1.5">
+            <AlertTriangle className="size-3.5 shrink-0 mt-0.5 text-destructive" />
+            {`Update check failed: ${status.error ?? 'unknown error'}`}
+          </p>
+          <Button size="sm" variant="outline" className="shrink-0" onClick={checkNow}>
+            Try again
+          </Button>
+        </div>
+      )
+      break
+    case 'offline':
+      body = (
+        <div className="flex items-start justify-between gap-3">
+          <p className="text-xs text-muted-foreground flex items-start gap-1.5">
+            <WifiOff className="size-3.5 shrink-0 mt-0.5" />
+            {"Couldn't reach the update server. Updates will resume when you're back online."}
+          </p>
+          <Button size="sm" variant="outline" className="shrink-0" onClick={checkNow}>
+            Try again
+          </Button>
+        </div>
+      )
+      break
+    case 'idle':
+      body = (
+        <div className="flex items-center gap-3">
+          <Button size="sm" variant="outline" onClick={checkNow}>
+            <RefreshCw className="size-3.5" />
+            Check for updates
+          </Button>
+          {confirmedUpToDate && (
+            <span className="text-xs text-muted-foreground flex items-center gap-1">
+              <CheckCircle2 className="size-3.5 text-green-500" />
+              {"You're up to date."}
+            </span>
+          )}
+        </div>
+      )
+      break
+  }
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <h4 className="text-sm font-medium">Updates</h4>
+        <p className="text-xs text-muted-foreground mt-0.5">Rowboat v{status.version}</p>
+      </div>
+      {body}
+    </div>
+  )
+}
+
 // --- Help & Support tab ---
 
 function HelpSettings() {
   return (
     <div className="space-y-4">
+      <UpdateSettings />
+      <Separator />
       <div>
         <h4 className="text-sm font-medium">Help &amp; Support</h4>
         <p className="text-xs text-muted-foreground mt-0.5">Get help from our community</p>

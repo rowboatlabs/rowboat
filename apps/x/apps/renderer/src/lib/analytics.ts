@@ -89,6 +89,13 @@ export function callTurnLatency(props: {
   })
 }
 
+// Client auto-update funnel: staged (main: update_failed on error) → prompted
+// (here, when the restart card is shown) → restarted (main, on quitAndInstall)
+// → client_updated (main, first launch on the new version).
+export function updatePrompted() {
+  posthog.capture('update_prompted')
+}
+
 export function searchExecuted(types: string[]) {
   posthog.capture('search_executed', { types })
 }
