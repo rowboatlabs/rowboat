@@ -653,11 +653,63 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
   }, [providerConfigs, rowboatConnected])
 
   const handleDeleteProvider = useCallback(async (prov: LlmProviderFlavor) => {
+    const isDefaultProv = defaultProvider === prov
     try {
       const result = await window.ipc.invoke("workspace:readFile", { path: "config/models.json" })
-      const parsed = JSON.parse(result.data)
+      let parsed = JSON.parse(result.data)
+
+      // Disconnecting the default provider: silently promote another
+      // connected provider first — the connect-only UI has no usable
+      // set-as-default step to send the user to. Prefer the provider the
+      // user's explicit defaultSelection points at; promotion goes through
+      // the same models:saveConfig path Set-as-default uses, so the repo
+      // writes a valid top-level provider/model.
+      let promoted: LlmProviderFlavor | null = null
+      if (isDefaultProv) {
+        const selProvider = parsed?.defaultSelection?.provider
+        const candidates = Object.keys(parsed?.providers ?? {})
+          .filter((k): k is LlmProviderFlavor => k !== prov && k in providerConfigs)
+          .sort((a, b) => (a === selProvider ? -1 : b === selProvider ? 1 : 0))
+        for (const candidate of candidates) {
+          const config = providerConfigs[candidate]
+          const allModels = config.models.map(m => m.trim()).filter(Boolean)
+          // Same silent precedence as connect, minus the live list we don't
+          // have here: the provider's saved model, else its preferred default.
+          const model = allModels[0] || preferredDefaults[candidate] || ""
+          if (!model) continue
+          await window.ipc.invoke("models:saveConfig", {
+            provider: {
+              flavor: candidate,
+              apiKey: config.apiKey.trim() || undefined,
+              baseURL: config.baseURL.trim() || undefined,
+            },
+            model,
+            models: allModels.length > 0 ? allModels : [model],
+            ...(rowboatConnected ? {} : {
+              knowledgeGraphModel: config.knowledgeGraphModel.trim() || undefined,
+              meetingNotesModel: config.meetingNotesModel.trim() || undefined,
+              liveNoteAgentModel: config.liveNoteAgentModel.trim() || undefined,
+              autoPermissionDecisionModel: config.autoPermissionDecisionModel.trim() || undefined,
+            }),
+          })
+          promoted = candidate
+          break
+        }
+        if (promoted) {
+          // saveConfig rewrote top-level and the providers map — re-read so
+          // the deletion write below doesn't clobber the promotion.
+          const fresh = await window.ipc.invoke("workspace:readFile", { path: "config/models.json" })
+          parsed = JSON.parse(fresh.data)
+        }
+      }
+
       if (parsed?.providers?.[prov]) {
         delete parsed.providers[prov]
+      }
+      // A defaultSelection pointing at the removed provider is dangling —
+      // drop it so llm:getDefaultModel falls back cleanly.
+      if (parsed?.defaultSelection?.provider === prov) {
+        delete parsed.defaultSelection
       }
       // If the deleted provider is the current top-level active one,
       // switch top-level config to the current default provider
@@ -677,6 +729,24 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
           parsed.liveNoteAgentModel = defConfig.liveNoteAgentModel.trim() || undefined
           parsed.autoPermissionDecisionModel = defConfig.autoPermissionDecisionModel.trim() || undefined
         }
+      } else if (parsed?.provider?.flavor === prov) {
+        // Removing the last connected provider: drop the top-level pair
+        // entirely. The schema requires it, so core's readConfig() treats
+        // the file as "no config" — signed-in falls back to the curated
+        // gateway default and signed-out llm:getDefaultModel rejects, which
+        // the composer already handles (it shows the connect hint).
+        delete parsed.provider
+        delete parsed.model
+        delete parsed.models
+        delete parsed.knowledgeGraphModel
+        delete parsed.meetingNotesModel
+        delete parsed.liveNoteAgentModel
+        delete parsed.autoPermissionDecisionModel
+        // With no BYOK providers left, any non-gateway selection is dangling.
+        if (parsed?.defaultSelection && parsed.defaultSelection.provider !== "rowboat"
+          && Object.keys(parsed?.providers ?? {}).length === 0) {
+          delete parsed.defaultSelection
+        }
       }
       await window.ipc.invoke("workspace:writeFile", {
         path: "config/models.json",
@@ -691,9 +761,15 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
         next.delete(prov)
         return next
       })
+      if (isDefaultProv) setDefaultProvider(promoted)
       setTestState({ status: "idle" })
       window.dispatchEvent(new Event('models-config-changed'))
-      toast.success("Provider configuration removed")
+      if (promoted) {
+        const promotedName = [...primaryProviders, ...moreProviders].find(p => p.id === promoted)?.name || promoted
+        toast.success(`Disconnected · ${promotedName} is now the default`)
+      } else {
+        toast.success("Provider configuration removed")
+      }
     } catch {
       toast.error("Failed to remove provider")
     }
@@ -874,6 +950,16 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
             <CheckCircle2 className="size-4" />
             Connected · {providerModels.models.length} model{providerModels.models.length === 1 ? "" : "s"} available
           </div>
+        )}
+        {savedProviders.has(provider) && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+            onClick={() => handleDeleteProvider(provider)}
+          >
+            Disconnect
+          </Button>
         )}
       </div>
 
