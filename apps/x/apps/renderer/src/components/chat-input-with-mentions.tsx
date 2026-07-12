@@ -108,6 +108,10 @@ interface ConfiguredModel {
 // fetch their list from the provider inside the dropdown via
 // useProviderModels (models:listForProvider).
 const LIVE_PICKER_FLAVORS = new Set<string>(['openrouter', 'aigateway', 'ollama', 'openai-compatible'])
+// Catalog-preferred flavors that degrade to a live fetch when models:list has
+// no catalog for them (signed-in mode returns only the rowboat provider, or
+// the models.dev cache is empty).
+const LIVE_FALLBACK_FLAVORS = new Set<string>(['openai', 'anthropic', 'google'])
 
 type ModelPickerGroup =
   | { kind: 'catalog'; flavor: string; models: string[] }
@@ -119,16 +123,35 @@ type ModelPickerGroup =
 // always pickable even while the fetch is pending or failed. Live-fetched
 // ids carry no reasoning metadata, so the effort control stays hidden for
 // them (reasoningByKey lookup misses default to off).
-function LiveProviderGroupItems({ group, pinnedModels }: { group: Extract<ModelPickerGroup, { kind: 'live' }>; pinnedModels: string[] }) {
+//
+// The group owns its header so it can hide itself when the search filter
+// matches none of its rows. Loading/error rows are status, not models — they
+// render (with the header) regardless of the filter, and don't count toward
+// the parent's "No models match" check (which is what gets reported up).
+function LiveProviderGroupItems({ group, label, pinnedModels, filter, onModelRowsChange }: {
+  group: Extract<ModelPickerGroup, { kind: 'live' }>
+  label: string
+  pinnedModels: string[]
+  filter: string
+  onModelRowsChange: (flavor: string, hasModelRows: boolean) => void
+}) {
   const { status, models, error, refetch } = useProviderModels({
     flavor: group.flavor,
     apiKey: group.apiKey,
     baseURL: group.baseURL,
   })
   const items = [...pinnedModels, ...models.filter((m) => !pinnedModels.includes(m))]
+  const visible = filter ? items.filter((m) => m.toLowerCase().includes(filter)) : items
+  const showStatus = status === 'loading' || status === 'error'
+  const hasModelRows = visible.length > 0
+  useEffect(() => {
+    onModelRowsChange(group.flavor, hasModelRows)
+  }, [group.flavor, hasModelRows, onModelRowsChange])
+  if (!hasModelRows && !showStatus) return null
   return (
     <>
-      {items.map((m) => {
+      <DropdownMenuLabel className="text-xs text-muted-foreground">{label}</DropdownMenuLabel>
+      {visible.map((m) => {
         const key = `${group.flavor}/${m}`
         return (
           <DropdownMenuRadioItem key={key} value={key}>
@@ -534,21 +557,23 @@ function ChatInputInner({
           const savedModel = typeof e.model === 'string' ? e.model : ''
 
           // Live flavors fetch their list from the provider inside the
-          // dropdown, with the credentials saved in config.
-          if (LIVE_PICKER_FLAVORS.has(flavor)) {
+          // dropdown, with the credentials saved in config. Catalog flavors
+          // degrade to the same live fetch when models:list carried no
+          // catalog for them (signed in, or empty models.dev cache).
+          const catalogModels = catalog[flavor] || []
+          if (LIVE_PICKER_FLAVORS.has(flavor) || (catalogModels.length === 0 && LIVE_FALLBACK_FLAVORS.has(flavor))) {
             groups.push({ kind: 'live', flavor: flavor as ProviderModelsFlavor, apiKey, baseURL, savedModel })
             continue
           }
 
-          // Catalog flavors: the saved default model leads, then the catalog.
-          // Saved models[] is the no-catalog fallback (models.dev cache
-          // empty, or signed in — the gateway list has no per-flavor catalogs).
+          // Catalog group: the saved default model leads, then the catalog.
+          // Saved models[] survives as the fallback for unknown flavors the
+          // live fetch doesn't support.
           const models: string[] = []
           const push = (model: string) => {
             if (model && !models.includes(model)) models.push(model)
           }
           push(savedModel)
-          const catalogModels = catalog[flavor] || []
           if (catalogModels.length > 0) {
             for (const m of catalogModels) push(m)
           } else {
@@ -769,6 +794,18 @@ function ChatInputInner({
     checkSearch()
   }, [isActive, isRowboatConnected])
 
+  // Search filter for the model dropdown. Reset each time the menu opens;
+  // matching is a case-insensitive substring test on the model id. Live
+  // groups filter themselves and report whether they still have rows, so the
+  // parent can render the global "No models match" row.
+  const [modelFilter, setModelFilter] = useState('')
+  const modelFilterInputRef = useRef<HTMLInputElement>(null)
+  const [liveGroupHasRows, setLiveGroupHasRows] = useState<Record<string, boolean>>({})
+  const modelFilterValue = modelFilter.trim().toLowerCase()
+  const handleLiveGroupRows = useCallback((flavor: string, hasRows: boolean) => {
+    setLiveGroupHasRows((prev) => (prev[flavor] === hasRows ? prev : { ...prev, [flavor]: hasRows }))
+  }, [])
+
   // The effective default always renders even when no group carries it (the
   // gateway list failed, or its provider was removed from config) — the
   // picker must never be missing the model that actually runs. Live groups
@@ -780,6 +817,16 @@ function ChatInputInner({
       (g.kind === 'live' || g.models.includes(defaultModel.model)))
     return covered ? null : defaultModel
   }, [modelGroups, defaultModel])
+
+  const standaloneVisible = standaloneDefault !== null &&
+    (!modelFilterValue || standaloneDefault.model.toLowerCase().includes(modelFilterValue))
+  // Nothing matches anywhere → "No models match". Live groups that haven't
+  // reported yet (first render after opening) count as having rows so the
+  // empty row never flashes.
+  const anyModelRowVisible = standaloneVisible || modelGroups.some((g) =>
+    g.kind === 'catalog'
+      ? g.models.some((m) => m.toLowerCase().includes(modelFilterValue))
+      : liveGroupHasRows[g.flavor] !== false)
 
   // Selecting a model affects the *next* run created from this tab (frozen
   // once a run exists) AND persists as the app default so background agents
@@ -1458,7 +1505,18 @@ function ChatInputInner({
             </TooltipContent>
           </Tooltip>
         ) : (
-          <DropdownMenu>
+          <DropdownMenu
+            onOpenChange={(open) => {
+              // The filter is per-opening, never sticky. Focus the search
+              // input once the content has mounted and Radix has run its own
+              // open-focus (DropdownMenu.Content has no onOpenAutoFocus).
+              if (open) {
+                setModelFilter('')
+                setLiveGroupHasRows({})
+                setTimeout(() => modelFilterInputRef.current?.focus(), 0)
+              }
+            }}
+          >
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
@@ -1478,48 +1536,80 @@ function ChatInputInner({
               {modelGroups.length === 0 && !standaloneDefault ? (
                 <DropdownMenuItem disabled>Connect a provider in Settings</DropdownMenuItem>
               ) : (
-                <DropdownMenuRadioGroup
-                  value={activeModelKey || (defaultModel ? `${defaultModel.provider}/${defaultModel.model}` : '')}
-                  onValueChange={handleModelChange}
-                >
-                  {standaloneDefault && (
-                    <DropdownMenuRadioItem value={`${standaloneDefault.provider}/${standaloneDefault.model}`}>
-                      <span className="truncate">{standaloneDefault.model}</span>
-                      <span className="ml-2 text-xs text-muted-foreground">
-                        {providerDisplayNames[standaloneDefault.provider] || standaloneDefault.provider}
-                      </span>
-                    </DropdownMenuRadioItem>
-                  )}
-                  {modelGroups.map((g) => {
-                    // The app default leads its live group; the group's own
-                    // saved model follows (both stay pickable through fetch
-                    // loading/failure).
-                    const pinned: string[] = []
-                    if (g.kind === 'live') {
-                      if (defaultModel && defaultModel.provider === g.flavor) pinned.push(defaultModel.model)
-                      if (g.savedModel && !pinned.includes(g.savedModel)) pinned.push(g.savedModel)
-                    }
-                    return (
-                      <Fragment key={g.flavor}>
-                        <DropdownMenuLabel className="text-xs text-muted-foreground">
-                          {providerDisplayNames[g.flavor] || g.flavor}
-                        </DropdownMenuLabel>
-                        {g.kind === 'catalog' ? (
-                          g.models.map((m) => {
+                <>
+                  <div className="sticky top-0 z-10 -mx-1 -mt-1 bg-popover p-1">
+                    <input
+                      ref={modelFilterInputRef}
+                      value={modelFilter}
+                      onChange={(e) => setModelFilter(e.target.value)}
+                      onKeyDown={(e) => {
+                        // Printable keys belong to the input, not the menu's
+                        // typeahead; arrows and Escape stay with the menu.
+                        if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Escape') {
+                          e.stopPropagation()
+                        }
+                      }}
+                      placeholder="Search models…"
+                      className="h-7 w-full rounded-sm border border-input bg-transparent px-2 text-xs outline-none placeholder:text-muted-foreground"
+                    />
+                  </div>
+                  <DropdownMenuRadioGroup
+                    value={activeModelKey || (defaultModel ? `${defaultModel.provider}/${defaultModel.model}` : '')}
+                    onValueChange={handleModelChange}
+                  >
+                    {standaloneDefault && standaloneVisible && (
+                      <DropdownMenuRadioItem value={`${standaloneDefault.provider}/${standaloneDefault.model}`}>
+                        <span className="truncate">{standaloneDefault.model}</span>
+                        <span className="ml-2 text-xs text-muted-foreground">
+                          {providerDisplayNames[standaloneDefault.provider] || standaloneDefault.provider}
+                        </span>
+                      </DropdownMenuRadioItem>
+                    )}
+                    {modelGroups.map((g) => {
+                      const label = providerDisplayNames[g.flavor] || g.flavor
+                      if (g.kind === 'live') {
+                        // The app default leads its live group; the group's
+                        // own saved model follows (both stay pickable through
+                        // fetch loading/failure).
+                        const pinned: string[] = []
+                        if (defaultModel && defaultModel.provider === g.flavor) pinned.push(defaultModel.model)
+                        if (g.savedModel && !pinned.includes(g.savedModel)) pinned.push(g.savedModel)
+                        return (
+                          <LiveProviderGroupItems
+                            key={g.flavor}
+                            group={g}
+                            label={label}
+                            pinnedModels={pinned}
+                            filter={modelFilterValue}
+                            onModelRowsChange={handleLiveGroupRows}
+                          />
+                        )
+                      }
+                      const visibleModels = modelFilterValue
+                        ? g.models.filter((m) => m.toLowerCase().includes(modelFilterValue))
+                        : g.models
+                      if (visibleModels.length === 0) return null
+                      return (
+                        <Fragment key={g.flavor}>
+                          <DropdownMenuLabel className="text-xs text-muted-foreground">
+                            {label}
+                          </DropdownMenuLabel>
+                          {visibleModels.map((m) => {
                             const key = `${g.flavor}/${m}`
                             return (
                               <DropdownMenuRadioItem key={key} value={key}>
                                 <span className="truncate">{m}</span>
                               </DropdownMenuRadioItem>
                             )
-                          })
-                        ) : (
-                          <LiveProviderGroupItems group={g} pinnedModels={pinned} />
-                        )}
-                      </Fragment>
-                    )
-                  })}
-                </DropdownMenuRadioGroup>
+                          })}
+                        </Fragment>
+                      )
+                    })}
+                    {modelFilterValue && !anyModelRowVisible && (
+                      <div className="px-2 py-1.5 text-xs text-muted-foreground">No models match</div>
+                    )}
+                  </DropdownMenuRadioGroup>
+                </>
               )}
             </DropdownMenuContent>
           </DropdownMenu>
