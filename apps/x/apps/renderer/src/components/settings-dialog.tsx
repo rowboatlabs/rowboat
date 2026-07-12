@@ -29,6 +29,7 @@ import { ConnectedAccountsSettings } from "@/components/settings/connected-accou
 import { MobileChannelsSettings } from "@/components/settings/mobile-channels-settings"
 import type { ApprovalPolicy } from "@x/shared/src/code-mode.js"
 import { startProvisioning, useProvisioning, enabledOptimistic, type AgentStatus, type CodeModeAgentStatus } from "@/lib/code-mode-provisioning"
+import { useProviderModels } from "@/hooks/use-provider-models"
 
 type ConfigTab = "account" | "connections" | "mobile" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "notifications" | "note-tagging" | "help"
 
@@ -336,6 +337,7 @@ const preferredDefaults: Partial<Record<LlmProviderFlavor, string>> = {
 const defaultBaseURLs: Partial<Record<LlmProviderFlavor, string>> = {
   ollama: "http://localhost:11434",
   "openai-compatible": "http://localhost:1234/v1",
+  aigateway: "https://ai-gateway.vercel.sh/v1",
 }
 
 type ProviderModelConfig = {
@@ -356,13 +358,12 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
     anthropic: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
     google: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
     openrouter: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
-    aigateway: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
+    aigateway: { apiKey: "", baseURL: "https://ai-gateway.vercel.sh/v1", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
     ollama: { apiKey: "", baseURL: "http://localhost:11434", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
     "openai-compatible": { apiKey: "", baseURL: "http://localhost:1234/v1", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
   })
   const [modelsCatalog, setModelsCatalog] = useState<Record<string, LlmModelOption[]>>({})
   const [modelsLoading, setModelsLoading] = useState(false)
-  const [modelsError, setModelsError] = useState<string | null>(null)
   const [testState, setTestState] = useState<{ status: "idle" | "testing" | "success" | "error"; error?: string }>({ status: "idle" })
   const [configLoading, setConfigLoading] = useState(true)
   const [showMoreProviders, setShowMoreProviders] = useState(false)
@@ -371,8 +372,18 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
   // auto-enable) has ever set it, so we only auto-enable once.
   const [deferBackgroundTasks, setDeferBackgroundTasks] = useState(false)
   const [deferExplicit, setDeferExplicit] = useState(false)
+  // openai-compatible only: free-text model that takes precedence over the
+  // fetched list (many such servers don't implement /models at all).
+  const [customModel, setCustomModel] = useState("")
 
   const activeConfig = providerConfigs[provider]
+  // Live per-key model list for the active provider — drives the primary
+  // model area. The per-function fields below still use the static catalog.
+  const providerModels = useProviderModels({
+    flavor: provider,
+    apiKey: activeConfig.apiKey,
+    baseURL: activeConfig.baseURL,
+  })
   const showApiKey = provider === "openai" || provider === "anthropic" || provider === "google" || provider === "openrouter" || provider === "aigateway" || provider === "openai-compatible"
   const requiresApiKey = provider === "openai" || provider === "anthropic" || provider === "google" || provider === "openrouter" || provider === "aigateway"
   const showBaseURL = provider === "ollama" || provider === "openai-compatible" || provider === "aigateway"
@@ -398,6 +409,19 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
     },
     []
   )
+
+  // All primary-model writes go through here: the old `models: [value]` form
+  // silently dropped every saved model after the first.
+  const setPrimaryModel = useCallback((prov: LlmProviderFlavor, value: string) => {
+    setProviderConfigs(prev => {
+      const existing = prev[prov].models
+      return {
+        ...prev,
+        [prov]: { ...prev[prov], models: [value, ...existing.slice(1).filter(m => m && m !== value)] },
+      }
+    })
+    setTestState({ status: "idle" })
+  }, [])
 
 
   // Load current config from file
@@ -489,7 +513,6 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
     async function loadModels() {
       try {
         setModelsLoading(true)
-        setModelsError(null)
         const result = await window.ipc.invoke("models:list", null)
         const catalog: Record<string, LlmModelOption[]> = {}
         for (const p of result.providers || []) {
@@ -497,7 +520,6 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
         }
         setModelsCatalog(catalog)
       } catch {
-        setModelsError("Failed to load models list")
         setModelsCatalog({})
       } finally {
         setModelsLoading(false)
@@ -507,24 +529,26 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
     loadModels()
   }, [dialogOpen])
 
-  // Set default models from catalog when catalog loads
+  // Preselect a model once the live per-key list arrives and nothing is
+  // chosen yet. Only the active provider is touched — unkeyed providers no
+  // longer get a model auto-seeded, so they can't look configured.
   useEffect(() => {
-    if (Object.keys(modelsCatalog).length === 0) return
-    setProviderConfigs(prev => {
-      const next = { ...prev }
-      const cloudProviders: LlmProviderFlavor[] = ["openai", "anthropic", "google"]
-      for (const prov of cloudProviders) {
-        const catalog = modelsCatalog[prov]
-        if (catalog?.length && !next[prov].models[0]) {
-          const preferred = preferredDefaults[prov]
-          const hasPreferred = preferred && catalog.some(m => m.id === preferred)
-          const defaultModel = hasPreferred ? preferred! : (catalog[0]?.id || "")
-          next[prov] = { ...next[prov], models: [defaultModel] }
-        }
-      }
-      return next
-    })
-  }, [modelsCatalog])
+    if (providerModels.status !== "loaded" || providerModels.models.length === 0) return
+    if (primaryModel) return
+    const preferred = preferredDefaults[provider]
+    const choice = preferred && providerModels.models.includes(preferred) ? preferred : providerModels.models[0]
+    setPrimaryModel(provider, choice)
+  }, [providerModels.status, providerModels.models, provider, primaryModel, setPrimaryModel])
+
+  // A saved openai-compatible model that isn't in the server's list belongs
+  // in the custom-model field, where it stays visible and editable.
+  useEffect(() => {
+    if (provider !== "openai-compatible" || providerModels.status !== "loaded") return
+    if (customModel) return
+    if (primaryModel && !providerModels.models.includes(primaryModel)) {
+      setCustomModel(primaryModel)
+    }
+  }, [provider, providerModels.status, providerModels.models, primaryModel, customModel])
 
   const handleTestAndSave = useCallback(async () => {
     if (!canTest) return
@@ -738,45 +762,116 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
         )}
       </div>
 
+      {/* API Key — key-first: the model list is fetched from it */}
+      {showApiKey && (
+        <div className="space-y-2">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+            {provider === "openai-compatible" ? "API Key (optional)" : "API Key"}
+          </span>
+          <Input
+            type="password"
+            value={activeConfig.apiKey}
+            onChange={(e) => updateConfig(provider, { apiKey: e.target.value })}
+            onBlur={() => providerModels.refetch()}
+            placeholder="Paste your API key"
+          />
+        </div>
+      )}
+
+      {/* Base URL */}
+      {showBaseURL && (
+        <div className="space-y-2">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Base URL</span>
+          <Input
+            value={activeConfig.baseURL}
+            onChange={(e) => updateConfig(provider, { baseURL: e.target.value })}
+            onBlur={() => providerModels.refetch()}
+            placeholder={
+              provider === "ollama"
+                ? "http://localhost:11434"
+                : provider === "openai-compatible"
+                  ? "http://localhost:1234/v1"
+                  : "https://ai-gateway.vercel.sh/v1"
+            }
+          />
+        </div>
+      )}
+
       {/* Model selection - side by side */}
       <div className="grid grid-cols-2 gap-3">
-        {/* Assistant models (left column) */}
+        {/* Assistant model (left column) — live list fetched from the key */}
         <div className="space-y-2">
           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{rowboatConnected ? "Model" : "Assistant model"}</span>
-          {modelsLoading ? (
+          {providerModels.status === "idle" ? (
+            <div className="text-sm text-muted-foreground">
+              {isLocalProvider
+                ? "Enter your base URL to load available models"
+                : "Enter your API key to load available models"}
+            </div>
+          ) : providerModels.status === "loading" ? (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="size-4 animate-spin" />
-              Loading...
+              Loading models...
+            </div>
+          ) : providerModels.status === "error" ? (
+            <div className="space-y-2">
+              <div className="text-xs text-destructive break-words">
+                {providerModels.error || "Failed to load models"}
+              </div>
+              <Button variant="outline" size="sm" onClick={() => providerModels.refetch()}>
+                Retry
+              </Button>
+              <Input
+                value={primaryModel}
+                onChange={(e) => setPrimaryModel(provider, e.target.value)}
+                placeholder="Enter model manually"
+              />
+            </div>
+          ) : providerModels.models.length === 0 ? (
+            <div className="space-y-2">
+              <div className="text-xs text-muted-foreground">
+                The provider reported no models — enter one manually
+              </div>
+              <Input
+                value={primaryModel}
+                onChange={(e) => setPrimaryModel(provider, e.target.value)}
+                placeholder="Enter model"
+              />
             </div>
           ) : (
             <div className="space-y-2">
-              {showModelInput ? (
+              <Select
+                value={provider === "openai-compatible" && !providerModels.models.includes(primaryModel) ? "" : primaryModel}
+                onValueChange={(value) => {
+                  setPrimaryModel(provider, value)
+                  if (provider === "openai-compatible") setCustomModel("")
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a model" />
+                </SelectTrigger>
+                <SelectContent>
+                  {provider !== "openai-compatible" && primaryModel && !providerModels.models.includes(primaryModel) && (
+                    <SelectItem value={primaryModel}>{primaryModel} (saved)</SelectItem>
+                  )}
+                  {providerModels.models.map((id) => (
+                    <SelectItem key={id} value={id}>
+                      {id}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {provider === "openai-compatible" && (
                 <Input
-                  value={primaryModel}
-                  onChange={(e) => updateConfig(provider, { models: [e.target.value] })}
-                  placeholder="Enter model"
+                  value={customModel}
+                  onChange={(e) => {
+                    setCustomModel(e.target.value)
+                    setPrimaryModel(provider, e.target.value)
+                  }}
+                  placeholder="Custom model (overrides selection)"
                 />
-              ) : (
-                <Select
-                  value={primaryModel}
-                  onValueChange={(value) => updateConfig(provider, { models: [value] })}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a model" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {modelsForProvider.map((m) => (
-                      <SelectItem key={m.id} value={m.id}>
-                        {m.name || m.id}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
               )}
             </div>
-          )}
-          {modelsError && (
-            <div className="text-xs text-destructive">{modelsError}</div>
           )}
         </div>
 
@@ -918,39 +1013,6 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
         </div>
         </>)}
       </div>
-
-      {/* API Key */}
-      {showApiKey && (
-        <div className="space-y-2">
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-            {provider === "openai-compatible" ? "API Key (optional)" : "API Key"}
-          </span>
-          <Input
-            type="password"
-            value={activeConfig.apiKey}
-            onChange={(e) => updateConfig(provider, { apiKey: e.target.value })}
-            placeholder="Paste your API key"
-          />
-        </div>
-      )}
-
-      {/* Base URL */}
-      {showBaseURL && (
-        <div className="space-y-2">
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Base URL</span>
-          <Input
-            value={activeConfig.baseURL}
-            onChange={(e) => updateConfig(provider, { baseURL: e.target.value })}
-            placeholder={
-              provider === "ollama"
-                ? "http://localhost:11434"
-                : provider === "openai-compatible"
-                  ? "http://localhost:1234/v1"
-                  : "https://ai-gateway.vercel.sh/v1"
-            }
-          />
-        </div>
-      )}
 
       {/* Test status */}
       {testState.status === "error" && (
