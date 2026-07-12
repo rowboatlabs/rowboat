@@ -30,7 +30,7 @@
 
 </h5>
 
-Rowboat indexes your work into a living knowledge graph and uses that to get work done on your machine. It includes work surfaces for collaborating with AI: email client, notes, browser, code mode, meeting note taker, and workspaces for different projects. 
+Rowboat indexes your work into a living knowledge graph and uses that to get work done on your machine. It includes work surfaces for collaborating with AI: email client, notes, browser, code mode, meeting note taker, and workspaces for different projects.
 
 
 Download latest for Mac/Windows/Linux: [Download](https://www.rowboatlabs.com/downloads)
@@ -55,7 +55,7 @@ Download latest for Mac/Windows/Linux: [Download](https://www.rowboatlabs.com/do
 <tr>
 <td width="40%" valign="middle">
 <h3>Brain</h3>
-Rowboat indexes email, meetings, slack and assistant conversations into a living Obsidian-style backlinked knowledge graph. 
+Rowboat indexes email, meetings, slack and assistant conversations into a living Obsidian-style backlinked knowledge graph.
 </td>
 <td width="60%">
 <img width="1502" height="939" alt="Brain graph screenshot" src="assets/readme-dark/brain.png" />
@@ -73,7 +73,7 @@ The built-in email client sorts emails into important and everything else. Rowbo
 <tr>
 <td width="40%" valign="middle">
 <h3>Background agents</h3>
-You can set up background agents that run on events like new email or on schedule like every day at 8am. They can connect to tools, search the web, use the browser and write code using Claude Code or Codex.  
+You can set up background agents that run on events like new email or on schedule like every day at 8am. They can connect to tools, search the web, use the browser and write code using Claude Code or Codex.
 </td>
 <td width="60%">
 <img width="1512" height="951" alt="Background agents screenshot" src="assets/readme-dark/background-agents.png" />
@@ -83,7 +83,7 @@ You can set up background agents that run on events like new email or on schedul
 <tr>
 <td width="40%" valign="middle">
 <h3>Built-in Browser</h3>
-Rowboat includes a browser that lets you and assistant collaborate on web tasks. Because its isolated from your main browser, you can log in only to the accounts that want the assistant to access. 
+Rowboat includes a browser that lets you and assistant collaborate on web tasks. Because its isolated from your main browser, you can log in only to the accounts that want the assistant to access.
 </td>
 <td width="60%">
 <img width="1512" height="948" alt="Browser screenshot" src="assets/readme-dark/browser.png" />
@@ -92,7 +92,7 @@ Rowboat includes a browser that lets you and assistant collaborate on web tasks.
 <tr>
 <td width="40%" valign="middle">
 <h3>Meeting Notes</h3>
-A local meeting note-taker that taps into mic & speaker, produces live transcript and summarizes the meeting in a markdown file and updates the knowledge graph. 
+A local meeting note-taker that taps into mic & speaker, produces live transcript and summarizes the meeting in a markdown file and updates the knowledge graph.
 </td>
 <td width="60%">
 <img width="1512" height="947" alt="Meeting notes screenshot" src="assets/readme-dark/meeting-notes.png" />
@@ -110,7 +110,7 @@ Code mode lets you spin up parallel coding agents with Claude Code or Codex, and
 <tr>
 <td width="40%" valign="middle">
 <h3>Apps</h3>
-You can bulild your own work surfaces inside Rowboat — they get acess to all the tools and integrations, and you can share them with other people.  
+You can bulild your own work surfaces inside Rowboat — they get acess to all the tools and integrations, and you can share them with other people.
 </td>
 <td width="60%">
 <img width="1512" height="949" alt="Apps screenshot" src="assets/readme-dark/apps.png" />
@@ -119,7 +119,7 @@ You can bulild your own work surfaces inside Rowboat — they get acess to all t
 <tr>
 <td width="40%" valign="middle">
 <h3>Integrations</h3>
-Includes one-click integrations to most popular products. 
+Includes one-click integrations to most popular products.
 </td>
 <td width="60%">
 <img width="1512" height="948" alt="Integrations screenshot" src="assets/readme-dark/integrations.png" />
