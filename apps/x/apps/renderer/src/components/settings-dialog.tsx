@@ -353,6 +353,9 @@ type ProviderModelConfig = {
 function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: boolean; rowboatConnected?: boolean }) {
   const [provider, setProvider] = useState<LlmProviderFlavor>("openai")
   const [defaultProvider, setDefaultProvider] = useState<LlmProviderFlavor | null>(null)
+  // Flavors present in the saved providers map — drives each card's
+  // "Connected" indicator, independent of which card is active.
+  const [savedProviders, setSavedProviders] = useState<Set<LlmProviderFlavor>>(new Set())
   const [providerConfigs, setProviderConfigs] = useState<Record<LlmProviderFlavor, ProviderModelConfig>>({
     openai: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
     anthropic: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
@@ -394,8 +397,25 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
   const isMoreProvider = moreProviders.some(p => p.id === provider)
 
   const primaryModel = activeConfig.models[0] || ""
+  // Settings no longer exposes model selection — the model is resolved
+  // silently when the user connects (the config schema still requires one;
+  // background agents/channels read it). Precedence: a typed escape-hatch
+  // value (openai-compatible Model field, offline manual input) > the saved
+  // model when the fetched list still has it > the flavor's preferred
+  // default > the first fetched id.
+  const resolvedModel = (() => {
+    if (provider === "openai-compatible" && customModel.trim()) return customModel.trim()
+    const saved = primaryModel.trim()
+    if (providerModels.status === "loaded" && providerModels.models.length > 0) {
+      if (saved && providerModels.models.includes(saved)) return saved
+      const preferred = preferredDefaults[provider]
+      if (preferred && providerModels.models.includes(preferred)) return preferred
+      return providerModels.models[0]
+    }
+    return saved
+  })()
   const canTest =
-    primaryModel.trim().length > 0 &&
+    resolvedModel.length > 0 &&
     (!requiresApiKey || activeConfig.apiKey.trim().length > 0) &&
     (!requiresBaseURL || activeConfig.baseURL.trim().length > 0)
 
@@ -439,6 +459,10 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
         const parsed = JSON.parse(result.data)
         setDeferBackgroundTasks(parsed?.deferBackgroundTasks === true)
         setDeferExplicit(typeof parsed?.deferBackgroundTasks === "boolean")
+        const knownFlavors = new Set<string>([...primaryProviders, ...moreProviders].map(p => p.id))
+        setSavedProviders(new Set(
+          Object.keys(parsed?.providers ?? {}).filter((k): k is LlmProviderFlavor => knownFlavors.has(k))
+        ))
         if (parsed?.provider?.flavor && parsed?.model) {
           const flavor = parsed.provider.flavor as LlmProviderFlavor
           setProvider(flavor)
@@ -529,23 +553,12 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
     loadModels()
   }, [dialogOpen])
 
-  // Preselect a model once the live per-key list arrives and nothing is
-  // chosen yet. Only the active provider is touched — unkeyed providers no
-  // longer get a model auto-seeded, so they can't look configured.
+  // A saved openai-compatible model that the server's list doesn't confirm
+  // (not listed, or /models unreachable) belongs in the visible Model field,
+  // where it stays editable and wins over the silent pick.
   useEffect(() => {
-    if (providerModels.status !== "loaded" || providerModels.models.length === 0) return
-    if (primaryModel) return
-    const preferred = preferredDefaults[provider]
-    const choice = preferred && providerModels.models.includes(preferred) ? preferred : providerModels.models[0]
-    setPrimaryModel(provider, choice)
-  }, [providerModels.status, providerModels.models, provider, primaryModel, setPrimaryModel])
-
-  // A saved openai-compatible model that isn't in the server's list belongs
-  // in the custom-model field, where it stays visible and editable.
-  useEffect(() => {
-    if (provider !== "openai-compatible" || providerModels.status !== "loaded") return
-    if (customModel) return
-    if (primaryModel && !providerModels.models.includes(primaryModel)) {
+    if (provider !== "openai-compatible" || customModel || !primaryModel) return
+    if (providerModels.status === "error" || (providerModels.status === "loaded" && !providerModels.models.includes(primaryModel))) {
       setCustomModel(primaryModel)
     }
   }, [provider, providerModels.status, providerModels.models, primaryModel, customModel])
@@ -554,7 +567,10 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
     if (!canTest) return
     setTestState({ status: "testing" })
     try {
-      const allModels = activeConfig.models.map(m => m.trim()).filter(Boolean)
+      // The silently resolved model takes the primary slot; the rest of the
+      // saved list is preserved (same semantics setPrimaryModel had).
+      const existing = activeConfig.models.map(m => m.trim())
+      const allModels = [resolvedModel, ...existing.slice(1).filter(m => m && m !== resolvedModel)]
       const providerConfig = {
         provider: {
           flavor: provider,
@@ -574,6 +590,11 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
       if (result.success) {
         await window.ipc.invoke("models:saveConfig", providerConfig)
         setDefaultProvider(provider)
+        setProviderConfigs(prev => ({
+          ...prev,
+          [provider]: { ...prev[provider], models: allModels },
+        }))
+        setSavedProviders(prev => new Set(prev).add(provider))
         setTestState({ status: "success" })
         window.dispatchEvent(new Event('models-config-changed'))
         // Local models compete with background agents for the same hardware:
@@ -601,7 +622,7 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
       setTestState({ status: "error", error: "Connection test failed" })
       toast.error("Connection test failed")
     }
-  }, [canTest, provider, activeConfig, rowboatConnected, deferExplicit, deferBackgroundTasks, handleDeferToggle])
+  }, [canTest, resolvedModel, provider, activeConfig, rowboatConnected, deferExplicit, deferBackgroundTasks, handleDeferToggle])
 
   const handleSetDefault = useCallback(async (prov: LlmProviderFlavor) => {
     const config = providerConfigs[prov]
@@ -665,6 +686,11 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
         ...prev,
         [prov]: { apiKey: "", baseURL: defaultBaseURLs[prov] || "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
       }))
+      setSavedProviders(prev => {
+        const next = new Set(prev)
+        next.delete(prov)
+        return next
+      })
       setTestState({ status: "idle" })
       window.dispatchEvent(new Event('models-config-changed'))
       toast.success("Provider configuration removed")
@@ -676,6 +702,7 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
   const renderProviderCard = (p: { id: LlmProviderFlavor; name: string; description: string; icon: React.ElementType }) => {
     const isDefault = defaultProvider === p.id
     const isSelected = provider === p.id
+    const isConnected = savedProviders.has(p.id)
     const hasModel = providerConfigs[p.id].models[0]?.trim().length > 0
     return (
       <button
@@ -697,6 +724,11 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
           {isDefault && !rowboatConnected && (
             <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-primary">
               Default
+            </span>
+          )}
+          {isConnected && (
+            <span className="rounded-full bg-green-500/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-green-600">
+              Connected
             </span>
           )}
         </div>
@@ -797,84 +829,72 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
         </div>
       )}
 
-      {/* Model selection - side by side */}
-      <div className="grid grid-cols-2 gap-3">
-        {/* Assistant model (left column) — live list fetched from the key */}
-        <div className="space-y-2">
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{rowboatConnected ? "Model" : "Assistant model"}</span>
-          {providerModels.status === "idle" ? (
+      {/* Connection status — the model itself is resolved silently on save */}
+      <div className="space-y-2">
+        {providerModels.status === "idle" ? (
+          <div className="text-sm text-muted-foreground">
+            {isLocalProvider
+              ? "Enter your base URL to connect"
+              : "Enter your API key to connect"}
+          </div>
+        ) : providerModels.status === "loading" ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="size-4 animate-spin" />
+            Checking connection…
+          </div>
+        ) : providerModels.status === "error" ? (
+          <div className="space-y-2">
+            <div className="text-xs text-destructive break-words">
+              {providerModels.error || "Connection check failed"}
+            </div>
+            <Button variant="outline" size="sm" onClick={() => providerModels.refetch()}>
+              Retry
+            </Button>
+            {provider !== "openai-compatible" && (
+              <Input
+                value={primaryModel}
+                onChange={(e) => setPrimaryModel(provider, e.target.value)}
+                placeholder="Enter a model to connect anyway"
+              />
+            )}
+          </div>
+        ) : providerModels.models.length === 0 && provider !== "openai-compatible" ? (
+          <div className="space-y-2">
             <div className="text-sm text-muted-foreground">
-              {isLocalProvider
-                ? "Enter your base URL to load available models"
-                : "Enter your API key to load available models"}
+              Connected, but the provider reported no models — enter one manually
             </div>
-          ) : providerModels.status === "loading" ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" />
-              Loading models...
-            </div>
-          ) : providerModels.status === "error" ? (
-            <div className="space-y-2">
-              <div className="text-xs text-destructive break-words">
-                {providerModels.error || "Failed to load models"}
-              </div>
-              <Button variant="outline" size="sm" onClick={() => providerModels.refetch()}>
-                Retry
-              </Button>
-              <Input
-                value={primaryModel}
-                onChange={(e) => setPrimaryModel(provider, e.target.value)}
-                placeholder="Enter model manually"
-              />
-            </div>
-          ) : providerModels.models.length === 0 ? (
-            <div className="space-y-2">
-              <div className="text-xs text-muted-foreground">
-                The provider reported no models — enter one manually
-              </div>
-              <Input
-                value={primaryModel}
-                onChange={(e) => setPrimaryModel(provider, e.target.value)}
-                placeholder="Enter model"
-              />
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <Select
-                value={provider === "openai-compatible" && !providerModels.models.includes(primaryModel) ? "" : primaryModel}
-                onValueChange={(value) => {
-                  setPrimaryModel(provider, value)
-                  if (provider === "openai-compatible") setCustomModel("")
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a model" />
-                </SelectTrigger>
-                <SelectContent>
-                  {provider !== "openai-compatible" && primaryModel && !providerModels.models.includes(primaryModel) && (
-                    <SelectItem value={primaryModel}>{primaryModel} (saved)</SelectItem>
-                  )}
-                  {providerModels.models.map((id) => (
-                    <SelectItem key={id} value={id}>
-                      {id}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {provider === "openai-compatible" && (
-                <Input
-                  value={customModel}
-                  onChange={(e) => {
-                    setCustomModel(e.target.value)
-                    setPrimaryModel(provider, e.target.value)
-                  }}
-                  placeholder="Custom model (overrides selection)"
-                />
-              )}
-            </div>
-          )}
-        </div>
+            <Input
+              value={primaryModel}
+              onChange={(e) => setPrimaryModel(provider, e.target.value)}
+              placeholder="Enter model"
+            />
+          </div>
+        ) : (
+          <div className="flex items-center gap-1.5 text-sm text-green-600">
+            <CheckCircle2 className="size-4" />
+            Connected · {providerModels.models.length} model{providerModels.models.length === 1 ? "" : "s"} available
+          </div>
+        )}
+      </div>
 
+      {/* openai-compatible escape hatch: its /models often doesn't exist, and
+          a typed model always wins over the silent pick */}
+      {provider === "openai-compatible" && (
+        <div className="space-y-2">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Model</span>
+          <Input
+            value={customModel}
+            onChange={(e) => {
+              setCustomModel(e.target.value)
+              setPrimaryModel(provider, e.target.value)
+            }}
+            placeholder="Model ID (leave empty to auto-select)"
+          />
+        </div>
+      )}
+
+      {/* Per-function model overrides */}
+      <div className="grid grid-cols-2 gap-3">
         {!rowboatConnected && (<>
         {/* Knowledge graph model (right column) */}
         <div className="space-y-2">
@@ -1045,9 +1065,9 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
         className="w-full"
       >
         {testState.status === "testing" ? (
-          <><Loader2 className="size-4 animate-spin mr-2" />Testing connection...</>
+          <><Loader2 className="size-4 animate-spin mr-2" />Connecting...</>
         ) : (
-          "Test & Save"
+          "Connect"
         )}
       </Button>
     </div>
