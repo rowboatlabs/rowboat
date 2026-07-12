@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   ArrowUp,
@@ -38,6 +38,7 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSub,
@@ -45,6 +46,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { useProviderModels, type ProviderModelsFlavor } from '@/hooks/use-provider-models'
 import {
   type AttachmentIconKind,
   getAttachmentDisplayName,
@@ -99,6 +101,61 @@ type ProviderName = "openai" | "anthropic" | "google" | "openrouter" | "aigatewa
 interface ConfiguredModel {
   provider: ProviderName
   model: string
+}
+
+// One picker group per connected provider. Catalog groups carry a resolved
+// model list (models:list / saved config); live groups carry credentials and
+// fetch their list from the provider inside the dropdown via
+// useProviderModels (models:listForProvider).
+const LIVE_PICKER_FLAVORS = new Set<string>(['openrouter', 'aigateway', 'ollama', 'openai-compatible'])
+
+type ModelPickerGroup =
+  | { kind: 'catalog'; flavor: string; models: string[] }
+  | { kind: 'live'; flavor: ProviderModelsFlavor; apiKey: string; baseURL: string; savedModel: string }
+
+// Rendered inside the dropdown's radio group: each live provider fetches its
+// own list, so groups load and fail independently. Pinned models (the saved
+// default / app default) render first — the model that actually runs is
+// always pickable even while the fetch is pending or failed. Live-fetched
+// ids carry no reasoning metadata, so the effort control stays hidden for
+// them (reasoningByKey lookup misses default to off).
+function LiveProviderGroupItems({ group, pinnedModels }: { group: Extract<ModelPickerGroup, { kind: 'live' }>; pinnedModels: string[] }) {
+  const { status, models, error, refetch } = useProviderModels({
+    flavor: group.flavor,
+    apiKey: group.apiKey,
+    baseURL: group.baseURL,
+  })
+  const items = [...pinnedModels, ...models.filter((m) => !pinnedModels.includes(m))]
+  return (
+    <>
+      {items.map((m) => {
+        const key = `${group.flavor}/${m}`
+        return (
+          <DropdownMenuRadioItem key={key} value={key}>
+            <span className="truncate">{m}</span>
+          </DropdownMenuRadioItem>
+        )
+      })}
+      {status === 'loading' && (
+        <div className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground">
+          <LoaderIcon className="h-3 w-3 animate-spin" />
+          Loading models…
+        </div>
+      )}
+      {status === 'error' && (
+        <DropdownMenuItem
+          onSelect={(e) => {
+            e.preventDefault()
+            refetch()
+          }}
+          className="text-xs"
+        >
+          <span className="truncate text-destructive">{error || 'Failed to load models'}</span>
+          <span className="ml-auto shrink-0 text-muted-foreground">Retry</span>
+        </DropdownMenuItem>
+      )}
+    </>
+  )
 }
 
 type RecentWorkDir = {
@@ -318,7 +375,7 @@ function ChatInputInner({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const canSubmit = (Boolean(message.trim()) || attachments.length > 0) && !isProcessing
 
-  const [configuredModels, setConfiguredModels] = useState<ConfiguredModel[]>([])
+  const [modelGroups, setModelGroups] = useState<ModelPickerGroup[]>([])
   const [activeModelKey, setActiveModelKey] = useState('')
   // The effective runtime default (what a run actually uses when the user
   // hasn't picked a model) — shown in the picker instead of guessing from
@@ -438,19 +495,9 @@ function ChatInputInner({
       if (loadModelConfigEpoch.current === epoch) setDefaultModel(null)
     }
     try {
-      const models: ConfiguredModel[] = []
-      const seen = new Set<string>()
-      const push = (provider: string, model: string) => {
-        if (!model) return
-        const key = `${provider}/${model}`
-        if (seen.has(key)) return
-        seen.add(key)
-        models.push({ provider: provider as ProviderName, model })
-      }
+      const groups: ModelPickerGroup[] = []
 
-      // Full catalog per provider (gateway + cloud). Providers with no
-      // catalog (Ollama, OpenAI-compatible) fall back to the models saved in
-      // config below.
+      // Full catalog per provider (gateway + models.dev cloud providers).
       const catalog: Record<string, string[]> = {}
       const reasoningFlags: Record<string, boolean> = {}
       try {
@@ -463,55 +510,76 @@ function ChatInputInner({
             }
           }
         }
-      } catch { /* offline / no catalog — fall back to saved config below */ }
+      } catch { /* offline / no catalog — groups fall back to saved config below */ }
       if (loadModelConfigEpoch.current === epoch) setReasoningByKey(reasoningFlags)
 
-      if (isRowboatConnected) {
-        for (const m of catalog['rowboat'] || []) push('rowboat', m)
+      if (isRowboatConnected && (catalog['rowboat'] || []).length > 0) {
+        groups.push({ kind: 'catalog', flavor: 'rowboat', models: catalog['rowboat'] })
       }
 
       try {
         const result = await window.ipc.invoke('workspace:readFile', { path: 'config/models.json' })
         const parsed = JSON.parse(result.data)
 
-        // List the default provider first so its default model leads the
-        // BYOK section of the picker.
+        // List the default provider's group first.
         const defaultFlavor = typeof parsed?.provider?.flavor === 'string' ? parsed.provider.flavor : ''
         const flavors = Object.keys(parsed?.providers || {})
           .sort((a, b) => (a === defaultFlavor ? -1 : b === defaultFlavor ? 1 : 0))
 
         for (const flavor of flavors) {
           const e = (parsed.providers[flavor] || {}) as Record<string, unknown>
-          const hasKey = typeof e.apiKey === 'string' && (e.apiKey as string).trim().length > 0
-          const hasBaseURL = typeof e.baseURL === 'string' && (e.baseURL as string).trim().length > 0
-          if (!hasKey && !hasBaseURL) continue // provider not configured
+          const apiKey = typeof e.apiKey === 'string' ? e.apiKey.trim() : ''
+          const baseURL = typeof e.baseURL === 'string' ? e.baseURL.trim() : ''
+          if (!apiKey && !baseURL) continue // provider not configured
+          const savedModel = typeof e.model === 'string' ? e.model : ''
 
-          // The provider's saved default model leads, then the rest of its catalog.
-          push(flavor, typeof e.model === 'string' ? e.model : '')
+          // Live flavors fetch their list from the provider inside the
+          // dropdown, with the credentials saved in config.
+          if (LIVE_PICKER_FLAVORS.has(flavor)) {
+            groups.push({ kind: 'live', flavor: flavor as ProviderModelsFlavor, apiKey, baseURL, savedModel })
+            continue
+          }
+
+          // Catalog flavors: the saved default model leads, then the catalog.
+          // Saved models[] is the no-catalog fallback (models.dev cache
+          // empty, or signed in — the gateway list has no per-flavor catalogs).
+          const models: string[] = []
+          const push = (model: string) => {
+            if (model && !models.includes(model)) models.push(model)
+          }
+          push(savedModel)
           const catalogModels = catalog[flavor] || []
           if (catalogModels.length > 0) {
-            for (const m of catalogModels) push(flavor, m)
+            for (const m of catalogModels) push(m)
           } else {
-            // No catalog (local provider) — fall back to whatever is saved.
             const saved = Array.isArray(e.models) ? e.models as string[] : []
-            for (const m of saved) push(flavor, m)
+            for (const m of saved) push(m)
           }
+          groups.push({ kind: 'catalog', flavor, models })
         }
 
-        // The user's explicit default selection leads the whole picker.
+        // The user's explicit default selection leads the picker: its group
+        // first and, within a catalog group, the model itself first. (Live
+        // groups pin the default at the top themselves.)
         const sel = parsed?.defaultSelection
         if (sel && typeof sel.provider === 'string' && typeof sel.model === 'string') {
-          const selKey = `${sel.provider}/${sel.model}`
-          const index = models.findIndex((m) => `${m.provider}/${m.model}` === selKey)
-          if (index > 0) {
-            const [entry] = models.splice(index, 1)
-            models.unshift(entry)
+          const index = groups.findIndex((g) => g.flavor === sel.provider)
+          if (index >= 0) {
+            const [group] = groups.splice(index, 1)
+            groups.unshift(group)
+            if (group.kind === 'catalog') {
+              const mi = group.models.indexOf(sel.model)
+              if (mi > 0) {
+                group.models.splice(mi, 1)
+                group.models.unshift(sel.model)
+              }
+            }
           }
         }
       } catch { /* no BYOK config yet */ }
 
       if (loadModelConfigEpoch.current !== epoch) return
-      setConfiguredModels(models)
+      setModelGroups(groups)
     } catch (err) {
       // No config yet — but surface unexpected failures for diagnosis.
       console.error('[chat-input] failed to load model list', err)
@@ -701,25 +769,36 @@ function ChatInputInner({
     checkSearch()
   }, [isActive, isRowboatConnected])
 
-  // The dropdown's items: always include the effective default so the picker
-  // is never empty (and never missing the model that actually runs) even
-  // while the full list is still loading.
-  const pickerModels = useMemo<ConfiguredModel[]>(() => {
-    if (!defaultModel) return configuredModels
-    const defaultKey = `${defaultModel.provider}/${defaultModel.model}`
-    if (configuredModels.some((m) => `${m.provider}/${m.model}` === defaultKey)) return configuredModels
-    return [defaultModel, ...configuredModels]
-  }, [configuredModels, defaultModel])
+  // The effective default always renders even when no group carries it (the
+  // gateway list failed, or its provider was removed from config) — the
+  // picker must never be missing the model that actually runs. Live groups
+  // pin the default themselves, so a flavor match is enough there.
+  const standaloneDefault = useMemo<ConfiguredModel | null>(() => {
+    if (!defaultModel) return null
+    const covered = modelGroups.some((g) =>
+      g.flavor === defaultModel.provider &&
+      (g.kind === 'live' || g.models.includes(defaultModel.model)))
+    return covered ? null : defaultModel
+  }, [modelGroups, defaultModel])
 
-  // Selecting a model affects only the *next* run created from this tab.
-  // Once a run exists, model is frozen on the run and the dropdown is read-only.
+  // Selecting a model affects the *next* run created from this tab (frozen
+  // once a run exists) AND persists as the app default so background agents
+  // and new tabs follow the last pick. The models-config-changed dispatch
+  // re-runs loadModelConfig here too — that re-read lands on the same
+  // selection (activeModelKey is untouched, the live lists come from the
+  // hook's cache), so it's visually a no-op.
   const handleModelChange = useCallback((key: string) => {
     if (lockedModel) return
-    const entry = pickerModels.find((m) => `${m.provider}/${m.model}` === key)
-    if (!entry) return
+    const slash = key.indexOf('/')
+    if (slash <= 0 || slash === key.length - 1) return
+    const provider = key.slice(0, slash)
+    const model = key.slice(slash + 1)
     setActiveModelKey(key)
-    onSelectedModelChange?.({ provider: entry.provider, model: entry.model })
-  }, [pickerModels, lockedModel, onSelectedModelChange])
+    onSelectedModelChange?.({ provider, model })
+    void window.ipc.invoke('models:updateConfig', { defaultSelection: { provider, model } })
+      .then(() => { window.dispatchEvent(new Event('models-config-changed')) })
+      .catch(() => { toast.error('Failed to save default model') })
+  }, [lockedModel, onSelectedModelChange])
 
   // Reasoning effort applies to the model the next message will actually use:
   // the run's frozen model once one exists, else the picker selection, else
@@ -1378,7 +1457,7 @@ function ChatInputInner({
               {providerDisplayNames[lockedModel.provider] || lockedModel.provider} — fixed for this chat
             </TooltipContent>
           </Tooltip>
-        ) : pickerModels.length > 0 ? (
+        ) : (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
@@ -1387,33 +1466,64 @@ function ChatInputInner({
               >
                 <span className="min-w-0 truncate">
                   {getSelectedModelDisplayName(
-                    pickerModels.find((m) => `${m.provider}/${m.model}` === activeModelKey)?.model
+                    (activeModelKey ? activeModelKey.slice(activeModelKey.indexOf('/') + 1) : '')
                       || defaultModel?.model
-                      || pickerModels[0]?.model
                       || 'Model'
                   )}
                 </span>
                 <ChevronDown className="h-3 w-3 shrink-0" />
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuRadioGroup
-                value={activeModelKey || (defaultModel ? `${defaultModel.provider}/${defaultModel.model}` : '')}
-                onValueChange={handleModelChange}
-              >
-                {pickerModels.map((m) => {
-                  const key = `${m.provider}/${m.model}`
-                  return (
-                    <DropdownMenuRadioItem key={key} value={key}>
-                      <span className="truncate">{m.model}</span>
-                      <span className="ml-2 text-xs text-muted-foreground">{providerDisplayNames[m.provider] || m.provider}</span>
+            <DropdownMenuContent align="end" className="max-h-80 overflow-y-auto">
+              {modelGroups.length === 0 && !standaloneDefault ? (
+                <DropdownMenuItem disabled>Connect a provider in Settings</DropdownMenuItem>
+              ) : (
+                <DropdownMenuRadioGroup
+                  value={activeModelKey || (defaultModel ? `${defaultModel.provider}/${defaultModel.model}` : '')}
+                  onValueChange={handleModelChange}
+                >
+                  {standaloneDefault && (
+                    <DropdownMenuRadioItem value={`${standaloneDefault.provider}/${standaloneDefault.model}`}>
+                      <span className="truncate">{standaloneDefault.model}</span>
+                      <span className="ml-2 text-xs text-muted-foreground">
+                        {providerDisplayNames[standaloneDefault.provider] || standaloneDefault.provider}
+                      </span>
                     </DropdownMenuRadioItem>
-                  )
-                })}
-              </DropdownMenuRadioGroup>
+                  )}
+                  {modelGroups.map((g) => {
+                    // The app default leads its live group; the group's own
+                    // saved model follows (both stay pickable through fetch
+                    // loading/failure).
+                    const pinned: string[] = []
+                    if (g.kind === 'live') {
+                      if (defaultModel && defaultModel.provider === g.flavor) pinned.push(defaultModel.model)
+                      if (g.savedModel && !pinned.includes(g.savedModel)) pinned.push(g.savedModel)
+                    }
+                    return (
+                      <Fragment key={g.flavor}>
+                        <DropdownMenuLabel className="text-xs text-muted-foreground">
+                          {providerDisplayNames[g.flavor] || g.flavor}
+                        </DropdownMenuLabel>
+                        {g.kind === 'catalog' ? (
+                          g.models.map((m) => {
+                            const key = `${g.flavor}/${m}`
+                            return (
+                              <DropdownMenuRadioItem key={key} value={key}>
+                                <span className="truncate">{m}</span>
+                              </DropdownMenuRadioItem>
+                            )
+                          })
+                        ) : (
+                          <LiveProviderGroupItems group={g} pinnedModels={pinned} />
+                        )}
+                      </Fragment>
+                    )
+                  })}
+                </DropdownMenuRadioGroup>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
-        ) : null}
+        )}
         {onStartCall && (
           <div className="flex shrink-0 items-center">
             <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
