@@ -22,11 +22,11 @@ The decision (see Q1 below) is to design the **end-state architecture for all th
 
 An architecture audit of the current code found the hard prep work is already done:
 
-- **`@x/core` is already Electron-free.** Zero `electron` imports in `packages/core/src` (there's even a comment at `packages/core/src/apps/github-auth.ts:13`: core stays electron-free). The only Electron touchpoints — notifications, browser control, safeStorage cipher — are dependency-injected interfaces wired in from `apps/main/src/main.ts:391-410`, with fallbacks.
-- **The API contract already exists.** All **239 IPC channels** are defined as Zod req/res schemas in one file (`packages/shared/src/ipc.ts`), and main registers handlers through a single typed, exhaustiveness-checked router (`apps/main/src/ipc.ts:439`). 214 channels are request/response (map to HTTP); 25 are push/stream (map to WebSocket).
-- **The client bridge is three generic methods.** The preload exposes only `invoke`/`send`/`on` (`apps/preload/src/preload.ts:14-51`); all 239 channels multiplex through them.
+- **`@x/core` is already Electron-free.** Zero `electron` imports in `packages/core/src` (there's even a comment at `packages/core/src/apps/github-auth.ts:13`: core stays electron-free). The only Electron touchpoints — notifications, browser control, safeStorage cipher — are dependency-injected interfaces wired in from main (`apps/main/src/main.ts:398-399` for the services, `:413-417` for the cipher) via the awilix container at `packages/core/src/di/container.ts`, with fallbacks.
+- **The API contract already exists.** All **243 IPC channels** are defined as Zod req/res schemas in one file (`packages/shared/src/ipc.ts`), and main registers handlers through a single typed, exhaustiveness-checked router (`apps/main/src/ipc.ts:450`). 217 channels are request/response (map to HTTP); 26 are push/stream (map to WebSocket).
+- **The client bridge is three generic methods.** The preload exposes only `invoke`/`send`/`on` (`apps/preload/src/preload.ts:13-49`); all 243 channels multiplex through them.
 - **Storage is parameterized.** Everything lives under `~/.rowboat` behind filesystem repos, overridable via `ROWBOAT_WORKDIR` (`packages/core/src/config/config.ts:7`).
-- **Events are already broadcast-shaped.** Main subscribes to core's in-process buses and re-broadcasts to all windows via `webContents.send` (`apps/main/src/ipc.ts:679-788`) — exactly WebSocket pub/sub semantics, with no per-subscriber filtering to untangle.
+- **Events are already broadcast-shaped.** Main subscribes to core's in-process buses and re-broadcasts durable events to all windows via `webContents.send` (`apps/main/src/ipc.ts:677-780`) — exactly WebSocket pub/sub semantics. The one exception is deliberate: high-volume turn *deltas* (`text_delta`/`reasoning_delta`) are per-window opt-in via `turns:subscribe`/`turns:unsubscribe` (`ipc.ts:708-746`) — a ready-made template for WS topic subscriptions (see Addendum).
 
 The genuinely hard spots: features bound to the user's physical machine (mic/camera/screen capture, Granola's local file, drag-drop file paths, native dialogs), the embedded `WebContentsView` browser pane, the OAuth loopback server, the terminal PTY, and single-user assumptions (plaintext token storage, one workdir, one DI container).
 
@@ -64,7 +64,7 @@ Options: **Main-as-proxy (recommended)** / Preload talks HTTP directly.
 
 Options: **RPC-over-HTTP (recommended)** / WS-only JSON-RPC / REST redesign.
 
-**Decision: RPC-over-HTTP.** `POST /rpc/{channel}`, body/response = the existing Zod req/res schemas, router **generated** from `ipcSchemas` — mechanical, no hand-written handlers, no redesign of 239 channels mid-migration. curl-able for third parties; OpenAPI derivable from the Zod schemas. A curated resource-oriented REST layer can be added on top later if a public API warrants it.
+**Decision: RPC-over-HTTP.** `POST /rpc/{channel}`, body/response = the existing Zod req/res schemas, router **generated** from `ipcSchemas` — mechanical, no hand-written handlers, no redesign of 243 channels mid-migration. curl-able for third parties; OpenAPI derivable from the Zod schemas. A curated resource-oriented REST layer can be added on top later if a public API warrants it.
 
 ### Q6. Event transport
 
@@ -246,6 +246,32 @@ Options: **Split → second client → remote (recommended)** / Remote before ph
 3. Token encryption-at-rest; key rotation UX.
 4. Edge-capability uploads for remote (Granola push, workspace file proxy hardening).
 5. Revisit: detached-daemon lifecycle, server-side Playwright for unattended agent browsing, SSE endpoint and/or curated stable API subset if demand exists.
+
+---
+
+## Addendum (2026-07-13) — re-verified after rebase onto main
+
+The branch was rebased over ~30 merged PRs (notably the `runtime-refactor` series: turn event spine, agent assembly, runtime reorg). A full re-audit found **no decision invalidated**. Deltas worth knowing:
+
+**Two decisions upgraded from "designed" to "already implemented at the IPC layer":**
+
+- **Q11 (refetch-on-reconnect) is now the shipped in-app behavior, not just our plan.** The new turn event spine (`TurnEventHub`, `packages/core/src/runtime/turns/event-hub.ts`) publishes each durable turn event with an **offset** — its 1-based line index in the turn's append-only JSONL file, assigned inside the serialized commit (`runtime/turns/runtime.ts:445-468`). The renderer's `turn-follower.ts` already does exactly the protocol Q11 specifies: subscribe first, fetch the `sessions:getTurn` snapshot, splice live events on by contiguous offset, and **full-refetch on any gap**. The WS layer reuses this wholesale; the per-connection sequence number we add is transport-level gap detection, orthogonal to (and composing with) the turn's file offset. The hub itself has no buffer and no persistence — confirming "no server-side replay buffer to build."
+  - Clarified answer to feedback question 3: **deltas** (`text_delta`/`reasoning_delta`) carry no offset and are never durable — dropped mid-stream deltas on a flaky connection are unrecoverable *by design*; the client re-converges at the next durable event (e.g. `model_call_completed`). The visible worst case is a paused token stream that jumps to complete text.
+
+- **Q12 (broadcast-to-all) gained a shipped nuance.** Durable events still broadcast to all windows, but high-volume turn deltas are now **per-window opt-in** via `turns:subscribe`/`turns:unsubscribe` + a `Map<WebContents, Set<turnId>>` registry (`apps/main/src/ipc.ts:708-746`). The WS protocol should mirror this from day one: durable events broadcast, deltas per-connection per-turn subscription. This is also the ready-made template if full topic subscriptions (feedback question 4) are ever forced.
+
+**Event channel landscape shifted under the spine (affects Phase 1 migration order):**
+
+- `turns:events` is the new primary event surface; `sessions:events` narrowed to index-change notifications only (`packages/shared/src/sessions.ts:170-177`); `runs:events` is now **legacy**, serving only code-mode + mini-apps, and is slated for deletion when those migrate (`packages/core/docs/turn-runtime-design.md`). Phase 1 should treat `turns:events` as the flagship WS stream and avoid investing in `runs:events` beyond pass-through.
+
+**Inventory and bucketing updates:**
+
+- Channel counts: **243 total / 217 invoke / 26 push** (was 239/214/25). New namespaces: `turns:*` (server bucket; carries the delta-subscription semantics above) and `power:*` caffeinate (client-local bucket; uses Electron `powerSaveBlocker`, `ipc.ts:1338-1347`). Bucketing nuance for caffeinate: its purpose is keeping the machine *hosting core* awake for background agent work — meaningful only while server and client share a machine; moot for remote servers.
+- Reasoning-effort, subagent-effort, apps-copilot-bridge, skills-with-tools: fields/internal mechanics on existing channels, server bucket, no new surface.
+
+**Packaging note:** `bundle.mjs` now builds a second artifact — the `agent-slack` CLI, spawned as a child process (`ELECTRON_RUN_AS_NODE`, `bun:sqlite` kept external). Since Slack/channels are server-bucket, this artifact ships with **rowboat-server** after the split, not with main. `node-pty` remains the only native module.
+
+**Structural:** core internals moved under a `runtime/` umbrella (`turns/`, `sessions/`, `legacy/`, `assembly/`, `tools/`), and the DI container is formalized at `packages/core/src/di/container.ts` — same three Electron seams, still injected from main. Core remains electron-free (marker comment still at `apps/github-auth.ts:13`); `ROWBOAT_WORKDIR` (`config/config.ts:7`) and plaintext token storage (`auth/repo.ts:57`) claims re-verified. File:line pointers in this doc were refreshed against the rebased tree.
 
 ---
 
