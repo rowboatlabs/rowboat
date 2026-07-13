@@ -17,7 +17,7 @@ const SIGNED_IN_AUTO_PERMISSION_DECISION_MODEL = "google/gemini-3.1-flash-lite";
 // Sub-agent tiers: the light model must stay one we've verified at
 // multi-step tool calling — spawned children are agentic, not one-shot.
 const SIGNED_IN_SUBAGENT_LIGHT_MODEL = "google/gemini-3.1-flash-lite";
-const SIGNED_IN_SUBAGENT_HEAVY_MODEL = "anthropic/claude-sonnet-5";
+const SIGNED_IN_SUBAGENT_HEAVY_MODEL = "anthropic/claude-sonnet-4.6";
 
 export type ModelSelection = z.infer<typeof ModelRef>;
 

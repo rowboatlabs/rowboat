@@ -54,8 +54,8 @@ back to "inherit the parent model."
      or the parent turn isn't on the `rowboat` gateway provider;
    - `{ provider: "rowboat", model: <curated> }` otherwise:
      - `light` → `google/gemini-3.1-flash-lite`
-     - `heavy` → `anthropic/claude-sonnet-5` *(product decision — swap
-       the constant if we prefer a different gateway model)*
+     - `heavy` → `anthropic/claude-sonnet-4.6` *(sonnet-5 isn't on the
+       gateway; swap the constant if the curated heavy choice changes)*
 3. Model precedence in `runSpawnedAgent`: tier mapping → parent model.
    The raw `model`/`provider` spawn inputs are REMOVED from the schema —
    live testing showed the copilot volunteering explicit ids out of habit
