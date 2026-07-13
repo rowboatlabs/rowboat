@@ -304,8 +304,8 @@ async function handleLlmGenerate(
         const model = createProvider(providerConfig).languageModel(resolved.model);
         const result = await withUseCase({ useCase: 'app_llm_generate', subUseCase: slug }, () => generateText({
             model,
-            ...(system ? { system } : {}),
-            ...(rawMessages ? { messages: rawMessages as ModelMessage[] } : { prompt: prompt as string }),
+            ...(system ? { instructions: system } : {}),
+            ...(rawMessages ? { messages: rawMessages as ModelMessage[], allowSystemInMessages: true } : { prompt: prompt as string }),
             ...(temperature !== undefined ? { temperature } : {}),
             maxOutputTokens,
         }));

@@ -1,7 +1,7 @@
 import { jsonSchema } from "ai";
 import { Agent, ToolAttachment } from "@x/shared/dist/agent.js";
 import { AssistantContentPart, AssistantMessage, MessageList, ProviderOptions, ToolCallPart, ToolMessage, UserMessageContext } from "@x/shared/dist/message.js";
-import { LanguageModel, stepCountIs, streamText, tool, Tool, ToolSet } from "ai";
+import { LanguageModel, isStepCount, streamText, tool, Tool, ToolSet } from "ai";
 import { z } from "zod";
 import { LlmStepStreamEvent } from "@x/shared/dist/llm-step-events.js";
 import { execTool } from "../tools/exec-tool.js";
@@ -255,7 +255,6 @@ async function mapAgentTool(t: z.infer<typeof ToolAttachment>): Promise<Tool> {
     switch (t.type) {
         case "mcp":
             return tool({
-                name: t.name,
                 description: t.description,
                 inputSchema: jsonSchema(t.inputSchema),
             });
@@ -265,7 +264,6 @@ async function mapAgentTool(t: z.infer<typeof ToolAttachment>): Promise<Tool> {
                 throw new Error(`Agent ${t.name} not found`);
             }
             return tool({
-                name: t.name,
                 description: agent.description,
                 inputSchema: z.object({
                     message: z.string().describe("The message to send to the workflow"),
@@ -1151,21 +1149,23 @@ async function* streamLlm(
         }, () => streamText({
             model,
             messages: converted,
-            system: instructions,
+            instructions,
+            allowSystemInMessages: true,
             tools,
-            stopWhen: stepCountIs(1),
+            stopWhen: isStepCount(1),
             abortSignal: signal,
         }))
         : streamText({
             model,
             messages: converted,
-            system: instructions,
+            instructions,
+            allowSystemInMessages: true,
             tools,
-            stopWhen: stepCountIs(1),
+            stopWhen: isStepCount(1),
             abortSignal: signal,
         });
-    const { fullStream } = streamResult;
-    for await (const event of fullStream) {
+    const { stream } = streamResult;
+    for await (const event of stream) {
         // Check abort on every chunk for responsiveness
         signal?.throwIfAborted();
         console.log("-> \t\tstream event", JSON.stringify(event));
@@ -1179,39 +1179,39 @@ async function* streamLlm(
             case "reasoning-start":
                 yield {
                     type: "reasoning-start",
-                    providerOptions: event.providerMetadata,
+                    providerOptions: event.providerMetadata as z.infer<typeof ProviderOptions> | undefined,
                 };
                 break;
             case "reasoning-delta":
                 yield {
                     type: "reasoning-delta",
                     delta: event.text,
-                    providerOptions: event.providerMetadata,
+                    providerOptions: event.providerMetadata as z.infer<typeof ProviderOptions> | undefined,
                 };
                 break;
             case "reasoning-end":
                 yield {
                     type: "reasoning-end",
-                    providerOptions: event.providerMetadata,
+                    providerOptions: event.providerMetadata as z.infer<typeof ProviderOptions> | undefined,
                 };
                 break;
             case "text-start":
                 yield {
                     type: "text-start",
-                    providerOptions: event.providerMetadata,
+                    providerOptions: event.providerMetadata as z.infer<typeof ProviderOptions> | undefined,
                 };
                 break;
             case "text-end":
                 yield {
                     type: "text-end",
-                    providerOptions: event.providerMetadata,
+                    providerOptions: event.providerMetadata as z.infer<typeof ProviderOptions> | undefined,
                 };
                 break;
             case "text-delta":
                 yield {
                     type: "text-delta",
                     delta: event.text,
-                    providerOptions: event.providerMetadata,
+                    providerOptions: event.providerMetadata as z.infer<typeof ProviderOptions> | undefined,
                 };
                 break;
             case "tool-call":
@@ -1220,7 +1220,7 @@ async function* streamLlm(
                     toolCallId: event.toolCallId,
                     toolName: event.toolName,
                     input: event.input,
-                    providerOptions: event.providerMetadata,
+                    providerOptions: event.providerMetadata as z.infer<typeof ProviderOptions> | undefined,
                 };
                 break;
             case "finish-step":
@@ -1238,7 +1238,7 @@ async function* streamLlm(
                     type: "finish-step",
                     usage: event.usage,
                     finishReason: event.finishReason,
-                    providerOptions: event.providerMetadata,
+                    providerOptions: event.providerMetadata as z.infer<typeof ProviderOptions> | undefined,
                 };
                 break;
             default:

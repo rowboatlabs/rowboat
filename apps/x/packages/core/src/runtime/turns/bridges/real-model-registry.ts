@@ -1,6 +1,6 @@
 import {
     jsonSchema,
-    stepCountIs,
+    isStepCount,
     streamText,
     tool,
     type LanguageModel,
@@ -39,10 +39,18 @@ export type StreamTextInvoker = (options: {
     topP?: number;
     maxOutputTokens?: number;
     providerOptions?: Record<string, Record<string, JsonValue>>;
-}) => { fullStream: AsyncIterable<unknown> };
+}) => { stream: AsyncIterable<unknown> };
 
-const defaultInvoker: StreamTextInvoker = (options) =>
-    streamText({ ...options, stopWhen: stepCountIs(1) });
+const defaultInvoker: StreamTextInvoker = ({ system, ...options }) =>
+    // Our seam keeps a `system` field; the SDK's top-level option is now
+    // `instructions`. `allowSystemInMessages` opts into system-role messages
+    // in the array (v7 rejects them by default) — persisted chats rely on it.
+    streamText({
+        ...options,
+        instructions: system,
+        allowSystemInMessages: true,
+        stopWhen: isStepCount(1),
+    });
 
 export interface RealModelRegistryDeps {
     resolveProvider?: (name: string) => Promise<z.infer<typeof LlmProvider>>;
@@ -217,7 +225,7 @@ export class RealModelRegistry implements IModelRegistry {
             ...generationParams,
         });
 
-        for await (const raw of result.fullStream) {
+        for await (const raw of result.stream) {
             request.signal.throwIfAborted();
             const event = raw as {
                 type: string;
@@ -226,7 +234,13 @@ export class RealModelRegistry implements IModelRegistry {
                 toolName?: string;
                 input?: unknown;
                 finishReason?: string;
-                usage?: Record<string, number | undefined>;
+                usage?: {
+                    inputTokens?: number;
+                    outputTokens?: number;
+                    totalTokens?: number;
+                    inputTokenDetails?: { cacheReadTokens?: number | undefined };
+                    outputTokenDetails?: { reasoningTokens?: number | undefined };
+                };
                 providerMetadata?: unknown;
                 error?: unknown;
             };
@@ -390,24 +404,33 @@ function mergeProviderOptions(
 }
 
 function mapUsage(
-    usage: Record<string, number | undefined> | undefined,
+    usage:
+        | {
+              inputTokens?: number;
+              outputTokens?: number;
+              totalTokens?: number;
+              inputTokenDetails?: { cacheReadTokens?: number | undefined };
+              outputTokenDetails?: { reasoningTokens?: number | undefined };
+          }
+        | undefined,
 ): z.infer<typeof TurnUsage> {
     const mapped: z.infer<typeof TurnUsage> = {};
     if (!usage) {
         return mapped;
     }
-    for (const key of [
-        "inputTokens",
-        "outputTokens",
-        "totalTokens",
-        "reasoningTokens",
-        "cachedInputTokens",
-    ] as const) {
-        const value = usage[key];
+    // AI SDK 7 relocated cached/reasoning tokens into nested detail objects
+    // (usage.inputTokenDetails.cacheReadTokens, usage.outputTokenDetails.reasoningTokens);
+    // our persisted TurnUsage keeps the flat names.
+    const put = (key: keyof z.infer<typeof TurnUsage>, value: number | undefined) => {
         if (typeof value === "number" && Number.isFinite(value)) {
             mapped[key] = value;
         }
-    }
+    };
+    put("inputTokens", usage.inputTokens);
+    put("outputTokens", usage.outputTokens);
+    put("totalTokens", usage.totalTokens);
+    put("reasoningTokens", usage.outputTokenDetails?.reasoningTokens);
+    put("cachedInputTokens", usage.inputTokenDetails?.cacheReadTokens);
     return mapped;
 }
 
