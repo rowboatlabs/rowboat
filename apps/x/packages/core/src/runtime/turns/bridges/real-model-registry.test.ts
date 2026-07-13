@@ -15,7 +15,7 @@ function makeRegistry(parts: Array<Record<string, unknown>>, capture: InvokerOpt
         invoke: (options) => {
             capture.push(options);
             return {
-                fullStream: (async function* () {
+                stream: (async function* () {
                     yield* parts;
                 })(),
             };
@@ -378,7 +378,7 @@ describe("RealModelRegistry", () => {
                 invoke: (options) => {
                     capture.push(options);
                     return {
-                        fullStream: (async function* () {
+                        stream: (async function* () {
                             yield { type: "finish-step", finishReason: "stop", usage: {} };
                         })(),
                     };
@@ -528,7 +528,7 @@ describe("RealModelRegistry", () => {
             invoke: (options) => {
                 capture.push(options);
                 return {
-                    fullStream: (async function* () {
+                    stream: (async function* () {
                         yield { type: "finish-step", finishReason: "stop", usage: {} };
                     })(),
                 };

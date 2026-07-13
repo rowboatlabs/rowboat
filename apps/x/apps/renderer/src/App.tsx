@@ -2,7 +2,7 @@ import * as React from 'react'
 import { useCallback, useEffect, useLayoutEffect, useState, useRef } from 'react'
 import { workspace } from '@x/shared';
 import { RunEvent } from '@x/shared/src/runs.js';
-import type { LanguageModelUsage, ToolUIPart } from 'ai';
+import type { ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
 import { CheckIcon, LoaderIcon, PanelLeftIcon, ArrowLeft, ArrowRight, MessageSquare, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon } from 'lucide-react';
@@ -458,7 +458,17 @@ const buildBgTaskSetupPrompt = (description: string) =>
 const buildBgTaskEditPrompt = (slug: string) =>
   `Let's tweak the background task \`${slug}\`. Please load the \`background-task\` skill first, read the task's current \`bg-tasks/${slug}/task.yaml\`, then ask me what I want to change.`
 
-const normalizeUsage = (usage?: Partial<LanguageModelUsage> | null): LanguageModelUsage | null => {
+// The renderer displays our internal (flat) usage shape that arrives over IPC,
+// not the AI SDK's restructured LanguageModelUsage (nested token details).
+type UsageSummary = {
+  inputTokens?: number
+  outputTokens?: number
+  totalTokens?: number
+  reasoningTokens?: number
+  cachedInputTokens?: number
+}
+
+const normalizeUsage = (usage?: UsageSummary | null): UsageSummary | null => {
   if (!usage) return null
   const hasNumbers = Object.values(usage).some((value) => typeof value === 'number')
   if (!hasNumbers) return null
@@ -960,7 +970,7 @@ function App() {
       return
     }
   }, [conversation])
-  const [, setModelUsage] = useState<LanguageModelUsage | null>(null)
+  const [, setModelUsage] = useState<UsageSummary | null>(null)
   const [runId, setRunId] = useState<string | null>(null)
   // New runtime: the active session's chat data + actions. All logic lives in
   // SessionChatStore (tested headlessly); the hook is a thin subscription.

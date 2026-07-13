@@ -101,7 +101,9 @@ export function convertFromMessages(messages: z.infer<typeof Message>[]): ModelM
                     // model knows which images show the user vs their screen.
                     const textSegments: string[] = userMessageContextPrefix ? [userMessageContextPrefix] : [];
                     const attachmentLines: string[] = [];
-                    type EncodedImagePart = { type: "image"; image: string; mediaType: string };
+                    // AI SDK 7 collapsed the `image` content part into `file`
+                    // (data + mediaType); image parts are deprecated.
+                    type EncodedImagePart = { type: "file"; data: string; mediaType: string };
                     const cameraParts: EncodedImagePart[] = [];
                     const screenParts: EncodedImagePart[] = [];
                     const frameTimes: string[] = [];
@@ -113,7 +115,7 @@ export function convertFromMessages(messages: z.infer<typeof Message>[]): ModelM
                             attachmentLines.push(`- ${part.filename} (${part.mimeType}${sizeStr}) at ${part.path}${lineStr}`);
                         } else if (part.type === "image") {
                             const target = part.source === "screen" ? screenParts : cameraParts;
-                            target.push({ type: "image", image: part.data, mediaType: part.mediaType });
+                            target.push({ type: "file", data: part.data, mediaType: part.mediaType });
                             if (part.capturedAt) frameTimes.push(part.capturedAt);
                         } else {
                             textSegments.push(part.text);

@@ -653,7 +653,7 @@ Respond with ONLY valid JSON: either a schedule object or null. No other text.`;
     try {
         const result = await withUseCase({ useCase: 'knowledge_sync', subUseCase: 'inline_task_classify' }, () => generateText({
             model,
-            system: systemPrompt,
+            instructions: systemPrompt,
             prompt: instruction,
         }));
 
