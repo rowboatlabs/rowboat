@@ -14,8 +14,8 @@ import type { DetectedMeeting } from "@x/core/dist/meetings/detector.js";
  */
 
 // Lean bar + margins for the overhanging × and the CSS drop shadow.
-const POPUP_WIDTH = 448;
-const POPUP_HEIGHT = 96;
+const POPUP_WIDTH = 400;
+const POPUP_HEIGHT = 84;
 const AUTO_DISMISS_MS = 45_000;
 
 // Display names, Granola-style ("Chrome", not "Google Chrome").

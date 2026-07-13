@@ -23,10 +23,24 @@ const SAIL_ICON =
  * floats on the card's top-left corner; the window itself is transparent.
  * Detection never records — the user has to click "Take notes".
  */
+// Opened directly in a browser (vite only, no Electron) there is no IPC
+// bridge — render sample data so the popup can be styled with plain HMR.
+// `?variant=calendar` previews the calendar-linked look.
+const isPreview = typeof window.ipc === 'undefined'
+
 export function MeetingDetectedPopup() {
   const [payload, setPayload] = useState<PopupPayload | null>(null)
 
   useEffect(() => {
+    if (isPreview) {
+      const calendar = new URLSearchParams(window.location.search).get('variant') === 'calendar'
+      setPayload(
+        calendar
+          ? { title: 'Weekly design sync', message: 'Chrome', hasCalendarEvent: true }
+          : { title: 'Meeting detected', message: 'Chrome', hasCalendarEvent: false },
+      )
+      return
+    }
     const cleanup = window.ipc.on('meetingDetect:payload', (next) => setPayload(next))
     // The main process pushes on did-finish-load, but that can race this
     // listener's registration — fetch explicitly too.
@@ -40,15 +54,24 @@ export function MeetingDetectedPopup() {
   }, [])
 
   const act = (action: 'take-notes' | 'dismiss') => {
+    if (isPreview) {
+      console.log(`[preview] action: ${action}`)
+      return
+    }
     void window.ipc.invoke('meetingDetect:action', { action }).catch(() => {})
   }
 
-  return (
-    <div className="h-screen w-screen relative bg-transparent" style={dragRegion}>
-      {/* Close — floats over the card's top-left corner */}
+  // In the browser preview, reproduce the real popup window's exact size
+  // (448×96) on a desktop-ish backdrop; in Electron the window IS that size.
+  const popup = (
+    <div
+      className={`group ${isPreview ? 'relative' : 'h-screen w-screen relative bg-transparent'}`}
+      style={isPreview ? { width: 400, height: 84 } : dragRegion}
+    >
+      {/* Close — floats over the card's top-left corner, revealed on hover */}
       <button
         onClick={() => act('dismiss')}
-        className="absolute left-0.5 top-0.5 z-10 flex size-6 items-center justify-center rounded-full bg-neutral-800 border border-neutral-600 text-neutral-200 shadow-md hover:bg-neutral-700 transition-colors"
+        className="absolute left-0.5 top-0.5 z-10 flex size-6 items-center justify-center rounded-full bg-neutral-800 border border-neutral-600 text-neutral-200 shadow-md hover:bg-neutral-700 opacity-0 group-hover:opacity-100 transition-opacity"
         style={noDragRegion}
         aria-label="Dismiss"
       >
@@ -56,33 +79,33 @@ export function MeetingDetectedPopup() {
       </button>
 
       {/* Card */}
-      <div className="absolute left-3 right-2 top-3 h-16 rounded-2xl bg-[#1d1d1d] shadow-[0_8px_28px_rgba(0,0,0,0.55)] flex items-center gap-3.5 pl-4 pr-2">
-        <div
-          className={`h-8 w-0 border-l-2 ${
-            payload?.hasCalendarEvent
-              ? 'border-emerald-500'
-              : 'border-dashed border-neutral-500'
-          }`}
-        />
+      <div className="absolute left-3 right-3 top-3 h-14 rounded-2xl bg-[#1d1d1d] shadow-[0_8px_28px_rgba(0,0,0,0.55)] flex items-center gap-3 pl-4 pr-2.5">
         <div className="flex-1 min-w-0">
-          <div className="text-[15px] font-semibold text-white leading-tight truncate">
+          <div className="text-sm font-semibold text-white leading-tight truncate">
             {payload?.title ?? 'Meeting detected'}
           </div>
-          <div className="text-sm text-neutral-400 leading-tight truncate">
+          <div className="text-[13px] text-neutral-400 leading-tight truncate mt-0.5">
             {payload?.message ?? ''}
           </div>
         </div>
         <button
           onClick={() => act('take-notes')}
-          className="flex shrink-0 items-center gap-2.5 rounded-xl bg-neutral-800/90 border border-neutral-700 pl-2.5 pr-4 py-2 hover:bg-neutral-700 transition-colors"
+          className="flex h-9.5 shrink-0 items-center gap-2 rounded-xl bg-neutral-800/90 border border-neutral-700 pl-2 pr-3 hover:bg-neutral-700 transition-colors"
           style={noDragRegion}
         >
-          <span className="flex size-7 items-center justify-center rounded-lg bg-white">
-            <img src={SAIL_ICON} alt="" className="size-4" />
+          <span className="flex size-6 items-center justify-center">
+            <img src={SAIL_ICON} alt="" className="size-4.5 invert" />
           </span>
-          <span className="text-[15px] font-semibold text-white">Take notes</span>
+          <span className="text-[13px] font-semibold text-white">Take notes</span>
         </button>
       </div>
+    </div>
+  )
+
+  if (!isPreview) return popup
+  return (
+    <div className="min-h-screen w-full bg-gradient-to-br from-sky-200 via-indigo-200 to-rose-200 p-6">
+      {popup}
     </div>
   )
 }
