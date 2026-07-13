@@ -48,6 +48,9 @@ function fakeServices(opts: {
     parentEvents?: Array<z.infer<typeof TurnEvent>>;
     childResult?: Partial<HeadlessAgentResult>;
     startError?: string;
+    subagentModelResolver?: NonNullable<
+        Parameters<typeof runSpawnedAgent>[1]["services"]
+    >["subagentModelResolver"];
 }) {
     const started: HeadlessAgentOptions[] = [];
     const turnRuntime = {
@@ -79,7 +82,16 @@ function fakeServices(opts: {
             throw new Error("unused");
         },
     };
-    return { services: { turnRuntime, headlessRunner }, started };
+    return {
+        services: {
+            turnRuntime,
+            headlessRunner,
+            ...(opts.subagentModelResolver
+                ? { subagentModelResolver: opts.subagentModelResolver }
+                : {}),
+        },
+        started,
+    };
 }
 
 const signal = new AbortController().signal;
@@ -151,6 +163,159 @@ describe("runSpawnedAgent", () => {
             { parentTurnId: "parent-1", signal, services },
         );
         expect(started[0].reasoningEffort).toBe("high");
+    });
+
+    it("maps a tier to a curated model via the resolver", async () => {
+        const asked: unknown[] = [];
+        const { services, started } = fakeServices({
+            subagentModelResolver: async (tier, parentProvider) => {
+                asked.push([tier, parentProvider]);
+                return { provider: "rowboat", model: "lite-model" };
+            },
+        });
+        await runSpawnedAgent(
+            { task: "t", instructions: "x", tier: "light" },
+            { parentTurnId: "parent-1", signal, services },
+        );
+        expect(asked).toEqual([["light", "parent-p"]]);
+        const agent = started[0].agent as {
+            inline: { model?: { provider: string; model: string } };
+        };
+        expect(agent.inline.model).toEqual({
+            provider: "rowboat",
+            model: "lite-model",
+        });
+    });
+
+    it("inherits the parent model when the tier resolver returns null", async () => {
+        const { services, started } = fakeServices({
+            subagentModelResolver: async () => null,
+        });
+        await runSpawnedAgent(
+            { task: "t", instructions: "x", tier: "heavy" },
+            { parentTurnId: "parent-1", signal, services },
+        );
+        const agent = started[0].agent as {
+            inline: { model?: { provider: string; model: string } };
+        };
+        expect(agent.inline.model).toEqual({
+            provider: "parent-p",
+            model: "parent-m",
+        });
+    });
+
+    it("inherits the parent model when the tier resolver throws", async () => {
+        const { services, started } = fakeServices({
+            subagentModelResolver: async () => {
+                throw new Error("gateway unreachable");
+            },
+        });
+        const result = await runSpawnedAgent(
+            { task: "t", instructions: "x", tier: "light" },
+            { parentTurnId: "parent-1", signal, services },
+        );
+        expect(result.isError).toBe(false);
+        const agent = started[0].agent as {
+            inline: { model?: { provider: string; model: string } };
+        };
+        expect(agent.inline.model).toEqual({
+            provider: "parent-p",
+            model: "parent-m",
+        });
+    });
+
+    it("ignores volunteered model ids — the tier still decides", async () => {
+        // Models habitually pass explicit model/provider despite guidance
+        // (observed live: a gateway parent asking for anthropic ids). The
+        // schema no longer has those fields, so they're stripped, not obeyed.
+        const { services, started } = fakeServices({
+            subagentModelResolver: async () =>
+                ({ provider: "rowboat", model: "lite-model" }),
+        });
+        await runSpawnedAgent(
+            {
+                task: "t",
+                instructions: "x",
+                tier: "light",
+                model: "claude-sonnet-4-6",
+                provider: "anthropic",
+            },
+            { parentTurnId: "parent-1", signal, services },
+        );
+        const agent = started[0].agent as {
+            inline: { model?: { provider: string; model: string } };
+        };
+        expect(agent.inline.model).toEqual({
+            provider: "rowboat",
+            model: "lite-model",
+        });
+    });
+
+    it("treats empty-string fields as absent", async () => {
+        // Models send "" instead of omitting optionals; an "" agent_id must
+        // not blank the display name or trigger the by-id path.
+        const { services, started } = fakeServices({});
+        const progress: unknown[] = [];
+        await runSpawnedAgent(
+            { task: "t", agent_id: "", name: "researcher", instructions: "" },
+            {
+                parentTurnId: "parent-1",
+                signal,
+                services,
+                onChildStarted: async (info) => {
+                    progress.push(info);
+                },
+            },
+        );
+        const agent = started[0].agent as {
+            inline: { name: string; instructions: string };
+        };
+        expect(agent.inline.name).toBe("researcher");
+        expect(agent.inline.instructions).toMatch(/researcher/);
+        expect(progress).toMatchObject([{ agentName: "researcher" }]);
+    });
+
+    it("does not consult the resolver for the standard tier", async () => {
+        const asked: unknown[] = [];
+        const { services, started } = fakeServices({
+            subagentModelResolver: async (tier, parentProvider) => {
+                asked.push([tier, parentProvider]);
+                return { provider: "rowboat", model: "lite-model" };
+            },
+        });
+        await runSpawnedAgent(
+            { task: "t", instructions: "x", tier: "standard" },
+            { parentTurnId: "parent-1", signal, services },
+        );
+        expect(asked).toEqual([]);
+        const agent = started[0].agent as {
+            inline: { model?: { provider: string; model: string } };
+        };
+        expect(agent.inline.model).toEqual({
+            provider: "parent-p",
+            model: "parent-m",
+        });
+    });
+
+    it("stamps the current date into the child's message, not the display task", async () => {
+        const { services, started } = fakeServices({});
+        const progress: Array<{ task: string }> = [];
+        await runSpawnedAgent(
+            { task: "find the latest news", instructions: "x" },
+            {
+                parentTurnId: "parent-1",
+                signal,
+                services,
+                onChildStarted: async (info) => {
+                    progress.push(info);
+                },
+            },
+        );
+        expect(started[0].message).toMatch(/^find the latest news\n\n/);
+        expect(started[0].message).toMatch(/Current date and time: /);
+        expect(started[0].message).toContain(String(new Date().getFullYear()));
+        // The UI header shows the task verbatim — no date noise there.
+        expect(progress[0].task).toBe("find the latest news");
     });
 
     it("rejects agent_id and instructions together", async () => {

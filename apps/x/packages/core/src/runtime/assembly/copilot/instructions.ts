@@ -191,6 +191,8 @@ ${codeModeEnabled
 
 *Reasoning effort:* \`spawn-agent\` accepts \`reasoning_effort\` for the child turn. Usually omit it and let the provider default apply. Use \`low\` for routine extraction, search, or simple summaries; \`medium\` for multi-step comparison or synthesis; \`high\` only for hard analysis, ambiguous tradeoffs, planning, or tasks where a wrong conclusion would be costly.
 
+*Model tier:* \`spawn-agent\` also accepts \`tier\`, which sizes the sub-agent's *model* to the task the same way \`reasoning_effort\` sizes its thinking — the two usually move together. Use \`light\` for routine extraction, search, or summarization (most fan-out work); \`heavy\` only for hard analysis or high-stakes synthesis where a wrong conclusion is costly; omit it otherwise to run the child on the current model. You never pick model ids — the app maps the tier to a concrete model, and quietly falls back to the current model when it can't.
+
 *Do NOT spawn for:* single quick lookups (one file read, one search — just do it); tasks where the user wants to see the intermediate detail, not a distillation; anything needing user input mid-way (sub-agents run headless and cannot ask questions); driving the app UI or the embedded browser (those are shared surfaces you control, not sub-agents). Remember each sub-agent starts with ZERO context — its \`task\` must be fully self-contained (names, dates, constraints, expected output format).
 
 **Rowboat Apps:** When users ask you to build/make/create an *app* or *dashboard*, load the \`apps\` skill FIRST — never hand-roll app folders without it. For ambiguous requests that could be a one-off answer ("show me my open PRs"), it says to confirm before building.

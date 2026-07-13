@@ -36,14 +36,6 @@ export const SpawnAgentInput = z.object({
         .describe(
             "System instructions for an agent constructed on the fly. Mutually exclusive with `agent_id`. Optional: omitting both `agent_id` and `instructions` spawns a general-purpose worker driven by `task` alone.",
         ),
-    model: z
-        .string()
-        .optional()
-        .describe("Model id for the sub-agent; defaults to the current model."),
-    provider: z
-        .string()
-        .optional()
-        .describe("Provider for `model`; defaults to the current provider."),
     tools: z
         .array(z.string())
         .optional()
@@ -65,7 +57,20 @@ export const SpawnAgentInput = z.object({
         .describe(
             "Optional reasoning-effort override for the sub-agent turn. Omit for auto/provider default. Use `low` for routine extraction or summarization, `medium` for multi-step synthesis, and `high` only when the child task truly needs deeper reasoning.",
         ),
+    tier: z
+        .enum(["light", "standard", "heavy"])
+        .optional()
+        .describe(
+            "Capability tier for the sub-agent's model, judged from task difficulty: `light` for routine extraction, search, or summarization; `heavy` for hard analysis or high-stakes synthesis; omit (or `standard`) to run on the current model. The sub-agent falls back to the current model whenever the tier cannot be mapped.",
+        ),
 });
+
+// Models routinely send "" instead of omitting an optional field; an empty
+// string must mean absent everywhere (an "" agent_id slipping past ?? once
+// blanked the child's display name).
+function nonEmpty(value: string | undefined): string | undefined {
+    return value && value.trim() ? value : undefined;
+}
 
 export const SPAWN_AGENT_DESCRIPTION =
     "Launch a sub-agent that works on a task in its own isolated, headless turn and returns its final answer. " +
@@ -73,6 +78,7 @@ export const SPAWN_AGENT_DESCRIPTION =
     "Issue several spawn-agent calls in ONE response only when the subtasks are genuinely independent and worth running in parallel. " +
     "Provide either `agent_id` (a stored agent) or `instructions` (construct a specialist on the fly, optionally with `name` and `tools`). " +
     "Optionally set `reasoning_effort` for the child turn; leave it unset for auto/provider default, and reserve `high` for tasks that clearly need deeper reasoning. " +
+    "Optionally set `tier` to size the child's model to the task: `light` for routine extraction/search/summaries, `heavy` for hard analysis; omit it to run the child on the current model. " +
     "The sub-agent cannot ask the user questions and cannot spawn further sub-agents; give it a complete, self-contained task.";
 
 export interface SpawnedAgentCallbacks {
@@ -89,6 +95,13 @@ export interface SpawnedAgentCallbacks {
     services?: {
         turnRuntime: import("../turns/api.js").ITurnRuntime;
         headlessRunner: import("./headless.js").IHeadlessAgentRunner;
+        // Maps a semantic tier to a curated model (null = inherit parent).
+        // Optional so existing callers/tests without tiers are untouched;
+        // production defaults to models/defaults.js getSubagentModel.
+        subagentModelResolver?: (
+            tier: import("../../models/defaults.js").SubagentTier | undefined,
+            parentProvider: string | undefined,
+        ) => Promise<z.infer<typeof ModelDescriptor> | null>;
     };
 }
 
@@ -103,7 +116,12 @@ export async function runSpawnedAgent(
     if (!parsed.success) {
         return spawnError(`invalid input: ${parsed.error.message}`);
     }
-    const input = parsed.data;
+    const input = {
+        ...parsed.data,
+        agent_id: nonEmpty(parsed.data.agent_id),
+        name: nonEmpty(parsed.data.name),
+        instructions: nonEmpty(parsed.data.instructions),
+    };
     if (input.agent_id && input.instructions) {
         return spawnError(
             "provide at most one of `agent_id` or `instructions`",
@@ -112,7 +130,7 @@ export async function runSpawnedAgent(
 
     // Lazy: this module is imported by the BuiltinTools catalog, which the
     // DI container's bridges import at startup.
-    const { turnRuntime, headlessRunner } =
+    const { turnRuntime, headlessRunner, subagentModelResolver } =
         opts.services ?? (await resolveServices());
 
     let parentModel: z.infer<typeof ModelDescriptor> | undefined;
@@ -133,17 +151,24 @@ export async function runSpawnedAgent(
         parentModel = undefined;
     }
 
-    const model: z.infer<typeof ModelDescriptor> | undefined = input.model
-        ? {
-              provider: input.provider ?? parentModel?.provider ?? "",
-              model: input.model,
-          }
-        : parentModel;
-    if (model && !model.provider) {
-        return spawnError(
-            "`model` was set but no provider could be determined; pass `provider` too",
-        );
+    // The spawning model never picks model ids — it only sizes the task via
+    // `tier`, and this resolver owns the mapping (stored agents carry their
+    // own model pins in config). A tier that cannot be mapped (BYOK, signed
+    // out, resolver failure) degrades to inheriting the parent model — a
+    // spawn never fails over its tier.
+    let tiered: z.infer<typeof ModelDescriptor> | null = null;
+    if (input.tier === "light" || input.tier === "heavy") {
+        try {
+            tiered = await (subagentModelResolver ??
+                (await defaultSubagentModelResolver()))(
+                input.tier,
+                parentModel?.provider,
+            );
+        } catch {
+            tiered = null;
+        }
     }
+    const model = tiered ?? parentModel;
 
     const agentName = input.agent_id ?? input.name ?? "subagent";
     const agent: z.infer<typeof RequestedAgent> = input.agent_id
@@ -172,11 +197,21 @@ export async function runSpawnedAgent(
         DEFAULT_MAX_MODEL_CALLS,
     );
 
+    // Children start with zero context — including the date. Recency-shaped
+    // tasks ("latest news") on a fresh model otherwise search whatever year
+    // it guesses (observed live: a July 2026 child searching October 2024).
+    const message =
+        `${input.task}\n\n` +
+        `(Current date and time: ${new Date().toLocaleString(undefined, {
+            dateStyle: "full",
+            timeStyle: "long",
+        })})`;
+
     let handle: Awaited<ReturnType<typeof headlessRunner.start>>;
     try {
         handle = await headlessRunner.start({
             agent,
-            message: input.task,
+            message,
             maxModelCalls,
             ...(input.reasoning_effort === undefined
                 ? {}
@@ -240,6 +275,15 @@ async function resolveServices(): Promise<
             import("./headless.js").IHeadlessAgentRunner
         >("headlessAgentRunner"),
     };
+}
+
+async function defaultSubagentModelResolver(): Promise<
+    NonNullable<
+        NonNullable<SpawnedAgentCallbacks["services"]>["subagentModelResolver"]
+    >
+> {
+    const { getSubagentModel } = await import("../../models/defaults.js");
+    return getSubagentModel;
 }
 
 function spawnError(message: string): z.infer<typeof ToolResultData> {

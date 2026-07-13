@@ -14,6 +14,10 @@ const SIGNED_IN_DEFAULT_PROVIDER = "rowboat";
 const SIGNED_IN_KG_MODEL = "google/gemini-3.1-flash-lite";
 const SIGNED_IN_LIVE_NOTE_AGENT_MODEL = "google/gemini-3.1-flash-lite";
 const SIGNED_IN_AUTO_PERMISSION_DECISION_MODEL = "google/gemini-3.1-flash-lite";
+// Sub-agent tiers: the light model must stay one we've verified at
+// multi-step tool calling — spawned children are agentic, not one-shot.
+const SIGNED_IN_SUBAGENT_LIGHT_MODEL = "google/gemini-3.1-flash-lite";
+const SIGNED_IN_SUBAGENT_HEAVY_MODEL = "anthropic/claude-sonnet-5";
 
 export type ModelSelection = z.infer<typeof ModelRef>;
 
@@ -161,4 +165,41 @@ export async function getMeetingNotesModel(): Promise<ModelSelection> {
  */
 export async function getBackgroundTaskAgentModel(): Promise<ModelSelection> {
     return getLiveNoteAgentModel();
+}
+
+export type SubagentTier = "light" | "standard" | "heavy";
+
+/**
+ * Curated model for a spawned sub-agent's capability tier. The tier is a
+ * semantic hint from the parent LLM (it knows task difficulty, not the
+ * user's model inventory); this resolver owns the mapping to a concrete
+ * model.
+ *
+ * Returns null whenever the tier cannot or should not be mapped — the
+ * caller then inherits the parent model, which is always safe:
+ * - tier absent or "standard" (inherit is the meaning of standard);
+ * - the parent turn isn't running on the gateway: a user who deliberately
+ *   set a BYOK default keeps their children on it, signed in or not;
+ * - signed out (curated models need gateway auth).
+ */
+export async function getSubagentModel(
+    tier: SubagentTier | undefined,
+    parentProvider: string | undefined,
+): Promise<ModelSelection | null> {
+    if (tier !== "light" && tier !== "heavy") {
+        return null;
+    }
+    if (parentProvider !== SIGNED_IN_DEFAULT_PROVIDER) {
+        return null;
+    }
+    if (!(await isSignedIn())) {
+        return null;
+    }
+    return {
+        provider: SIGNED_IN_DEFAULT_PROVIDER,
+        model:
+            tier === "light"
+                ? SIGNED_IN_SUBAGENT_LIGHT_MODEL
+                : SIGNED_IN_SUBAGENT_HEAVY_MODEL,
+    };
 }
