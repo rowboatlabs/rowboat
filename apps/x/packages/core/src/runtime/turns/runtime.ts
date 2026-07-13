@@ -301,6 +301,10 @@ export class TurnRuntime implements ITurnRuntime {
         try {
             return await run.run(input);
         } finally {
+            // Drain any queued commits before withLock releases the turn, so
+            // no append (straggler tool, un-awaited progress) can run after
+            // the lock is gone — the invariant fs-repo relies on.
+            await run.settleAppends();
             if (externalSignal) {
                 externalSignal.removeEventListener("abort", forwardAbort);
             }
@@ -461,6 +465,16 @@ class TurnAdvance {
                 offset: base + i + 1,
             });
         }
+    }
+
+    // Wait for every queued commit to run. advance() awaits this before it
+    // releases the per-turn lock, so an append can never land unlocked — not
+    // even from a fire-and-forget path (a tool that calls reportProgress
+    // without awaiting) or a sibling still in flight when the batch faulted.
+    // appendChain swallows rejections, so this never throws; any caller that
+    // needed to observe an append error already saw it from its own append().
+    async settleAppends(): Promise<void> {
+        await this.appendChain;
     }
 
     // §18 step 8: repeatedly advance deterministic work. Each phase either
@@ -898,11 +912,25 @@ class TurnAdvance {
             }
             started.push({ tc, tool: tool as SyncRuntimeTool });
         }
-        // Each task settles its own call (result or error), so Promise.all
-        // never rejects and one slow tool never blocks its siblings.
-        await Promise.all(
+        // Each task normally settles its own call (result or error). The one
+        // way a task rejects is an append failure (repo fault, or a gate
+        // rejection) — and that MUST NOT short-circuit the batch: with
+        // Promise.all, the first rejection resolves this invocation and frees
+        // the per-turn lock while sibling tools are still executing, so a
+        // straggler's later append runs unlocked and against a stale gate
+        // view, which can write a duplicate tool_result and corrupt the turn
+        // file. allSettled holds the batch (and thus the lock) until every
+        // tool has finished appending; only then do we surface the fault as an
+        // infrastructure rejection.
+        const settled = await Promise.allSettled(
             started.map(({ tc, tool }) => this.executeSyncTool(tc, tool)),
         );
+        const rejected = settled.find(
+            (r): r is PromiseRejectedResult => r.status === "rejected",
+        );
+        if (rejected) {
+            throw rejected.reason;
+        }
     }
 
     private async executeSyncTool(
@@ -1337,9 +1365,15 @@ function errorMessage(error: unknown): string {
     // (AI SDK APICallError; RetryError wraps the last one as lastError).
     // "Failed after 3 attempts" alone is undebuggable — persist the payload,
     // bounded so request events stay reference-sized.
-    const source = (error as { lastError?: unknown }).lastError ?? error;
-    const statusCode = (source as { statusCode?: unknown }).statusCode;
-    const responseBody = (source as { responseBody?: unknown }).responseBody;
+    // Optional chaining throughout: the thrown value may be null/undefined (a
+    // tool doing `throw null`, a provider rejecting with undefined). A bare
+    // property access here would throw a TypeError inside a catch handler,
+    // turning a modeled tool/model failure into an infrastructure rejection —
+    // and, mid sync-tool batch, orphaning sibling appends (see the lock-drain
+    // in advance()).
+    const source = (error as { lastError?: unknown } | null)?.lastError ?? error;
+    const statusCode = (source as { statusCode?: unknown } | null)?.statusCode;
+    const responseBody = (source as { responseBody?: unknown } | null)?.responseBody;
     const details: string[] = [];
     if (typeof statusCode === "number") {
         details.push(`status ${statusCode}`);

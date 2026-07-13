@@ -2604,6 +2604,147 @@ describe("sync tool result append failures (21.4)", () => {
             result: { isError: true },
         });
     });
+
+    it("a sync tool that throws a nullish value is a tool error, not an infrastructure rejection", async () => {
+        // Regression: errorMessage() dereferenced the thrown value directly, so
+        // `throw null` threw a TypeError *inside* the catch handler — promoting
+        // a modeled tool failure to an infrastructure rejection (and, mid-batch,
+        // orphaning sibling appends behind the released lock).
+        const executed: string[] = [];
+        const { runtime, repo } = makeRuntime({
+            tools: [
+                syncTool(echoDescriptor, async () => {
+                    executed.push("echo");
+                    const boom: unknown = null;
+                    throw boom;
+                }),
+                ...defaultTools.slice(1),
+            ],
+            models: [
+                respond(
+                    completedResp(assistantCalls(toolCallPart("A", "echo"))),
+                ),
+                respond(completedResp(assistantText("done"))),
+            ],
+        });
+        const turnId = await newTurn(runtime);
+        const { outcome, error } = await advanceAndSettle(runtime, turnId);
+
+        // The throw is conversational: the turn is not derailed.
+        expect(error).toBeUndefined();
+        expect(outcome?.status).toBe("completed");
+        expect(executed).toEqual(["echo"]);
+        const log = await persisted(repo, turnId);
+        const result = log.find((e) => e.type === "tool_result");
+        expect(result).toMatchObject({
+            source: "sync",
+            result: { output: "null", isError: true },
+        });
+    });
+
+    it("does not settle (and free the per-turn lock) until a straggling sibling append lands", async () => {
+        // Regression: when one tool's result append failed, the batch rejected
+        // immediately (Promise.all), settling the invocation and freeing the
+        // per-turn lock while a slower sibling was still executing. The
+        // sibling's later append then ran unlocked and against a stale gate
+        // view — racing a recovery advance, it could write a DUPLICATE result
+        // that the reducer rejects, permanently corrupting the turn file (and
+        // every session referencing it). The invocation must hold the lock
+        // until every sibling has finished appending, so here the invocation
+        // must not settle until slow's result is durable.
+        const slowDescriptor: z.infer<typeof ToolDescriptor> = {
+            toolId: "tool.slow",
+            name: "slow",
+            description: "Slow tool",
+            inputSchema: {},
+            execution: "sync",
+            requiresHuman: false,
+        };
+        const agent: z.infer<typeof ResolvedAgent> = {
+            ...defaultAgent,
+            tools: [echoDescriptor, slowDescriptor],
+        };
+        let releaseSlow!: () => void;
+        const slowGate = new Promise<void>((resolve) => {
+            releaseSlow = resolve;
+        });
+        const repo = new FailingAppendRepo();
+        // Fail only echo's success append (the trigger); slow commits normally.
+        repo.failWhen = (events) =>
+            events.some(
+                (e) =>
+                    e.type === "tool_result" &&
+                    e.source === "sync" &&
+                    e.toolCallId === "E" &&
+                    e.result.isError === false,
+            );
+        const { runtime } = makeRuntime({
+            repo,
+            agent,
+            tools: [
+                syncTool(echoDescriptor, async () => ({
+                    output: "e-done",
+                    isError: false,
+                })),
+                syncTool(slowDescriptor, async () => {
+                    await slowGate;
+                    return { output: "s-done", isError: false };
+                }),
+            ],
+            models: [
+                respond(
+                    completedResp(
+                        assistantCalls(
+                            toolCallPart("E", "echo"),
+                            toolCallPart("S", "slow"),
+                        ),
+                    ),
+                ),
+                respond(completedResp(assistantText("done"))),
+            ],
+        });
+        const turnId = await newTurn(runtime);
+
+        // Advance 1: echo appends-and-fails while slow is still gated on
+        // slowGate. Under the old code the batch rejects here and the
+        // invocation settles; under the fix it stays pending, holding the lock.
+        let settled = false;
+        const first = settle(runtime.advanceTurn(turnId)).then((r) => {
+            settled = true;
+            return r;
+        });
+        // Yield a macrotask: all of the invocation's microtask work (including
+        // an early short-circuit) has drained. slow is still gated.
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        expect(settled).toBe(false);
+
+        // Only now let slow finish. The invocation can surface its error.
+        releaseSlow();
+        const r1 = await first;
+        expect(r1.outcome).toBeUndefined();
+        expect(String(r1.error)).toContain("disk full");
+
+        // slow's real result was durably appended before the invocation
+        // settled, so the log is intact — no window for a duplicate.
+        const log = await repo.read(turnId);
+        expect(() => reduceTurn(log)).not.toThrow();
+        const sResult = log.find(
+            (e) => e.type === "tool_result" && e.toolCallId === "S",
+        );
+        expect(sResult).toMatchObject({
+            source: "sync",
+            result: { output: "s-done", isError: false },
+        });
+
+        // Recovery then closes echo honestly and completes; one result per call.
+        repo.failWhen = undefined;
+        const r2 = await advanceAndSettle(runtime, turnId);
+        expect(r2.outcome?.status).toBe("completed");
+        const finalLog = await repo.read(turnId);
+        expect(
+            finalLog.filter((e) => e.type === "tool_result"),
+        ).toHaveLength(2);
+    });
 });
 
 describe("mid-turn tool extension", () => {
