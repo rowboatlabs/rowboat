@@ -1101,6 +1101,14 @@ function App() {
     handleToggleMeetingRef.current?.()
   })
 
+  // Keep the tray menu in sync with meeting capture ("Start meeting notes"
+  // vs "Stop recording & generate notes").
+  useEffect(() => {
+    void window.ipc
+      .invoke('meeting:setRecordingState', { recording: meetingTranscription.state === 'recording' })
+      .catch(() => { /* tray may be unavailable */ })
+  }, [meetingTranscription.state])
+
   // Check if voice is available on mount and when OAuth state changes
   const refreshVoiceAvailability = useCallback(() => {
     Promise.all([
@@ -4676,6 +4684,18 @@ function App() {
     const observer = new MutationObserver(report)
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
     return () => observer.disconnect()
+  }, [])
+
+  // Tray menu "Start/Stop meeting notes": same toggle as the Meetings header
+  // button. Also drains a toggle parked while the window was closed/loading
+  // (mirrors the pending deep-link pull above).
+  useEffect(() => {
+    void window.ipc.invoke('app:consumePendingTrayCommand', null).then(({ toggleMeetingNotes }) => {
+      if (toggleMeetingNotes) handleToggleMeetingRef.current?.()
+    })
+    return window.ipc.on('app:toggleMeetingNotes', () => {
+      handleToggleMeetingRef.current?.()
+    })
   }, [])
 
   // Triggered by main when the user clicks a calendar-meeting notification.

@@ -226,11 +226,48 @@ function ThemeOption({
   )
 }
 
+function LaunchAtLoginSetting() {
+  const [openAtLogin, setOpenAtLogin] = useState(false)
+  const [loaded, setLoaded] = useState(false)
+
+  useEffect(() => {
+    window.ipc.invoke("app:getLoginItemSettings", null)
+      .then(({ openAtLogin }) => setOpenAtLogin(openAtLogin))
+      .catch(() => { /* dev builds report off */ })
+      .finally(() => setLoaded(true))
+  }, [])
+
+  const handleToggle = async (next: boolean) => {
+    setOpenAtLogin(next)
+    try {
+      await window.ipc.invoke("app:setLoginItemSettings", { openAtLogin: next })
+    } catch {
+      setOpenAtLogin(!next)
+    }
+  }
+
+  return (
+    <div className="flex items-center justify-between gap-4 rounded-md border px-3 py-2.5">
+      <div className="min-w-0">
+        <div className="text-sm font-medium">Start Rowboat when you log in</div>
+        <div className="text-xs text-muted-foreground mt-0.5">
+          Keeps Rowboat in your menu bar so meeting notes and notifications work without opening the app
+        </div>
+      </div>
+      <Switch checked={openAtLogin} onCheckedChange={handleToggle} disabled={!loaded} />
+    </div>
+  )
+}
+
 function AppearanceSettings() {
   const { theme, setTheme, chatPanePlacement, setChatPanePlacement, chatPaneSize, setChatPaneSize } = useTheme()
 
   return (
     <div className="space-y-6">
+      <div>
+        <h4 className="text-sm font-medium mb-3">System</h4>
+        <LaunchAtLoginSetting />
+      </div>
       <div>
         <h4 className="text-sm font-medium mb-3">Theme</h4>
         <p className="text-xs text-muted-foreground mb-4">

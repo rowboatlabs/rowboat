@@ -66,6 +66,8 @@ import { rankSlackHomeMessages } from '@x/core/dist/knowledge/sources/rank_slack
 import { syncSlackKnowledgeSources, triggerSync as triggerSlackKnowledgeSync, getSlackKnowledgeSyncStatus } from '@x/core/dist/knowledge/sources/sync_slack.js';
 import { isOnboardingComplete, markOnboardingComplete } from '@x/core/dist/config/note_creation_config.js';
 import { loadNotificationSettings, saveNotificationSettings } from '@x/core/dist/config/notification_config.js';
+import { saveAppSettings } from '@x/core/dist/config/app_settings.js';
+import { consumePendingToggleMeetingNotes, setTrayRecordingState } from './tray.js';
 import * as composioHandler from './composio-handler.js';
 import * as appsIndexer from '@x/core/dist/apps/indexer.js';
 import * as appsServer from '@x/core/dist/apps/server.js';
@@ -838,6 +840,31 @@ export function setupIpcHandlers() {
     },
     'app:consumePendingDeepLink': async () => {
       return { url: consumePendingDeepLink() };
+    },
+    'app:consumePendingTrayCommand': async () => {
+      return { toggleMeetingNotes: consumePendingToggleMeetingNotes() };
+    },
+    'app:getLoginItemSettings': async () => {
+      // Dev builds never register a login item (it would point at the dev
+      // Electron binary), so report off.
+      if (!app.isPackaged) return { openAtLogin: false };
+      return { openAtLogin: app.getLoginItemSettings().openAtLogin };
+    },
+    'app:setLoginItemSettings': async (_event, args) => {
+      if (app.isPackaged) {
+        app.setLoginItemSettings({
+          openAtLogin: args.openAtLogin,
+          ...(process.platform === 'win32' ? { args: ['--hidden'] } : {}),
+        });
+        // The user has expressed an explicit choice — never re-apply the
+        // first-run default over it.
+        saveAppSettings({ loginItemRegistered: true });
+      }
+      return { success: true as const };
+    },
+    'meeting:setRecordingState': async (_event, args) => {
+      setTrayRecordingState(args.recording);
+      return { success: true as const };
     },
     'analytics:bootstrap': async () => {
       return {

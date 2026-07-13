@@ -743,6 +743,46 @@ const ipcSchemas = {
       url: z.string().nullable(),
     }),
   },
+  // Tray commands issued before the renderer was ready (mirrors the pending
+  // deep-link pull above): the renderer drains this once on mount.
+  'app:consumePendingTrayCommand': {
+    req: z.null(),
+    res: z.object({
+      toggleMeetingNotes: z.boolean(),
+    }),
+  },
+  // Main → renderer: tray menu "Start/Stop meeting notes" — runs the same
+  // toggle flow as the Meetings header button.
+  'app:toggleMeetingNotes': {
+    req: z.null(),
+    res: z.null(),
+  },
+  // Launch-at-login (resident app). The OS login-item registry is the source
+  // of truth; these read/write it directly rather than a config file.
+  'app:getLoginItemSettings': {
+    req: z.null(),
+    res: z.object({
+      openAtLogin: z.boolean(),
+    }),
+  },
+  'app:setLoginItemSettings': {
+    req: z.object({
+      openAtLogin: z.boolean(),
+    }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  // Renderer → main: meeting capture state, so the tray menu/tooltip can
+  // reflect an active recording.
+  'meeting:setRecordingState': {
+    req: z.object({
+      recording: z.boolean(),
+    }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
   'granola:getConfig': {
     req: z.null(),
     res: z.object({
