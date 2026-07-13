@@ -9,20 +9,26 @@ import { isNotificationCategoryEnabled } from "../config/notification_config.js"
  * Ambient meeting detection (Granola-style).
  *
  * Signal: the mic-monitor helper (apps/main/native/mic-monitor.swift) reports
- * when ANY process starts using the microphone — with the owning PIDs on
- * macOS 14.4+, so the call is attributed to the app that actually holds the
- * mic (Chrome vs Zoom vs Slack), not just whatever meeting app happens to be
- * running. When the mic has been in use continuously for a few seconds — and
- * it isn't Rowboat's own capture — we label the popup ("Huddle detected" for
- * Slack, "Call detected" for FaceTime/WhatsApp, "Meeting detected"
- * otherwise), merge with a calendar event whose window covers now
- * (start − 15 min through end), and emit a DetectedMeeting.
+ * when ANY process starts using the microphone — with the owning processes'
+ * bundle IDs and executable paths on macOS 14.4+, resolved natively in the
+ * helper. That matters twice over: attribution is exact (a Meet call in
+ * Chrome attributes to Chrome even while Slack/Zoom idle in the background),
+ * and the main process never has to shell out while capture is active
+ * (child-process spawns from Electron's main fail with EBADF during capture).
  *
- * Never auto-records: the consumer (main process) shows a "Take Notes?"
- * popup and waits for a click.
+ * When the mic has been in use continuously for a few seconds — and it isn't
+ * Rowboat's own capture — we label the popup ("Huddle detected" for Slack,
+ * "Call detected" for FaceTime/WhatsApp, "Meeting detected" otherwise),
+ * merge with a calendar event whose window covers now (start − 15 min
+ * through end), and emit a DetectedMeeting. Never auto-records: the consumer
+ * (main process) shows a "Take Notes?" popup and waits for a click.
  *
  * Fires at most once per continuous mic-in-use session; the session resets
  * after the mic has been idle for MIC_SESSION_RESET_MS.
+ *
+ * While Rowboat records, the same owner list powers call-end detection: once
+ * a meeting app has been seen on the mic, its absence for CALL_END_GRACE_MS
+ * means the call ended.
  */
 
 const POLL_INTERVAL_MS = 2_000;
@@ -34,6 +40,10 @@ const MIC_SESSION_RESET_MS = 30_000;
 // A calendar event merges with a detected call from 15 min before its start
 // (Granola merges ad-hoc calls within 15 minutes of a scheduled event).
 const CALENDAR_MERGE_LEAD_MS = 15 * 60_000;
+// While recording, the meeting app must be off the mic this long before we
+// call the meeting over. Kept short so notes arrive right after hang-up;
+// only guards against sub-poll device churn, not full reconnects.
+const CALL_END_GRACE_MS = 3_000;
 const CALENDAR_SYNC_DIR = path.join(WorkDir, "calendar_sync");
 const HELPER_MAX_RESTARTS = 3;
 
@@ -51,12 +61,47 @@ export interface DetectedMeeting {
     calendarEvent?: Record<string, unknown>;
 }
 
-// Matched against process names by case-insensitive prefix (Electron/Chromium
-// apps capture through helper processes: "Google Chrome Helper (Renderer)",
-// "Slack Helper"…). When mic-owner PIDs are available this is exact
-// attribution; otherwise it's a running-app heuristic ordered by confidence:
-// dedicated conferencing apps first, always-running chat apps after, browsers
-// as the generic fallback.
+interface PlatformMatch {
+    app: string;
+    kind: DetectedMeetingKind;
+}
+
+// Bundle-ID prefixes (lowercased) → platform. The primary matcher: exact and
+// stable, covers helper processes too (com.google.Chrome.helper etc.).
+const BUNDLE_MATCHERS: Array<{ prefix: string; app: string; kind: DetectedMeetingKind }> = [
+    { prefix: "us.zoom", app: "Zoom", kind: "meeting" },
+    { prefix: "com.microsoft.teams", app: "Microsoft Teams", kind: "meeting" },
+    { prefix: "com.cisco.webex", app: "Webex", kind: "meeting" },
+    { prefix: "com.webex", app: "Webex", kind: "meeting" },
+    { prefix: "com.tinyspeck.slackmacgap", app: "Slack", kind: "huddle" },
+    { prefix: "com.apple.facetime", app: "FaceTime", kind: "call" },
+    { prefix: "net.whatsapp", app: "WhatsApp", kind: "call" },
+    { prefix: "com.hnc.discord", app: "Discord", kind: "call" },
+    // Browsers — generic "Meeting detected".
+    { prefix: "com.google.chrome", app: "Google Chrome", kind: "meeting" },
+    { prefix: "com.apple.safari", app: "Safari", kind: "meeting" },
+    { prefix: "com.apple.webkit", app: "Safari", kind: "meeting" },
+    { prefix: "org.mozilla.firefox", app: "Firefox", kind: "meeting" },
+    { prefix: "com.brave.browser", app: "Brave Browser", kind: "meeting" },
+    { prefix: "com.microsoft.edgemac", app: "Microsoft Edge", kind: "meeting" },
+    { prefix: "company.thebrowser", app: "Arc", kind: "meeting" },
+];
+
+// Rowboat's own capture (and the dev Electron shell) — never a "meeting".
+const SELF_BUNDLE_PREFIXES = ["com.rowboat", "com.github.electron"];
+
+const BROWSER_APPS = new Set([
+    "Google Chrome",
+    "Safari",
+    "Firefox",
+    "Brave Browser",
+    "Microsoft Edge",
+    "Arc",
+]);
+
+// Process-name fallbacks (case-insensitive prefix on the executable
+// basename): used when an owner has no bundle ID, and by the pre-14.4
+// running-app heuristic. Ordered by confidence for the heuristic.
 const MEETING_APPS: Array<{ proc: string; app: string; kind: DetectedMeetingKind }> = [
     { proc: "zoom.us", app: "Zoom", kind: "meeting" },
     { proc: "MSTeams", app: "Microsoft Teams", kind: "meeting" },
@@ -85,21 +130,38 @@ const KIND_TITLES: Record<DetectedMeetingKind, string> = {
     meeting: "Meeting detected",
 };
 
+interface MicOwner {
+    pid: number;
+    bundleId: string;
+    path: string;
+}
+
 interface DetectorOptions {
     /** Absolute path to the compiled mic-monitor helper binary. */
     helperPath: string;
     onDetected: (meeting: DetectedMeeting) => void;
+    /**
+     * Fired once per recording session when the meeting app that was on the
+     * mic has released it for CALL_END_GRACE_MS while Rowboat is still
+     * capturing — i.e. the call ended. Needs per-process attribution
+     * (macOS 14.4+); silently unavailable otherwise.
+     */
+    onExternalCallEnded?: () => void;
 }
 
 let started = false;
 let selfCaptureActive = false;
 let micInUse = false;
-// PIDs currently capturing from the mic (macOS 14.4+; empty = unknown).
-let micPids: number[] = [];
+// Processes currently capturing from the mic (macOS 14.4+; empty = unknown).
+let micOwners: MicOwner[] = [];
 let micInUseSince: number | null = null;
 let micIdleSince: number | null = null;
 let sessionNotified = false;
 let helperRestarts = 0;
+// Call-end tracking for the current self-capture session.
+let externalAppSeen = false;
+let externalAbsentSince: number | null = null;
+let callEndFired = false;
 
 /**
  * Rowboat's own capture (meeting recording, assistant voice/video call) also
@@ -108,6 +170,10 @@ let helperRestarts = 0;
  */
 export function setSelfCaptureActive(active: boolean): void {
     selfCaptureActive = active;
+    // Fresh capture session — re-arm call-end tracking.
+    externalAppSeen = false;
+    externalAbsentSince = null;
+    callEndFired = false;
     if (active) {
         // Whatever mic session is in flight is ours — don't prompt when the
         // user stops and the mic lingers.
@@ -131,6 +197,7 @@ export function init(options: DetectorOptions): void {
     setInterval(() => {
         try {
             tick(options.onDetected);
+            checkExternalCallEnd(options.onExternalCallEnded);
         } catch (err) {
             console.error("[MeetingDetect] tick failed:", err);
         }
@@ -159,8 +226,13 @@ function spawnHelper(helperPath: string): void {
                 const parsed = JSON.parse(line);
                 if (typeof parsed?.micInUse === "boolean") {
                     micInUse = parsed.micInUse;
-                    micPids = Array.isArray(parsed.pids)
-                        ? parsed.pids.filter((p: unknown): p is number => typeof p === "number")
+                    micOwners = Array.isArray(parsed.owners)
+                        ? parsed.owners.filter(
+                              (o: unknown): o is MicOwner =>
+                                  typeof (o as MicOwner)?.pid === "number" &&
+                                  typeof (o as MicOwner)?.bundleId === "string" &&
+                                  typeof (o as MicOwner)?.path === "string",
+                          )
                         : [];
                 }
             } catch {
@@ -171,7 +243,7 @@ function spawnHelper(helperPath: string): void {
 
     child.on("exit", (code) => {
         micInUse = false;
-        micPids = [];
+        micOwners = [];
         if (helperRestarts < HELPER_MAX_RESTARTS) {
             helperRestarts += 1;
             const delay = 5_000 * helperRestarts;
@@ -211,10 +283,58 @@ function tick(onDetected: DetectorOptions["onDetected"]): void {
     }
     if (now - micInUseSince < MIC_DEBOUNCE_MS) return;
 
-    // Claim the session before the async work — a slow ps/calendar scan must
+    // Claim the session before the async work — a slow calendar scan must
     // not let a second tick double-fire.
     sessionNotified = true;
     void detect(onDetected);
+}
+
+/**
+ * While Rowboat is recording, watch whether any known meeting app/browser
+ * still owns the mic. Once one has been seen, its absence for
+ * CALL_END_GRACE_MS means the call ended — fire once per session. Fully
+ * synchronous: reads the helper-provided owner list, spawns nothing.
+ */
+function checkExternalCallEnd(onExternalCallEnded?: () => void): void {
+    if (!onExternalCallEnded) return;
+    if (!selfCaptureActive || callEndFired) return;
+    // No attribution data (pre-14.4 macOS) — feature unavailable.
+    if (micOwners.length === 0) return;
+
+    const now = Date.now();
+    const externalOnMic = micOwners.some((owner) => {
+        const match = matchOwner(owner);
+        return match !== null && match !== "self";
+    });
+    if (externalOnMic) {
+        if (!externalAppSeen) {
+            console.log(
+                `[MeetingDetect] call-end watch armed — mic owners: ${describeOwners(micOwners)}`,
+            );
+        }
+        externalAppSeen = true;
+        externalAbsentSince = null;
+        return;
+    }
+    if (!externalAppSeen) return;
+    if (externalAbsentSince === null) {
+        externalAbsentSince = now;
+        console.log(
+            `[MeetingDetect] meeting app off the mic — remaining owners: ${describeOwners(micOwners)}`,
+        );
+        return;
+    }
+    if (now - externalAbsentSince >= CALL_END_GRACE_MS) {
+        callEndFired = true;
+        console.log("[MeetingDetect] meeting app released the mic — call likely ended");
+        onExternalCallEnded();
+    }
+}
+
+function describeOwners(owners: MicOwner[]): string {
+    return owners
+        .map((o) => o.bundleId || path.basename(o.path) || `pid ${o.pid}`)
+        .join(", ");
 }
 
 async function detect(onDetected: DetectorOptions["onDetected"]): Promise<void> {
@@ -222,7 +342,7 @@ async function detect(onDetected: DetectorOptions["onDetected"]): Promise<void> 
 
     const source = await findLikelyMeetingApp();
     if (!source) {
-        // Mic in use but nothing call-capable is running (dictation, voice
+        // Mic in use but nothing call-capable owns it (dictation, voice
         // memo, unknown recorder) — stay quiet to avoid noise.
         return;
     }
@@ -246,14 +366,33 @@ async function detect(onDetected: DetectorOptions["onDetected"]): Promise<void> 
     onDetected(meeting);
 }
 
-function defaultNoteTitle(source: { app: string; kind: DetectedMeetingKind }): string {
+function defaultNoteTitle(source: PlatformMatch): string {
     if (source.kind === "huddle") return `${source.app} huddle`;
     if (source.kind === "call") return `${source.app} call`;
-    return BROWSERS.includes(source.app) ? "Meeting" : `${source.app} meeting`;
+    return BROWSER_APPS.has(source.app) || BROWSERS.includes(source.app)
+        ? "Meeting"
+        : `${source.app} meeting`;
+}
+
+/** Match a mic owner to a platform (or to Rowboat itself). */
+function matchOwner(owner: MicOwner): PlatformMatch | "self" | null {
+    const bundle = owner.bundleId.toLowerCase();
+    if (bundle) {
+        for (const prefix of SELF_BUNDLE_PREFIXES) {
+            if (bundle.startsWith(prefix)) return "self";
+        }
+        for (const matcher of BUNDLE_MATCHERS) {
+            if (bundle.startsWith(matcher.prefix)) {
+                return { app: matcher.app, kind: matcher.kind };
+            }
+        }
+    }
+    const basename = path.basename(owner.path);
+    return basename ? matchProcessName(basename) : null;
 }
 
 /** Match one process name to a platform, by case-insensitive prefix. */
-function matchProcessName(name: string): { app: string; kind: DetectedMeetingKind } | null {
+function matchProcessName(name: string): PlatformMatch | null {
     const lower = name.toLowerCase();
     // Safari captures through WebKit's out-of-process media stack.
     if (lower.startsWith("com.apple.webkit")) return { app: "Safari", kind: "meeting" };
@@ -271,24 +410,20 @@ function matchProcessName(name: string): { app: string; kind: DetectedMeetingKin
 }
 
 /**
- * Attribute the call to an app. Exact when mic-owner PIDs are known: resolve
- * their process names and match those (a Meet call in Chrome attributes to
- * Chrome even while Slack/Zoom idle in the background). If owners are known
- * but none is call-capable (voice memo, dictation, screen recorder), that's
- * NOT a meeting — stay quiet. Only without PID info (pre-14.4 macOS) fall
- * back to the running-app heuristic.
+ * Attribute the call to an app. Exact when mic owners are known (bundle IDs
+ * from the helper, no child processes involved). Owners known but none
+ * call-capable (voice memo, dictation, screen recorder) → NOT a meeting,
+ * stay quiet. Only without attribution (pre-14.4 macOS) fall back to the
+ * running-app heuristic.
  */
-async function findLikelyMeetingApp(): Promise<{ app: string; kind: DetectedMeetingKind } | null> {
-    if (micPids.length > 0) {
-        const owners = await processNamesForPids(micPids);
-        if (owners.length > 0) {
-            // Prefer dedicated apps over browsers when several own the mic.
-            const matches = owners
-                .map(matchProcessName)
-                .filter((m): m is NonNullable<typeof m> => m !== null);
-            const dedicated = matches.find((m) => !BROWSERS.includes(m.app));
-            return dedicated ?? matches[0] ?? null;
-        }
+async function findLikelyMeetingApp(): Promise<PlatformMatch | null> {
+    if (micOwners.length > 0) {
+        const matches = micOwners
+            .map(matchOwner)
+            .filter((m): m is PlatformMatch => m !== null && m !== "self");
+        // Prefer dedicated apps over browsers when several own the mic.
+        const dedicated = matches.find((m) => !BROWSER_APPS.has(m.app));
+        return dedicated ?? matches[0] ?? null;
     }
 
     // No attribution available — running-app heuristic in table order
@@ -309,30 +444,6 @@ async function findLikelyMeetingApp(): Promise<{ app: string; kind: DetectedMeet
         if (hasPrefix(browser)) return { app: browser, kind: "meeting" };
     }
     return null;
-}
-
-function processNamesForPids(pids: number[]): Promise<string[]> {
-    return new Promise((resolve) => {
-        execFile(
-            "ps",
-            ["-o", "comm=", "-p", pids.join(",")],
-            { maxBuffer: 1024 * 1024 },
-            (err, stdout) => {
-                if (err) {
-                    resolve([]);
-                    return;
-                }
-                const names: string[] = [];
-                for (const line of stdout.split("\n")) {
-                    const trimmed = line.trim();
-                    if (!trimmed) continue;
-                    // GUI apps list as full executable paths — use the basename.
-                    names.push(path.basename(trimmed));
-                }
-                resolve(names);
-            },
-        );
-    });
 }
 
 function runningProcessNames(): Promise<Set<string> | null> {

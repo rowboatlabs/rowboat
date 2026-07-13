@@ -538,6 +538,13 @@ app.whenReady().then(async () => {
   initMeetingDetection({
     helperPath: path.join(__dirname, "mic-monitor"),
     onDetected: (meeting) => showMeetingPopup(meeting),
+    // Call ended while recording (meeting app released the mic) — the
+    // renderer stops capture and generates notes, same as a manual stop.
+    onExternalCallEnded: () => {
+      const win = mainWindow;
+      if (!win || win.isDestroyed() || win.webContents.isLoading()) return;
+      win.webContents.send("meeting:externalCallEnded", null);
+    },
   });
 
   // Start workspace watcher as a main-process service

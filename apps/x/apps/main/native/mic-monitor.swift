@@ -8,14 +8,18 @@
 //
 // Two signals, best available wins:
 //  - macOS 14.4+: per-process audio objects (kAudioHardwarePropertyProcessObjectList
-//    + kAudioProcessPropertyIsRunningInput) give the PIDs that own the mic,
-//    so the consumer can attribute the call to Chrome vs Zoom vs Slack.
+//    + kAudioProcessPropertyIsRunningInput) give the processes that own the
+//    mic. Each owner is resolved to its bundle ID (CoreAudio) and executable
+//    path (libproc) HERE, natively — the consumer must not need to shell out
+//    (child-process spawns from Electron's main process fail with EBADF
+//    while capture is active).
 //  - Fallback: kAudioDevicePropertyDeviceIsRunningSomewhere on the default
 //    input device — mic in use by *someone*, no attribution.
 //
 // Protocol: one JSON object per line on stdout, emitted on every state
-// change (and once at startup): {"micInUse":true|false,"pids":[123,456]}
-// ("pids" is empty when attribution is unavailable.)
+// change (and once at startup):
+//   {"micInUse":true,"owners":[{"pid":123,"bundleId":"com.google.Chrome.helper","path":"/Applications/..."}]}
+// ("owners" is empty when attribution is unavailable.)
 // The process exits when stdin closes, so it can never outlive the app.
 //
 // Compiled by apps/main/bundle.mjs (best-effort, macOS only) to
@@ -23,6 +27,7 @@
 
 import Foundation
 import CoreAudio
+import Darwin
 
 func defaultInputDeviceID() -> AudioDeviceID? {
     var deviceID = AudioDeviceID(0)
@@ -87,14 +92,64 @@ func processPID(_ object: AudioObjectID) -> Int32? {
     return Int32(pid)
 }
 
-/// PIDs of processes currently capturing from any input device (macOS 14.4+;
+func processBundleID(_ object: AudioObjectID) -> String? {
+    var addr = AudioObjectPropertyAddress(
+        mSelector: kAudioProcessPropertyBundleID,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain)
+    var value: Unmanaged<CFString>? = nil
+    var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+    guard AudioObjectGetPropertyData(object, &addr, 0, nil, &size, &value) == noErr,
+          let cf = value else { return nil }
+    let str = cf.takeRetainedValue() as String
+    return str.isEmpty ? nil : str
+}
+
+func processPath(_ pid: Int32) -> String? {
+    var buffer = [CChar](repeating: 0, count: 4096)
+    let length = proc_pidpath(pid, &buffer, UInt32(buffer.count))
+    guard length > 0 else { return nil }
+    return String(cString: buffer)
+}
+
+struct MicOwner: Equatable {
+    let pid: Int32
+    let bundleId: String
+    let path: String
+}
+
+/// Processes currently capturing from any input device (macOS 14.4+;
 /// returns [] where unsupported and the device-level fallback takes over).
-func micOwningPIDs() -> [Int32] {
-    var pids: [Int32] = []
+func micOwners() -> [MicOwner] {
+    var owners: [MicOwner] = []
     for object in audioProcessObjectIDs() where processIsRunningInput(object) {
-        if let pid = processPID(object) { pids.append(pid) }
+        guard let pid = processPID(object) else { continue }
+        owners.append(MicOwner(
+            pid: pid,
+            bundleId: processBundleID(object) ?? "",
+            path: processPath(pid) ?? ""))
     }
-    return pids.sorted()
+    return owners.sorted { $0.pid < $1.pid }
+}
+
+func jsonEscape(_ s: String) -> String {
+    var out = ""
+    for ch in s.unicodeScalars {
+        switch ch {
+        case "\"": out += "\\\""
+        case "\\": out += "\\\\"
+        case "\n": out += "\\n"
+        case "\r": out += "\\r"
+        case "\t": out += "\\t"
+        default:
+            if ch.value < 0x20 {
+                out += String(format: "\\u%04x", ch.value)
+            } else {
+                out.unicodeScalars.append(ch)
+            }
+        }
+    }
+    return out
 }
 
 // Exit when the parent closes our stdin (app quit/crash) — never orphan.
@@ -106,18 +161,20 @@ Thread {
 setbuf(stdout, nil)
 
 var lastInUse: Bool? = nil
-var lastPids: [Int32] = []
+var lastOwners: [MicOwner] = []
 while true {
-    let pids = micOwningPIDs()
+    let owners = micOwners()
     // Re-resolve the default device every poll: the user can switch input
     // devices (AirPods in/out) mid-session.
     let deviceInUse = defaultInputDeviceID().map(isRunningSomewhere) ?? false
-    let inUse = deviceInUse || !pids.isEmpty
-    if inUse != lastInUse || pids != lastPids {
+    let inUse = deviceInUse || !owners.isEmpty
+    if inUse != lastInUse || owners != lastOwners {
         lastInUse = inUse
-        lastPids = pids
-        let pidList = pids.map(String.init).joined(separator: ",")
-        print("{\"micInUse\":\(inUse),\"pids\":[\(pidList)]}")
+        lastOwners = owners
+        let ownerJson = owners.map { o in
+            "{\"pid\":\(o.pid),\"bundleId\":\"\(jsonEscape(o.bundleId))\",\"path\":\"\(jsonEscape(o.path))\"}"
+        }.joined(separator: ",")
+        print("{\"micInUse\":\(inUse),\"owners\":[\(ownerJson)]}")
     }
     Thread.sleep(forTimeInterval: 1.0)
 }

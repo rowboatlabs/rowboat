@@ -1116,6 +1116,16 @@ function App() {
       .catch(() => { /* tray may be unavailable */ })
   }, [meetingTranscription.state])
 
+  // Main detected the meeting app released the mic (call ended) — stop and
+  // generate notes, exactly like a manual stop. Listener only exists while
+  // recording, so a stale signal can never toggle a new recording ON.
+  useEffect(() => {
+    if (meetingTranscription.state !== 'recording') return
+    return window.ipc.on('meeting:externalCallEnded', () => {
+      handleToggleMeetingRef.current?.()
+    })
+  }, [meetingTranscription.state])
+
   // Check if voice is available on mount and when OAuth state changes
   const refreshVoiceAvailability = useCallback(() => {
     Promise.all([
@@ -5664,6 +5674,14 @@ function App() {
               })
               // Refresh the file view
               await handleVoiceNoteCreated(notePath)
+              // Notes are done — bring Rowboat to the foreground on the
+              // finished note (the post-call "redirect"). The notification
+              // below is background-only, so it only fires if the focus
+              // grab didn't take.
+              void window.ipc.invoke('app:focusMainWindow', null).catch(() => {})
+              void window.ipc
+                .invoke('meeting:notifyNotesReady', { notePath, title: noteTitle })
+                .catch(() => { /* notification is best-effort */ })
             }
           }
         } catch (err) {

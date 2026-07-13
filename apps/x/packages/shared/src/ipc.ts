@@ -786,6 +786,23 @@ const ipcSchemas = {
       success: z.literal(true),
     }),
   },
+  // Renderer → main: meeting notes finished generating — fire the "notes
+  // ready" notification (background only; click opens the note).
+  'meeting:notifyNotesReady': {
+    req: z.object({
+      notePath: z.string(),
+      title: z.string(),
+    }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  // Main → renderer: the meeting app released the microphone while a
+  // recording was running — the call likely ended, auto-stop and summarize.
+  'meeting:externalCallEnded': {
+    req: z.null(),
+    res: z.null(),
+  },
   // Renderer → main: assistant voice/video call holds the mic — suppresses
   // ambient meeting detection (it would otherwise see our own capture).
   'voice:setCallActive': {

@@ -68,6 +68,7 @@ import { isOnboardingComplete, markOnboardingComplete } from '@x/core/dist/confi
 import { loadNotificationSettings, saveNotificationSettings } from '@x/core/dist/config/notification_config.js';
 import { saveAppSettings } from '@x/core/dist/config/app_settings.js';
 import { setSelfCaptureActive } from '@x/core/dist/meetings/detector.js';
+import { notifyIfEnabled } from '@x/core/dist/application/notification/notifier.js';
 import { consumePendingToggleMeetingNotes, setTrayRecordingState } from './tray.js';
 import { closeMeetingPopup, getMeetingPopupPayload, handleMeetingPopupAction } from './meeting-popup.js';
 
@@ -885,6 +886,19 @@ export function setupIpcHandlers() {
     'voice:setCallActive': async (_event, args) => {
       voiceCallActive = args.active;
       updateSelfCaptureState();
+      return { success: true as const };
+    },
+    'meeting:notifyNotesReady': async (_event, args) => {
+      // Granola-style re-entry point: the note refreshed in place, but the
+      // user has usually switched back to the meeting app — the notification
+      // brings them back. Suppressed while the app is focused.
+      void notifyIfEnabled('meeting_notes_ready', {
+        title: 'Meeting notes ready',
+        message: `Your notes for "${args.title}" are ready.`,
+        link: `rowboat://open?type=file&path=${encodeURIComponent(args.notePath)}`,
+        actionLabel: 'Open notes',
+        onlyWhenBackground: true,
+      });
       return { success: true as const };
     },
     'meetingDetect:getPayload': async () => {
@@ -2246,6 +2260,9 @@ export function setupIpcHandlers() {
         if (main.isMinimized()) main.restore();
         main.show();
         main.focus();
+        // The user is typically in another app (e.g. just left a meeting) —
+        // a plain focus() won't take the foreground from it.
+        app.focus({ steal: true });
       }
       return {};
     },
