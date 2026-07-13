@@ -81,8 +81,8 @@ function showReadyBadge(): void {
 /**
  * Initialize auto-update. Replaces update-electron-app's `notifyUser` native
  * dialog with our own state machine: events are forwarded to the renderer
- * (updater:status), which shows the non-modal "restart to update" card at a
- * moment the user isn't busy.
+ * (updater:status), which shows a non-modal "Restart to update" chip in the
+ * titlebar once the update is staged.
  */
 export function initUpdater(): void {
   const version = app.getVersion();

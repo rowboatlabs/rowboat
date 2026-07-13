@@ -78,7 +78,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Toaster } from "@/components/ui/sonner"
-import { UpdateReadyNotice } from "@/components/update-notice"
+import { UpdateIndicator } from "@/components/update-indicator"
 import { BillingErrorDialog } from "@/components/billing-error-dialog"
 import { matchBillingError, type BillingErrorMatch } from "@/lib/billing-error"
 import { dispatchCreditExhausted, dispatchCreditReplenished } from "@/lib/credit-status"
@@ -6293,6 +6293,7 @@ function App() {
                     <TooltipContent side="bottom">New chat</TooltipContent>
                   </Tooltip>
                 )}
+                <UpdateIndicator />
                 <CaffeinateIndicator />
                 {/* Trailing layout control. Always mounted (just toggled invisible
                     when inactive) so its -webkit-app-region:no-drag rect is stable —
@@ -7044,8 +7045,6 @@ function App() {
                 getLevel={tts.getLevel}
               />
             )}
-            {/* Restart-to-update card; deferred while a call or turn is active */}
-            <UpdateReadyNotice busy={inCall || activeIsProcessing} />
             {/* Rendered last so its no-drag region paints over the sidebar drag region */}
             <FixedSidebarToggle
               leftInsetPx={isMac ? MACOS_TRAFFIC_LIGHTS_RESERVED_PX : 0}
