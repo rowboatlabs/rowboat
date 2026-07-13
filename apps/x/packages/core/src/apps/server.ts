@@ -719,6 +719,12 @@ async function startWatcher(): Promise<void> {
     if (watcher) return;
     const w = chokidar.watch(APPS_DIR, {
         ignoreInitial: true,
+        // Installed apps may ship .git/node_modules trees — thousands of files
+        // no consumer renders, at one watch fd per file (chokidar v4, no fsevents).
+        ignored: (watchedPath: string) => {
+            const segments = path.relative(APPS_DIR, watchedPath).split(path.sep);
+            return segments.includes('.git') || segments.includes('node_modules');
+        },
         awaitWriteFinish: { stabilityThreshold: 180, pollInterval: 50 },
     });
     w.on('all', (eventName, absolutePath) => {
