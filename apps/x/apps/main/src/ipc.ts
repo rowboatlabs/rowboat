@@ -583,11 +583,12 @@ function handleWorkspaceChange(event: z.infer<typeof workspaceShared.WorkspaceCh
 
 /**
  * Start workspace watcher
- * Watches the configured workspace root recursively and emits change events to renderer
+ * Watches the user-facing workspace roots recursively and emits change events to renderer
  * 
  * This should be called once when the app starts (from main.ts).
- * The watcher runs as a main-process service and catches ALL filesystem changes
- * (both from IPC handlers and external changes like terminal/git).
+ * The watcher runs as a main-process service and catches all filesystem changes
+ * under the watched roots (both from IPC handlers and external changes like
+ * terminal/git).
  * 
  * Safe to call multiple times - guards against duplicate watchers.
  */
