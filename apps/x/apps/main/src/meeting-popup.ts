@@ -15,7 +15,7 @@ import type { DetectedMeeting } from "@x/core/dist/meetings/detector.js";
 
 // Lean bar + margins for the overhanging × and the CSS drop shadow.
 const POPUP_WIDTH = 400;
-const POPUP_HEIGHT = 84;
+const POPUP_HEIGHT = 76;
 const AUTO_DISMISS_MS = 45_000;
 
 // Display names, Granola-style ("Chrome", not "Google Chrome").
@@ -98,7 +98,8 @@ export function showMeetingPopup(meeting: DetectedMeeting): void {
         width: POPUP_WIDTH,
         height: POPUP_HEIGHT,
         x: workArea.x + 24,
-        y: workArea.y + 24,
+        // Sit a bit clear of the menu bar rather than hugging it.
+        y: workArea.y + 44,
         // NSPanel (macOS): non-activating, and — unlike a regular window with
         // visibleOnFullScreen — can float over fullscreen Spaces without
         // turning Rowboat into an "agent" app that loses its Dock icon.

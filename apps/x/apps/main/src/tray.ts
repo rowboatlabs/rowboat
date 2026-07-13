@@ -88,6 +88,62 @@ export function setTrayRecordingState(isRecording: boolean): void {
   if (recording === isRecording) return;
   recording = isRecording;
   rebuildMenu();
+  if (isRecording) startWaveAnimation();
+  else stopWaveAnimation();
+}
+
+// --- Recording indicator: animated mini-waveform beside the tray icon ---
+// macOS renders tray titles to the right of the icon. Braille cells give
+// 1-dot-wide bars (two bars per character, four height steps each) — a slim
+// waveform, an unmissable "Rowboat is capturing this meeting" signal.
+
+const WAVE_FRAME_MS = 300;
+const WAVE_BAR_COUNT = 5;
+// Dot bits for a bar of height 1–4 (index 0–3), built bottom-up. Two bars
+// per braille cell (left column: dots 7,3,2,1 — right column: dots 8,6,5,4)
+// keeps the columns tightly packed; the sine wave keeps every bar ≥1 dot so
+// no column ever reads as missing.
+const WAVE_LEFT_BITS = [0x40, 0x44, 0x46, 0x47];
+const WAVE_RIGHT_BITS = [0x80, 0xa0, 0xb0, 0xb8];
+// Radians per bar / per frame: together they make the crest travel smoothly
+// leftward across the five bars.
+const WAVE_SPATIAL_STEP = 1.1;
+const WAVE_PHASE_STEP = 0.9;
+
+let waveTimer: NodeJS.Timeout | null = null;
+let wavePhase = 0;
+
+function waveString(phase: number): string {
+  const levels: number[] = [];
+  for (let i = 0; i < WAVE_BAR_COUNT; i++) {
+    const level = Math.round(1.5 + 1.5 * Math.sin(phase + i * WAVE_SPATIAL_STEP));
+    levels.push(Math.min(3, Math.max(0, level)));
+  }
+  let out = "";
+  for (let i = 0; i < levels.length; i += 2) {
+    const left = WAVE_LEFT_BITS[levels[i]];
+    const right = levels[i + 1] !== undefined ? WAVE_RIGHT_BITS[levels[i + 1]] : 0;
+    out += String.fromCharCode(0x2800 + left + right);
+  }
+  return out;
+}
+
+function startWaveAnimation(): void {
+  if (!tray || process.platform !== "darwin") return;
+  stopWaveAnimation();
+  waveTimer = setInterval(() => {
+    if (!tray) return;
+    wavePhase += WAVE_PHASE_STEP;
+    tray.setTitle(` ${waveString(wavePhase)}`, { fontType: "monospaced" });
+  }, WAVE_FRAME_MS);
+}
+
+function stopWaveAnimation(): void {
+  if (waveTimer) {
+    clearInterval(waveTimer);
+    waveTimer = null;
+  }
+  if (tray && process.platform === "darwin") tray.setTitle("");
 }
 
 function rebuildMenu(): void {

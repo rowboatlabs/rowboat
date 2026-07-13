@@ -7,9 +7,6 @@ type PopupPayload = {
   hasCalendarEvent: boolean
 }
 
-const dragRegion = { WebkitAppRegion: 'drag' } as React.CSSProperties
-const noDragRegion = { WebkitAppRegion: 'no-drag' } as React.CSSProperties
-
 // Rowboat sail glyph (black on transparent, same asset as the tray icon) —
 // rendered on a white chip inside the "Take notes" pill.
 const SAIL_ICON =
@@ -63,23 +60,23 @@ export function MeetingDetectedPopup() {
 
   // In the browser preview, reproduce the real popup window's exact size
   // (448×96) on a desktop-ish backdrop; in Electron the window IS that size.
+  // No drag region: draggable areas swallow mouse events, which would keep
+  // the hover-revealed × from ever showing while over the card body.
   const popup = (
     <div
       className={`group ${isPreview ? 'relative' : 'h-screen w-screen relative bg-transparent'}`}
-      style={isPreview ? { width: 400, height: 84 } : dragRegion}
+      style={isPreview ? { width: 400, height: 76 } : undefined}
     >
       {/* Close — floats over the card's top-left corner, revealed on hover */}
       <button
         onClick={() => act('dismiss')}
-        className="absolute left-0.5 top-0.5 z-10 flex size-6 items-center justify-center rounded-full bg-neutral-800 border border-neutral-600 text-neutral-200 shadow-md hover:bg-neutral-700 opacity-0 group-hover:opacity-100 transition-opacity"
-        style={noDragRegion}
-        aria-label="Dismiss"
+        className="absolute left-0.5 top-0.5 z-10 flex size-6 items-center justify-center rounded-full bg-neutral-800 border border-neutral-600 text-neutral-200 shadow-md hover:bg-neutral-700 opacity-0 group-hover:opacity-100 transition-opacity"        aria-label="Dismiss"
       >
         <X className="size-3.5" strokeWidth={2.5} />
       </button>
 
       {/* Card */}
-      <div className="absolute left-3 right-3 top-3 h-14 rounded-2xl bg-[#1d1d1d] shadow-[0_8px_28px_rgba(0,0,0,0.55)] flex items-center gap-3 pl-4 pr-2.5">
+      <div className="absolute left-3 right-3 top-3 h-12 rounded-2xl bg-[#1d1d1d] shadow-[0_8px_28px_rgba(0,0,0,0.55)] flex items-center gap-3 pl-4 pr-2">
         <div className="flex-1 min-w-0">
           <div className="text-sm font-semibold text-white leading-tight truncate">
             {payload?.title ?? 'Meeting detected'}
@@ -90,8 +87,7 @@ export function MeetingDetectedPopup() {
         </div>
         <button
           onClick={() => act('take-notes')}
-          className="flex h-9.5 shrink-0 items-center gap-2 rounded-xl bg-neutral-800/90 border border-neutral-700 pl-2 pr-3 hover:bg-neutral-700 transition-colors"
-          style={noDragRegion}
+          className="flex h-8.5 shrink-0 items-center gap-1.5 rounded-lg bg-neutral-800/90 border border-neutral-700 pl-1.5 pr-2.5 hover:bg-neutral-700 transition-colors"
         >
           <span className="flex size-6 items-center justify-center">
             <img src={SAIL_ICON} alt="" className="size-4.5 invert" />
