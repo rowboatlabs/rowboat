@@ -91,6 +91,26 @@ if (!fs.existsSync(stagedBinary)) {
 }
 console.log('✅ node-pty staged in .package/node_modules');
 
+// Compile the mic-monitor helper (ambient meeting detection) on macOS.
+// Best-effort: without swiftc — or on other platforms — the app still works,
+// ad-hoc meeting detection just stays off (main checks the binary exists).
+if (process.platform === 'darwin') {
+  const swiftSrc = path.join(here, 'native', 'mic-monitor.swift');
+  const helperOut = path.join(here, '.package', 'dist', 'mic-monitor');
+  const upToDate = fs.existsSync(helperOut) &&
+    fs.statSync(helperOut).mtimeMs >= fs.statSync(swiftSrc).mtimeMs;
+  if (upToDate) {
+    console.log('✅ mic-monitor helper up to date');
+  } else {
+    try {
+      execSync(`swiftc -O "${swiftSrc}" -o "${helperOut}"`, { stdio: 'inherit' });
+      console.log('✅ mic-monitor helper compiled');
+    } catch {
+      console.warn('⚠️  mic-monitor helper not built (swiftc unavailable?) — meeting detection disabled');
+    }
+  }
+}
+
 // Bundle the vendored agent-slack CLI into a single self-contained script next
 // to main.cjs. It runs as a child process (process.execPath with
 // ELECTRON_RUN_AS_NODE=1), so it must exist as a real file on disk — it can't

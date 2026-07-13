@@ -1083,6 +1083,13 @@ function App() {
   // floating popout; camera on → full-screen call; camera off → popout
   // (mascot pill). Handlers live below the voice/submit plumbing they drive.
   const video = useVideoMode()
+  // Assistant calls hold the mic — tell main so ambient meeting detection
+  // doesn't mistake our own capture for an external meeting.
+  useEffect(() => {
+    void window.ipc
+      .invoke('voice:setCallActive', { active: video.state !== 'idle' })
+      .catch(() => { /* detection may be unavailable */ })
+  }, [video.state])
   const [inCall, setInCall] = useState(false)
   const inCallRef = useRef(false)
   // User explicitly shrank the full-screen call to the floating pill.
@@ -4702,7 +4709,7 @@ function App() {
   // Reuses the same flow as the in-app "Join meeting & take notes" button.
   // When `openMeeting` is true, also opens the meeting URL in the system browser.
   useEffect(() => {
-    return window.ipc.on('app:takeMeetingNotes', ({ event, openMeeting }) => {
+    return window.ipc.on('app:takeMeetingNotes', ({ event, openMeeting, source }) => {
       const e = event as {
         summary?: string
         start?: { dateTime?: string; date?: string; timeZone?: string }
@@ -4726,7 +4733,7 @@ function App() {
         location: e.location,
         htmlLink: e.htmlLink,
         conferenceLink,
-        source: 'calendar-sync',
+        source: source ?? 'calendar-sync',
       }
       window.dispatchEvent(new Event('calendar-block:join-meeting'))
     })

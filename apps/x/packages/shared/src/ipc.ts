@@ -734,6 +734,9 @@ const ipcSchemas = {
       // When true, the renderer should also open the meeting URL (Zoom/Meet/etc.)
       // in addition to triggering the take-notes flow.
       openMeeting: z.boolean().optional(),
+      // Origin recorded in the note frontmatter: 'calendar-sync' (default) for
+      // notification/deep-link starts, 'detected' for ambient meeting detection.
+      source: z.string().optional(),
     }),
     res: z.null(),
   },
@@ -782,6 +785,48 @@ const ipcSchemas = {
     res: z.object({
       success: z.literal(true),
     }),
+  },
+  // Renderer → main: assistant voice/video call holds the mic — suppresses
+  // ambient meeting detection (it would otherwise see our own capture).
+  'voice:setCallActive': {
+    req: z.object({
+      active: z.boolean(),
+    }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  // --- Ambient meeting detection popup (own always-on-top window) ---
+  // Main → popup: the detection to display.
+  'meetingDetect:payload': {
+    req: z.object({
+      title: z.string(),
+      message: z.string(),
+      // Calendar-linked detections render a solid accent bar; ad-hoc ones a
+      // dashed one (Granola's affordance).
+      hasCalendarEvent: z.boolean(),
+    }),
+    res: z.null(),
+  },
+  // Popup → main: fetch the payload (the push can race listener registration).
+  'meetingDetect:getPayload': {
+    req: z.null(),
+    res: z.object({
+      payload: z
+        .object({
+          title: z.string(),
+          message: z.string(),
+          hasCalendarEvent: z.boolean(),
+        })
+        .nullable(),
+    }),
+  },
+  // Popup → main: user clicked a button.
+  'meetingDetect:action': {
+    req: z.object({
+      action: z.enum(['take-notes', 'dismiss']),
+    }),
+    res: z.object({}),
   },
   'granola:getConfig': {
     req: z.null(),

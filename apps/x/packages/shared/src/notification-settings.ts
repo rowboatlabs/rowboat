@@ -7,12 +7,14 @@ import { z } from 'zod';
  * - new_email:        a new email arrived during incremental Gmail sync
  * - agent_permission: an agent is requesting permission to run a tool
  * - background_task:  a background task agent pinged via the notify-user tool
+ * - meeting_detection: popup when Rowboat detects you're in a call/meeting
  */
 export const NotificationCategorySchema = z.enum([
   'chat_completion',
   'new_email',
   'agent_permission',
   'background_task',
+  'meeting_detection',
 ]);
 
 export const NotificationCategoriesSchema = z.object({
@@ -20,6 +22,7 @@ export const NotificationCategoriesSchema = z.object({
   new_email: z.boolean(),
   agent_permission: z.boolean(),
   background_task: z.boolean(),
+  meeting_detection: z.boolean(),
 });
 
 export const NotificationSettingsSchema = z.object({
@@ -32,6 +35,7 @@ export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
     new_email: true,
     agent_permission: true,
     background_task: true,
+    meeting_detection: true,
   },
 };
 

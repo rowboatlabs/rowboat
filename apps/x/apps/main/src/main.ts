@@ -67,7 +67,9 @@ import {
 import { disconnectGoogleIfScopesStale } from "./oauth-handler.js";
 import { startModelsDevRefresh } from "@x/core/dist/models/models-dev.js";
 import { loadAppSettings, saveAppSettings } from "@x/core/dist/config/app_settings.js";
-import { createAppTray, hasTray, markPendingToggleMeetingNotes } from "./tray.js";
+import { init as initMeetingDetection } from "@x/core/dist/meetings/detector.js";
+import { createAppTray, hasTray, isRecordingActive, markPendingToggleMeetingNotes } from "./tray.js";
+import { initMeetingPopup, showMeetingPopup } from "./meeting-popup.js";
 
 // Captured as early as possible so it reflects actual process start. Used to
 // gate grace-eligible notifications (e.g. the burst of background-task
@@ -273,9 +275,12 @@ function showApp(): void {
     if (!mainWindow.isVisible()) mainWindow.maximize();
     mainWindow.show();
     mainWindow.focus();
-    return;
+  } else {
+    createWindow();
   }
-  createWindow();
+  // The user is usually in another app (a meeting!) when this runs — a plain
+  // focus() won't take the foreground from it.
+  app.focus({ steal: true });
 }
 
 /**
@@ -502,6 +507,37 @@ app.whenReady().then(async () => {
       }
       win.webContents.send("app:toggleMeetingNotes", null);
     },
+  });
+
+  // Ambient meeting detection (Granola-style): the mic-monitor helper +
+  // running-app scan produce "Meeting detected" events; the popup asks
+  // before anything records. Clicking "Take Notes" routes into the same
+  // renderer flow as the calendar notification.
+  initMeetingPopup({
+    onTakeNotes: (meeting) => {
+      showApp();
+      // The user may have started recording between popup and click —
+      // sending the take-notes flow then would toggle it OFF.
+      if (isRecordingActive()) return;
+      const payload = {
+        event: meeting.calendarEvent ?? { summary: meeting.noteTitle },
+        openMeeting: false,
+        source: "detected",
+      };
+      const win = mainWindow;
+      if (!win || win.isDestroyed()) return;
+      if (win.webContents.isLoading()) {
+        win.webContents.once("did-finish-load", () => {
+          if (!win.isDestroyed()) win.webContents.send("app:takeMeetingNotes", payload);
+        });
+        return;
+      }
+      win.webContents.send("app:takeMeetingNotes", payload);
+    },
+  });
+  initMeetingDetection({
+    helperPath: path.join(__dirname, "mic-monitor"),
+    onDetected: (meeting) => showMeetingPopup(meeting),
   });
 
   // Start workspace watcher as a main-process service

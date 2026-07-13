@@ -11,10 +11,10 @@ import { app, Menu, Tray, nativeImage } from "electron";
  * packaged layouts. Template rendering makes macOS tint it correctly
  * in light/dark menu bars and while highlighted.
  */
-const TRAY_ICON_16 =
-  "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAABD0lEQVR4nKSSz+pBQRTH585vfgtrllYiSkpJHkAegLJQlvIE9soD2MvSE3gCG57ARiwoe2Kl/Lm+J2d0XJd7y7c+dc898z1zzswYFV6OwAU3+zNIf9LglwwyWqKgBKogBpZAa+XfKukKIqABxmABJqAPcnat8Zi1aLUNOiAl8hfeYMaxazw7kzkNRqAoOpFjHcCc45sWZpqzxtVpxqPIac6TpmDP/5UtQMkkz1YGCZAHA89YDndnv1+u8R+c1buGoMVFtiADTjYpb+HMsSNy9N3llinusfnpC/OQSBuwAwWO7Xko88VkDzarHo+owvHLpkEFSHXQBCtR9G3RJ9HBxsHazxymgFzn+iWM+sFMugMAAP//whjxNQAAAAZJREFUAwCzrTaLm3OP9AAAAABJRU5ErkJggg==";
-const TRAY_ICON_32 =
-  "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAACfUlEQVR4nMSXO2gUURSGz8yuYuGjsBHFBza+UGwULUxjoY0iWPnA0lZQURDsFC1E7Owt7JQ0SZGQLk2SNoQEQhICCXlUCXk/ZvOf3HM2Z2/uZDM7m90fPnbm3jn3P/e5M0VqsorUZBWocYqogQnEhj1VzwTUsOTBOgJOg1WwYYMiyqdITDe9RK6CW+A2uAYugOPgBhiXuO3kal2E1pg5BO6BJ+A+uEK7OzcJpuVaR6amBArG+Bx4BZ6LqZUOdSI+I+SmoEJZEoilMTa+CN6Cl+CEMUrkuUgS5d91+e33OpApAQ06Cj6CN+CY1G14pqryPMt1b6jhagloI2z+EPwCl4xxgXabqnQXFCW+R8oTaxDvw5z1DbSL+Zpp2D4bpcTz7zAYMomVVaxizkP+FzwydYfJ9Uh3QskYWXGZrolOiamY/7QE1Pwk6AaXwTzoA7OghdyhQtJY7PVWzcnU/fPKK8xC5mdBB1gGv6UHY/IMr/rH4D25gyUtCS3n4efDaJ1Seuvf8xC/BhPgv1dnTz1+7qskogvSrhsu4wPqM/hCgeEPJUC0s99VBbkveWXa2A/wzktC45fILdxJL7kKM1+JV7cZCNRFyIYfwICXqA7/HzGPA22Ue5KmElWXjtYceCrXuiVXwDOp27OBPNJpaAVT5HaVTsVPcv98qb0nqs/7ABvw4XQTXJf7UfBCEkyqBeeV9u6UXHObvIsW9xOcNwFd2WfAHWnvO+iinUV5oAlo/ANyx3Yb+EQpez6keryS8QgMkjvp7oIFStnzIeX5LtAtyK9h3OOWrOZ5E9C/5PPk3gdnspoT5Z8Ce2xnNtegeqgmc1YjP82CavrHadMT2AIAAP//JKuLxQAAAAZJREFUAwAJ75pCeqjxVQAAAABJRU5ErkJggg==";
+const TRAY_ICON_18 =
+  "iVBORw0KGgoAAAANSUhEUgAAABIAAAASCAYAAABWzo5XAAABRElEQVR4nKySMS9EQRSF7773REEUlFpRiEg0Oj1RqTQqCiLRKNV+gkLvF5CoJRqJPyBEqyMURJB9zzl5Z3bvTuZtdjdu8mVm7sw9c+fOzWw0a4HMO3Ib3DJRaV0NK5QrqHLBM2AB/IAvOgrrn0EJ2pqvgg2N82AarIBX7jcJtSQyCXbALliKzryDJ83LIiEQnrAFTsBcOOxg3CN4C4FFQmQCnINN+b/BmPZDvTi/0T597SwS4dtvwTK4VPrj1mu5zl9oXQWBMDKTfXAPruSfBcfgwOqi03j5A1h0vo5QJ0W3Dr9GOwN7eiYzPASn/owXSgmEBmTfsLhT4NnqHvqMg2IrozkvewHXyvpIIj2xqYyajJncWf2bPuvGjFL76+ADbFu3WW0YIdaHvcYfWrOoLt4GeVquC3+t228jCfmzVb/b/sX+AAAA//+fzjrgAAAABklEQVQDAHsTRGNUkus5AAAAAElFTkSuQmCC";
+const TRAY_ICON_36 =
+  "iVBORw0KGgoAAAANSUhEUgAAACQAAAAkCAYAAADhAJiYAAAC3klEQVR4nOyYu4sUQRDGa3fm8DgxUxB8ICqKqBj4QBOFMxMDRQUfgS/0D1A0MRQMTA1MxBcngpFmBiocgokgCopo4PnCSE193e74FV11XTtMz+zs9sLB3Qc/drenp/ubrqruuUtpmimlaaYZb6gBmvK9DbKiDoNUU+bIxEClEoqvRIxkOYbBcrAJ7ALzwATlFiVWyDQULYE1F2wE28E2sBYsJr8I58Fjc18UQw2hLYOOgJ1gHxgFSwru+SsmXsnvjjzq1ZA1wgOuBMfBQXJhUbUF7c8akraJWIZ4yVsyEIfhjBgZket6TRPa5mkmbd/AZ9PWk6GGmXAhuABOgTnSPikmmoH79F7+/Rr8IV+BtQ3xJFq2HJpLYkqNJNS5EkXbiVYb65kZt1XXkIZoAbhKLmGtkdRMFNrXMmOA+4zn2qdUtTGqma1gDKwAv2XgtOD+MkOaV5w/XAS/ijqmXZjZA+6QT9ph00erLDGTFpnitkn5fCRmbBpUGtLYHgU3pe0teAKegnVgL7kqI+lrjwlrKh+ue1Si0NPwICfBFXAX3CaXiP9MP16V3eSqbXOFKb32BawmF/ZCNQvaeDDOlWVgvRgbFzOJgSd5QO5YuEyd+5OaUnRzHBMzwTM0lIRD5FcjofBpnZDPIzZ1jnz12Qdk8ZGxBnykgv2nyhDLnthl0oOVjb0AG8itlOYnPxg/4C1wjALJrCp7/agykjfF/b+CI9QZNq2ww+BH1UBNiiPNkYfgHflQtuT7NfCe/KoHFfMFTZN6PthBblU4bLwq+ymwEeYVa4WsXspnW8Y/C75TSSJbDeIlf1Q+eUe/T24PK01kq9gv+fyAb8Aq8IncK+xPudZVkcQKmY6zhfzBeYBc/nQVKlXskJ0Wc4fAc6oRKlWMkOkKLCUXphPgBvmqqz1Yv9K95SL4AK73aiaWIRYfDYvInVO1w0QDMKTqywwr5k5dq5pCGsTf9n1p9h9WVfoPAAD//0eu+ckAAAAGSURBVAMAjdCu7L3gD4wAAAAASUVORK5CYII=";
 
 interface TrayActions {
   openApp: () => void;
@@ -44,11 +44,11 @@ function buildTrayIcon() {
   const icon = nativeImage.createEmpty();
   icon.addRepresentation({
     scaleFactor: 1,
-    buffer: Buffer.from(TRAY_ICON_16, "base64"),
+    buffer: Buffer.from(TRAY_ICON_18, "base64"),
   });
   icon.addRepresentation({
     scaleFactor: 2,
-    buffer: Buffer.from(TRAY_ICON_32, "base64"),
+    buffer: Buffer.from(TRAY_ICON_36, "base64"),
   });
   icon.setTemplateImage(true);
   return icon;
@@ -78,6 +78,10 @@ export function createAppTray(trayActions: TrayActions): void {
 
 export function hasTray(): boolean {
   return tray !== null;
+}
+
+export function isRecordingActive(): boolean {
+  return recording;
 }
 
 export function setTrayRecordingState(isRecording: boolean): void {

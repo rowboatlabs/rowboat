@@ -67,7 +67,18 @@ import { syncSlackKnowledgeSources, triggerSync as triggerSlackKnowledgeSync, ge
 import { isOnboardingComplete, markOnboardingComplete } from '@x/core/dist/config/note_creation_config.js';
 import { loadNotificationSettings, saveNotificationSettings } from '@x/core/dist/config/notification_config.js';
 import { saveAppSettings } from '@x/core/dist/config/app_settings.js';
+import { setSelfCaptureActive } from '@x/core/dist/meetings/detector.js';
 import { consumePendingToggleMeetingNotes, setTrayRecordingState } from './tray.js';
+import { closeMeetingPopup, getMeetingPopupPayload, handleMeetingPopupAction } from './meeting-popup.js';
+
+// Ambient meeting detection must ignore Rowboat's own mic use: meeting
+// capture and assistant voice/video calls both hold the mic. Either being
+// active suppresses "Meeting detected" prompts.
+let meetingRecordingActive = false;
+let voiceCallActive = false;
+function updateSelfCaptureState() {
+  setSelfCaptureActive(meetingRecordingActive || voiceCallActive);
+}
 import * as composioHandler from './composio-handler.js';
 import * as appsIndexer from '@x/core/dist/apps/indexer.js';
 import * as appsServer from '@x/core/dist/apps/server.js';
@@ -864,7 +875,24 @@ export function setupIpcHandlers() {
     },
     'meeting:setRecordingState': async (_event, args) => {
       setTrayRecordingState(args.recording);
+      meetingRecordingActive = args.recording;
+      updateSelfCaptureState();
+      // Recording started through another path — a lingering "Take Notes?"
+      // popup is stale now.
+      if (args.recording) closeMeetingPopup();
       return { success: true as const };
+    },
+    'voice:setCallActive': async (_event, args) => {
+      voiceCallActive = args.active;
+      updateSelfCaptureState();
+      return { success: true as const };
+    },
+    'meetingDetect:getPayload': async () => {
+      return { payload: getMeetingPopupPayload() };
+    },
+    'meetingDetect:action': async (_event, args) => {
+      handleMeetingPopupAction(args.action);
+      return {};
     },
     'analytics:bootstrap': async () => {
       return {
