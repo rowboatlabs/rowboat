@@ -259,8 +259,20 @@ export async function listModelsForProvider(
                 url = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey ?? ""}`;
                 break;
             case "openrouter":
-                url = "https://openrouter.ai/api/v1/models";
-                if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
+                // /api/v1/models is a public catalog — it returns the full
+                // list even with an invalid/absent key, so listing it can't
+                // tell a bad key from a good one (a false "Connected"). When
+                // a key is given, hit the account-scoped /models/user behind
+                // Bearer auth instead: a bad key 401s here and the shared
+                // throw below surfaces it. Same OpenAI-shaped { data:[{id}] }
+                // response, so the parse path is unchanged. No key → keep the
+                // public catalog so an unconfigured provider can still preview.
+                if (apiKey) {
+                    url = "https://openrouter.ai/api/v1/models/user";
+                    headers["Authorization"] = `Bearer ${apiKey}`;
+                } else {
+                    url = "https://openrouter.ai/api/v1/models";
+                }
                 break;
             case "ollama":
                 url = `${(baseURL ?? "http://localhost:11434").replace(/\/$/, "")}/api/tags`;

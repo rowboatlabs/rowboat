@@ -457,13 +457,24 @@ export function useOnboardingState(open: boolean, onComplete: (opts?: { startTou
         return false
       }
 
-      const preferred = preferredDefaults[llmProvider]
-      // A model the user explicitly entered always wins — this used to prefer
-      // catalog[0], which silently replaced the user's Ollama model with
-      // whatever model the local server happened to list first.
-      const model = modelInputShown
-        ? (typed || catalog[0] || "")
-        : ((preferred && catalog.includes(preferred) && preferred) || catalog[0] || typed || "")
+      // Resolve the model silently — same precedence as the settings dialog's
+      // resolvedModel, so onboarding no longer asks users to type one.
+      // openai-compatible keeps a visible Model field (its /models is
+      // unreliable), so a typed value there wins; otherwise the typed/saved
+      // model if the fetched list still has it, else the flavor's preferred
+      // default, else the first fetched id. An empty list falls back to
+      // whatever was typed/seeded.
+      let model: string
+      if (llmProvider === "openai-compatible" && typed) {
+        model = typed
+      } else if (catalog.length > 0) {
+        const preferred = preferredDefaults[llmProvider]
+        model = (typed && catalog.includes(typed))
+          ? typed
+          : ((preferred && catalog.includes(preferred)) ? preferred : catalog[0])
+      } else {
+        model = typed
+      }
 
       // `models` is the user's curated assistant-model list (shown in Settings),
       // NOT the full provider catalog. Onboarding seeds it with just the selected
