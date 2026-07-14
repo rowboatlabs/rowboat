@@ -1,4 +1,4 @@
-import { app, BrowserWindow, desktopCapturer, protocol, net, shell, session, safeStorage, type Session } from "electron";
+import { app, BrowserWindow, desktopCapturer, dialog, protocol, net, shell, session, safeStorage, type Session } from "electron";
 import path from "node:path";
 import {
   setupIpcHandlers,
@@ -72,6 +72,24 @@ const APP_LAUNCHED_AT = Date.now();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+// fs.watch failures (EMFILE fd exhaustion, ENOSPC watch limits) surface as
+// uncaught exceptions from Node's watcher internals, bypassing chokidar's
+// 'error' handlers. Watching is a degradable feature — log and keep running.
+// Everything else keeps Electron's default behavior (native error dialog),
+// which we replicate since registering any listener suppresses it.
+process.on('uncaughtException', (err) => {
+  const code = (err as NodeJS.ErrnoException | undefined)?.code;
+  if ((code === 'EMFILE' || code === 'ENOSPC') && (err?.stack ?? '').includes('FSWatcher')) {
+    console.error('[Main] file watcher error (non-fatal):', err);
+    return;
+  }
+  console.error('[Main] uncaught exception:', err);
+  dialog.showErrorBox(
+    'A JavaScript error occurred in the main process',
+    err?.stack ?? String(err),
+  );
+});
 
 // run this as early in the main process as possible
 if (started) app.quit();
