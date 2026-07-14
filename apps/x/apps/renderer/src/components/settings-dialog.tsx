@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Terminal, AlertTriangle, RefreshCw, PanelRight, Bell, Smartphone } from "lucide-react"
+import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Terminal, AlertTriangle, RefreshCw, PanelRight, Bell, Smartphone, FolderInput } from "lucide-react"
 
 import {
   Dialog,
@@ -27,10 +27,11 @@ import { AnthropicIcon, DiscordIcon, GenericApiIcon, GitHubIcon, GoogleIcon, Oll
 import { AccountSettings } from "@/components/settings/account-settings"
 import { ConnectedAccountsSettings } from "@/components/settings/connected-accounts-settings"
 import { MobileChannelsSettings } from "@/components/settings/mobile-channels-settings"
+import { MigrateSettings } from "@/components/settings/migrate-settings"
 import type { ApprovalPolicy } from "@x/shared/src/code-mode.js"
 import { startProvisioning, useProvisioning, enabledOptimistic, type AgentStatus, type CodeModeAgentStatus } from "@/lib/code-mode-provisioning"
 
-type ConfigTab = "account" | "connections" | "mobile" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "notifications" | "note-tagging" | "help"
+type ConfigTab = "account" | "connections" | "mobile" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "notifications" | "note-tagging" | "migrate" | "help"
 
 interface TabConfig {
   id: ConfigTab
@@ -106,6 +107,12 @@ const tabs: TabConfig[] = [
     description: "Configure tags for notes and emails",
   },
   {
+    id: "migrate",
+    label: "Migrate Data",
+    icon: FolderInput,
+    description: "Bring your notes over from Obsidian or Notion",
+  },
+  {
     id: "help",
     label: "Help",
     icon: HelpCircle,
@@ -117,7 +124,7 @@ const tabs: TabConfig[] = [
 const NAV_SECTIONS: { label: string | null; ids: ConfigTab[] }[] = [
   { label: null, ids: ["account", "connections", "mobile"] },
   { label: "Configure", ids: ["models", "mcp", "security", "code-mode", "note-tagging"] },
-  { label: "App", ids: ["appearance", "notifications", "help"] },
+  { label: "App", ids: ["appearance", "notifications", "migrate", "help"] },
 ]
 
 interface SettingsDialogProps {
@@ -2378,7 +2385,7 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
             </div>
 
             {/* Content */}
-            <div className={cn("flex-1 px-6 pb-5 min-h-0", (activeTab === "models" || activeTab === "connections" || activeTab === "mobile" || activeTab === "account" || activeTab === "code-mode" || activeTab === "notifications") ? "overflow-y-auto" : activeTab === "note-tagging" ? "overflow-hidden flex flex-col" : "overflow-hidden")}>
+            <div className={cn("flex-1 px-6 pb-5 min-h-0", (activeTab === "models" || activeTab === "connections" || activeTab === "mobile" || activeTab === "account" || activeTab === "code-mode" || activeTab === "notifications" || activeTab === "migrate") ? "overflow-y-auto" : activeTab === "note-tagging" ? "overflow-hidden flex flex-col" : "overflow-hidden")}>
               {activeTab === "account" ? (
                 <AccountSettings dialogOpen={open} />
               ) : activeTab === "connections" ? (
@@ -2417,6 +2424,8 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
                 <AppearanceSettings />
               ) : activeTab === "notifications" ? (
                 <NotificationSettings dialogOpen={open} />
+              ) : activeTab === "migrate" ? (
+                <MigrateSettings />
               ) : activeTab === "help" ? (
                 <HelpSettings />
               ) : activeTab === "code-mode" ? (

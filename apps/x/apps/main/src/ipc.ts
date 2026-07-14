@@ -104,6 +104,7 @@ import { getEmailLabels, syncCustomLabelsFromInstructions } from '@x/core/dist/k
 import { searchContacts as searchGmailContacts, warmContactIndex } from '@x/core/dist/knowledge/gmail_contacts.js';
 import { searchSentContacts, warmSentContacts } from '@x/core/dist/knowledge/gmail_sent_contacts.js';
 import { getGoogleDocsConnectionStatus, importGoogleDoc, syncGoogleDocDown, syncGoogleDocUp, getGoogleDocLink } from '@x/core/dist/knowledge/google_docs.js';
+import { importObsidianVault, importNotionExport } from '@x/core/dist/knowledge/import_notes.js';
 import { startManagedGooglePick } from './google-picker-managed.js';
 import { liveNoteBus } from '@x/core/dist/knowledge/live-note/bus.js';
 import { getInstallationId } from '@x/core/dist/analytics/installation.js';
@@ -1924,6 +1925,19 @@ export function setupIpcHandlers() {
     'knowledge:restore': async (_event, args) => {
       await versionHistory.restoreFile(args.path, args.oid);
       return { ok: true };
+    },
+    'knowledge:importNotes': async (_event, args) => {
+      console.log(`[ImportNotes] ${args.source} import ${args.sourcePath} -> ${args.targetFolder}`);
+      try {
+        const result = args.source === 'obsidian'
+          ? await importObsidianVault(args.sourcePath, args.targetFolder)
+          : await importNotionExport(args.sourcePath, args.targetFolder);
+        console.log(`[ImportNotes] OK -> ${result.root} (${result.notes} notes, ${result.attachments} attachments, ${result.skipped} skipped)`);
+        return result;
+      } catch (err) {
+        console.error('[ImportNotes] FAILED:', err instanceof Error ? err.message : err);
+        throw err;
+      }
     },
     'google-docs:getStatus': async () => {
       return getGoogleDocsConnectionStatus();

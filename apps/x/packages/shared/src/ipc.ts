@@ -1593,6 +1593,22 @@ const ipcSchemas = {
     req: z.object({}),
     res: z.null(),
   },
+  // Bulk note import from other apps: an Obsidian vault folder or a Notion
+  // "Markdown & CSV" export zip. sourcePath is an absolute path picked via the
+  // native dialog; notes land in a new subfolder of targetFolder.
+  'knowledge:importNotes': {
+    req: z.object({
+      source: z.enum(['obsidian', 'notion']),
+      sourcePath: z.string().min(1),
+      targetFolder: RelPath,
+    }),
+    res: z.object({
+      notes: z.number(),
+      attachments: z.number(),
+      skipped: z.number(),
+      root: RelPath,
+    }),
+  },
   // Google Docs linked knowledge files
   'google-docs:getStatus': {
     req: z.null(),
