@@ -31,7 +31,9 @@ import { isNotificationCategoryEnabled } from "../config/notification_config.js"
  * means the call ended.
  */
 
-const POLL_INTERVAL_MS = 2_000;
+// 1s so call-end lands within ~2s of hang-up; all tick work is in-memory
+// (the helper pushes owner updates, nothing is spawned).
+const POLL_INTERVAL_MS = 1_000;
 // Mic must be in use continuously this long before we prompt — filters out
 // Siri, dictation bursts, and app mic-permission probes.
 const MIC_DEBOUNCE_MS = 5_000;
@@ -43,7 +45,7 @@ const CALENDAR_MERGE_LEAD_MS = 15 * 60_000;
 // While recording, the meeting app must be off the mic this long before we
 // call the meeting over. Kept short so notes arrive right after hang-up;
 // only guards against sub-poll device churn, not full reconnects.
-const CALL_END_GRACE_MS = 3_000;
+const CALL_END_GRACE_MS = 1_000;
 const CALENDAR_SYNC_DIR = path.join(WorkDir, "calendar_sync");
 const HELPER_MAX_RESTARTS = 3;
 

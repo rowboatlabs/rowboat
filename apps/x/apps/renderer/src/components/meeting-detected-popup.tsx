@@ -1,5 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { X } from 'lucide-react'
+
+// How long the popup stays up before dismissing itself. The countdown (and
+// its progress line) pauses while the pointer is over the popup — main only
+// keeps a much longer crash-safety fallback.
+const AUTO_DISMISS_MS = 30_000
 
 type PopupPayload = {
   title: string
@@ -50,13 +55,57 @@ export function MeetingDetectedPopup() {
     return cleanup
   }, [])
 
-  const act = (action: 'take-notes' | 'dismiss') => {
+  const act = useCallback((action: 'take-notes' | 'dismiss') => {
     if (isPreview) {
       console.log(`[preview] action: ${action}`)
       return
     }
     void window.ipc.invoke('meetingDetect:action', { action }).catch(() => {})
-  }
+  }, [])
+
+  // Subtle arrival chime, synthesized (no asset, no process spawn): a soft
+  // sine ding gliding up a fourth, ~0.35s, low gain. Once per popup.
+  const chimedRef = useRef(false)
+  useEffect(() => {
+    if (!payload || chimedRef.current || isPreview) return
+    chimedRef.current = true
+    try {
+      const ctx = new AudioContext()
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.type = 'sine'
+      osc.frequency.setValueAtTime(880, ctx.currentTime)
+      osc.frequency.exponentialRampToValueAtTime(1174.66, ctx.currentTime + 0.08)
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime)
+      gain.gain.exponentialRampToValueAtTime(0.06, ctx.currentTime + 0.02)
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.35)
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      osc.start()
+      osc.stop(ctx.currentTime + 0.4)
+      osc.onended = () => void ctx.close()
+    } catch { /* audio is best-effort */ }
+  }, [payload])
+
+  // Auto-dismiss countdown, rendered as the progress line at the bottom.
+  // Hovering pauses it (elapsed only accrues while the pointer is away).
+  const [remainingFrac, setRemainingFrac] = useState(1)
+  const hoveredRef = useRef(false)
+  useEffect(() => {
+    const TICK_MS = 100
+    let elapsed = 0
+    const timer = setInterval(() => {
+      if (hoveredRef.current) return
+      elapsed += TICK_MS
+      const frac = Math.max(0, 1 - elapsed / AUTO_DISMISS_MS)
+      setRemainingFrac(frac)
+      if (frac <= 0) {
+        clearInterval(timer)
+        act('dismiss')
+      }
+    }, TICK_MS)
+    return () => clearInterval(timer)
+  }, [act])
 
   // The Electron window IS the card (376×48, card background, native macOS
   // rounded corners + shadow — no transparency, which panels don't honor).
@@ -69,14 +118,16 @@ export function MeetingDetectedPopup() {
         isPreview ? 'rounded-xl shadow-[0_8px_28px_rgba(0,0,0,0.45)]' : 'h-screen w-screen'
       }`}
       style={isPreview ? { width: 376, height: 48 } : undefined}
+      onMouseEnter={() => { hoveredRef.current = true }}
+      onMouseLeave={() => { hoveredRef.current = false }}
     >
-      {/* Close — slides in over the left edge on hover */}
+      {/* Close — top-left corner, revealed on hover */}
       <button
         onClick={() => act('dismiss')}
-        className="absolute left-1.5 top-1/2 -translate-y-1/2 z-10 flex size-6 items-center justify-center rounded-full bg-neutral-800 border border-neutral-600 text-neutral-200 shadow-md hover:bg-neutral-700 opacity-0 group-hover:opacity-100 transition-opacity"
+        className="absolute left-1 top-1 z-10 flex size-5 items-center justify-center rounded-full bg-neutral-800 border border-neutral-600 text-neutral-200 shadow-md hover:bg-neutral-700 opacity-0 group-hover:opacity-100 transition-opacity"
         aria-label="Dismiss"
       >
-        <X className="size-3.5" strokeWidth={2.5} />
+        <X className="size-3" strokeWidth={2.5} />
       </button>
 
       <div className="flex-1 min-w-0 transition-[padding] group-hover:pl-6">
@@ -96,6 +147,12 @@ export function MeetingDetectedPopup() {
         </span>
         <span className="text-[13px] font-semibold text-white">Take notes</span>
       </button>
+
+      {/* Time-left line: drains toward dismissal, frozen while hovered */}
+      <div
+        className="absolute bottom-0 left-0 h-[2px] bg-white/25 transition-[width] duration-100 ease-linear"
+        style={{ width: `${remainingFrac * 100}%` }}
+      />
     </div>
   )
 

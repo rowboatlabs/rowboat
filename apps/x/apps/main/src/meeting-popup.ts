@@ -18,7 +18,10 @@ import type { DetectedMeeting } from "@x/core/dist/meetings/detector.js";
 // `transparent: true` reliably and paint a grey backing slab instead.
 const POPUP_WIDTH = 376;
 const POPUP_HEIGHT = 48;
-const AUTO_DISMISS_MS = 45_000;
+// The popup renderer owns the real 45s countdown (it pauses on hover and
+// draws the progress line); this is only a crash-safety net so a wedged
+// renderer can't leave the popup on screen forever.
+const FALLBACK_DISMISS_MS = 180_000;
 
 // Display names, Granola-style ("Chrome", not "Google Chrome").
 const SHORT_APP_NAMES: Record<string, string> = {
@@ -153,5 +156,5 @@ export function showMeetingPopup(meeting: DetectedMeeting): void {
         win.loadURL("http://localhost:5173/#meeting-detected");
     }
 
-    dismissTimer = setTimeout(() => closeMeetingPopup(), AUTO_DISMISS_MS);
+    dismissTimer = setTimeout(() => closeMeetingPopup(), FALLBACK_DISMISS_MS);
 }
