@@ -4,8 +4,8 @@ import type { z } from "zod";
 import type { ChannelsConfig, ChannelsStatus } from "@x/shared/dist/channels.js";
 import container from "../di/container.js";
 import { WorkDir } from "../config/config.js";
-import type { ISessions } from "../sessions/api.js";
-import type { EmitterSessionBus } from "../sessions/bus.js";
+import type { ISessions } from "../runtime/sessions/api.js";
+import type { ITurnEventBus } from "../runtime/turns/event-hub.js";
 import { isSignedIn } from "../account/account.js";
 import { listGatewayModels } from "../models/gateway.js";
 import { listOnboardingModels } from "../models/models-dev.js";
@@ -98,7 +98,7 @@ function ensureBridge(): ChannelBridge {
     if (!bridge) {
         bridge = new ChannelBridge({
             sessions: container.resolve<ISessions>("sessions"),
-            sessionBus: container.resolve<EmitterSessionBus>("sessionBus"),
+            turnEventBus: container.resolve<ITurnEventBus>("turnEventBus"),
             listModels: listBridgeModels,
         });
     }

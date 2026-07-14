@@ -1,4 +1,4 @@
-import { ProviderV2 } from "@ai-sdk/provider";
+import { ProviderV4 } from "@ai-sdk/provider";
 import { createGateway, generateText, type LanguageModel } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
@@ -22,7 +22,7 @@ import {
 export const Provider = LlmProvider;
 export const ModelConfig = LlmModelConfig;
 
-export function createProvider(config: z.infer<typeof Provider>): ProviderV2 {
+export function createProvider(config: z.infer<typeof Provider>): ProviderV4 {
     const { apiKey, baseURL, headers } = config;
     switch (config.flavor) {
         case "openai":
@@ -78,7 +78,7 @@ export function createProvider(config: z.infer<typeof Provider>): ProviderV2 {
                 apiKey,
                 baseURL,
                 headers,
-            }) as unknown as ProviderV2;
+            }) as unknown as ProviderV4;
         case "rowboat":
             return getGatewayProvider();
         default:
@@ -259,8 +259,20 @@ export async function listModelsForProvider(
                 url = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey ?? ""}`;
                 break;
             case "openrouter":
-                url = "https://openrouter.ai/api/v1/models";
-                if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
+                // /api/v1/models is a public catalog — it returns the full
+                // list even with an invalid/absent key, so listing it can't
+                // tell a bad key from a good one (a false "Connected"). When
+                // a key is given, hit the account-scoped /models/user behind
+                // Bearer auth instead: a bad key 401s here and the shared
+                // throw below surfaces it. Same OpenAI-shaped { data:[{id}] }
+                // response, so the parse path is unchanged. No key → keep the
+                // public catalog so an unconfigured provider can still preview.
+                if (apiKey) {
+                    url = "https://openrouter.ai/api/v1/models/user";
+                    headers["Authorization"] = `Bearer ${apiKey}`;
+                } else {
+                    url = "https://openrouter.ai/api/v1/models";
+                }
                 break;
             case "ollama":
                 url = `${(baseURL ?? "http://localhost:11434").replace(/\/$/, "")}/api/tags`;
@@ -342,7 +354,7 @@ export async function generateOneShot(opts: GenerateTextOptions): Promise<Genera
             { useCase: "copilot_chat", subUseCase: "email_compose" },
             () => generateText({
                 model: languageModel,
-                ...(opts.system ? { system: opts.system } : {}),
+                ...(opts.system ? { instructions: opts.system } : {}),
                 prompt: opts.prompt,
             }),
         );

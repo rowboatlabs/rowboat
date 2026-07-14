@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { reduceTurn } from '@x/shared/src/turns.js'
-import { isChatMessage, isErrorMessage, isToolCall } from '@/lib/chat-conversation'
+import { isChatMessage, isErrorMessage, isToolCall, isTurnUsageMessage } from '@/lib/chat-conversation'
 import {
   applyOverlay,
   buildSessionChatState,
@@ -177,6 +177,34 @@ describe('buildTurnConversation', () => {
     const tool = items.find(isToolCall)
     expect(tool?.result).toEqual({ echoed: true })
     expect(tool?.input).toEqual({ x: 1 })
+  })
+
+  it('adds one turn usage row from accumulated model-call usage', () => {
+    const state = reduceTurn([
+      created(T1, S1, user('run it')),
+      requested(T1, 0),
+      completed(T1, 0, assistantText('checking'), {
+        inputTokens: 10,
+        outputTokens: 5,
+        totalTokens: 15,
+      }),
+      requested(T1, 1, ['assistant:0']),
+      completed(T1, 1, assistantText('done'), {
+        inputTokens: 12,
+        outputTokens: 3,
+        totalTokens: 15,
+        cachedInputTokens: 4,
+      }),
+      turnCompleted(T1, 'done'),
+    ])
+    const usage = buildTurnConversation(state).find(isTurnUsageMessage)
+    expect(usage?.usage).toEqual({
+      inputTokens: 22,
+      outputTokens: 8,
+      totalTokens: 30,
+      cachedInputTokens: 4,
+    })
+    expect(usage?.modelCallCount).toBe(2)
   })
 
   it('marks permission-pending tools pending and running tools running', () => {
@@ -386,6 +414,37 @@ describe('buildSessionChatState', () => {
     expect(state.isProcessing).toBe(true) // latest turn idle = actively working
     expect(state.isReasoning).toBe(false)
     expect(state.isWaitingOnHuman).toBe(false)
+  })
+
+  it('aggregates usage across session turns', () => {
+    const first = reduceTurn([
+      created('turn-1', S1, user('first?')),
+      requested('turn-1', 0),
+      completed('turn-1', 0, assistantText('first answer'), {
+        inputTokens: 20,
+        outputTokens: 5,
+        totalTokens: 25,
+      }),
+      turnCompleted('turn-1', 'first answer'),
+    ])
+    const second = reduceTurn([
+      created('turn-2', S1, user('second?')),
+      requested('turn-2', 0),
+      completed('turn-2', 0, assistantText('second answer'), {
+        inputTokens: 30,
+        outputTokens: 7,
+        totalTokens: 37,
+        reasoningTokens: 2,
+      }),
+      turnCompleted('turn-2', 'second answer'),
+    ])
+    const state = buildSessionChatState([first, second], emptyOverlay())
+    expect(state.sessionUsage).toEqual({
+      inputTokens: 50,
+      outputTokens: 12,
+      totalTokens: 62,
+      reasoningTokens: 2,
+    })
   })
 
   it('is settled (not processing) when the latest turn is terminal', () => {

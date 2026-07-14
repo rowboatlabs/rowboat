@@ -1,6 +1,6 @@
 import z from 'zod';
 import { Agent, ToolAttachment } from '@x/shared/dist/agent.js';
-import { BuiltinTools } from '../../application/lib/builtin-tools.js';
+import { BuiltinTools } from '../../runtime/tools/catalog.js';
 import { KNOWLEDGE_NOTE_STYLE_GUIDE } from '../../application/lib/knowledge-note-style.js';
 import { WorkDir } from '../../config/config.js';
 

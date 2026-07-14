@@ -128,8 +128,8 @@ async function getCategoryModel(
 }
 
 /**
- * Model used by knowledge-graph agents (note_creation, labeling_agent, etc.)
- * when they're the top-level of a run.
+ * Model used by knowledge-graph agents (note_creation, the email classifier,
+ * etc.) when they're the top-level of a run.
  */
 export async function getKgModel(): Promise<ModelSelection> {
     return getCategoryModel("knowledgeGraphModel", SIGNED_IN_KG_MODEL);

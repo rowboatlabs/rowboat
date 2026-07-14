@@ -26,8 +26,8 @@ import { createProvider } from '../models/models.js';
 import { captureLlmUsage } from '../analytics/usage.js';
 import { withUseCase } from '../analytics/use_case.js';
 import { isSignedIn } from '../account/account.js';
-import { createRun, createMessage } from '../runs/runs.js';
-import { extractAgentResponse, waitForRunCompletion } from '../agents/utils.js';
+import { createRun, createMessage } from '../runtime/legacy/runs.js';
+import { extractAgentResponse, waitForRunCompletion } from '../runtime/legacy/utils.js';
 import { getBackgroundTaskAgentModel } from '../models/defaults.js';
 
 // Host API — M2 endpoints (spec §7.4–§7.7): Composio tools, SSRF-guarded fetch
@@ -304,8 +304,8 @@ async function handleLlmGenerate(
         const model = createProvider(providerConfig).languageModel(resolved.model);
         const result = await withUseCase({ useCase: 'app_llm_generate', subUseCase: slug }, () => generateText({
             model,
-            ...(system ? { system } : {}),
-            ...(rawMessages ? { messages: rawMessages as ModelMessage[] } : { prompt: prompt as string }),
+            ...(system ? { instructions: system } : {}),
+            ...(rawMessages ? { messages: rawMessages as ModelMessage[], allowSystemInMessages: true } : { prompt: prompt as string }),
             ...(temperature !== undefined ? { temperature } : {}),
             maxOutputTokens,
         }));

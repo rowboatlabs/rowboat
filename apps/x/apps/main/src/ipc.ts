@@ -12,8 +12,8 @@ import { watcher as watcherCore, workspace } from '@x/core';
 import { WorkDir } from '@x/core/dist/config/config.js';
 import { workspace as workspaceShared } from '@x/shared';
 import * as mcpCore from '@x/core/dist/mcp/mcp.js';
-import * as runsCore from '@x/core/dist/runs/runs.js';
-import { bus } from '@x/core/dist/runs/bus.js';
+import * as runsCore from '@x/core/dist/runtime/legacy/runs.js';
+import { bus } from '@x/core/dist/runtime/legacy/bus.js';
 import { serviceBus } from '@x/core/dist/services/service_bus.js';
 import type { FSWatcher } from 'chokidar';
 import fs from 'node:fs/promises';
@@ -29,7 +29,9 @@ let caffeinateBlockerId: number | null = null;
 import { RunEvent } from '@x/shared/dist/runs.js';
 import { ServiceEvent } from '@x/shared/dist/service-events.js';
 import type { SessionBusEvent } from '@x/shared/dist/sessions.js';
-import type { ISessions, EmitterSessionBus } from '@x/core/dist/sessions/index.js';
+import { isDurableTurnEvent } from '@x/shared/dist/turns.js';
+import type { ISessions, EmitterSessionBus } from '@x/core/dist/runtime/sessions/index.js';
+import type { ITurnEventBus } from '@x/core/dist/runtime/turns/event-hub.js';
 import container from '@x/core/dist/di/container.js';
 import { listOnboardingModels } from '@x/core/dist/models/models-dev.js';
 import { testModelConnection, listModelsForProvider, generateOneShot } from '@x/core/dist/models/models.js';
@@ -53,7 +55,7 @@ import * as codeGit from '@x/core/dist/code-mode/git/service.js';
 import { readProjectDir, readProjectFile } from '@x/core/dist/code-mode/projects/fs.js';
 import { ensureTerminal, writeTerminal, resizeTerminal, disposeTerminal } from './terminal.js';
 import type { CodeSession } from '@x/shared/dist/code-sessions.js';
-import { invalidateCopilotInstructionsCache } from '@x/core/dist/application/assistant/instructions.js';
+import { invalidateCopilotInstructionsCache } from '@x/core/dist/runtime/assembly/copilot/instructions.js';
 import { triggerSync as triggerGranolaSync } from '@x/core/dist/knowledge/granola/sync.js';
 import { ISlackConfigRepo } from '@x/core/dist/slack/repo.js';
 import { IChannelsConfigRepo } from '@x/core/dist/channels/repo.js';
@@ -64,6 +66,20 @@ import { rankSlackHomeMessages } from '@x/core/dist/knowledge/sources/rank_slack
 import { syncSlackKnowledgeSources, triggerSync as triggerSlackKnowledgeSync, getSlackKnowledgeSyncStatus } from '@x/core/dist/knowledge/sources/sync_slack.js';
 import { isOnboardingComplete, markOnboardingComplete } from '@x/core/dist/config/note_creation_config.js';
 import { loadNotificationSettings, saveNotificationSettings } from '@x/core/dist/config/notification_config.js';
+import { saveAppSettings } from '@x/core/dist/config/app_settings.js';
+import { setSelfCaptureActive } from '@x/core/dist/meetings/detector.js';
+import { notifyIfEnabled } from '@x/core/dist/application/notification/notifier.js';
+import { consumePendingToggleMeetingNotes, setTrayRecordingState } from './tray.js';
+import { closeMeetingPopup, getMeetingPopupPayload, handleMeetingPopupAction } from './meeting-popup.js';
+
+// Ambient meeting detection must ignore Rowboat's own mic use: meeting
+// capture and assistant voice/video calls both hold the mic. Either being
+// active suppresses "Meeting detected" prompts.
+let meetingRecordingActive = false;
+let voiceCallActive = false;
+function updateSelfCaptureState() {
+  setSelfCaptureActive(meetingRecordingActive || voiceCallActive);
+}
 import * as composioHandler from './composio-handler.js';
 import * as appsIndexer from '@x/core/dist/apps/indexer.js';
 import * as appsServer from '@x/core/dist/apps/server.js';
@@ -79,6 +95,9 @@ import * as appsPublisher from '@x/core/dist/apps/publisher.js';
 
 // D18 install previews awaiting confirmation, keyed by app name.
 const appInstallPreviews = new Map<string, Awaited<ReturnType<typeof appsInstaller.previewInstall>>>();
+// Last-seen app-set fingerprint; a change invalidates the copilot
+// instructions cache (they embed the installed-apps list).
+let lastAppsFingerprint: string | null = null;
 import { consumePendingDeepLink } from './deeplink.js';
 import { qualifyAndDisconnectComposioGoogle } from '@x/core/dist/migrations/composio-google-migration.js';
 import { IAgentScheduleRepo } from '@x/core/dist/agent-schedule/repo.js';
@@ -95,7 +114,9 @@ import { summarizeMeeting } from '@x/core/dist/knowledge/summarize_meeting.js';
 import { getAccessToken } from '@x/core/dist/auth/tokens.js';
 import { getRowboatConfig } from '@x/core/dist/config/rowboat.js';
 import { runLiveNoteAgent } from '@x/core/dist/knowledge/live-note/runner.js';
-import { listImportantThreads, listEverythingElseThreads, saveMessageBodyHeight, triggerSync as triggerGmailSync, sendThreadReply, saveThreadDraft, deleteThreadDraft, listDraftThreads, searchThreads, archiveThread, trashThread, markThreadRead, downloadAttachment, getAccountEmail, getAccountName, getConnectionStatus as getGmailConnectionStatus, setThreadImportance } from '@x/core/dist/knowledge/sync_gmail.js';
+import { listImportantThreads, listEverythingElseThreads, saveMessageBodyHeight, triggerSync as triggerGmailSync, sendThreadReply, saveThreadDraft, deleteThreadDraft, listDraftThreads, searchThreads, archiveThread, archiveCategoryThreads, trashThread, markThreadRead, downloadAttachment, getAccountEmail, getAccountName, getConnectionStatus as getGmailConnectionStatus, setThreadImportance, setThreadCategory } from '@x/core/dist/knowledge/sync_gmail.js';
+import { loadEmailInstructions, saveEmailInstructions } from '@x/core/dist/knowledge/email_instructions.js';
+import { getEmailLabels, syncCustomLabelsFromInstructions } from '@x/core/dist/knowledge/email_labels.js';
 import { searchContacts as searchGmailContacts, warmContactIndex } from '@x/core/dist/knowledge/gmail_contacts.js';
 import { searchSentContacts, warmSentContacts } from '@x/core/dist/knowledge/gmail_sent_contacts.js';
 import { getGoogleDocsConnectionStatus, importGoogleDoc, syncGoogleDocDown, syncGoogleDocUp, getGoogleDocLink } from '@x/core/dist/knowledge/google_docs.js';
@@ -488,24 +509,14 @@ let debounceTimer: ReturnType<typeof setTimeout> | null = null;
  * Emit knowledge commit event to all renderer windows
  */
 function emitKnowledgeCommitEvent(): void {
-  const windows = BrowserWindow.getAllWindows();
-  for (const win of windows) {
-    if (!win.isDestroyed() && win.webContents) {
-      win.webContents.send('knowledge:didCommit', {});
-    }
-  }
+  broadcastToWindows('knowledge:didCommit', {});
 }
 
 /**
  * Emit workspace change event to all renderer windows
  */
 function emitWorkspaceChangeEvent(event: z.infer<typeof workspaceShared.WorkspaceChangeEvent>): void {
-  const windows = BrowserWindow.getAllWindows();
-  for (const win of windows) {
-    if (!win.isDestroyed() && win.webContents) {
-      win.webContents.send('workspace:didChange', event);
-    }
-  }
+  broadcastToWindows('workspace:didChange', event);
 }
 
 /**
@@ -590,11 +601,12 @@ function handleWorkspaceChange(event: z.infer<typeof workspaceShared.WorkspaceCh
 
 /**
  * Start workspace watcher
- * Watches the configured workspace root recursively and emits change events to renderer
+ * Watches the user-facing workspace roots recursively and emits change events to renderer
  * 
  * This should be called once when the app starts (from main.ts).
- * The watcher runs as a main-process service and catches ALL filesystem changes
- * (both from IPC handlers and external changes like terminal/git).
+ * The watcher runs as a main-process service and catches all filesystem changes
+ * under the watched roots (both from IPC handlers and external changes like
+ * terminal/git).
  * 
  * Safe to call multiple times - guards against duplicate watchers.
  */
@@ -622,34 +634,31 @@ export function stopWorkspaceWatcher(): void {
   changeQueue.clear();
 }
 
-function emitRunEvent(event: z.infer<typeof RunEvent>): void {
+// The one renderer fan-out: send a payload to every live window on a channel.
+// All broadcast feeds (runs, services, sessions, turns, code runs, agent
+// status) go through here.
+function broadcastToWindows(channel: string, payload: unknown): void {
   const windows = BrowserWindow.getAllWindows();
   for (const win of windows) {
     if (!win.isDestroyed() && win.webContents) {
-      win.webContents.send('runs:events', event);
+      win.webContents.send(channel, payload);
     }
   }
 }
 
+function emitRunEvent(event: z.infer<typeof RunEvent>): void {
+  broadcastToWindows('runs:events', event);
+}
+
 function emitServiceEvent(event: z.infer<typeof ServiceEvent>): void {
-  const windows = BrowserWindow.getAllWindows();
-  for (const win of windows) {
-    if (!win.isDestroyed() && win.webContents) {
-      win.webContents.send('services:events', event);
-    }
-  }
+  broadcastToWindows('services:events', event);
 }
 
 export function emitOAuthEvent(event: { provider: string; success: boolean; error?: string; userId?: string }): void {
   // Native connection status (e.g. Google) is baked into the Copilot system
   // prompt, so any OAuth state change must rebuild it.
   invalidateCopilotInstructionsCache();
-  const windows = BrowserWindow.getAllWindows();
-  for (const win of windows) {
-    if (!win.isDestroyed() && win.webContents) {
-      win.webContents.send('oauth:didConnect', event);
-    }
-  }
+  broadcastToWindows('oauth:didConnect', event);
 }
 
 async function requireCodeSession(sessionId: string): Promise<CodeSession> {
@@ -669,12 +678,7 @@ export async function startCodeSessionStatusWatcher(): Promise<void> {
   const tracker = container.resolve<CodeSessionStatusTracker>('codeSessionStatusTracker');
   await tracker.start();
   codeSessionStatusWatcher = tracker.onTransition((sessionId, status) => {
-    const windows = BrowserWindow.getAllWindows();
-    for (const win of windows) {
-      if (!win.isDestroyed() && win.webContents) {
-        win.webContents.send('codeSession:status', { sessionId, status });
-      }
-    }
+    broadcastToWindows('codeSession:status', { sessionId, status });
   });
 }
 
@@ -690,12 +694,7 @@ export async function startRunsWatcher(): Promise<void> {
 
 // New runtime: session bus → renderer windows (session-design.md §10).
 function emitSessionEvent(event: SessionBusEvent): void {
-  const windows = BrowserWindow.getAllWindows();
-  for (const win of windows) {
-    if (!win.isDestroyed() && win.webContents) {
-      win.webContents.send('sessions:events', event);
-    }
-  }
+  broadcastToWindows('sessions:events', event);
 }
 
 // Mobile channels: status changes (QR pairing, connect/disconnect) → renderer.
@@ -703,12 +702,7 @@ let channelsWatcher: (() => void) | null = null;
 export function startChannelsWatcher(): void {
   if (channelsWatcher) return;
   channelsWatcher = subscribeChannelsStatus((status) => {
-    const windows = BrowserWindow.getAllWindows();
-    for (const win of windows) {
-      if (!win.isDestroyed() && win.webContents) {
-        win.webContents.send('channels:status', status);
-      }
-    }
+    broadcastToWindows('channels:status', status);
   });
 }
 
@@ -721,6 +715,55 @@ export function startSessionsWatcher(): void {
   sessionsWatcher = sessionBus.subscribe((event) => emitSessionEvent(event));
 }
 
+// Turn event spine → renderer windows: durable events of every turn the
+// runtime executes (session chat, headless background/knowledge runners,
+// spawned sub-agents), tagged with sessionId and the event's file offset so
+// consumers can join a live turn against a sessions:getTurn snapshot without
+// gaps or duplicates. Durable events are broadcast to every window;
+// text/reasoning deltas are high-volume and ephemeral, so they are sent only
+// to windows that subscribed to that turn via turns:subscribe.
+const turnDeltaSubs = new Map<Electron.WebContents, Set<string>>();
+
+export function subscribeTurnDeltas(sender: Electron.WebContents, turnId: string): void {
+  let turnIds = turnDeltaSubs.get(sender);
+  if (!turnIds) {
+    turnIds = new Set();
+    turnDeltaSubs.set(sender, turnIds);
+    sender.once('destroyed', () => turnDeltaSubs.delete(sender));
+  }
+  turnIds.add(turnId);
+}
+
+export function unsubscribeTurnDeltas(sender: Electron.WebContents, turnId: string): void {
+  const turnIds = turnDeltaSubs.get(sender);
+  if (!turnIds) {
+    return;
+  }
+  turnIds.delete(turnId);
+  if (turnIds.size === 0) {
+    turnDeltaSubs.delete(sender);
+  }
+}
+
+let turnEventsWatcher: (() => void) | null = null;
+export function startTurnEventsWatcher(): void {
+  if (turnEventsWatcher) {
+    return;
+  }
+  const hub = container.resolve<ITurnEventBus>('turnEventBus');
+  turnEventsWatcher = hub.subscribeAll((event) => {
+    if (isDurableTurnEvent(event.event)) {
+      broadcastToWindows('turns:events', event);
+      return;
+    }
+    for (const [sender, turnIds] of turnDeltaSubs) {
+      if (turnIds.has(event.turnId) && !sender.isDestroyed()) {
+        sender.send('turns:events', event);
+      }
+    }
+  });
+}
+
 // Ephemeral code-run stream: CodeRunFeed → all renderer windows. A direct
 // tool→renderer side-channel that bypasses the turn runtime; the durable
 // record is the settle-time code-run-events-batch tool progress.
@@ -731,12 +774,7 @@ export function startCodeRunFeedWatcher(): void {
   }
   const feed = container.resolve<CodeRunFeed>('codeRunFeed');
   codeRunFeedWatcher = feed.subscribe((event) => {
-    const windows = BrowserWindow.getAllWindows();
-    for (const win of windows) {
-      if (!win.isDestroyed() && win.webContents) {
-        win.webContents.send('codeRun:events', event);
-      }
-    }
+    broadcastToWindows('codeRun:events', event);
   });
 }
 
@@ -767,12 +805,7 @@ let liveNoteAgentWatcher: (() => void) | null = null;
 export function startLiveNoteAgentWatcher(): void {
   if (liveNoteAgentWatcher) return;
   liveNoteAgentWatcher = liveNoteBus.subscribe((event) => {
-    const windows = BrowserWindow.getAllWindows();
-    for (const win of windows) {
-      if (!win.isDestroyed() && win.webContents) {
-        win.webContents.send('live-note-agent:events', event);
-      }
-    }
+    broadcastToWindows('live-note-agent:events', event);
   });
 }
 
@@ -780,12 +813,7 @@ let backgroundTaskAgentWatcher: (() => void) | null = null;
 export function startBackgroundTaskAgentWatcher(): void {
   if (backgroundTaskAgentWatcher) return;
   backgroundTaskAgentWatcher = backgroundTaskBus.subscribe((event) => {
-    const windows = BrowserWindow.getAllWindows();
-    for (const win of windows) {
-      if (!win.isDestroyed() && win.webContents) {
-        win.webContents.send('bg-task-agent:events', event);
-      }
-    }
+    broadcastToWindows('bg-task-agent:events', event);
   });
 }
 
@@ -854,6 +882,59 @@ export function setupIpcHandlers() {
     },
     'updater:quitAndInstall': async () => {
       quitAndInstallUpdate();
+    'app:consumePendingTrayCommand': async () => {
+      return { toggleMeetingNotes: consumePendingToggleMeetingNotes() };
+    },
+    'app:getLoginItemSettings': async () => {
+      // Dev builds never register a login item (it would point at the dev
+      // Electron binary), so report off.
+      if (!app.isPackaged) return { openAtLogin: false };
+      return { openAtLogin: app.getLoginItemSettings().openAtLogin };
+    },
+    'app:setLoginItemSettings': async (_event, args) => {
+      if (app.isPackaged) {
+        app.setLoginItemSettings({
+          openAtLogin: args.openAtLogin,
+          ...(process.platform === 'win32' ? { args: ['--hidden'] } : {}),
+        });
+        // The user has expressed an explicit choice — never re-apply the
+        // first-run default over it.
+        saveAppSettings({ loginItemRegistered: true });
+      }
+      return { success: true as const };
+    },
+    'meeting:setRecordingState': async (_event, args) => {
+      setTrayRecordingState(args.recording);
+      meetingRecordingActive = args.recording;
+      updateSelfCaptureState();
+      // Recording started through another path — a lingering "Take Notes?"
+      // popup is stale now.
+      if (args.recording) closeMeetingPopup();
+      return { success: true as const };
+    },
+    'voice:setCallActive': async (_event, args) => {
+      voiceCallActive = args.active;
+      updateSelfCaptureState();
+      return { success: true as const };
+    },
+    'meeting:notifyNotesReady': async (_event, args) => {
+      // Granola-style re-entry point: the note refreshed in place, but the
+      // user has usually switched back to the meeting app — the notification
+      // brings them back. Suppressed while the app is focused.
+      void notifyIfEnabled('meeting_notes_ready', {
+        title: 'Meeting notes ready',
+        message: `Your notes for "${args.title}" are ready.`,
+        link: `rowboat://open?type=file&path=${encodeURIComponent(args.notePath)}`,
+        actionLabel: 'Open notes',
+        onlyWhenBackground: true,
+      });
+      return { success: true as const };
+    },
+    'meetingDetect:getPayload': async () => {
+      return { payload: getMeetingPopupPayload() };
+    },
+    'meetingDetect:action': async (_event, args) => {
+      handleMeetingPopupAction(args.action);
       return {};
     },
     'analytics:bootstrap': async () => {
@@ -897,7 +978,7 @@ export function setupIpcHandlers() {
       return listImportantThreads({ cursor: args.cursor, limit: args.limit });
     },
     'gmail:getEverythingElse': async (_event, args) => {
-      return listEverythingElseThreads({ cursor: args.cursor, limit: args.limit });
+      return listEverythingElseThreads({ cursor: args.cursor, limit: args.limit, category: args.category });
     },
     'gmail:triggerSync': async () => {
       triggerGmailSync();
@@ -930,6 +1011,33 @@ export function setupIpcHandlers() {
     'gmail:setImportance': async (_event, args) => {
       const result = setThreadImportance(args.threadId, args.importance);
       return { ok: result.success, previous: result.previous, error: result.error };
+    },
+    'gmail:setCategory': async (_event, args) => {
+      const result = setThreadCategory(args.threadId, args.category);
+      return { ok: result.success, error: result.error };
+    },
+    'gmail:archiveCategory': async (_event, args) => {
+      return archiveCategoryThreads(args.category);
+    },
+    'gmail:getEmailInstructions': async () => {
+      return { instructions: loadEmailInstructions() };
+    },
+    'gmail:setEmailInstructions': async (_event, args) => {
+      const saved = saveEmailInstructions(args.instructions);
+      if (!saved.ok) return saved;
+      // Extract any custom labels the instructions define so they become
+      // valid classifier outputs immediately. Extraction failure shouldn't
+      // fail the save — the instructions themselves are already persisted
+      // and still steer classification as free text.
+      try {
+        await syncCustomLabelsFromInstructions(args.instructions);
+      } catch (err) {
+        console.warn('[EmailLabels] custom label extraction failed:', err);
+      }
+      return saved;
+    },
+    'gmail:getEmailLabels': async () => {
+      return { labels: getEmailLabels().map(({ id, name, kind }) => ({ id, name, kind })) };
     },
     'gmail:archiveThread': async (_event, args) => {
       return archiveThread(args.threadId);
@@ -1049,6 +1157,14 @@ export function setupIpcHandlers() {
     },
     'sessions:delete': async (_event, args) => {
       await container.resolve<ISessions>('sessions').deleteSession(args.sessionId);
+      return { success: true };
+    },
+    'turns:subscribe': async (event, args) => {
+      subscribeTurnDeltas(event.sender, args.turnId);
+      return { success: true };
+    },
+    'turns:unsubscribe': async (event, args) => {
+      unsubscribeTurnDeltas(event.sender, args.turnId);
       return { success: true };
     },
     'sessions:downloadLog': async (event, args) => {
@@ -1630,6 +1746,15 @@ export function setupIpcHandlers() {
       for (const app of apps) {
         if (app.agentSlugs.length) await appsAgents.syncAppAgents(app);
       }
+      // The copilot instructions embed the installed-apps list. This handler
+      // is the one place that sees every change to the app set (installs,
+      // deletes, copilot-created folders — the renderer polls it), so refresh
+      // the instructions cache when the set actually changes.
+      const fingerprint = JSON.stringify(apps.map((a) => [a.folder, a.manifest?.name, a.manifest?.description, a.hasDist]));
+      if (fingerprint !== lastAppsFingerprint) {
+        lastAppsFingerprint = fingerprint;
+        invalidateCopilotInstructionsCache();
+      }
       return {
         serverRunning: status.running,
         ...(status.error ? { serverError: status.error } : {}),
@@ -1932,7 +2057,10 @@ export function setupIpcHandlers() {
     },
     // Search handler
     'search:query': async (_event, args) => {
-      return search(args.query, args.limit, args.types);
+      await sessionsIndexReady;
+      const sessions = container.resolve<ISessions>('sessions').listSessions()
+        .map((s) => ({ sessionId: s.sessionId, title: s.title }));
+      return search(args.query, args.limit, args.types, sessions);
     },
     // Inline task schedule classification
     'export:note': async (event, args) => {
@@ -2188,6 +2316,9 @@ export function setupIpcHandlers() {
         if (main.isMinimized()) main.restore();
         main.show();
         main.focus();
+        // The user is typically in another app (e.g. just left a meeting) —
+        // a plain focus() won't take the foreground from it.
+        app.focus({ steal: true });
       }
       return {};
     },

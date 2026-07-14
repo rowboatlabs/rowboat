@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { RelPath, Encoding, Stat, DirEntry, ReaddirOptions, ReadFileResult, WorkspaceChangeEvent, WriteFileOptions, WriteFileResult, RemoveOptions } from './workspace.js';
 import { ListToolsResponse } from './mcp.js';
 import { AskHumanResponsePayload, CreateRunOptions, Run, ListRunsResponse, ToolPermissionAuthorizePayload } from './runs.js';
-import { LlmModelConfig, LlmProvider, ModelOverride, ModelRef } from './models.js';
+import { LlmModelConfig, LlmProvider, ModelOverride, ModelRef, ReasoningEffort } from './models.js';
 import { AgentScheduleConfig, AgentScheduleEntry } from './agent-schedule.js';
 import { AgentScheduleState } from './agent-schedule-state.js';
 import { ServiceEvent } from './service-events.js';
@@ -14,7 +14,7 @@ import {
     TriggersSchema,
 } from './background-task.js';
 import { UserMessage, UserMessageContent } from './message.js';
-import { RequestedAgent, type TurnEvent } from './turns.js';
+import { RequestedAgent, type TurnBusEvent, type TurnEvent } from './turns.js';
 import type { SessionBusEvent, SessionIndexEntry, SessionState } from './sessions.js';
 import { RowboatApiConfig } from './rowboat-account.js';
 import { ZListToolkitsResponse } from './composio.js';
@@ -183,16 +183,21 @@ const ipcSchemas = {
     res: z.object({
       threads: z.array(GmailThreadSchema),
       nextCursor: z.string().nullable(),
+      categoryCounts: z.record(z.string(), z.number()).optional(),
     }),
   },
   'gmail:getEverythingElse': {
     req: z.object({
       cursor: z.string().optional(),
       limit: z.number().int().min(1).max(100).optional(),
+      // Restrict to one category (filter pills). Whole-section categoryCounts
+      // are returned regardless, so the pills stay populated while filtered.
+      category: z.string().optional(),
     }),
     res: z.object({
       threads: z.array(GmailThreadSchema),
       nextCursor: z.string().nullable(),
+      categoryCounts: z.record(z.string(), z.number()).optional(),
     }),
   },
   'gmail:triggerSync': {
@@ -307,6 +312,53 @@ const ipcSchemas = {
     res: z.object({
       ok: z.boolean(),
       previous: z.enum(['important', 'other']).optional(),
+      error: z.string().optional(),
+    }),
+  },
+  // User explicitly picks a thread's category. Sticky on the thread
+  // (re-classification never overrides) and recorded as a correction the
+  // classifier learns from. Never affects the knowledge-graph verdict.
+  'gmail:setCategory': {
+    req: z.object({
+      threadId: z.string().min(1),
+      // Open string: valid ids come from the email label registry (built-ins
+      // plus user-defined labels), which the renderer fetches at runtime.
+      category: z.string().min(1).max(40),
+    }),
+    res: z.object({
+      ok: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  // The label registry: built-in categories plus labels the user defined in
+  // their agent instructions. Chips, filter pills, and the correction
+  // dropdown all render from this list.
+  'gmail:getEmailLabels': {
+    req: z.object({}),
+    res: z.object({
+      labels: z.array(z.object({
+        id: z.string(),
+        name: z.string(),
+        kind: z.enum(['builtin', 'custom']),
+      })),
+    }),
+  },
+  // Free-text standing instructions injected into every classification /
+  // draft call. Stored at config/email_instructions.md.
+  'gmail:getEmailInstructions': {
+    req: z.object({}),
+    res: z.object({ instructions: z.string() }),
+  },
+  'gmail:setEmailInstructions': {
+    req: z.object({ instructions: z.string().max(8000) }),
+    res: z.object({ ok: z.boolean(), error: z.string().optional() }),
+  },
+  // Archive every "Everything else" thread of one category in a single sweep.
+  'gmail:archiveCategory': {
+    req: z.object({ category: z.string().min(1) }),
+    res: z.object({
+      archived: z.number(),
+      failed: z.number(),
       error: z.string().optional(),
     }),
   },
@@ -477,7 +529,7 @@ const ipcSchemas = {
   },
   // ── New runtime: sessions + turns (session-design.md) ────────────────────
   // Turn-mutating calls return quickly; the renderer follows progress through
-  // the sessions:events feed and the shared reduceTurn reducer.
+  // the turns:events feed and the shared reduceTurn reducer.
   'sessions:create': {
     req: z.object({ title: z.string().optional() }),
     res: z.object({ sessionId: z.string() }),
@@ -504,6 +556,7 @@ const ipcSchemas = {
         agent: RequestedAgent,
         autoPermission: z.boolean().optional(),
         maxModelCalls: z.number().int().positive().optional(),
+        reasoningEffort: ReasoningEffort.optional(),
       }),
     }),
     res: z.object({ turnId: z.string() }),
@@ -559,6 +612,26 @@ const ipcSchemas = {
     req: z.custom<SessionBusEvent>(),
     res: z.null(),
   },
+  // Process-wide turn event spine: every turn's durable events (with file
+  // offsets), regardless of who started the turn — session chat, headless
+  // background/knowledge runners, spawned sub-agents. Text/reasoning deltas
+  // ride the same channel but only reach windows that subscribed to that
+  // turn via turns:subscribe.
+  'turns:events': {
+    req: z.custom<TurnBusEvent>(),
+    res: z.null(),
+  },
+  // Per-window delta subscription: deltas are high-volume and ephemeral, so
+  // they cross IPC only for turns this window declared it is watching.
+  // Durable events are always broadcast regardless.
+  'turns:subscribe': {
+    req: z.object({ turnId: z.string() }),
+    res: z.object({ success: z.literal(true) }),
+  },
+  'turns:unsubscribe': {
+    req: z.object({ turnId: z.string() }),
+    res: z.object({ success: z.literal(true) }),
+  },
   'services:events': {
     req: ServiceEvent,
     res: z.null(),
@@ -581,6 +654,9 @@ const ipcSchemas = {
           id: z.string(),
           name: z.string().optional(),
           release_date: z.string().optional(),
+          // models.dev "supports reasoning/extended thinking" flag; absent =
+          // unknown. Gates the composer's reasoning-effort control.
+          reasoning: z.boolean().optional(),
         })),
       })),
       lastUpdated: z.string().optional(),
@@ -726,6 +802,9 @@ const ipcSchemas = {
       // When true, the renderer should also open the meeting URL (Zoom/Meet/etc.)
       // in addition to triggering the take-notes flow.
       openMeeting: z.boolean().optional(),
+      // Origin recorded in the note frontmatter: 'calendar-sync' (default) for
+      // notification/deep-link starts, 'detected' for ambient meeting detection.
+      source: z.string().optional(),
     }),
     res: z.null(),
   },
@@ -764,6 +843,103 @@ const ipcSchemas = {
   },
   'updater:quitAndInstall': {
     req: z.null(),
+  // Tray commands issued before the renderer was ready (mirrors the pending
+  // deep-link pull above): the renderer drains this once on mount.
+  'app:consumePendingTrayCommand': {
+    req: z.null(),
+    res: z.object({
+      toggleMeetingNotes: z.boolean(),
+    }),
+  },
+  // Main → renderer: tray menu "Start/Stop meeting notes" — runs the same
+  // toggle flow as the Meetings header button.
+  'app:toggleMeetingNotes': {
+    req: z.null(),
+    res: z.null(),
+  },
+  // Launch-at-login (resident app). The OS login-item registry is the source
+  // of truth; these read/write it directly rather than a config file.
+  'app:getLoginItemSettings': {
+    req: z.null(),
+    res: z.object({
+      openAtLogin: z.boolean(),
+    }),
+  },
+  'app:setLoginItemSettings': {
+    req: z.object({
+      openAtLogin: z.boolean(),
+    }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  // Renderer → main: meeting capture state, so the tray menu/tooltip can
+  // reflect an active recording.
+  'meeting:setRecordingState': {
+    req: z.object({
+      recording: z.boolean(),
+    }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  // Renderer → main: meeting notes finished generating — fire the "notes
+  // ready" notification (background only; click opens the note).
+  'meeting:notifyNotesReady': {
+    req: z.object({
+      notePath: z.string(),
+      title: z.string(),
+    }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  // Main → renderer: the meeting app released the microphone while a
+  // recording was running — the call likely ended, auto-stop and summarize.
+  'meeting:externalCallEnded': {
+    req: z.null(),
+    res: z.null(),
+  },
+  // Renderer → main: assistant voice/video call holds the mic — suppresses
+  // ambient meeting detection (it would otherwise see our own capture).
+  'voice:setCallActive': {
+    req: z.object({
+      active: z.boolean(),
+    }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  // --- Ambient meeting detection popup (own always-on-top window) ---
+  // Main → popup: the detection to display.
+  'meetingDetect:payload': {
+    req: z.object({
+      title: z.string(),
+      message: z.string(),
+      // Calendar-linked detections render a solid accent bar; ad-hoc ones a
+      // dashed one (Granola's affordance).
+      hasCalendarEvent: z.boolean(),
+    }),
+    res: z.null(),
+  },
+  // Popup → main: fetch the payload (the push can race listener registration).
+  'meetingDetect:getPayload': {
+    req: z.null(),
+    res: z.object({
+      payload: z
+        .object({
+          title: z.string(),
+          message: z.string(),
+          hasCalendarEvent: z.boolean(),
+        })
+        .nullable(),
+    }),
+  },
+  // Popup → main: user clicked a button.
+  'meetingDetect:action': {
+    req: z.object({
+      action: z.enum(['take-notes', 'dismiss']),
+    }),
     res: z.object({}),
   },
   'granola:getConfig': {

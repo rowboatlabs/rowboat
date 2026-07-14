@@ -52,9 +52,27 @@ export const PermissionRequest = ({
         : JSON.stringify(toolCall.arguments))
     : null;
   const filePermission = permission?.kind === "file" ? permission : null;
+  const externalAction =
+    permission?.kind === "composio"
+      ? { label: "Composio action", detail: `${permission.toolSlug} (${permission.toolkitSlug})` }
+      : permission?.kind === "mcp"
+        ? {
+            label: "MCP tool",
+            detail: permission.serverName
+              ? `${permission.toolName} on ${permission.serverName}`
+              : permission.toolName,
+          }
+        : null;
 
   const isResponded = response !== null;
   const isApproved = response === 'approve';
+
+  // Scope actions ("Allow for Session"/"Always Allow") render only when the
+  // caller wires them: the legacy code-mode path persists grants, but the
+  // turns path has no grant persistence yet and must not show dead buttons.
+  const hasScopeActions =
+    Boolean(onApproveSession || onApproveAlways) &&
+    Boolean(command || filePermission);
 
   // Once a response is chosen, collapse the details to just the header.
   // Users can click the header to expand them again.
@@ -139,6 +157,16 @@ export const PermissionRequest = ({
                 </div>
               </div>
             )}
+            {showDetails && externalAction && (
+              <div className="rounded-md border bg-background/50 p-3 mt-3">
+                <p className="text-xs font-medium text-muted-foreground mb-1.5 uppercase tracking-wide">
+                  {externalAction.label}
+                </p>
+                <p className="text-xs font-mono font-medium text-foreground break-all">
+                  {externalAction.detail}
+                </p>
+              </div>
+            )}
             {showDetails && !command && !filePermission && toolCall.arguments && (
               <div className="rounded-md border bg-background/50 p-3 mt-3">
                 <p className="text-xs font-medium text-muted-foreground mb-1.5 uppercase tracking-wide">
@@ -159,12 +187,12 @@ export const PermissionRequest = ({
                 size="sm"
                 onClick={onApprove}
                 disabled={isProcessing}
-                className={cn("flex-1", (command || filePermission) && "rounded-r-none")}
+                className={cn("flex-1", hasScopeActions && "rounded-r-none")}
               >
                 <CheckIcon className="size-4" />
                 Approve
               </Button>
-              {(command || filePermission) && (
+              {hasScopeActions && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button

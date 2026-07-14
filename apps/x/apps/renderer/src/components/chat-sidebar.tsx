@@ -1,18 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, Bug, MoreHorizontal, Pin } from 'lucide-react'
-import { toast } from 'sonner'
+import { ArrowLeft, ArrowRight, Pin } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { ChatHeader } from '@/components/chat-header'
 import { ChatEmptyState } from '@/components/chat-empty-state'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
 import {
   Conversation,
   ConversationContent,
@@ -21,6 +14,7 @@ import {
 import {
   Message,
   MessageContent,
+  MessageCopyButton,
   MessageResponse,
 } from '@/components/ai-elements/message'
 import { TurnActivityIndicator } from '@/components/turn-activity-indicator'
@@ -37,7 +31,7 @@ import { MarkdownPreOverride } from '@/components/ai-elements/markdown-code-over
 import { defaultRemarkPlugins } from 'streamdown'
 import remarkBreaks from 'remark-breaks'
 import { type ChatTab } from '@/components/tab-bar'
-import { ChatInputWithMentions, type CallPreset, type PermissionMode, type StagedAttachment, type SelectedModel } from '@/components/chat-input-with-mentions'
+import { ChatInputWithMentions, type CallPreset, type PermissionMode, type StagedAttachment, type SelectedModel, type ReasoningEffortLevel } from '@/components/chat-input-with-mentions'
 import { ChatMessageAttachments } from '@/components/chat-message-attachments'
 import { useSidebar } from '@/components/ui/sidebar'
 import { wikiLabel } from '@/lib/wiki-links'
@@ -47,6 +41,7 @@ import {
   type ChatTabViewState,
   type ConversationItem,
   type PermissionResponse,
+  type TokenUsage,
   createEmptyChatTabViewState,
   getWebSearchCardData,
   getComposioConnectCardData,
@@ -57,12 +52,15 @@ import {
   isErrorMessage,
   isToolCall,
   isToolGroup,
+  isTurnUsageMessage,
   normalizeToolInput,
   normalizeToolOutput,
   parseAttachedFiles,
+  REASONING_EFFORT_LABELS,
   toToolState,
 } from '@/lib/chat-conversation'
 import { matchBillingError } from '@/lib/billing-error'
+import { TokenUsageMenu } from '@/components/token-usage-menu'
 
 const streamdownComponents = { pre: MarkdownPreOverride }
 
@@ -140,6 +138,7 @@ interface ChatSidebarProps {
   onOpenFullScreen?: () => void
   conversation: ConversationItem[]
   currentAssistantMessage: string
+  sessionUsage?: TokenUsage
   chatTabStates?: Record<string, ChatTabViewState>
   viewportAnchors?: Record<string, ChatViewportAnchorState>
   isProcessing: boolean
@@ -157,6 +156,7 @@ interface ChatSidebarProps {
   getInitialDraft?: (tabId: string) => string | undefined
   onDraftChangeForTab?: (tabId: string, text: string) => void
   onSelectedModelChangeForTab?: (tabId: string, model: SelectedModel | null) => void
+  onReasoningEffortChangeForTab?: (tabId: string, effort: ReasoningEffortLevel | null) => void
   workDirByTab?: Record<string, string | null>
   /** Composer locks for runs bound to Code-section sessions (cwd + agent frozen). */
   codeSessionLocks?: Record<string, { cwd: string; agent: 'claude' | 'codex' }>
@@ -170,7 +170,7 @@ interface ChatSidebarProps {
   allPermissionRequests?: ChatTabViewState['allPermissionRequests']
   permissionResponses?: ChatTabViewState['permissionResponses']
   autoPermissionDecisions?: ChatTabViewState['autoPermissionDecisions']
-  onPermissionResponse?: (toolCallId: string, subflow: string[], response: PermissionResponse, scope?: 'once' | 'session' | 'always') => void
+  onPermissionResponse?: (toolCallId: string, subflow: string[], response: PermissionResponse) => void
   onAskHumanResponse?: (toolCallId: string, subflow: string[], response: string) => void
   isToolOpenForTab?: (tabId: string, toolId: string) => boolean
   onToolOpenChangeForTab?: (tabId: string, toolId: string, open: boolean) => void
@@ -210,6 +210,7 @@ export function ChatSidebar({
   onOpenFullScreen,
   conversation,
   currentAssistantMessage,
+  sessionUsage = {},
   chatTabStates = {},
   viewportAnchors = {},
   isProcessing,
@@ -227,6 +228,7 @@ export function ChatSidebar({
   getInitialDraft,
   onDraftChangeForTab,
   onSelectedModelChangeForTab,
+  onReasoningEffortChangeForTab,
   workDirByTab = {},
   codeSessionLocks = {},
   pinnedToCodeSession = null,
@@ -350,6 +352,7 @@ export function ChatSidebar({
     runId: runId ?? null,
     conversation,
     currentAssistantMessage,
+    sessionUsage,
     pendingAskHumanRequests,
     allPermissionRequests,
     permissionResponses,
@@ -358,6 +361,7 @@ export function ChatSidebar({
     runId,
     conversation,
     currentAssistantMessage,
+    sessionUsage,
     pendingAskHumanRequests,
     allPermissionRequests,
     permissionResponses,
@@ -368,33 +372,6 @@ export function ChatSidebar({
     if (tabId === activeChatTabId) return activeTabState
     return chatTabStates[tabId] ?? emptyTabState
   }, [activeChatTabId, activeTabState, chatTabStates, emptyTabState])
-  const activeRunId = activeTabState.runId
-  const handleDownloadChatLog = useCallback(async () => {
-    if (!activeRunId) {
-      toast.error('No chat log available yet')
-      return
-    }
-
-    try {
-      // Session-first (new runtime); legacy runs fallback covers old
-      // background tabs until stage 7 removes the runs runtime.
-      let result: { success: boolean; error?: string }
-      try {
-        result = await window.ipc.invoke('sessions:downloadLog', { sessionId: activeRunId })
-      } catch {
-        result = await window.ipc.invoke('runs:downloadLog', { runId: activeRunId })
-      }
-      if (result.success) {
-        toast.success('Chat log saved')
-      } else if (result.error) {
-        toast.error(result.error)
-      }
-    } catch (err) {
-      console.error('Download chat log failed:', err)
-      toast.error('Failed to download chat log')
-    }
-  }, [activeRunId])
-
   const renderConversationItem = (
     item: ConversationItem,
     tabId: string,
@@ -409,14 +386,17 @@ export function ChatSidebar({
                 <ChatMessageAttachments attachments={item.attachments} />
               </MessageContent>
               {item.content && (
-                <MessageContent>
-                  <MessageResponse
-                    components={streamdownComponents}
-                    remarkPlugins={userMessageRemarkPlugins}
-                  >
-                    {item.content}
-                  </MessageResponse>
-                </MessageContent>
+                <div className="flex flex-col items-end">
+                  <MessageContent>
+                    <MessageResponse
+                      components={streamdownComponents}
+                      remarkPlugins={userMessageRemarkPlugins}
+                    >
+                      {item.content}
+                    </MessageResponse>
+                  </MessageContent>
+                  <MessageCopyButton text={item.content} className="mt-0.5" />
+                </div>
               )}
             </Message>
           )
@@ -424,26 +404,29 @@ export function ChatSidebar({
         const { message, files } = parseAttachedFiles(item.content)
         return (
           <Message key={item.id} from={item.role} data-message-id={item.id}>
-            <MessageContent>
-              {files.length > 0 && (
-                <div className="mb-2 flex flex-wrap gap-1.5">
-                  {files.map((filePath, index) => (
-                    <span
-                      key={index}
-                      className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary"
-                    >
-                      @{wikiLabel(filePath)}
-                    </span>
-                  ))}
-                </div>
-              )}
-              <MessageResponse
-                components={streamdownComponents}
-                remarkPlugins={userMessageRemarkPlugins}
-              >
-                {message}
-              </MessageResponse>
-            </MessageContent>
+            <div className="flex flex-col items-end">
+              <MessageContent>
+                {files.length > 0 && (
+                  <div className="mb-2 flex flex-wrap gap-1.5">
+                    {files.map((filePath, index) => (
+                      <span
+                        key={index}
+                        className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary"
+                      >
+                        @{wikiLabel(filePath)}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <MessageResponse
+                  components={streamdownComponents}
+                  remarkPlugins={userMessageRemarkPlugins}
+                >
+                  {message}
+                </MessageResponse>
+              </MessageContent>
+              <MessageCopyButton text={message} className="mt-0.5" />
+            </div>
           </Message>
         )
       }
@@ -505,6 +488,24 @@ export function ChatSidebar({
             )}
           </ToolContent>
         </Tool>
+      )
+    }
+
+    if (isTurnUsageMessage(item)) {
+      return (
+        <div key={item.id} className="-mt-6 -ml-1 flex items-center justify-start gap-1" data-message-id={item.id}>
+          <TokenUsageMenu
+            usage={item.usage}
+            scope="turn"
+            modelCallCount={item.modelCallCount}
+            align="start"
+          />
+          {item.reasoningEffort && (
+            <span className="text-xs text-muted-foreground/70">
+              {REASONING_EFFORT_LABELS[item.reasoningEffort]}
+            </span>
+          )}
+        </div>
       )
     }
 
@@ -600,38 +601,11 @@ export function ChatSidebar({
                 onNewChatTab={onNewChatTab}
                 recentRuns={recentRuns}
                 activeRunId={runId}
+                sessionUsage={activeTabState.sessionUsage}
                 onSelectRun={onSelectRun}
                 onOpenChatHistory={onOpenChatHistory}
               />
             )}
-            <DropdownMenu>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="titlebar-no-drag my-1 h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
-                      aria-label="Chat options"
-                    >
-                      <MoreHorizontal className="size-5" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">Chat options</TooltipContent>
-              </Tooltip>
-              <DropdownMenuContent align="end" className="min-w-48">
-                <DropdownMenuItem
-                  disabled={!activeRunId}
-                  onSelect={() => {
-                    void handleDownloadChatLog()
-                  }}
-                >
-                  <Bug className="size-4" />
-                  Download chat log
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
             {onOpenFullScreen && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -732,8 +706,6 @@ export function ChatSidebar({
                                             toolCall={permRequest.toolCall}
                                             permission={permRequest.permission}
                                             onApprove={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
-                                            onApproveSession={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'session')}
-                                            onApproveAlways={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'always')}
                                             onDeny={() => onPermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
                                             isProcessing={isActive && isProcessing && !isWaitingOnHuman}
                                             response={response}
@@ -812,6 +784,7 @@ export function ChatSidebar({
                           initialDraft={getInitialDraft?.(tab.id)}
                           onDraftChange={onDraftChangeForTab ? (text) => onDraftChangeForTab(tab.id, text) : undefined}
                           onSelectedModelChange={onSelectedModelChangeForTab ? (m) => onSelectedModelChangeForTab(tab.id, m) : undefined}
+                          onReasoningEffortChange={onReasoningEffortChangeForTab ? (effort) => onReasoningEffortChangeForTab(tab.id, effort) : undefined}
                           workDir={workDirByTab[tab.id] ?? null}
                           onWorkDirChange={onWorkDirChangeForTab ? (v) => onWorkDirChangeForTab(tab.id, v) : undefined}
                           codeSessionLock={tabState.runId ? codeSessionLocks[tabState.runId] ?? null : null}

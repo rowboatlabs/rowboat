@@ -1,6 +1,6 @@
 import type { z } from 'zod'
 import type { Run } from '@x/shared/src/runs.js'
-import { reduceTurn, type TurnEvent } from '@x/shared/src/turns.js'
+import { reduceTurn, type TurnEvent, type TurnState } from '@x/shared/src/turns.js'
 import type { ConversationItem } from '@/lib/chat-conversation'
 import { runLogToConversation } from '@/lib/run-to-conversation'
 import { buildTurnConversation } from '@/lib/session-chat/turn-view'
@@ -24,7 +24,15 @@ export function turnToTranscript(
   turnId: string,
   events: Array<z.infer<typeof TurnEvent>>,
 ): AgentRunTranscript {
-  const state = reduceTurn(events)
+  return turnStateToTranscript(turnId, reduceTurn(events))
+}
+
+// Reduced-state variant for consumers that already hold a live TurnState
+// (useTurn) and should not re-reduce the event log.
+export function turnStateToTranscript(
+  turnId: string,
+  state: TurnState,
+): AgentRunTranscript {
   const out: AgentRunTranscript = {
     id: turnId,
     createdAt: state.definition.ts,

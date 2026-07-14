@@ -1,5 +1,13 @@
 import { z } from "zod";
 
+// Canonical reasoning-effort ladder, used everywhere effort appears: the
+// per-provider default in models.json, the per-turn override on turn
+// creation, and the persisted per-call parameters. Absence means "auto" —
+// send nothing and let the provider default apply. Provider-specific
+// syntax (OpenAI reasoningEffort, Anthropic thinking budgets, Gemini
+// thinkingLevel, OpenRouter reasoning.effort) is mapped at invoke time.
+export const ReasoningEffort = z.enum(["low", "medium", "high"]);
+
 export const LlmProvider = z.object({
   flavor: z.enum(["openai", "anthropic", "google", "openrouter", "aigateway", "ollama", "openai-compatible", "rowboat"]),
   apiKey: z.string().optional(),
@@ -9,11 +17,12 @@ export const LlmProvider = z.object({
   // to a ~4k window that silently truncates Rowboat's prompts; when unset,
   // local providers get a larger default (see core/models/local.ts).
   contextLength: z.number().int().positive().optional(),
-  // Reasoning effort for local thinking models (Ollama `think` parameter).
-  // gpt-oss supports the levels directly; other thinking models map
-  // low → thinking off, high → thinking on. Defaults to "low" for Ollama —
-  // background agents and chat both want snappy responses on local hardware.
-  reasoningEffort: z.enum(["low", "medium", "high"]).optional(),
+  // Default reasoning effort for this provider. For Ollama this drives the
+  // `think` parameter (gpt-oss takes the levels directly; other thinking
+  // models map low → off, high → on; defaults to "low" — background agents
+  // and chat both want snappy responses on local hardware). For cloud
+  // providers it seeds the per-turn effort when the user hasn't chosen one.
+  reasoningEffort: ReasoningEffort.optional(),
 });
 
 // A provider-qualified model reference. `provider` is a provider name as
@@ -47,7 +56,7 @@ export const LlmModelConfig = z.object({
     baseURL: z.string().optional(),
     headers: z.record(z.string(), z.string()).optional(),
     contextLength: z.number().int().positive().optional(),
-    reasoningEffort: z.enum(["low", "medium", "high"]).optional(),
+    reasoningEffort: ReasoningEffort.optional(),
     model: z.string().optional(),
     models: z.array(z.string()).optional(),
     knowledgeGraphModel: z.string().optional(),

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { makeOllamaThinkFetch, resolveThinkValue } from "./local.js";
+import { makeOllamaThinkFetch, resolveThinkValue, rewrapOllamaErrorBody } from "./local.js";
 
 describe("resolveThinkValue", () => {
     it("passes effort levels straight through for gpt-oss variants", () => {
@@ -19,6 +19,27 @@ describe("resolveThinkValue", () => {
     it("strips think for models without the thinking capability", () => {
         expect(resolveThinkValue("llama3.2:3b", "low", false)).toBeUndefined();
         expect(resolveThinkValue("llama3.2:3b", "high", false)).toBeUndefined();
+    });
+});
+
+describe("rewrapOllamaErrorBody", () => {
+    it("rewraps Ollama's plain-string error shape", () => {
+        expect(rewrapOllamaErrorBody('{"error":"model \'x\' not found"}'))
+            .toBe('{"error":{"message":"model \'x\' not found"}}');
+    });
+
+    it("leaves already-nested errors untouched", () => {
+        expect(rewrapOllamaErrorBody('{"error":{"message":"x"}}')).toBeUndefined();
+    });
+
+    it("leaves non-JSON bodies untouched", () => {
+        expect(rewrapOllamaErrorBody("<html>bad gateway</html>")).toBeUndefined();
+    });
+
+    it("leaves JSON without a string error field untouched", () => {
+        expect(rewrapOllamaErrorBody('{"message":"x"}')).toBeUndefined();
+        expect(rewrapOllamaErrorBody('{"error":42}')).toBeUndefined();
+        expect(rewrapOllamaErrorBody("null")).toBeUndefined();
     });
 });
 
@@ -77,5 +98,33 @@ describe("makeOllamaThinkFetch", () => {
         }
         // Non-chat request passed through with no body rewrite.
         expect(calls.some((c) => c.url.endsWith("/api/tags"))).toBe(true);
+    });
+
+    it("rewraps plain-string error bodies on failed responses, keeping the status", async () => {
+        vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+            const url = String(input);
+            if (url.endsWith("/api/show")) {
+                return new Response(JSON.stringify({ capabilities: ["completion"] }), { status: 200 });
+            }
+            return new Response(JSON.stringify({ error: "boom" }), { status: 400, statusText: "Bad Request" });
+        }));
+        const wrapped = makeOllamaThinkFetch("low");
+        const res = await wrapped("http://localhost:11434/api/chat", {
+            method: "POST",
+            body: JSON.stringify({ model: "llama3.2:3b", think: false, messages: [] }),
+        });
+        expect(res.status).toBe(400);
+        expect(await res.json()).toEqual({ error: { message: "boom" } });
+    });
+
+    it("returns successful responses untouched", async () => {
+        stubFetch(["completion"]);
+        const wrapped = makeOllamaThinkFetch("low");
+        const res = await wrapped("http://localhost:11434/api/chat", {
+            method: "POST",
+            body: JSON.stringify({ model: "llama3.2:3b", messages: [] }),
+        });
+        expect(res.status).toBe(200);
+        expect(await res.json()).toEqual({});
     });
 });

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
-  ArrowLeft,
   ChevronRight,
   Copy,
   ExternalLink,
@@ -70,20 +69,6 @@ const HIDDEN_PATHS = new Set(['knowledge/Meetings', 'knowledge/Workspace'])
 
 // Theme-aware accent palette for folder avatars — colored letter on a faint
 // tint of the same hue. Mirrors the design's six-colour rotation.
-const AVATAR_PALETTE = [
-  'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400',
-  'bg-violet-500/10 text-violet-600 dark:text-violet-400',
-  'bg-amber-500/10 text-amber-600 dark:text-amber-400',
-  'bg-rose-500/10 text-rose-600 dark:text-rose-400',
-  'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
-  'bg-sky-500/10 text-sky-600 dark:text-sky-400',
-] as const
-
-function avatarClass(name: string): string {
-  let hash = 0
-  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0
-  return AVATAR_PALETTE[hash % AVATAR_PALETTE.length]
-}
 
 function isMarkdown(node: TreeNode): boolean {
   return node.kind === 'file' && node.name.toLowerCase().endsWith('.md')
@@ -203,11 +188,11 @@ export function KnowledgeView({
   const currentFolder = folderPath ? findNode(tree, folderPath) : null
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
-      <div className="shrink-0 flex items-start justify-between gap-4 border-b border-border px-8 py-6">
+    <div className="flex h-full flex-col overflow-hidden bg-[#f8f8f9] dark:bg-[#0b0b0d]">
+      <div className="mx-auto w-full max-w-[1120px] shrink-0 flex items-start justify-between gap-4 px-[30px] pt-[34px] pb-5">
         <div className="min-w-0">
-          <h1 className="text-2xl font-bold tracking-tight">Brain</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
+          <h1 className="text-[24px] font-[650] tracking-[-0.02em] text-[#0d0e11] dark:text-[#f4f5f7]">Brain</h1>
+          <p className="mt-1 text-[14px] text-black/50 dark:text-white/[0.52]">
             {totalNotes} {totalNotes === 1 ? 'note' : 'notes'} across {folders.length}{' '}
             {folders.length === 1 ? 'folder' : 'folders'}
           </p>
@@ -242,12 +227,12 @@ export function KnowledgeView({
           {graphContent}
         </div>
       ) : mode === 'basis' ? (
-        <div className="flex-1 min-h-0 overflow-hidden">
+        <div className="mx-auto flex w-full max-w-[1120px] flex-1 min-h-0 flex-col overflow-hidden px-[30px] pb-6">
           {basisContent}
         </div>
       ) : (
       <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-3xl px-8 py-6">
+        <div className="mx-auto w-full max-w-[1120px] px-[30px] py-6">
           {currentFolder ? (
             <FolderDetail
               folder={currentFolder}
@@ -261,11 +246,11 @@ export function KnowledgeView({
             />
           ) : (
             <>
-              <SectionHeader label={`Folders · ${folders.length}`} aside="Sorted by name" />
+              <SectionHeader label={`Folders · ${folders.length}`} />
               {folders.length === 0 ? (
                 <EmptyState text="No folders yet." />
               ) : (
-                <div className="overflow-hidden rounded-xl border border-border">
+                <div className="overflow-hidden rounded-xl border border-black/15 dark:border-border">
                   {folders.map((node, i) => (
                     <div key={node.path} className={cn(i > 0 && 'border-t border-border/60')}>
                       <FolderCard
@@ -285,7 +270,7 @@ export function KnowledgeView({
               {looseNotes.length > 0 && (
                 <div className="mt-8">
                   <SectionHeader label={`Loose notes · ${looseNotes.length}`} />
-                  <div className="overflow-hidden rounded-xl border border-border">
+                  <div className="overflow-hidden rounded-xl border border-black/15 dark:border-border">
                     {looseNotes.map((node, i) => (
                       <div key={node.path} className={cn(i > 0 && 'border-t border-border/60')}>
                         <ItemRow
@@ -398,9 +383,9 @@ function QuickAction({
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground transition-colors hover:bg-accent"
+      className="inline-flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
     >
-      <Icon className="size-4 text-muted-foreground" />
+      <Icon className="size-4" />
       <span>{label}</span>
     </button>
   )
@@ -409,7 +394,7 @@ function QuickAction({
 function SectionHeader({ label, aside }: { label: string; aside?: string }) {
   return (
     <div className="mb-2.5 flex items-center justify-between">
-      <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+      <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
         {label}
       </span>
       {aside && <span className="text-xs text-muted-foreground">{aside}</span>}
@@ -421,20 +406,6 @@ function EmptyState({ text }: { text: string }) {
   return (
     <div className="rounded-xl border border-dashed border-border px-6 py-10 text-center text-sm text-muted-foreground">
       {text}
-    </div>
-  )
-}
-
-function FolderAvatar({ name, className }: { name: string; className?: string }) {
-  return (
-    <div
-      className={cn(
-        'flex size-8 shrink-0 items-center justify-center rounded-md text-[13px] font-bold',
-        avatarClass(name),
-        className,
-      )}
-    >
-      {name.charAt(0).toUpperCase() || '?'}
     </div>
   )
 }
@@ -472,9 +443,8 @@ function FolderCard({
           onOpenFolder(node.path)
         }
       }}
-      className="group flex w-full cursor-pointer items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-accent/50"
+      className="group flex w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-accent/50"
     >
-      <FolderAvatar name={node.name} className="mt-0.5" />
       <div className="min-w-0 flex-1">
         {renameActive ? (
           <RenameField
@@ -489,28 +459,32 @@ function FolderCard({
             {node.name}
           </span>
         )}
-        <div className="mt-0.5 text-xs text-muted-foreground">
-          {count} {count === 1 ? 'note' : 'notes'}
+        <div className="mt-0.5 flex min-w-0 items-baseline gap-1.5 text-xs text-muted-foreground">
+          <span className="shrink-0">
+            {count} {count === 1 ? 'note' : 'notes'}
+          </span>
+          {peek.length > 0 && (
+            <span className="truncate text-muted-foreground/70">
+              {peek.map((n) => (
+                <span key={n.path}>
+                  <span className="text-muted-foreground/40">{' · '}</span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onOpenNote(n.path)
+                    }}
+                    className="transition-colors hover:text-foreground hover:underline"
+                  >
+                    {displayName(n)}
+                  </button>
+                </span>
+              ))}
+            </span>
+          )}
         </div>
-        {peek.length > 0 && (
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {peek.map((n) => (
-              <button
-                key={n.path}
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onOpenNote(n.path)
-                }}
-                className="max-w-[200px] truncate rounded-full border border-border/60 bg-muted px-2.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              >
-                {displayName(n)}
-              </button>
-            ))}
-          </div>
-        )}
       </div>
-      <div className="flex shrink-0 items-center gap-2 pt-1">
+      <div className="flex shrink-0 items-center gap-2">
         <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
           {modified}
         </span>
@@ -567,17 +541,6 @@ function FolderDetail({
       <div className="mb-4 flex min-w-0 items-center gap-1.5 text-sm">
         <button
           type="button"
-          onClick={() => {
-            const parent = crumbs.length >= 2 ? crumbs[crumbs.length - 2].path : null
-            onNavigate(parent)
-          }}
-          className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          aria-label="Back"
-        >
-          <ArrowLeft className="size-4" />
-        </button>
-        <button
-          type="button"
           onClick={() => onNavigate(null)}
           className="rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         >
@@ -605,7 +568,7 @@ function FolderDetail({
       {items.length === 0 ? (
         <EmptyState text="This folder is empty." />
       ) : (
-        <div className="overflow-hidden rounded-xl border border-border">
+        <div className="overflow-hidden rounded-xl border border-black/15 dark:border-border">
           {items.map((node, i) => (
             <div key={node.path} className={cn(i > 0 && 'border-t border-border/60')}>
               <ItemRow
@@ -665,13 +628,6 @@ function ItemRow({
       }}
       className="group flex w-full cursor-pointer items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-accent/50"
     >
-      {isDir ? (
-        <FolderAvatar name={node.name} />
-      ) : (
-        <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-          <FileText className="size-4" />
-        </div>
-      )}
       <div className="min-w-0 flex-1">
         {renameActive ? (
           <RenameField
@@ -682,16 +638,21 @@ function ItemRow({
             onDone={onClearRename}
           />
         ) : (
-          <span className="block truncate text-sm text-foreground">{displayName(node)}</span>
-        )}
-        {isDir && (
-          <div className="mt-0.5 text-xs text-muted-foreground">
-            {count} {count === 1 ? 'note' : 'notes'}
-          </div>
+          <span className="block truncate text-sm font-semibold text-foreground">
+            {displayName(node)}
+          </span>
         )}
       </div>
-      <div className="flex shrink-0 items-center gap-2">
-        <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
+      <div className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+        {isDir && (
+          <>
+            <span className="whitespace-nowrap">
+              {count} {count === 1 ? 'note' : 'notes'}
+            </span>
+            <span className="text-muted-foreground/40">·</span>
+          </>
+        )}
+        <span className="tabular-nums whitespace-nowrap">
           {modified}
         </span>
         {isDir && (

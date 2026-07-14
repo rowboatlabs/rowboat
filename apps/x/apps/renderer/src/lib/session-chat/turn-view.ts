@@ -20,8 +20,10 @@ import type {
   ErrorMessage,
   MessageAttachment,
   PermissionResponse,
+  TokenUsage,
   ToolCall,
 } from '@/lib/chat-conversation'
+import { addTokenUsage, hasTokenUsage } from '@/lib/token-usage'
 
 // Pure derivations from reduced turn state (+ the ephemeral live overlay) to
 // the view shapes the existing chat components already consume. No IPC, no
@@ -337,6 +339,18 @@ export function buildTurnConversation(state: TurnState): ConversationItem[] {
     } satisfies ErrorMessage)
   }
 
+  if (hasTokenUsage(state.usage)) {
+    const reasoningEffort = state.definition.config.reasoningEffort
+    items.push({
+      id: `${turnId}:usage`,
+      kind: 'turn-usage',
+      usage: state.usage,
+      modelCallCount: state.modelCalls.filter((call) => call.usage !== undefined).length,
+      ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
+      timestamp: ts(),
+    })
+  }
+
   return items
 }
 
@@ -349,6 +363,7 @@ type PermMeta = z.infer<typeof ToolPermissionMetadata>
 export type SessionChatState = {
   conversation: ConversationItem[]
   currentAssistantMessage: string
+  sessionUsage: TokenUsage
   // See LiveOverlay.voiceSegments.
   voiceSegments: string[]
   pendingAskHumanRequests: Map<string, z.infer<typeof AskHumanRequestEvent>>
@@ -410,8 +425,10 @@ export function buildSessionChatState(
   overlay: LiveOverlay,
 ): SessionChatState {
   const conversation: ConversationItem[] = []
+  let sessionUsage: TokenUsage = {}
   for (const turn of turns) {
     conversation.push(...buildTurnConversation(turn))
+    sessionUsage = addTokenUsage(sessionUsage, turn.usage)
   }
   for (let i = 0; i < conversation.length; i++) {
     const item = conversation[i]
@@ -482,6 +499,7 @@ export function buildSessionChatState(
   return {
     conversation,
     currentAssistantMessage: stripVoiceTags(overlay.text),
+    sessionUsage,
     voiceSegments: overlay.voiceSegments,
     pendingAskHumanRequests,
     allPermissionRequests,

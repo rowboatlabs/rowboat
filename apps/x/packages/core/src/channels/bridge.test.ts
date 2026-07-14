@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import type { SessionIndexEntry } from "@x/shared/dist/sessions.js";
 import type { TurnStreamEvent } from "@x/shared/dist/turns.js";
-import { EmitterSessionBus } from "../sessions/bus.js";
-import { TurnInputError } from "../turns/api.js";
-import type { ISessions } from "../sessions/api.js";
+import { TurnEventHub } from "../runtime/turns/event-hub.js";
+import { TurnInputError } from "../runtime/turns/api.js";
+import type { ISessions } from "../runtime/sessions/api.js";
 import { ChannelBridge, type ModelChoice } from "./bridge.js";
 
 const SENDER = "test:1";
@@ -50,7 +50,7 @@ function askEvent(turnId: string, question: string, options?: string[]): TurnStr
 
 interface Harness {
     bridge: ChannelBridge;
-    bus: EmitterSessionBus;
+    bus: TurnEventHub;
     replies: string[];
     reply: (text: string) => Promise<void>;
     sessions: {
@@ -72,9 +72,9 @@ const MODELS: ModelChoice[] = [
 ];
 
 function harness(entries: SessionIndexEntry[] = []): Harness {
-    const bus = new EmitterSessionBus();
+    const bus = new TurnEventHub();
     const publish = (turnId: string, event: TurnStreamEvent) =>
-        bus.publish({ kind: "turn-event", sessionId: "s1", turnId, event });
+        bus.publish({ turnId, sessionId: "s1", event });
     const sessions = {
         createSession: vi.fn(async () => "s1"),
         sendMessage: vi.fn(async () => ({ turnId: "t1" })),
@@ -86,7 +86,7 @@ function harness(entries: SessionIndexEntry[] = []): Harness {
     const listModels = vi.fn(async () => MODELS);
     const bridge = new ChannelBridge({
         sessions: sessions as unknown as ISessions,
-        sessionBus: bus,
+        turnEventBus: bus,
         listModels,
     });
     const replies: string[] = [];

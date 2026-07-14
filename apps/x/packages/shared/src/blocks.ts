@@ -145,6 +145,10 @@ export const GmailThreadSchema = EmailBlockSchema.extend({
   threadUrl: z.string().url(),
   unread: z.boolean().optional(),
   importance: z.enum(['important', 'other']).optional(),
+  // What kind of email this is (correspondence, meeting, notification,
+  // newsletter, promotion, cold_outreach, receipt). Loose string so the
+  // classifier's taxonomy can evolve without a lockstep schema change.
+  category: z.string().optional(),
   gmail_draft: z.string().optional(),
   // Gmail-side draft id, present on entries returned by the Drafts list so the
   // composer can update/delete that exact draft.

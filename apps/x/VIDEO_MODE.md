@@ -108,7 +108,7 @@ is live) to the outgoing message as `UserImagePart`s and sets
   (`data`, `mediaType`), `source: 'camera' | 'screen'`, `capturedAt`. Unlike
   file attachments (path references read via the `LLMParse` tool), image
   parts go to the model as real multimodal image parts.
-- `packages/core/src/agents/runtime.ts` `convertFromMessages` (~line 1013):
+- `packages/core/src/runtime/assembly/message-encoding.ts` `convertFromMessages`:
   emits a context line (frame counts + time span), then labeled groups —
   a `"Webcam frames (oldest to newest):"` text part before camera images and
   a `"Screen-share frames (oldest to newest):"` text part before screen
@@ -176,11 +176,11 @@ Push-to-talk is disabled while a call owns the mic.
 
 | Prompt | Where |
 |--------|-------|
-| `# Video Mode (Live Camera)` system section — how to use webcam frames, coaching guidance, screen-share rules ("treat the screen as the primary subject", "last screen frame is current"), etiquette (never comment on appearance) | `packages/core/src/agents/runtime.ts:386` (`composeSystemInstructions`, gated on `videoMode`) |
-| `# Practice Session (Coach Mode)` system section — coaching persona: specific/actionable feedback after each take, one-sentence interjections mid-flow, structured debrief on wrap-up | `composeSystemInstructions`, gated on `coachMode` (directly after the video section) |
-| "Driving the app" paragraph in the video-mode section — on calls, prefer app-navigation read-view/open-item (show while telling) over describing or squinting at frames | same `# Video Mode` section; full action docs in the `app-navigation` skill (`application/assistant/skills/app-navigation/skill.ts`) |
-| Per-message frame context line `[Video mode: N live webcam frames … and M frames of the user's shared screen …]` + group labels | `packages/core/src/agents/runtime.ts` (`convertFromMessages`) |
-| `videoMode` / `coachMode` composition overrides (session-sticky; flips bust prefix cache) | `packages/core/src/turns/bridges/real-agent-resolver.ts` (`CompositionOverrides`); set from `App.tsx` `sendConfig` |
+| `# Video Mode (Live Camera)` system section — how to use webcam frames, coaching guidance, screen-share rules ("treat the screen as the primary subject", "last screen frame is current"), etiquette (never comment on appearance) | `packages/core/src/runtime/assembly/capabilities/modes.ts` (the `VIDEO_MODE` fragment of the `video-mode` capability, composed by `runtime/assembly/compose-instructions.ts`) |
+| `# Practice Session (Coach Mode)` system section — coaching persona: specific/actionable feedback after each take, one-sentence interjections mid-flow, structured debrief on wrap-up | `capabilities/modes.ts` (the `COACH_MODE` fragment, directly after the video capability) |
+| "Driving the app" paragraph in the video-mode section — on calls, prefer app-navigation read-view/open-item (show while telling) over describing or squinting at frames | same `# Video Mode` section; full action docs in the `app-navigation` skill (`runtime/assembly/skills/app-navigation/skill.ts`) |
+| Per-message frame context line `[Video mode: N live webcam frames … and M frames of the user's shared screen …]` + group labels | `packages/core/src/runtime/assembly/message-encoding.ts` (`convertFromMessages`) |
+| `videoMode` / `coachMode` composition overrides (session-sticky; flips bust prefix cache) | `packages/core/src/runtime/turns/bridges/real-agent-resolver.ts` (`CompositionOverrides`); set from `App.tsx` `sendConfig` |
 
 Voice input/output prompt sections (`# Voice Input`, `# Voice Output`) are
 reused untouched — calls set `voiceInput` per utterance and force

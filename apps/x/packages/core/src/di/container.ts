@@ -3,18 +3,18 @@ import { asClass, asFunction, asValue, createContainer, InjectionMode } from "aw
 import { WorkDir } from "../config/config.js";
 import { FSModelConfigRepo, IModelConfigRepo } from "../models/repo.js";
 import { FSMcpConfigRepo, IMcpConfigRepo } from "../mcp/repo.js";
-import { FSAgentsRepo, IAgentsRepo } from "../agents/repo.js";
-import { FSRunsRepo, IRunsRepo } from "../runs/repo.js";
+import { FSAgentsRepo, IAgentsRepo } from "../runtime/assembly/repo.js";
+import { FSRunsRepo, IRunsRepo } from "../runtime/legacy/repo.js";
 import { IMonotonicallyIncreasingIdGenerator, IdGen } from "../application/lib/id-gen.js";
 import { IMessageQueue, InMemoryMessageQueue } from "../application/lib/message-queue.js";
 import { IBus, InMemoryBus } from "../application/lib/bus.js";
-import { IRunsLock, InMemoryRunsLock } from "../runs/lock.js";
-import { IAgentRuntime, AgentRuntime } from "../agents/runtime.js";
+import { IRunsLock, InMemoryRunsLock } from "../runtime/legacy/lock.js";
+import { IAgentRuntime, AgentRuntime } from "../runtime/legacy/engine.js";
 import { FSOAuthRepo, IOAuthRepo } from "../auth/repo.js";
 import { FSClientRegistrationRepo, IClientRegistrationRepo } from "../auth/client-repo.js";
 import { FSGranolaConfigRepo, IGranolaConfigRepo } from "../knowledge/granola/repo.js";
 import { FSCodeModeConfigRepo, ICodeModeConfigRepo } from "../code-mode/repo.js";
-import { IAbortRegistry, InMemoryAbortRegistry } from "../runs/abort-registry.js";
+import { IAbortRegistry, InMemoryAbortRegistry } from "../runtime/turns/abort-registry.js";
 import { FSAgentScheduleRepo, IAgentScheduleRepo } from "../agent-schedule/repo.js";
 import { FSAgentScheduleStateRepo, IAgentScheduleStateRepo } from "../agent-schedule/state-repo.js";
 import { FSSlackConfigRepo, ISlackConfigRepo } from "../slack/repo.js";
@@ -28,32 +28,33 @@ import { CodeSessionService } from "../code-mode/sessions/service.js";
 import { CodeSessionStatusTracker } from "../code-mode/sessions/status-tracker.js";
 import type { IBrowserControlService } from "../application/browser-control/service.js";
 import type { INotificationService } from "../application/notification/service.js";
-import { SystemClock, type IClock } from "../turns/clock.js";
-import { FSTurnRepo } from "../turns/fs-repo.js";
-import type { ITurnRepo } from "../turns/repo.js";
-import type { IContextResolver } from "../turns/context-resolver.js";
-import { createContextResolver } from "../turns/context-elision.js";
-import { EmitterTurnLifecycleBus, type ITurnLifecycleBus } from "../turns/bus.js";
-import { RealUsageReporter } from "../turns/bridges/real-usage-reporter.js";
-import type { IUsageReporter } from "../turns/usage-reporter.js";
-import { TurnRuntime } from "../turns/runtime.js";
-import type { ITurnRuntime } from "../turns/api.js";
-import type { IAgentResolver } from "../turns/agent-resolver.js";
-import type { IModelRegistry } from "../turns/model-registry.js";
-import type { IToolRegistry } from "../turns/tool-registry.js";
-import type { IPermissionChecker, IPermissionClassifier } from "../turns/permission.js";
-import { RealAgentResolver } from "../turns/bridges/real-agent-resolver.js";
-import { InlineAgentResolver } from "../turns/bridges/inline-agent-resolver.js";
-import { DispatchingAgentResolver } from "../turns/bridges/agent-resolver-dispatch.js";
-import { RealModelRegistry } from "../turns/bridges/real-model-registry.js";
-import { RealToolRegistry } from "../turns/bridges/real-tool-registry.js";
-import { RealPermissionChecker } from "../turns/bridges/real-permission-checker.js";
-import { RealPermissionClassifier } from "../turns/bridges/real-permission-classifier.js";
-import { FSSessionRepo } from "../sessions/fs-repo.js";
-import type { ISessionRepo } from "../sessions/repo.js";
-import { EmitterSessionBus, type ISessionBus } from "../sessions/bus.js";
-import { SessionsImpl } from "../sessions/sessions.js";
-import type { ISessions } from "../sessions/api.js";
+import { SystemClock, type IClock } from "../runtime/turns/clock.js";
+import { FSTurnRepo } from "../runtime/turns/fs-repo.js";
+import type { ITurnRepo } from "../runtime/turns/repo.js";
+import type { IContextResolver } from "../runtime/turns/context-resolver.js";
+import { createContextResolver } from "../runtime/turns/context-elision.js";
+import { EmitterTurnLifecycleBus, type ITurnLifecycleBus } from "../runtime/turns/bus.js";
+import { TurnEventHub, type ITurnEventBus } from "../runtime/turns/event-hub.js";
+import { RealUsageReporter } from "../runtime/turns/bridges/real-usage-reporter.js";
+import type { IUsageReporter } from "../runtime/turns/usage-reporter.js";
+import { TurnRuntime } from "../runtime/turns/runtime.js";
+import type { ITurnRuntime } from "../runtime/turns/api.js";
+import type { IAgentResolver } from "../runtime/turns/agent-resolver.js";
+import type { IModelRegistry } from "../runtime/turns/model-registry.js";
+import type { IToolRegistry } from "../runtime/turns/tool-registry.js";
+import type { IPermissionChecker, IPermissionClassifier } from "../runtime/turns/permission.js";
+import { RealAgentResolver } from "../runtime/turns/bridges/real-agent-resolver.js";
+import { InlineAgentResolver } from "../runtime/turns/bridges/inline-agent-resolver.js";
+import { DispatchingAgentResolver } from "../runtime/turns/bridges/agent-resolver-dispatch.js";
+import { RealModelRegistry } from "../runtime/turns/bridges/real-model-registry.js";
+import { RealToolRegistry } from "../runtime/turns/bridges/real-tool-registry.js";
+import { RealPermissionChecker } from "../runtime/turns/bridges/real-permission-checker.js";
+import { RealPermissionClassifier } from "../runtime/turns/bridges/real-permission-classifier.js";
+import { FSSessionRepo } from "../runtime/sessions/fs-repo.js";
+import type { ISessionRepo } from "../runtime/sessions/repo.js";
+import { EmitterSessionBus, type ISessionBus } from "../runtime/sessions/bus.js";
+import { SessionsImpl } from "../runtime/sessions/sessions.js";
+import type { ISessions } from "../runtime/sessions/api.js";
 import {
     DefaultModelResolver,
     type IDefaultModelResolver,
@@ -61,7 +62,7 @@ import {
 import {
     HeadlessAgentRunner,
     type IHeadlessAgentRunner,
-} from "../agents/headless.js";
+} from "../runtime/assembly/headless.js";
 
 const container = createContainer({
     injectionMode: InjectionMode.PROXY,
@@ -124,6 +125,9 @@ container.register({
         createContextResolver({ turnRepo }),
     ).singleton(),
     lifecycleBus: asClass<ITurnLifecycleBus>(EmitterTurnLifecycleBus).singleton(),
+    // Process-wide turn event spine: every turn's events, tagged with
+    // sessionId and durable file offsets, regardless of who started the turn.
+    turnEventBus: asClass<ITurnEventBus>(TurnEventHub).singleton(),
     usageReporter: asClass<IUsageReporter>(RealUsageReporter).singleton(),
     agentResolver: asFunction<IAgentResolver>(
         () =>

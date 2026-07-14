@@ -34,6 +34,12 @@ jobs:
       - name: Run apps/x Vitest suites
         run: npm test
 
+      # Typechecks with the dev tsconfigs, which include test files —
+      # the build tsconfigs exclude them and vitest strips types without
+      # checking, so this is the only gate that sees type errors in tests.
+      - name: Typecheck apps/x packages
+        run: npm run typecheck
+
   apps-x-electron-package:
     name: apps/x Electron package smoke test
     runs-on: ubuntu-latest

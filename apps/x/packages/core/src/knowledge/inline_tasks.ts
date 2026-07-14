@@ -3,7 +3,7 @@ import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
 import { generateText } from 'ai';
 import { WorkDir } from '../config/config.js';
-import { runWhenPossible } from '../agents/headless-app.js';
+import { runWhenPossible } from '../runtime/assembly/headless-app.js';
 import { getKgModel } from '../models/defaults.js';
 import container from '../di/container.js';
 import type { IModelConfigRepo } from '../models/repo.js';
@@ -653,7 +653,7 @@ Respond with ONLY valid JSON: either a schedule object or null. No other text.`;
     try {
         const result = await withUseCase({ useCase: 'knowledge_sync', subUseCase: 'inline_task_classify' }, () => generateText({
             model,
-            system: systemPrompt,
+            instructions: systemPrompt,
             prompt: instruction,
         }));
 

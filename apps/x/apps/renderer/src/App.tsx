@@ -2,7 +2,7 @@ import * as React from 'react'
 import { useCallback, useEffect, useLayoutEffect, useState, useRef } from 'react'
 import { workspace } from '@x/shared';
 import { RunEvent } from '@x/shared/src/runs.js';
-import type { LanguageModelUsage, ToolUIPart } from 'ai';
+import type { ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
 import { CheckIcon, LoaderIcon, PanelLeftIcon, ArrowLeft, ArrowRight, MessageSquare, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon } from 'lucide-react';
@@ -51,6 +51,7 @@ import {
 import {
   Message,
   MessageContent,
+  MessageCopyButton,
   MessageResponse,
 } from '@/components/ai-elements/message';
 import {
@@ -115,9 +116,11 @@ import {
   isErrorMessage,
   isToolCall,
   isToolGroup,
+  isTurnUsageMessage,
   normalizeToolInput,
   normalizeToolOutput,
   parseAttachedFiles,
+  REASONING_EFFORT_LABELS,
   toToolState,
 } from '@/lib/chat-conversation'
 import { COMPOSIO_DISPLAY_NAMES as composioDisplayNames } from '@x/shared/src/composio.js'
@@ -134,6 +137,7 @@ import { useAnalyticsIdentity } from '@/hooks/useAnalyticsIdentity'
 import * as analytics from '@/lib/analytics'
 import { playAckCue } from '@/lib/call-sounds'
 import { useTheme } from '@/contexts/theme-context'
+import { TokenUsageMenu } from '@/components/token-usage-menu'
 
 type DirEntry = z.infer<typeof workspace.DirEntry>
 type RunEventType = z.infer<typeof RunEvent>
@@ -455,7 +459,17 @@ const buildBgTaskSetupPrompt = (description: string) =>
 const buildBgTaskEditPrompt = (slug: string) =>
   `Let's tweak the background task \`${slug}\`. Please load the \`background-task\` skill first, read the task's current \`bg-tasks/${slug}/task.yaml\`, then ask me what I want to change.`
 
-const normalizeUsage = (usage?: Partial<LanguageModelUsage> | null): LanguageModelUsage | null => {
+// The renderer displays our internal (flat) usage shape that arrives over IPC,
+// not the AI SDK's restructured LanguageModelUsage (nested token details).
+type UsageSummary = {
+  inputTokens?: number
+  outputTokens?: number
+  totalTokens?: number
+  reasoningTokens?: number
+  cachedInputTokens?: number
+}
+
+const normalizeUsage = (usage?: UsageSummary | null): UsageSummary | null => {
   if (!usage) return null
   const hasNumbers = Object.values(usage).some((value) => typeof value === 'number')
   if (!hasNumbers) return null
@@ -957,7 +971,7 @@ function App() {
       return
     }
   }, [conversation])
-  const [, setModelUsage] = useState<LanguageModelUsage | null>(null)
+  const [, setModelUsage] = useState<UsageSummary | null>(null)
   const [runId, setRunId] = useState<string | null>(null)
   // New runtime: the active session's chat data + actions. All logic lives in
   // SessionChatStore (tested headlessly); the hook is a thin subscription.
@@ -1070,6 +1084,13 @@ function App() {
   // floating popout; camera on → full-screen call; camera off → popout
   // (mascot pill). Handlers live below the voice/submit plumbing they drive.
   const video = useVideoMode()
+  // Assistant calls hold the mic — tell main so ambient meeting detection
+  // doesn't mistake our own capture for an external meeting.
+  useEffect(() => {
+    void window.ipc
+      .invoke('voice:setCallActive', { active: video.state !== 'idle' })
+      .catch(() => { /* detection may be unavailable */ })
+  }, [video.state])
   const [inCall, setInCall] = useState(false)
   const inCallRef = useRef(false)
   // User explicitly shrank the full-screen call to the floating pill.
@@ -1087,6 +1108,24 @@ function App() {
   const meetingTranscription = useMeetingTranscription(() => {
     handleToggleMeetingRef.current?.()
   })
+
+  // Keep the tray menu in sync with meeting capture ("Start meeting notes"
+  // vs "Stop recording & generate notes").
+  useEffect(() => {
+    void window.ipc
+      .invoke('meeting:setRecordingState', { recording: meetingTranscription.state === 'recording' })
+      .catch(() => { /* tray may be unavailable */ })
+  }, [meetingTranscription.state])
+
+  // Main detected the meeting app released the mic (call ended) — stop and
+  // generate notes, exactly like a manual stop. Listener only exists while
+  // recording, so a stale signal can never toggle a new recording ON.
+  useEffect(() => {
+    if (meetingTranscription.state !== 'recording') return
+    return window.ipc.on('meeting:externalCallEnded', () => {
+      handleToggleMeetingRef.current?.()
+    })
+  }, [meetingTranscription.state])
 
   // Check if voice is available on mount and when OAuth state changes
   const refreshVoiceAvailability = useCallback(() => {
@@ -1428,6 +1467,9 @@ function App() {
   const chatViewStateByTabRef = useRef(chatViewStateByTab)
   const chatDraftsRef = useRef(new Map<string, string>())
   const selectedModelByTabRef = useRef(new Map<string, { provider: string; model: string }>())
+  // Reasoning effort is per-tab, next-turn intent like the model selection —
+  // but unlike model it is never frozen on a run; it applies turn by turn.
+  const reasoningEffortByTabRef = useRef(new Map<string, 'low' | 'medium' | 'high'>())
   // Work directory is per-chat. Keyed by tab id; null/absent means none set.
   const [workDirByTab, setWorkDirByTab] = useState<Record<string, string | null>>({})
   const workDirByTabRef = useRef(workDirByTab)
@@ -1597,6 +1639,7 @@ function App() {
       runId,
       conversation,
       currentAssistantMessage,
+      sessionUsage: {},
       pendingAskHumanRequests: new Map(pendingAskHumanRequests),
       allPermissionRequests: new Map(allPermissionRequests),
       permissionResponses: new Map(permissionResponses),
@@ -2969,6 +3012,7 @@ function App() {
       // Per-message turn config. Composition inputs land in the system prompt
       // via the agent resolver; keep them session-sticky where possible so the
       // provider prefix cache survives across turns.
+      const reasoningEffort = reasoningEffortByTabRef.current.get(submitTabId)
       const sendConfig = {
         agent: {
           agentId,
@@ -2986,6 +3030,7 @@ function App() {
           },
         },
         autoPermission: (permissionMode ?? 'manual') === 'auto',
+        ...(reasoningEffort ? { reasoningEffort } : {}),
       }
       const userMessageContextFor = (middlePane: Awaited<ReturnType<typeof buildMiddlePaneContext>>) => ({
         currentDateTime: new Date().toISOString(),
@@ -3141,7 +3186,6 @@ function App() {
     toolCallId: string,
     subflow: string[],
     response: 'approve' | 'deny',
-    scope?: 'once' | 'session' | 'always',
   ) => {
     if (!runId) return
 
@@ -3150,7 +3194,6 @@ function App() {
       await sessionChat.respondToPermission(
         toolCallId,
         response === 'approve' ? 'allow' : 'deny',
-        scope ? { scope } : undefined,
       )
     } catch (error) {
       console.error('Failed to authorize permission:', error)
@@ -3333,6 +3376,7 @@ function App() {
     })
     chatDraftsRef.current.delete(tabId)
     selectedModelByTabRef.current.delete(tabId)
+    reasoningEffortByTabRef.current.delete(tabId)
     chatScrollTopByTabRef.current.delete(tabId)
     setWorkDirByTab((prev) => {
       if (!(tabId in prev)) return prev
@@ -4677,11 +4721,23 @@ function App() {
     return () => observer.disconnect()
   }, [])
 
+  // Tray menu "Start/Stop meeting notes": same toggle as the Meetings header
+  // button. Also drains a toggle parked while the window was closed/loading
+  // (mirrors the pending deep-link pull above).
+  useEffect(() => {
+    void window.ipc.invoke('app:consumePendingTrayCommand', null).then(({ toggleMeetingNotes }) => {
+      if (toggleMeetingNotes) handleToggleMeetingRef.current?.()
+    })
+    return window.ipc.on('app:toggleMeetingNotes', () => {
+      handleToggleMeetingRef.current?.()
+    })
+  }, [])
+
   // Triggered by main when the user clicks a calendar-meeting notification.
   // Reuses the same flow as the in-app "Join meeting & take notes" button.
   // When `openMeeting` is true, also opens the meeting URL in the system browser.
   useEffect(() => {
-    return window.ipc.on('app:takeMeetingNotes', ({ event, openMeeting }) => {
+    return window.ipc.on('app:takeMeetingNotes', ({ event, openMeeting, source }) => {
       const e = event as {
         summary?: string
         start?: { dateTime?: string; date?: string; timeZone?: string }
@@ -4705,7 +4761,7 @@ function App() {
         location: e.location,
         htmlLink: e.htmlLink,
         conferenceLink,
-        source: 'calendar-sync',
+        source: source ?? 'calendar-sync',
       }
       window.dispatchEvent(new Event('calendar-block:join-meeting'))
     })
@@ -4780,6 +4836,7 @@ function App() {
         case 'knowledge': void navigateToView({ type: 'knowledge-view' }); break
         case 'workspace': void navigateToView({ type: 'workspace' }); break
         case 'code': void navigateToView({ type: 'code' }); break
+        case 'apps': openAppsView(); break
       }
     }
 
@@ -5635,6 +5692,14 @@ function App() {
               })
               // Refresh the file view
               await handleVoiceNoteCreated(notePath)
+              // Notes are done — bring Rowboat to the foreground on the
+              // finished note (the post-call "redirect"). The notification
+              // below is background-only, so it only fires if the focus
+              // grab didn't take.
+              void window.ipc.invoke('app:focusMainWindow', null).catch(() => {})
+              void window.ipc
+                .invoke('meeting:notifyNotesReady', { notePath, title: noteTitle })
+                .catch(() => { /* notification is best-effort */ })
             }
           }
         } catch (err) {
@@ -5906,14 +5971,17 @@ function App() {
                 <ChatMessageAttachments attachments={item.attachments} />
               </MessageContent>
               {item.content && (
-                <MessageContent>
-                  <MessageResponse
-                    components={streamdownComponents}
-                    remarkPlugins={userMessageRemarkPlugins}
-                  >
-                    {item.content}
-                  </MessageResponse>
-                </MessageContent>
+                <div className="flex flex-col items-end">
+                  <MessageContent>
+                    <MessageResponse
+                      components={streamdownComponents}
+                      remarkPlugins={userMessageRemarkPlugins}
+                    >
+                      {item.content}
+                    </MessageResponse>
+                  </MessageContent>
+                  <MessageCopyButton text={item.content} className="mt-0.5" />
+                </div>
               )}
             </Message>
           )
@@ -5921,26 +5989,29 @@ function App() {
         const { message, files } = parseAttachedFiles(item.content)
         return (
           <Message key={item.id} from={item.role} data-message-id={item.id}>
-            <MessageContent>
-              {files.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 mb-2">
-                  {files.map((filePath, index) => (
-                    <span
-                      key={index}
-                      className="inline-flex items-center gap-1 text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full"
-                    >
-                      @{wikiLabel(filePath)}
-                    </span>
-                  ))}
-                </div>
-              )}
-              <MessageResponse
-                components={streamdownComponents}
-                remarkPlugins={userMessageRemarkPlugins}
-              >
-                {message}
-              </MessageResponse>
-            </MessageContent>
+            <div className="flex flex-col items-end">
+              <MessageContent>
+                {files.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mb-2">
+                    {files.map((filePath, index) => (
+                      <span
+                        key={index}
+                        className="inline-flex items-center gap-1 text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full"
+                      >
+                        @{wikiLabel(filePath)}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <MessageResponse
+                  components={streamdownComponents}
+                  remarkPlugins={userMessageRemarkPlugins}
+                >
+                  {message}
+                </MessageResponse>
+              </MessageContent>
+              <MessageCopyButton text={message} className="mt-0.5" />
+            </div>
           </Message>
         )
       }
@@ -6039,6 +6110,24 @@ function App() {
       )
     }
 
+    if (isTurnUsageMessage(item)) {
+      return (
+        <div key={item.id} className="-mt-6 -ml-1 flex items-center justify-start gap-1" data-message-id={item.id}>
+          <TokenUsageMenu
+            usage={item.usage}
+            scope="turn"
+            modelCallCount={item.modelCallCount}
+            align="start"
+          />
+          {item.reasoningEffort && (
+            <span className="text-xs text-muted-foreground/70">
+              {REASONING_EFFORT_LABELS[item.reasoningEffort]}
+            </span>
+          )}
+        </div>
+      )
+    }
+
     if (isErrorMessage(item)) {
       if (matchBillingError(item.message)) {
         return null
@@ -6062,6 +6151,7 @@ function App() {
       ? { runId, ...sessionChat.chatState }
       : {
           runId,
+          sessionUsage: {},
           conversation: sessionLoadErrorItems.length > 0 ? sessionLoadErrorItems : conversation,
           currentAssistantMessage,
           pendingAskHumanRequests,
@@ -6174,6 +6264,20 @@ function App() {
               onOpenApps={openAppsView}
               recentRuns={runs}
               onOpenRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
+              onRenameRun={(rid, title) => {
+                void window.ipc.invoke('sessions:setTitle', { sessionId: rid, title })
+                  .then(() => setRuns((prev) => prev.map((r) => (r.id === rid ? { ...r, title } : r))))
+                  .catch((err) => console.error('Failed to rename chat:', err))
+              }}
+              onDeleteRun={(rid) => {
+                void window.ipc.invoke('sessions:delete', { sessionId: rid })
+                  .then(() => {
+                    setRuns((prev) => prev.filter((r) => r.id !== rid))
+                    const openTab = chatTabs.find((t) => t.runId === rid)
+                    if (openTab) closeChatTab(openTab.id)
+                  })
+                  .catch((err) => console.error('Failed to delete chat:', err))
+              }}
               onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
               onOpenEmail={(threadId) => openEmailView(threadId)}
               onOpenHome={() => void navigateToView({ type: 'home' })}
@@ -6224,6 +6328,7 @@ function App() {
                     onNewChatTab={handleNewChatTab}
                     recentRuns={runs}
                     activeRunId={runId}
+                    sessionUsage={activeChatTabState.sessionUsage}
                     onSelectRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
                     onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
                   />
@@ -6497,6 +6602,11 @@ function App() {
                     currentRunId={runId}
                     processingRunIds={processingRunIds}
                     onSelectRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
+                    onRenameRun={(rid, title) => {
+                      void window.ipc.invoke('sessions:setTitle', { sessionId: rid, title })
+                        .then(() => setRuns((prev) => prev.map((r) => (r.id === rid ? { ...r, title } : r))))
+                        .catch((err) => console.error('Failed to rename chat:', err))
+                    }}
                     onDeleteRun={async (rid) => {
                       try {
                         await window.ipc.invoke('sessions:delete', { sessionId: rid })
@@ -6795,8 +6905,6 @@ function App() {
                                               toolCall={permRequest.toolCall}
                                               permission={permRequest.permission}
                                               onApprove={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve')}
-                                              onApproveSession={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'session')}
-                                              onApproveAlways={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'approve', 'always')}
                                               onDeny={() => handlePermissionResponse(permRequest.toolCall.toolCallId, permRequest.subflow, 'deny')}
                                               isProcessing={isActive && activeIsWorking}
                                               response={response}
@@ -6880,6 +6988,13 @@ function App() {
                                 selectedModelByTabRef.current.delete(tab.id)
                               }
                             }}
+                            onReasoningEffortChange={(effort) => {
+                              if (effort) {
+                                reasoningEffortByTabRef.current.set(tab.id, effort)
+                              } else {
+                                reasoningEffortByTabRef.current.delete(tab.id)
+                              }
+                            }}
                             workDir={workDirByTab[tab.id] ?? null}
                             onWorkDirChange={(v) => setTabWorkDir(tab.id, v)}
                             isRecording={isActive && isRecording}
@@ -6947,6 +7062,7 @@ function App() {
                 onOpenFullScreen={toggleRightPaneMaximize}
                 conversation={activeChatTabState.conversation}
                 currentAssistantMessage={activeChatTabState.currentAssistantMessage}
+                sessionUsage={activeChatTabState.sessionUsage}
                 chatTabStates={chatTabStatesForRender}
                 viewportAnchors={chatViewportAnchorByTab}
                 isProcessing={activeIsProcessing}
@@ -6966,6 +7082,13 @@ function App() {
                     selectedModelByTabRef.current.set(tabId, m)
                   } else {
                     selectedModelByTabRef.current.delete(tabId)
+                  }
+                }}
+                onReasoningEffortChangeForTab={(tabId, effort) => {
+                  if (effort) {
+                    reasoningEffortByTabRef.current.set(tabId, effort)
+                  } else {
+                    reasoningEffortByTabRef.current.delete(tabId)
                   }
                 }}
                 workDirByTab={workDirByTab}

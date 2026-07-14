@@ -67,6 +67,7 @@ export function completed(
   turnId: string,
   index: number,
   message: { role: 'assistant'; content: unknown },
+  usage: Extract<TEvent, { type: 'model_call_completed' }>['usage'] = {},
 ): TEvent {
   return {
     type: 'model_call_completed',
@@ -75,7 +76,7 @@ export function completed(
     modelCallIndex: index,
     message: message as never,
     finishReason: 'stop',
-    usage: {},
+    usage,
   }
 }
 

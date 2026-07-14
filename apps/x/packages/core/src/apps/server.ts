@@ -683,10 +683,48 @@ function slugFromAbsolutePath(absolutePath: string): { slug: string; rel: string
     return { slug, rel: segments.slice(1).join('/') };
 }
 
+// Config-change → one-shot agent run. An app writes data/config.json when the
+// user changes its settings (e.g. picks the repo to track); its bundled agents
+// are what turn that config into fresh data. Without this kick the user would
+// stare at an empty app until the next cron tick. Generic: any app, any agent
+// the app owns (app--<slug>--*). Dynamic import keeps apps/server decoupled
+// from the bg-task runner at module-load time.
+const agentKickTimers = new Map<string, NodeJS.Timeout>();
+function scheduleAgentKick(slug: string): void {
+    const existing = agentKickTimers.get(slug);
+    if (existing) clearTimeout(existing);
+    agentKickTimers.set(slug, setTimeout(() => {
+        agentKickTimers.delete(slug);
+        void (async () => {
+            try {
+                const tasksDir = path.join(path.dirname(APPS_DIR), 'bg-tasks');
+                const entries = await fsp.readdir(tasksDir).catch(() => [] as string[]);
+                const owned = entries.filter((e) => e.startsWith(`app--${slug}--`));
+                if (!owned.length) return;
+                const { runBackgroundTask } = await import('../background-tasks/runner.js');
+                for (const taskSlug of owned) {
+                    console.log(`[Apps] ${slug}/data/config.json changed — running ${taskSlug}`);
+                    void runBackgroundTask(taskSlug, 'manual').catch((e: unknown) => {
+                        console.warn(`[Apps] config-change agent run failed for ${taskSlug}:`, e);
+                    });
+                }
+            } catch (e) {
+                console.warn(`[Apps] config-change agent kick failed for ${slug}:`, e);
+            }
+        })();
+    }, 400));
+}
+
 async function startWatcher(): Promise<void> {
     if (watcher) return;
     const w = chokidar.watch(APPS_DIR, {
         ignoreInitial: true,
+        // Installed apps may ship .git/node_modules trees — thousands of files
+        // no consumer renders, at one watch fd per file (chokidar v4, no fsevents).
+        ignored: (watchedPath: string) => {
+            const segments = path.relative(APPS_DIR, watchedPath).split(path.sep);
+            return segments.includes('.git') || segments.includes('node_modules');
+        },
         awaitWriteFinish: { stabilityThreshold: 180, pollInterval: 50 },
     });
     w.on('all', (eventName, absolutePath) => {
@@ -695,6 +733,9 @@ async function startWatcher(): Promise<void> {
         if (!hit || hit.rel.endsWith('.tmp') || /\.tmp-[0-9a-f]+$/.test(hit.rel)) return;
         const area: 'dist' | 'data' = hit.rel === 'data' || hit.rel.startsWith('data/') ? 'data' : 'dist';
         scheduleChangeBroadcast(hit.slug, area, hit.rel);
+        if (hit.rel === 'data/config.json' && (eventName === 'add' || eventName === 'change')) {
+            scheduleAgentKick(hit.slug);
+        }
     });
     w.on('error', (error: unknown) => {
         console.error('[Apps] watcher error:', error);
@@ -795,6 +836,8 @@ export async function shutdown(): Promise<void> {
 
     for (const timer of reloadTimers.values()) clearTimeout(timer);
     reloadTimers.clear();
+    for (const timer of agentKickTimers.values()) clearTimeout(timer);
+    agentKickTimers.clear();
 
     for (const clients of eventClients.values()) {
         for (const res of clients) {

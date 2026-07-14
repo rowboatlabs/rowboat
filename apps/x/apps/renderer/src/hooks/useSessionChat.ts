@@ -1,11 +1,22 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { ipcSessionsClient } from '@/lib/session-chat/client'
-import { subscribeSessionFeed } from '@/lib/session-chat/feed'
+import { subscribeTurnFeed } from '@/lib/turn-feed'
 import { SessionChatStore, type SessionChatStoreDeps } from '@/lib/session-chat/store'
+
+// Declare "this window is watching turn X" so main forwards its deltas.
+// Fire-and-forget on both edges: a lost subscribe only degrades streaming
+// granularity (durable events still arrive), never correctness.
+function subscribeDeltas(turnId: string): () => void {
+  void window.ipc.invoke('turns:subscribe', { turnId }).catch(() => undefined)
+  return () => {
+    void window.ipc.invoke('turns:unsubscribe', { turnId }).catch(() => undefined)
+  }
+}
 
 const defaultDeps: SessionChatStoreDeps = {
   client: ipcSessionsClient,
-  subscribeFeed: subscribeSessionFeed,
+  subscribeTurnFeed,
+  subscribeDeltas,
 }
 
 // Thin subscription over SessionChatStore — all logic (seeding, feed events,

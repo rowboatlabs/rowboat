@@ -1,9 +1,10 @@
 # Turn Runtime Technical Specification
 
 Status: implemented and live. All chat, background, and knowledge callers
-run on this runtime; the legacy runs runtime remains only for code-mode
-sessions (see the carve-out section in the repo-root `AGENTS.md`). The
-companion session layer is specified in `session-design.md`.
+run on this runtime; the legacy runs runtime (`src/runtime/legacy/`) remains
+only for code-mode sessions and the mini-apps host API, and is deleted as a
+unit when those migrate. The companion session layer is specified in
+`session-design.md`.
 
 This document specifies a new turn-oriented agent loop for `@x/core`. It is
 intended to replace the behavioral responsibilities of the current run runtime
@@ -163,9 +164,17 @@ naturally complete independently. No behavior may rely on physical completion
 order.
 
 Durable appends are serialized through a single internal queue per invocation:
-the persist → reduce → stream ritual runs to completion for one batch of
+the reduce → persist → stream ritual runs to completion for one batch of
 events before the next begins, so file order, in-memory order, and stream
 order are identical by construction even while executions overlap.
+
+The reduce step comes first as a validation gate: the batch is reduced
+against the in-memory history before anything is written, so an illegal
+append (for example, a misbehaving tool reporting progress after its
+terminal result) rejects in memory for its caller only and never becomes
+durable. A persisted illegal event would make every future read of the
+file fail and, through context references (section 6.6), block the whole
+session chain behind it.
 
 ## 5. Storage design
 
@@ -597,6 +606,13 @@ bytes and the two views cannot diverge.
 Requests exclude credentials, auth headers, functions, model objects, and
 transport objects.
 
+`parameters` holds only canonical, provider-agnostic generation knobs. The
+model bridge whitelists what it forwards (`temperature`, `topP`,
+`maxOutputTokens`, `providerOptions`) and maps `reasoningEffort`
+(`"low" | "medium" | "high"`, stamped from `turn_created.config` onto every
+call) into provider-specific options at invoke time — transport-only, like
+prompt caching, so a persisted turn replays correctly on a different model.
+
 The name `requested` is intentional. The event proves durable intent, not that
 the provider definitely received the request.
 
@@ -683,6 +699,15 @@ interface IPermissionChecker {
 
 Tool-specific policy, command analysis, filesystem boundaries, and allowlists
 remain outside the loop.
+
+The real checker bridge implements that policy from per-tool declarations in
+the builtin catalog (`tools/types.ts`) and fails closed: any tool without an
+explicit `"none"` declaration — undeclared builtins, `mcp:*` attachments on
+user agents, unknown toolId families — requires permission. Composio and MCP
+executions produce family-specific request payloads (the shared
+`ToolPermissionMetadata` kinds); everything else falls back to a generic
+`{kind: "tool"}` request. The audited set of gated builtins is pinned by a
+catalog test.
 
 When automatic permission is enabled, the injected classifier handles all
 permission-required calls from one model response in one batch:
@@ -1300,6 +1325,10 @@ Missing or mismatched runtime dependencies:
 - Do not append `turn_failed`.
 - Leave the turn unchanged so the caller can fix its environment and retry.
 
+Cancel inputs are exempt from this validation: they are applied before
+dependency materialization (section 22), because cancellation is the
+terminal exit for environments that never come back.
+
 Provider failures after actual execution begins are modeled turn failures.
 
 ## 16. Hot TurnExecution stream
@@ -1415,6 +1444,34 @@ Lifecycle publication is observational and must not alter durable turn
 semantics. Live durable events and deltas are consumed from `TurnExecution` by
 the application and may be forwarded over the existing bus/IPC bridge.
 
+### 17.1 Turn event bus
+
+Implemented alongside the lifecycle bus: the runtime publishes every turn's
+events to an injected `ITurnEventBus` (`event-hub.ts`), tagged with the
+turn's `sessionId`, regardless of who started the turn — session chat,
+headless runners, spawned sub-agents. This is the process-wide delivery
+spine; `TurnExecution` remains the single-consumer, invocation-scoped
+stream for the initiating caller.
+
+- `turn_created` is published by `createTurn` (it never flows through an
+  execution stream); every other durable event is published by the advance
+  loop immediately after its `stream.push`, inside the serialized commit
+  ritual, so bus order equals file order.
+- Durable events carry `offset`, their 1-based line index in the turn file
+  (`this.events.length` at commit time, which is absolute because each
+  invocation re-reads the full log). A late subscriber joins a live turn by
+  subscribing first, fetching the `getTurn` snapshot, and discarding bus
+  events with `offset <= snapshot.length` — no gaps, no duplicates, no
+  sequence numbers in the durable schema.
+- Text/reasoning deltas are published without an offset (they are not
+  durable). The app-layer IPC bridge (`turns:events`) broadcasts durable
+  events to every window; deltas are forwarded only to windows that
+  declared they are watching that turn (`turns:subscribe` /
+  `turns:unsubscribe`, a per-webContents registry in the app layer).
+- The bus is ephemeral and observational, like the lifecycle bus: listener
+  errors are swallowed, nothing durable depends on delivery, and a crash
+  losing listeners accurately reflects that no execution is known active.
+
 ## 18. Main execution algorithm
 
 At a high level, `advanceTurn` performs:
@@ -1425,10 +1482,13 @@ At a high level, `advanceTurn` performs:
 3. Publish turn-processing-start.
 4. Read and validate JSONL.
 5. Reduce events to TurnState.
-6. Materialize context through the injected context resolver.
-7. Validate terminal state, input, and runtime dependencies.
-8. Apply the optional single external input.
-9. Repeatedly advance deterministic work:
+6. Validate terminal state and the optional input.
+7. If the input is a cancel, cancel immediately — live dependencies are
+   never materialized for cancellation (section 22).
+8. Materialize context through the injected context resolver and validate
+   runtime dependencies.
+9. Apply the optional single external input.
+10. Repeatedly advance deterministic work:
    a. Recover from the current durable boundary.
    b. Resolve permissions.
    c. Execute eligible sync tools.
@@ -1441,9 +1501,9 @@ At a high level, `advanceTurn` performs:
    j. Persist normalized non-delta events and stream deltas.
    k. Append model_call_completed or model_call_failed.
    l. Complete when the response has no tool calls.
-10. Publish turn-processing-end in finalization.
-11. Release the lock.
-12. Resolve/reject outcome and close/error event stream.
+11. Publish turn-processing-end in finalization.
+12. Release the lock.
+13. Resolve/reject outcome and close/error event stream.
 ```
 
 The loop does not read session queues, accept new user messages, switch agents,
@@ -1539,6 +1599,11 @@ Rules:
 - Append `turn_cancelled`.
 - Never initiate another model call.
 - Reject late permission decisions, progress, and results after cancellation.
+- A cancel input is applied before live-dependency materialization:
+  cancellation never requires the context, agent snapshot, model, or tools
+  to resolve, so a turn whose environment is no longer resolvable (provider
+  removed from config, builtin renamed, context chain unreadable) can
+  always be cancelled — the terminal exit that keeps its session usable.
 
 Sync tools are cooperatively cancellable. A tool that ignores the signal may not
 settle immediately. The runtime cannot guarantee rollback of external side
@@ -1619,6 +1684,11 @@ but the first turn implementation does not enforce it.
 
 The reducer validates `context` structurally but treats it as opaque; it
 never resolves references (section 6.6).
+
+The runtime also uses the reducer as its append gate: every batch is
+reduced against the existing history before it is persisted (section 4.5),
+so a history that violates these invariants cannot become durable through
+the loop.
 
 ## 25. Historical and live UI behavior
 
@@ -1733,6 +1803,9 @@ Assertions:
 - Turn becomes terminal cancelled.
 - No subsequent model request occurs.
 - Late external inputs are rejected.
+- Cancellation succeeds when live dependencies can no longer be resolved,
+  while non-cancel inputs against the same broken environment reject with
+  the turn file unchanged.
 
 ### 26.6 Failures
 
@@ -1853,21 +1926,20 @@ tests for:
 This is a suggested organization, not a locked implementation requirement:
 
 ```text
-apps/x/packages/shared/src/turns.ts
+apps/x/packages/shared/src/turns.ts   # durable schemas + reducer (unchanged home)
 
-apps/x/packages/core/src/turns/
-  runtime.ts
-  reducer.ts              # if implementation is re-exported through shared,
-                          # locate pure code to avoid dependency cycles
-  repo.ts
-  fs-repo.ts
-  stream.ts
-  agent-resolver.ts
-  context-resolver.ts
-  model-registry.ts
-  tool-registry.ts
-  permission.ts
-  index.ts
+apps/x/packages/core/src/runtime/
+  turns/          # the engine: runtime.ts, stream, event-hub, context
+                  # resolution/elision, request composer, repos, inspect-cli
+    bridges/      # real implementations of the engine's seams (agent/tool/
+                  # model resolvers, permission checker/classifier)
+  sessions/       # session layer (session-design.md)
+  assembly/       # what an agent is: registry, compose-instructions,
+                  # workspace-context, message-encoding, permission-metadata,
+                  # headless runners, spawn-agent, copilot/, capabilities/,
+                  # skills/
+  tools/          # builtin-tool catalog + domain modules + exec plumbing
+  legacy/         # the dying runs engine (engine.ts + runs.ts + repos)
 ```
 
 The final reducer location must permit both core and renderer to use exactly the

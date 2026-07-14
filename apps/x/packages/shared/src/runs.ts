@@ -100,6 +100,24 @@ export const ToolPermissionMetadata = z.discriminatedUnion("kind", [
         paths: z.array(z.string()),
         pathPrefix: z.string(),
     }),
+    // A Composio action execution (composio-execute-tool).
+    z.object({
+        kind: z.literal("composio"),
+        toolkitSlug: z.string(),
+        toolSlug: z.string(),
+    }),
+    // An MCP tool execution (executeMcpTool or an mcp:* attachment).
+    z.object({
+        kind: z.literal("mcp"),
+        serverName: z.string().optional(),
+        toolName: z.string(),
+    }),
+    // Generic fail-closed request: a tool with no more specific policy.
+    z.object({
+        kind: z.literal("tool"),
+        toolId: z.string(),
+        toolName: z.string(),
+    }),
 ]);
 
 export const ToolPermissionRequestEvent = BaseRunEvent.extend({

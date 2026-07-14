@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Archive, Bold, CheckCheck, Forward, Italic, Link as LinkIcon, List, ListOrdered, LoaderIcon, Mail, Paperclip, Quote, Redo2, RefreshCw, Reply, ReplyAll, Search, Send, Sparkles, SquarePen, Star, StarOff, Strikethrough, Trash2, Undo2, X } from 'lucide-react'
+import { Archive, Bold, CheckCheck, Forward, Italic, Link as LinkIcon, List, ListOrdered, LoaderIcon, Mail, Paperclip, Quote, Redo2, RefreshCw, Reply, ReplyAll, Search, Send, SlidersHorizontal, Sparkles, SquarePen, Star, StarOff, Strikethrough, Trash2, Undo2, X } from 'lucide-react'
 import { useEditor, EditorContent, type Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
@@ -7,11 +7,19 @@ import Placeholder from '@tiptap/extension-placeholder'
 import type { blocks } from '@x/shared'
 import { cn } from '@/lib/utils'
 import { toast } from '@/lib/toast'
+import { prepareEmailHtml, splitPlainTextQuote, stripQuotedReplyText, QUOTED_CLASS } from '@/lib/email-quotes'
 import { useTheme } from '@/contexts/theme-context'
 import { SettingsDialog } from '@/components/settings-dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 
 type GmailThread = blocks.GmailThread
 type GmailThreadMessage = blocks.GmailThreadMessage
@@ -72,31 +80,6 @@ function snippet(text?: string): string {
   return (text || '').replace(/\s+/g, ' ').trim().slice(0, 180)
 }
 
-function isReplyQuoteBoundary(lines: string[], index: number): boolean {
-  const line = lines[index]?.trim() || ''
-  if (/^On\b.+\bwrote:\s*$/i.test(line)) return true
-  if (/^-{2,}\s*(Original Message|Forwarded message)\s*-{2,}$/i.test(line)) return true
-  if (/^From:\s+\S/i.test(line)) {
-    const next = lines.slice(index + 1, index + 6).map((value) => value.trim())
-    return next.some((value) => /^(Sent|Date):\s+\S/i.test(value))
-      && next.some((value) => /^To:\s+\S/i.test(value))
-      && next.some((value) => /^Subject:\s+\S/i.test(value))
-  }
-  return false
-}
-
-function stripQuotedReplyText(text: string): string {
-  const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')
-  const boundary = lines.findIndex((line, index) => {
-    if (isReplyQuoteBoundary(lines, index)) return true
-    return index > 0
-      && line.trim().startsWith('>')
-      && (lines[index - 1]?.trim() === '' || lines[index - 1]?.trim().startsWith('>'))
-  })
-  const visible = boundary >= 0 ? lines.slice(0, boundary) : lines
-  return visible.join('\n').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
-}
-
 function getInitial(from?: string): string {
   return (extractName(from)[0] || '?').toUpperCase()
 }
@@ -112,6 +95,70 @@ function avatarColor(from?: string): string {
 
 function latestMessage(thread: GmailThread): GmailThreadMessage | undefined {
   return thread.messages[thread.messages.length - 1]
+}
+
+// The label set (chips, filter pills, correction dropdown) comes from the
+// backend label registry: built-ins (display names follow Superhuman's Auto
+// Label vocabulary — Marketing / Pitch / News / Calendar) plus any labels the
+// user defined in their agent instructions. This static copy of the built-ins
+// is the fallback used until the registry loads, and for ids the registry no
+// longer knows (a custom label the user later removed).
+type EmailCategory = string
+
+interface EmailLabelInfo {
+  id: string
+  name: string
+  kind: 'builtin' | 'custom'
+}
+
+const BUILTIN_LABELS: EmailLabelInfo[] = [
+  { id: 'correspondence', name: 'Direct', kind: 'builtin' },
+  { id: 'meeting', name: 'Calendar', kind: 'builtin' },
+  { id: 'notification', name: 'Notification', kind: 'builtin' },
+  { id: 'newsletter', name: 'News', kind: 'builtin' },
+  { id: 'promotion', name: 'Marketing', kind: 'builtin' },
+  { id: 'cold_outreach', name: 'Pitch', kind: 'builtin' },
+  { id: 'receipt', name: 'Receipt', kind: 'builtin' },
+]
+
+// Pill order in the "Everything else" filter row: noise first (that's what
+// gets bulk-archived), then the rest of the built-ins; custom labels are
+// appended in registry order at render time. 'unclassified' (threads the
+// classifier hasn't reached yet) is always last and unarchivable.
+const BUILTIN_PILL_ORDER = ['newsletter', 'promotion', 'notification', 'cold_outreach', 'receipt', 'meeting', 'correspondence']
+
+// Fallback for ids the registry doesn't know: "portfolio_updates" → "Portfolio updates".
+function prettifyLabelId(id: string): string {
+  const words = id.replace(/_/g, ' ').trim()
+  return words ? words[0].toUpperCase() + words.slice(1) : id
+}
+
+function labelNameFor(labels: EmailLabelInfo[], category: string): string {
+  if (category === 'unclassified') return 'Uncategorized'
+  return labels.find((l) => l.id === category)?.name ?? prettifyLabelId(category)
+}
+
+// The user sent the latest message and someone else is in the conversation —
+// the ball is in their court. Derived from the messages on every render (never
+// stored) so it can't go stale the way an arrival-time label would.
+function isAwaitingThem(thread: GmailThread, selfEmail: string | null | undefined): boolean {
+  const self = (selfEmail || '').trim().toLowerCase()
+  if (!self) return false
+  const latest = latestMessage(thread)
+  if (!(latest?.from || '').toLowerCase().includes(self)) return false
+  return thread.messages.some((m) => m.from && !m.from.toLowerCase().includes(self))
+}
+
+function daysSince(value?: string): number | null {
+  if (!value) return null
+  const ms = Date.parse(value)
+  if (!Number.isFinite(ms)) return null
+  return Math.max(0, Math.floor((Date.now() - ms) / 86_400_000))
+}
+
+function waitingChip(thread: GmailThread): string {
+  const days = daysSince(latestMessage(thread)?.date || thread.date)
+  return days && days > 0 ? `Waiting ${days}d` : 'Waiting'
 }
 
 // Split a raw header recipient string (e.g. `"Jo Bloggs" <jo@x.com>, b@y.com`) into
@@ -307,43 +354,6 @@ function plainTextToHtml(text: string): string {
     .join('')
 }
 
-function splitPlainTextQuote(text: string): { visible: string; quoted: string | null } {
-  const re = /(?:^|\n)On\s+.+?\swrote:\s*(?:\n|$)/
-  const match = re.exec(text)
-  if (!match) return { visible: text, quoted: null }
-  const start = match.index === 0 ? 0 : match.index + 1
-  const visible = text.slice(0, start).trimEnd()
-  const quoted = text.slice(start)
-  if (!quoted.trim()) return { visible: text, quoted: null }
-  return { visible, quoted }
-}
-
-// True if the HTML — after stripping quoted/hidden content — defines its
-// own visual layout (real images, tables, explicit backgrounds). Unstyled
-// HTML (Gmail replies, Outlook one-liners wrapped in MsoNormal boilerplate,
-// outreach emails with only a tracking pixel, reply HTML whose only image
-// lives inside the inline-quoted thread) gets an iframe that adapts to the
-// app theme; styled HTML keeps the white "paper" look so newsletters /
-// branded designs render as their senders intended.
-function isStyledHtml(html: string): boolean {
-  const doc = new DOMParser().parseFromString(html, 'text/html')
-  doc.querySelectorAll('.gmail_quote, .gmail_attr, blockquote[type="cite"]').forEach((n) => n.remove())
-  if (doc.querySelector('table')) return true
-  for (const img of Array.from(doc.querySelectorAll('img'))) {
-    const w = parseInt(img.getAttribute('width') || '0', 10)
-    const h = parseInt(img.getAttribute('height') || '0', 10)
-    if (w === 1 && h === 1) continue
-    const style = img.getAttribute('style') || ''
-    if (/display\s*:\s*none/i.test(style)) continue
-    if (/visibility\s*:\s*hidden/i.test(style)) continue
-    return true
-  }
-  const visible = doc.body?.innerHTML || ''
-  if (/bgcolor\s*=/i.test(visible)) return true
-  if (/background-(color|image)\s*:/i.test(visible)) return true
-  return false
-}
-
 function buildEmailDocument(
   html: string,
   opts: { theme: 'light' | 'dark'; adaptToTheme: boolean },
@@ -373,6 +383,10 @@ function buildEmailDocument(
     overflow-y: hidden;
     word-wrap: break-word;
     padding-bottom: 4px;
+    /* Contain the first child's top margin. Without this it collapses through
+       <body>, shifting the box down while body.scrollHeight stays short — so
+       the height we hand the iframe cuts the last line off. */
+    display: flow-root;
   }
   body > *:last-child { margin-bottom: 0; }
   img { max-width: 100%; height: auto; }
@@ -384,12 +398,8 @@ function buildEmailDocument(
     border-left: 2px solid ${quoteBorder};
     color: ${quoteColor};
   }
-  .gmail_quote,
-  .gmail_attr,
-  blockquote[type="cite"] { display: none; }
-  [data-show-quotes="true"] .gmail_quote,
-  [data-show-quotes="true"] .gmail_attr,
-  [data-show-quotes="true"] blockquote[type="cite"] { display: block; }
+  .${QUOTED_CLASS} { display: none; }
+  [data-show-quotes="true"] .${QUOTED_CLASS} { display: revert; }
 </style>
 </head><body>${html}</body></html>`
 }
@@ -436,24 +446,25 @@ function HtmlMessageBody({ message, threadId }: { message: GmailThreadMessage; t
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastSavedHeightRef = useRef<number>(message.bodyHeight ?? 0)
   const [height, setHeight] = useState(message.bodyHeight ?? 80)
-  const [hasQuote, setHasQuote] = useState(false)
   const [showQuotes, setShowQuotes] = useState(false)
   // Read by handleLoad so a reload (theme switch rebuilds srcDoc) restores the
   // expanded-quotes state on the fresh document.
   const showQuotesRef = useRef(showQuotes)
   useEffect(() => { showQuotesRef.current = showQuotes }, [showQuotes])
 
-  const adaptToTheme = useMemo(() => !isStyledHtml(message.bodyHtml!), [message.bodyHtml])
+  // Tag the quotes before the iframe ever paints, so quoted history is hidden
+  // on the first frame and the height we measure is the collapsed height.
+  const { html, hasQuote, styled } = useMemo(() => prepareEmailHtml(message.bodyHtml!), [message.bodyHtml])
+  const adaptToTheme = !styled
   const srcDoc = useMemo(
-    () => buildEmailDocument(message.bodyHtml!, { theme: resolvedTheme, adaptToTheme }),
-    [message.bodyHtml, resolvedTheme, adaptToTheme],
+    () => buildEmailDocument(html, { theme: resolvedTheme, adaptToTheme }),
+    [html, resolvedTheme, adaptToTheme],
   )
 
   const handleLoad = useCallback(() => {
     const iframe = iframeRef.current
     const doc = iframe?.contentDocument
     if (!doc?.body) return
-    setHasQuote(!!doc.querySelector('.gmail_quote, .gmail_attr, blockquote[type="cite"]'))
     if (showQuotesRef.current) doc.documentElement.dataset.showQuotes = 'true'
     // Clicking into the email body focuses the iframe document, which would
     // otherwise swallow every list/thread shortcut (the parent's document
@@ -1304,6 +1315,15 @@ const ComposeBox = memo(function ComposeBox({
 
     setGenerating(true)
     try {
+      // The user's standing email-agent instructions steer this writer too —
+      // otherwise "keep drafts short, sign off with X" would apply to the
+      // auto-drafted replies but silently not to the Write-with-AI bar.
+      try {
+        const { instructions } = await window.ipc.invoke('gmail:getEmailInstructions', {})
+        if (instructions.trim()) {
+          system = `${system}\n\nThe user's standing email preferences — follow any that concern how emails should be written (tone, length, sign-off, what not to write):\n${instructions.trim()}`
+        }
+      } catch { /* draft without them */ }
       // Draft through Copilot: no model override, so the backend resolves the
       // same default model/provider the Copilot chat uses (models.json).
       const res = await window.ipc.invoke('llm:generate', { prompt, system })
@@ -1970,6 +1990,8 @@ function ThreadDetail({
   hidden,
   keysDisabled,
   onComposingChange,
+  onSetCategory,
+  labels = BUILTIN_LABELS,
 }: {
   thread: GmailThread
   onClose: () => void
@@ -1978,6 +2000,10 @@ function ThreadDetail({
   keysDisabled?: boolean
   /** Reports whether the inline composer is open, so list shortcuts pause. */
   onComposingChange?: (composing: boolean) => void
+  /** Present for inbox threads only — search results aren't in the cache the correction writes to. */
+  onSetCategory?: (threadId: string, category: EmailCategory) => Promise<void>
+  /** The label registry (built-ins + user-defined) for the chip and correction dropdown. */
+  labels?: EmailLabelInfo[]
 }) {
   const [composeMode, setComposeMode] = useState<ComposeMode | null>(null)
   const [selfEmail, setSelfEmail] = useState<string>('')
@@ -2059,6 +2085,30 @@ function ThreadDetail({
     <div className={cn('gmail-detail gmail-detail-inline', hidden && 'gmail-detail-hidden')}>
       <div className="gmail-detail-toolbar">
         <div className="gmail-thread-subject-inline">{thread.subject || '(No subject)'}</div>
+        {onSetCategory && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="gmail-row-chip gmail-category-chip"
+                title="Correct the category — the classifier learns from this"
+              >
+                {thread.category ? labelNameFor(labels, thread.category) : 'Categorize'}
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="font-sans">
+              {labels.map((l) => (
+                <DropdownMenuItem
+                  key={l.id}
+                  onSelect={() => { void onSetCategory(thread.threadId, l.id) }}
+                  className={cn(l.id === thread.category && 'font-semibold')}
+                >
+                  {l.name}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
         <button type="button" className="gmail-icon-button" onClick={onClose} aria-label="Close thread">
           <span>×</span>
         </button>
@@ -2150,6 +2200,10 @@ const ThreadRow = memo(function ThreadRow({
   isLeaving,
   keysDisabled,
   section,
+  chip,
+  chipWaiting,
+  onSetCategory,
+  labels,
   onToggle,
   onMarkRead,
   onArchive,
@@ -2168,6 +2222,12 @@ const ThreadRow = memo(function ThreadRow({
   keysDisabled: boolean
   /** Which inbox section the row is rendered in; null hides the importance toggle (e.g. search results). */
   section: 'important' | 'other' | null
+  /** Status pill after the subject — "Reply ready" or waiting age ("Waiting 3d"). The category chip renders automatically from thread.category. */
+  chip?: string | null
+  chipWaiting?: boolean
+  onSetCategory?: (threadId: string, category: EmailCategory) => Promise<void>
+  /** Label registry — stable reference from EmailView state (this row is memoized). */
+  labels: EmailLabelInfo[]
   onToggle: (thread: GmailThread) => void
   onMarkRead: (threadId: string, read?: boolean) => Promise<void>
   onArchive: (threadId: string) => Promise<void>
@@ -2180,6 +2240,14 @@ const ThreadRow = memo(function ThreadRow({
 }) {
   const latest = latestMessage(thread)
   const isUnread = thread.unread === true
+  // Category chip on classified rows so the list itself answers "worth
+  // opening?". Plain correspondence gets none — with granular labels
+  // (Investor, Customer, …) available, "Direct" is the default case and
+  // absence reads cleaner than a chip stating it. It stays available in the
+  // correction dropdown and the Everything-else filter pills.
+  const categoryChip = thread.category && thread.category !== 'correspondence'
+    ? labelNameFor(labels, thread.category)
+    : null
   const stop = (e: React.MouseEvent | React.KeyboardEvent) => {
     e.stopPropagation()
   }
@@ -2201,6 +2269,8 @@ const ThreadRow = memo(function ThreadRow({
           <span className="gmail-row-content">
             <strong>{thread.summary || thread.subject || '(No subject)'}</strong>
             <span>{thread.summary ? thread.subject : snippet(latest?.body || thread.latest_email)}</span>
+            {categoryChip && <span className="gmail-row-chip">{categoryChip}</span>}
+            {chip && <span className={cn('gmail-row-chip', chipWaiting ? 'gmail-row-chip-waiting' : 'gmail-row-chip-ready')}>{chip}</span>}
           </span>
           <span className="gmail-row-date">{formatInboxTime(latest?.date || thread.date)}</span>
         </button>
@@ -2254,11 +2324,87 @@ const ThreadRow = memo(function ThreadRow({
           hidden={!isSelected}
           keysDisabled={keysDisabled}
           onComposingChange={onComposingChange}
+          onSetCategory={onSetCategory}
+          labels={labels}
         />
       )}
     </div>
   )
 })
+
+// Free-text standing instructions for the email agent. Saved to
+// config/email_instructions.md and injected into every classification /
+// draft call as the highest-priority section of the system prompt.
+function EmailInstructionsDialog({ open, onOpenChange, onSaved }: { open: boolean; onOpenChange: (open: boolean) => void; onSaved?: () => void }) {
+  const [text, setText] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    setLoading(true)
+    window.ipc.invoke('gmail:getEmailInstructions', {})
+      .then((res) => { if (!cancelled) setText(res.instructions) })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [open])
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      const result = await window.ipc.invoke('gmail:setEmailInstructions', { instructions: text })
+      if (result.ok) {
+        toast('Instructions saved — they apply to every email from now on.', 'success')
+        onOpenChange(false)
+        onSaved?.()
+      } else {
+        toast(`Could not save: ${result.error ?? 'unknown error'}`, 'error')
+      }
+    } catch (err) {
+      toast(`Could not save: ${err instanceof Error ? err.message : String(err)}`, 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="font-sans sm:max-w-[560px]">
+        <DialogTitle className="text-base font-semibold">Email agent instructions</DialogTitle>
+        <p className="text-sm text-muted-foreground">
+          Standing instructions for how your email is labeled, prioritized, and how draft replies are written.
+          The agent follows these over its defaults, on every new email. You can also define your own labels
+          here — e.g. “Create a label Clients for emails from active client accounts.”
+        </p>
+        <Textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          disabled={loading}
+          rows={10}
+          maxLength={8000}
+          placeholder={
+            'Examples:\n' +
+            '- Emails from my investors are always important.\n' +
+            '- Investor updates I receive are direct emails, not news.\n' +
+            '- Never draft replies to recruiters or cold outreach.\n' +
+            '- Keep drafts short and casual; sign off with my first name.\n' +
+            '- Payment failure alerts are important; other billing emails are receipts.\n' +
+            '- Create a label "Customers" for emails from paying customers.'
+          }
+          className="min-h-[220px] font-sans text-sm leading-relaxed"
+        />
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button onClick={() => void save()} disabled={saving || loading}>
+            {saving ? 'Saving…' : 'Save'}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
 
 function ShortcutKey({ children }: { children: React.ReactNode }) {
   return (
@@ -2420,6 +2566,13 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
   const closeCompose = useCallback(() => setComposeOpen(false), [])
   // Inbox vs Drafts. Drafts are fetched live (they're not in the inbox cache).
   const [view, setView] = useState<'inbox' | 'drafts'>('inbox')
+  // Category filter for "Everything else" (null = all) + whole-section counts
+  // from the last backend response, which drive the filter pills.
+  const [otherCategory, setOtherCategory] = useState<string | null>(null)
+  const otherCategoryRef = useRef<string | null>(null)
+  otherCategoryRef.current = otherCategory
+  const [categoryCounts, setCategoryCounts] = useState<Record<string, number>>({})
+  const [bulkArchiving, setBulkArchiving] = useState(false)
   const [drafts, setDrafts] = useState<GmailThread[]>(() => persistedDrafts ?? [])
   const [draftsLoading, setDraftsLoading] = useState(false)
   const [draftsError, setDraftsError] = useState<string | null>(null)
@@ -2432,6 +2585,17 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
   // Gmail sync uses the native Google OAuth connection.
   const [emailConnection, setEmailConnection] = useState<GmailConnectionStatus | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [instructionsOpen, setInstructionsOpen] = useState(false)
+  // Label registry (built-ins + user-defined). Fetched on mount and again
+  // after the instructions dialog saves, since saving can create labels.
+  const [emailLabels, setEmailLabels] = useState<EmailLabelInfo[]>(BUILTIN_LABELS)
+  const refreshLabels = useCallback(async () => {
+    try {
+      const res = await window.ipc.invoke('gmail:getEmailLabels', {})
+      if (res.labels?.length) setEmailLabels(res.labels)
+    } catch { /* keep built-ins */ }
+  }, [])
+  useEffect(() => { void refreshLabels() }, [refreshLabels])
   // Keyboard navigation: the j/k focus cursor over the visible rows, plus the
   // "?" shortcuts overlay. lastFocusedIndexRef remembers the cursor's position
   // so it can re-anchor when the focused row disappears (archive/trash/reload).
@@ -2649,6 +2813,33 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
     }
   }, [important.threads, other.threads, markLeaving, setSection])
 
+  // User corrects a thread's category: sticky on the thread + recorded as a
+  // correction the classifier learns from (few-shot).
+  const setCategoryAction = useCallback(async (threadId: string, category: EmailCategory) => {
+    try {
+      const result = await window.ipc.invoke('gmail:setCategory', { threadId, category })
+      if (result.ok) {
+        updateThreadInState(threadId, (t) => ({ ...t, category }))
+        setCategoryCounts((prev) => {
+          const next = { ...prev }
+          // Only 'other'-section threads are counted; adjust optimistically and
+          // let the next backend response correct any drift.
+          const prevCat = [...important.threads, ...other.threads].find((t) => t.threadId === threadId)?.category ?? 'unclassified'
+          if (other.threads.some((t) => t.threadId === threadId)) {
+            next[prevCat] = Math.max(0, (next[prevCat] ?? 1) - 1)
+            next[category] = (next[category] ?? 0) + 1
+          }
+          return next
+        })
+        toast(`Filed as ${labelNameFor(emailLabels, category)} — noted for similar emails.`, 'success')
+      } else if (result.error) {
+        toast(`Could not update category: ${result.error}`, 'error')
+      }
+    } catch (err) {
+      toast(`Could not update category: ${err instanceof Error ? err.message : String(err)}`, 'error')
+    }
+  }, [updateThreadInState, important.threads, other.threads, emailLabels])
+
   const trashThreadAction = useCallback(async (threadId: string) => {
     markLeaving(threadId, true)
     try {
@@ -2714,8 +2905,21 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
   // reload to be discarded whenever Other was reloaded in the same tick.)
   const epochsRef = useRef<Record<InboxSection, number>>({ important: 0, other: 0 })
 
-  const sectionChannel = (section: InboxSection) =>
-    section === 'important' ? 'gmail:getImportant' as const : 'gmail:getEverythingElse' as const
+  const fetchSectionPage = useCallback(async (section: InboxSection, cursor?: string) => {
+    const result = section === 'important'
+      ? await window.ipc.invoke('gmail:getImportant', { cursor, limit: PAGE_SIZE })
+      : await window.ipc.invoke('gmail:getEverythingElse', {
+          cursor,
+          limit: PAGE_SIZE,
+          category: otherCategoryRef.current ?? undefined,
+        })
+    // Counts describe the whole 'other' section regardless of filter/page —
+    // keep the pills fresh on every response that carries them.
+    if (section === 'other' && result.categoryCounts) {
+      setCategoryCounts(result.categoryCounts)
+    }
+    return result
+  }, [])
 
   const loadNextPage = useCallback(async (section: InboxSection) => {
     const current = section === 'important' ? important : other
@@ -2724,10 +2928,7 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
     const epoch = epochsRef.current[section]
     setSection(section, (prev) => ({ ...prev, loadingPage: true }))
     try {
-      const result = await window.ipc.invoke(sectionChannel(section), {
-        cursor: current.nextCursor ?? undefined,
-        limit: PAGE_SIZE,
-      })
+      const result = await fetchSectionPage(section, current.nextCursor ?? undefined)
       if (epoch !== epochsRef.current[section]) return
       setSection(section, (prev) => ({
         threads: [...prev.threads, ...result.threads],
@@ -2740,7 +2941,7 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
       console.warn(`[Gmail] page load failed for ${section}:`, err)
       setSection(section, (prev) => ({ ...prev, loadingPage: false }))
     }
-  }, [important, other, setSection])
+  }, [important, other, setSection, fetchSectionPage])
 
   const reloadFirstPage = useCallback(async (section: InboxSection, options: { silent?: boolean } = {}) => {
     const epoch = ++epochsRef.current[section]
@@ -2750,9 +2951,7 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
       setSection(section, () => ({ ...initialSectionState, loadingPage: true }))
     }
     try {
-      const result = await window.ipc.invoke(sectionChannel(section), {
-        limit: PAGE_SIZE,
-      })
+      const result = await fetchSectionPage(section)
       if (epoch !== epochsRef.current[section]) return
       setSection(section, () => ({
         threads: result.threads,
@@ -2765,33 +2964,59 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
       console.warn(`[Gmail] initial page load failed for ${section}:`, err)
       setSection(section, (prev) => ({ ...prev, loadingPage: false }))
     }
-  }, [setSection])
+  }, [setSection, fetchSectionPage])
 
-  // Initial load — fetch page 1 of Important. On first-ever mount we do a
-  // non-silent load (shows loading state). On re-mount with persisted state we
-  // do a silent reconcile against the cache — necessary because the watcher
-  // subscription only runs while mounted, so any cache changes that happened
-  // while the panel was unmounted would otherwise stay invisible.
+
+  // Initial load — fetch page 1 of BOTH sections. Everything else used to
+  // load lazily once Important was exhausted, but that chained on
+  // hasReachedEnd, which every silent live reload resets (back to page 1) —
+  // under sustained sync writes the chain never fired and the section never
+  // appeared at all. Both lists are cheap local reads (mtime-cached file
+  // scan), so eager is fine. On first-ever mount we do a non-silent load
+  // (shows loading state); on re-mount with persisted state we do a silent
+  // reconcile against the cache — necessary because the watcher subscription
+  // only runs while mounted, so any cache changes that happened while the
+  // panel was unmounted would otherwise stay invisible.
   useEffect(() => {
-    if (hadPersistedDataOnMount.current) {
-      void reloadFirstPage('important', { silent: true })
-      // Reconcile Other too if it had been loaded before the unmount.
-      if (other.threads.length > 0) {
-        void reloadFirstPage('other', { silent: true })
-      }
-    } else {
-      void reloadFirstPage('important')
-    }
+    const silent = hadPersistedDataOnMount.current
+    void reloadFirstPage('important', { silent })
+    void reloadFirstPage('other', { silent })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Once Important is exhausted, kick off page 1 of Everything else.
+  // Changing the category filter refetches Everything else from page 1
+  // (fetchSectionPage reads the filter from otherCategoryRef). Skipped on
+  // mount — the initial-load effect above covers it.
+  const otherCategoryMounted = useRef(false)
   useEffect(() => {
-    if (!important.hasReachedEnd) return
-    if (other.threads.length > 0) return
-    if (other.loadingPage) return
+    if (!otherCategoryMounted.current) {
+      otherCategoryMounted.current = true
+      return
+    }
     void reloadFirstPage('other')
-  }, [important.hasReachedEnd, other.threads.length, other.loadingPage, reloadFirstPage])
+  }, [otherCategory, reloadFirstPage])
+
+  // Bulk gesture behind the filter pills: archive the whole category at once.
+  const archiveCategoryAction = useCallback(async (category: string) => {
+    setBulkArchiving(true)
+    try {
+      const result = await window.ipc.invoke('gmail:archiveCategory', { category })
+      if (result.error) {
+        toast(`Bulk archive failed: ${result.error}`, 'error')
+      } else {
+        toast(
+          `Archived ${result.archived} thread${result.archived === 1 ? '' : 's'}${result.failed ? ` (${result.failed} failed)` : ''}. They stay searchable in Gmail.`,
+          result.failed ? 'error' : 'success',
+        )
+      }
+      setOtherCategory(null) // triggers the Everything else reload above
+      void reloadFirstPage('important', { silent: true })
+    } catch (err) {
+      toast(`Bulk archive failed: ${err instanceof Error ? err.message : String(err)}`, 'error')
+    } finally {
+      setBulkArchiving(false)
+    }
+  }, [reloadFirstPage])
 
   // Live updates: watcher on inbox_lists/ → silently refresh visible sections
   // when files change. Throttled to at most one reload per ~3s so a burst of
@@ -2811,8 +3036,6 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
   composeOpenRef.current = composeOpen
   const isRefreshingRef = useRef(false)
   isRefreshingRef.current = refreshing
-  const otherHasThreadsRef = useRef(false)
-  otherHasThreadsRef.current = other.threads.length > 0
 
   const RELOAD_THROTTLE_MS = 3000
 
@@ -2824,11 +3047,7 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
     }
     lastReloadAtRef.current = Date.now()
     void reloadFirstPage('important', { silent: true })
-    // Only refresh Other if it had been loaded — otherwise the chained
-    // effect handles it once Important hits hasReachedEnd.
-    if (otherHasThreadsRef.current) {
-      void reloadFirstPage('other', { silent: true })
-    }
+    void reloadFirstPage('other', { silent: true })
   }, [reloadFirstPage])
 
   // Leading-edge throttle:
@@ -2881,9 +3100,7 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
     pendingReloadRef.current = false
     lastReloadAtRef.current = Date.now()
     void reloadFirstPage('important', { silent: true })
-    if (otherHasThreadsRef.current) {
-      void reloadFirstPage('other', { silent: true })
-    }
+    void reloadFirstPage('other', { silent: true })
   }, [selectedThreadId, composeOpen, reloadFirstPage])
 
   // Manual refresh: wake the background sync loop. It updates inbox_lists/,
@@ -2936,13 +3153,26 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
   const visibleOther = useMemo(() => filterThreads(other.threads), [other.threads, filterThreads])
   const visibleDrafts = useMemo(() => filterThreads(drafts), [drafts, filterThreads])
 
+  // Split "Important" into what still needs the user vs. what they've already
+  // answered and are waiting on. Derived per render from the messages — thread
+  // state, unlike a label, can't be allowed to go stale.
+  const selfEmail = emailConnection?.email ?? null
+  const visibleNeedsYou = useMemo(
+    () => visibleImportant.filter((t) => !isAwaitingThem(t, selfEmail)),
+    [visibleImportant, selfEmail],
+  )
+  const visibleWaiting = useMemo(
+    () => visibleImportant.filter((t) => isAwaitingThem(t, selfEmail)),
+    [visibleImportant, selfEmail],
+  )
+
   // ── Keyboard shortcuts (Superhuman-style) ───────────────────────────────────
   // EmailView only mounts while the email tab is open, so these are naturally
   // scoped to that view. Single-letter keys stay inert while typing in any
   // field, while a dialog is up, or while the inline reply composer is open.
 
   const listMode: 'search' | 'drafts' | 'inbox' = query.trim() ? 'search' : view === 'drafts' ? 'drafts' : 'inbox'
-  const anyModalOpen = composeOpen || settingsOpen || Boolean(editingDraft) || helpOpen
+  const anyModalOpen = composeOpen || settingsOpen || Boolean(editingDraft) || helpOpen || instructionsOpen
 
   // Row identity for the focus cursor — must match each row's data-thread-id.
   const rowIdOf = useCallback((thread: GmailThread) => (
@@ -2956,9 +3186,9 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
   const visibleList = useMemo<GmailThread[]>(() => {
     if (query.trim()) return searchResults
     if (view === 'drafts') return visibleDrafts
-    if (important.hasReachedEnd && other.threads.length > 0) return [...visibleImportant, ...visibleOther]
-    return visibleImportant
-  }, [query, searchResults, view, visibleDrafts, visibleImportant, visibleOther, important.hasReachedEnd, other.threads.length])
+    if (other.threads.length > 0) return [...visibleNeedsYou, ...visibleWaiting, ...visibleOther]
+    return [...visibleNeedsYou, ...visibleWaiting]
+  }, [query, searchResults, view, visibleDrafts, visibleNeedsYou, visibleWaiting, visibleOther, other.threads.length])
 
   // Keep the cursor valid as the list changes: switching between inbox,
   // search, and drafts resets it; if the focused row vanished (archived,
@@ -3195,7 +3425,12 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
 
   const closeThread = useCallback(() => setSelectedThreadId(null), [])
 
-  const renderRow = (thread: GmailThread, section: 'important' | 'other' | null = null) => {
+  const renderRow = (
+    thread: GmailThread,
+    section: 'important' | 'other' | null = null,
+    chip: string | null = null,
+    chipWaiting: boolean = false,
+  ) => {
     const isMounted = openedThreadIds.includes(thread.threadId)
     return (
       <ThreadRow
@@ -3207,6 +3442,10 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
         isLeaving={leavingThreadIds.has(thread.threadId)}
         keysDisabled={isMounted && anyModalOpen}
         section={section}
+        chip={chip}
+        chipWaiting={chipWaiting}
+        onSetCategory={section ? setCategoryAction : undefined}
+        labels={emailLabels}
         onToggle={toggleThread}
         onMarkRead={markThreadReadAction}
         onArchive={archiveThreadAction}
@@ -3305,6 +3544,15 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
             <button
               type="button"
               className="gmail-icon-button"
+              onClick={() => setInstructionsOpen(true)}
+              aria-label="Email agent instructions"
+              title="Email agent instructions"
+            >
+              <SlidersHorizontal size={18} />
+            </button>
+            <button
+              type="button"
+              className="gmail-icon-button"
               onClick={() => { if (view === 'drafts') void loadDrafts(); else void refresh() }}
               aria-label="Refresh"
             >
@@ -3356,25 +3604,44 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
           <div className="gmail-empty-state">Could not load mail: {error}</div>
         ) : hasAny ? (
           <div className="gmail-list" aria-label="Recent emails">
-            {important.threads.length > 0 && (
+            {visibleNeedsYou.length > 0 ? (
               <section className="gmail-section">
                 <div className="gmail-list-header">
-                  <span>Important</span>
+                  <span>Needs you</span>
                   <span>
-                    {important.threads.length}{important.hasReachedEnd ? '' : '+'} thread{important.threads.length === 1 ? '' : 's'}
+                    {visibleNeedsYou.length}{important.hasReachedEnd ? '' : '+'} thread{visibleNeedsYou.length === 1 ? '' : 's'}
                   </span>
                 </div>
-                {visibleImportant.map((t) => renderRow(t, 'important'))}
-                {!important.hasReachedEnd && (
-                  <SectionSentinel
-                    disabled={important.loadingPage || important.hasReachedEnd}
-                    onIntersect={() => loadNextPage('important')}
-                    loading={important.loadingPage}
-                  />
-                )}
+                {visibleNeedsYou.map((t) => renderRow(t, 'important', t.draft_response ? 'Reply ready' : null))}
+              </section>
+            ) : important.hasReachedEnd && !important.loadingPage ? (
+              <div className="gmail-caughtup">You’re caught up — nothing needs a reply.</div>
+            ) : null}
+            {visibleWaiting.length > 0 && (
+              <section className="gmail-section">
+                <div className="gmail-list-header">
+                  <span>Waiting on them</span>
+                  <span>
+                    {visibleWaiting.length}{important.hasReachedEnd ? '' : '+'} thread{visibleWaiting.length === 1 ? '' : 's'}
+                  </span>
+                </div>
+                {visibleWaiting.map((t) => renderRow(t, 'important', waitingChip(t), true))}
               </section>
             )}
-            {important.hasReachedEnd && other.threads.length > 0 && (
+            {/* Pages of "Important" feed both sections above, so the sentinel
+                lives after them rather than inside either one. */}
+            {important.threads.length > 0 && !important.hasReachedEnd && (
+              <SectionSentinel
+                disabled={important.loadingPage || important.hasReachedEnd}
+                onIntersect={() => loadNextPage('important')}
+                loading={important.loadingPage}
+              />
+            )}
+            {/* Loading stays lazy (chained on Important exhausting), but once
+                loaded the section never unmounts: silent live reloads reset
+                Important to page 1 (hasReachedEnd → false), and gating the
+                render on it made this whole section vanish on every sync. */}
+            {(other.threads.length > 0 || otherCategory !== null) && (
               <section className="gmail-section">
                 <div className="gmail-list-header">
                   <span>Everything else</span>
@@ -3382,6 +3649,41 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
                     {other.threads.length}{other.hasReachedEnd ? '' : '+'} thread{other.threads.length === 1 ? '' : 's'}
                   </span>
                 </div>
+                {Object.keys(categoryCounts).length > 0 && (
+                  <div className="gmail-category-pills">
+                    {[
+                      ...BUILTIN_PILL_ORDER,
+                      ...emailLabels.filter((l) => l.kind === 'custom').map((l) => l.id),
+                      // Stale custom ids still present in counts render too.
+                      ...Object.keys(categoryCounts).filter((c) => c !== 'unclassified' && !BUILTIN_PILL_ORDER.includes(c) && !emailLabels.some((l) => l.id === c)),
+                      'unclassified',
+                    ].filter((c) => (categoryCounts[c] ?? 0) > 0).map((cat) => (
+                      <button
+                        key={cat}
+                        type="button"
+                        className={cn('gmail-category-pill', otherCategory === cat && 'gmail-category-pill-active')}
+                        onClick={() => setOtherCategory((prev) => (prev === cat ? null : cat))}
+                      >
+                        {labelNameFor(emailLabels, cat)} <span className="gmail-category-pill-count">{categoryCounts[cat]}</span>
+                      </button>
+                    ))}
+                    {otherCategory && otherCategory !== 'unclassified' && (
+                      <button
+                        type="button"
+                        className="gmail-category-pill gmail-category-pill-archive"
+                        disabled={bulkArchiving}
+                        onClick={() => void archiveCategoryAction(otherCategory)}
+                      >
+                        {bulkArchiving
+                          ? 'Archiving…'
+                          : `Archive all ${categoryCounts[otherCategory] ?? ''} ${labelNameFor(emailLabels, otherCategory).toLowerCase()}`}
+                      </button>
+                    )}
+                  </div>
+                )}
+                {other.threads.length === 0 && otherCategory !== null && !other.loadingPage && (
+                  <div className="gmail-caughtup">Nothing filed as {labelNameFor(emailLabels, otherCategory).toLowerCase()}.</div>
+                )}
                 {visibleOther.map((t) => renderRow(t, 'other'))}
                 {!other.hasReachedEnd && (
                   <SectionSentinel
@@ -3427,6 +3729,7 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
       )}
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} defaultTab="connections" />
       <ShortcutsHelpDialog open={helpOpen} onOpenChange={setHelpOpen} />
+      <EmailInstructionsDialog open={instructionsOpen} onOpenChange={setInstructionsOpen} onSaved={() => void refreshLabels()} />
     </div>
   )
 }

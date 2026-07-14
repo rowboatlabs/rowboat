@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Bug, Terminal, AlertTriangle, RefreshCw, PanelRight, Bell, Smartphone } from "lucide-react"
+import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Terminal, AlertTriangle, RefreshCw, PanelRight, Bell, Smartphone } from "lucide-react"
 
 import {
   Dialog,
@@ -23,12 +23,14 @@ import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
 import { useTheme } from "@/contexts/theme-context"
 import { toast } from "sonner"
+import { AnthropicIcon, DiscordIcon, GenericApiIcon, GitHubIcon, GoogleIcon, OllamaIcon, OpenAIIcon, OpenRouterIcon, VercelIcon } from "@/components/onboarding/provider-icons"
 import { AccountSettings } from "@/components/settings/account-settings"
 import { ConnectedAccountsSettings } from "@/components/settings/connected-accounts-settings"
 import { MobileChannelsSettings } from "@/components/settings/mobile-channels-settings"
 import type { ApprovalPolicy } from "@x/shared/src/code-mode.js"
 import type { ipc as ipcShared } from "@x/shared"
 import { startProvisioning, useProvisioning, enabledOptimistic, type AgentStatus, type CodeModeAgentStatus } from "@/lib/code-mode-provisioning"
+import { useProviderModels } from "@/hooks/use-provider-models"
 
 type ConfigTab = "account" | "connections" | "mobile" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "notifications" | "note-tagging" | "help"
 
@@ -111,6 +113,13 @@ const tabs: TabConfig[] = [
     icon: HelpCircle,
     description: "Get help and support",
   },
+]
+
+/** Sidebar nav grouping: identity first, capabilities, then app-level. */
+const NAV_SECTIONS: { label: string | null; ids: ConfigTab[] }[] = [
+  { label: null, ids: ["account", "connections", "mobile"] },
+  { label: "Configure", ids: ["models", "mcp", "security", "code-mode", "note-tagging"] },
+  { label: "App", ids: ["appearance", "notifications", "help"] },
 ]
 
 interface SettingsDialogProps {
@@ -265,9 +274,7 @@ function HelpSettings() {
         className="w-full justify-start gap-3 h-auto py-3"
         onClick={() => window.open("https://github.com/rowboatlabs/rowboat/issues/new", "_blank")}
       >
-        <div className="flex size-8 items-center justify-center rounded-md bg-destructive/10">
-          <Bug className="size-4 text-destructive" />
-        </div>
+        <GitHubIcon className="size-5 shrink-0" />
         <div className="flex flex-col items-start">
           <span className="text-sm font-medium">Report a bug</span>
           <span className="text-xs text-muted-foreground">Send feedback to the Rowboat team</span>
@@ -278,9 +285,7 @@ function HelpSettings() {
         className="w-full justify-start gap-3 h-auto py-3"
         onClick={() => window.open("https://discord.com/invite/wajrgmJQ6b", "_blank")}
       >
-        <div className="flex size-8 items-center justify-center rounded-md bg-[#5865F2]">
-          <MessageCircle className="size-4 text-white" />
-        </div>
+        <DiscordIcon className="size-5 shrink-0" />
         <div className="flex flex-col items-start">
           <span className="text-sm font-medium">Join our Discord</span>
           <span className="text-xs text-muted-foreground">Chat with the community</span>
@@ -291,9 +296,7 @@ function HelpSettings() {
         className="w-full justify-start gap-3 h-auto py-3"
         onClick={() => window.open("mailto:contact@rowboatlabs.com", "_blank")}
       >
-        <div className="flex size-8 items-center justify-center rounded-md bg-muted">
-          <Mail className="size-4" />
-        </div>
+        <Mail className="size-5 shrink-0" />
         <div className="flex flex-col items-start">
           <span className="text-sm font-medium">Contact us</span>
           <span className="text-xs text-muted-foreground">contact@rowboatlabs.com</span>
@@ -353,11 +356,48 @@ function ThemeOption({
   )
 }
 
+function LaunchAtLoginSetting() {
+  const [openAtLogin, setOpenAtLogin] = useState(false)
+  const [loaded, setLoaded] = useState(false)
+
+  useEffect(() => {
+    window.ipc.invoke("app:getLoginItemSettings", null)
+      .then(({ openAtLogin }) => setOpenAtLogin(openAtLogin))
+      .catch(() => { /* dev builds report off */ })
+      .finally(() => setLoaded(true))
+  }, [])
+
+  const handleToggle = async (next: boolean) => {
+    setOpenAtLogin(next)
+    try {
+      await window.ipc.invoke("app:setLoginItemSettings", { openAtLogin: next })
+    } catch {
+      setOpenAtLogin(!next)
+    }
+  }
+
+  return (
+    <div className="flex items-center justify-between gap-4 rounded-md border px-3 py-2.5">
+      <div className="min-w-0">
+        <div className="text-sm font-medium">Start Rowboat when you log in</div>
+        <div className="text-xs text-muted-foreground mt-0.5">
+          Keeps Rowboat in your menu bar so meeting notes and notifications work without opening the app
+        </div>
+      </div>
+      <Switch checked={openAtLogin} onCheckedChange={handleToggle} disabled={!loaded} />
+    </div>
+  )
+}
+
 function AppearanceSettings() {
   const { theme, setTheme, chatPanePlacement, setChatPanePlacement, chatPaneSize, setChatPaneSize } = useTheme()
 
   return (
     <div className="space-y-6">
+      <div>
+        <h4 className="text-sm font-medium mb-3">System</h4>
+        <LaunchAtLoginSetting />
+      </div>
       <div>
         <h4 className="text-sm font-medium mb-3">Theme</h4>
         <p className="text-xs text-muted-foreground mb-4">
@@ -442,17 +482,17 @@ interface LlmModelOption {
   release_date?: string
 }
 
-const primaryProviders: Array<{ id: LlmProviderFlavor; name: string; description: string }> = [
-  { id: "openai", name: "OpenAI", description: "GPT models" },
-  { id: "anthropic", name: "Anthropic", description: "Claude models" },
-  { id: "google", name: "Gemini", description: "Google AI Studio" },
-  { id: "ollama", name: "Ollama (Local)", description: "Run models locally" },
+const primaryProviders: Array<{ id: LlmProviderFlavor; name: string; description: string; icon: React.ElementType }> = [
+  { id: "openai", name: "OpenAI", description: "GPT models", icon: OpenAIIcon },
+  { id: "anthropic", name: "Anthropic", description: "Claude models", icon: AnthropicIcon },
+  { id: "google", name: "Gemini", description: "Google AI Studio", icon: GoogleIcon },
+  { id: "ollama", name: "Ollama (Local)", description: "Run models locally", icon: OllamaIcon },
 ]
 
-const moreProviders: Array<{ id: LlmProviderFlavor; name: string; description: string }> = [
-  { id: "openrouter", name: "OpenRouter", description: "Multiple models, one key" },
-  { id: "aigateway", name: "AI Gateway (Vercel)", description: "Vercel's AI Gateway" },
-  { id: "openai-compatible", name: "OpenAI-Compatible", description: "Custom OpenAI-compatible API" },
+const moreProviders: Array<{ id: LlmProviderFlavor; name: string; description: string; icon: React.ElementType }> = [
+  { id: "openrouter", name: "OpenRouter", description: "Multiple models, one key", icon: OpenRouterIcon },
+  { id: "aigateway", name: "AI Gateway (Vercel)", description: "Vercel's AI Gateway", icon: VercelIcon },
+  { id: "openai-compatible", name: "OpenAI-Compatible", description: "Custom OpenAI-compatible API", icon: GenericApiIcon },
 ]
 
 const preferredDefaults: Partial<Record<LlmProviderFlavor, string>> = {
@@ -463,6 +503,7 @@ const preferredDefaults: Partial<Record<LlmProviderFlavor, string>> = {
 const defaultBaseURLs: Partial<Record<LlmProviderFlavor, string>> = {
   ollama: "http://localhost:11434",
   "openai-compatible": "http://localhost:1234/v1",
+  aigateway: "https://ai-gateway.vercel.sh/v1",
 }
 
 type ProviderModelConfig = {
@@ -478,18 +519,20 @@ type ProviderModelConfig = {
 function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: boolean; rowboatConnected?: boolean }) {
   const [provider, setProvider] = useState<LlmProviderFlavor>("openai")
   const [defaultProvider, setDefaultProvider] = useState<LlmProviderFlavor | null>(null)
+  // Flavors present in the saved providers map — drives each card's
+  // "Connected" indicator, independent of which card is active.
+  const [savedProviders, setSavedProviders] = useState<Set<LlmProviderFlavor>>(new Set())
   const [providerConfigs, setProviderConfigs] = useState<Record<LlmProviderFlavor, ProviderModelConfig>>({
     openai: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
     anthropic: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
     google: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
     openrouter: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
-    aigateway: { apiKey: "", baseURL: "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
+    aigateway: { apiKey: "", baseURL: "https://ai-gateway.vercel.sh/v1", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
     ollama: { apiKey: "", baseURL: "http://localhost:11434", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
     "openai-compatible": { apiKey: "", baseURL: "http://localhost:1234/v1", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
   })
   const [modelsCatalog, setModelsCatalog] = useState<Record<string, LlmModelOption[]>>({})
   const [modelsLoading, setModelsLoading] = useState(false)
-  const [modelsError, setModelsError] = useState<string | null>(null)
   const [testState, setTestState] = useState<{ status: "idle" | "testing" | "success" | "error"; error?: string }>({ status: "idle" })
   const [configLoading, setConfigLoading] = useState(true)
   const [showMoreProviders, setShowMoreProviders] = useState(false)
@@ -498,8 +541,18 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
   // auto-enable) has ever set it, so we only auto-enable once.
   const [deferBackgroundTasks, setDeferBackgroundTasks] = useState(false)
   const [deferExplicit, setDeferExplicit] = useState(false)
+  // openai-compatible only: free-text model that takes precedence over the
+  // fetched list (many such servers don't implement /models at all).
+  const [customModel, setCustomModel] = useState("")
 
   const activeConfig = providerConfigs[provider]
+  // Live per-key model list for the active provider — drives the primary
+  // model area. The per-function fields below still use the static catalog.
+  const providerModels = useProviderModels({
+    flavor: provider,
+    apiKey: activeConfig.apiKey,
+    baseURL: activeConfig.baseURL,
+  })
   const showApiKey = provider === "openai" || provider === "anthropic" || provider === "google" || provider === "openrouter" || provider === "aigateway" || provider === "openai-compatible"
   const requiresApiKey = provider === "openai" || provider === "anthropic" || provider === "google" || provider === "openrouter" || provider === "aigateway"
   const showBaseURL = provider === "ollama" || provider === "openai-compatible" || provider === "aigateway"
@@ -510,8 +563,28 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
   const isMoreProvider = moreProviders.some(p => p.id === provider)
 
   const primaryModel = activeConfig.models[0] || ""
+  // Settings no longer exposes model selection — the model is resolved
+  // silently when the user connects (the config schema still requires one;
+  // background agents/channels read it). Precedence: a typed escape-hatch
+  // value (openai-compatible Model field, offline manual input) > the saved
+  // model when the fetched list still has it > the flavor's preferred
+  // default > the first fetched id.
+  const resolvedModel = (() => {
+    if (provider === "openai-compatible" && customModel.trim()) return customModel.trim()
+    const saved = primaryModel.trim()
+    if (providerModels.status === "loaded" && providerModels.models.length > 0) {
+      if (saved && providerModels.models.includes(saved)) return saved
+      const preferred = preferredDefaults[provider]
+      if (preferred && providerModels.models.includes(preferred)) return preferred
+      return providerModels.models[0]
+    }
+    return saved
+  })()
+  // Gate Connect on credentials only, NOT on resolvedModel — that derives
+  // from the live fetch, which hasn't settled the instant a key is pasted, so
+  // gating on it made the first click a no-op (the model is resolved, fetching
+  // on demand if needed, inside handleTestAndSave).
   const canTest =
-    primaryModel.trim().length > 0 &&
     (!requiresApiKey || activeConfig.apiKey.trim().length > 0) &&
     (!requiresBaseURL || activeConfig.baseURL.trim().length > 0)
 
@@ -525,6 +598,19 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
     },
     []
   )
+
+  // All primary-model writes go through here: the old `models: [value]` form
+  // silently dropped every saved model after the first.
+  const setPrimaryModel = useCallback((prov: LlmProviderFlavor, value: string) => {
+    setProviderConfigs(prev => {
+      const existing = prev[prov].models
+      return {
+        ...prev,
+        [prov]: { ...prev[prov], models: [value, ...existing.slice(1).filter(m => m && m !== value)] },
+      }
+    })
+    setTestState({ status: "idle" })
+  }, [])
 
 
   // Load current config from file
@@ -542,6 +628,10 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
         const parsed = JSON.parse(result.data)
         setDeferBackgroundTasks(parsed?.deferBackgroundTasks === true)
         setDeferExplicit(typeof parsed?.deferBackgroundTasks === "boolean")
+        const knownFlavors = new Set<string>([...primaryProviders, ...moreProviders].map(p => p.id))
+        setSavedProviders(new Set(
+          Object.keys(parsed?.providers ?? {}).filter((k): k is LlmProviderFlavor => knownFlavors.has(k))
+        ))
         if (parsed?.provider?.flavor && parsed?.model) {
           const flavor = parsed.provider.flavor as LlmProviderFlavor
           setProvider(flavor)
@@ -616,7 +706,6 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
     async function loadModels() {
       try {
         setModelsLoading(true)
-        setModelsError(null)
         const result = await window.ipc.invoke("models:list", null)
         const catalog: Record<string, LlmModelOption[]> = {}
         for (const p of result.providers || []) {
@@ -624,7 +713,6 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
         }
         setModelsCatalog(catalog)
       } catch {
-        setModelsError("Failed to load models list")
         setModelsCatalog({})
       } finally {
         setModelsLoading(false)
@@ -634,30 +722,49 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
     loadModels()
   }, [dialogOpen])
 
-  // Set default models from catalog when catalog loads
+  // A saved openai-compatible model that the server's list doesn't confirm
+  // (not listed, or /models unreachable) belongs in the visible Model field,
+  // where it stays editable and wins over the silent pick.
   useEffect(() => {
-    if (Object.keys(modelsCatalog).length === 0) return
-    setProviderConfigs(prev => {
-      const next = { ...prev }
-      const cloudProviders: LlmProviderFlavor[] = ["openai", "anthropic", "google"]
-      for (const prov of cloudProviders) {
-        const catalog = modelsCatalog[prov]
-        if (catalog?.length && !next[prov].models[0]) {
-          const preferred = preferredDefaults[prov]
-          const hasPreferred = preferred && catalog.some(m => m.id === preferred)
-          const defaultModel = hasPreferred ? preferred! : (catalog[0]?.id || "")
-          next[prov] = { ...next[prov], models: [defaultModel] }
-        }
-      }
-      return next
-    })
-  }, [modelsCatalog])
+    if (provider !== "openai-compatible" || customModel || !primaryModel) return
+    if (providerModels.status === "error" || (providerModels.status === "loaded" && !providerModels.models.includes(primaryModel))) {
+      setCustomModel(primaryModel)
+    }
+  }, [provider, providerModels.status, providerModels.models, primaryModel, customModel])
 
   const handleTestAndSave = useCallback(async () => {
     if (!canTest) return
     setTestState({ status: "testing" })
     try {
-      const allModels = activeConfig.models.map(m => m.trim()).filter(Boolean)
+      // Normally providerModels has loaded by click time and resolvedModel is
+      // set. But a Connect click right after pasting a key can beat the
+      // debounced key-change fetch — so when nothing is resolved yet, fetch
+      // the list on demand (one fetch, then save) instead of forcing a second
+      // click. Same silent precedence as resolvedModel, minus the customModel
+      // branch (that path only runs when resolvedModel is already empty).
+      let model = resolvedModel
+      if (!model) {
+        const listRes = await window.ipc.invoke("models:listForProvider", {
+          provider: {
+            flavor: provider,
+            apiKey: activeConfig.apiKey.trim() || undefined,
+            baseURL: activeConfig.baseURL.trim() || undefined,
+          },
+        })
+        if (listRes.success && listRes.models && listRes.models.length > 0) {
+          const preferred = preferredDefaults[provider]
+          model = preferred && listRes.models.includes(preferred) ? preferred : listRes.models[0]
+        }
+      }
+      if (!model) {
+        setTestState({ status: "error", error: "Enter a model to connect" })
+        toast.error("Enter a model to connect")
+        return
+      }
+      // The silently resolved model takes the primary slot; the rest of the
+      // saved list is preserved (same semantics setPrimaryModel had).
+      const existing = activeConfig.models.map(m => m.trim())
+      const allModels = [model, ...existing.slice(1).filter(m => m && m !== model)]
       const providerConfig = {
         provider: {
           flavor: provider,
@@ -677,6 +784,11 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
       if (result.success) {
         await window.ipc.invoke("models:saveConfig", providerConfig)
         setDefaultProvider(provider)
+        setProviderConfigs(prev => ({
+          ...prev,
+          [provider]: { ...prev[provider], models: allModels },
+        }))
+        setSavedProviders(prev => new Set(prev).add(provider))
         setTestState({ status: "success" })
         window.dispatchEvent(new Event('models-config-changed'))
         // Local models compete with background agents for the same hardware:
@@ -704,7 +816,7 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
       setTestState({ status: "error", error: "Connection test failed" })
       toast.error("Connection test failed")
     }
-  }, [canTest, provider, activeConfig, rowboatConnected, deferExplicit, deferBackgroundTasks, handleDeferToggle])
+  }, [canTest, resolvedModel, provider, activeConfig, rowboatConnected, deferExplicit, deferBackgroundTasks, handleDeferToggle])
 
   const handleSetDefault = useCallback(async (prov: LlmProviderFlavor) => {
     const config = providerConfigs[prov]
@@ -735,11 +847,63 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
   }, [providerConfigs, rowboatConnected])
 
   const handleDeleteProvider = useCallback(async (prov: LlmProviderFlavor) => {
+    const isDefaultProv = defaultProvider === prov
     try {
       const result = await window.ipc.invoke("workspace:readFile", { path: "config/models.json" })
-      const parsed = JSON.parse(result.data)
+      let parsed = JSON.parse(result.data)
+
+      // Disconnecting the default provider: silently promote another
+      // connected provider first — the connect-only UI has no usable
+      // set-as-default step to send the user to. Prefer the provider the
+      // user's explicit defaultSelection points at; promotion goes through
+      // the same models:saveConfig path Set-as-default uses, so the repo
+      // writes a valid top-level provider/model.
+      let promoted: LlmProviderFlavor | null = null
+      if (isDefaultProv) {
+        const selProvider = parsed?.defaultSelection?.provider
+        const candidates = Object.keys(parsed?.providers ?? {})
+          .filter((k): k is LlmProviderFlavor => k !== prov && k in providerConfigs)
+          .sort((a, b) => (a === selProvider ? -1 : b === selProvider ? 1 : 0))
+        for (const candidate of candidates) {
+          const config = providerConfigs[candidate]
+          const allModels = config.models.map(m => m.trim()).filter(Boolean)
+          // Same silent precedence as connect, minus the live list we don't
+          // have here: the provider's saved model, else its preferred default.
+          const model = allModels[0] || preferredDefaults[candidate] || ""
+          if (!model) continue
+          await window.ipc.invoke("models:saveConfig", {
+            provider: {
+              flavor: candidate,
+              apiKey: config.apiKey.trim() || undefined,
+              baseURL: config.baseURL.trim() || undefined,
+            },
+            model,
+            models: allModels.length > 0 ? allModels : [model],
+            ...(rowboatConnected ? {} : {
+              knowledgeGraphModel: config.knowledgeGraphModel.trim() || undefined,
+              meetingNotesModel: config.meetingNotesModel.trim() || undefined,
+              liveNoteAgentModel: config.liveNoteAgentModel.trim() || undefined,
+              autoPermissionDecisionModel: config.autoPermissionDecisionModel.trim() || undefined,
+            }),
+          })
+          promoted = candidate
+          break
+        }
+        if (promoted) {
+          // saveConfig rewrote top-level and the providers map — re-read so
+          // the deletion write below doesn't clobber the promotion.
+          const fresh = await window.ipc.invoke("workspace:readFile", { path: "config/models.json" })
+          parsed = JSON.parse(fresh.data)
+        }
+      }
+
       if (parsed?.providers?.[prov]) {
         delete parsed.providers[prov]
+      }
+      // A defaultSelection pointing at the removed provider is dangling —
+      // drop it so llm:getDefaultModel falls back cleanly.
+      if (parsed?.defaultSelection?.provider === prov) {
+        delete parsed.defaultSelection
       }
       // If the deleted provider is the current top-level active one,
       // switch top-level config to the current default provider
@@ -759,6 +923,24 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
           parsed.liveNoteAgentModel = defConfig.liveNoteAgentModel.trim() || undefined
           parsed.autoPermissionDecisionModel = defConfig.autoPermissionDecisionModel.trim() || undefined
         }
+      } else if (parsed?.provider?.flavor === prov) {
+        // Removing the last connected provider: drop the top-level pair
+        // entirely. The schema requires it, so core's readConfig() treats
+        // the file as "no config" — signed-in falls back to the curated
+        // gateway default and signed-out llm:getDefaultModel rejects, which
+        // the composer already handles (it shows the connect hint).
+        delete parsed.provider
+        delete parsed.model
+        delete parsed.models
+        delete parsed.knowledgeGraphModel
+        delete parsed.meetingNotesModel
+        delete parsed.liveNoteAgentModel
+        delete parsed.autoPermissionDecisionModel
+        // With no BYOK providers left, any non-gateway selection is dangling.
+        if (parsed?.defaultSelection && parsed.defaultSelection.provider !== "rowboat"
+          && Object.keys(parsed?.providers ?? {}).length === 0) {
+          delete parsed.defaultSelection
+        }
       }
       await window.ipc.invoke("workspace:writeFile", {
         path: "config/models.json",
@@ -768,17 +950,29 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
         ...prev,
         [prov]: { apiKey: "", baseURL: defaultBaseURLs[prov] || "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
       }))
+      setSavedProviders(prev => {
+        const next = new Set(prev)
+        next.delete(prov)
+        return next
+      })
+      if (isDefaultProv) setDefaultProvider(promoted)
       setTestState({ status: "idle" })
       window.dispatchEvent(new Event('models-config-changed'))
-      toast.success("Provider configuration removed")
+      if (promoted) {
+        const promotedName = [...primaryProviders, ...moreProviders].find(p => p.id === promoted)?.name || promoted
+        toast.success(`Disconnected · ${promotedName} is now the default`)
+      } else {
+        toast.success("Provider configuration removed")
+      }
     } catch {
       toast.error("Failed to remove provider")
     }
   }, [defaultProvider, providerConfigs, rowboatConnected])
 
-  const renderProviderCard = (p: { id: LlmProviderFlavor; name: string; description: string }) => {
+  const renderProviderCard = (p: { id: LlmProviderFlavor; name: string; description: string; icon: React.ElementType }) => {
     const isDefault = defaultProvider === p.id
     const isSelected = provider === p.id
+    const isConnected = savedProviders.has(p.id)
     const hasModel = providerConfigs[p.id].models[0]?.trim().length > 0
     return (
       <button
@@ -794,11 +988,17 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
             : "border-border hover:bg-accent"
         )}
       >
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-2">
+          <p.icon className="size-4 shrink-0" />
           <span className="text-sm font-medium">{p.name}</span>
           {isDefault && !rowboatConnected && (
             <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-primary">
               Default
+            </span>
+          )}
+          {isConnected && (
+            <span className="rounded-full bg-green-500/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-green-600">
+              Connected
             </span>
           )}
         </div>
@@ -864,48 +1064,117 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
         )}
       </div>
 
-      {/* Model selection - side by side */}
-      <div className="grid grid-cols-2 gap-3">
-        {/* Assistant models (left column) */}
+      {/* API Key — key-first: the model list is fetched from it */}
+      {showApiKey && (
         <div className="space-y-2">
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{rowboatConnected ? "Model" : "Assistant model"}</span>
-          {modelsLoading ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" />
-              Loading...
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {showModelInput ? (
-                <Input
-                  value={primaryModel}
-                  onChange={(e) => updateConfig(provider, { models: [e.target.value] })}
-                  placeholder="Enter model"
-                />
-              ) : (
-                <Select
-                  value={primaryModel}
-                  onValueChange={(value) => updateConfig(provider, { models: [value] })}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a model" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {modelsForProvider.map((m) => (
-                      <SelectItem key={m.id} value={m.id}>
-                        {m.name || m.id}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-            </div>
-          )}
-          {modelsError && (
-            <div className="text-xs text-destructive">{modelsError}</div>
-          )}
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+            {provider === "openai-compatible" ? "API Key (optional)" : "API Key"}
+          </span>
+          <Input
+            type="password"
+            value={activeConfig.apiKey}
+            onChange={(e) => updateConfig(provider, { apiKey: e.target.value })}
+            onBlur={() => providerModels.refetch()}
+            placeholder="Paste your API key"
+          />
         </div>
+      )}
 
+      {/* Base URL */}
+      {showBaseURL && (
+        <div className="space-y-2">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Base URL</span>
+          <Input
+            value={activeConfig.baseURL}
+            onChange={(e) => updateConfig(provider, { baseURL: e.target.value })}
+            onBlur={() => providerModels.refetch()}
+            placeholder={
+              provider === "ollama"
+                ? "http://localhost:11434"
+                : provider === "openai-compatible"
+                  ? "http://localhost:1234/v1"
+                  : "https://ai-gateway.vercel.sh/v1"
+            }
+          />
+        </div>
+      )}
+
+      {/* Connection status — the model itself is resolved silently on save */}
+      <div className="space-y-2">
+        {providerModels.status === "idle" ? (
+          <div className="text-sm text-muted-foreground">
+            {isLocalProvider
+              ? "Enter your base URL to connect"
+              : "Enter your API key to connect"}
+          </div>
+        ) : providerModels.status === "loading" ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="size-4 animate-spin" />
+            Checking connection…
+          </div>
+        ) : providerModels.status === "error" ? (
+          <div className="space-y-2">
+            <div className="text-xs text-destructive break-words">
+              {providerModels.error || "Connection check failed"}
+            </div>
+            <Button variant="outline" size="sm" onClick={() => providerModels.refetch()}>
+              Retry
+            </Button>
+            {provider !== "openai-compatible" && (
+              <Input
+                value={primaryModel}
+                onChange={(e) => setPrimaryModel(provider, e.target.value)}
+                placeholder="Enter a model to connect anyway"
+              />
+            )}
+          </div>
+        ) : providerModels.models.length === 0 && provider !== "openai-compatible" ? (
+          <div className="space-y-2">
+            <div className="text-sm text-muted-foreground">
+              Connected, but the provider reported no models — enter one manually
+            </div>
+            <Input
+              value={primaryModel}
+              onChange={(e) => setPrimaryModel(provider, e.target.value)}
+              placeholder="Enter model"
+            />
+          </div>
+        ) : (
+          <div className="flex items-center gap-1.5 text-sm text-green-600">
+            <CheckCircle2 className="size-4" />
+            Connected · {providerModels.models.length} model{providerModels.models.length === 1 ? "" : "s"} available
+          </div>
+        )}
+        {savedProviders.has(provider) && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+            onClick={() => handleDeleteProvider(provider)}
+          >
+            Disconnect
+          </Button>
+        )}
+      </div>
+
+      {/* openai-compatible escape hatch: its /models often doesn't exist, and
+          a typed model always wins over the silent pick */}
+      {provider === "openai-compatible" && (
+        <div className="space-y-2">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Model</span>
+          <Input
+            value={customModel}
+            onChange={(e) => {
+              setCustomModel(e.target.value)
+              setPrimaryModel(provider, e.target.value)
+            }}
+            placeholder="Model ID (leave empty to auto-select)"
+          />
+        </div>
+      )}
+
+      {/* Per-function model overrides */}
+      <div className="grid grid-cols-2 gap-3">
         {!rowboatConnected && (<>
         {/* Knowledge graph model (right column) */}
         <div className="space-y-2">
@@ -1045,39 +1314,6 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
         </>)}
       </div>
 
-      {/* API Key */}
-      {showApiKey && (
-        <div className="space-y-2">
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-            {provider === "openai-compatible" ? "API Key (optional)" : "API Key"}
-          </span>
-          <Input
-            type="password"
-            value={activeConfig.apiKey}
-            onChange={(e) => updateConfig(provider, { apiKey: e.target.value })}
-            placeholder="Paste your API key"
-          />
-        </div>
-      )}
-
-      {/* Base URL */}
-      {showBaseURL && (
-        <div className="space-y-2">
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Base URL</span>
-          <Input
-            value={activeConfig.baseURL}
-            onChange={(e) => updateConfig(provider, { baseURL: e.target.value })}
-            placeholder={
-              provider === "ollama"
-                ? "http://localhost:11434"
-                : provider === "openai-compatible"
-                  ? "http://localhost:1234/v1"
-                  : "https://ai-gateway.vercel.sh/v1"
-            }
-          />
-        </div>
-      )}
-
       {/* Test status */}
       {testState.status === "error" && (
         <div className="text-sm text-destructive">
@@ -1109,9 +1345,9 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
         className="w-full"
       >
         {testState.status === "testing" ? (
-          <><Loader2 className="size-4 animate-spin mr-2" />Testing connection...</>
+          <><Loader2 className="size-4 animate-spin mr-2" />Connecting...</>
         ) : (
-          "Test & Save"
+          "Connect"
         )}
       </Button>
     </div>
@@ -1998,7 +2234,11 @@ function AgentStatusRow({
   const ready = installed && status?.signedIn
   return (
     <div className="rounded-md border px-3 py-2.5 flex items-center gap-3">
-      <Terminal className="size-4 text-muted-foreground shrink-0" />
+      {agent === 'claude' ? (
+        <AnthropicIcon className="size-5 shrink-0" />
+      ) : (
+        <OpenAIIcon className="size-5 shrink-0" />
+      )}
       <div className="flex-1 min-w-0">
         <div className="text-sm font-medium">{name}</div>
         <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-3">
@@ -2234,7 +2474,7 @@ function CodeModeSettings({ dialogOpen }: { dialogOpen: boolean }) {
 
 // --- Notification Settings ---
 
-type NotificationCategoryKey = "chat_completion" | "new_email" | "agent_permission" | "background_task"
+type NotificationCategoryKey = "chat_completion" | "new_email" | "agent_permission" | "background_task" | "meeting_detection" | "meeting_notes_ready"
 
 const NOTIFICATION_CATEGORIES: { key: NotificationCategoryKey; label: string; description: string }[] = [
   {
@@ -2256,6 +2496,16 @@ const NOTIFICATION_CATEGORIES: { key: NotificationCategoryKey; label: string; de
     key: "background_task",
     label: "Background agents",
     description: "When a background agent you've set up has something to surface. Click to open it on the background tasks page.",
+  },
+  {
+    key: "meeting_detection",
+    label: "Meeting detection",
+    description: "A popup offering to take notes when Rowboat notices you're in a call or meeting. Nothing records until you accept.",
+  },
+  {
+    key: "meeting_notes_ready",
+    label: "Meeting notes ready",
+    description: "When your meeting notes finish generating after a call. Click to open the note. Only shown while the app is in the background.",
   },
 ]
 
@@ -2452,34 +2702,47 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
         <div className="flex h-full overflow-hidden">
           {/* Sidebar */}
           <div className="w-48 border-r bg-muted/30 p-2 flex flex-col">
-            <div className="px-2 py-3 mb-2">
-              <h2 className="font-semibold text-sm">Settings</h2>
+            <div className="px-2 pt-3.5 pb-3 mb-2">
+              <h2 className="font-semibold text-base tracking-tight">Settings</h2>
             </div>
-            <nav className="flex flex-col gap-1">
-              {visibleTabs.map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => handleTabChange(tab.id)}
-                  className={cn(
-                    "flex items-center gap-2 px-2 py-2 rounded-md text-sm transition-colors text-left",
-                    activeTab === tab.id
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground hover:bg-background/50"
-                  )}
-                >
-                  <tab.icon className="size-4" />
-                  {tab.label}
-                </button>
-              ))}
+            <nav className="flex flex-col">
+              {NAV_SECTIONS.map((section) => {
+                const sectionTabs = visibleTabs.filter((tab) => section.ids.includes(tab.id))
+                if (sectionTabs.length === 0) return null
+                return (
+                  <div key={section.label ?? "main"} className="flex flex-col gap-0.5">
+                    {section.label ? (
+                      <div className="px-2 pb-1 pt-4 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+                        {section.label}
+                      </div>
+                    ) : null}
+                    {sectionTabs.map((tab) => (
+                      <button
+                        key={tab.id}
+                        onClick={() => handleTabChange(tab.id)}
+                        className={cn(
+                          "flex items-center gap-2 px-2 py-1.5 rounded-md text-sm transition-colors text-left",
+                          activeTab === tab.id
+                            ? "bg-background text-foreground shadow-sm"
+                            : "text-muted-foreground hover:text-foreground hover:bg-background/50"
+                        )}
+                      >
+                        <tab.icon className="size-4" />
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+                )
+              })}
             </nav>
           </div>
 
           {/* Main content */}
           <div className="flex-1 flex flex-col min-w-0 min-h-0">
             {/* Header */}
-            <div className="px-4 py-3 border-b">
-              <h3 className="font-medium text-sm">{activeTabConfig.label}</h3>
-              <p className="text-xs text-muted-foreground mt-0.5">
+            <div className="px-6 pb-4 pt-5">
+              <h3 className="text-lg font-semibold tracking-tight">{activeTabConfig.label}</h3>
+              <p className="text-sm text-muted-foreground mt-1">
                 {activeTab === "models" && rowboatConnected
                   ? "Select your default models"
                   : activeTabConfig.description}
@@ -2487,7 +2750,7 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
             </div>
 
             {/* Content */}
-            <div className={cn("flex-1 p-4 min-h-0", (activeTab === "models" || activeTab === "connections" || activeTab === "mobile" || activeTab === "account" || activeTab === "code-mode" || activeTab === "notifications") ? "overflow-y-auto" : activeTab === "note-tagging" ? "overflow-hidden flex flex-col" : "overflow-hidden")}>
+            <div className={cn("flex-1 px-6 pb-5 min-h-0", (activeTab === "models" || activeTab === "connections" || activeTab === "mobile" || activeTab === "account" || activeTab === "code-mode" || activeTab === "notifications") ? "overflow-y-auto" : activeTab === "note-tagging" ? "overflow-hidden flex flex-col" : "overflow-hidden")}>
               {activeTab === "account" ? (
                 <AccountSettings dialogOpen={open} />
               ) : activeTab === "connections" ? (

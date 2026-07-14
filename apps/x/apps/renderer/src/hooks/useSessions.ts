@@ -1,16 +1,16 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { ipcSessionsClient } from '@/lib/session-chat/client'
 import { subscribeSessionFeed } from '@/lib/session-chat/feed'
-import { SessionListStore, type SessionChatStoreDeps } from '@/lib/session-chat/store'
+import { SessionListStore, type SessionListStoreDeps } from '@/lib/session-chat/store'
 
-const defaultDeps: SessionChatStoreDeps = {
+const defaultDeps: SessionListStoreDeps = {
   client: ipcSessionsClient,
   subscribeFeed: subscribeSessionFeed,
 }
 
 // The session list (chat history sidebar): seeded from sessions:list, kept
 // current by index-changed feed events. Logic lives in SessionListStore.
-export function useSessions(deps: SessionChatStoreDeps = defaultDeps) {
+export function useSessions(deps: SessionListStoreDeps = defaultDeps) {
   const [store] = useState(() => new SessionListStore(deps))
   useEffect(() => {
     const disconnect = store.connect()

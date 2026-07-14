@@ -19,8 +19,8 @@ export async function notifyIfEnabled(
 ): Promise<void> {
     try {
         if (!isNotificationCategoryEnabled(category)) return;
-        const { default: container } = await import('../../di/container.js');
-        const service = container.resolve<INotificationService>('notificationService');
+        const { lazyResolve } = await import('../../di/lazy-resolve.js');
+        const service = await lazyResolve<INotificationService>('notificationService');
         if (!service.isSupported()) return;
         service.notify(input);
     } catch (err) {

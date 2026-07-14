@@ -2,8 +2,8 @@ import type { BackgroundTask, BackgroundTaskTriggerType } from '@x/shared/dist/b
 import { PrefixLogger } from '@x/shared/dist/prefix-logger.js';
 import { fetchTask, patchTask, prependRunId } from './fileops.js';
 import { getBackgroundTaskAgentModel } from '../models/defaults.js';
-import { startHeadlessAgent, startWhenPossible } from '../agents/headless-app.js';
-import { buildTriggerBlock } from '../agents/build-trigger-block.js';
+import { startHeadlessAgent, startWhenPossible } from '../runtime/assembly/headless-app.js';
+import { buildTriggerBlock } from '../runtime/assembly/build-trigger-block.js';
 import { backgroundTaskBus } from './bus.js';
 import { withUseCase } from '../analytics/use_case.js';
 
@@ -128,8 +128,8 @@ export async function runBackgroundTask(
         let codeProject: { id: string; path: string; name: string } | undefined;
         if (task.projectId) {
             try {
-                const { default: container } = await import('../di/container.js');
-                const projectsRepo = container.resolve<import('../code-mode/projects/repo.js').ICodeProjectsRepo>('codeProjectsRepo');
+                const { lazyResolve } = await import('../di/lazy-resolve.js');
+                const projectsRepo = await lazyResolve<import('../code-mode/projects/repo.js').ICodeProjectsRepo>('codeProjectsRepo');
                 const project = await projectsRepo.get(task.projectId);
                 if (project) codeProject = { id: project.id, path: project.path, name: project.name };
             } catch (err) {

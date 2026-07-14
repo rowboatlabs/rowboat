@@ -6,12 +6,15 @@ import {
     isChatMessage,
     isErrorMessage,
     isToolCall,
+    isTurnUsageMessage,
     getToolDisplayName,
     getToolErrorText,
+    REASONING_EFFORT_LABELS,
     toToolState,
     normalizeToolOutput,
 } from '@/lib/chat-conversation'
 import { Tool, ToolHeader, ToolContent, ToolTabbedContent } from '@/components/ai-elements/tool'
+import { TokenUsageMenu } from '@/components/token-usage-menu'
 
 /**
  * Compact rendering of a run's conversation log — used by the live-note panel's
@@ -31,6 +34,24 @@ export function CompactConversation({ items }: { items: ConversationItem[] }) {
                     return (
                         <div key={item.id} className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
                             {item.message}
+                        </div>
+                    )
+                }
+                if (isTurnUsageMessage(item)) {
+                    return (
+                        <div key={item.id} className="-ml-1 flex items-center justify-start gap-1">
+                            <TokenUsageMenu
+                                usage={item.usage}
+                                scope="turn"
+                                modelCallCount={item.modelCallCount}
+                                className="size-5 border-transparent bg-transparent hover:bg-transparent"
+                                align="start"
+                            />
+                            {item.reasoningEffort && (
+                                <span className="text-xs text-muted-foreground/70">
+                                    {REASONING_EFFORT_LABELS[item.reasoningEffort]}
+                                </span>
+                            )}
                         </div>
                     )
                 }

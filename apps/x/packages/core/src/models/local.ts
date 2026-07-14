@@ -84,12 +84,43 @@ export function resolveThinkValue(
     }
 }
 
+// Ollama replies with {"error":"<string>"}; ollama-ai-provider-v2 expects
+// OpenAI-style {"error":{"message":...}} and falls back to the bare HTTP
+// statusText when parsing fails -- the real reason gets swallowed (#696).
+// Rewrap so the provider surfaces the actual message. Returns undefined
+// when the body isn't in Ollama's plain-string error shape.
+export function rewrapOllamaErrorBody(text: string): string | undefined {
+    try {
+        const parsed = JSON.parse(text) as unknown;
+        if (parsed && typeof parsed === "object" && typeof (parsed as { error?: unknown }).error === "string") {
+            return JSON.stringify({ error: { message: (parsed as { error: string }).error } });
+        }
+    } catch {
+        // not JSON -- leave untouched
+    }
+    return undefined;
+}
+
+async function rewrapErrorResponse(res: Response): Promise<Response> {
+    const text = await res.text();
+    const headers = new Headers(res.headers);
+    // The body may have grown; let the runtime recompute the length.
+    headers.delete("content-length");
+    return new Response(rewrapOllamaErrorBody(text) ?? text, {
+        status: res.status,
+        statusText: res.statusText,
+        headers,
+    });
+}
+
 // The ollama-ai-provider-v2 request builder always writes `think: false`
 // (its providerOptions schema is boolean-only), so effort can only be set by
 // rewriting the wire request. This wraps fetch for createOllama: /api/chat
 // bodies get `think` set per resolveThinkValue; every other request passes
 // through untouched. Thinking capability is probed once per model via
-// /api/show and cached for the process lifetime.
+// /api/show and cached for the process lifetime. Failed responses get their
+// error body rewrapped (see rewrapOllamaErrorBody) so the provider surfaces
+// Ollama's actual error message instead of the HTTP statusText.
 export function makeOllamaThinkFetch(
     effort: ReasoningEffort,
 ): typeof fetch {
@@ -117,6 +148,7 @@ export function makeOllamaThinkFetch(
     };
 
     return async (input, init) => {
+        let finalInit = init;
         try {
             const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
             const isChat = /\/api\/chat(\?.*)?$/.test(url);
@@ -130,11 +162,12 @@ export function makeOllamaThinkFetch(
                 } else {
                     parsed.think = think;
                 }
-                return fetch(input, { ...init, body: JSON.stringify(parsed) });
+                finalInit = { ...init, body: JSON.stringify(parsed) };
             }
         } catch {
             // Malformed body or URL — send the original request unchanged.
         }
-        return fetch(input, init);
+        const res = await fetch(input, finalInit);
+        return res.ok ? res : rewrapErrorResponse(res);
     };
 }

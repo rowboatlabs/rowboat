@@ -338,9 +338,14 @@ runtime's job; the session layer passes its errors through.
 
 ### 9.3 stopTurn and resumeTurn
 
-- `stopTurn` cancels via the turn runtime: aborting the active invocation's
-  signal if one is running, else advancing a suspended turn with a `cancel`
-  input.
+- `stopTurn` cancels via the turn runtime: aborting the signal of every
+  live advance the layer has started for the turn, else advancing the turn
+  with a `cancel` input. A turn can legally have several live advances at
+  once — one running invocation plus external-input invocations queued on
+  the turn lock — so the layer tracks them per turn and stop aborts them
+  all; the queued ones observe their aborted signal when the lock frees. A
+  cancel input that loses the race with a concurrent settle (the turn is
+  already terminal by the time it applies) counts as a successful stop.
 - `resumeTurn` re-enters the latest turn with no input — the turn spec's
   recovery entry point — for turns left `idle` by a crash. There is no
   automatic resume sweep at startup: recovery re-issues interrupted model
@@ -357,18 +362,23 @@ which governs mutation of live logs, not their removal.
 
 ## 10. Event forwarding and live UI
 
-1. For every `advanceTurn` it initiates, the session layer consumes
-   `TurnExecution.events` and forwards each `TurnStreamEvent` — tagged with
-   `sessionId` — through the application bus to renderer windows over one
-   IPC channel (`sessions:events`).
+1. Live turn delivery is not the session layer's job: the turn runtime
+   publishes every turn's events to the process-wide turn event bus
+   (turn-runtime-design.md §17.1), which the app layer bridges to renderer
+   windows over one IPC channel (`turns:events` — durable events broadcast
+   with their file offsets; deltas only to windows subscribed to that turn).
+   The session layer drains each `TurnExecution.events` it initiates so an
+   unconsumed stream never buffers, and `sessions:events` carries only
+   `session-index-changed` entries.
 2. When `outcome` settles, the session layer updates the index entry and
    publishes `session-index-changed`.
 3. The renderer follows the turn spec's historical/live pattern: fetch
    turns via `getTurn`, run the shared `reduceTurn` per turn, compose the
    session timeline turn-by-turn (each turn renders its input and its own
    activity; the referenced prefix is never re-rendered from context),
-   append live durable events and re-reduce, and keep text/reasoning deltas
-   in an ephemeral overlay cleared by canonical responses.
+   join live durable events by file offset (drop covered, append
+   contiguous, refetch on gap) and re-reduce, and keep text/reasoning
+   deltas in an ephemeral overlay cleared by canonical responses.
 4. Pending approvals and ask-human prompts render from the suspended turn's
    reduced state, so they survive restarts without any session-layer
    bookkeeping.
@@ -376,7 +386,10 @@ which governs mutation of live logs, not their removal.
 ## 11. Headless standalone turns
 
 A helper covers the non-session callers (background tasks, live notes,
-knowledge pipelines, scheduled agents):
+knowledge pipelines, scheduled agents). Implemented as
+`HeadlessAgentRunner` in `agents/headless.ts` (start/run handle with
+turn id, reduced state, and final assistant text); the shape below is
+the contract it fulfils:
 
 ```ts
 function runHeadlessTurn(input: {
@@ -491,6 +504,11 @@ All tests use the in-memory/mocked turn runtime and repo fakes.
   correct turn with the correct input type.
 - Turn-runtime rejections (unknown call, terminal turn) pass through.
 - `sendMessage` never routes to ask-human.
+- `stopTurn` aborts every live advance when a turn has concurrent
+  invocations, and an earlier advance settling does not untrack a later
+  one.
+- A `stopTurn` cancel input that lost the race with a concurrent settle
+  resolves as a successful stop; a non-terminal rejection still surfaces.
 
 ### 13.6 Index
 
@@ -512,15 +530,20 @@ All tests use the in-memory/mocked turn runtime and repo fakes.
 ## 14. Suggested module layout
 
 ```text
-apps/x/packages/shared/src/sessions.ts   # event schemas, reducer, index types
+apps/x/packages/shared/src/sessions.ts        # event schemas, reducer, index types
 
-apps/x/packages/core/src/sessions/
+apps/x/packages/core/src/runtime/sessions/
   sessions.ts      # ISessions implementation
+  api.ts           # public contract
   repo.ts          # ISessionRepo contract
   fs-repo.ts       # filesystem implementation
-  index.ts         # in-memory index + startup scan
-  headless.ts      # runHeadlessTurn
+  session-index.ts # in-memory index
+  bus.ts           # index-changed fan-out
 ```
+
+The headless helper of §11 is implemented as `HeadlessAgentRunner` in
+`runtime/assembly/headless.ts` (not under `sessions/`).
+
 
 Awilix registration mirrors the turn runtime: singleton scope, PROXY
 constructor injection, no container resolution from inside the classes.

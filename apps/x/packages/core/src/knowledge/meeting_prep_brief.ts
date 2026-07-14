@@ -181,7 +181,7 @@ async function generateBrief(event: CalendarEvent, ctx: Awaited<ReturnType<typeo
 
     const result = await withUseCase({ useCase: 'meeting_prep' }, () => generateText({
         model,
-        system: BRIEF_SYSTEM,
+        instructions: BRIEF_SYSTEM,
         prompt: parts.join('\n\n'),
     }));
     captureLlmUsage({ useCase: 'meeting_prep', model: modelId, provider: providerName, usage: result.usage });
