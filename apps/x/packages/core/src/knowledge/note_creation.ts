@@ -1,5 +1,4 @@
 import { renderNoteTypesBlock } from './note_system.js';
-import { renderNoteEffectRules } from './tag_system.js';
 
 export function getRaw(): string {
   return `---
@@ -193,15 +192,13 @@ Either:
 
 ---
 
-# The Core Rule: Label-Based Filtering
+# The Core Rule: Pre-Filtered Emails
 
-**Emails now have YAML frontmatter with labels.** Use these labels to decide whether to process or skip.
+**Emails reaching you have already passed a noise filter.** The inbox classifier stamps every email's YAML frontmatter with a \`knowledge: extract | skip\` verdict, and \`skip\` emails (marketing, newsletters, notifications, receipts, cold outreach) never reach this agent. Do not re-litigate that decision — an email in front of you is presumed worth reading.
 
-**Meetings and voice memos always create notes** — no label check needed.
+**Meetings and voice memos always create notes** — no check needed.
 
-**For emails, read the YAML frontmatter labels and apply these rules:**
-
-${renderNoteEffectRules()}
+**For emails, you still apply judgment about WHAT to extract:** an admitted email can still contain nothing durable (a bare "thanks!", a scheduling ping with no new facts). In that case output SKIP with a reason rather than inventing a note.
 
 ---
 
@@ -284,7 +281,7 @@ Emails containing calendar invites (\`.ics\` attachments or inline calendar data
 
 ---
 
-# Step 1: Source Filtering (Label-Based)
+# Step 1: Source Filtering
 
 ## For Meetings and Voice Memos
 Always process — no filtering needed.
@@ -307,33 +304,31 @@ Skip routine metadata churn and duplicated notifications unless they change dura
 
 ## For Emails — Read YAML Frontmatter
 
-Emails have YAML frontmatter with labels prepended by the labeling agent:
+Emails carry YAML frontmatter stamped by the inbox classifier:
 
 \`\`\`yaml
 ---
-labels:
-  relationship:
-    - Investor
-  topics:
-    - Fundraising
-  type: Intro
-  filter: []
-  action: FYI
-processed: true
-labeled_at: "2026-02-28T12:00:00Z"
+importance: important
+category: correspondence
+knowledge: extract
+classified_at: "2026-07-11T12:00:00Z"
 ---
 \`\`\`
 
+- \`category\` (correspondence, meeting, notification, newsletter, promotion, cold_outreach, receipt) tells you what kind of email this is — use it as context, e.g. \`meeting\` emails usually yield a person/meeting note.
+- \`knowledge: extract\` is why the file reached you; \`skip\` emails are filtered out upstream.
+- Older files may instead carry a legacy \`labels:\` block from the retired labeling agent — treat those the same way: the file reached you, so it passed filtering.
+
 ## Decision Rules
 
-Apply the label rules from "The Core Rule: Label-Based Filtering" above.
+Apply "The Core Rule: Pre-Filtered Emails" above: process the email, but SKIP if it genuinely contains nothing durable.
 
 ## Filter Decision Output
 
 If skipping:
 \`\`\`
 SKIP
-Reason: Labels indicate skip-only categories: {list the labels}
+Reason: {why nothing durable — e.g. bare acknowledgement, no new facts}
 \`\`\`
 
 If processing, continue to Step 2.
@@ -1303,15 +1298,15 @@ ${renderNoteTypesBlock()}
 
 ---
 
-# Summary: Label-Based Rules
+# Summary: Filtering Rules
 
 | Source Type | Creates Notes? | Updates Notes? | Detects State Changes? |
 |-------------|---------------|----------------|------------------------|
 | Meeting | Yes | Yes | Yes |
 | Voice memo | Yes | Yes | Yes |
-| Email (create label + user replied in thread) | Yes | Yes | Yes |
-| Email (create label, purely inbound — no user reply) | Update-only (no new People/Org notes) | Yes | Yes |
-| Email (only skip labels) | No (SKIP) | No | No |
+| Email (user replied in thread) | Yes | Yes | Yes |
+| Email (purely inbound — no user reply) | Update-only (no new People/Org notes) | Yes | Yes |
+| Email (nothing durable in it) | No (SKIP) | No | No |
 
 **Email Reply Gate:** New canonical People/Organization notes from an email require the user to have replied at least once in the thread (a \`### From:\` matching \`user.email\` or \`@user.domain\`). Purely inbound threads update existing notes only. Calendar invites for a scheduled meeting are exempt.
 

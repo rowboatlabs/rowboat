@@ -194,41 +194,7 @@ function renderTagGroups(tags: TagDefinition[]): string {
   return `# Tag System Reference\n\n${sections.join('\n\n')}`;
 }
 
-export function renderNoteEffectRules(): string {
-  const tags = getTagDefinitions();
-  const skipByType = new Map<string, string[]>();
-  const createByType = new Map<string, string[]>();
-
-  for (const t of tags) {
-    const effect = t.noteEffect ?? 'none';
-    if (effect === 'none') continue;
-    const label = TYPE_LABELS[t.type] ?? t.type;
-    const map = effect === 'skip' ? skipByType : createByType;
-    const list = map.get(label) ?? [];
-    list.push(t.tag.split('-').map(w => w[0].toUpperCase() + w.slice(1)).join(' '));
-    map.set(label, list);
-  }
-
-  const formatList = (map: Map<string, string[]>) =>
-    Array.from(map.entries()).map(([type, tags]) => `- **${type}:** ${tags.join(', ')}`).join('\n');
-
-  return [
-    `**SKIP if the email has ANY of these labels (skip labels override everything):**`,
-    formatList(skipByType),
-    ``,
-    `**CREATE/UPDATE notes if the email has ANY of these labels (and no skip labels present):**`,
-    formatList(createByType),
-    ``,
-    `**Logic:** If even one label falls in the "skip" list, skip the email — skip labels are hard filters that override create labels.`,
-  ].join('\n');
-}
-
 export function renderTagSystemForNotes(): string {
   const tags = getTagDefinitions().filter(t => t.applicability !== 'email');
-  return renderTagGroups(tags);
-}
-
-export function renderTagSystemForEmails(): string {
-  const tags = getTagDefinitions().filter(t => t.applicability !== 'notes');
   return renderTagGroups(tags);
 }

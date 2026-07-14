@@ -1,22 +1,23 @@
 #!/usr/bin/env node
 /**
- * Standalone pipeline runner for email labeling, graph building, and note tagging.
+ * Standalone pipeline runner for graph building and note tagging.
  *
  * Usage:
  *   npx tsx packages/core/src/knowledge/run_pipeline.ts --workdir /path/to/workdir
- *   npx tsx packages/core/src/knowledge/run_pipeline.ts --workdir /path/to/workdir --steps label,graph,tag
- *   npx tsx packages/core/src/knowledge/run_pipeline.ts --workdir /path/to/workdir --steps label
  *   npx tsx packages/core/src/knowledge/run_pipeline.ts --workdir /path/to/workdir --steps graph,tag
+ *   npx tsx packages/core/src/knowledge/run_pipeline.ts --workdir /path/to/workdir --steps graph
  *
  * The workdir should contain a gmail_sync/ folder with email markdown files.
+ * Email classification frontmatter is stamped by the Gmail sync (see
+ * sync_gmail.ts / classify_thread.ts) — files without it are held by the
+ * graph step until the app's sync stamps them.
  * Output notes are written to workdir/knowledge/.
  *
  * Steps:
- *   label  - Classify emails with YAML frontmatter labels
  *   graph  - Extract entities and create/update knowledge notes
  *   tag    - Add YAML frontmatter tags to knowledge notes
  *
- * If --steps is omitted, all three steps run in order: label → graph → tag
+ * If --steps is omitted, both steps run in order: graph → tag
  */
 
 import fs from 'fs';
@@ -24,40 +25,31 @@ import path from 'path';
 
 // --- Parse CLI args before any core imports (WorkDir reads env at import time) ---
 
-const VALID_STEPS = ['label', 'graph', 'tag'] as const;
+const VALID_STEPS = ['graph', 'tag'] as const;
 type Step = typeof VALID_STEPS[number];
 
-function parseArgs(): { workdir: string; steps: Step[]; concurrency: number } {
+function parseArgs(): { workdir: string; steps: Step[] } {
     const args = process.argv.slice(2);
     let workdir: string | undefined;
     let stepsRaw: string | undefined;
-    let concurrency = 3;
 
     for (let i = 0; i < args.length; i++) {
         if (args[i] === '--workdir' && args[i + 1]) {
             workdir = args[++i];
         } else if (args[i] === '--steps' && args[i + 1]) {
             stepsRaw = args[++i];
-        } else if (args[i] === '--concurrency' && args[i + 1]) {
-            concurrency = parseInt(args[++i], 10);
-            if (isNaN(concurrency) || concurrency < 1) {
-                console.error('Error: --concurrency must be a positive integer');
-                process.exit(1);
-            }
         } else if (args[i] === '--help' || args[i] === '-h') {
             console.log(`
-Usage: run_pipeline --workdir <path> [--steps label,graph,tag] [--concurrency N]
+Usage: run_pipeline --workdir <path> [--steps graph,tag]
 
 Options:
   --workdir <path>      Working directory containing gmail_sync/ folder (required)
-  --steps <list>        Comma-separated steps to run: label, graph, tag (default: all)
-  --concurrency <N>     Number of parallel batches for labeling (default: 3)
+  --steps <list>        Comma-separated steps to run: graph, tag (default: all)
   --help, -h            Show this help message
 
 Examples:
   run_pipeline --workdir ./my-emails
-  run_pipeline --workdir ./my-emails --steps label --concurrency 5
-  run_pipeline --workdir ./my-emails --steps label,graph
+  run_pipeline --workdir ./my-emails --steps graph
   run_pipeline --workdir ./my-emails --steps graph,tag
 `);
             process.exit(0);
@@ -91,10 +83,10 @@ Examples:
         steps = [...VALID_STEPS];
     }
 
-    return { workdir, steps, concurrency };
+    return { workdir, steps };
 }
 
-const { workdir, steps, concurrency } = parseArgs();
+const { workdir, steps } = parseArgs();
 
 // Set env BEFORE importing core modules (WorkDir is read at module load time)
 process.env.ROWBOAT_WORKDIR = workdir;
@@ -104,33 +96,25 @@ process.env.ROWBOAT_WORKDIR = workdir;
 async function main() {
     console.log(`[Pipeline] Working directory: ${workdir}`);
     console.log(`[Pipeline] Steps to run: ${steps.join(', ')}`);
-    console.log(`[Pipeline] Concurrency: ${concurrency}`);
     console.log();
 
-    // Verify gmail_sync exists if label or graph step is requested
+    // Verify gmail_sync exists if the graph step is requested
     const gmailSyncDir = path.join(workdir, 'gmail_sync');
-    if ((steps.includes('label') || steps.includes('graph')) && !fs.existsSync(gmailSyncDir)) {
+    if (steps.includes('graph') && !fs.existsSync(gmailSyncDir)) {
         console.warn(`[Pipeline] Warning: gmail_sync/ folder not found in ${workdir}`);
     }
 
     const startTime = Date.now();
 
-    if (steps.includes('label')) {
-        console.log('[Pipeline] === Step 1: Email Labeling ===');
-        const { processUnlabeledEmails } = await import('./label_emails.js');
-        await processUnlabeledEmails(concurrency);
-        console.log();
-    }
-
     if (steps.includes('graph')) {
-        console.log('[Pipeline] === Step 2: Graph Building ===');
+        console.log('[Pipeline] === Step 1: Graph Building ===');
         const { processAllSources } = await import('./build_graph.js');
         await processAllSources();
         console.log();
     }
 
     if (steps.includes('tag')) {
-        console.log('[Pipeline] === Step 3: Note Tagging ===');
+        console.log('[Pipeline] === Step 2: Note Tagging ===');
         const { processUntaggedNotes } = await import('./tag_notes.js');
         await processUntaggedNotes();
         console.log();
