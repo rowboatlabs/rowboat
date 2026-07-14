@@ -89,7 +89,10 @@ export function initUpdater(): void {
       releaseNotes: releaseNotes || undefined,
     });
     showReadyBadge();
-    if (!releaseNotes) void backfillReleaseNotes(releaseName || undefined);
+    // Always fetch the aggregated notes: even when Squirrel supplied a body,
+    // it covers only the target release — an update spanning several versions
+    // (0.6.0 → 0.7.1) would silently drop everything in between.
+    void backfillReleaseNotes(releaseName || undefined);
   });
   autoUpdater.on("error", (err) => {
     setStatus({ state: "error", error: err.message, lastCheckedAt: status.lastCheckedAt });
@@ -105,28 +108,113 @@ export function initUpdater(): void {
   });
 }
 
+// Numeric x.y.z comparison; any prerelease suffix is ignored (release tags
+// here are plain versions like v0.7.1).
+function cmpVersions(a: string, b: string): number {
+  const pa = a.split("-")[0].split(".").map(Number);
+  const pb = b.split("-")[0].split(".").map(Number);
+  for (let i = 0; i < 3; i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0);
+    if (d) return d;
+  }
+  return 0;
+}
+
 /**
- * Fetch the GitHub release body for the staged update so the restart card
- * can show "What's new" inline. Best-effort: on any failure the card simply
- * omits the notes and keeps the link to the releases page.
+ * GitHub's release page falls back to the tagged commit's message when a
+ * release has no body — mirror that: list the commit subjects between the
+ * two version tags. Merge-PR subjects ("Merge pull request #689 from …")
+ * carry their meaning in the body, so those render as "token optimizations
+ * (#689)"; other merge commits are skipped as noise.
+ */
+async function commitLogFallback(fromVersion: string, toVersion: string): Promise<string | undefined> {
+  const res = await net.fetch(
+    `https://api.github.com/repos/${REPO}/compare/v${fromVersion}...v${toVersion}`,
+    { headers: { Accept: "application/vnd.github+json", "User-Agent": "Rowboat" } },
+  );
+  if (!res.ok) return undefined;
+  const { commits } = (await res.json()) as {
+    commits?: Array<{ commit: { message: string } }>;
+  };
+  if (!commits?.length) return undefined;
+  // Merge-based history lists both a PR's merge commit and its member
+  // commits — dedupe on the text minus any "(#N)" suffix. The merge commit
+  // is the newer one, so after reversing, the PR-numbered line wins.
+  const seen = new Set<string>();
+  const lines = commits
+    .map(({ commit }) => {
+      const [subject, ...rest] = commit.message.split("\n");
+      const pr = subject.match(/^Merge pull request (#\d+) from /);
+      if (pr) {
+        const body = rest.map((l) => l.trim()).find(Boolean);
+        return body ? `${body} (${pr[1]})` : undefined;
+      }
+      return subject.startsWith("Merge ") ? undefined : subject.trim();
+    })
+    .filter((s): s is string => Boolean(s))
+    .reverse() // compare lists oldest→newest; show newest first
+    .filter((line) => {
+      const key = line.replace(/ \(#\d+\)$/, "").toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  if (!lines.length) return undefined;
+  const MAX = 30;
+  const shown = lines.slice(0, MAX).map((l) => `- ${l}`);
+  if (lines.length > MAX) shown.push(`- …and ${lines.length - MAX} more`);
+  return shown.join("\n");
+}
+
+/**
+ * Fetch release notes for the staged update so the restart card can show
+ * "What's new" inline. Aggregates the bodies of EVERY release between the
+ * running version (exclusive) and the update target (inclusive) — an update
+ * that skips versions shows the changes of all of them, and releases with
+ * empty bodies are simply omitted. If NO release in range has a body, falls
+ * back to the commit log between the two versions. Best-effort: on any
+ * failure the card keeps whatever Squirrel supplied plus the link to the
+ * releases page.
  */
 async function backfillReleaseNotes(releaseName: string | undefined): Promise<void> {
-  const url = releaseName
-    ? `https://api.github.com/repos/${REPO}/releases/tags/${releaseName.startsWith("v") ? releaseName : `v${releaseName}`}`
-    : `https://api.github.com/repos/${REPO}/releases/latest`;
   try {
-    const res = await net.fetch(url, {
+    const res = await net.fetch(`https://api.github.com/repos/${REPO}/releases?per_page=30`, {
       headers: { Accept: "application/vnd.github+json", "User-Agent": "Rowboat" },
     });
     if (!res.ok) return;
-    const release = (await res.json()) as { tag_name?: string; body?: string };
-    // A newer download may have re-staged meanwhile — only fill in gaps.
-    if (status.state !== "ready" || status.releaseNotes) return;
-    if (!release.body) return;
+    const releases = (await res.json()) as Array<{
+      tag_name?: string;
+      body?: string;
+      draft?: boolean;
+      prerelease?: boolean;
+    }>;
+    // The update service only serves stable releases, so absent a name from
+    // Squirrel the target is the newest non-prerelease.
+    const target = (
+      releaseName ?? releases.find((r) => !r.draft && !r.prerelease)?.tag_name ?? ""
+    ).replace(/^v/, "");
+    if (!target) return;
+    const inRange = releases
+      .filter((r) => {
+        if (r.draft || !r.tag_name) return false;
+        const v = r.tag_name.replace(/^v/, "");
+        return cmpVersions(v, status.version) > 0 && cmpVersions(v, target) <= 0;
+      })
+      .sort((a, b) => cmpVersions(b.tag_name!.replace(/^v/, ""), a.tag_name!.replace(/^v/, "")));
+    const withNotes = inRange.filter((r) => r.body?.trim());
+    // A single-step update reads better without a version heading (the card
+    // already shows the version badge); multi-step gets one per release.
+    const notes =
+      withNotes.length === 1
+        ? withNotes[0].body!.trim()
+        : withNotes.map((r) => `## ${r.tag_name}\n\n${r.body!.trim()}`).join("\n\n");
+    const finalNotes = notes || (await commitLogFallback(status.version, target));
+    // A newer download may have re-staged meanwhile — don't stomp its state.
+    if (status.state !== "ready") return;
     setStatus({
       state: "ready",
-      newVersion: status.newVersion ?? release.tag_name,
-      releaseNotes: release.body,
+      newVersion: status.newVersion ?? target,
+      releaseNotes: finalNotes || status.releaseNotes,
     });
   } catch (err) {
     console.error("[Updater] release notes fetch failed:", err);

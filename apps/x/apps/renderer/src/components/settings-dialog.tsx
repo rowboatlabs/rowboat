@@ -129,34 +129,15 @@ type UpdaterStatus = ipcShared.IPCChannels['updater:status']['req']
 
 function UpdateSettings() {
   const [status, setStatus] = useState<UpdaterStatus | null>(null)
-  // When the user clicked "Check for updates" — the "You're up to date"
-  // confirmation only shows for a check completed after this, so a stale
-  // lastCheckedAt from a background check never reads as click feedback.
-  const [checkStartedAt, setCheckStartedAt] = useState<number | null>(null)
 
   useEffect(() => {
     void window.ipc.invoke('updater:getStatus', null).then(setStatus)
     return window.ipc.on('updater:status', setStatus)
   }, [])
 
-  const confirmedUpToDate =
-    checkStartedAt !== null &&
-    status?.state === 'idle' &&
-    status.lastCheckedAt !== undefined &&
-    status.lastCheckedAt >= checkStartedAt
-
-  // The confirmation is click feedback, not a status — fade it after a bit
-  // rather than leaving a stale "You're up to date" up indefinitely.
-  useEffect(() => {
-    if (!confirmedUpToDate) return
-    const timer = setTimeout(() => setCheckStartedAt(null), 5000)
-    return () => clearTimeout(timer)
-  }, [confirmedUpToDate])
-
   if (!status) return null
 
   const checkNow = () => {
-    setCheckStartedAt(Date.now())
     // Progress arrives via updater:status pushes; using the invoke's snapshot
     // here could stomp a newer pushed state.
     void window.ipc.invoke('updater:check', null)
@@ -233,17 +214,25 @@ function UpdateSettings() {
       break
     case 'idle':
       body = (
-        <div className="flex items-center gap-3">
+        <div className="space-y-2">
+          {/* lastCheckedAt only exists after a check that found no update
+              (an available update moves the state to downloading/ready), so
+              idle + lastCheckedAt genuinely means "on the latest version". */}
+          {status.lastCheckedAt !== undefined && (
+            <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+              <CheckCircle2 className="size-3.5 text-green-500 shrink-0" />
+              <span>
+                {`You're up to date! Rowboat v${status.version} is the latest version.`}
+                <span className="text-muted-foreground/60">
+                  {` Checked at ${new Date(status.lastCheckedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.`}
+                </span>
+              </span>
+            </p>
+          )}
           <Button size="sm" variant="outline" onClick={checkNow}>
             <RefreshCw className="size-3.5" />
             Check for updates
           </Button>
-          {confirmedUpToDate && (
-            <span className="text-xs text-muted-foreground flex items-center gap-1">
-              <CheckCircle2 className="size-3.5 text-green-500" />
-              {"You're up to date."}
-            </span>
-          )}
         </div>
       )
       break
