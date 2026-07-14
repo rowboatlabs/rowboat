@@ -13,9 +13,11 @@ import type { DetectedMeeting } from "@x/core/dist/meetings/detector.js";
  * window's existing take-meeting-notes flow.
  */
 
-// Lean bar + margins for the overhanging × and the CSS drop shadow.
-const POPUP_WIDTH = 400;
-const POPUP_HEIGHT = 76;
+// The window IS the card: exact card dimensions, card background, native
+// rounded corners + shadow. No transparency — macOS panels don't honor
+// `transparent: true` reliably and paint a grey backing slab instead.
+const POPUP_WIDTH = 376;
+const POPUP_HEIGHT = 48;
 const AUTO_DISMISS_MS = 45_000;
 
 // Display names, Granola-style ("Chrome", not "Google Chrome").
@@ -109,10 +111,8 @@ export function showMeetingPopup(meeting: DetectedMeeting): void {
         alwaysOnTop: true,
         skipTaskbar: true,
         show: false,
-        // Transparent window: the rounded card + overhanging × render inside;
-        // the shadow is CSS (native shadows artifact on transparent windows).
-        transparent: true,
-        hasShadow: false,
+        backgroundColor: "#1d1d1d",
+        hasShadow: true,
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
