@@ -786,6 +786,9 @@ const ipcSchemas = {
       // When true, the renderer should also open the meeting URL (Zoom/Meet/etc.)
       // in addition to triggering the take-notes flow.
       openMeeting: z.boolean().optional(),
+      // Origin recorded in the note frontmatter: 'calendar-sync' (default) for
+      // notification/deep-link starts, 'detected' for ambient meeting detection.
+      source: z.string().optional(),
     }),
     res: z.null(),
   },
@@ -794,6 +797,105 @@ const ipcSchemas = {
     res: z.object({
       url: z.string().nullable(),
     }),
+  },
+  // Tray commands issued before the renderer was ready (mirrors the pending
+  // deep-link pull above): the renderer drains this once on mount.
+  'app:consumePendingTrayCommand': {
+    req: z.null(),
+    res: z.object({
+      toggleMeetingNotes: z.boolean(),
+    }),
+  },
+  // Main → renderer: tray menu "Start/Stop meeting notes" — runs the same
+  // toggle flow as the Meetings header button.
+  'app:toggleMeetingNotes': {
+    req: z.null(),
+    res: z.null(),
+  },
+  // Launch-at-login (resident app). The OS login-item registry is the source
+  // of truth; these read/write it directly rather than a config file.
+  'app:getLoginItemSettings': {
+    req: z.null(),
+    res: z.object({
+      openAtLogin: z.boolean(),
+    }),
+  },
+  'app:setLoginItemSettings': {
+    req: z.object({
+      openAtLogin: z.boolean(),
+    }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  // Renderer → main: meeting capture state, so the tray menu/tooltip can
+  // reflect an active recording.
+  'meeting:setRecordingState': {
+    req: z.object({
+      recording: z.boolean(),
+    }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  // Renderer → main: meeting notes finished generating — fire the "notes
+  // ready" notification (background only; click opens the note).
+  'meeting:notifyNotesReady': {
+    req: z.object({
+      notePath: z.string(),
+      title: z.string(),
+    }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  // Main → renderer: the meeting app released the microphone while a
+  // recording was running — the call likely ended, auto-stop and summarize.
+  'meeting:externalCallEnded': {
+    req: z.null(),
+    res: z.null(),
+  },
+  // Renderer → main: assistant voice/video call holds the mic — suppresses
+  // ambient meeting detection (it would otherwise see our own capture).
+  'voice:setCallActive': {
+    req: z.object({
+      active: z.boolean(),
+    }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  // --- Ambient meeting detection popup (own always-on-top window) ---
+  // Main → popup: the detection to display.
+  'meetingDetect:payload': {
+    req: z.object({
+      title: z.string(),
+      message: z.string(),
+      // Calendar-linked detections render a solid accent bar; ad-hoc ones a
+      // dashed one (Granola's affordance).
+      hasCalendarEvent: z.boolean(),
+    }),
+    res: z.null(),
+  },
+  // Popup → main: fetch the payload (the push can race listener registration).
+  'meetingDetect:getPayload': {
+    req: z.null(),
+    res: z.object({
+      payload: z
+        .object({
+          title: z.string(),
+          message: z.string(),
+          hasCalendarEvent: z.boolean(),
+        })
+        .nullable(),
+    }),
+  },
+  // Popup → main: user clicked a button.
+  'meetingDetect:action': {
+    req: z.object({
+      action: z.enum(['take-notes', 'dismiss']),
+    }),
+    res: z.object({}),
   },
   'granola:getConfig': {
     req: z.null(),

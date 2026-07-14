@@ -66,6 +66,20 @@ import { rankSlackHomeMessages } from '@x/core/dist/knowledge/sources/rank_slack
 import { syncSlackKnowledgeSources, triggerSync as triggerSlackKnowledgeSync, getSlackKnowledgeSyncStatus } from '@x/core/dist/knowledge/sources/sync_slack.js';
 import { isOnboardingComplete, markOnboardingComplete } from '@x/core/dist/config/note_creation_config.js';
 import { loadNotificationSettings, saveNotificationSettings } from '@x/core/dist/config/notification_config.js';
+import { saveAppSettings } from '@x/core/dist/config/app_settings.js';
+import { setSelfCaptureActive } from '@x/core/dist/meetings/detector.js';
+import { notifyIfEnabled } from '@x/core/dist/application/notification/notifier.js';
+import { consumePendingToggleMeetingNotes, setTrayRecordingState } from './tray.js';
+import { closeMeetingPopup, getMeetingPopupPayload, handleMeetingPopupAction } from './meeting-popup.js';
+
+// Ambient meeting detection must ignore Rowboat's own mic use: meeting
+// capture and assistant voice/video calls both hold the mic. Either being
+// active suppresses "Meeting detected" prompts.
+let meetingRecordingActive = false;
+let voiceCallActive = false;
+function updateSelfCaptureState() {
+  setSelfCaptureActive(meetingRecordingActive || voiceCallActive);
+}
 import * as composioHandler from './composio-handler.js';
 import * as appsIndexer from '@x/core/dist/apps/indexer.js';
 import * as appsServer from '@x/core/dist/apps/server.js';
@@ -841,6 +855,61 @@ export function setupIpcHandlers() {
     },
     'app:consumePendingDeepLink': async () => {
       return { url: consumePendingDeepLink() };
+    },
+    'app:consumePendingTrayCommand': async () => {
+      return { toggleMeetingNotes: consumePendingToggleMeetingNotes() };
+    },
+    'app:getLoginItemSettings': async () => {
+      // Dev builds never register a login item (it would point at the dev
+      // Electron binary), so report off.
+      if (!app.isPackaged) return { openAtLogin: false };
+      return { openAtLogin: app.getLoginItemSettings().openAtLogin };
+    },
+    'app:setLoginItemSettings': async (_event, args) => {
+      if (app.isPackaged) {
+        app.setLoginItemSettings({
+          openAtLogin: args.openAtLogin,
+          ...(process.platform === 'win32' ? { args: ['--hidden'] } : {}),
+        });
+        // The user has expressed an explicit choice — never re-apply the
+        // first-run default over it.
+        saveAppSettings({ loginItemRegistered: true });
+      }
+      return { success: true as const };
+    },
+    'meeting:setRecordingState': async (_event, args) => {
+      setTrayRecordingState(args.recording);
+      meetingRecordingActive = args.recording;
+      updateSelfCaptureState();
+      // Recording started through another path — a lingering "Take Notes?"
+      // popup is stale now.
+      if (args.recording) closeMeetingPopup();
+      return { success: true as const };
+    },
+    'voice:setCallActive': async (_event, args) => {
+      voiceCallActive = args.active;
+      updateSelfCaptureState();
+      return { success: true as const };
+    },
+    'meeting:notifyNotesReady': async (_event, args) => {
+      // Granola-style re-entry point: the note refreshed in place, but the
+      // user has usually switched back to the meeting app — the notification
+      // brings them back. Suppressed while the app is focused.
+      void notifyIfEnabled('meeting_notes_ready', {
+        title: 'Meeting notes ready',
+        message: `Your notes for "${args.title}" are ready.`,
+        link: `rowboat://open?type=file&path=${encodeURIComponent(args.notePath)}`,
+        actionLabel: 'Open notes',
+        onlyWhenBackground: true,
+      });
+      return { success: true as const };
+    },
+    'meetingDetect:getPayload': async () => {
+      return { payload: getMeetingPopupPayload() };
+    },
+    'meetingDetect:action': async (_event, args) => {
+      handleMeetingPopupAction(args.action);
+      return {};
     },
     'analytics:bootstrap': async () => {
       return {
@@ -2221,6 +2290,9 @@ export function setupIpcHandlers() {
         if (main.isMinimized()) main.restore();
         main.show();
         main.focus();
+        // The user is typically in another app (e.g. just left a meeting) —
+        // a plain focus() won't take the foreground from it.
+        app.focus({ steal: true });
       }
       return {};
     },

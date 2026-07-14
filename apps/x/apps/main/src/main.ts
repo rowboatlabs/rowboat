@@ -1,5 +1,6 @@
 import { app, BrowserWindow, desktopCapturer, dialog, protocol, net, shell, session, safeStorage, type Session } from "electron";
 import path from "node:path";
+import os from "node:os";
 import {
   setupIpcHandlers,
   startRunsWatcher, startSessionsWatcher, startTurnEventsWatcher, markSessionsIndexReady,
@@ -64,6 +65,10 @@ import {
 } from "./deeplink.js";
 import { disconnectGoogleIfScopesStale } from "./oauth-handler.js";
 import { startModelsDevRefresh } from "@x/core/dist/models/models-dev.js";
+import { loadAppSettings, saveAppSettings } from "@x/core/dist/config/app_settings.js";
+import { init as initMeetingDetection } from "@x/core/dist/meetings/detector.js";
+import { createAppTray, hasTray, isRecordingActive, markPendingToggleMeetingNotes } from "./tray.js";
+import { initMeetingPopup, showMeetingPopup } from "./meeting-popup.js";
 
 // Captured as early as possible so it reflects actual process start. Used to
 // gate grace-eligible notifications (e.g. the burst of background-task
@@ -275,7 +280,49 @@ function setupZoomShortcuts(win: BrowserWindow) {
   });
 }
 
-function createWindow() {
+// Resident-app plumbing (Granola-style): the main window may exist hidden
+// (launched at login) or not at all (closed on macOS) while the app keeps
+// running from the tray. showApp() is the single "bring the app up" path
+// used by the tray, the Dock, and pending tray commands.
+let mainWindow: BrowserWindow | null = null;
+
+function showApp(): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    if (!mainWindow.isVisible()) mainWindow.maximize();
+    mainWindow.show();
+    mainWindow.focus();
+  } else {
+    createWindow();
+  }
+  // The user is usually in another app (a meeting!) when this runs — a plain
+  // focus() won't take the foreground from it.
+  app.focus({ steal: true });
+}
+
+/**
+ * Was this process launched by the OS at login (rather than by the user)?
+ * Used to start with the window hidden so login launches are invisible.
+ *
+ * - Windows: our login item registers with an explicit --hidden arg.
+ * - macOS: wasOpenedAtLogin when available. On macOS 13+ (SMAppService)
+ *   Electron doesn't reliably populate it (electron#37244), so fall back to
+ *   a heuristic: a packaged launch while registered as a login item within
+ *   two minutes of boot is treated as a login launch.
+ */
+function wasLaunchedAtLogin(): boolean {
+  if (process.argv.includes("--hidden")) return true;
+  if (process.platform !== "darwin" || !app.isPackaged) return false;
+  try {
+    const settings = app.getLoginItemSettings();
+    if (settings.wasOpenedAtLogin) return true;
+    return settings.openAtLogin && os.uptime() < 120;
+  } catch {
+    return false;
+  }
+}
+
+function createWindow(options: { startHidden?: boolean } = {}) {
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -301,11 +348,18 @@ function createWindow() {
   configureSessionPermissions(session.defaultSession);
   configureSessionPermissions(session.fromPartition(BROWSER_PARTITION));
 
+  mainWindow = win;
   setMainWindowForDeepLinks(win);
-  win.on("closed", () => setMainWindowForDeepLinks(null));
+  win.on("closed", () => {
+    if (mainWindow === win) mainWindow = null;
+    setMainWindowForDeepLinks(null);
+  });
 
-  // Show window when content is ready to prevent blank screen
+  // Show window when content is ready to prevent blank screen.
+  // Launched-at-login starts stay hidden: the app is reachable from the
+  // tray/Dock, and showApp() maximizes on first reveal.
   win.once("ready-to-show", () => {
+    if (options.startHidden) return;
     win.maximize();
     win.show();
   });
@@ -436,7 +490,79 @@ app.whenReady().then(async () => {
     console.error('[Apps] Failed to start:', error);
   });
 
-  createWindow();
+  // Resident app (Granola-style): register as an OS login item once, on the
+  // first packaged run. After that the OS registry is the source of truth —
+  // the Settings toggle writes it directly, and disabling the login item in
+  // System Settings sticks because we never re-register on boot.
+  if (app.isPackaged && !loadAppSettings().loginItemRegistered) {
+    try {
+      app.setLoginItemSettings({
+        openAtLogin: true,
+        ...(process.platform === "win32" ? { args: ["--hidden"] } : {}),
+      });
+      saveAppSettings({ loginItemRegistered: true });
+    } catch (error) {
+      console.error("[LoginItem] Failed to register login item:", error);
+    }
+  }
+
+  createWindow({ startHidden: wasLaunchedAtLogin() });
+
+  // Menu bar icon: open the app / start-stop meeting notes without the
+  // window. If the renderer isn't ready to receive the toggle (window closed
+  // or still loading), park it as a pending command the renderer drains on
+  // mount — same pull pattern as pending deep links.
+  createAppTray({
+    openApp: showApp,
+    toggleMeetingNotes: () => {
+      const hadWindow = mainWindow !== null && !mainWindow.isDestroyed();
+      showApp();
+      const win = mainWindow;
+      if (!hadWindow || !win || win.webContents.isLoading()) {
+        markPendingToggleMeetingNotes();
+        return;
+      }
+      win.webContents.send("app:toggleMeetingNotes", null);
+    },
+  });
+
+  // Ambient meeting detection (Granola-style): the mic-monitor helper +
+  // running-app scan produce "Meeting detected" events; the popup asks
+  // before anything records. Clicking "Take Notes" routes into the same
+  // renderer flow as the calendar notification.
+  initMeetingPopup({
+    onTakeNotes: (meeting) => {
+      showApp();
+      // The user may have started recording between popup and click —
+      // sending the take-notes flow then would toggle it OFF.
+      if (isRecordingActive()) return;
+      const payload = {
+        event: meeting.calendarEvent ?? { summary: meeting.noteTitle },
+        openMeeting: false,
+        source: "detected",
+      };
+      const win = mainWindow;
+      if (!win || win.isDestroyed()) return;
+      if (win.webContents.isLoading()) {
+        win.webContents.once("did-finish-load", () => {
+          if (!win.isDestroyed()) win.webContents.send("app:takeMeetingNotes", payload);
+        });
+        return;
+      }
+      win.webContents.send("app:takeMeetingNotes", payload);
+    },
+  });
+  initMeetingDetection({
+    helperPath: path.join(__dirname, "mic-monitor"),
+    onDetected: (meeting) => showMeetingPopup(meeting),
+    // Call ended while recording (meeting app released the mic) — the
+    // renderer stops capture and generates notes, same as a manual stop.
+    onExternalCallEnded: () => {
+      const win = mainWindow;
+      if (!win || win.isDestroyed() || win.webContents.isLoading()) return;
+      win.webContents.send("meeting:externalCallEnded", null);
+    },
+  });
 
   // Start workspace watcher as a main-process service
   // Watcher runs independently and catches ALL filesystem changes:
@@ -561,14 +687,16 @@ app.whenReady().then(async () => {
   initChromeSync();
 
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
-    }
+    // Reveal the hidden/closed main window (login launches start hidden).
+    showApp();
   });
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
+  // Resident app: with a tray present, keep running with no windows so
+  // meeting detection/notifications stay alive (Granola-style). Without a
+  // tray (creation failed), fall back to the platform-default quit.
+  if (process.platform !== "darwin" && !hasTray()) {
     app.quit();
   }
 });

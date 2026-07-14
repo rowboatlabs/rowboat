@@ -1083,6 +1083,13 @@ function App() {
   // floating popout; camera on → full-screen call; camera off → popout
   // (mascot pill). Handlers live below the voice/submit plumbing they drive.
   const video = useVideoMode()
+  // Assistant calls hold the mic — tell main so ambient meeting detection
+  // doesn't mistake our own capture for an external meeting.
+  useEffect(() => {
+    void window.ipc
+      .invoke('voice:setCallActive', { active: video.state !== 'idle' })
+      .catch(() => { /* detection may be unavailable */ })
+  }, [video.state])
   const [inCall, setInCall] = useState(false)
   const inCallRef = useRef(false)
   // User explicitly shrank the full-screen call to the floating pill.
@@ -1100,6 +1107,24 @@ function App() {
   const meetingTranscription = useMeetingTranscription(() => {
     handleToggleMeetingRef.current?.()
   })
+
+  // Keep the tray menu in sync with meeting capture ("Start meeting notes"
+  // vs "Stop recording & generate notes").
+  useEffect(() => {
+    void window.ipc
+      .invoke('meeting:setRecordingState', { recording: meetingTranscription.state === 'recording' })
+      .catch(() => { /* tray may be unavailable */ })
+  }, [meetingTranscription.state])
+
+  // Main detected the meeting app released the mic (call ended) — stop and
+  // generate notes, exactly like a manual stop. Listener only exists while
+  // recording, so a stale signal can never toggle a new recording ON.
+  useEffect(() => {
+    if (meetingTranscription.state !== 'recording') return
+    return window.ipc.on('meeting:externalCallEnded', () => {
+      handleToggleMeetingRef.current?.()
+    })
+  }, [meetingTranscription.state])
 
   // Check if voice is available on mount and when OAuth state changes
   const refreshVoiceAvailability = useCallback(() => {
@@ -4678,11 +4703,23 @@ function App() {
     return () => observer.disconnect()
   }, [])
 
+  // Tray menu "Start/Stop meeting notes": same toggle as the Meetings header
+  // button. Also drains a toggle parked while the window was closed/loading
+  // (mirrors the pending deep-link pull above).
+  useEffect(() => {
+    void window.ipc.invoke('app:consumePendingTrayCommand', null).then(({ toggleMeetingNotes }) => {
+      if (toggleMeetingNotes) handleToggleMeetingRef.current?.()
+    })
+    return window.ipc.on('app:toggleMeetingNotes', () => {
+      handleToggleMeetingRef.current?.()
+    })
+  }, [])
+
   // Triggered by main when the user clicks a calendar-meeting notification.
   // Reuses the same flow as the in-app "Join meeting & take notes" button.
   // When `openMeeting` is true, also opens the meeting URL in the system browser.
   useEffect(() => {
-    return window.ipc.on('app:takeMeetingNotes', ({ event, openMeeting }) => {
+    return window.ipc.on('app:takeMeetingNotes', ({ event, openMeeting, source }) => {
       const e = event as {
         summary?: string
         start?: { dateTime?: string; date?: string; timeZone?: string }
@@ -4706,7 +4743,7 @@ function App() {
         location: e.location,
         htmlLink: e.htmlLink,
         conferenceLink,
-        source: 'calendar-sync',
+        source: source ?? 'calendar-sync',
       }
       window.dispatchEvent(new Event('calendar-block:join-meeting'))
     })
@@ -5637,6 +5674,14 @@ function App() {
               })
               // Refresh the file view
               await handleVoiceNoteCreated(notePath)
+              // Notes are done — bring Rowboat to the foreground on the
+              // finished note (the post-call "redirect"). The notification
+              // below is background-only, so it only fires if the focus
+              // grab didn't take.
+              void window.ipc.invoke('app:focusMainWindow', null).catch(() => {})
+              void window.ipc
+                .invoke('meeting:notifyNotesReady', { notePath, title: noteTitle })
+                .catch(() => { /* notification is best-effort */ })
             }
           }
         } catch (err) {
