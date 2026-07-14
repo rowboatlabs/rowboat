@@ -414,8 +414,11 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
     }
     return saved
   })()
+  // Gate Connect on credentials only, NOT on resolvedModel — that derives
+  // from the live fetch, which hasn't settled the instant a key is pasted, so
+  // gating on it made the first click a no-op (the model is resolved, fetching
+  // on demand if needed, inside handleTestAndSave).
   const canTest =
-    resolvedModel.length > 0 &&
     (!requiresApiKey || activeConfig.apiKey.trim().length > 0) &&
     (!requiresBaseURL || activeConfig.baseURL.trim().length > 0)
 
@@ -567,10 +570,35 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
     if (!canTest) return
     setTestState({ status: "testing" })
     try {
+      // Normally providerModels has loaded by click time and resolvedModel is
+      // set. But a Connect click right after pasting a key can beat the
+      // debounced key-change fetch — so when nothing is resolved yet, fetch
+      // the list on demand (one fetch, then save) instead of forcing a second
+      // click. Same silent precedence as resolvedModel, minus the customModel
+      // branch (that path only runs when resolvedModel is already empty).
+      let model = resolvedModel
+      if (!model) {
+        const listRes = await window.ipc.invoke("models:listForProvider", {
+          provider: {
+            flavor: provider,
+            apiKey: activeConfig.apiKey.trim() || undefined,
+            baseURL: activeConfig.baseURL.trim() || undefined,
+          },
+        })
+        if (listRes.success && listRes.models && listRes.models.length > 0) {
+          const preferred = preferredDefaults[provider]
+          model = preferred && listRes.models.includes(preferred) ? preferred : listRes.models[0]
+        }
+      }
+      if (!model) {
+        setTestState({ status: "error", error: "Enter a model to connect" })
+        toast.error("Enter a model to connect")
+        return
+      }
       // The silently resolved model takes the primary slot; the rest of the
       // saved list is preserved (same semantics setPrimaryModel had).
       const existing = activeConfig.models.map(m => m.trim())
-      const allModels = [resolvedModel, ...existing.slice(1).filter(m => m && m !== resolvedModel)]
+      const allModels = [model, ...existing.slice(1).filter(m => m && m !== model)]
       const providerConfig = {
         provider: {
           flavor: provider,

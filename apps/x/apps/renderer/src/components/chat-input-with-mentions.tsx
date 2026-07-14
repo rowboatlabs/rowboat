@@ -1532,12 +1532,17 @@ function ChatInputInner({
                 <ChevronDown className="h-3 w-3 shrink-0" />
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="max-h-80 overflow-y-auto">
+            <DropdownMenuContent align="end" className="p-0 overflow-hidden">
               {modelGroups.length === 0 && !standaloneDefault ? (
-                <DropdownMenuItem disabled>Connect a provider in Settings</DropdownMenuItem>
+                <div className="p-1">
+                  <DropdownMenuItem disabled>Connect a provider in Settings</DropdownMenuItem>
+                </div>
               ) : (
                 <>
-                  <div className="sticky top-0 z-10 -mx-1 -mt-1 bg-popover p-1">
+                  {/* Fixed search header — lives OUTSIDE the scroll area (the
+                      inner div below scrolls), so it's flush at the very top
+                      and always visible without any scroll. */}
+                  <div className="bg-popover p-1">
                     <input
                       ref={modelFilterInputRef}
                       value={modelFilter}
@@ -1553,6 +1558,7 @@ function ChatInputInner({
                       className="h-7 w-full rounded-sm border border-input bg-transparent px-2 text-xs outline-none placeholder:text-muted-foreground"
                     />
                   </div>
+                  <div className="max-h-80 overflow-y-auto p-1 pt-0">
                   <DropdownMenuRadioGroup
                     value={activeModelKey || (defaultModel ? `${defaultModel.provider}/${defaultModel.model}` : '')}
                     onValueChange={handleModelChange}
@@ -1609,6 +1615,7 @@ function ChatInputInner({
                       <div className="px-2 py-1.5 text-xs text-muted-foreground">No models match</div>
                     )}
                   </DropdownMenuRadioGroup>
+                  </div>
                 </>
               )}
             </DropdownMenuContent>
