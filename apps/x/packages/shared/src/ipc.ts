@@ -305,12 +305,37 @@ const ipcSchemas = {
   'gmail:setCategory': {
     req: z.object({
       threadId: z.string().min(1),
-      category: z.enum(['correspondence', 'meeting', 'notification', 'newsletter', 'promotion', 'cold_outreach', 'receipt']),
+      // Open string: valid ids come from the email label registry (built-ins
+      // plus user-defined labels), which the renderer fetches at runtime.
+      category: z.string().min(1).max(40),
     }),
     res: z.object({
       ok: z.boolean(),
       error: z.string().optional(),
     }),
+  },
+  // The label registry: built-in categories plus labels the user defined in
+  // their agent instructions. Chips, filter pills, and the correction
+  // dropdown all render from this list.
+  'gmail:getEmailLabels': {
+    req: z.object({}),
+    res: z.object({
+      labels: z.array(z.object({
+        id: z.string(),
+        name: z.string(),
+        kind: z.enum(['builtin', 'custom']),
+      })),
+    }),
+  },
+  // Free-text standing instructions injected into every classification /
+  // draft call. Stored at config/email_instructions.md.
+  'gmail:getEmailInstructions': {
+    req: z.object({}),
+    res: z.object({ instructions: z.string() }),
+  },
+  'gmail:setEmailInstructions': {
+    req: z.object({ instructions: z.string().max(8000) }),
+    res: z.object({ ok: z.boolean(), error: z.string().optional() }),
   },
   // Archive every "Everything else" thread of one category in a single sweep.
   'gmail:archiveCategory': {

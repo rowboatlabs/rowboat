@@ -460,10 +460,22 @@
   font-size: 13px;
 }
 
+/* The bold lead (summary or subject) may shrink — with ellipsis — but only
+   after the snippet span (huge shrink factor below) has fully collapsed.
+   Without this, a long summary plus the never-shrinking category chip
+   overflows the clipped row and the chip is what gets cut off. */
 .gmail-row-content strong {
-  flex-shrink: 0;
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: inherit;
   font-weight: 400;
+}
+
+/* Snippet gives way first (chips carry .gmail-row-chip and keep shrink 0). */
+.gmail-row-content > span:not(.gmail-row-chip) {
+  flex-shrink: 1000;
 }
 
 .gmail-row-date {

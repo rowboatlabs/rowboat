@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Archive, Bold, CheckCheck, Forward, Italic, Link as LinkIcon, List, ListOrdered, LoaderIcon, Mail, Paperclip, Quote, Redo2, RefreshCw, Reply, ReplyAll, Search, Send, Sparkles, SquarePen, Star, StarOff, Strikethrough, Trash2, Undo2, X } from 'lucide-react'
+import { Archive, Bold, CheckCheck, Forward, Italic, Link as LinkIcon, List, ListOrdered, LoaderIcon, Mail, Paperclip, Quote, Redo2, RefreshCw, Reply, ReplyAll, Search, Send, SlidersHorizontal, Sparkles, SquarePen, Star, StarOff, Strikethrough, Trash2, Undo2, X } from 'lucide-react'
 import { useEditor, EditorContent, type Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
@@ -12,6 +12,7 @@ import { useTheme } from '@/contexts/theme-context'
 import { SettingsDialog } from '@/components/settings-dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import {
   DropdownMenu,
@@ -96,34 +97,45 @@ function latestMessage(thread: GmailThread): GmailThreadMessage | undefined {
   return thread.messages[thread.messages.length - 1]
 }
 
-// Chip labels for the "Everything else" section — the reason a thread was
-// filed there. Plain correspondence gets no chip: chips explain the filing,
-// and correspondence is the default kind of mail.
-const CATEGORY_CHIP_LABELS: Record<string, string> = {
-  meeting: 'Meeting',
-  notification: 'Notification',
-  newsletter: 'Newsletter',
-  promotion: 'Promotion',
-  cold_outreach: 'Cold outreach',
-  receipt: 'Receipt',
+// The label set (chips, filter pills, correction dropdown) comes from the
+// backend label registry: built-ins (display names follow Superhuman's Auto
+// Label vocabulary — Marketing / Pitch / News / Calendar) plus any labels the
+// user defined in their agent instructions. This static copy of the built-ins
+// is the fallback used until the registry loads, and for ids the registry no
+// longer knows (a custom label the user later removed).
+type EmailCategory = string
+
+interface EmailLabelInfo {
+  id: string
+  name: string
+  kind: 'builtin' | 'custom'
 }
 
-type EmailCategory = 'correspondence' | 'meeting' | 'notification' | 'newsletter' | 'promotion' | 'cold_outreach' | 'receipt'
+const BUILTIN_LABELS: EmailLabelInfo[] = [
+  { id: 'correspondence', name: 'Direct', kind: 'builtin' },
+  { id: 'meeting', name: 'Calendar', kind: 'builtin' },
+  { id: 'notification', name: 'Notification', kind: 'builtin' },
+  { id: 'newsletter', name: 'News', kind: 'builtin' },
+  { id: 'promotion', name: 'Marketing', kind: 'builtin' },
+  { id: 'cold_outreach', name: 'Pitch', kind: 'builtin' },
+  { id: 'receipt', name: 'Receipt', kind: 'builtin' },
+]
 
-// Full label set for the correction dropdown (correspondence included there —
-// "this newsletter is actually a real person" is the most valuable fix).
-const ALL_CATEGORY_LABELS: Record<EmailCategory, string> = {
-  correspondence: 'Correspondence',
-  ...CATEGORY_CHIP_LABELS,
-} as Record<EmailCategory, string>
+// Pill order in the "Everything else" filter row: noise first (that's what
+// gets bulk-archived), then the rest of the built-ins; custom labels are
+// appended in registry order at render time. 'unclassified' (threads the
+// classifier hasn't reached yet) is always last and unarchivable.
+const BUILTIN_PILL_ORDER = ['newsletter', 'promotion', 'notification', 'cold_outreach', 'receipt', 'meeting', 'correspondence']
 
-// Pill order in the "Everything else" filter row. 'unclassified' (threads the
-// classifier hasn't reached yet) is deliberately last and unarchivable.
-const CATEGORY_PILL_ORDER = ['newsletter', 'promotion', 'notification', 'cold_outreach', 'receipt', 'meeting', 'correspondence', 'unclassified']
+// Fallback for ids the registry doesn't know: "portfolio_updates" → "Portfolio updates".
+function prettifyLabelId(id: string): string {
+  const words = id.replace(/_/g, ' ').trim()
+  return words ? words[0].toUpperCase() + words.slice(1) : id
+}
 
-function categoryPillLabel(category: string): string {
+function labelNameFor(labels: EmailLabelInfo[], category: string): string {
   if (category === 'unclassified') return 'Uncategorized'
-  return ALL_CATEGORY_LABELS[category as EmailCategory] ?? category
+  return labels.find((l) => l.id === category)?.name ?? prettifyLabelId(category)
 }
 
 // The user sent the latest message and someone else is in the conversation —
@@ -1303,6 +1315,15 @@ const ComposeBox = memo(function ComposeBox({
 
     setGenerating(true)
     try {
+      // The user's standing email-agent instructions steer this writer too —
+      // otherwise "keep drafts short, sign off with X" would apply to the
+      // auto-drafted replies but silently not to the Write-with-AI bar.
+      try {
+        const { instructions } = await window.ipc.invoke('gmail:getEmailInstructions', {})
+        if (instructions.trim()) {
+          system = `${system}\n\nThe user's standing email preferences — follow any that concern how emails should be written (tone, length, sign-off, what not to write):\n${instructions.trim()}`
+        }
+      } catch { /* draft without them */ }
       // Draft through Copilot: no model override, so the backend resolves the
       // same default model/provider the Copilot chat uses (models.json).
       const res = await window.ipc.invoke('llm:generate', { prompt, system })
@@ -1970,6 +1991,7 @@ function ThreadDetail({
   keysDisabled,
   onComposingChange,
   onSetCategory,
+  labels = BUILTIN_LABELS,
 }: {
   thread: GmailThread
   onClose: () => void
@@ -1980,6 +2002,8 @@ function ThreadDetail({
   onComposingChange?: (composing: boolean) => void
   /** Present for inbox threads only — search results aren't in the cache the correction writes to. */
   onSetCategory?: (threadId: string, category: EmailCategory) => Promise<void>
+  /** The label registry (built-ins + user-defined) for the chip and correction dropdown. */
+  labels?: EmailLabelInfo[]
 }) {
   const [composeMode, setComposeMode] = useState<ComposeMode | null>(null)
   const [selfEmail, setSelfEmail] = useState<string>('')
@@ -2069,17 +2093,17 @@ function ThreadDetail({
                 className="gmail-row-chip gmail-category-chip"
                 title="Correct the category — the classifier learns from this"
               >
-                {thread.category ? categoryPillLabel(thread.category) : 'Categorize'}
+                {thread.category ? labelNameFor(labels, thread.category) : 'Categorize'}
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="font-sans">
-              {(Object.keys(ALL_CATEGORY_LABELS) as EmailCategory[]).map((cat) => (
+              {labels.map((l) => (
                 <DropdownMenuItem
-                  key={cat}
-                  onSelect={() => { void onSetCategory(thread.threadId, cat) }}
-                  className={cn(cat === thread.category && 'font-semibold')}
+                  key={l.id}
+                  onSelect={() => { void onSetCategory(thread.threadId, l.id) }}
+                  className={cn(l.id === thread.category && 'font-semibold')}
                 >
-                  {ALL_CATEGORY_LABELS[cat]}
+                  {l.name}
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>
@@ -2179,6 +2203,7 @@ const ThreadRow = memo(function ThreadRow({
   chip,
   chipWaiting,
   onSetCategory,
+  labels,
   onToggle,
   onMarkRead,
   onArchive,
@@ -2201,6 +2226,8 @@ const ThreadRow = memo(function ThreadRow({
   chip?: string | null
   chipWaiting?: boolean
   onSetCategory?: (threadId: string, category: EmailCategory) => Promise<void>
+  /** Label registry — stable reference from EmailView state (this row is memoized). */
+  labels: EmailLabelInfo[]
   onToggle: (thread: GmailThread) => void
   onMarkRead: (threadId: string, read?: boolean) => Promise<void>
   onArchive: (threadId: string) => Promise<void>
@@ -2213,10 +2240,14 @@ const ThreadRow = memo(function ThreadRow({
 }) {
   const latest = latestMessage(thread)
   const isUnread = thread.unread === true
-  // Category chip on every row so the list itself answers "worth opening?".
-  // Plain correspondence stays chipless — labeling normal human mail
-  // "Correspondence" adds noise, not information.
-  const categoryChip = (thread.category && CATEGORY_CHIP_LABELS[thread.category]) || null
+  // Category chip on classified rows so the list itself answers "worth
+  // opening?". Plain correspondence gets none — with granular labels
+  // (Investor, Customer, …) available, "Direct" is the default case and
+  // absence reads cleaner than a chip stating it. It stays available in the
+  // correction dropdown and the Everything-else filter pills.
+  const categoryChip = thread.category && thread.category !== 'correspondence'
+    ? labelNameFor(labels, thread.category)
+    : null
   const stop = (e: React.MouseEvent | React.KeyboardEvent) => {
     e.stopPropagation()
   }
@@ -2294,11 +2325,86 @@ const ThreadRow = memo(function ThreadRow({
           keysDisabled={keysDisabled}
           onComposingChange={onComposingChange}
           onSetCategory={onSetCategory}
+          labels={labels}
         />
       )}
     </div>
   )
 })
+
+// Free-text standing instructions for the email agent. Saved to
+// config/email_instructions.md and injected into every classification /
+// draft call as the highest-priority section of the system prompt.
+function EmailInstructionsDialog({ open, onOpenChange, onSaved }: { open: boolean; onOpenChange: (open: boolean) => void; onSaved?: () => void }) {
+  const [text, setText] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    setLoading(true)
+    window.ipc.invoke('gmail:getEmailInstructions', {})
+      .then((res) => { if (!cancelled) setText(res.instructions) })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [open])
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      const result = await window.ipc.invoke('gmail:setEmailInstructions', { instructions: text })
+      if (result.ok) {
+        toast('Instructions saved — they apply to every email from now on.', 'success')
+        onOpenChange(false)
+        onSaved?.()
+      } else {
+        toast(`Could not save: ${result.error ?? 'unknown error'}`, 'error')
+      }
+    } catch (err) {
+      toast(`Could not save: ${err instanceof Error ? err.message : String(err)}`, 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="font-sans sm:max-w-[560px]">
+        <DialogTitle className="text-base font-semibold">Email agent instructions</DialogTitle>
+        <p className="text-sm text-muted-foreground">
+          Standing instructions for how your email is labeled, prioritized, and how draft replies are written.
+          The agent follows these over its defaults, on every new email. You can also define your own labels
+          here — e.g. “Create a label Clients for emails from active client accounts.”
+        </p>
+        <Textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          disabled={loading}
+          rows={10}
+          maxLength={8000}
+          placeholder={
+            'Examples:\n' +
+            '- Emails from my investors are always important.\n' +
+            '- Investor updates I receive are direct emails, not news.\n' +
+            '- Never draft replies to recruiters or cold outreach.\n' +
+            '- Keep drafts short and casual; sign off with my first name.\n' +
+            '- Payment failure alerts are important; other billing emails are receipts.\n' +
+            '- Create a label "Customers" for emails from paying customers.'
+          }
+          className="min-h-[220px] font-sans text-sm leading-relaxed"
+        />
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button onClick={() => void save()} disabled={saving || loading}>
+            {saving ? 'Saving…' : 'Save'}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
 
 function ShortcutKey({ children }: { children: React.ReactNode }) {
   return (
@@ -2479,6 +2585,17 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
   // Gmail sync uses the native Google OAuth connection.
   const [emailConnection, setEmailConnection] = useState<GmailConnectionStatus | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [instructionsOpen, setInstructionsOpen] = useState(false)
+  // Label registry (built-ins + user-defined). Fetched on mount and again
+  // after the instructions dialog saves, since saving can create labels.
+  const [emailLabels, setEmailLabels] = useState<EmailLabelInfo[]>(BUILTIN_LABELS)
+  const refreshLabels = useCallback(async () => {
+    try {
+      const res = await window.ipc.invoke('gmail:getEmailLabels', {})
+      if (res.labels?.length) setEmailLabels(res.labels)
+    } catch { /* keep built-ins */ }
+  }, [])
+  useEffect(() => { void refreshLabels() }, [refreshLabels])
   // Keyboard navigation: the j/k focus cursor over the visible rows, plus the
   // "?" shortcuts overlay. lastFocusedIndexRef remembers the cursor's position
   // so it can re-anchor when the focused row disappears (archive/trash/reload).
@@ -2714,14 +2831,14 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
           }
           return next
         })
-        toast(`Filed as ${categoryPillLabel(category)} — noted for similar emails.`, 'success')
+        toast(`Filed as ${labelNameFor(emailLabels, category)} — noted for similar emails.`, 'success')
       } else if (result.error) {
         toast(`Could not update category: ${result.error}`, 'error')
       }
     } catch (err) {
       toast(`Could not update category: ${err instanceof Error ? err.message : String(err)}`, 'error')
     }
-  }, [updateThreadInState, important.threads, other.threads])
+  }, [updateThreadInState, important.threads, other.threads, emailLabels])
 
   const trashThreadAction = useCallback(async (threadId: string) => {
     markLeaving(threadId, true)
@@ -3055,7 +3172,7 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
   // field, while a dialog is up, or while the inline reply composer is open.
 
   const listMode: 'search' | 'drafts' | 'inbox' = query.trim() ? 'search' : view === 'drafts' ? 'drafts' : 'inbox'
-  const anyModalOpen = composeOpen || settingsOpen || Boolean(editingDraft) || helpOpen
+  const anyModalOpen = composeOpen || settingsOpen || Boolean(editingDraft) || helpOpen || instructionsOpen
 
   // Row identity for the focus cursor — must match each row's data-thread-id.
   const rowIdOf = useCallback((thread: GmailThread) => (
@@ -3328,6 +3445,7 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
         chip={chip}
         chipWaiting={chipWaiting}
         onSetCategory={section ? setCategoryAction : undefined}
+        labels={emailLabels}
         onToggle={toggleThread}
         onMarkRead={markThreadReadAction}
         onArchive={archiveThreadAction}
@@ -3423,6 +3541,15 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
                 onClick={() => setView('drafts')}
               >Drafts{drafts.length > 0 ? ` (${drafts.length})` : ''}</button>
             </div>
+            <button
+              type="button"
+              className="gmail-icon-button"
+              onClick={() => setInstructionsOpen(true)}
+              aria-label="Email agent instructions"
+              title="Email agent instructions"
+            >
+              <SlidersHorizontal size={18} />
+            </button>
             <button
               type="button"
               className="gmail-icon-button"
@@ -3524,14 +3651,20 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
                 </div>
                 {Object.keys(categoryCounts).length > 0 && (
                   <div className="gmail-category-pills">
-                    {CATEGORY_PILL_ORDER.filter((c) => (categoryCounts[c] ?? 0) > 0).map((cat) => (
+                    {[
+                      ...BUILTIN_PILL_ORDER,
+                      ...emailLabels.filter((l) => l.kind === 'custom').map((l) => l.id),
+                      // Stale custom ids still present in counts render too.
+                      ...Object.keys(categoryCounts).filter((c) => c !== 'unclassified' && !BUILTIN_PILL_ORDER.includes(c) && !emailLabels.some((l) => l.id === c)),
+                      'unclassified',
+                    ].filter((c) => (categoryCounts[c] ?? 0) > 0).map((cat) => (
                       <button
                         key={cat}
                         type="button"
                         className={cn('gmail-category-pill', otherCategory === cat && 'gmail-category-pill-active')}
                         onClick={() => setOtherCategory((prev) => (prev === cat ? null : cat))}
                       >
-                        {categoryPillLabel(cat)} <span className="gmail-category-pill-count">{categoryCounts[cat]}</span>
+                        {labelNameFor(emailLabels, cat)} <span className="gmail-category-pill-count">{categoryCounts[cat]}</span>
                       </button>
                     ))}
                     {otherCategory && otherCategory !== 'unclassified' && (
@@ -3543,13 +3676,13 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
                       >
                         {bulkArchiving
                           ? 'Archiving…'
-                          : `Archive all ${categoryCounts[otherCategory] ?? ''} ${categoryPillLabel(otherCategory).toLowerCase()}`}
+                          : `Archive all ${categoryCounts[otherCategory] ?? ''} ${labelNameFor(emailLabels, otherCategory).toLowerCase()}`}
                       </button>
                     )}
                   </div>
                 )}
                 {other.threads.length === 0 && otherCategory !== null && !other.loadingPage && (
-                  <div className="gmail-caughtup">Nothing filed as {categoryPillLabel(otherCategory).toLowerCase()}.</div>
+                  <div className="gmail-caughtup">Nothing filed as {labelNameFor(emailLabels, otherCategory).toLowerCase()}.</div>
                 )}
                 {visibleOther.map((t) => renderRow(t, 'other'))}
                 {!other.hasReachedEnd && (
@@ -3596,6 +3729,7 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
       )}
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} defaultTab="connections" />
       <ShortcutsHelpDialog open={helpOpen} onOpenChange={setHelpOpen} />
+      <EmailInstructionsDialog open={instructionsOpen} onOpenChange={setInstructionsOpen} onSaved={() => void refreshLabels()} />
     </div>
   )
 }
