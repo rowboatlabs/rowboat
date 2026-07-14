@@ -224,21 +224,34 @@ protocol.registerSchemesAsPrivileged([
   },
 ]);
 
-const ALLOWED_SESSION_PERMISSIONS = new Set(["media", "display-capture", "clipboard-read", "clipboard-sanitized-write"]);
+// The app's own surfaces (meeting notes, calls) legitimately need mic/camera and
+// screen capture, so the default session grants them. The embedded browser
+// session (BROWSER_PARTITION) can load arbitrary http(s) pages, so it must NOT
+// silently receive capture/media — that would let any visited site grab the
+// mic, camera, or screen without user consent. It gets only clipboard access.
+// See https://github.com/rowboatlabs/rowboat/issues/507
+const APP_SESSION_PERMISSIONS = new Set(["media", "display-capture", "clipboard-read", "clipboard-sanitized-write"]);
+const BROWSER_SESSION_PERMISSIONS = new Set(["clipboard-read", "clipboard-sanitized-write"]);
 
-function configureSessionPermissions(targetSession: Session): void {
+function configureSessionPermissions(targetSession: Session, allowedPermissions: Set<string>): void {
   targetSession.setPermissionCheckHandler((_webContents, permission) => {
-    return ALLOWED_SESSION_PERMISSIONS.has(permission);
+    return allowedPermissions.has(permission);
   });
 
   targetSession.setPermissionRequestHandler((_webContents, permission, callback) => {
-    callback(ALLOWED_SESSION_PERMISSIONS.has(permission));
+    callback(allowedPermissions.has(permission));
   });
 
   // Auto-approve display media requests and route system audio as loopback.
   // Electron requires a video source in the callback even if we only want audio.
   // We pass the first available screen source; the renderer discards the video track.
+  // Sessions that aren't allowed to capture the display (e.g. the embedded
+  // browser) get an empty response instead of an auto-selected screen source.
   targetSession.setDisplayMediaRequestHandler(async (_request, callback) => {
+    if (!allowedPermissions.has("display-capture")) {
+      callback({});
+      return;
+    }
     const sources = await desktopCapturer.getSources({ types: ['screen'] });
     if (sources.length === 0) {
       callback({});
@@ -345,8 +358,8 @@ function createWindow(options: { startHidden?: boolean } = {}) {
     },
   });
 
-  configureSessionPermissions(session.defaultSession);
-  configureSessionPermissions(session.fromPartition(BROWSER_PARTITION));
+  configureSessionPermissions(session.defaultSession, APP_SESSION_PERMISSIONS);
+  configureSessionPermissions(session.fromPartition(BROWSER_PARTITION), BROWSER_SESSION_PERMISSIONS);
 
   mainWindow = win;
   setMainWindowForDeepLinks(win);
