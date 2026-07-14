@@ -78,7 +78,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Toaster } from "@/components/ui/sonner"
-import { UpdateIndicator } from "@/components/update-indicator"
+import { UpdateCard } from "@/components/update-card"
 import { BillingErrorDialog } from "@/components/billing-error-dialog"
 import { matchBillingError, type BillingErrorMatch } from "@/lib/billing-error"
 import { dispatchCreditExhausted, dispatchCreditReplenished } from "@/lib/credit-status"
@@ -6293,7 +6293,6 @@ function App() {
                     <TooltipContent side="bottom">New chat</TooltipContent>
                   </Tooltip>
                 )}
-                <UpdateIndicator />
                 <CaffeinateIndicator />
                 {/* Trailing layout control. Always mounted (just toggled invisible
                     when inactive) so its -webkit-app-region:no-drag rect is stable —
@@ -7060,6 +7059,7 @@ function App() {
         />
       </SidebarSectionProvider>
       <Toaster />
+      <UpdateCard />
       <BillingErrorDialog
         open={billingErrorOpen}
         match={billingErrorMatch}

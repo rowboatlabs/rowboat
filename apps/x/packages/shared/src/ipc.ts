@@ -61,19 +61,17 @@ const KnowledgeSourceConfigSchema = z.object({
 // Lifecycle of the client auto-updater (apps/main/src/updater.ts).
 // - disabled: dev build — the updater never initializes
 // - unsupported: platform can't auto-update (`reason` says why)
-// - ready: an update is downloaded and staged; restart applies it
-// - offline: a check failed for network reasons — retried automatically,
-//   surfaced softly (unlike `error`, which is a real updater failure)
+// - ready: an update is downloaded and installed; restart switches to it
 const UpdaterStatusSchema = z.object({
-  state: z.enum(['disabled', 'unsupported', 'idle', 'checking', 'downloading', 'ready', 'error', 'offline']),
+  state: z.enum(['disabled', 'unsupported', 'idle', 'checking', 'downloading', 'ready', 'error']),
   version: z.string(),
   reason: z.enum(['dev', 'platform', 'not-in-applications']).optional(),
   newVersion: z.string().optional(),
+  // Markdown body of the staged update's GitHub release, when known — the
+  // restart card renders it as "What's new".
+  releaseNotes: z.string().optional(),
   error: z.string().optional(),
   lastCheckedAt: z.number().optional(),
-  // While `ready`: don't proactively re-offer the restart prompt before this
-  // epoch ms. Owned by main (persisted) so it survives window reloads.
-  snoozedUntil: z.number().optional(),
 });
 
 const ipcSchemas = {
@@ -767,17 +765,6 @@ const ipcSchemas = {
   'updater:quitAndInstall': {
     req: z.null(),
     res: z.object({}),
-  },
-  // "Later" on the restart-to-update prompt. Main persists the snooze and
-  // pushes the refreshed status (with `snoozedUntil`) to all windows.
-  'updater:snooze': {
-    req: z.null(),
-    res: UpdaterStatusSchema,
-  },
-  // macOS only: app.moveToApplicationsFolder(). Relaunches the app on success.
-  'updater:moveToApplications': {
-    req: z.null(),
-    res: z.object({ moved: z.boolean() }),
   },
   'granola:getConfig': {
     req: z.null(),

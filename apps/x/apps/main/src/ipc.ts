@@ -70,7 +70,7 @@ import * as appsServer from '@x/core/dist/apps/server.js';
 import * as appsAgents from '@x/core/dist/apps/agents.js';
 import { capture } from '@x/core/dist/analytics/posthog.js';
 import { recordAppVersion, isVersionUpgrade } from '@x/core/dist/config/app_version.js';
-import { getUpdaterStatus, checkForUpdates, quitAndInstallUpdate, snoozeUpdateNotice, moveToApplications } from './updater.js';
+import { getUpdaterStatus, checkForUpdates, quitAndInstallUpdate } from './updater.js';
 import * as githubAuth from '@x/core/dist/apps/github-auth.js';
 import * as appsStars from '@x/core/dist/apps/stars.js';
 import * as appsInstaller from '@x/core/dist/apps/installer.js';
@@ -855,12 +855,6 @@ export function setupIpcHandlers() {
     'updater:quitAndInstall': async () => {
       quitAndInstallUpdate();
       return {};
-    },
-    'updater:snooze': async () => {
-      return snoozeUpdateNotice();
-    },
-    'updater:moveToApplications': async () => {
-      return { moved: moveToApplications() };
     },
     'analytics:bootstrap': async () => {
       return {

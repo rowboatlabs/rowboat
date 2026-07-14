@@ -18,7 +18,6 @@ import { disposeAllTerminals } from "./terminal.js";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname } from "node:path";
 import { initUpdater } from "./updater.js";
-import { loadWindowState, trackWindowState } from "./window-state.js";
 import { init as initGmailSync } from "@x/core/dist/knowledge/sync_gmail.js";
 import { init as initCalendarSync } from "@x/core/dist/knowledge/sync_calendar.js";
 import { init as initFirefliesSync } from "@x/core/dist/knowledge/sync_fireflies.js";
@@ -259,12 +258,9 @@ function setupZoomShortcuts(win: BrowserWindow) {
 }
 
 function createWindow() {
-  const savedState = loadWindowState();
   const win = new BrowserWindow({
-    width: savedState?.width ?? 1280,
-    height: savedState?.height ?? 800,
-    x: savedState?.x,
-    y: savedState?.y,
+    width: 1280,
+    height: 800,
     minWidth: 600,
     minHeight: 480,
     show: false, // Don't show until ready
@@ -290,14 +286,11 @@ function createWindow() {
   setMainWindowForDeepLinks(win);
   win.on("closed", () => setMainWindowForDeepLinks(null));
 
-  // Show window when content is ready to prevent blank screen.
-  // First run keeps the maximize-by-default behavior; afterwards restore
-  // whatever the user last had (a restart-to-update should feel lossless).
+  // Show window when content is ready to prevent blank screen
   win.once("ready-to-show", () => {
-    if (!savedState || savedState.maximized) win.maximize();
+    win.maximize();
     win.show();
   });
-  trackWindowState(win);
 
   // Open external links in system browser (not sandboxed Electron window)
   // This handles window.open() and target="_blank" links

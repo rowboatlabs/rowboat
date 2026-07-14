@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Bug, Terminal, AlertTriangle, RefreshCw, PanelRight, Bell, Smartphone, WifiOff } from "lucide-react"
+import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Bug, Terminal, AlertTriangle, RefreshCw, PanelRight, Bell, Smartphone } from "lucide-react"
 
 import {
   Dialog,
@@ -173,28 +173,10 @@ function UpdateSettings() {
       break
     case 'unsupported':
       body = status.reason === 'not-in-applications' ? (
-        <div className="flex items-start justify-between gap-3">
-          <p className="text-xs text-muted-foreground flex items-start gap-1.5">
-            <AlertTriangle className="size-3.5 shrink-0 mt-0.5 text-amber-500" />
-            Move Rowboat to the Applications folder to enable automatic updates.
-          </p>
-          <Button
-            size="sm"
-            variant="outline"
-            className="shrink-0"
-            onClick={() =>
-              void window.ipc.invoke('updater:moveToApplications', null).then(({ moved }) => {
-                if (!moved) {
-                  toast("Couldn't move Rowboat", {
-                    description: 'Quit Rowboat and drag it into the Applications folder instead.',
-                  })
-                }
-              })
-            }
-          >
-            Move to Applications
-          </Button>
-        </div>
+        <p className="text-xs text-muted-foreground flex items-start gap-1.5">
+          <AlertTriangle className="size-3.5 shrink-0 mt-0.5 text-amber-500" />
+          Quit Rowboat and move it to the Applications folder to enable automatic updates.
+        </p>
       ) : (
         <p className="text-xs text-muted-foreground">
           {"Automatic updates aren't available on this platform. "}
@@ -242,19 +224,6 @@ function UpdateSettings() {
           <p className="text-xs text-muted-foreground flex items-start gap-1.5">
             <AlertTriangle className="size-3.5 shrink-0 mt-0.5 text-destructive" />
             {`Update check failed: ${status.error ?? 'unknown error'}`}
-          </p>
-          <Button size="sm" variant="outline" className="shrink-0" onClick={checkNow}>
-            Try again
-          </Button>
-        </div>
-      )
-      break
-    case 'offline':
-      body = (
-        <div className="flex items-start justify-between gap-3">
-          <p className="text-xs text-muted-foreground flex items-start gap-1.5">
-            <WifiOff className="size-3.5 shrink-0 mt-0.5" />
-            {"Couldn't reach the update server. Updates will resume when you're back online."}
           </p>
           <Button size="sm" variant="outline" className="shrink-0" onClick={checkNow}>
             Try again

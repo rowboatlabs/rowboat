@@ -1,50 +1,13 @@
-import { app, autoUpdater, dialog, net, nativeImage, BrowserWindow } from "electron";
+import { app, autoUpdater, net, nativeImage, BrowserWindow } from "electron";
 import { updateElectronApp, UpdateSourceType } from "update-electron-app";
-import fs from "node:fs";
-import path from "node:path";
-import { WorkDir } from "@x/core/dist/config/config.js";
 import { capture } from "@x/core/dist/analytics/posthog.js";
 import type { ipc } from "@x/shared";
 
 export type UpdaterStatus = ipc.IPCChannels["updater:status"]["req"];
 
-// Cross-launch prefs: the /Applications move prompt opt-out, and the
-// restart-prompt snooze (so "Later" survives window reloads and reopens).
-const PREFS_PATH = path.join(WorkDir, "config", "updater.json");
-
-interface UpdaterPrefs {
-  suppressMovePrompt?: boolean;
-  snoozeUntil?: number;
-}
-
-// How long "Later" defers the proactive restart prompt. The update still
-// applies on the next natural restart; Settings always offers it too.
-const SNOOZE_MS = 24 * 60 * 60 * 1000;
+const REPO = "rowboatlabs/rowboat";
 
 let status: UpdaterStatus = { state: "disabled", version: "", reason: "dev" };
-
-// Squirrel surfaces connectivity loss as generic Errors; match the usual
-// Node/Chromium/NSURLError shapes so a flaky connection doesn't read as a
-// broken updater. net.isOnline() covers whatever the regex misses.
-const NETWORK_ERROR_RE =
-  /ENOTFOUND|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNREFUSED|ECONNRESET|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|net::ERR_|internet connection appears to be offline|could not connect to the server|hostname could not be found|network connection was lost/i;
-
-function isNetworkError(err: Error): boolean {
-  return NETWORK_ERROR_RE.test(err.message) || !net.isOnline();
-}
-
-/**
- * Network blips go to `offline` (soft UI, no analytics — the periodic check
- * retries on its own); everything else is a real `error`.
- */
-function reportUpdateError(err: Error): void {
-  if (isNetworkError(err)) {
-    setStatus({ state: "offline", lastCheckedAt: status.lastCheckedAt });
-    return;
-  }
-  setStatus({ state: "error", error: err.message, lastCheckedAt: status.lastCheckedAt });
-  capture("update_failed", { message: err.message });
-}
 
 function setStatus(next: Omit<UpdaterStatus, "version">): void {
   status = { version: status.version, ...next };
@@ -81,8 +44,9 @@ function showReadyBadge(): void {
 /**
  * Initialize auto-update. Replaces update-electron-app's `notifyUser` native
  * dialog with our own state machine: events are forwarded to the renderer
- * (updater:status), which shows a non-modal "Restart to update" chip in the
- * titlebar once the update is staged.
+ * (updater:status), which shows a "Restart to update" card once the update
+ * is staged. By then Squirrel has already installed it — the card only asks
+ * for the restart, Chrome-style.
  */
 export function initUpdater(): void {
   const version = app.getVersion();
@@ -98,25 +62,14 @@ export function initUpdater(): void {
   }
   if (process.platform === "darwin" && !app.isInApplicationsFolder()) {
     // Squirrel.Mac swaps the .app bundle in place, which fails outside
-    // /Applications (DMG mount, ~/Downloads). Don't wire the updater yet —
-    // offer the move instead. A successful move relaunches the app; a manual
-    // drag while running is picked up by the focus re-check below.
+    // /Applications (DMG mount, ~/Downloads). Don't wire the updater —
+    // Settings > Help tells the user to move the app.
     status = { state: "unsupported", version, reason: "not-in-applications" };
-    promptMoveWhenWindowVisible();
-    watchForManualMove();
     return;
   }
 
   status = { state: "idle", version };
-  wireUpdater();
-}
 
-/**
- * Attach autoUpdater listeners and start the periodic check. Called once —
- * either at init, or later from the focus re-check once the app lands in
- * /Applications.
- */
-function wireUpdater(): void {
   autoUpdater.on("checking-for-update", () => {
     setStatus({ state: "checking", lastCheckedAt: status.lastCheckedAt });
   });
@@ -126,150 +79,79 @@ function wireUpdater(): void {
   autoUpdater.on("update-not-available", () => {
     setStatus({ state: "idle", lastCheckedAt: Date.now() });
   });
-  autoUpdater.on("update-downloaded", (_event, _notes, releaseName) => {
-    // A snooze from before an app restart carries over if still current —
-    // "Later" means "not today", even if a fresh download re-staged since.
-    const snoozeUntil = readPrefs().snoozeUntil;
-    // releaseName is only populated on Windows (Squirrel.Windows).
+  autoUpdater.on("update-downloaded", (_event, releaseNotes, releaseName) => {
+    // macOS (Squirrel.Mac fed by update.electronjs.org) supplies both the
+    // release name and the GitHub release body; Squirrel.Windows only the
+    // name. Whatever is missing is backfilled from the GitHub API below.
     setStatus({
       state: "ready",
       newVersion: releaseName || undefined,
-      snoozedUntil: snoozeUntil && snoozeUntil > Date.now() ? snoozeUntil : undefined,
+      releaseNotes: releaseNotes || undefined,
     });
     showReadyBadge();
+    if (!releaseNotes) void backfillReleaseNotes(releaseName || undefined);
   });
   autoUpdater.on("error", (err) => {
-    reportUpdateError(err);
+    setStatus({ state: "error", error: err.message, lastCheckedAt: status.lastCheckedAt });
+    capture("update_failed", { message: err.message });
   });
 
   updateElectronApp({
     updateSource: {
       type: UpdateSourceType.ElectronPublicUpdateService,
-      repo: "rowboatlabs/rowboat",
+      repo: REPO,
     },
     notifyUser: false,
   });
 }
 
 /**
- * Manual "Check for updates". Only meaningful once the updater is wired
- * (idle/error/offline); checking/downloading are already in flight and ready
- * is already staged. Returns the snapshot after initiating.
+ * Fetch the GitHub release body for the staged update so the restart card
+ * can show "What's new" inline. Best-effort: on any failure the card simply
+ * omits the notes and keeps the link to the releases page.
+ */
+async function backfillReleaseNotes(releaseName: string | undefined): Promise<void> {
+  const url = releaseName
+    ? `https://api.github.com/repos/${REPO}/releases/tags/${releaseName.startsWith("v") ? releaseName : `v${releaseName}`}`
+    : `https://api.github.com/repos/${REPO}/releases/latest`;
+  try {
+    const res = await net.fetch(url, {
+      headers: { Accept: "application/vnd.github+json", "User-Agent": "Rowboat" },
+    });
+    if (!res.ok) return;
+    const release = (await res.json()) as { tag_name?: string; body?: string };
+    // A newer download may have re-staged meanwhile — only fill in gaps.
+    if (status.state !== "ready" || status.releaseNotes) return;
+    if (!release.body) return;
+    setStatus({
+      state: "ready",
+      newVersion: status.newVersion ?? release.tag_name,
+      releaseNotes: release.body,
+    });
+  } catch (err) {
+    console.error("[Updater] release notes fetch failed:", err);
+  }
+}
+
+/**
+ * Manual "Check for updates". Only meaningful when idle or errored;
+ * checking/downloading are already in flight and ready is already staged.
+ * Returns the snapshot after initiating.
  */
 export function checkForUpdates(): UpdaterStatus {
-  if (status.state === "idle" || status.state === "error" || status.state === "offline") {
+  if (status.state === "idle" || status.state === "error") {
     try {
       autoUpdater.checkForUpdates();
     } catch (err) {
-      reportUpdateError(err instanceof Error ? err : new Error(String(err)));
+      const error = err instanceof Error ? err : new Error(String(err));
+      setStatus({ state: "error", error: error.message, lastCheckedAt: status.lastCheckedAt });
+      capture("update_failed", { message: error.message });
     }
   }
   return status;
 }
 
-/**
- * "Later" on the restart prompt: defer re-offering for SNOOZE_MS. Persisted
- * so it holds across window reloads/reopens (and app restarts, in the rare
- * case an update re-stages within the window). Returns the snapshot.
- */
-export function snoozeUpdateNotice(): UpdaterStatus {
-  if (status.state === "ready") {
-    const snoozeUntil = Date.now() + SNOOZE_MS;
-    writePrefs({ snoozeUntil });
-    setStatus({ state: "ready", newVersion: status.newVersion, snoozedUntil: snoozeUntil });
-  }
-  return status;
-}
-
 export function quitAndInstallUpdate(): void {
-  // The user engaged with the prompt — a leftover "Later" shouldn't suppress
-  // the next update's prompt after this install. (undefined drops the key.)
-  writePrefs({ snoozeUntil: undefined });
   capture("update_restarted", { from: status.version, to: status.newVersion });
   autoUpdater.quitAndInstall();
-}
-
-/** Returns false when the move failed or the user declined the OS prompt. */
-export function moveToApplications(): boolean {
-  if (process.platform !== "darwin") return false;
-  try {
-    // Relaunches from the new location on success. The default conflict
-    // handler prompts if a copy already exists in /Applications.
-    return app.moveToApplicationsFolder();
-  } catch (err) {
-    console.error("[Updater] moveToApplicationsFolder failed:", err);
-    return false;
-  }
-}
-
-/**
- * initUpdater runs before any window exists — an unparented dialog there
- * would float alone on screen before the app has even appeared. Wait for the
- * main window to become visible and attach the prompt to it as a sheet.
- */
-function promptMoveWhenWindowVisible(): void {
-  const attach = (win: BrowserWindow) => {
-    if (win.isVisible()) void promptMoveToApplications(win);
-    else win.once("show", () => void promptMoveToApplications(win));
-  };
-  const existing = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed());
-  if (existing) attach(existing);
-  else app.once("browser-window-created", (_event, win) => attach(win));
-}
-
-/**
- * If the user drags the app into /Applications themselves while it's
- * running, pick that up on the next window focus and wire the updater —
- * no relaunch needed. (The in-app move button relaunches, bypassing this.)
- */
-function watchForManualMove(): void {
-  const recheck = () => {
-    if (!app.isInApplicationsFolder()) return;
-    app.removeListener("browser-window-focus", recheck);
-    setStatus({ state: "idle" });
-    wireUpdater();
-  };
-  app.on("browser-window-focus", recheck);
-}
-
-async function promptMoveToApplications(parent: BrowserWindow): Promise<void> {
-  if (readPrefs().suppressMovePrompt) return;
-  const { response, checkboxChecked } = await dialog.showMessageBox(parent, {
-    type: "info",
-    message: "Move Rowboat to the Applications folder?",
-    detail:
-      "Rowboat can only install updates automatically when it runs from the Applications folder.",
-    buttons: ["Move to Applications", "Not Now"],
-    defaultId: 0,
-    cancelId: 1,
-    checkboxLabel: "Don't ask again",
-  });
-  if (checkboxChecked) writePrefs({ suppressMovePrompt: true });
-  if (response !== 0) return;
-  if (!moveToApplications() && !parent.isDestroyed()) {
-    // Gatekeeper app translocation (and declined OS conflict prompts) make
-    // the move fail without any OS feedback — give the manual path.
-    await dialog.showMessageBox(parent, {
-      type: "warning",
-      message: "Couldn't move Rowboat",
-      detail: "Quit Rowboat and drag it into the Applications folder instead.",
-    });
-  }
-}
-
-function readPrefs(): UpdaterPrefs {
-  try {
-    return JSON.parse(fs.readFileSync(PREFS_PATH, "utf-8")) as UpdaterPrefs;
-  } catch {
-    return {};
-  }
-}
-
-function writePrefs(patch: UpdaterPrefs): void {
-  try {
-    fs.mkdirSync(path.dirname(PREFS_PATH), { recursive: true });
-    fs.writeFileSync(PREFS_PATH, JSON.stringify({ ...readPrefs(), ...patch }, null, 2));
-  } catch (err) {
-    console.error("[Updater] Failed to write updater.json:", err);
-  }
 }
