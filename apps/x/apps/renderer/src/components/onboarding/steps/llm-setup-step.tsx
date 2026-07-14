@@ -42,14 +42,11 @@ export function LlmSetupStep({ state }: LlmSetupStepProps) {
   } = state
 
   const isMoreProvider = moreProviders.some(p => p.id === llmProvider)
-  // Hosted providers (openai/anthropic/google) get a default model, so we only
-  // ask for a model on providers that truly need one (local/custom/gateway),
-  // or as a fallback if no model is set yet.
-  // Hosted providers (openai/anthropic/google) fetch their models from the API
-  // key on test, so they never need a manual model field. Only local/custom/
-  // gateway providers, where the user must specify a model, show the input.
-  const hostedProviders: LlmProviderFlavor[] = ["openai", "anthropic", "google"]
-  const showModelInput = !hostedProviders.includes(llmProvider)
+  // Connect-only, mirroring Settings: entering a key (or base URL) is enough
+  // and the model is resolved silently at save. openai-compatible is the sole
+  // exception with a visible Model field — its /models endpoint often doesn't
+  // exist, so a typed value must be able to win.
+  const showModelInput = llmProvider === "openai-compatible"
 
   const renderProviderCard = (provider: typeof primaryProviders[0], index: number) => {
     const isSelected = llmProvider === provider.id
@@ -150,9 +147,9 @@ export function LlmSetupStep({ state }: LlmSetupStepProps) {
 
       {/* Provider configuration */}
       <div className="space-y-4">
-        {/* Cloud providers get a default model auto-selected; only local/custom
-            providers (no catalog) need a model here. Users can pick any of the
-            provider's models later in the chat view. */}
+        {/* Every provider resolves its model silently at save. openai-compatible
+            alone keeps this field, since its /models is unreliable and a typed
+            value must win; leaving it blank auto-selects from the fetched list. */}
         {showModelInput && (
           <div className="space-y-2">
             <label className="text-xs font-medium text-muted-foreground">
@@ -167,7 +164,7 @@ export function LlmSetupStep({ state }: LlmSetupStepProps) {
               <Input
                 value={activeConfig.model}
                 onChange={(e) => updateProviderConfig(llmProvider, { model: e.target.value })}
-                placeholder="Enter model"
+                placeholder="Model ID (leave empty to auto-select)"
               />
             )}
             {modelsError && (
