@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Streamdown } from 'streamdown'
 import '@/styles/live-note-panel.css'
+import * as analytics from '@/lib/analytics'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
@@ -166,6 +167,7 @@ export function LiveNoteSidebar({ filePath, onClose }: LiveNoteSidebarProps) {
         setError(res.error ?? 'Save failed')
         return
       }
+      analytics.liveNoteSaved()
       setLive(res.live ?? null)
       setDraft(res.live ? structuredClone(res.live) as LiveNote : null)
       setEditingObjective(false)
@@ -195,6 +197,7 @@ export function LiveNoteSidebar({ filePath, onClose }: LiveNoteSidebarProps) {
         setError(res.error ?? 'Failed')
         return
       }
+      analytics.liveNoteToggled(live.active === false)
       setLive(res.live ?? null)
       setDraft(res.live ? structuredClone(res.live) as LiveNote : null)
     } catch (err) {
@@ -207,6 +210,7 @@ export function LiveNoteSidebar({ filePath, onClose }: LiveNoteSidebarProps) {
   const handleRun = useCallback(async () => {
     if (!knowledgeRelPath) return
     setError(null)
+    analytics.liveNoteRunClicked()
     try {
       await window.ipc.invoke('live-note:run', { filePath: knowledgeRelPath })
     } catch (err) {
@@ -219,6 +223,7 @@ export function LiveNoteSidebar({ filePath, onClose }: LiveNoteSidebarProps) {
     setError(null)
     try {
       const res = await window.ipc.invoke('live-note:stop', { filePath: knowledgeRelPath })
+      if (res.success) analytics.liveNoteStopped()
       if (!res.success && res.error) setError(res.error)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -235,6 +240,7 @@ export function LiveNoteSidebar({ filePath, onClose }: LiveNoteSidebarProps) {
         setError(res.error ?? 'Delete failed')
         return
       }
+      analytics.liveNoteDeleted()
       setLive(null)
       setDraft(null)
       setConfirmingDelete(false)
@@ -247,6 +253,7 @@ export function LiveNoteSidebar({ filePath, onClose }: LiveNoteSidebarProps) {
 
   const handleEditWithCopilot = useCallback(() => {
     if (!filePath) return
+    analytics.liveNoteEditWithCopilotClicked()
     window.dispatchEvent(new CustomEvent('rowboat:open-copilot-edit-live-note', {
       detail: { filePath },
     }))

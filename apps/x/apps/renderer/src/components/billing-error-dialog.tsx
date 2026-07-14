@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import type { BillingErrorMatch } from "@/lib/billing-error"
+import * as analytics from "@/lib/analytics"
 
 interface BillingRowboatAccount {
   config?: {
@@ -33,9 +34,14 @@ export function BillingErrorDialog({ open, match, onOpenChange }: BillingErrorDi
       .catch(() => {})
   }, [open])
 
+  useEffect(() => {
+    if (open && match) analytics.billingErrorShown(match.kind)
+  }, [open, match])
+
   if (!match) return null
 
   const handleUpgrade = () => {
+    analytics.billingUpgradeClicked(match.kind)
     if (appUrl) window.open(`${appUrl}?intent=upgrade`)
     onOpenChange(false)
   }

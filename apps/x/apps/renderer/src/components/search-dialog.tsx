@@ -78,6 +78,7 @@ export function CommandPalette({
 
   useEffect(() => {
     if (!open) return
+    analytics.searchOpened()
     searchInputRef.current?.focus()
   }, [open])
 
@@ -122,6 +123,7 @@ export function CommandPalette({
   }, [open])
 
   const handleSelect = useCallback((result: SearchResult) => {
+    analytics.searchResultSelected(result.type)
     onOpenChange(false)
     if (result.type === 'knowledge') {
       onSelectFile(result.path)

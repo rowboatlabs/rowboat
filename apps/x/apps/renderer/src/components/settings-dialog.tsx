@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
+import * as analytics from "@/lib/analytics"
 import { useTheme } from "@/contexts/theme-context"
 import { toast } from "sonner"
 import { AnthropicIcon, DiscordIcon, GenericApiIcon, GitHubIcon, GoogleIcon, OllamaIcon, OpenAIIcon, OpenRouterIcon, VercelIcon } from "@/components/onboarding/provider-icons"
@@ -2470,7 +2471,10 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
 
   // Reset to the requested default tab each time the dialog is opened
   useEffect(() => {
-    if (open) setActiveTab(defaultTab)
+    if (open) {
+      setActiveTab(defaultTab)
+      analytics.settingsOpened(defaultTab)
+    }
   }, [open, defaultTab])
 
   // Check if user is signed in to Rowboat
@@ -2561,6 +2565,7 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
         return
       }
     }
+    analytics.settingsTabChanged(tab)
     setActiveTab(tab)
   }
 
