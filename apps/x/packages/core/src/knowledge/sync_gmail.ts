@@ -9,8 +9,9 @@ import { GoogleClientFactory } from './google-client-factory.js';
 import { serviceLogger, type ServiceRunContext } from '../services/service_logger.js';
 import { limitEventItems } from './limit_event_items.js';
 import { createEvent } from '../events/producer.js';
-import { classifyThread, getUserEmail } from './classify_thread.js';
+import { classifyThread, getUserEmail, type EmailCategory } from './classify_thread.js';
 import { recordImportanceCorrection } from './email_importance_feedback.js';
+import { recordCategoryCorrection } from './email_category_feedback.js';
 import { notifyIfEnabled } from '../application/notification/notifier.js';
 
 // Configuration
@@ -110,7 +111,45 @@ export function setThreadImportance(
         userVerdict: importance,
         at: new Date().toISOString(),
     });
+    // Keep the markdown mirror's stamped importance truthful. The knowledge
+    // verdict is deliberately untouched — "stop showing me this" must never
+    // silently starve the knowledge graph.
+    stampClassificationFrontmatter(threadId, cached.snapshot);
     return { success: true, previous };
+}
+
+/**
+ * User explicitly picks a thread's category in the UI. Sticky on the thread
+ * (categorySource: 'user'; re-classification never overrides it) and recorded
+ * as a correction the classifier learns from as few-shot examples. Like
+ * importance flips, this never touches the knowledge verdict.
+ */
+export function setThreadCategory(
+    threadId: string,
+    category: EmailCategory,
+): { success: boolean; error?: string } {
+    const cached = readCachedSnapshot(threadId);
+    if (!cached) {
+        return { success: false, error: `No inbox entry found for thread ${threadId}` };
+    }
+    const previous = cached.snapshot.category;
+    cached.snapshot.category = category;
+    cached.snapshot.categorySource = 'user';
+    try {
+        fs.writeFileSync(cachePath(threadId), JSON.stringify(cached), 'utf-8');
+    } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+    recordCategoryCorrection({
+        threadId,
+        subject: cached.snapshot.subject || '(no subject)',
+        from: cached.snapshot.from || 'unknown',
+        agentCategory: previous ?? 'unknown',
+        userCategory: category,
+        at: new Date().toISOString(),
+    });
+    stampClassificationFrontmatter(threadId, cached.snapshot);
+    return { success: true };
 }
 
 export function saveMessageBodyHeight(threadId: string, messageId: string, height: number): void {
@@ -245,6 +284,12 @@ export interface GmailThreadSnapshot {
     importance?: 'important' | 'other';
     /** 'user' when the user explicitly set importance in the UI — sticky; re-classification never overrides it. */
     importanceSource?: 'user';
+    /** What kind of email this is (chip in the inbox UI, context for the knowledge pipeline). */
+    category?: EmailCategory;
+    /** 'user' when the user explicitly picked the category in the UI — sticky; re-classification never overrides it. */
+    categorySource?: 'user';
+    /** Knowledge-graph admission verdict, stamped into the gmail_sync markdown frontmatter. */
+    knowledge?: 'extract' | 'skip';
     draft_response?: string;
     gmail_draft?: string;
     /** Gmail-side draft id, present on entries from listDraftThreads. */
@@ -659,11 +704,19 @@ export interface InboxPageOptions {
     section: InboxSection;
     cursor?: string;
     limit?: number;
+    /** Restrict the page to threads of this category (used by the "Everything else" filter pills). */
+    category?: string;
 }
 
 export interface InboxPageResult {
     threads: GmailThreadSnapshot[];
     nextCursor: string | null;
+    /**
+     * Threads per category across the WHOLE section (ignoring `category` and
+     * pagination) — drives the filter pills. Threads with no verdict yet count
+     * under 'unclassified'.
+     */
+    categoryCounts: Record<string, number>;
 }
 
 interface IndexedEntry {
@@ -702,7 +755,7 @@ export function listImportantThreads(opts: { cursor?: string; limit?: number } =
     return listInboxPage({ section: 'important', ...opts });
 }
 
-export function listEverythingElseThreads(opts: { cursor?: string; limit?: number } = {}): InboxPageResult {
+export function listEverythingElseThreads(opts: { cursor?: string; limit?: number; category?: string } = {}): InboxPageResult {
     return listInboxPage({ section: 'other', ...opts });
 }
 
@@ -724,17 +777,18 @@ const listCache = new Map<string, ListCacheEntry>();
 export function listInboxPage(opts: InboxPageOptions): InboxPageResult {
     const limit = Math.max(1, Math.min(100, opts.limit ?? 25));
     const cursor = parseCursor(opts.cursor);
+    const categoryCounts: Record<string, number> = {};
 
     if (!fs.existsSync(CACHE_DIR)) {
         listCache.clear();
-        return { threads: [], nextCursor: null };
+        return { threads: [], nextCursor: null, categoryCounts };
     }
 
     let names: string[];
     try {
         names = fs.readdirSync(CACHE_DIR);
     } catch {
-        return { threads: [], nextCursor: null };
+        return { threads: [], nextCursor: null, categoryCounts };
     }
 
     const seen = new Set<string>();
@@ -777,6 +831,9 @@ export function listInboxPage(opts: InboxPageOptions): InboxPageResult {
         }
 
         if (cached.section !== opts.section) continue;
+        const cat = cached.snapshot.category ?? 'unclassified';
+        categoryCounts[cat] = (categoryCounts[cat] ?? 0) + 1;
+        if (opts.category && cat !== opts.category) continue;
         entries.push({
             threadId: cached.snapshot.threadId,
             dateMs: cached.dateMs,
@@ -812,7 +869,46 @@ export function listInboxPage(opts: InboxPageOptions): InboxPageResult {
     return {
         threads: slice.map((e) => e.snapshot),
         nextCursor: hasMore && last ? encodeCursor({ dateMs: last.dateMs, threadId: last.threadId }) : null,
+        categoryCounts,
     };
+}
+
+/**
+ * Archive every "Everything else" thread of the given category in one sweep —
+ * the bulk gesture behind the category filter pills. Walks the local cache
+ * (never the live mailbox), so it can only touch threads the user can see in
+ * the section. Threads whose category was user-corrected are matched on the
+ * corrected value, like everywhere else.
+ *
+ * Returns per-thread failures rather than aborting: one 404 (thread deleted
+ * elsewhere) shouldn't strand the other 80 promotions in the inbox.
+ */
+export async function archiveCategoryThreads(category: string): Promise<{ archived: number; failed: number; error?: string }> {
+    if (!fs.existsSync(CACHE_DIR)) return { archived: 0, failed: 0 };
+    let names: string[];
+    try {
+        names = fs.readdirSync(CACHE_DIR);
+    } catch (err) {
+        return { archived: 0, failed: 0, error: err instanceof Error ? err.message : String(err) };
+    }
+    const targets: string[] = [];
+    for (const name of names) {
+        if (!name.endsWith('.json')) continue;
+        const threadId = decodeURIComponent(name.replace(/\.json$/, ''));
+        const snapshot = readCachedSnapshot(threadId)?.snapshot;
+        if (!snapshot) continue;
+        if (snapshotImportance(snapshot) !== 'other') continue;
+        if ((snapshot.category ?? 'unclassified') !== category) continue;
+        targets.push(threadId);
+    }
+    let archived = 0;
+    let failed = 0;
+    for (const threadId of targets) {
+        const result = await archiveThread(threadId);
+        if (result.ok) archived += 1;
+        else failed += 1;
+    }
+    return { archived, failed };
 }
 
 export async function listRecentThreadIds(daysAgo: number = 2): Promise<RecentThreadInfo[]> {
@@ -850,6 +946,61 @@ export async function listRecentThreadIds(daysAgo: number = 2): Promise<RecentTh
     return results;
 }
 
+/** Drop a leading YAML frontmatter block, returning just the document body. */
+function stripLeadingFrontmatter(content: string): string {
+    if (!content.startsWith('---\n')) return content;
+    const end = content.indexOf('\n---', 4);
+    if (end === -1) return content;
+    const afterClose = content.indexOf('\n', end + 4);
+    if (afterClose === -1) return '';
+    return content.slice(afterClose + 1).replace(/^\n+/, '');
+}
+
+/**
+ * Stamp the classification verdict into the thread's gmail_sync markdown as
+ * YAML frontmatter. The knowledge-graph builder holds any email file without
+ * frontmatter (it can't tell noise from signal yet), so this stamp is what
+ * admits — or permanently excludes — the thread from knowledge extraction.
+ *
+ * No-op when the snapshot carries no verdict (LLM failure → the sweep in
+ * performSync retries later) or when the file already carries this verdict.
+ *
+ * Exported for tests.
+ */
+export function stampClassificationFrontmatter(threadId: string, snapshot: GmailThreadSnapshot): void {
+    if (!snapshot.category || !snapshot.knowledge) return;
+    const mdPath = path.join(SYNC_DIR, `${threadId}.md`);
+    let content: string;
+    try {
+        content = fs.readFileSync(mdPath, 'utf-8');
+    } catch {
+        return; // no markdown mirror for this thread (e.g. draft-only)
+    }
+    const importance = snapshot.importance === 'other' ? 'other' : 'important';
+    const frontmatter = [
+        '---',
+        `importance: ${importance}`,
+        `category: ${snapshot.category}`,
+        `knowledge: ${snapshot.knowledge}`,
+        `classified_at: "${new Date().toISOString()}"`,
+        '---',
+        '',
+    ].join('\n');
+    if (
+        content.startsWith('---') &&
+        content.includes(`\nimportance: ${importance}\n`) &&
+        content.includes(`\ncategory: ${snapshot.category}\n`) &&
+        content.includes(`\nknowledge: ${snapshot.knowledge}\n`)
+    ) {
+        return; // already stamped with this exact verdict
+    }
+    try {
+        fs.writeFileSync(mdPath, frontmatter + stripLeadingFrontmatter(content));
+    } catch (err) {
+        console.warn(`[Gmail] frontmatter stamp failed for ${threadId}:`, err);
+    }
+}
+
 /**
  * Build a GmailThreadSnapshot from an already-fetched threads.get response,
  * classify it, and write to inbox_lists/. Called by the background sync
@@ -873,7 +1024,11 @@ async function buildAndCacheSnapshot(
     // call per unchanged thread (matters most during fullSync after a
     // historyId expiry, where the whole window is re-walked).
     // We require `importance` to be present too — pre-classifier cache files
-    // would otherwise stick around forever uncategorised.
+    // would otherwise stick around forever uncategorised. Deliberately NOT
+    // requiring `category` here: a fullSync rewalk re-visits every cached
+    // thread, and requiring it would turn that walk into one sequential LLM
+    // call per pre-existing thread. Old caches gain category/knowledge via
+    // the budgeted sweep instead (sweepUnclassifiedMarkdown).
     if (
         threadData.historyId &&
         cached &&
@@ -881,15 +1036,21 @@ async function buildAndCacheSnapshot(
         cached.parserVersion === SNAPSHOT_PARSER_VERSION &&
         cached.snapshot.importance
     ) {
+        // processThread may have just rewritten the markdown mirror (which
+        // drops its frontmatter) — re-stamp from the cached verdict.
+        stampClassificationFrontmatter(threadId, cached.snapshot);
         return cached.snapshot;
     }
     const snapshot = await parseThreadSnapshot(threadId, threadData, gmailClient);
     if (!snapshot) return null;
 
-    // The user's explicit verdict on this thread is sticky — carry it over and
-    // skip nothing else (summary/draft still refresh below).
+    // The user's explicit verdicts on this thread are sticky — carry them over
+    // and skip nothing else (summary/draft still refresh below).
     const userOverride = cached?.snapshot.importanceSource === 'user'
         ? cached.snapshot.importance
+        : undefined;
+    const userCategoryOverride = cached?.snapshot.categorySource === 'user'
+        ? cached.snapshot.category
         : undefined;
 
     try {
@@ -897,6 +1058,8 @@ async function buildAndCacheSnapshot(
         const skipDraft = (snapshot.gmail_draft?.length ?? 0) > 0;
         const classification = await classifyThread(snapshot, userEmail, { skipDraft });
         snapshot.importance = classification.importance;
+        if (classification.category) snapshot.category = classification.category;
+        if (classification.knowledge) snapshot.knowledge = classification.knowledge;
         if (classification.summary) snapshot.summary = classification.summary;
         if (classification.draftResponse) {
             const draftResponse = stripGmailQuotedReplyText(classification.draftResponse);
@@ -910,10 +1073,15 @@ async function buildAndCacheSnapshot(
         snapshot.importance = userOverride;
         snapshot.importanceSource = 'user';
     }
+    if (userCategoryOverride) {
+        snapshot.category = userCategoryOverride;
+        snapshot.categorySource = 'user';
+    }
 
     if (threadData.historyId) {
         writeCachedSnapshot(threadId, threadData.historyId, snapshot);
     }
+    stampClassificationFrontmatter(threadId, snapshot);
 
     return snapshot;
 }
@@ -1634,6 +1802,137 @@ async function partialSync(auth: OAuth2Client, startHistoryId: string, syncDir: 
     }
 }
 
+// Threads the sweep failed on (deleted in Gmail, persistent classify failure).
+// In-memory so they retry on the next app launch but don't burn an LLM call
+// every 30s tick in the meantime.
+const sweepSkip = new Set<string>();
+
+/**
+ * Classify-and-stamp any gmail_sync markdown that has no frontmatter yet.
+ * Covers three cases the main sync path can miss:
+ *  - a classify call failed mid-sync (fail-open importance, no verdict)
+ *  - files from before the unified classifier that the old labeling agent
+ *    never got to
+ *  - threads whose inbox cache was pruned (archived) before a verdict landed
+ *
+ * The knowledge-graph builder holds unstamped files indefinitely, so without
+ * this sweep those emails would silently never produce knowledge notes.
+ * LLM work is bounded per tick; cache-backed stamps are free and unbounded.
+ */
+async function sweepUnclassifiedMarkdown(auth: OAuth2Client, llmBudget: number = 15): Promise<void> {
+    if (!fs.existsSync(SYNC_DIR)) return;
+    let names: string[];
+    try {
+        names = fs.readdirSync(SYNC_DIR);
+    } catch {
+        return;
+    }
+    const gmailClient = google.gmail({ version: 'v1', auth });
+    let classified = 0;
+    let stamped = 0;
+    for (const name of names) {
+        if (!name.endsWith('.md')) continue;
+        const threadId = name.slice(0, -3);
+        if (sweepSkip.has(threadId)) continue;
+        let content: string;
+        try {
+            content = fs.readFileSync(path.join(SYNC_DIR, name), 'utf-8');
+        } catch {
+            continue;
+        }
+        // Anything with frontmatter is either already stamped or carries the
+        // legacy labeling-agent verdict the graph builder still understands.
+        if (content.startsWith('---')) continue;
+
+        const cached = readCachedSnapshot(threadId)?.snapshot;
+        if (cached?.category && cached.knowledge) {
+            stampClassificationFrontmatter(threadId, cached);
+            stamped += 1;
+            continue;
+        }
+
+        if (classified >= llmBudget) continue;
+        classified += 1;
+        try {
+            const res = await gmailClient.users.threads.get({ userId: 'me', id: threadId });
+            if (cached) {
+                // In the inbox — reuse the full path (classify, cache, stamp).
+                await buildAndCacheSnapshot(threadId, res.data, gmailClient, auth);
+                if (!readCachedSnapshot(threadId)?.snapshot.category) sweepSkip.add(threadId);
+            } else {
+                // Not in the inbox cache (archived/pruned). Classify and stamp
+                // only — writing the cache would resurrect the thread in the
+                // inbox UI.
+                const snapshot = await parseThreadSnapshot(threadId, res.data, gmailClient);
+                if (!snapshot) {
+                    sweepSkip.add(threadId);
+                    continue;
+                }
+                const userEmail = await getUserEmail(auth);
+                const classification = await classifyThread(snapshot, userEmail, { skipDraft: true });
+                snapshot.importance = classification.importance;
+                if (classification.category) snapshot.category = classification.category;
+                if (classification.knowledge) snapshot.knowledge = classification.knowledge;
+                stampClassificationFrontmatter(threadId, snapshot);
+                if (!classification.category) sweepSkip.add(threadId);
+            }
+        } catch (err) {
+            console.warn(`[Gmail] classification sweep failed for ${threadId}:`, err);
+            sweepSkip.add(threadId);
+        }
+    }
+
+    // Enrich pre-upgrade inbox caches (importance but no category) so old
+    // threads get chips and a knowledge verdict. The cached snapshot already
+    // holds the messages — no Gmail fetch needed. Deliberately does NOT
+    // re-stamp markdown that carries legacy labels: frontmatter — rewriting
+    // those files would make the graph builder reprocess emails it already
+    // extracted (mtime+hash change detection).
+    if (classified < llmBudget && fs.existsSync(CACHE_DIR)) {
+        let cacheNames: string[] = [];
+        try {
+            cacheNames = fs.readdirSync(CACHE_DIR);
+        } catch { /* ignore */ }
+        const userEmail = await getUserEmail(auth);
+        for (const name of cacheNames) {
+            if (classified >= llmBudget) break;
+            if (!name.endsWith('.json')) continue;
+            const threadId = decodeURIComponent(name.replace(/\.json$/, ''));
+            if (sweepSkip.has(threadId)) continue;
+            const entry = readCachedSnapshot(threadId);
+            if (!entry || !entry.snapshot.importance || entry.snapshot.category) continue;
+            classified += 1;
+            try {
+                const classification = await classifyThread(entry.snapshot, userEmail, { skipDraft: true });
+                if (!classification.category || !classification.knowledge) {
+                    sweepSkip.add(threadId);
+                    continue;
+                }
+                entry.snapshot.category = classification.category;
+                entry.snapshot.knowledge = classification.knowledge;
+                // The user's sticky verdict (and the previously shown one) win —
+                // this pass is about adding the missing fields, not re-judging.
+                writeCachedSnapshot(threadId, entry.historyId, entry.snapshot);
+                const mdPath = path.join(SYNC_DIR, `${threadId}.md`);
+                let mdContent: string | null = null;
+                try {
+                    mdContent = fs.readFileSync(mdPath, 'utf-8');
+                } catch { /* no markdown mirror */ }
+                if (mdContent !== null && !mdContent.startsWith('---')) {
+                    stampClassificationFrontmatter(threadId, entry.snapshot);
+                }
+            } catch (err) {
+                console.warn(`[Gmail] cache enrichment failed for ${threadId}:`, err);
+                sweepSkip.add(threadId);
+            }
+        }
+    }
+
+    if (classified > 0 || stamped > 0) {
+        console.log(`[Gmail] classification sweep: ${classified} classified, ${stamped} stamped from cache`);
+    }
+}
+
 async function performSync() {
     const LOOKBACK_DAYS = 7; // Default to 1 week
     const ATTACHMENTS_DIR = path.join(SYNC_DIR, 'attachments');
@@ -1684,6 +1983,10 @@ async function performSync() {
         // Keep inbox_lists/ in lock-step with Gmail's INBOX label —
         // remove cache files for threads that were archived/trashed elsewhere.
         await pruneInboxCache(auth);
+
+        // Backfill classification verdicts onto any markdown the main sync
+        // paths missed — the knowledge graph holds unstamped files forever.
+        await sweepUnclassifiedMarkdown(auth);
 
         console.log("Sync completed.");
     } catch (error) {

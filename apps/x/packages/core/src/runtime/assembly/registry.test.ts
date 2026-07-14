@@ -16,7 +16,6 @@ describe("agent registry", () => {
                 "background-task-agent",
                 "note_creation",
                 "note_curation",
-                "labeling_agent",
                 "note_tagging_agent",
                 "inline_task_agent",
                 "agent_notes_agent",
@@ -41,7 +40,6 @@ describe("agent registry", () => {
         for (const id of [
             "note_creation",
             "note_curation",
-            "labeling_agent",
             "note_tagging_agent",
             "inline_task_agent",
             "agent_notes_agent",

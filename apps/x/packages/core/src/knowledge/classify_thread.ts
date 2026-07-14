@@ -14,6 +14,7 @@ import { captureLlmUsage } from '../analytics/usage.js';
 import { withUseCase } from '../analytics/use_case.js';
 import type { GmailThreadSnapshot } from './sync_gmail.js';
 import { formatImportanceFeedbackForPrompt, maybeDistillImportanceRules } from './email_importance_feedback.js';
+import { formatCategoryFeedbackForPrompt } from './email_category_feedback.js';
 
 const STYLE_GUIDE_PATH = path.join(WorkDir, 'knowledge', 'Agent Notes', 'style', 'email.md');
 const CALENDAR_DIR = path.join(WorkDir, 'calendar_sync');
@@ -100,14 +101,35 @@ export async function getUserEmail(auth: OAuth2Client): Promise<string | null> {
     return null;
 }
 
+/**
+ * What kind of email this is — shown as a chip in the inbox's "Everything
+ * else" section and stamped into the gmail_sync markdown for the knowledge
+ * pipeline. Orthogonal to importance: a newsletter is almost always "other",
+ * but an investor update arriving as a newsletter can still carry knowledge.
+ */
+export type EmailCategory =
+    | 'correspondence'
+    | 'meeting'
+    | 'notification'
+    | 'newsletter'
+    | 'promotion'
+    | 'cold_outreach'
+    | 'receipt';
+
 export interface Classification {
     importance: 'important' | 'other';
+    /** Absent when the LLM call failed (fail-open) — callers must not stamp a verdict they don't have. */
+    category?: EmailCategory;
+    /** Whether the knowledge-graph pipeline should extract from this thread. Absent on LLM failure. */
+    knowledge?: 'extract' | 'skip';
     summary?: string;
     draftResponse?: string;
 }
 
 const ClassificationSchema = z.object({
     importance: z.enum(['important', 'other']).describe('important = real correspondence, action-required, or content worth referencing later. other = newsletters, marketing, automated notifications, transactional receipts, cold outreach.'),
+    category: z.enum(['correspondence', 'meeting', 'notification', 'newsletter', 'promotion', 'cold_outreach', 'receipt']).describe('What kind of email this is. correspondence = a real person writing to the user with prior engagement. meeting = scheduling/calendar invites involving named people. notification = automated system messages. newsletter = digests, industry reports, subscription content. promotion = marketing, offers, event/webinar invites from companies. cold_outreach = unsolicited pitches from strangers. receipt = completed-transaction confirmations (payments, payroll, tax filings, orders, travel bookings).'),
+    knowledge: z.enum(['extract', 'skip']).describe('Whether this thread contains durable facts worth adding to the user\'s knowledge base about their people, companies, and projects. extract = real relationships (investor, customer, prospect, partner, vendor, team, advisor, press, personal) or substantive topics (deals, contracts, hiring, fundraising, support, incidents, real meetings, intros). skip = noise with no durable facts: marketing, newsletters, automated notifications, receipts, social/forum digests, cold outreach from strangers, job applicants and recruiters.'),
     summary: z.string().optional().describe('One or two sentences capturing what the thread is about and any implied action. Required when importance is important. Omit when other.'),
     draftResponse: z.string().optional().describe('A complete draft reply the user can send as-is or edit. Plain text with real line breaks (\\n): greeting on its own line, a blank line between paragraphs, and the sign-off on its own line(s) — e.g. "Hi Tyrone,\\n\\nThanks for the follow-up.\\n\\nBest,\\nJohn". If a sign-off name is included, use only the user\'s first name. Required when importance is important AND the thread implies a response is wanted. Omit when other, or when no response is appropriate (e.g. an FYI from a colleague that does not need a reply).'),
 });
@@ -119,6 +141,25 @@ const SYSTEM_PROMPT = `You classify a Gmail thread for a personal inbox view and
 Decide if the thread is "important" or "other":
 - important: real human correspondence the user is part of (customer, investor, team, vendor, candidate); a time-sensitive notification; a message that needs a response from the user; anything worth referencing later (contracts, pricing, deadlines, decisions).
 - other: newsletters, industry digests, marketing or promotional, product tips from vendors, automated notifications (verifications, recording uploads, platform policy updates), transactional confirmations (payment receipts, GST/tax filings, salary disbursements), unsolicited cold outreach.
+
+# Category
+
+Pick exactly one category — it labels the email in the inbox:
+- correspondence: a real person writing to (or with) the user — there is prior engagement or a genuine relationship. A cold sender bumping their own unanswered email is NOT correspondence; it stays cold_outreach.
+- meeting: scheduling with named people — calendar invites, availability requests, reschedules. Automated meeting reminders with no human context ("your meeting starts in 10 minutes") are notification, not meeting.
+- notification: automated system messages — verifications, password resets, recording uploads, policy updates, deploy/CI alerts, social and forum digests.
+- newsletter: subscription content, industry reports, community digests, product tips — even from platforms the user actively uses.
+- promotion: marketing, offers, product launches, webinar/workshop invites from companies, startup-program upsells.
+- cold_outreach: unsolicited pitches from people with no prior engagement — agencies, dev shops, freelancers, hiring platforms — even when they mention the user's company by name or offer something free.
+- receipt: completed transactions with no decision remaining — payment receipts, payroll, tax filings, order/shipping confirmations, travel bookings.
+
+# Knowledge
+
+Decide whether the user's knowledge base should extract durable facts from this thread:
+- extract: threads involving real relationships (investors, customers, prospects, partners, vendors under contract, team, advisors, press, friends and family, government) or substantive topics (sales and deals, support, legal, finance decisions, hiring processes the user is running, fundraising, security incidents, infrastructure issues, real meetings with named people, events the user attends, warm intros, genuine follow-ups).
+- skip: nothing durable to learn — spam, promotions, cold outreach, newsletters, notifications, digests, product updates, receipts, social media, mailing lists, automated scheduling reminders, travel and shopping confirmations, and unsolicited job applicants or recruiter outreach.
+
+Importance and knowledge are independent judgments. A board member's long FYI may need no reply yet be knowledge-rich; a quick "can we move to 3pm?" needs action but adds little durable knowledge. When a message from a real relationship arrives wrapped in a bulk format (an investor update sent as a newsletter), knowledge is still extract.
 
 # Summary (important only)
 
@@ -227,14 +268,18 @@ export async function classifyThread(
         // first-touch outreach, self-test sends) are not inbox-important —
         // when a recipient replies, the thread updates and is re-classified,
         // and this shortcut then correctly marks it important.
+        //
+        // Either way the user wrote the latest message themselves, so the
+        // knowledge pipeline always extracts: their own words carry their
+        // commitments, decisions, and relationships.
         const needle = (userEmail ?? '').toLowerCase();
         const othersParticipated = needle
             ? snapshot.messages.some((m) => m.from && !m.from.toLowerCase().includes(needle))
             : false;
         if (othersParticipated) {
-            return { importance: 'important' };
+            return { importance: 'important', category: 'correspondence', knowledge: 'extract' };
         }
-        return { importance: 'other' };
+        return { importance: 'other', category: 'correspondence', knowledge: 'extract' };
     }
 
     try {
@@ -253,11 +298,15 @@ export async function classifyThread(
             ? `${SYSTEM_PROMPT}\n\n# Skip the draft\n\nThe user already has their own draft in progress for this thread — DO NOT generate a draftResponse. Always omit the draftResponse field.`
             : SYSTEM_PROMPT;
 
-        // The user's learned importance preferences override the generic
-        // criteria — appended last so they take precedence.
+        // The user's learned preferences override the generic criteria —
+        // appended last so they take precedence.
         const feedback = formatImportanceFeedbackForPrompt();
         if (feedback) {
             systemPrompt = `${systemPrompt}\n\n${feedback}`;
+        }
+        const categoryFeedback = formatCategoryFeedbackForPrompt();
+        if (categoryFeedback) {
+            systemPrompt = `${systemPrompt}\n\n${categoryFeedback}`;
         }
 
         const result = await withUseCase({ useCase: 'knowledge_sync', subUseCase: 'email_classifier' }, () => generateObjectSafe({
@@ -276,7 +325,19 @@ export async function classifyThread(
             usage: result.usage,
         });
 
-        const out: Classification = { importance: result.object.importance };
+        const out: Classification = {
+            importance: result.object.importance,
+            category: result.object.category,
+            knowledge: result.object.knowledge,
+        };
+        // Guardrail, enforced in code rather than the prompt: if the user ever
+        // wrote in this thread, the knowledge pipeline must see it — their own
+        // messages carry commitments and decisions regardless of how the LLM
+        // categorized the thread.
+        const needle = (userEmail ?? '').toLowerCase();
+        if (needle && snapshot.messages.some((m) => (m.from || '').toLowerCase().includes(needle))) {
+            out.knowledge = 'extract';
+        }
         if (result.object.importance === 'important') {
             if (result.object.summary) out.summary = result.object.summary;
             if (!options.skipDraft && result.object.draftResponse) out.draftResponse = result.object.draftResponse;
@@ -284,6 +345,9 @@ export async function classifyThread(
         return out;
     } catch (err) {
         console.warn(`[Email classifier] LLM call failed for thread ${snapshot.threadId}:`, err);
+        // Fail open on importance so real mail is never hidden, but leave
+        // category/knowledge absent — callers must not stamp a verdict that
+        // was never made (the sync sweep retries these threads later).
         return { importance: 'important' };
     }
 }

@@ -167,16 +167,21 @@ const ipcSchemas = {
     res: z.object({
       threads: z.array(GmailThreadSchema),
       nextCursor: z.string().nullable(),
+      categoryCounts: z.record(z.string(), z.number()).optional(),
     }),
   },
   'gmail:getEverythingElse': {
     req: z.object({
       cursor: z.string().optional(),
       limit: z.number().int().min(1).max(100).optional(),
+      // Restrict to one category (filter pills). Whole-section categoryCounts
+      // are returned regardless, so the pills stay populated while filtered.
+      category: z.string().optional(),
     }),
     res: z.object({
       threads: z.array(GmailThreadSchema),
       nextCursor: z.string().nullable(),
+      categoryCounts: z.record(z.string(), z.number()).optional(),
     }),
   },
   'gmail:triggerSync': {
@@ -291,6 +296,28 @@ const ipcSchemas = {
     res: z.object({
       ok: z.boolean(),
       previous: z.enum(['important', 'other']).optional(),
+      error: z.string().optional(),
+    }),
+  },
+  // User explicitly picks a thread's category. Sticky on the thread
+  // (re-classification never overrides) and recorded as a correction the
+  // classifier learns from. Never affects the knowledge-graph verdict.
+  'gmail:setCategory': {
+    req: z.object({
+      threadId: z.string().min(1),
+      category: z.enum(['correspondence', 'meeting', 'notification', 'newsletter', 'promotion', 'cold_outreach', 'receipt']),
+    }),
+    res: z.object({
+      ok: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  // Archive every "Everything else" thread of one category in a single sweep.
+  'gmail:archiveCategory': {
+    req: z.object({ category: z.string().min(1) }),
+    res: z.object({
+      archived: z.number(),
+      failed: z.number(),
       error: z.string().optional(),
     }),
   },

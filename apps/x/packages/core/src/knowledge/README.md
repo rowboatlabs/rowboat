@@ -213,7 +213,7 @@ On first run, `strictness_analyzer.ts` analyzes your emails and recommends a lev
 
 ### Prompt Files
 
-(Historical: per-strictness prompt files no longer exist.) The single prompt lives in `note_creation.ts` (`getRaw()`); email gating is label-based via `renderNoteEffectRules()` from `tag_system.ts`, layered with the Email Reply Gate, direct-interaction, transactional, weekly-importance, and ongoing-relationship tests.
+(Historical: per-strictness prompt files no longer exist.) The single prompt lives in `note_creation.ts` (`getRaw()`); email gating happens upstream — the inbox classifier (`classify_thread.ts`) stamps a `knowledge: extract | skip` verdict into each email's frontmatter during Gmail sync, and `build_graph.ts` only admits `extract` files — layered with the Email Reply Gate, direct-interaction, transactional, weekly-importance, and ongoing-relationship tests.
 
 ## Other Configuration
 

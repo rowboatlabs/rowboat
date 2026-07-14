@@ -13,6 +13,12 @@ import { SettingsDialog } from '@/components/settings-dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 
 type GmailThread = blocks.GmailThread
 type GmailThreadMessage = blocks.GmailThreadMessage
@@ -88,6 +94,59 @@ function avatarColor(from?: string): string {
 
 function latestMessage(thread: GmailThread): GmailThreadMessage | undefined {
   return thread.messages[thread.messages.length - 1]
+}
+
+// Chip labels for the "Everything else" section — the reason a thread was
+// filed there. Plain correspondence gets no chip: chips explain the filing,
+// and correspondence is the default kind of mail.
+const CATEGORY_CHIP_LABELS: Record<string, string> = {
+  meeting: 'Meeting',
+  notification: 'Notification',
+  newsletter: 'Newsletter',
+  promotion: 'Promotion',
+  cold_outreach: 'Cold outreach',
+  receipt: 'Receipt',
+}
+
+type EmailCategory = 'correspondence' | 'meeting' | 'notification' | 'newsletter' | 'promotion' | 'cold_outreach' | 'receipt'
+
+// Full label set for the correction dropdown (correspondence included there —
+// "this newsletter is actually a real person" is the most valuable fix).
+const ALL_CATEGORY_LABELS: Record<EmailCategory, string> = {
+  correspondence: 'Correspondence',
+  ...CATEGORY_CHIP_LABELS,
+} as Record<EmailCategory, string>
+
+// Pill order in the "Everything else" filter row. 'unclassified' (threads the
+// classifier hasn't reached yet) is deliberately last and unarchivable.
+const CATEGORY_PILL_ORDER = ['newsletter', 'promotion', 'notification', 'cold_outreach', 'receipt', 'meeting', 'correspondence', 'unclassified']
+
+function categoryPillLabel(category: string): string {
+  if (category === 'unclassified') return 'Uncategorized'
+  return ALL_CATEGORY_LABELS[category as EmailCategory] ?? category
+}
+
+// The user sent the latest message and someone else is in the conversation —
+// the ball is in their court. Derived from the messages on every render (never
+// stored) so it can't go stale the way an arrival-time label would.
+function isAwaitingThem(thread: GmailThread, selfEmail: string | null | undefined): boolean {
+  const self = (selfEmail || '').trim().toLowerCase()
+  if (!self) return false
+  const latest = latestMessage(thread)
+  if (!(latest?.from || '').toLowerCase().includes(self)) return false
+  return thread.messages.some((m) => m.from && !m.from.toLowerCase().includes(self))
+}
+
+function daysSince(value?: string): number | null {
+  if (!value) return null
+  const ms = Date.parse(value)
+  if (!Number.isFinite(ms)) return null
+  return Math.max(0, Math.floor((Date.now() - ms) / 86_400_000))
+}
+
+function waitingChip(thread: GmailThread): string {
+  const days = daysSince(latestMessage(thread)?.date || thread.date)
+  return days && days > 0 ? `Waiting ${days}d` : 'Waiting'
 }
 
 // Split a raw header recipient string (e.g. `"Jo Bloggs" <jo@x.com>, b@y.com`) into
@@ -1910,6 +1969,7 @@ function ThreadDetail({
   hidden,
   keysDisabled,
   onComposingChange,
+  onSetCategory,
 }: {
   thread: GmailThread
   onClose: () => void
@@ -1918,6 +1978,8 @@ function ThreadDetail({
   keysDisabled?: boolean
   /** Reports whether the inline composer is open, so list shortcuts pause. */
   onComposingChange?: (composing: boolean) => void
+  /** Present for inbox threads only — search results aren't in the cache the correction writes to. */
+  onSetCategory?: (threadId: string, category: EmailCategory) => Promise<void>
 }) {
   const [composeMode, setComposeMode] = useState<ComposeMode | null>(null)
   const [selfEmail, setSelfEmail] = useState<string>('')
@@ -1999,6 +2061,30 @@ function ThreadDetail({
     <div className={cn('gmail-detail gmail-detail-inline', hidden && 'gmail-detail-hidden')}>
       <div className="gmail-detail-toolbar">
         <div className="gmail-thread-subject-inline">{thread.subject || '(No subject)'}</div>
+        {onSetCategory && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="gmail-row-chip gmail-category-chip"
+                title="Correct the category — the classifier learns from this"
+              >
+                {thread.category ? categoryPillLabel(thread.category) : 'Categorize'}
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="font-sans">
+              {(Object.keys(ALL_CATEGORY_LABELS) as EmailCategory[]).map((cat) => (
+                <DropdownMenuItem
+                  key={cat}
+                  onSelect={() => { void onSetCategory(thread.threadId, cat) }}
+                  className={cn(cat === thread.category && 'font-semibold')}
+                >
+                  {ALL_CATEGORY_LABELS[cat]}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
         <button type="button" className="gmail-icon-button" onClick={onClose} aria-label="Close thread">
           <span>×</span>
         </button>
@@ -2090,6 +2176,9 @@ const ThreadRow = memo(function ThreadRow({
   isLeaving,
   keysDisabled,
   section,
+  chip,
+  chipWaiting,
+  onSetCategory,
   onToggle,
   onMarkRead,
   onArchive,
@@ -2108,6 +2197,10 @@ const ThreadRow = memo(function ThreadRow({
   keysDisabled: boolean
   /** Which inbox section the row is rendered in; null hides the importance toggle (e.g. search results). */
   section: 'important' | 'other' | null
+  /** Status pill after the subject — "Reply ready" or waiting age ("Waiting 3d"). The category chip renders automatically from thread.category. */
+  chip?: string | null
+  chipWaiting?: boolean
+  onSetCategory?: (threadId: string, category: EmailCategory) => Promise<void>
   onToggle: (thread: GmailThread) => void
   onMarkRead: (threadId: string, read?: boolean) => Promise<void>
   onArchive: (threadId: string) => Promise<void>
@@ -2120,6 +2213,10 @@ const ThreadRow = memo(function ThreadRow({
 }) {
   const latest = latestMessage(thread)
   const isUnread = thread.unread === true
+  // Category chip on every row so the list itself answers "worth opening?".
+  // Plain correspondence stays chipless — labeling normal human mail
+  // "Correspondence" adds noise, not information.
+  const categoryChip = (thread.category && CATEGORY_CHIP_LABELS[thread.category]) || null
   const stop = (e: React.MouseEvent | React.KeyboardEvent) => {
     e.stopPropagation()
   }
@@ -2141,6 +2238,8 @@ const ThreadRow = memo(function ThreadRow({
           <span className="gmail-row-content">
             <strong>{thread.summary || thread.subject || '(No subject)'}</strong>
             <span>{thread.summary ? thread.subject : snippet(latest?.body || thread.latest_email)}</span>
+            {categoryChip && <span className="gmail-row-chip">{categoryChip}</span>}
+            {chip && <span className={cn('gmail-row-chip', chipWaiting ? 'gmail-row-chip-waiting' : 'gmail-row-chip-ready')}>{chip}</span>}
           </span>
           <span className="gmail-row-date">{formatInboxTime(latest?.date || thread.date)}</span>
         </button>
@@ -2194,6 +2293,7 @@ const ThreadRow = memo(function ThreadRow({
           hidden={!isSelected}
           keysDisabled={keysDisabled}
           onComposingChange={onComposingChange}
+          onSetCategory={onSetCategory}
         />
       )}
     </div>
@@ -2360,6 +2460,13 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
   const closeCompose = useCallback(() => setComposeOpen(false), [])
   // Inbox vs Drafts. Drafts are fetched live (they're not in the inbox cache).
   const [view, setView] = useState<'inbox' | 'drafts'>('inbox')
+  // Category filter for "Everything else" (null = all) + whole-section counts
+  // from the last backend response, which drive the filter pills.
+  const [otherCategory, setOtherCategory] = useState<string | null>(null)
+  const otherCategoryRef = useRef<string | null>(null)
+  otherCategoryRef.current = otherCategory
+  const [categoryCounts, setCategoryCounts] = useState<Record<string, number>>({})
+  const [bulkArchiving, setBulkArchiving] = useState(false)
   const [drafts, setDrafts] = useState<GmailThread[]>(() => persistedDrafts ?? [])
   const [draftsLoading, setDraftsLoading] = useState(false)
   const [draftsError, setDraftsError] = useState<string | null>(null)
@@ -2589,6 +2696,33 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
     }
   }, [important.threads, other.threads, markLeaving, setSection])
 
+  // User corrects a thread's category: sticky on the thread + recorded as a
+  // correction the classifier learns from (few-shot).
+  const setCategoryAction = useCallback(async (threadId: string, category: EmailCategory) => {
+    try {
+      const result = await window.ipc.invoke('gmail:setCategory', { threadId, category })
+      if (result.ok) {
+        updateThreadInState(threadId, (t) => ({ ...t, category }))
+        setCategoryCounts((prev) => {
+          const next = { ...prev }
+          // Only 'other'-section threads are counted; adjust optimistically and
+          // let the next backend response correct any drift.
+          const prevCat = [...important.threads, ...other.threads].find((t) => t.threadId === threadId)?.category ?? 'unclassified'
+          if (other.threads.some((t) => t.threadId === threadId)) {
+            next[prevCat] = Math.max(0, (next[prevCat] ?? 1) - 1)
+            next[category] = (next[category] ?? 0) + 1
+          }
+          return next
+        })
+        toast(`Filed as ${categoryPillLabel(category)} — noted for similar emails.`, 'success')
+      } else if (result.error) {
+        toast(`Could not update category: ${result.error}`, 'error')
+      }
+    } catch (err) {
+      toast(`Could not update category: ${err instanceof Error ? err.message : String(err)}`, 'error')
+    }
+  }, [updateThreadInState, important.threads, other.threads])
+
   const trashThreadAction = useCallback(async (threadId: string) => {
     markLeaving(threadId, true)
     try {
@@ -2654,8 +2788,21 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
   // reload to be discarded whenever Other was reloaded in the same tick.)
   const epochsRef = useRef<Record<InboxSection, number>>({ important: 0, other: 0 })
 
-  const sectionChannel = (section: InboxSection) =>
-    section === 'important' ? 'gmail:getImportant' as const : 'gmail:getEverythingElse' as const
+  const fetchSectionPage = useCallback(async (section: InboxSection, cursor?: string) => {
+    const result = section === 'important'
+      ? await window.ipc.invoke('gmail:getImportant', { cursor, limit: PAGE_SIZE })
+      : await window.ipc.invoke('gmail:getEverythingElse', {
+          cursor,
+          limit: PAGE_SIZE,
+          category: otherCategoryRef.current ?? undefined,
+        })
+    // Counts describe the whole 'other' section regardless of filter/page —
+    // keep the pills fresh on every response that carries them.
+    if (section === 'other' && result.categoryCounts) {
+      setCategoryCounts(result.categoryCounts)
+    }
+    return result
+  }, [])
 
   const loadNextPage = useCallback(async (section: InboxSection) => {
     const current = section === 'important' ? important : other
@@ -2664,10 +2811,7 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
     const epoch = epochsRef.current[section]
     setSection(section, (prev) => ({ ...prev, loadingPage: true }))
     try {
-      const result = await window.ipc.invoke(sectionChannel(section), {
-        cursor: current.nextCursor ?? undefined,
-        limit: PAGE_SIZE,
-      })
+      const result = await fetchSectionPage(section, current.nextCursor ?? undefined)
       if (epoch !== epochsRef.current[section]) return
       setSection(section, (prev) => ({
         threads: [...prev.threads, ...result.threads],
@@ -2680,7 +2824,7 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
       console.warn(`[Gmail] page load failed for ${section}:`, err)
       setSection(section, (prev) => ({ ...prev, loadingPage: false }))
     }
-  }, [important, other, setSection])
+  }, [important, other, setSection, fetchSectionPage])
 
   const reloadFirstPage = useCallback(async (section: InboxSection, options: { silent?: boolean } = {}) => {
     const epoch = ++epochsRef.current[section]
@@ -2690,9 +2834,7 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
       setSection(section, () => ({ ...initialSectionState, loadingPage: true }))
     }
     try {
-      const result = await window.ipc.invoke(sectionChannel(section), {
-        limit: PAGE_SIZE,
-      })
+      const result = await fetchSectionPage(section)
       if (epoch !== epochsRef.current[section]) return
       setSection(section, () => ({
         threads: result.threads,
@@ -2705,33 +2847,59 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
       console.warn(`[Gmail] initial page load failed for ${section}:`, err)
       setSection(section, (prev) => ({ ...prev, loadingPage: false }))
     }
-  }, [setSection])
+  }, [setSection, fetchSectionPage])
 
-  // Initial load — fetch page 1 of Important. On first-ever mount we do a
-  // non-silent load (shows loading state). On re-mount with persisted state we
-  // do a silent reconcile against the cache — necessary because the watcher
-  // subscription only runs while mounted, so any cache changes that happened
-  // while the panel was unmounted would otherwise stay invisible.
+
+  // Initial load — fetch page 1 of BOTH sections. Everything else used to
+  // load lazily once Important was exhausted, but that chained on
+  // hasReachedEnd, which every silent live reload resets (back to page 1) —
+  // under sustained sync writes the chain never fired and the section never
+  // appeared at all. Both lists are cheap local reads (mtime-cached file
+  // scan), so eager is fine. On first-ever mount we do a non-silent load
+  // (shows loading state); on re-mount with persisted state we do a silent
+  // reconcile against the cache — necessary because the watcher subscription
+  // only runs while mounted, so any cache changes that happened while the
+  // panel was unmounted would otherwise stay invisible.
   useEffect(() => {
-    if (hadPersistedDataOnMount.current) {
-      void reloadFirstPage('important', { silent: true })
-      // Reconcile Other too if it had been loaded before the unmount.
-      if (other.threads.length > 0) {
-        void reloadFirstPage('other', { silent: true })
-      }
-    } else {
-      void reloadFirstPage('important')
-    }
+    const silent = hadPersistedDataOnMount.current
+    void reloadFirstPage('important', { silent })
+    void reloadFirstPage('other', { silent })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Once Important is exhausted, kick off page 1 of Everything else.
+  // Changing the category filter refetches Everything else from page 1
+  // (fetchSectionPage reads the filter from otherCategoryRef). Skipped on
+  // mount — the initial-load effect above covers it.
+  const otherCategoryMounted = useRef(false)
   useEffect(() => {
-    if (!important.hasReachedEnd) return
-    if (other.threads.length > 0) return
-    if (other.loadingPage) return
+    if (!otherCategoryMounted.current) {
+      otherCategoryMounted.current = true
+      return
+    }
     void reloadFirstPage('other')
-  }, [important.hasReachedEnd, other.threads.length, other.loadingPage, reloadFirstPage])
+  }, [otherCategory, reloadFirstPage])
+
+  // Bulk gesture behind the filter pills: archive the whole category at once.
+  const archiveCategoryAction = useCallback(async (category: string) => {
+    setBulkArchiving(true)
+    try {
+      const result = await window.ipc.invoke('gmail:archiveCategory', { category })
+      if (result.error) {
+        toast(`Bulk archive failed: ${result.error}`, 'error')
+      } else {
+        toast(
+          `Archived ${result.archived} thread${result.archived === 1 ? '' : 's'}${result.failed ? ` (${result.failed} failed)` : ''}. They stay searchable in Gmail.`,
+          result.failed ? 'error' : 'success',
+        )
+      }
+      setOtherCategory(null) // triggers the Everything else reload above
+      void reloadFirstPage('important', { silent: true })
+    } catch (err) {
+      toast(`Bulk archive failed: ${err instanceof Error ? err.message : String(err)}`, 'error')
+    } finally {
+      setBulkArchiving(false)
+    }
+  }, [reloadFirstPage])
 
   // Live updates: watcher on inbox_lists/ → silently refresh visible sections
   // when files change. Throttled to at most one reload per ~3s so a burst of
@@ -2751,8 +2919,6 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
   composeOpenRef.current = composeOpen
   const isRefreshingRef = useRef(false)
   isRefreshingRef.current = refreshing
-  const otherHasThreadsRef = useRef(false)
-  otherHasThreadsRef.current = other.threads.length > 0
 
   const RELOAD_THROTTLE_MS = 3000
 
@@ -2764,11 +2930,7 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
     }
     lastReloadAtRef.current = Date.now()
     void reloadFirstPage('important', { silent: true })
-    // Only refresh Other if it had been loaded — otherwise the chained
-    // effect handles it once Important hits hasReachedEnd.
-    if (otherHasThreadsRef.current) {
-      void reloadFirstPage('other', { silent: true })
-    }
+    void reloadFirstPage('other', { silent: true })
   }, [reloadFirstPage])
 
   // Leading-edge throttle:
@@ -2821,9 +2983,7 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
     pendingReloadRef.current = false
     lastReloadAtRef.current = Date.now()
     void reloadFirstPage('important', { silent: true })
-    if (otherHasThreadsRef.current) {
-      void reloadFirstPage('other', { silent: true })
-    }
+    void reloadFirstPage('other', { silent: true })
   }, [selectedThreadId, composeOpen, reloadFirstPage])
 
   // Manual refresh: wake the background sync loop. It updates inbox_lists/,
@@ -2876,6 +3036,19 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
   const visibleOther = useMemo(() => filterThreads(other.threads), [other.threads, filterThreads])
   const visibleDrafts = useMemo(() => filterThreads(drafts), [drafts, filterThreads])
 
+  // Split "Important" into what still needs the user vs. what they've already
+  // answered and are waiting on. Derived per render from the messages — thread
+  // state, unlike a label, can't be allowed to go stale.
+  const selfEmail = emailConnection?.email ?? null
+  const visibleNeedsYou = useMemo(
+    () => visibleImportant.filter((t) => !isAwaitingThem(t, selfEmail)),
+    [visibleImportant, selfEmail],
+  )
+  const visibleWaiting = useMemo(
+    () => visibleImportant.filter((t) => isAwaitingThem(t, selfEmail)),
+    [visibleImportant, selfEmail],
+  )
+
   // ── Keyboard shortcuts (Superhuman-style) ───────────────────────────────────
   // EmailView only mounts while the email tab is open, so these are naturally
   // scoped to that view. Single-letter keys stay inert while typing in any
@@ -2896,9 +3069,9 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
   const visibleList = useMemo<GmailThread[]>(() => {
     if (query.trim()) return searchResults
     if (view === 'drafts') return visibleDrafts
-    if (important.hasReachedEnd && other.threads.length > 0) return [...visibleImportant, ...visibleOther]
-    return visibleImportant
-  }, [query, searchResults, view, visibleDrafts, visibleImportant, visibleOther, important.hasReachedEnd, other.threads.length])
+    if (other.threads.length > 0) return [...visibleNeedsYou, ...visibleWaiting, ...visibleOther]
+    return [...visibleNeedsYou, ...visibleWaiting]
+  }, [query, searchResults, view, visibleDrafts, visibleNeedsYou, visibleWaiting, visibleOther, other.threads.length])
 
   // Keep the cursor valid as the list changes: switching between inbox,
   // search, and drafts resets it; if the focused row vanished (archived,
@@ -3135,7 +3308,12 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
 
   const closeThread = useCallback(() => setSelectedThreadId(null), [])
 
-  const renderRow = (thread: GmailThread, section: 'important' | 'other' | null = null) => {
+  const renderRow = (
+    thread: GmailThread,
+    section: 'important' | 'other' | null = null,
+    chip: string | null = null,
+    chipWaiting: boolean = false,
+  ) => {
     const isMounted = openedThreadIds.includes(thread.threadId)
     return (
       <ThreadRow
@@ -3147,6 +3325,9 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
         isLeaving={leavingThreadIds.has(thread.threadId)}
         keysDisabled={isMounted && anyModalOpen}
         section={section}
+        chip={chip}
+        chipWaiting={chipWaiting}
+        onSetCategory={section ? setCategoryAction : undefined}
         onToggle={toggleThread}
         onMarkRead={markThreadReadAction}
         onArchive={archiveThreadAction}
@@ -3296,25 +3477,44 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
           <div className="gmail-empty-state">Could not load mail: {error}</div>
         ) : hasAny ? (
           <div className="gmail-list" aria-label="Recent emails">
-            {important.threads.length > 0 && (
+            {visibleNeedsYou.length > 0 ? (
               <section className="gmail-section">
                 <div className="gmail-list-header">
-                  <span>Important</span>
+                  <span>Needs you</span>
                   <span>
-                    {important.threads.length}{important.hasReachedEnd ? '' : '+'} thread{important.threads.length === 1 ? '' : 's'}
+                    {visibleNeedsYou.length}{important.hasReachedEnd ? '' : '+'} thread{visibleNeedsYou.length === 1 ? '' : 's'}
                   </span>
                 </div>
-                {visibleImportant.map((t) => renderRow(t, 'important'))}
-                {!important.hasReachedEnd && (
-                  <SectionSentinel
-                    disabled={important.loadingPage || important.hasReachedEnd}
-                    onIntersect={() => loadNextPage('important')}
-                    loading={important.loadingPage}
-                  />
-                )}
+                {visibleNeedsYou.map((t) => renderRow(t, 'important', t.draft_response ? 'Reply ready' : null))}
+              </section>
+            ) : important.hasReachedEnd && !important.loadingPage ? (
+              <div className="gmail-caughtup">You’re caught up — nothing needs a reply.</div>
+            ) : null}
+            {visibleWaiting.length > 0 && (
+              <section className="gmail-section">
+                <div className="gmail-list-header">
+                  <span>Waiting on them</span>
+                  <span>
+                    {visibleWaiting.length}{important.hasReachedEnd ? '' : '+'} thread{visibleWaiting.length === 1 ? '' : 's'}
+                  </span>
+                </div>
+                {visibleWaiting.map((t) => renderRow(t, 'important', waitingChip(t), true))}
               </section>
             )}
-            {important.hasReachedEnd && other.threads.length > 0 && (
+            {/* Pages of "Important" feed both sections above, so the sentinel
+                lives after them rather than inside either one. */}
+            {important.threads.length > 0 && !important.hasReachedEnd && (
+              <SectionSentinel
+                disabled={important.loadingPage || important.hasReachedEnd}
+                onIntersect={() => loadNextPage('important')}
+                loading={important.loadingPage}
+              />
+            )}
+            {/* Loading stays lazy (chained on Important exhausting), but once
+                loaded the section never unmounts: silent live reloads reset
+                Important to page 1 (hasReachedEnd → false), and gating the
+                render on it made this whole section vanish on every sync. */}
+            {(other.threads.length > 0 || otherCategory !== null) && (
               <section className="gmail-section">
                 <div className="gmail-list-header">
                   <span>Everything else</span>
@@ -3322,6 +3522,35 @@ export function EmailView({ initialThreadId, threadIdVersion, initialSearchQuery
                     {other.threads.length}{other.hasReachedEnd ? '' : '+'} thread{other.threads.length === 1 ? '' : 's'}
                   </span>
                 </div>
+                {Object.keys(categoryCounts).length > 0 && (
+                  <div className="gmail-category-pills">
+                    {CATEGORY_PILL_ORDER.filter((c) => (categoryCounts[c] ?? 0) > 0).map((cat) => (
+                      <button
+                        key={cat}
+                        type="button"
+                        className={cn('gmail-category-pill', otherCategory === cat && 'gmail-category-pill-active')}
+                        onClick={() => setOtherCategory((prev) => (prev === cat ? null : cat))}
+                      >
+                        {categoryPillLabel(cat)} <span className="gmail-category-pill-count">{categoryCounts[cat]}</span>
+                      </button>
+                    ))}
+                    {otherCategory && otherCategory !== 'unclassified' && (
+                      <button
+                        type="button"
+                        className="gmail-category-pill gmail-category-pill-archive"
+                        disabled={bulkArchiving}
+                        onClick={() => void archiveCategoryAction(otherCategory)}
+                      >
+                        {bulkArchiving
+                          ? 'Archiving…'
+                          : `Archive all ${categoryCounts[otherCategory] ?? ''} ${categoryPillLabel(otherCategory).toLowerCase()}`}
+                      </button>
+                    )}
+                  </div>
+                )}
+                {other.threads.length === 0 && otherCategory !== null && !other.loadingPage && (
+                  <div className="gmail-caughtup">Nothing filed as {categoryPillLabel(otherCategory).toLowerCase()}.</div>
+                )}
                 {visibleOther.map((t) => renderRow(t, 'other'))}
                 {!other.hasReachedEnd && (
                   <SectionSentinel
