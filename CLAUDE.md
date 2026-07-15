@@ -112,6 +112,7 @@ Long-form docs for specific features. Read the relevant file before making chang
 | Calls (video mode) — one hands-free call engine with four presets (voice / video / share screen / practice coaching), device-derived surfaces (full-screen ⇄ floating popout), frame pipeline, prompts catalog | `apps/x/VIDEO_MODE.md` |
 | Analytics — PostHog event catalog, person properties, use-case taxonomy, how to add a new event | `apps/x/ANALYTICS.md` |
 | Sub-agents — spawn-agent tool, headless child turns, model-tier system (light/medium/heavy, `subagentModels` config, sign-in seeding), design decisions, prompts catalog | `apps/x/SUBAGENTS.md` |
+| Model curation runbook — checklist of every hardcoded/curated model id; READ WHEN adopting a new model or retuning any curated default (seeds don't retro-apply, gateway-id verification, tool-calling floor) | `apps/x/MODELS.md` |
 | Turn/session runtime — event-sourced storage, reference model, the `npm run inspect` debugger | `apps/x/packages/core/docs/turn-runtime-design.md`, `session-design.md` |
 
 ## Common Tasks
