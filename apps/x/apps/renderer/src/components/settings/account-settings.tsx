@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Separator } from "@/components/ui/separator"
 import { useBilling } from "@/hooks/useBilling"
+import { CreditRewards } from "@/components/settings/credit-rewards"
 import { toast } from "sonner"
 import { getBillingPlanData, type BillingUsageBucket } from "@x/shared/dist/billing.js"
 
@@ -56,7 +57,7 @@ export function AccountSettings({ dialogOpen }: AccountSettingsProps) {
   const [disconnecting, setDisconnecting] = useState(false)
   const [connecting, setConnecting] = useState(false)
   const [appUrl, setAppUrl] = useState<string | null>(null)
-  const { billing, isLoading: billingLoading } = useBilling(isRowboatConnected)
+  const { billing, isLoading: billingLoading, refresh: refreshBilling } = useBilling(isRowboatConnected)
   const currentPlan = billing ? getBillingPlanData(billing.catalog, billing.subscriptionPlanId) : null
   const hasPaidSubscription = currentPlan?.category === 'starter' || currentPlan?.category === 'pro'
 
@@ -99,6 +100,14 @@ export function AccountSettings({ dialogOpen }: AccountSettingsProps) {
     })
     return cleanup
   }, [])
+
+  // A confirmed reward grant changes the bonus-credit balance; refetch so the
+  // Earn-credits section shows the updated number while the dialog is open.
+  useEffect(() => {
+    return window.ipc.on('credits:didActivate', () => {
+      refreshBilling()
+    })
+  }, [refreshBilling])
 
   const handleConnect = useCallback(async () => {
     try {
@@ -226,6 +235,11 @@ export function AccountSettings({ dialogOpen }: AccountSettingsProps) {
           <p className="text-xs text-muted-foreground">Unable to load plan details</p>
         )}
       </div>
+
+      <Separator />
+
+      {/* Earn Credits Section */}
+      <CreditRewards store={billing?.store ?? null} />
 
       <Separator />
 

@@ -1,5 +1,9 @@
 import { z } from 'zod';
 
+// Mirrors the backend's shared billing constant — credits are denominated so
+// that 100M credits == $1 of usage.
+export const CREDITS_PER_DOLLAR = 100_000_000;
+
 export const BillingPlanCategorySchema = z.enum(['free', 'starter', 'pro']);
 export type BillingPlanCategory = z.infer<typeof BillingPlanCategorySchema>;
 
@@ -29,6 +33,13 @@ export const BillingUsageBucketSchema = z.object({
 });
 export type BillingUsageBucket = z.infer<typeof BillingUsageBucketSchema>;
 
+// Bonus/promotional credits granted outside the plan buckets (credit store).
+// Not sanctioned per period, so it carries a plain balance instead of a quota.
+export const BillingStoreBucketSchema = z.object({
+  availableCredits: z.number(),
+});
+export type BillingStoreBucket = z.infer<typeof BillingStoreBucketSchema>;
+
 export const BillingInfoSchema = z.object({
   userEmail: z.string().nullable(),
   userId: z.string().nullable(),
@@ -40,6 +51,7 @@ export const BillingInfoSchema = z.object({
   daily: BillingUsageBucketSchema.extend({
     usageDay: z.string(),
   }),
+  store: BillingStoreBucketSchema,
 });
 export type BillingInfo = z.infer<typeof BillingInfoSchema>;
 

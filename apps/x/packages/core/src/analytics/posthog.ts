@@ -91,6 +91,24 @@ export function reset(): void {
   identifiedUserId = null;
 }
 
+/**
+ * Evaluate a PostHog feature flag for the current identity (rowboat user id
+ * once identified, installation id before that). `defaultValue` is returned
+ * when the flag can't be definitively evaluated — analytics disabled, flags
+ * API unreachable, or the flag doesn't exist in the PostHog project.
+ */
+export async function isFeatureEnabled(key: string, defaultValue = false): Promise<boolean> {
+  const ph = getClient();
+  if (!ph) return defaultValue;
+  try {
+    const result = await ph.isFeatureEnabled(key, activeDistinctId());
+    return result === undefined ? defaultValue : result;
+  } catch (err) {
+    console.error(`[Analytics] feature flag ${key} check failed:`, err);
+    return defaultValue;
+  }
+}
+
 export async function shutdown(): Promise<void> {
   if (!client) return;
   try {
