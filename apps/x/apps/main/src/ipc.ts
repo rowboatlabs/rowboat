@@ -908,6 +908,8 @@ export function setupIpcHandlers() {
       return { payload: getMeetingPopupPayload() };
     },
     'meetingDetect:action': async (_event, args) => {
+      // Captured here because the popup window runs without PostHog.
+      capture('meeting_popup_action', { action: args.action });
       handleMeetingPopupAction(args.action);
       return {};
     },
@@ -1333,6 +1335,7 @@ export function setupIpcHandlers() {
     'codeSession:create': async (_event, args) => {
       const service = container.resolve<CodeSessionService>('codeSessionService');
       const session = await service.create(args);
+      capture('code_session_created', { mode: session.mode, agent: session.agent });
       return { session };
     },
     'codeSession:list': async () => {
@@ -1845,7 +1848,9 @@ export function setupIpcHandlers() {
       return { app };
     },
     'apps:rollback': async (_event, args) => {
-      return { app: await appsInstaller.rollbackApp(args.folder) };
+      const app = await appsInstaller.rollbackApp(args.folder);
+      capture('app_rolled_back', { folder: args.folder });
+      return { app };
     },
     'apps:publish': async (event, args) => {
       const win = BrowserWindow.fromWebContents(event.sender);

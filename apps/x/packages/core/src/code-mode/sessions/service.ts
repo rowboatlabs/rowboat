@@ -2,6 +2,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import z from 'zod';
 import { WorkDir } from '../../config/config.js';
+import { capture } from '../../analytics/posthog.js';
 import type { CodeSession, CodeSessionMode } from '@x/shared/dist/code-sessions.js';
 import type { CodingAgent, ApprovalPolicy } from '@x/shared/dist/code-mode.js';
 import { RunEvent, MessageEvent } from '@x/shared/dist/runs.js';
@@ -182,6 +183,9 @@ export class CodeSessionService {
             return { accepted: false, error: 'The session is busy with a Rowboat-driven turn.' };
         }
         this.inflight.add(sessionId);
+        // Direct-drive turns bypass the agent runtime, so they never show up in
+        // llm_usage — this is the only signal that direct code mode is used.
+        capture('code_session_message_sent', { mode: session.mode, agent: session.agent });
         const signal = this.abortRegistry.createForRun(sessionId);
         const turnId = await this.idGenerator.next();
         const toolCallId = `direct-${turnId}`;

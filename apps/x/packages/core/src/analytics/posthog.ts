@@ -30,7 +30,7 @@ function getClient(): PostHog | null {
     // distinguishes prod / staging / custom — meaning is assigned in PostHog).
     client.identify({
       distinctId: getInstallationId(),
-      properties: { api_url: API_URL, ...appVersionProperties() },
+      properties: { api_url: API_URL, ...baseProperties() },
     });
   } catch (err) {
     console.error('[Analytics] Failed to init PostHog:', err);
@@ -43,8 +43,10 @@ function activeDistinctId(): string {
   return identifiedUserId ?? getInstallationId();
 }
 
-function appVersionProperties(): Record<string, string> {
-  return APP_VERSION ? { app_version: APP_VERSION } : {};
+// Stamped on every event so desktop traffic is distinguishable from any other
+// surface (e.g. the web dashboard's autocapture) sharing the PostHog project.
+function baseProperties(): Record<string, string> {
+  return { platform: 'desktop', ...(APP_VERSION ? { app_version: APP_VERSION } : {}) };
 }
 
 export function capture(event: string, properties?: Record<string, unknown>): void {
@@ -56,7 +58,7 @@ export function capture(event: string, properties?: Record<string, unknown>): vo
       event,
       properties: {
         ...properties,
-        ...appVersionProperties(),
+        ...baseProperties(),
       },
     });
   } catch (err) {
@@ -76,7 +78,7 @@ export function identify(userId: string, properties?: Record<string, unknown>): 
       properties: {
         ...properties,
         api_url: API_URL,
-        ...appVersionProperties(),
+        ...baseProperties(),
       },
     });
     identifiedUserId = userId;
