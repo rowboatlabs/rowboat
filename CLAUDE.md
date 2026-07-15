@@ -26,6 +26,7 @@ rowboat/
 │   ├── python-sdk/        # Python SDK
 │   └── docs/              # Documentation site
 ├── CLAUDE.md              # This file
+├── DOCS.md                # Internal docs index — START HERE to find any doc
 └── README.md              # User-facing readme
 ```
 
