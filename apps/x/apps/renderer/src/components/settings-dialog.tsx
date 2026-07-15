@@ -1585,6 +1585,9 @@ function RowboatModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
   const [selectedKg, setSelectedKg] = useState("")
   const [selectedLiveNote, setSelectedLiveNote] = useState("")
   const [selectedAutoPermission, setSelectedAutoPermission] = useState("")
+  const [selectedSubagentLight, setSelectedSubagentLight] = useState("")
+  const [selectedSubagentMedium, setSelectedSubagentMedium] = useState("")
+  const [selectedSubagentHeavy, setSelectedSubagentHeavy] = useState("")
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
@@ -1651,6 +1654,10 @@ function RowboatModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
         setSelectedKg(toKey(parsed.knowledgeGraphModel))
         setSelectedLiveNote(toKey(parsed.liveNoteAgentModel))
         setSelectedAutoPermission(toKey(parsed.autoPermissionDecisionModel))
+        const subagentModels = (parsed.subagentModels ?? {}) as Record<string, unknown>
+        setSelectedSubagentLight(toKey(subagentModels.light))
+        setSelectedSubagentMedium(toKey(subagentModels.medium))
+        setSelectedSubagentHeavy(toKey(subagentModels.heavy))
       } catch {
         toast.error("Failed to load models")
       } finally {
@@ -1665,11 +1672,23 @@ function RowboatModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
     setSaving(true)
     try {
       const toRef = (key: string) => (key ? parseHybridKey(key) : null)
+      // Always write the subagentModels object (even all-unset) — its
+      // presence is what marks "user has made a choice", which blocks the
+      // sign-in seeding from re-suggesting defaults over it.
+      const lightRef = toRef(selectedSubagentLight)
+      const mediumRef = toRef(selectedSubagentMedium)
+      const heavyRef = toRef(selectedSubagentHeavy)
+      const subagentModels = {
+        ...(lightRef ? { light: lightRef } : {}),
+        ...(mediumRef ? { medium: mediumRef } : {}),
+        ...(heavyRef ? { heavy: heavyRef } : {}),
+      }
       await window.ipc.invoke("models:updateConfig", {
         defaultSelection: toRef(selectedDefault),
         knowledgeGraphModel: toRef(selectedKg),
         liveNoteAgentModel: toRef(selectedLiveNote),
         autoPermissionDecisionModel: toRef(selectedAutoPermission),
+        subagentModels,
       })
       window.dispatchEvent(new Event("models-config-changed"))
       toast.success("Model configuration saved")
@@ -1678,7 +1697,7 @@ function RowboatModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
     } finally {
       setSaving(false)
     }
-  }, [selectedDefault, selectedKg, selectedLiveNote, selectedAutoPermission])
+  }, [selectedDefault, selectedKg, selectedLiveNote, selectedAutoPermission, selectedSubagentLight, selectedSubagentMedium, selectedSubagentHeavy])
 
   const renderSelect = (
     label: string,
@@ -1728,6 +1747,16 @@ function RowboatModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
       {renderSelect("Knowledge graph model", selectedKg, setSelectedKg, "Rowboat default")}
       {renderSelect("Background agents model", selectedLiveNote, setSelectedLiveNote, "Rowboat default")}
       {renderSelect("Permission checks model", selectedAutoPermission, setSelectedAutoPermission, "Rowboat default")}
+
+      <div className="space-y-1 pt-2">
+        <h4 className="text-sm font-semibold">Sub-agent models</h4>
+        <p className="text-xs text-muted-foreground">
+          Models for spawned sub-agents by task difficulty. Unset tiers use the conversation's model.
+        </p>
+      </div>
+      {renderSelect("Light (extraction, search, summaries)", selectedSubagentLight, setSelectedSubagentLight, "Same as conversation model")}
+      {renderSelect("Medium (comparison, synthesis)", selectedSubagentMedium, setSelectedSubagentMedium, "Same as conversation model")}
+      {renderSelect("Heavy (hard analysis)", selectedSubagentHeavy, setSelectedSubagentHeavy, "Same as conversation model")}
 
       {/* Save */}
       <Button onClick={handleSave} disabled={saving}>

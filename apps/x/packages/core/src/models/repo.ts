@@ -11,6 +11,7 @@ export type ModelConfigPatch = {
         | "meetingNotesModel"
         | "liveNoteAgentModel"
         | "autoPermissionDecisionModel"
+        | "subagentModels"
         | "deferBackgroundTasks"]?: z.infer<typeof ModelConfig>[K] | null;
 };
 
@@ -86,7 +87,7 @@ export class FSModelConfigRepo implements IModelConfigRepo {
             const raw = await fs.readFile(this.configPath, "utf8");
             const existing = JSON.parse(raw);
             existingSelections = Object.fromEntries(
-                ["defaultSelection", "knowledgeGraphModel", "meetingNotesModel", "liveNoteAgentModel", "autoPermissionDecisionModel", "deferBackgroundTasks"]
+                ["defaultSelection", "knowledgeGraphModel", "meetingNotesModel", "liveNoteAgentModel", "autoPermissionDecisionModel", "subagentModels", "deferBackgroundTasks"]
                     .filter((key) => existing[key] !== undefined && (config as Record<string, unknown>)[key] === undefined)
                     .map((key) => [key, existing[key]]),
             );

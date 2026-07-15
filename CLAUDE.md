@@ -111,6 +111,7 @@ Long-form docs for specific features. Read the relevant file before making chang
 | Live Notes — single `live:` frontmatter block (one objective + optional cron / windows / eventMatchCriteria) that turns a note into a self-updating artifact, panel UI, Copilot skill, prompts catalog | `apps/x/LIVE_NOTE.md` |
 | Calls (video mode) — one hands-free call engine with four presets (voice / video / share screen / practice coaching), device-derived surfaces (full-screen ⇄ floating popout), frame pipeline, prompts catalog | `apps/x/VIDEO_MODE.md` |
 | Analytics — PostHog event catalog, person properties, use-case taxonomy, how to add a new event | `apps/x/ANALYTICS.md` |
+| Sub-agents (spawn-agent, model tiers) and the model-curation runbook live in the PRIVATE internal-docs repo — local clone at `~/Developer/rowboat-internal-docs` (read `docs/SUBAGENTS.md` before touching spawn-agent/tier code; `docs/MODELS.md` before changing any curated model id) | private repo `rowboatlabs/internal-docs` |
 | Turn/session runtime — event-sourced storage, reference model, the `npm run inspect` debugger | `apps/x/packages/core/docs/turn-runtime-design.md`, `session-design.md` |
 
 ## Common Tasks

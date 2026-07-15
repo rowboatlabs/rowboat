@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { ChatHeader } from '@/components/chat-header'
+import { SubAgentBlock } from '@/components/sub-agent-block'
 import { ChatEmptyState } from '@/components/chat-empty-state'
 import {
   Conversation,
@@ -440,6 +441,16 @@ export function ChatSidebar({
     }
 
     if (isToolCall(item)) {
+      if (item.name === 'spawn-agent') {
+        return (
+          <SubAgentBlock
+            key={item.id}
+            item={item}
+            open={isToolOpenForTab?.(tabId, item.id) ?? false}
+            onOpenChange={(open) => onToolOpenChangeForTab?.(tabId, item.id, open)}
+          />
+        )
+      }
       const webSearchData = getWebSearchCardData(item)
       if (webSearchData) {
         return (

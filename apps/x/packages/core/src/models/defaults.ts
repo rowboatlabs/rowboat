@@ -14,6 +14,11 @@ const SIGNED_IN_DEFAULT_PROVIDER = "rowboat";
 const SIGNED_IN_KG_MODEL = "google/gemini-3.1-flash-lite";
 const SIGNED_IN_LIVE_NOTE_AGENT_MODEL = "google/gemini-3.1-flash-lite";
 const SIGNED_IN_AUTO_PERMISSION_DECISION_MODEL = "google/gemini-3.1-flash-lite";
+// Sub-agent tiers: the light model must stay one we've verified at
+// multi-step tool calling — spawned children are agentic, not one-shot.
+const SIGNED_IN_SUBAGENT_LIGHT_MODEL = "google/gemini-3.1-flash-lite";
+const SIGNED_IN_SUBAGENT_MEDIUM_MODEL = "anthropic/claude-sonnet-4.6";
+const SIGNED_IN_SUBAGENT_HEAVY_MODEL = "anthropic/claude-opus-4.8";
 
 export type ModelSelection = z.infer<typeof ModelRef>;
 
@@ -161,4 +166,70 @@ export async function getMeetingNotesModel(): Promise<ModelSelection> {
  */
 export async function getBackgroundTaskAgentModel(): Promise<ModelSelection> {
     return getLiveNoteAgentModel();
+}
+
+export type SubagentTier = "light" | "medium" | "heavy";
+
+// Suggested tier defaults, written into models.json once at Rowboat
+// sign-in (seedSubagentModelDefaults). Purely seed values — runtime
+// resolution reads the config, so users can retune tiers in settings
+// without an app update.
+const SUBAGENT_TIER_SEED: Record<SubagentTier, ModelSelection> = {
+    light: {
+        provider: SIGNED_IN_DEFAULT_PROVIDER,
+        model: SIGNED_IN_SUBAGENT_LIGHT_MODEL,
+    },
+    medium: {
+        provider: SIGNED_IN_DEFAULT_PROVIDER,
+        model: SIGNED_IN_SUBAGENT_MEDIUM_MODEL,
+    },
+    heavy: {
+        provider: SIGNED_IN_DEFAULT_PROVIDER,
+        model: SIGNED_IN_SUBAGENT_HEAVY_MODEL,
+    },
+};
+
+/**
+ * Model for a spawned sub-agent's capability tier. The tier is a semantic
+ * hint from the parent LLM (it knows task difficulty, not the user's model
+ * inventory); the user's `subagentModels` config owns the mapping.
+ *
+ * Returns null whenever the tier cannot or should not be mapped — the
+ * caller then inherits the parent model, which is always safe:
+ * - tier absent, or not configured in `subagentModels` (unset tiers mean
+ *   "just use the current model" in both modes);
+ * - the configured ref points at the gateway while signed out (same rule
+ *   as every other "rowboat" model ref).
+ */
+export async function getSubagentModel(
+    tier: SubagentTier | undefined,
+): Promise<ModelSelection | null> {
+    if (tier !== "light" && tier !== "medium" && tier !== "heavy") {
+        return null;
+    }
+    const cfg = await readConfig();
+    const ref = cfg?.subagentModels?.[tier];
+    if (!ref) {
+        return null;
+    }
+    if (ref.provider === SIGNED_IN_DEFAULT_PROVIDER && !(await isSignedIn())) {
+        return null;
+    }
+    return { provider: ref.provider, model: ref.model };
+}
+
+/**
+ * One-time write of suggested tier defaults, called when a Rowboat sign-in
+ * completes. Deliberately idempotent-by-absence: if `subagentModels` exists
+ * at all (user-configured, or a previous seed), nothing is written — a
+ * re-sign-in never clobbers user edits.
+ */
+export async function seedSubagentModelDefaults(): Promise<void> {
+    const repo = container.resolve<IModelConfigRepo>("modelConfigRepo");
+    await repo.ensureConfig();
+    const cfg = await readConfig();
+    if (cfg?.subagentModels) {
+        return;
+    }
+    await repo.updateConfig({ subagentModels: SUBAGENT_TIER_SEED });
 }
