@@ -882,6 +882,8 @@ export function setupIpcHandlers() {
     },
     'updater:quitAndInstall': async () => {
       quitAndInstallUpdate();
+      return {};
+    },
     'app:consumePendingTrayCommand': async () => {
       return { toggleMeetingNotes: consumePendingToggleMeetingNotes() };
     },

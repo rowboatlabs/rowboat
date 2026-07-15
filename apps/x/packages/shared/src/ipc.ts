@@ -843,6 +843,8 @@ const ipcSchemas = {
   },
   'updater:quitAndInstall': {
     req: z.null(),
+    res: z.object({}),
+  },
   // Tray commands issued before the renderer was ready (mirrors the pending
   // deep-link pull above): the renderer drains this once on mount.
   'app:consumePendingTrayCommand': {
