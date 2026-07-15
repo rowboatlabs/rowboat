@@ -371,6 +371,10 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
   // auto-enable) has ever set it, so we only auto-enable once.
   const [deferBackgroundTasks, setDeferBackgroundTasks] = useState(false)
   const [deferExplicit, setDeferExplicit] = useState(false)
+  // Top-level subagentModels config (provider-qualified refs), saved
+  // immediately on change like the defer toggle. Only rendered when not
+  // signed in — the signed-in surface (RowboatModelSettings) has its own.
+  const [subagentTiers, setSubagentTiers] = useState<Record<string, { provider: string; model: string }>>({})
 
   const activeConfig = providerConfigs[provider]
   const showApiKey = provider === "openai" || provider === "anthropic" || provider === "google" || provider === "openrouter" || provider === "aigateway" || provider === "openai-compatible"
@@ -415,6 +419,14 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
         const parsed = JSON.parse(result.data)
         setDeferBackgroundTasks(parsed?.deferBackgroundTasks === true)
         setDeferExplicit(typeof parsed?.deferBackgroundTasks === "boolean")
+        const tiers: Record<string, { provider: string; model: string }> = {}
+        for (const tier of ["light", "medium", "heavy"]) {
+          const ref = parsed?.subagentModels?.[tier]
+          if (ref && typeof ref.provider === "string" && typeof ref.model === "string") {
+            tiers[tier] = { provider: ref.provider, model: ref.model }
+          }
+        }
+        setSubagentTiers(tiers)
         if (parsed?.provider?.flavor && parsed?.model) {
           const flavor = parsed.provider.flavor as LlmProviderFlavor
           setProvider(flavor)
@@ -470,6 +482,25 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
 
     loadCurrentConfig()
   }, [dialogOpen])
+
+  const handleTierChange = useCallback(async (tier: "light" | "medium" | "heavy", key: string) => {
+    const next = { ...subagentTiers }
+    if (!key) {
+      delete next[tier]
+    } else {
+      const sep = key.indexOf("::")
+      next[tier] = { provider: key.slice(0, sep), model: key.slice(sep + 2) }
+    }
+    setSubagentTiers(next)
+    try {
+      // Always write the object (even all-unset): its presence marks "user
+      // has chosen", which blocks sign-in seeding from overwriting it.
+      await window.ipc.invoke("models:updateConfig", { subagentModels: next })
+      window.dispatchEvent(new Event("models-config-changed"))
+    } catch {
+      toast.error("Failed to save sub-agent model")
+    }
+  }, [subagentTiers])
 
   const handleDeferToggle = useCallback(async (value: boolean) => {
     setDeferBackgroundTasks(value)
@@ -975,6 +1006,74 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
         </div>
         <Switch checked={deferBackgroundTasks} onCheckedChange={handleDeferToggle} />
       </div>
+
+      {/* Sub-agent tier models (top-level config, spans all configured providers) */}
+      {!rowboatConnected && (() => {
+        const tierOptions: Array<{ key: string; label: string; provider: string }> = []
+        const seen = new Set<string>()
+        for (const [flavor, cfg] of Object.entries(providerConfigs)) {
+          const configured = cfg.apiKey.trim() !== "" || cfg.models.some((m) => m.trim() !== "")
+          if (!configured) continue
+          const catalogModels = modelsCatalog[flavor] || []
+          const entries = catalogModels.length > 0
+            ? catalogModels.map((m) => ({ id: m.id, name: m.name || m.id }))
+            : cfg.models.filter((m) => m.trim() !== "").map((m) => ({ id: m, name: m }))
+          for (const m of entries) {
+            const key = `${flavor}::${m.id}`
+            if (seen.has(key)) continue
+            seen.add(key)
+            tierOptions.push({ key, label: m.name, provider: flavor })
+          }
+        }
+        const tierRows: Array<{ tier: "light" | "medium" | "heavy"; label: string }> = [
+          { tier: "light", label: "Light (extraction, search, summaries)" },
+          { tier: "medium", label: "Medium (comparison, synthesis)" },
+          { tier: "heavy", label: "Heavy (hard analysis)" },
+        ]
+        return (
+          <div className="space-y-3 rounded-md border px-3 py-2.5">
+            <div className="min-w-0">
+              <div className="text-sm font-medium">Sub-agent models</div>
+              <div className="text-xs text-muted-foreground mt-0.5">
+                Models for spawned sub-agents by task difficulty. Unset tiers use the conversation's model.
+              </div>
+            </div>
+            {tierRows.map(({ tier, label }) => {
+              const current = subagentTiers[tier]
+              const currentKey = current ? `${current.provider}::${current.model}` : ""
+              const currentInOptions = !currentKey || tierOptions.some((o) => o.key === currentKey)
+              return (
+                <div key={tier} className="space-y-1">
+                  <span className="text-xs font-medium text-muted-foreground">{label}</span>
+                  <Select
+                    value={currentKey || "__same__"}
+                    onValueChange={(v) => handleTierChange(tier, v === "__same__" ? "" : v)}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Same as conversation model" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__same__">Same as conversation model</SelectItem>
+                      {!currentInOptions && (
+                        <SelectItem value={currentKey}>
+                          {current!.model}
+                          <span className="ml-2 text-xs text-muted-foreground">{current!.provider}</span>
+                        </SelectItem>
+                      )}
+                      {tierOptions.map((o) => (
+                        <SelectItem key={o.key} value={o.key}>
+                          {o.label}
+                          <span className="ml-2 text-xs text-muted-foreground">{o.provider}</span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )
+            })}
+          </div>
+        )
+      })()}
 
       {/* Test & Save button */}
       <Button
