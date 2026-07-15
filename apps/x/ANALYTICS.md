@@ -16,7 +16,7 @@
 
 ## Event catalog
 
-All PostHog events include `app_version` automatically. Main-process events add it in `packages/core/src/analytics/posthog.ts`; renderer events get it from the `analytics:bootstrap` IPC payload and an initialization-time `before_send` hook.
+All PostHog events include `app_version` and `platform: 'desktop'` automatically. Main-process events add them in `packages/core/src/analytics/posthog.ts`; renderer events get them from the `analytics:bootstrap` IPC payload via `posthog.register` (plus an initialization-time `before_send` hook for `app_version`). `platform` guards against the legacy web dashboard's autocapture (`apps/rowboat`, unidentified by design) muddying desktop dashboards if it ever shares the project.
 
 ### `llm_usage`
 
@@ -192,6 +192,7 @@ Persistent across sessions for the same user. Set via `posthog.people.set` or as
 | `email` | main on identify | From `/v1/me`; powers PostHog cohort match + integrations |
 | `plan`, `status` | main on identify | Subscription state |
 | `api_url` | both processes (init + identify) | Distinguishes prod / staging / custom — assign meaning in PostHog dashboard. `https://api.x.rowboatlabs.com` = production |
+| `platform` | both processes (init + identify) | Always `desktop` from this app; segments desktop users from any other surface |
 | `app_version` | both processes (init + identify) | Electron app version; also included automatically on every event |
 | `signed_in` | renderer | `true` while rowboat OAuth is connected |
 | `{provider}_connected` | renderer | One of `gmail`, `calendar`, `slack`, `rowboat` |
