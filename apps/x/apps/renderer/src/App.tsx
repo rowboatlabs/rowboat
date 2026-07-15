@@ -1218,6 +1218,8 @@ function App() {
   // the call button's main click) is "work together": screen shared, camera
   // off, floating pill — the user keeps working while the assistant watches
   // along. 'video'/'practice' open face-to-face full screen instead.
+  const callStartedAtMsRef = useRef<number | null>(null)
+
   const startCall = useCallback(async (preset: CallPreset) => {
     if (inCallRef.current) return
     const camera = preset === 'video' || preset === 'practice'
@@ -1262,11 +1264,15 @@ function App() {
     setCallMinimized(preset === 'voice' || preset === 'share')
     inCallRef.current = true
     setInCall(true)
+    callStartedAtMsRef.current = performance.now()
     analytics.callStarted(preset)
   }, [video])
 
   const endCall = useCallback(() => {
     if (!inCallRef.current) return
+    const startedAt = callStartedAtMsRef.current
+    callStartedAtMsRef.current = null
+    analytics.callEnded(startedAt != null ? (performance.now() - startedAt) / 1000 : 0)
     voiceRef.current.cancel()
     ttsEnabledRef.current = false
     ttsModeRef.current = 'summary'
@@ -2271,6 +2277,7 @@ function App() {
           opts: { encoding: 'utf8' }
         })
         markRecentLocalMarkdownWrite(pathToSave)
+        analytics.noteEdited(pathToSave)
         // Store body-only baseline (matches what debouncedContent compares against)
         initialContentByPathRef.current.set(pathToSave, splitFrontmatter(contentToSave).body)
 
@@ -4083,6 +4090,12 @@ function App() {
     return { type: 'chat', runId }
   }, [selectedBackgroundTask, isEmailOpen, isMeetingsOpen, isLiveNotesOpen, isBgTasksOpen, isAppsOpen, isSuggestedTopicsOpen, selectedPath, isGraphOpen, isWorkspaceOpen, isKnowledgeViewOpen, knowledgeViewFolderPath, knowledgeViewMode, isChatHistoryOpen, isHomeOpen, isCodeOpen, workspaceInitialPath, runId])
 
+  // Feature-importance funnel: one event per view the user lands on. Keyed on
+  // the view *type* so switching files/threads inside a view doesn't re-fire.
+  useEffect(() => {
+    analytics.viewOpened(currentViewState.type)
+  }, [currentViewState.type])
+
   const appendUnique = useCallback((stack: ViewState[], entry: ViewState) => {
     const last = stack[stack.length - 1]
     if (last && viewStatesEqual(last, entry)) return stack
@@ -5339,6 +5352,7 @@ function App() {
     } catch (err) {
       console.error('Failed to mark onboarding complete:', err)
     }
+    analytics.onboardingCompleted()
     setShowOnboarding(false)
     if (opts?.startTour) {
       window.setTimeout(() => setTourActive(true), 400)
@@ -5363,6 +5377,7 @@ function App() {
           data: `# ${name}\n\n`,
           opts: { encoding: 'utf8' }
         })
+        analytics.noteCreated()
         setExpandedPaths(prev => new Set([...prev, parentPath]))
         navigateToFile(fullPath)
       } catch (err) {
@@ -5618,6 +5633,7 @@ function App() {
   }, [loadDirectory, navigateToFile, fileTabs])
 
   const meetingNotePathRef = useRef<string | null>(null)
+  const meetingRecordingStartedAtMsRef = useRef<number | null>(null)
   const pendingCalendarEventRef = useRef<CalendarEventMeta | undefined>(undefined)
   const [meetingSummarizing, setMeetingSummarizing] = useState(false)
   const [showMeetingPermissions, setShowMeetingPermissions] = useState(false)
@@ -5631,6 +5647,8 @@ function App() {
     setRecordingMeetingSource(calEvent?.source ?? null)
     const notePath = await meetingTranscription.start(calEvent)
     if (notePath) {
+      meetingRecordingStartedAtMsRef.current = performance.now()
+      analytics.meetingRecordingStarted(Boolean(calEvent))
       meetingNotePathRef.current = notePath
       await handleVoiceNoteCreated(notePath)
     }
@@ -5656,6 +5674,9 @@ function App() {
   const handleToggleMeeting = useCallback(async () => {
     if (meetingTranscription.state === 'recording') {
       await meetingTranscription.stop()
+      const recordingStartedAt = meetingRecordingStartedAtMsRef.current
+      meetingRecordingStartedAtMsRef.current = null
+      analytics.meetingRecordingStopped(recordingStartedAt != null ? (performance.now() - recordingStartedAt) / 1000 : 0)
       setRecordingMeetingSource(null)
 
       // Read the final transcript and generate meeting notes via LLM
@@ -5703,6 +5724,7 @@ function App() {
             }
           }
         } catch (err) {
+          analytics.meetingSummarizeFailed()
           console.error('[meeting] Failed to generate meeting notes:', err)
         }
         setMeetingSummarizing(false)

@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { SettingsDialog } from '@/components/settings-dialog'
 import { formatRelativeTime } from '@/lib/relative-time'
+import * as analytics from '@/lib/analytics'
 import { extractConferenceLink } from '@/lib/calendar-event'
 import { cn } from '@/lib/utils'
 import type { MeetingTranscriptionState } from '@/hooks/useMeetingTranscription'
@@ -1310,7 +1311,7 @@ export function MeetingsView({ onOpenNote, onTakeMeetingNotes, meetingState, mee
                     <td className="px-4 py-3 align-top">
                       <button
                         type="button"
-                        onClick={() => onOpenNote(note.path)}
+                        onClick={() => { analytics.meetingNoteOpened(); onOpenNote(note.path) }}
                         className="block w-full min-w-0 text-left text-sm font-medium text-foreground hover:underline"
                       >
                         <span className="block truncate">{note.name}</span>

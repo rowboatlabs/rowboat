@@ -16,7 +16,7 @@
 
 ## Event catalog
 
-All PostHog events include `app_version` automatically. Main-process events add it in `packages/core/src/analytics/posthog.ts`; renderer events get it from the `analytics:bootstrap` IPC payload and an initialization-time `before_send` hook.
+All PostHog events include `app_version` and `platform: 'desktop'` automatically. Main-process events add them in `packages/core/src/analytics/posthog.ts`; renderer events get them from the `analytics:bootstrap` IPC payload via `posthog.register` (plus an initialization-time `before_send` hook for `app_version`). `platform` guards against the legacy web dashboard's autocapture (`apps/rowboat`, unidentified by design) muddying desktop dashboards if it ever shares the project.
 
 ### `llm_usage`
 
@@ -104,6 +104,92 @@ The desktop client's own updates — distinct from the in-app apps feature, whic
 - `update_restarted` — main (`apps/main/src/updater.ts`), `{ from, to? }`: the user clicked restart-to-update (`to` may be missing when the update feed doesn't report the release name)
 - `update_failed` — main (`apps/main/src/updater.ts`), `{ message }`: the auto-updater errored (includes network errors for now)
 - `client_updated` — main (`apps/main/src/ipc.ts`), `{ from, to }`: first launch on a newer version (fires once per update, whatever the restart path; downgrades restamp silently and don't fire)
+### `view_opened` — feature-importance funnel
+
+One event per view the user lands on, fired centrally from the `currentViewState` effect in `apps/renderer/src/App.tsx`. `view` is one of: `chat`, `file`, `graph`, `task`, `suggested-topics`, `meetings`, `live-notes`, `email`, `workspace`, `knowledge-view`, `chat-history`, `home`, `code`, `bg-tasks`, `apps`. Keyed on the view *type*, so switching files or threads inside a view doesn't re-fire.
+
+This is the top of every feature funnel: unique users on `view = 'email'` ÷ all users = how many people even open email. First visit to a key view also sets a one-shot person property (`has_used_email`, `has_used_meetings`, `has_used_live_notes`, `has_used_bg_agents`, `has_used_apps`, `has_used_code`) for cohort building.
+
+### Feature action events
+
+All renderer events live in `apps/renderer/src/lib/analytics.ts` (typed wrappers); the emit sites are in the components named below. Events marked **(main)** are captured in `apps/main/src/ipc.ts` via `capture()` because the operation runs there.
+
+**Email** (`components/email-view.tsx`):
+
+- `email_thread_opened` — a thread was expanded in the list
+- `email_compose_opened` — `{ mode: 'new' | 'reply' | 'replyAll' | 'forward' | 'draft' }` — a composer was opened
+- `email_sent` — `{ mode, has_attachments, ai_assisted }` — `ai_assisted` is true when Write-with-AI produced a draft in that composer
+- `email_ai_draft_generated` — `{ mode: 'generate' | 'rewrite' }` — the Write/Edit-with-AI bar completed
+- `email_archived` / `email_trashed` — one thread archived / moved to trash
+- `email_marked_unread` — explicit mark-as-unread (marking *read* fires automatically on open, so it's deliberately not tracked)
+- `email_importance_changed` — `{ importance: 'important' | 'other' }` — user corrected the importance verdict
+- `email_category_changed` — `{ category }` — user re-filed a thread
+- `email_category_archived` — `{ category }` — bulk "archive all in category"
+- `email_searched` — a search query executed (debounced, one per settled query)
+- `email_instructions_saved` — standing email-agent instructions saved
+- `email_sync_triggered` — manual refresh button
+
+**Meetings** (`App.tsx`, `components/meetings-view.tsx`):
+
+- `meeting_recording_started` — `{ has_calendar_event }` — transcription actually began (all entry points: meetings view, home, sidebar, popup funnel through one call site)
+- `meeting_recording_stopped` — `{ duration_seconds }`
+- `meeting_popup_action` — `{ action: 'take-notes' | 'dismiss' }` **(main)** — the "meeting detected" popup window runs without PostHog, so the action is captured in its IPC handler
+- `meeting_note_opened` — a past meeting note opened from the meetings list
+
+**Calls** (`App.tsx`):
+
+- `call_started` — (pre-existing, above) fires on every call-button press that starts a call
+- `call_ended` — `{ duration_seconds }`
+
+**Background agents** (`components/bg-tasks-view.tsx`, `components/apps/app-detail.tsx`):
+
+- `bg_agent_created` — `{ method: 'manual' | 'coding' | 'copilot', has_triggers }` — `copilot` means the user submitted the "describe it" form (the agent is then created by Copilot in chat)
+- `bg_agent_updated` — instructions/triggers/model saved on an existing agent
+- `bg_agent_toggled` — `{ active }`
+- `bg_agent_run_clicked` — manual Run now
+- `bg_agent_stopped` — manual stop of a run
+- `bg_agent_deleted`
+
+**Live notes** (`components/live-note-sidebar.tsx`, `components/live-notes-view.tsx`):
+
+- `live_note_saved` — live config created or edited via the panel
+- `live_note_toggled` — `{ active }`
+- `live_note_run_clicked` — manual Run
+- `live_note_stopped` — in-flight run stopped
+- `live_note_deleted` — live config removed from the note
+- `live_note_edit_with_copilot_clicked`
+
+**Search** (`components/search-dialog.tsx`):
+
+- `search_opened` — the palette opened
+- `search_executed` — (pre-existing, above)
+- `search_result_selected` — `{ type: 'knowledge' | 'chat' }`
+
+**Apps** — all **(main)**, in `apps/main/src/ipc.ts` (pre-existing except `app_rolled_back`): `app_created`, `app_installed`, `app_uninstalled`, `app_updated`, `app_rolled_back`, `app_published`, `app_starred`, `app_deleted`. Plus renderer-side `app_opened` — `{ folder }` — an installed app's UI was opened (`components/apps/app-frame.tsx`).
+
+**Code mode** — both **(main/core)**:
+
+- `code_session_created` — `{ mode: 'direct' | 'rowboat', agent }` — captured in the `codeSession:create` IPC handler. This is the direct-vs-rowboat session split.
+- `code_session_message_sent` — `{ mode, agent }` — one per direct-drive message (`packages/core/src/code-mode/sessions/service.ts`). Direct turns bypass the agent runtime and emit no `llm_usage`, so this is the only usage-depth signal for direct mode; Rowboat-mode depth comes from `llm_usage where use_case = code_session`.
+
+**Billing** (`components/billing-error-dialog.tsx`):
+
+- `billing_error_shown` — `{ kind: 'subscription_required' | 'out_of_credits' | 'subscription_inactive' }` — the paywall dialog appeared
+- `billing_upgrade_clicked` — `{ kind }` — the upgrade CTA was clicked (shown → clicked = paywall conversion)
+
+**Failures** — success events all have a failure sibling where the operation can fail after the click:
+
+- `email_send_failed` — send returned an error or threw (`components/email-view.tsx`)
+- `meeting_summarize_failed` — post-recording notes generation threw (`App.tsx`)
+- `bg_agent_run_failed` / `bg_agent_run_completed` — `{ trigger: 'manual' | 'cron' | 'window' | 'event' }` **(core)** — every background-agent run settles as exactly one of these (`packages/core/src/background-tasks/runner.ts`), giving a failure *rate* across all trigger sources, not just manual clicks
+
+**Misc**:
+
+- `note_created` — new note from the sidebar/knowledge actions (`App.tsx`)
+- `note_edited` — a note's autosave wrote changed content; deduped to one event per note per app session (so it counts "notes touched", not keystroke bursts)
+- `settings_opened` — `{ tab }` — settings dialog opened (tab = the initial tab)
+- `settings_tab_changed` — `{ tab }`
+- `onboarding_completed` — the onboarding flow finished (`App.tsx`)
 
 ## Person properties
 
@@ -114,11 +200,14 @@ Persistent across sessions for the same user. Set via `posthog.people.set` or as
 | `email` | main on identify | From `/v1/me`; powers PostHog cohort match + integrations |
 | `plan`, `status` | main on identify | Subscription state |
 | `api_url` | both processes (init + identify) | Distinguishes prod / staging / custom — assign meaning in PostHog dashboard. `https://api.x.rowboatlabs.com` = production |
+| `platform` | both processes (init + identify) | Always `desktop` from this app; segments desktop users from any other surface |
 | `app_version` | both processes (init + identify) | Electron app version; also included automatically on every event |
 | `signed_in` | renderer | `true` while rowboat OAuth is connected |
 | `{provider}_connected` | renderer | One of `gmail`, `calendar`, `slack`, `rowboat` |
 | `total_notes` | renderer (init) | Workspace size signal |
 | `has_used_search`, `has_used_voice` | renderer | One-shot first-use flags |
+| `has_used_email`, `has_used_meetings`, `has_used_live_notes`, `has_used_bg_agents`, `has_used_apps`, `has_used_code` | renderer (`view_opened`) | One-shot first-use flags per feature view |
+| `has_created_bg_agent` | renderer | One-shot: user set up a background agent |
 
 ## How to add a new event
 

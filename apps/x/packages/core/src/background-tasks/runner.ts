@@ -6,6 +6,7 @@ import { startHeadlessAgent, startWhenPossible } from '../runtime/assembly/headl
 import { buildTriggerBlock } from '../runtime/assembly/build-trigger-block.js';
 import { backgroundTaskBus } from './bus.js';
 import { withUseCase } from '../analytics/use_case.js';
+import { capture } from '../analytics/posthog.js';
 
 const log = new PrefixLogger('BgTask:Agent');
 
@@ -210,6 +211,7 @@ export async function runBackgroundTask(
             });
 
             log.log(`${slug} — done summary="${truncate(summary)}"`);
+            capture('bg_agent_run_completed', { trigger });
 
             backgroundTaskBus.publish({
                 type: 'background_task_agent_complete',
@@ -233,6 +235,7 @@ export async function runBackgroundTask(
             }
 
             log.log(`${slug} — failed: ${truncate(msg)}`);
+            capture('bg_agent_run_failed', { trigger });
 
             backgroundTaskBus.publish({
                 type: 'background_task_agent_complete',
