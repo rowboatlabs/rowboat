@@ -167,39 +167,68 @@ export async function getBackgroundTaskAgentModel(): Promise<ModelSelection> {
     return getLiveNoteAgentModel();
 }
 
-export type SubagentTier = "light" | "standard" | "heavy";
+export type SubagentTier = "light" | "medium" | "heavy";
+
+// Suggested tier defaults, written into models.json once at Rowboat
+// sign-in (seedSubagentModelDefaults). Purely seed values — runtime
+// resolution reads the config, so users can retune tiers in settings
+// without an app update.
+const SUBAGENT_TIER_SEED: Record<SubagentTier, ModelSelection> = {
+    light: {
+        provider: SIGNED_IN_DEFAULT_PROVIDER,
+        model: SIGNED_IN_SUBAGENT_LIGHT_MODEL,
+    },
+    medium: {
+        provider: SIGNED_IN_DEFAULT_PROVIDER,
+        model: SIGNED_IN_DEFAULT_MODEL,
+    },
+    heavy: {
+        provider: SIGNED_IN_DEFAULT_PROVIDER,
+        model: SIGNED_IN_SUBAGENT_HEAVY_MODEL,
+    },
+};
 
 /**
- * Curated model for a spawned sub-agent's capability tier. The tier is a
- * semantic hint from the parent LLM (it knows task difficulty, not the
- * user's model inventory); this resolver owns the mapping to a concrete
- * model.
+ * Model for a spawned sub-agent's capability tier. The tier is a semantic
+ * hint from the parent LLM (it knows task difficulty, not the user's model
+ * inventory); the user's `subagentModels` config owns the mapping.
  *
  * Returns null whenever the tier cannot or should not be mapped — the
  * caller then inherits the parent model, which is always safe:
- * - tier absent or "standard" (inherit is the meaning of standard);
- * - the parent turn isn't running on the gateway: a user who deliberately
- *   set a BYOK default keeps their children on it, signed in or not;
- * - signed out (curated models need gateway auth).
+ * - tier absent, or not configured in `subagentModels` (unset tiers mean
+ *   "just use the current model" in both modes);
+ * - the configured ref points at the gateway while signed out (same rule
+ *   as every other "rowboat" model ref).
  */
 export async function getSubagentModel(
     tier: SubagentTier | undefined,
-    parentProvider: string | undefined,
 ): Promise<ModelSelection | null> {
-    if (tier !== "light" && tier !== "heavy") {
+    if (tier !== "light" && tier !== "medium" && tier !== "heavy") {
         return null;
     }
-    if (parentProvider !== SIGNED_IN_DEFAULT_PROVIDER) {
+    const cfg = await readConfig();
+    const ref = cfg?.subagentModels?.[tier];
+    if (!ref) {
         return null;
     }
-    if (!(await isSignedIn())) {
+    if (ref.provider === SIGNED_IN_DEFAULT_PROVIDER && !(await isSignedIn())) {
         return null;
     }
-    return {
-        provider: SIGNED_IN_DEFAULT_PROVIDER,
-        model:
-            tier === "light"
-                ? SIGNED_IN_SUBAGENT_LIGHT_MODEL
-                : SIGNED_IN_SUBAGENT_HEAVY_MODEL,
-    };
+    return { provider: ref.provider, model: ref.model };
+}
+
+/**
+ * One-time write of suggested tier defaults, called when a Rowboat sign-in
+ * completes. Deliberately idempotent-by-absence: if `subagentModels` exists
+ * at all (user-configured, or a previous seed), nothing is written — a
+ * re-sign-in never clobbers user edits.
+ */
+export async function seedSubagentModelDefaults(): Promise<void> {
+    const repo = container.resolve<IModelConfigRepo>("modelConfigRepo");
+    await repo.ensureConfig();
+    const cfg = await readConfig();
+    if (cfg?.subagentModels) {
+        return;
+    }
+    await repo.updateConfig({ subagentModels: SUBAGENT_TIER_SEED });
 }

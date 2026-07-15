@@ -13,6 +13,7 @@ import { triggerSync as triggerCalendarSync } from '@x/core/dist/knowledge/sync_
 import { triggerSync as triggerFirefliesSync } from '@x/core/dist/knowledge/sync_fireflies.js';
 import { emitOAuthEvent } from './ipc.js';
 import { getBillingInfo } from '@x/core/dist/billing/billing.js';
+import { seedSubagentModelDefaults } from '@x/core/dist/models/defaults.js';
 import { capture as analyticsCapture, identify as analyticsIdentify, reset as analyticsReset } from '@x/core/dist/analytics/posthog.js';
 import { isSignedIn } from '@x/core/dist/account/account.js';
 import { getWebappUrl } from '@x/core/dist/config/remote-config.js';
@@ -339,6 +340,13 @@ export async function connectProvider(provider: string, credentials?: { clientId
           // multiple renderer hooks race to create the user, causing duplicates.
           let signedInUserId: string | undefined;
           if (provider === 'rowboat') {
+            // Suggested sub-agent tier models: written only when the config
+            // key is absent, so re-sign-ins never clobber user edits.
+            try {
+              await seedSubagentModelDefaults();
+            } catch (seedError) {
+              console.error('[OAuth] Failed to seed sub-agent tier defaults:', seedError);
+            }
             try {
               const billing = await getBillingInfo();
               if (billing.userId) {

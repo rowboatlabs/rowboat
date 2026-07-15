@@ -58,10 +58,10 @@ export const SpawnAgentInput = z.object({
             "Optional reasoning-effort override for the sub-agent turn. Omit for auto/provider default. Use `low` for routine extraction or summarization, `medium` for multi-step synthesis, and `high` only when the child task truly needs deeper reasoning.",
         ),
     tier: z
-        .enum(["light", "standard", "heavy"])
+        .enum(["light", "medium", "heavy"])
         .optional()
         .describe(
-            "Capability tier for the sub-agent's model, judged from task difficulty: `light` for routine extraction, search, or summarization; `heavy` for hard analysis or high-stakes synthesis; omit (or `standard`) to run on the current model. The sub-agent falls back to the current model whenever the tier cannot be mapped.",
+            "Capability tier for the sub-agent's model, judged from task difficulty: `light` for routine extraction, search, or summarization; `medium` for multi-step comparison or synthesis; `heavy` for hard analysis or high-stakes synthesis. Omit to run on the current model; the sub-agent also falls back to the current model whenever the tier cannot be mapped.",
         ),
 });
 
@@ -78,7 +78,7 @@ export const SPAWN_AGENT_DESCRIPTION =
     "Issue several spawn-agent calls in ONE response only when the subtasks are genuinely independent and worth running in parallel. " +
     "Provide either `agent_id` (a stored agent) or `instructions` (construct a specialist on the fly, optionally with `name` and `tools`). " +
     "Optionally set `reasoning_effort` for the child turn; leave it unset for auto/provider default, and reserve `high` for tasks that clearly need deeper reasoning. " +
-    "Optionally set `tier` to size the child's model to the task: `light` for routine extraction/search/summaries, `heavy` for hard analysis; omit it to run the child on the current model. " +
+    "Optionally set `tier` to size the child's model to the task: `light` for routine extraction/search/summaries, `medium` for multi-step synthesis, `heavy` for hard analysis; omit it to run the child on the current model. " +
     "The sub-agent cannot ask the user questions and cannot spawn further sub-agents; give it a complete, self-contained task.";
 
 export interface SpawnedAgentCallbacks {
@@ -95,12 +95,11 @@ export interface SpawnedAgentCallbacks {
     services?: {
         turnRuntime: import("../turns/api.js").ITurnRuntime;
         headlessRunner: import("./headless.js").IHeadlessAgentRunner;
-        // Maps a semantic tier to a curated model (null = inherit parent).
+        // Maps a semantic tier to a configured model (null = inherit parent).
         // Optional so existing callers/tests without tiers are untouched;
         // production defaults to models/defaults.js getSubagentModel.
         subagentModelResolver?: (
             tier: import("../../models/defaults.js").SubagentTier | undefined,
-            parentProvider: string | undefined,
         ) => Promise<z.infer<typeof ModelDescriptor> | null>;
     };
 }
@@ -152,18 +151,15 @@ export async function runSpawnedAgent(
     }
 
     // The spawning model never picks model ids — it only sizes the task via
-    // `tier`, and this resolver owns the mapping (stored agents carry their
-    // own model pins in config). A tier that cannot be mapped (BYOK, signed
-    // out, resolver failure) degrades to inheriting the parent model — a
-    // spawn never fails over its tier.
+    // `tier`, and the user's subagentModels config owns the mapping (stored
+    // agents carry their own model pins in config). A tier that cannot be
+    // mapped (unconfigured, signed out, resolver failure) degrades to
+    // inheriting the parent model — a spawn never fails over its tier.
     let tiered: z.infer<typeof ModelDescriptor> | null = null;
-    if (input.tier === "light" || input.tier === "heavy") {
+    if (input.tier !== undefined) {
         try {
             tiered = await (subagentModelResolver ??
-                (await defaultSubagentModelResolver()))(
-                input.tier,
-                parentModel?.provider,
-            );
+                (await defaultSubagentModelResolver()))(input.tier);
         } catch {
             tiered = null;
         }

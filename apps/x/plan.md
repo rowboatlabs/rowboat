@@ -45,18 +45,25 @@ configured, so it either omits them or guesses wrong.
 One semantic knob, resolved differently per auth mode; every path falls
 back to "inherit the parent model."
 
-1. `spawn-agent` gains an optional `tier` input: `light | standard | heavy`.
+1. `spawn-agent` gains an optional `tier` input: `light | medium | heavy`.
    The copilot LLM picks the tier from task difficulty (same mental model
-   as `reasoning_effort`). It never picks model ids.
-2. `getSubagentModel(tier, parentProvider)` in `models/defaults.ts`
-   (alongside the existing `getKgModel`-style category resolvers) returns:
-   - `null` (= inherit) when: tier absent/`standard`, user not signed in,
-     or the parent turn isn't on the `rowboat` gateway provider;
-   - `{ provider: "rowboat", model: <curated> }` otherwise:
-     - `light` → `google/gemini-3.1-flash-lite`
-     - `heavy` → `anthropic/claude-sonnet-4.6` *(sonnet-5 isn't on the
-       gateway; swap the constant if the curated heavy choice changes)*
-3. Model precedence in `runSpawnedAgent`: tier mapping → parent model.
+   as `reasoning_effort`). It never picks model ids. Omitted tier = the
+   parent model.
+2. Tier→model mapping is **user config**, not code (per CTO review):
+   `subagentModels: { light?, medium?, heavy? }` in `models.json`, each a
+   provider-qualified `ModelRef` — same format as the existing category
+   overrides. `getSubagentModel(tier)` reads it and returns `null`
+   (= inherit parent) when the tier is unset, or when the ref points at the
+   gateway while signed out. Editable in settings → models (post-onboarding
+   surface, both signed-in and BYOK configs can use it).
+3. **Sign-in seeding:** when a Rowboat sign-in completes, suggested
+   defaults are written ONCE — only if `subagentModels` is absent, so
+   re-sign-ins never clobber user edits (the settings Save also always
+   writes the key, marking "user has chosen"):
+   - `light` → `google/gemini-3.1-flash-lite`
+   - `medium` → `google/gemini-3.5-flash`
+   - `heavy` → `anthropic/claude-sonnet-4.6`
+4. Model precedence in `runSpawnedAgent`: tier mapping → parent model.
    The raw `model`/`provider` spawn inputs are REMOVED from the schema —
    live testing showed the copilot volunteering explicit ids out of habit
    ("claude-sonnet-4-6" on a gateway parent), which silently defeated the
@@ -65,10 +72,10 @@ back to "inherit the parent model."
    Tier-mapping failures degrade silently to inherit; a spawn never fails
    because a tier couldn't be mapped. Empty-string inputs (`agent_id: ""`
    etc., another observed model habit) normalize to absent.
-4. **BYOK: no behavior change.** Children inherit the parent model; `tier`
-   is accepted and ignored (deliberate — no config keys, no catalog
-   lookups for v1).
-5. Copilot prompt: one guidance block steering `tier` alongside
+5. **BYOK default: no behavior change.** With no `subagentModels`
+   configured, children inherit the parent model. BYOK users can now opt
+   in to tiering explicitly via the same config key.
+6. Copilot prompt: one guidance block steering `tier` alongside
    `reasoning_effort` (light = routine extraction/search/summaries,
    heavy = hard analysis; omit to inherit).
 

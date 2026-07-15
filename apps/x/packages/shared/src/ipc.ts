@@ -656,6 +656,11 @@ const ipcSchemas = {
       meetingNotesModel: ModelOverride.nullable().optional(),
       liveNoteAgentModel: ModelOverride.nullable().optional(),
       autoPermissionDecisionModel: ModelOverride.nullable().optional(),
+      subagentModels: z.object({
+        light: ModelRef.optional(),
+        medium: ModelRef.optional(),
+        heavy: ModelRef.optional(),
+      }).nullable().optional(),
       deferBackgroundTasks: z.boolean().nullable().optional(),
     }),
     res: z.object({

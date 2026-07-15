@@ -165,26 +165,28 @@ describe("runSpawnedAgent", () => {
         expect(started[0].reasoningEffort).toBe("high");
     });
 
-    it("maps a tier to a curated model via the resolver", async () => {
-        const asked: unknown[] = [];
-        const { services, started } = fakeServices({
-            subagentModelResolver: async (tier, parentProvider) => {
-                asked.push([tier, parentProvider]);
-                return { provider: "rowboat", model: "lite-model" };
-            },
-        });
-        await runSpawnedAgent(
-            { task: "t", instructions: "x", tier: "light" },
-            { parentTurnId: "parent-1", signal, services },
-        );
-        expect(asked).toEqual([["light", "parent-p"]]);
-        const agent = started[0].agent as {
-            inline: { model?: { provider: string; model: string } };
-        };
-        expect(agent.inline.model).toEqual({
-            provider: "rowboat",
-            model: "lite-model",
-        });
+    it("maps a tier to a configured model via the resolver", async () => {
+        for (const tier of ["light", "medium", "heavy"] as const) {
+            const asked: unknown[] = [];
+            const { services, started } = fakeServices({
+                subagentModelResolver: async (t) => {
+                    asked.push(t);
+                    return { provider: "rowboat", model: `${t}-model` };
+                },
+            });
+            await runSpawnedAgent(
+                { task: "t", instructions: "x", tier },
+                { parentTurnId: "parent-1", signal, services },
+            );
+            expect(asked).toEqual([tier]);
+            const agent = started[0].agent as {
+                inline: { model?: { provider: string; model: string } };
+            };
+            expect(agent.inline.model).toEqual({
+                provider: "rowboat",
+                model: `${tier}-model`,
+            });
+        }
     });
 
     it("inherits the parent model when the tier resolver returns null", async () => {
@@ -251,6 +253,28 @@ describe("runSpawnedAgent", () => {
         });
     });
 
+    it("does not consult the resolver when tier is omitted", async () => {
+        const asked: unknown[] = [];
+        const { services, started } = fakeServices({
+            subagentModelResolver: async (t) => {
+                asked.push(t);
+                return { provider: "rowboat", model: "lite-model" };
+            },
+        });
+        await runSpawnedAgent(
+            { task: "t", instructions: "x" },
+            { parentTurnId: "parent-1", signal, services },
+        );
+        expect(asked).toEqual([]);
+        const agent = started[0].agent as {
+            inline: { model?: { provider: string; model: string } };
+        };
+        expect(agent.inline.model).toEqual({
+            provider: "parent-p",
+            model: "parent-m",
+        });
+    });
+
     it("treats empty-string fields as absent", async () => {
         // Models send "" instead of omitting optionals; an "" agent_id must
         // not blank the display name or trigger the by-id path.
@@ -275,26 +299,15 @@ describe("runSpawnedAgent", () => {
         expect(progress).toMatchObject([{ agentName: "researcher" }]);
     });
 
-    it("does not consult the resolver for the standard tier", async () => {
-        const asked: unknown[] = [];
-        const { services, started } = fakeServices({
-            subagentModelResolver: async (tier, parentProvider) => {
-                asked.push([tier, parentProvider]);
-                return { provider: "rowboat", model: "lite-model" };
-            },
-        });
-        await runSpawnedAgent(
+    it("rejects an unknown tier at the schema boundary", async () => {
+        const { services, started } = fakeServices({});
+        const result = await runSpawnedAgent(
             { task: "t", instructions: "x", tier: "standard" },
             { parentTurnId: "parent-1", signal, services },
         );
-        expect(asked).toEqual([]);
-        const agent = started[0].agent as {
-            inline: { model?: { provider: string; model: string } };
-        };
-        expect(agent.inline.model).toEqual({
-            provider: "parent-p",
-            model: "parent-m",
-        });
+        expect(result.isError).toBe(true);
+        expect(result.output).toMatch(/invalid input/);
+        expect(started).toHaveLength(0);
     });
 
     it("stamps the current date into the child's message, not the display task", async () => {

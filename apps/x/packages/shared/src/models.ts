@@ -71,4 +71,13 @@ export const LlmModelConfig = z.object({
   meetingNotesModel: ModelOverride.optional(),
   liveNoteAgentModel: ModelOverride.optional(),
   autoPermissionDecisionModel: ModelOverride.optional(),
+  // Per-tier sub-agent models (the spawn-agent `tier` input). An unset tier
+  // inherits the parent turn's model — the safe default in both modes.
+  // Seeded once at Rowboat sign-in with curated suggestions (only when this
+  // key is absent); user-overridable in settings afterwards.
+  subagentModels: z.object({
+    light: ModelRef.optional(),
+    medium: ModelRef.optional(),
+    heavy: ModelRef.optional(),
+  }).optional(),
 });
