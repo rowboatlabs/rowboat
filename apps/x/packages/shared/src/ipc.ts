@@ -783,6 +783,44 @@ const ipcSchemas = {
     }),
     res: z.null(),
   },
+  // --- "Sign in with ChatGPT" (subscription OAuth via the Codex CLI client) ---
+  // Raw tokens are never exposed over IPC — the renderer only sees identity
+  // and connection state.
+  'chatgpt:getStatus': {
+    req: z.null(),
+    res: z.object({
+      signedIn: z.boolean(),
+      email: z.string().optional(),
+      accountId: z.string().optional(),
+    }),
+  },
+  // Resolves when the browser flow settles (success, denial, timeout, port
+  // busy, exchange failure, cancellation) — same shape as getStatus plus an
+  // error string; `cancelled` marks expected teardown (no error toast).
+  'chatgpt:signIn': {
+    req: z.null(),
+    res: z.object({
+      signedIn: z.boolean(),
+      email: z.string().optional(),
+      accountId: z.string().optional(),
+      cancelled: z.boolean().optional(),
+      error: z.string().optional(),
+    }),
+  },
+  // Abort the pending sign-in attempt: stops the loopback server and settles
+  // the in-flight chatgpt:signIn with a cancelled outcome. No-op when idle.
+  'chatgpt:cancelSignIn': {
+    req: z.null(),
+    res: z.object({
+      success: z.boolean(),
+    }),
+  },
+  'chatgpt:signOut': {
+    req: z.null(),
+    res: z.object({
+      success: z.boolean(),
+    }),
+  },
   'app:openUrl': {
     req: z.object({
       url: z.string(),

@@ -40,6 +40,8 @@ import { isSignedIn } from '@x/core/dist/account/account.js';
 import { listGatewayModels } from '@x/core/dist/models/gateway.js';
 import type { IModelConfigRepo } from '@x/core/dist/models/repo.js';
 import type { IOAuthRepo } from '@x/core/dist/auth/repo.js';
+import { getChatGPTStatus, signOutChatGPT } from '@x/core/dist/auth/chatgpt-auth.js';
+import { signInWithChatGPT, cancelChatGPTSignIn } from './chatgpt-signin.js';
 import { IGranolaConfigRepo } from '@x/core/dist/knowledge/granola/repo.js';
 import { ICodeModeConfigRepo } from '@x/core/dist/code-mode/repo.js';
 import { CodePermissionRegistry } from '@x/core/dist/code-mode/acp/permission-registry.js';
@@ -1284,6 +1286,25 @@ export function setupIpcHandlers() {
       const repo = container.resolve<IOAuthRepo>('oauthRepo');
       const config = await repo.getClientFacingConfig();
       return { config };
+    },
+    'chatgpt:getStatus': async () => {
+      return await getChatGPTStatus();
+    },
+    'chatgpt:signIn': async () => {
+      return await signInWithChatGPT();
+    },
+    'chatgpt:cancelSignIn': async () => {
+      await cancelChatGPTSignIn();
+      return { success: true };
+    },
+    'chatgpt:signOut': async () => {
+      try {
+        await signOutChatGPT();
+        return { success: true };
+      } catch (error) {
+        console.error('[ChatGPTAuth] Sign-out failed:', error);
+        return { success: false };
+      }
     },
     'account:getRowboat': async () => {
       const signedIn = await isSignedIn();
