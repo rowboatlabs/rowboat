@@ -61,8 +61,8 @@ back to "inherit the parent model."
    re-sign-ins never clobber user edits (the settings Save also always
    writes the key, marking "user has chosen"):
    - `light` → `google/gemini-3.1-flash-lite`
-   - `medium` → `google/gemini-3.5-flash`
-   - `heavy` → `anthropic/claude-sonnet-4.6`
+   - `medium` → `anthropic/claude-sonnet-4.6`
+   - `heavy` → `anthropic/claude-opus-4.8`
 4. Model precedence in `runSpawnedAgent`: tier mapping → parent model.
    The raw `model`/`provider` spawn inputs are REMOVED from the schema —
    live testing showed the copilot volunteering explicit ids out of habit
