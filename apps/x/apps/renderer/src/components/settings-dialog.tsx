@@ -493,8 +493,9 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
     }
     setSubagentTiers(next)
     try {
-      // Always write the object (even all-unset): its presence marks "user
-      // has chosen", which blocks sign-in seeding from overwriting it.
+      // The whole object is written on each change; unset tiers mean
+      // "inherit the conversation model". A later Rowboat sign-in resets
+      // tiers to the curated defaults (see seedSubagentModelDefaults).
       await window.ipc.invoke("models:updateConfig", { subagentModels: next })
       window.dispatchEvent(new Event("models-config-changed"))
     } catch {
@@ -1537,9 +1538,9 @@ function RowboatModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
     setSaving(true)
     try {
       const toRef = (key: string) => (key ? parseHybridKey(key) : null)
-      // Always write the subagentModels object (even all-unset) — its
-      // presence is what marks "user has made a choice", which blocks the
-      // sign-in seeding from re-suggesting defaults over it.
+      // The whole object is written each save; unset tiers mean "inherit
+      // the conversation model". A later sign-in resets tiers to the
+      // curated defaults (see seedSubagentModelDefaults).
       const lightRef = toRef(selectedSubagentLight)
       const mediumRef = toRef(selectedSubagentMedium)
       const heavyRef = toRef(selectedSubagentHeavy)
@@ -1569,30 +1570,45 @@ function RowboatModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
     value: string,
     onChange: (v: string) => void,
     defaultLabel: string,
-  ) => (
-    <div className="space-y-2">
-      <label className="text-sm font-medium">{label}</label>
-      <Select value={value || "__default__"} onValueChange={(v) => onChange(v === "__default__" ? "" : v)}>
-        <SelectTrigger className="w-full">
-          <SelectValue placeholder={defaultLabel} />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="__default__">{defaultLabel}</SelectItem>
-          {options.map((o) => {
-            const key = hybridKey(o.provider, o.model)
-            return (
-              <SelectItem key={key} value={key}>
-                {o.label}
+  ) => {
+    // A configured value can reference a model outside the current options
+    // (BYOK-era tier pick, model dropped from the catalog). Render it as a
+    // selectable item instead of a blank control.
+    const valueInOptions = !value || options.some((o) => hybridKey(o.provider, o.model) === value)
+    const currentRef = !valueInOptions ? parseHybridKey(value) : null
+    return (
+      <div className="space-y-2">
+        <label className="text-sm font-medium">{label}</label>
+        <Select value={value || "__default__"} onValueChange={(v) => onChange(v === "__default__" ? "" : v)}>
+          <SelectTrigger className="w-full">
+            <SelectValue placeholder={defaultLabel} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__default__">{defaultLabel}</SelectItem>
+            {currentRef && (
+              <SelectItem value={value}>
+                {currentRef.model}
                 <span className="ml-2 text-xs text-muted-foreground">
-                  {providerDisplayNames[o.provider] || o.provider}
+                  {providerDisplayNames[currentRef.provider] || currentRef.provider}
                 </span>
               </SelectItem>
-            )
-          })}
-        </SelectContent>
-      </Select>
-    </div>
-  )
+            )}
+            {options.map((o) => {
+              const key = hybridKey(o.provider, o.model)
+              return (
+                <SelectItem key={key} value={key}>
+                  {o.label}
+                  <span className="ml-2 text-xs text-muted-foreground">
+                    {providerDisplayNames[o.provider] || o.provider}
+                  </span>
+                </SelectItem>
+              )
+            })}
+          </SelectContent>
+        </Select>
+      </div>
+    )
+  }
 
   if (loading) {
     return (

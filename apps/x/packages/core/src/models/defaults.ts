@@ -219,17 +219,15 @@ export async function getSubagentModel(
 }
 
 /**
- * One-time write of suggested tier defaults, called when a Rowboat sign-in
- * completes. Deliberately idempotent-by-absence: if `subagentModels` exists
- * at all (user-configured, or a previous seed), nothing is written — a
- * re-sign-in never clobbers user edits.
+ * Write the curated tier defaults, called when a Rowboat sign-in completes.
+ * Sign-in RESETS the tiers to Rowboat's suggestions — including over
+ * BYOK-era picks — and the user overrides afterwards in settings if they
+ * want. (Originally this skipped when the key existed; live usage showed
+ * users expect sign-in to bring the curated defaults, and sign-ins are
+ * rare enough that resetting on each one is predictable, not hostile.)
  */
 export async function seedSubagentModelDefaults(): Promise<void> {
     const repo = container.resolve<IModelConfigRepo>("modelConfigRepo");
     await repo.ensureConfig();
-    const cfg = await readConfig();
-    if (cfg?.subagentModels) {
-        return;
-    }
     await repo.updateConfig({ subagentModels: SUBAGENT_TIER_SEED });
 }
