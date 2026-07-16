@@ -63,6 +63,7 @@ import { TurnActivityIndicator } from '@/components/turn-activity-indicator';
 import { useSmoothedText } from './hooks/useSmoothedText';
 import { Tool, ToolContent, ToolGroupComponent, ToolHeader, ToolTabbedContent } from '@/components/ai-elements/tool';
 import { WebSearchResult } from '@/components/ai-elements/web-search-result';
+import { GeneratedImageCard } from '@/components/ai-elements/generated-image-card';
 import { AppActionCard } from '@/components/ai-elements/app-action-card';
 import { ComposioConnectCard } from '@/components/ai-elements/composio-connect-card';
 import { PermissionRequest } from '@/components/ai-elements/permission-request';
@@ -107,6 +108,7 @@ import {
   type ToolCall,
   createEmptyChatTabViewState,
   getWebSearchCardData,
+  getGeneratedImageCardData,
   getAppActionCardData,
   getComposioConnectCardData,
   getToolDisplayName,
@@ -6085,6 +6087,18 @@ function App() {
             results={webSearchData.results}
             status={item.status}
             title={webSearchData.title}
+          />
+        )
+      }
+      const generatedImageData = getGeneratedImageCardData(item)
+      if (generatedImageData) {
+        return (
+          <GeneratedImageCard
+            key={item.id}
+            prompt={generatedImageData.prompt}
+            path={generatedImageData.path}
+            error={generatedImageData.error}
+            status={item.status}
           />
         )
       }

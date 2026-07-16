@@ -204,6 +204,27 @@ export const getWebSearchCardData = (tool: ToolCall): WebSearchCardData | null =
   return null
 }
 
+// Generated-image card data (the generate-image builtin)
+export type GeneratedImageCardData = {
+  prompt: string
+  /** Workspace-relative path of the generated image; undefined while running or on failure. */
+  path?: string
+  error?: string
+}
+
+export const getGeneratedImageCardData = (tool: ToolCall): GeneratedImageCardData | null => {
+  if (tool.name !== 'generate-image') return null
+  const input = normalizeToolInput(tool.input) as Record<string, unknown> | undefined
+  const result = tool.result as Record<string, unknown> | undefined
+  return {
+    prompt: (input?.prompt as string) || '',
+    ...(result?.success && typeof result.path === 'string' ? { path: result.path } : {}),
+    ...(result && result.success !== true
+      ? { error: (result.error as string) || 'Image generation failed' }
+      : {}),
+  }
+}
+
 // App navigation action card data
 export type AppActionCardData = {
   action: string
@@ -609,6 +630,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   'composio-search-tools': 'Searching tools',
   'composio-execute-tool': 'Running tool',
   'composio-connect-toolkit': 'Connecting service',
+  'generate-image': 'Generating image',
 }
 
 /**
@@ -705,6 +727,7 @@ const isPlainToolCall = (item: ConversationItem): item is ToolCall => {
   if (getWebSearchCardData(item)) return false
   if (getComposioConnectCardData(item)) return false
   if (getAppActionCardData(item)) return false
+  if (getGeneratedImageCardData(item)) return false
   return true
 }
 

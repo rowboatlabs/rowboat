@@ -202,6 +202,7 @@ const HISTORICAL_KEY_ORDER = [
     "run-background-task-agent",
     "launch-code-task",
     "notify-user",
+    "generate-image",
     "spawn-agent",
 ];
 
@@ -239,6 +240,7 @@ describe("BuiltinTools permission audit", () => {
             addMcpServer: "prompt",
             executeMcpTool: "mcp-execute",
             "composio-execute-tool": "composio-execute",
+            "generate-image": "file-boundary",
         });
     });
 });

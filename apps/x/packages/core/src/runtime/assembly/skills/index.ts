@@ -29,6 +29,7 @@ import backgroundTaskSkill from "./background-task/skill.js";
 import notifyUserSkill from "./notify-user/skill.js";
 import appsSkill from "./apps/skill.js";
 import slackSkill from "./slack/skill.js";
+import generateImagesSkill from "./generate-images/skill.js";
 
 const CURRENT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const CATALOG_PREFIX = "src/runtime/assembly/skills";
@@ -191,6 +192,22 @@ const definitions: SkillDefinition[] = [
     title: "Slack",
     summary: "Read, search, and send Slack messages via the agent-slack CLI — catch up on channels, summarize threads, list users. Load FIRST for ANY Slack request; Slack is connected natively, never through Composio.",
     content: slackSkill,
+  },
+  {
+    id: "generate-images",
+    // Hidden until image generation is usable: signed in (gateway proxy) or
+    // a BYOK config/image-generation.json. Imported lazily to keep this
+    // module free of back-edges into heavier layers (a static import of
+    // models/defaults.ts from here once cycled through the DI container into
+    // the tool catalog, which imports this file).
+    availability: async () => {
+      const { isImageGenerationAvailable } = await import("../../../images/images.js");
+      return isImageGenerationAvailable();
+    },
+    title: "Generate Images",
+    summary: "Create, edit, or remix images from a text prompt with the configured image model. Load when the user asks for an image — illustration, logo, mockup, photo edit, etc.",
+    content: generateImagesSkill,
+    tools: ["generate-image"],
   },
   {
     id: "notify-user",
