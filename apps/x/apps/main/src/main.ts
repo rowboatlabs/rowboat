@@ -55,6 +55,7 @@ import type { CodeModeManager } from "@x/core/dist/code-mode/acp/manager.js";
 import type { ISessions } from "@x/core/dist/runtime/sessions/index.js";
 import { browserViewManager, BROWSER_PARTITION } from "./browser/view.js";
 import { setupBrowserEventForwarding } from "./browser/ipc.js";
+import { setupBrowserExtensions } from "./browser/extensions.js";
 import { ElectronBrowserControlService } from "./browser/control-service.js";
 import { ElectronNotificationService } from "./notification/electron-notification-service.js";
 import {
@@ -226,18 +227,34 @@ protocol.registerSchemesAsPrivileged([
 
 const ALLOWED_SESSION_PERMISSIONS = new Set(["media", "display-capture", "clipboard-read", "clipboard-sanitized-write"]);
 
-function configureSessionPermissions(targetSession: Session): void {
+// Granted to the embedded browser partition on top of the base set.
+// `notifications` lets sites (WhatsApp Web, Gmail, Slack, ...) show native OS
+// notifications via the HTML5 Notification API — Electron renders these
+// through the system notification center once the permission resolves to
+// granted. Background Web Push is still unavailable (Electron has no FCM),
+// so notifications only fire while the site is loaded in a tab. The app's
+// own renderer keeps the base set; it notifies through the main-process
+// notification service instead.
+const BROWSER_EXTRA_PERMISSIONS = ["notifications"] as const;
+
+function configureSessionPermissions(targetSession: Session, extraPermissions: readonly string[] = []): void {
+  const allowed = new Set([...ALLOWED_SESSION_PERMISSIONS, ...extraPermissions]);
+
   targetSession.setPermissionCheckHandler((_webContents, permission) => {
-    return ALLOWED_SESSION_PERMISSIONS.has(permission);
+    return allowed.has(permission);
   });
 
   targetSession.setPermissionRequestHandler((_webContents, permission, callback) => {
-    callback(ALLOWED_SESSION_PERMISSIONS.has(permission));
+    callback(allowed.has(permission));
   });
+}
 
-  // Auto-approve display media requests and route system audio as loopback.
-  // Electron requires a video source in the callback even if we only want audio.
-  // We pass the first available screen source; the renderer discards the video track.
+// Auto-approve display media requests and route system audio as loopback.
+// Electron requires a video source in the callback even if we only want audio.
+// We pass the first available screen source; the renderer discards the video track.
+// App session only — the embedded browser partition registers its own handler
+// (a user-facing source picker) in BrowserViewManager.
+function configureAppDisplayMediaHandler(targetSession: Session): void {
   targetSession.setDisplayMediaRequestHandler(async (_request, callback) => {
     const sources = await desktopCapturer.getSources({ types: ['screen'] });
     if (sources.length === 0) {
@@ -346,7 +363,8 @@ function createWindow(options: { startHidden?: boolean } = {}) {
   });
 
   configureSessionPermissions(session.defaultSession);
-  configureSessionPermissions(session.fromPartition(BROWSER_PARTITION));
+  configureAppDisplayMediaHandler(session.defaultSession);
+  configureSessionPermissions(session.fromPartition(BROWSER_PARTITION), BROWSER_EXTRA_PERMISSIONS);
 
   mainWindow = win;
   setMainWindowForDeepLinks(win);
@@ -471,6 +489,7 @@ app.whenReady().then(async () => {
 
   setupIpcHandlers();
   setupBrowserEventForwarding();
+  setupBrowserExtensions();
 
   // Start the Rowboat Apps server (per-app origins on 127.0.0.1:3210) BEFORE
   // the window and the long service-init chain below. The Apps view is
