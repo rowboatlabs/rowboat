@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { Server, Key, Shield, ShieldCheck, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, Minus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Terminal, AlertTriangle, RefreshCw, PanelRight, Bell, Smartphone, Keyboard } from "lucide-react"
+import { Server, Key, Shield, ShieldCheck, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, Minus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Terminal, AlertTriangle, RefreshCw, PanelRight, Bell, Smartphone, Keyboard, QrCode } from "lucide-react"
 
 import {
   Dialog,
@@ -28,6 +28,7 @@ import { AnthropicIcon, DiscordIcon, GitHubIcon, OpenAIIcon } from "@/components
 import { AccountSettings } from "@/components/settings/account-settings"
 import { ConnectedAccountsSettings } from "@/components/settings/connected-accounts-settings"
 import { MobileChannelsSettings } from "@/components/settings/mobile-channels-settings"
+import { PhonePairingSettings } from "@/components/settings/phone-pairing-settings"
 import type { ApprovalPolicy } from "@x/shared/src/code-mode.js"
 import { DEFAULT_TURN_LIMITS_SETTINGS } from "@x/shared/src/turn-limits.js"
 import type { ipc as ipcShared } from "@x/shared"
@@ -38,7 +39,7 @@ import { ShortcutSettings } from "@/components/settings/shortcut-settings"
 import { ProvidersSection } from "@/components/settings/providers-section"
 import { useModels } from "@/hooks/use-models"
 
-type ConfigTab = "account" | "connections" | "mobile" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "shortcuts" | "notifications" | "permissions" | "note-tagging" | "advanced" | "help"
+type ConfigTab = "account" | "connections" | "mobile" | "phone" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "shortcuts" | "notifications" | "permissions" | "note-tagging" | "advanced" | "help"
 
 interface TabConfig {
   id: ConfigTab
@@ -66,6 +67,12 @@ const tabs: TabConfig[] = [
     label: "Mobile",
     icon: Smartphone,
     description: "Chat with Rowboat from WhatsApp or Telegram",
+  },
+  {
+    id: "phone",
+    label: "Phone app",
+    icon: QrCode,
+    description: "Pair the Rowboat phone app with this Mac",
   },
   {
     id: "models",
@@ -141,7 +148,7 @@ const tabs: TabConfig[] = [
 
 /** Sidebar nav grouping: identity first, capabilities, then app-level. */
 const NAV_SECTIONS: { label: string | null; ids: ConfigTab[] }[] = [
-  { label: null, ids: ["account", "connections", "mobile"] },
+  { label: null, ids: ["account", "connections", "mobile", "phone"] },
   { label: "Configure", ids: ["models", "mcp", "security", "code-mode", "note-tagging", "advanced"] },
   { label: "App", ids: ["appearance", "shortcuts", "notifications", "permissions", "help"] },
 ]
@@ -2096,6 +2103,8 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
                 </div>
               ) : activeTab === "mobile" ? (
                 <MobileChannelsSettings dialogOpen={open} />
+              ) : activeTab === "phone" ? (
+                <PhonePairingSettings dialogOpen={open} />
               ) : activeTab === "models" ? (
                 // ONE model-selection surface for signed-in and BYOK alike:
                 // the Assistant model + per-task overrides, then provider

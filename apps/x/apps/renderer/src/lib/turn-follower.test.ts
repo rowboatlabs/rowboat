@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { TurnBusEvent, TurnState } from '@x/shared/src/turns.js'
-import { followTurn, type TurnFollowerDeps } from './turn-follower'
+import { followTurn, type TurnFollowerDeps } from '@x/shared/src/turn-follower.js'
 import {
   completed,
   created,

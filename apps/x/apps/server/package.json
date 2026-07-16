@@ -1,0 +1,29 @@
+{
+  "name": "@x/server",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "dev": "tsc -w -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "standalone": "node dist/standalone.js"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.19.7",
+    "@x/core": "workspace:*",
+    "@x/shared": "workspace:*",
+    "hono": "^4.11.9",
+    "ws": "^8.18.3",
+    "zod": "^4.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.3",
+    "@types/ws": "^8.18.1",
+    "@x/client": "workspace:*",
+    "vitest": "catalog:"
+  }
+}

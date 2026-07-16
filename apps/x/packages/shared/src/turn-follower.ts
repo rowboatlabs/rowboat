@@ -4,8 +4,8 @@ import {
   reduceTurn,
   type TurnBusEvent,
   type TurnEvent,
-} from '@x/shared/src/turns.js'
-import type { TurnState } from '@x/shared/src/turns.js'
+} from './turns.js'
+import type { TurnState } from './turns.js'
 
 // Follows one turn live, regardless of where it runs — session chat, headless
 // background/knowledge runners, spawned sub-agents.
