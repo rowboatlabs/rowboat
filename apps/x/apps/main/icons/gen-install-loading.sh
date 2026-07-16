@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# One-off dev tool, run manually (requires ImageMagick) — NOT part of any
+# build step. Its output, install-loading.gif, is committed and wired into
+# forge.config.cjs as Squirrel.Windows' `loadingGif` (the installer's only
+# UI). Re-run only if the icon or branding changes.
+#
 # Generates the Squirrel install animation: icon + title + operation label.
 # Timeline approximates a typical 20-25s install, then holds at "Almost done"
 # for the slow-machine tail. Frame every 0.5s. No progress bar — Squirrel gives

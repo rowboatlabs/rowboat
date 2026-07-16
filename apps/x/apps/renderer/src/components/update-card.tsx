@@ -79,16 +79,20 @@ export function UpdateCard() {
       <p className="mt-1 text-xs text-muted-foreground">
         A new version is ready to install. Restart to start using it.
       </p>
-      {status.releaseNotes && (
-        <div className="mt-3">
-          <h5 className="text-xs font-semibold">What&apos;s new</h5>
+      <div className="mt-3">
+        <h5 className="text-xs font-semibold">What&apos;s new</h5>
+        {status.releaseNotes ? (
           <div className="mt-1.5 max-h-56 overflow-y-auto">
             <Streamdown className="prose prose-sm dark:prose-invert max-w-none text-xs [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
               {status.releaseNotes}
             </Streamdown>
           </div>
-        </div>
-      )}
+        ) : (
+          // Releases are expected to carry notes; if this one doesn't, show
+          // a static line instead of an empty pane.
+          <p className="mt-1.5 text-xs text-muted-foreground">Bug fixes and improvements.</p>
+        )}
+      </div>
       <div className="mt-3 flex items-center gap-2">
         <Button size="sm" variant="ghost" onClick={() => setDismissedFor(versionKey)}>
           Later

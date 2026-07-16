@@ -8,27 +8,6 @@ permissions:
   contents: write  # Required to upload release assets
 
 jobs:
-  # The in-app updater surfaces the release body as "What's new" — an empty
-  # body means users get an update with no notes at all. If the release was
-  # published without notes, fill it with GitHub's auto-generated ones
-  # (merged PRs / commits since the previous release).
-  release-notes:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Fill empty release body with generated notes
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TAG="${GITHUB_REF#refs/tags/}"
-          BODY="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" --jq '.body // ""')"
-          if [ -n "$BODY" ]; then
-            echo "Release ${TAG} already has notes; leaving them as-is."
-            exit 0
-          fi
-          NOTES="$(gh api -X POST "repos/${GITHUB_REPOSITORY}/releases/generate-notes" -f tag_name="${TAG}" --jq .body)"
-          gh release edit "${TAG}" --repo "${GITHUB_REPOSITORY}" --notes "$NOTES"
-          echo "Filled ${TAG} with generated release notes."
-
   build-macos:
     runs-on: macos-latest
 
