@@ -1,11 +1,11 @@
 import { app, autoUpdater, nativeImage, BrowserWindow } from "electron";
-import { updateElectronApp, UpdateSourceType } from "update-electron-app";
 import { capture } from "@x/core/dist/analytics/posthog.js";
 import type { ipc } from "@x/shared";
 
 export type UpdaterStatus = ipc.IPCChannels["updater:status"]["req"];
 
 const REPO = "rowboatlabs/rowboat";
+const CHECK_INTERVAL_MS = 10 * 60 * 1000;
 
 let status: UpdaterStatus = { state: "disabled", version: "", reason: "dev" };
 
@@ -42,11 +42,12 @@ function showReadyBadge(): void {
 }
 
 /**
- * Initialize auto-update. Replaces update-electron-app's `notifyUser` native
- * dialog with our own state machine: events are forwarded to the renderer
+ * Initialize auto-update, driving Electron's autoUpdater (Squirrel) against
+ * update.electronjs.org directly. Events are forwarded to the renderer
  * (updater:status), which shows a "Restart to update" card once the update
  * is staged. By then Squirrel has already installed it — the card only asks
- * for the restart, Chrome-style.
+ * for the restart, Chrome-style. Must be called after app ready (it is —
+ * from whenReady() in main.ts).
  */
 export function initUpdater(): void {
   const version = app.getVersion();
@@ -95,17 +96,18 @@ export function initUpdater(): void {
     capture("update_failed", { message: err.message });
   });
 
-  // updateElectronApp() is a thin configurer of the SAME Electron autoUpdater
-  // singleton the listeners above are attached to: it sets the feed URL and
-  // schedules the periodic checkForUpdates() calls. notifyUser: false disables
-  // its built-in dialog, so the renderer card is the only update UI.
-  updateElectronApp({
-    updateSource: {
-      type: UpdateSourceType.ElectronPublicUpdateService,
-      repo: REPO,
-    },
-    notifyUser: false,
+  // update.electronjs.org serves both Squirrel dialects from one URL:
+  // Squirrel.Mac GETs it as-is (204 = up to date, JSON = update; that legacy
+  // format is serverType "default"), Squirrel.Windows appends /RELEASES.
+  autoUpdater.setFeedURL({
+    url: `https://update.electronjs.org/${REPO}/${process.platform}-${process.arch}/${version}`,
+    serverType: "default",
   });
+  // Check now and every 10 minutes, through the same guard as the manual
+  // check: a tick is a no-op while a check/download is in flight or an
+  // update is already staged.
+  checkForUpdates();
+  setInterval(checkForUpdates, CHECK_INTERVAL_MS);
 }
 
 /**
