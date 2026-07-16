@@ -15,6 +15,7 @@ import { WelcomeStep } from "./steps/welcome-step"
 import { LlmSetupStep } from "./steps/llm-setup-step"
 import { ConnectAccountsStep } from "./steps/connect-accounts-step"
 import { CodeModeStep } from "./steps/code-mode-step"
+import { MigrateStep } from "./steps/migrate-step"
 import { CompletionStep } from "./steps/completion-step"
 
 interface OnboardingModalProps {
@@ -36,6 +37,8 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
       case 3:
         return <CodeModeStep state={state} />
       case 4:
+        return <MigrateStep state={state} />
+      case 5:
         return <CompletionStep state={state} />
     }
   }, [state.currentStep, state])

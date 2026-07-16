@@ -95,6 +95,7 @@ All in `apps/renderer/src/lib/analytics.ts`:
 - `call_turn_latency` — `{ endpoint_to_submit_ms, submit_to_speak_ms, speak_to_audio_ms, total_ms }` — voice-to-voice latency breakdown for one call turn (utterance accepted → submitted → first TTS speak → audio playing)
 - `search_executed` — `{ types: string[] }`
 - `note_exported` — `{ format }`
+- `notes_migrated` — `{ source: 'obsidian' | 'notion', success: boolean, notes?, attachments?, skipped?, error? }` — one event per migration attempt (Settings → Migrate Data or the onboarding Migrate step). Counts (`notes`/`attachments`/`skipped`) only on success; `error` (the user-facing message thrown by `importTree`, or the client-side "not a .zip" rejection) only on failure. Cancelling the file picker emits nothing.
 
 ## Person properties
 

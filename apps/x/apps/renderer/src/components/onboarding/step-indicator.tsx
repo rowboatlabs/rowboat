@@ -7,7 +7,8 @@ const ROWBOAT_STEPS = [
   { step: 0 as Step, label: "Welcome" },
   { step: 2 as Step, label: "Connect" },
   { step: 3 as Step, label: "Code" },
-  { step: 4 as Step, label: "Done" },
+  { step: 4 as Step, label: "Migrate" },
+  { step: 5 as Step, label: "Done" },
 ]
 
 const BYOK_STEPS = [
@@ -15,7 +16,8 @@ const BYOK_STEPS = [
   { step: 1 as Step, label: "Model" },
   { step: 2 as Step, label: "Connect" },
   { step: 3 as Step, label: "Code" },
-  { step: 4 as Step, label: "Done" },
+  { step: 4 as Step, label: "Migrate" },
+  { step: 5 as Step, label: "Done" },
 ]
 
 interface StepIndicatorProps {

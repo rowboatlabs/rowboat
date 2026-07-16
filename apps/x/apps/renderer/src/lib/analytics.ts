@@ -96,3 +96,24 @@ export function searchExecuted(types: string[]) {
 export function noteExported(format: string) {
   posthog.capture('note_exported', { format })
 }
+
+// One event per migration attempt (Settings → Migrate Data or onboarding).
+// Counts are only present on success; `error` only on failure — a failed
+// attempt reporting notes: 0 would pollute per-migration averages.
+export function notesMigrated(props: {
+  source: 'obsidian' | 'notion'
+  success: boolean
+  notes?: number
+  attachments?: number
+  skipped?: number
+  error?: string
+}) {
+  posthog.capture('notes_migrated', {
+    source: props.source,
+    success: props.success,
+    ...(props.notes !== undefined ? { notes: props.notes } : {}),
+    ...(props.attachments !== undefined ? { attachments: props.attachments } : {}),
+    ...(props.skipped !== undefined ? { skipped: props.skipped } : {}),
+    ...(props.error !== undefined ? { error: props.error } : {}),
+  })
+}
