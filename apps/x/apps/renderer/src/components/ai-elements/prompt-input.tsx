@@ -1162,6 +1162,7 @@ export const PromptInputTextarea = ({
         <div
           ref={highlightRef}
           aria-hidden="true"
+          dir="auto"
           className="pointer-events-none absolute inset-0 z-0 overflow-hidden whitespace-pre-wrap break-words text-sm text-transparent"
         >
           {mentionHighlights.segments.map((segment, index) =>
@@ -1180,6 +1181,7 @@ export const PromptInputTextarea = ({
       )}
       <InputGroupTextarea
         ref={textareaRef}
+        dir="auto"
         className={cn("relative z-10 !p-0 field-sizing-content max-h-48 min-h-10", className)}
         name="message"
         onCompositionEnd={() => setIsComposing(false)}
