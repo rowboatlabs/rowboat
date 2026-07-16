@@ -19,6 +19,7 @@
         "@x/shared": "workspace:*",
         "agent-slack": "0.9.3",
         "chokidar": "^4.0.3",
+        "electron-chrome-extensions": "^4.9.0",
         "electron-squirrel-startup": "^1.0.1",
         "html-to-docx": "^1.8.0",
         "mammoth": "^1.11.0",

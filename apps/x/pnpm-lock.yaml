@@ -70,6 +70,9 @@ importers:
       chokidar:
         specifier: ^4.0.3
         version: 4.0.3
+      electron-chrome-extensions:
+        specifier: ^4.9.0
+        version: 4.9.0
       electron-squirrel-startup:
         specifier: ^1.0.1
         version: 1.0.1
@@ -143,6 +146,9 @@ importers:
       '@x/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      electron-chrome-extensions:
+        specifier: ^4.9.0
+        version: 4.9.0
     devDependencies:
       electron:
         specifier: ^39.2.7
@@ -5409,6 +5415,9 @@ packages:
 
   ee-first@1.1.1:
     resolution: {integrity: sha512-WMwm9LhRUo+WUaRN+vRuETqG89IgZphVSNkdFgeb6sS/E4OrDIN7t48CAewSHXc6C8lefD8KKfr5vY61brQlow==}
+
+  electron-chrome-extensions@4.9.0:
+    resolution: {integrity: sha512-4kLlh4sPPF0ieOy/Gw7A7KrmqB07megDLqOWAWXdFLAYu+2AeOGME6uOBa80NZLbKgTqBvrsVDZ+epdszRm/EQ==}
 
   electron-installer-common@0.10.4:
     resolution: {integrity: sha512-8gMNPXfAqUE5CfXg8RL0vXpLE9HAaPkgLXVoHE3BMUzogMWenf4LmwQ27BdCUrEhkjrKl+igs2IHJibclR3z3Q==}
@@ -15064,6 +15073,12 @@ snapshots:
       safe-buffer: 5.2.1
 
   ee-first@1.1.1: {}
+
+  electron-chrome-extensions@4.9.0:
+    dependencies:
+      debug: 4.4.3
+    transitivePeerDependencies:
+      - supports-color
 
   electron-installer-common@0.10.4:
     dependencies:

@@ -1,7 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowLeft, ArrowRight, Loader2, Plus, RotateCw, X } from 'lucide-react'
 
-import type { HttpAuthRequest } from '@x/shared/dist/browser-control.js'
+// Custom element provided by electron-chrome-extensions (injected via the
+// preload script): a row of extension action icons for the given session
+// partition, with popup handling built in. Type names resolve against the
+// react module's own scope inside this augmentation.
+declare module 'react' {
+  namespace JSX {
+    interface IntrinsicElements {
+      'browser-action-list': import('react').DetailedHTMLProps<
+        import('react').HTMLAttributes<HTMLElement>,
+        HTMLElement
+      > & {
+        partition?: string
+        alignment?: string
+      }
+    }
+  }
+}
+
+import type { DisplayMediaRequest, DisplayMediaSource, HttpAuthRequest } from '@x/shared/dist/browser-control.js'
 
 import { TabBar } from '@/components/tab-bar'
 import { Button } from '@/components/ui/button'
@@ -168,10 +186,127 @@ function BrowserHttpAuthDialog({
   )
 }
 
+/**
+ * Source picker for getDisplayMedia() requests raised by pages in the
+ * embedded browser (e.g. Google Meet "Present now"). Mirrors Chrome's share
+ * dialog: pick a screen or window, optionally include system audio (screens
+ * only — loopback capture is system-wide, so it isn't offered per-window).
+ */
+function BrowserScreenSharePickerDialog({
+  request,
+  onSubmit,
+  onCancel,
+}: {
+  request: DisplayMediaRequest
+  onSubmit: (sourceId: string, audio: boolean) => void
+  onCancel: () => void
+}) {
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [shareAudio, setShareAudio] = useState(false)
+
+  const screens = request.sources.filter((source) => source.kind === 'screen')
+  const windows = request.sources.filter((source) => source.kind === 'window')
+  const selected = request.sources.find((source) => source.id === selectedId) ?? null
+  const audioAvailable = selected?.kind === 'screen'
+
+  const renderSources = (sources: DisplayMediaSource[]) => (
+    <div className="grid grid-cols-3 gap-2">
+      {sources.map((source) => (
+        <button
+          key={source.id}
+          type="button"
+          onClick={() => setSelectedId(source.id)}
+          className={cn(
+            'flex min-w-0 flex-col gap-1.5 rounded-md border p-1.5 text-left transition-colors',
+            source.id === selectedId
+              ? 'border-ring bg-accent'
+              : 'border-border hover:bg-accent/50',
+          )}
+        >
+          <div className="flex h-20 items-center justify-center overflow-hidden rounded bg-muted">
+            {source.thumbnailDataUrl ? (
+              <img
+                src={source.thumbnailDataUrl}
+                alt=""
+                className="max-h-full max-w-full object-contain"
+              />
+            ) : null}
+          </div>
+          <div className="flex min-w-0 items-center gap-1">
+            {source.appIconDataUrl ? (
+              <img src={source.appIconDataUrl} alt="" className="size-3.5 shrink-0" />
+            ) : null}
+            <span className="truncate text-xs text-foreground">{source.name}</span>
+          </div>
+        </button>
+      ))}
+    </div>
+  )
+
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) onCancel() }}>
+      <DialogContent className="w-[min(36rem,calc(100%-2rem))] max-w-xl">
+        <DialogHeader>
+          <DialogTitle>Share your screen</DialogTitle>
+          <DialogDescription>
+            Choose what to share with this site.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex max-h-[50vh] flex-col gap-3 overflow-y-auto pr-1">
+          {screens.length > 0 && (
+            <div className="flex flex-col gap-1.5">
+              <span className="text-xs font-medium text-muted-foreground">Screens</span>
+              {renderSources(screens)}
+            </div>
+          )}
+          {windows.length > 0 && (
+            <div className="flex flex-col gap-1.5">
+              <span className="text-xs font-medium text-muted-foreground">Windows</span>
+              {renderSources(windows)}
+            </div>
+          )}
+        </div>
+        <DialogFooter className="items-center sm:justify-between">
+          <label
+            className={cn(
+              'flex items-center gap-2 text-xs',
+              audioAvailable ? 'text-foreground' : 'text-muted-foreground/60',
+            )}
+          >
+            <input
+              type="checkbox"
+              checked={audioAvailable && shareAudio}
+              disabled={!audioAvailable}
+              onChange={(e) => setShareAudio(e.target.checked)}
+            />
+            Also share system audio
+          </label>
+          <div className="flex gap-2">
+            <Button type="button" variant="outline" onClick={onCancel}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              disabled={!selected}
+              onClick={() => {
+                if (!selected) return
+                onSubmit(selected.id, audioAvailable && shareAudio)
+              }}
+            >
+              Share
+            </Button>
+          </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 export function BrowserPane({ onClose, forceHidden = false }: BrowserPaneProps) {
   const [state, setState] = useState<BrowserState>(EMPTY_STATE)
   const [addressValue, setAddressValue] = useState('')
   const [authQueue, setAuthQueue] = useState<HttpAuthRequest[]>([])
+  const [displayMediaQueue, setDisplayMediaQueue] = useState<DisplayMediaRequest[]>([])
 
   const activeTabIdRef = useRef<string | null>(null)
   const addressFocusedRef = useRef(false)
@@ -248,6 +383,47 @@ export function BrowserPane({ onClose, forceHidden = false }: BrowserPaneProps) 
   )
 
   const activeAuthRequest = authQueue[0] ?? null
+
+  // Same lifecycle as the auth queue: push on request, prune on main-side
+  // resolution (timeout / window teardown), cancel leftovers on unmount so
+  // the main-process callbacks and timers are freed immediately.
+  const displayMediaQueueRef = useRef<DisplayMediaRequest[]>([])
+  useEffect(() => {
+    displayMediaQueueRef.current = displayMediaQueue
+  }, [displayMediaQueue])
+
+  useEffect(() => {
+    const offRequest = window.ipc.on('browser:displayMediaRequest', (incoming) => {
+      setDisplayMediaQueue((queue) => [...queue, incoming as DisplayMediaRequest])
+    })
+    const offResolved = window.ipc.on('browser:displayMediaResolved', (incoming) => {
+      const { requestId } = incoming as { requestId: string }
+      setDisplayMediaQueue((queue) => queue.filter((request) => request.requestId !== requestId))
+    })
+    return () => {
+      offRequest()
+      offResolved()
+      for (const request of displayMediaQueueRef.current) {
+        void window.ipc.invoke('browser:displayMediaResponse', { requestId: request.requestId })
+      }
+    }
+  }, [])
+
+  const respondToDisplayMedia = useCallback(
+    (requestId: string, choice: { sourceId: string; audio: boolean } | null) => {
+      setDisplayMediaQueue((queue) => queue.filter((request) => request.requestId !== requestId))
+      // Omit sourceId to cancel; include it to share the chosen source.
+      void window.ipc.invoke(
+        'browser:displayMediaResponse',
+        choice
+          ? { requestId, sourceId: choice.sourceId, audio: choice.audio }
+          : { requestId },
+      )
+    },
+    [],
+  )
+
+  const activeDisplayMediaRequest = displayMediaQueue[0] ?? null
 
   const setViewVisible = useCallback((visible: boolean) => {
     if (viewVisibleRef.current === visible) return
@@ -533,6 +709,11 @@ export function BrowserPane({ onClose, forceHidden = false }: BrowserPaneProps) 
             autoCapitalize="off"
           />
         </form>
+        <browser-action-list
+          partition="persist:rowboat-browser"
+          alignment="bottom right"
+          className="ml-1 flex shrink-0 items-center"
+        />
         <button
           type="button"
           onClick={onClose}
@@ -557,6 +738,17 @@ export function BrowserPane({ onClose, forceHidden = false }: BrowserPaneProps) 
             respondToAuth(activeAuthRequest.requestId, { username, password })
           }
           onCancel={() => respondToAuth(activeAuthRequest.requestId, null)}
+        />
+      )}
+
+      {!activeAuthRequest && activeDisplayMediaRequest && (
+        <BrowserScreenSharePickerDialog
+          key={activeDisplayMediaRequest.requestId}
+          request={activeDisplayMediaRequest}
+          onSubmit={(sourceId, audio) =>
+            respondToDisplayMedia(activeDisplayMediaRequest.requestId, { sourceId, audio })
+          }
+          onCancel={() => respondToDisplayMedia(activeDisplayMediaRequest.requestId, null)}
         />
       )}
     </div>

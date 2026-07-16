@@ -19,7 +19,7 @@ import type { SessionBusEvent, SessionIndexEntry, SessionState } from './session
 import { RowboatApiConfig } from './rowboat-account.js';
 import { ZListToolkitsResponse } from './composio.js';
 import { AppSummarySchema, RegistryRecordSchema, RowboatAppManifestSchema } from './rowboat-app.js';
-import { BrowserStateSchema, HttpAuthRequestSchema } from './browser-control.js';
+import { BrowserStateSchema, DisplayMediaRequestSchema, HttpAuthRequestSchema } from './browser-control.js';
 import { BillingInfoSchema } from './billing.js';
 import { EmailBlockSchema, GmailThreadSchema } from './blocks.js';
 import { PermissionDecision, ApprovalPolicy, CodingAgent, type CodeRunFeedEvent } from './code-mode.js';
@@ -2300,6 +2300,30 @@ const ipcSchemas = {
       requestId: z.string(),
       username: z.string().optional(),
       password: z.string().optional(),
+    }),
+    res: z.object({ ok: z.boolean() }),
+  },
+  // Screen-share picker for pages calling getDisplayMedia() in the embedded
+  // browser (main → renderer push). The renderer shows a source picker and
+  // answers via browser:displayMediaResponse.
+  'browser:displayMediaRequest': {
+    req: DisplayMediaRequestSchema,
+    res: z.null(),
+  },
+  // Main → renderer: a pending display-media request was resolved without the
+  // renderer answering (timed out, or the window went away), so the renderer
+  // must drop the corresponding picker dialog.
+  'browser:displayMediaResolved': {
+    req: z.object({ requestId: z.string() }),
+    res: z.null(),
+  },
+  // Renderer → main. Omit sourceId to cancel the request; `audio` asks for
+  // system-audio loopback alongside the shared screen.
+  'browser:displayMediaResponse': {
+    req: z.object({
+      requestId: z.string(),
+      sourceId: z.string().optional(),
+      audio: z.boolean().optional(),
     }),
     res: z.object({ ok: z.boolean() }),
   },
