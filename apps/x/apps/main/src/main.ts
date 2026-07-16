@@ -45,6 +45,7 @@ import { identifyIfSignedIn } from "@x/core/dist/analytics/identify.js";
 import { migrateRuns } from "@x/core/dist/migrations/runs/migrate.js";
 
 import { initConfigs } from "@x/core/dist/config/initConfigs.js";
+import { startServerHost, stopServerHost } from "./server-host.js";
 import { getAgentSlackCliStatus } from "@x/core/dist/slack/agent-slack-exec.js";
 import { resolveWorkspacePath } from "@x/core/dist/workspace/workspace.js";
 import started from "electron-squirrel-startup";
@@ -609,6 +610,13 @@ app.whenReady().then(async () => {
   startTurnEventsWatcher();
   startCodeRunFeedWatcher();
 
+  // rowboat-server transport (phone/API clients + the strangler-fig channel
+  // forwarder), hosted in-process on this same core instance. Needs the
+  // session index gate above; must never block boot.
+  startServerHost().catch((error) => {
+    console.error('[server-host] failed to start rowboat-server:', error);
+  });
+
   // Mobile channels (WhatsApp/Telegram bridge): needs the session index, so
   // start after initialize(). Failures must never block boot.
   startChannelsWatcher();
@@ -717,6 +725,9 @@ stopSkillsWatcher();
   disposeAllTerminals();
   shutdownAppsServer().catch((error) => {
     console.error('[Apps] Failed to shut down cleanly:', error);
+  });
+  stopServerHost().catch((error) => {
+    console.error('[server-host] Failed to shut down cleanly:', error);
   });
   shutdownAnalytics().catch((error) => {
     console.error('[Analytics] Failed to flush on quit:', error);
