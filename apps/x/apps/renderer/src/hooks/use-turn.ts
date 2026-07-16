@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { TurnState } from '@x/shared/src/turns.js'
 import { subscribeTurnFeed } from '@/lib/turn-feed'
-import { followTurn } from '@/lib/turn-follower'
+import { followTurn } from '@x/shared/src/turn-follower.js'
 
 export interface UseTurnResult {
   state: TurnState | null
@@ -13,7 +13,7 @@ export interface UseTurnResult {
 }
 
 // Live view of one turn by id: snapshot via sessions:getTurn, then durable
-// events from the turns:events spine (see lib/turn-follower.ts for the join
+// events from the turns:events spine (see @x/shared turn-follower for the join
 // protocol). Works for any turn — session chat, headless runners, spawned
 // sub-agents.
 export function useTurn(

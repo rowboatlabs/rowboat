@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Terminal, AlertTriangle, RefreshCw, PanelRight, Bell, Smartphone } from "lucide-react"
+import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Terminal, AlertTriangle, RefreshCw, PanelRight, Bell, Smartphone, QrCode } from "lucide-react"
 
 import {
   Dialog,
@@ -28,11 +28,12 @@ import { AnthropicIcon, DiscordIcon, GenericApiIcon, GitHubIcon, GoogleIcon, Oll
 import { AccountSettings } from "@/components/settings/account-settings"
 import { ConnectedAccountsSettings } from "@/components/settings/connected-accounts-settings"
 import { MobileChannelsSettings } from "@/components/settings/mobile-channels-settings"
+import { PhonePairingSettings } from "@/components/settings/phone-pairing-settings"
 import type { ApprovalPolicy } from "@x/shared/src/code-mode.js"
 import { startProvisioning, useProvisioning, enabledOptimistic, type AgentStatus, type CodeModeAgentStatus } from "@/lib/code-mode-provisioning"
 import { useProviderModels } from "@/hooks/use-provider-models"
 
-type ConfigTab = "account" | "connections" | "mobile" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "notifications" | "note-tagging" | "help"
+type ConfigTab = "account" | "connections" | "mobile" | "phone" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "notifications" | "note-tagging" | "help"
 
 interface TabConfig {
   id: ConfigTab
@@ -60,6 +61,12 @@ const tabs: TabConfig[] = [
     label: "Mobile",
     icon: Smartphone,
     description: "Chat with Rowboat from WhatsApp or Telegram",
+  },
+  {
+    id: "phone",
+    label: "Phone app",
+    icon: QrCode,
+    description: "Pair the Rowboat phone app with this Mac",
   },
   {
     id: "models",
@@ -117,7 +124,7 @@ const tabs: TabConfig[] = [
 
 /** Sidebar nav grouping: identity first, capabilities, then app-level. */
 const NAV_SECTIONS: { label: string | null; ids: ConfigTab[] }[] = [
-  { label: null, ids: ["account", "connections", "mobile"] },
+  { label: null, ids: ["account", "connections", "mobile", "phone"] },
   { label: "Configure", ids: ["models", "mcp", "security", "code-mode", "note-tagging"] },
   { label: "App", ids: ["appearance", "notifications", "help"] },
 ]
@@ -2626,7 +2633,7 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
             </div>
 
             {/* Content */}
-            <div className={cn("flex-1 px-6 pb-5 min-h-0", (activeTab === "models" || activeTab === "connections" || activeTab === "mobile" || activeTab === "account" || activeTab === "code-mode" || activeTab === "notifications") ? "overflow-y-auto" : activeTab === "note-tagging" ? "overflow-hidden flex flex-col" : "overflow-hidden")}>
+            <div className={cn("flex-1 px-6 pb-5 min-h-0", (activeTab === "models" || activeTab === "connections" || activeTab === "mobile" || activeTab === "phone" || activeTab === "account" || activeTab === "code-mode" || activeTab === "notifications") ? "overflow-y-auto" : activeTab === "note-tagging" ? "overflow-hidden flex flex-col" : "overflow-hidden")}>
               {activeTab === "account" ? (
                 <AccountSettings dialogOpen={open} />
               ) : activeTab === "connections" ? (
@@ -2643,6 +2650,8 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
                 </div>
               ) : activeTab === "mobile" ? (
                 <MobileChannelsSettings dialogOpen={open} />
+              ) : activeTab === "phone" ? (
+                <PhonePairingSettings dialogOpen={open} />
               ) : activeTab === "models" ? (
                 rowboatConnected
                   ? (

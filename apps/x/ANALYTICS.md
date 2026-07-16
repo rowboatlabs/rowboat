@@ -183,6 +183,17 @@ All renderer events live in `apps/renderer/src/lib/analytics.ts` (typed wrappers
 - `settings_tab_changed` — `{ tab }`
 - `onboarding_completed` — the onboarding flow finished (`App.tsx`)
 
+### Mobile app events
+
+Captured by the iOS app (`apps/mobile/src/lib/analytics.ts`, typed wrappers like the renderer's). Every event carries `platform: 'mobile'`, the counterpart of desktop's `platform: 'desktop'`, so the shared project separates surfaces. The key is injected at build time via `EXPO_PUBLIC_POSTHOG_KEY` (`EXPO_PUBLIC_POSTHOG_HOST` optional); without it every call is a no-op — dev builds send nothing.
+
+- `mobile_paired` — `{ method: 'qr' | 'manual' | 'dev-link' }` — pairing with a rowboat-server succeeded
+- `mobile_unpaired` — `{ reason: 'user' | 'unauthorized' }` — `unauthorized` = the server key was rotated out from under the phone
+- `mobile_message_sent` — a chat message sent from the phone
+- `mobile_reconnected` — the WS feed recovered after a disconnect
+- `mobile_note_opened` — a note opened in the read-only browser
+- `mobile_voice_used` — reserved; fires once voice ships in the dev build
+
 ## Person properties
 
 Persistent across sessions for the same user. Set via `posthog.people.set` or as the `properties` arg to `identify`.
