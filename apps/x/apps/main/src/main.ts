@@ -48,7 +48,8 @@ import { initConfigs } from "@x/core/dist/config/initConfigs.js";
 import { getAgentSlackCliStatus } from "@x/core/dist/slack/agent-slack-exec.js";
 import { resolveWorkspacePath } from "@x/core/dist/workspace/workspace.js";
 import started from "electron-squirrel-startup";
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
+import { promisify } from "node:util";
 import { init as initChromeSync } from "@x/core/dist/knowledge/chrome-extension/server/server.js";
 import container, { registerBrowserControlService, registerNotificationService } from "@x/core/dist/di/container.js";
 import type { CodeModeManager } from "@x/core/dist/code-mode/acp/manager.js";
@@ -226,6 +227,28 @@ protocol.registerSchemesAsPrivileged([
 
 const ALLOWED_SESSION_PERMISSIONS = new Set(["media", "display-capture", "clipboard-read", "clipboard-sanitized-write"]);
 
+// On Linux, Chromium's loopback capture records the default sink's monitor
+// through the PulseAudio layer, at the monitor source's own volume. Desktop
+// tools sometimes leave that volume near zero — it's invisible plumbing that
+// doesn't affect what the user hears — which turns the whole capture into
+// digital silence with no error anywhere. Raise it back to 100% before
+// capture starts (raise only, so a deliberate >100% boost is left alone).
+// Best-effort: no pactl or no Pulse layer just skips.
+async function ensureLinuxMonitorVolume(): Promise<void> {
+  const execFileP = promisify(execFile);
+  try {
+    const { stdout: sinkOut } = await execFileP("pactl", ["get-default-sink"], { timeout: 3000 });
+    const monitor = `${sinkOut.trim()}.monitor`;
+    const { stdout: volOut } = await execFileP("pactl", ["get-source-volume", monitor], { timeout: 3000 });
+    const percents = [...volOut.matchAll(/(\d+)%/g)].map((m) => Number(m[1]));
+    if (percents.length === 0 || Math.min(...percents) >= 100) return;
+    await execFileP("pactl", ["set-source-volume", monitor, "100%"], { timeout: 3000 });
+    console.log(`[meeting] Raised ${monitor} volume from ${Math.min(...percents)}% to 100% for system-audio capture`);
+  } catch {
+    // pactl missing or non-Pulse audio stack — nothing to fix here.
+  }
+}
+
 function configureSessionPermissions(targetSession: Session): void {
   targetSession.setPermissionCheckHandler((_webContents, permission) => {
     return ALLOWED_SESSION_PERMISSIONS.has(permission);
@@ -238,7 +261,18 @@ function configureSessionPermissions(targetSession: Session): void {
   // Auto-approve display media requests and route system audio as loopback.
   // Electron requires a video source in the callback even if we only want audio.
   // We pass the first available screen source; the renderer discards the video track.
-  targetSession.setDisplayMediaRequestHandler(async (_request, callback) => {
+  targetSession.setDisplayMediaRequestHandler(async (request, callback) => {
+    // On Linux, enumerating screens via desktopCapturer goes through the
+    // Wayland screencast portal, which can block on a system dialog or hang
+    // outright. Requests that want audio (meeting transcription — the only
+    // audio consumer; it discards the video track) don't need a real screen,
+    // so answer with the requesting frame as the mandatory video source and
+    // Chromium's PulseAudio loopback for the audio.
+    if (process.platform === 'linux' && request.audioRequested && request.frame) {
+      await ensureLinuxMonitorVolume();
+      callback({ video: request.frame, audio: 'loopback' });
+      return;
+    }
     const sources = await desktopCapturer.getSources({ types: ['screen'] });
     if (sources.length === 0) {
       callback({});
