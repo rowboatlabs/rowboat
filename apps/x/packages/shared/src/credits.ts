@@ -3,12 +3,14 @@ import { CREDITS_PER_DOLLAR } from './billing.js';
 
 // First-time-action credit rewards.
 //
-// Each activity maps to an activation code in the backend's credit-activation
-// catalog (rowboatx-backend packages/shared/src/billing/credit-activations.ts).
-// The app calls POST /v1/billing/credit-activations with the code when the
-// user completes the action; the backend grants the credits at most once per
-// (customer, code). This catalog is display metadata only — the granted
-// amount is whatever the backend returns.
+// Only the activity CODES are known to the app — they anchor the trigger call
+// sites (which action fires which code) and per-code UI like icons and
+// navigation. Everything else (display name, description, credit amount) is
+// the backend catalog's to define and comes from GET /v1/config
+// `creditActivations`; the app never hardcodes amounts or copy, so the
+// catalog can change without an app release. Codes present in the config but
+// unknown to this app version are ignored (nothing here can trigger them);
+// known codes absent from the config are treated as retired and hidden.
 export const CreditActivityCodeSchema = z.enum([
   'first_gmail_connected',
   'first_email_sent',
@@ -18,52 +20,20 @@ export const CreditActivityCodeSchema = z.enum([
 ]);
 export type CreditActivityCode = z.infer<typeof CreditActivityCodeSchema>;
 
-export interface CreditActivity {
-  code: CreditActivityCode;
-  title: string;
-  description: string;
-  // expected reward, for display before the action is done; the backend
-  // catalog is the source of truth for what is actually granted
-  credits: number;
-}
-
-export const CREDIT_ACTIVITIES: CreditActivity[] = [
-  {
-    code: 'first_gmail_connected',
-    title: 'Connect Gmail',
-    description: 'Link your Google account to sync email and calendar',
-    credits: CREDITS_PER_DOLLAR * 1,
-  },
-  {
-    code: 'first_email_sent',
-    title: 'Send an email',
-    description: 'Send your first email from inside Rowboat',
-    credits: CREDITS_PER_DOLLAR * 1,
-  },
-  {
-    code: 'first_meeting_note',
-    title: 'Take meeting notes',
-    description: 'Record a meeting and let Rowboat write the notes',
-    credits: CREDITS_PER_DOLLAR * 1,
-  },
-  {
-    code: 'first_bg_agent',
-    title: 'Set up a background agent',
-    description: 'Create an agent that works for you on a schedule or trigger',
-    credits: CREDITS_PER_DOLLAR * 1,
-  },
-  {
-    code: 'first_app_built',
-    title: 'Build an app',
-    description: 'Create your first Rowboat app',
-    credits: CREDITS_PER_DOLLAR * 1,
-  },
-];
+// One catalog entry as served by GET /v1/config — `code` is an open string
+// because the backend may serve codes this app version doesn't know yet.
+export const CreditActivationCatalogEntrySchema = z.object({
+  code: z.string(),
+  displayName: z.string(),
+  description: z.string().optional(),
+  credits: z.number(),
+});
+export type CreditActivationCatalogEntry = z.infer<typeof CreditActivationCatalogEntrySchema>;
 
 export const CreditActivityStateSchema = z.object({
   code: CreditActivityCodeSchema,
   title: z.string(),
-  description: z.string(),
+  description: z.string().optional(),
   credits: z.number(),
   claimed: z.boolean(),
 });

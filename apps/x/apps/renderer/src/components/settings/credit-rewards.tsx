@@ -20,9 +20,10 @@ interface CreditRewardsProps {
 export function CreditRewards({ store }: CreditRewardsProps) {
   const state = useCreditsState()
 
-  // Hidden while loading, when the feature flag is off, or when not eligible
-  // (rewards are for signed-in free-tier users — not BYOK, not paid plans).
-  if (!state || !state.enabled || !state.eligible) return null
+  // Hidden while loading, when the feature flag is off, when not eligible
+  // (rewards are for signed-in free-tier users — not BYOK, not paid plans),
+  // or when the API hasn't served a reward catalog.
+  if (!state || !state.enabled || !state.eligible || state.activities.length === 0) return null
 
   const earnedCount = state.activities.filter((a) => a.claimed).length
 
@@ -67,7 +68,9 @@ export function CreditRewards({ store }: CreditRewardsProps) {
                   <p className={cn("text-sm font-medium", activity.claimed && "text-muted-foreground")}>
                     {activity.title}
                   </p>
-                  <p className="text-xs text-muted-foreground">{activity.description}</p>
+                  {activity.description && (
+                    <p className="text-xs text-muted-foreground">{activity.description}</p>
+                  )}
                 </div>
                 <span
                   className={cn(

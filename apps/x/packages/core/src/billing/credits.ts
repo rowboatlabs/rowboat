@@ -7,12 +7,27 @@ import { isSignedIn } from '../account/account.js';
 import { isFeatureEnabled } from '../analytics/posthog.js';
 import { API_URL } from '../config/env.js';
 import { getBillingInfo } from './billing.js';
+import { getRowboatConfig } from '../config/rowboat.js';
 import { getBillingPlanData } from '@x/shared/dist/billing.js';
 import {
-  CREDIT_ACTIVITIES,
+  CreditActivityCodeSchema,
+  type CreditActivationCatalogEntry,
   type CreditActivityCode,
   type CreditsState,
 } from '@x/shared/dist/credits.js';
+
+// The reward catalog (names, descriptions, amounts) is owned by the backend
+// and served via GET /v1/config `creditActivations` — the app hardcodes only
+// the activity codes it knows how to trigger. Entries with codes this app
+// version doesn't recognize are dropped (nothing here can fire them).
+type KnownCatalogEntry = CreditActivationCatalogEntry & { code: CreditActivityCode };
+
+async function getActivityCatalog(): Promise<KnownCatalogEntry[]> {
+  const config = await getRowboatConfig();
+  return (config.creditActivations ?? []).filter(
+    (entry): entry is KnownCatalogEntry => CreditActivityCodeSchema.safeParse(entry.code).success,
+  );
+}
 
 const CLAIMED_FILE = path.join(WorkDir, 'config', 'credit_activations.json');
 
@@ -151,9 +166,6 @@ function notifyActivation(event: CreditActivationSuccess): void {
  * uniqueness guarantee makes retries safe.
  */
 export async function maybeActivateCredit(code: CreditActivityCode): Promise<CreditActivationSuccess | null> {
-  const activity = CREDIT_ACTIVITIES.find((a) => a.code === code);
-  if (!activity) return null;
-
   try {
     if (!(await isSignedIn())) return null;
     const accessToken = await getAccessToken();
@@ -199,7 +211,12 @@ export async function maybeActivateCredit(code: CreditActivityCode): Promise<Cre
     }
     markClaimed(userId, code);
     console.log(`[Credits] Activated ${code}: +${amount} credits`);
-    const success: CreditActivationSuccess = { code, title: activity.title, credits: amount };
+    // display name from the backend catalog; the code is a serviceable
+    // fallback if the config fetch fails right now
+    const title = await getActivityCatalog()
+      .then((catalog) => catalog.find((entry) => entry.code === code)?.displayName)
+      .catch(() => undefined);
+    const success: CreditActivationSuccess = { code, title: title ?? code, credits: amount };
     notifyActivation(success);
     return success;
   } catch (err) {
@@ -209,8 +226,8 @@ export async function maybeActivateCredit(code: CreditActivityCode): Promise<Cre
 }
 
 /**
- * Catalog of reward activities with the current user's claimed flags, for the
- * settings UI. Claimed flags come from the local cache (the /v1/me grants list
+ * Backend reward catalog joined with the current user's claimed flags, for
+ * the UI. Claimed flags come from the local cache (the /v1/me grants list
  * doesn't expose activation codes), so a fresh install shows an action as
  * unclaimed until it is performed again and the backend answers 409.
  */
@@ -218,23 +235,32 @@ export async function getCreditsState(): Promise<CreditsState> {
   const enabled = await isCreditsEnabled();
   let userId: string | null = null;
   let eligible = false;
+  let catalog: KnownCatalogEntry[] = [];
   try {
     if (enabled && (await isSignedIn())) {
       userId = userIdFromToken(await getAccessToken());
       // billing-fetch failures fall through to eligible=false — the UI
       // refreshes on the next credits/oauth event anyway
       eligible = userId != null && !(await hasPaidPlan(userId));
+      if (eligible) {
+        catalog = await getActivityCatalog();
+      }
     }
   } catch {
-    // treat token/billing errors as not eligible right now
+    // treat token/billing/config errors as not eligible right now
+    eligible = false;
   }
   const claimed = userId ? readClaimedStore()[userId] ?? {} : {};
   return {
     enabled,
     eligible,
-    activities: CREDIT_ACTIVITIES.map((activity) => ({
-      ...activity,
-      claimed: !!claimed[activity.code],
+    // API order is preserved — the backend catalog decides display order too
+    activities: catalog.map((entry) => ({
+      code: entry.code,
+      title: entry.displayName,
+      ...(entry.description !== undefined ? { description: entry.description } : {}),
+      credits: entry.credits,
+      claimed: !!claimed[entry.code],
     })),
   };
 }

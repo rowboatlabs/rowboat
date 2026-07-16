@@ -20,9 +20,32 @@ const CATALOG = {
   ],
 };
 
+// the activation catalog as served by GET /v1/config — display metadata is
+// backend-owned; the app only knows the codes
+const ACTIVATIONS = [
+  { code: "first_gmail_connected", displayName: "Connected Gmail", description: "Link your Google account", credits: 100 },
+  { code: "first_email_sent", displayName: "First email sent", credits: 100 },
+  { code: "first_bg_agent", displayName: "First background agent", credits: 100 },
+  { code: "first_app_built", displayName: "First app built", credits: 100 },
+  { code: "some_future_code", displayName: "Unknown to this app version", credits: 100 },
+];
+
 function mockBilling(planId: string | null) {
   vi.doMock("./billing.js", () => ({
     getBillingInfo: vi.fn(async () => ({ subscriptionPlanId: planId, catalog: CATALOG })),
+  }));
+}
+
+// pass null to omit the creditActivations field entirely (pre-catalog API)
+function mockConfig(creditActivations: unknown[] | null = ACTIVATIONS) {
+  vi.doMock("../config/rowboat.js", () => ({
+    getRowboatConfig: vi.fn(async () => ({
+      appUrl: "https://app.example",
+      websocketApiUrl: "",
+      supabaseUrl: "",
+      billing: CATALOG,
+      ...(creditActivations ? { creditActivations } : {}),
+    })),
   }));
 }
 
@@ -39,6 +62,7 @@ beforeEach(() => {
     getAccessToken: vi.fn(async () => fakeJwt("user-1")),
   }));
   mockBilling("free-1");
+  mockConfig();
   fetchMock = vi.fn();
   vi.stubGlobal("fetch", fetchMock);
 });
@@ -49,6 +73,7 @@ afterEach(() => {
   vi.doUnmock("../account/account.js");
   vi.doUnmock("../auth/tokens.js");
   vi.doUnmock("./billing.js");
+  vi.doUnmock("../config/rowboat.js");
   vi.unstubAllGlobals();
   vi.resetModules();
   fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -70,7 +95,8 @@ describe("maybeActivateCredit", () => {
     fetchMock.mockResolvedValueOnce(grantResponse(100));
 
     const first = await credits.maybeActivateCredit("first_email_sent");
-    expect(first).toMatchObject({ code: "first_email_sent", credits: 100 });
+    // display name comes from the API catalog, not app code
+    expect(first).toMatchObject({ code: "first_email_sent", title: "First email sent", credits: 100 });
     expect(seen).toHaveLength(1);
 
     // second attempt short-circuits on the local claim — no network call
@@ -81,6 +107,16 @@ describe("maybeActivateCredit", () => {
     const state = await credits.getCreditsState();
     expect(state.activities.find((a) => a.code === "first_email_sent")?.claimed).toBe(true);
     expect(state.activities.find((a) => a.code === "first_bg_agent")?.claimed).toBe(false);
+    // catalog codes this app version doesn't know are dropped
+    expect(state.activities.map((a) => a.code)).not.toContain("some_future_code");
+  });
+
+  it("shows no activities when the API serves no reward catalog", async () => {
+    mockConfig(null);
+    const credits = await loadCredits();
+    const state = await credits.getCreditsState();
+    expect(state.eligible).toBe(true);
+    expect(state.activities).toEqual([]);
   });
 
   it("treats 409 as already claimed without notifying", async () => {
