@@ -45,21 +45,22 @@ type SourceFile = {
   rel: string; // '/'-separated path relative to the source root
 };
 
-type PlannedNote = {
+export type PlannedNote = {
   abs: string;
   srcRel: string;
   destRel: string; // workspace-relative, e.g. knowledge/My Vault/Note.md
   wikiPath: string; // knowledge-stripped, extension-less, e.g. My Vault/Note
 };
 
-type PlannedAsset = {
+export type PlannedAsset = {
   abs: string;
   srcRel: string;
   destRel: string; // workspace-relative, under knowledge/.assets/imports/
   url: string; // app://workspace/<destRel>, URL-encoded per segment
+  copied: boolean; // links to assets that never landed keep their original text
 };
 
-type LinkMaps = {
+export type LinkMaps = {
   // Keys are lowercased source-relative paths without extension, plus bare
   // basenames (Obsidian's "shortest path" links carry no folders).
   noteByRel: Map<string, PlannedNote>;
@@ -70,8 +71,9 @@ type LinkMaps = {
 
 // Characters that are illegal in workspace filenames or would break the
 // [[wiki link]] syntax that note paths get embedded into.
-function sanitizeSegment(name: string): string {
+export function sanitizeSegment(name: string): string {
   const cleaned = name
+    .normalize('NFC')
     .replace(/[\\/:*?"<>|#^[\]]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
@@ -80,7 +82,7 @@ function sanitizeSegment(name: string): string {
   return cleaned || 'Untitled';
 }
 
-function stripNotionId(stem: string): string {
+export function stripNotionId(stem: string): string {
   return stem.replace(NOTION_ID_SUFFIX, '');
 }
 
@@ -91,7 +93,7 @@ function splitExt(name: string): { stem: string; ext: string } {
 
 // Map a source-relative path to its destination-relative shape: strip Notion
 // ids (notion mode) and sanitize every segment.
-function mapRelPath(rel: string, mode: ImportMode): string {
+export function mapRelPath(rel: string, mode: ImportMode): string {
   return rel
     .split('/')
     .map((segment, i, all) => {
@@ -161,9 +163,11 @@ function tryDecode(value: string): string {
 
 // Lookup keys for a link target as written in a note: resolved against the
 // note's own folder, against the source root, and by bare basename.
-function relKey(rel: string): string {
+export function relKey(rel: string): string {
   const { stem, ext } = splitExt(rel);
-  return (ext.toLowerCase() === '.md' ? stem : rel).toLowerCase();
+  // NFC-normalize: macOS readdir hands out NFD names while the links written
+  // inside notes are typically NFC — both sides must meet on one form.
+  return (ext.toLowerCase() === '.md' ? stem : rel).normalize('NFC').toLowerCase();
 }
 
 function resolveTarget<T>(
@@ -191,11 +195,11 @@ function isExternalTarget(target: string): boolean {
 
 // Split out fenced/inline code so link rewriting never touches code samples.
 // Odd indices of the result are the code spans (kept verbatim).
-function splitCode(content: string): string[] {
+export function splitCode(content: string): string[] {
   return content.split(/(```[\s\S]*?(?:```|$)|`[^`\n]+`)/);
 }
 
-function parseWikiTarget(raw: string): { target: string; heading?: string; alias?: string } {
+export function parseWikiTarget(raw: string): { target: string; heading?: string; alias?: string } {
   const pipe = raw.indexOf('|');
   const alias = pipe === -1 ? undefined : raw.slice(pipe + 1).trim() || undefined;
   const beforeAlias = pipe === -1 ? raw : raw.slice(0, pipe);
@@ -209,15 +213,17 @@ function buildWikiLink(wikiPath: string, heading?: string, alias?: string): stri
   return `[[${wikiPath}${heading ? `#${heading}` : ''}${alias ? `|${alias}` : ''}]]`;
 }
 
-function transformNoteContent(content: string, noteSrcDir: string, maps: LinkMaps): string {
+export function transformNoteContent(content: string, noteSrcDir: string, maps: LinkMaps): string {
   const rewriteSegment = (text: string): string => {
     let out = text;
 
     // Obsidian embeds: ![[image.png]] / ![[Some Note]].
-    out = out.replace(/!\[\[([^[\]]+)\]\]/g, (_match, raw: string) => {
+    out = out.replace(/!\[\[([^[\]]+)\]\]/g, (match, raw: string) => {
       const { target, heading, alias } = parseWikiTarget(raw);
       const asset = resolveTarget(target, noteSrcDir, maps.assetByRel, maps.assetByBase);
-      if (asset) return `![${alias ?? ''}](${asset.url})`;
+      // A planned asset that never landed (too large, copy error) keeps its
+      // original embed — rewriting would produce an app:// URL that 404s.
+      if (asset) return asset.copied ? `![${alias ?? ''}](${asset.url})` : match;
       const note = resolveTarget(target, noteSrcDir, maps.noteByRel, maps.noteByBase);
       if (note) return buildWikiLink(note.wikiPath, heading, alias);
       return `[[${raw}]]`;
@@ -234,14 +240,23 @@ function transformNoteContent(content: string, noteSrcDir: string, maps: LinkMap
 
     // Markdown links & images with relative targets — Notion's inter-page
     // links ([Page](Page%20Name%20<id>.md)) and both apps' image references.
+    // Targets with unencoded spaces arrive angle-bracketed: [x](<Some Note.md>).
     out = out.replace(
-      /(!?)\[([^\]]*)\]\(<?([^)\s>]+)>?(?:\s+"[^"]*")?\)/g,
-      (match, bang: string, label: string, target: string) => {
-        if (isExternalTarget(target)) return match;
-        const asset = resolveTarget(target, noteSrcDir, maps.assetByRel, maps.assetByBase);
-        if (asset) return `${bang}[${label}](${asset.url})`;
-        const note = resolveTarget(target, noteSrcDir, maps.noteByRel, maps.noteByBase);
-        if (note) return buildWikiLink(note.wikiPath, undefined, label.trim() || undefined);
+      /(!?)\[([^\]]*)\]\((?:<([^<>]+)>|([^)\s>]+))(?:\s+"[^"]*")?\)/g,
+      (match, bang: string, label: string, angled: string | undefined, plain: string | undefined) => {
+        const target = angled ?? plain ?? '';
+        if (!target || isExternalTarget(target)) return match;
+        const hash = target.indexOf('#');
+        const targetPath = hash === -1 ? target : target.slice(0, hash);
+        const heading =
+          hash === -1
+            ? undefined
+            : tryDecode(target.slice(hash + 1)).replace(/[[\]|#]/g, ' ').trim() || undefined;
+        if (!targetPath) return match;
+        const asset = resolveTarget(targetPath, noteSrcDir, maps.assetByRel, maps.assetByBase);
+        if (asset) return asset.copied ? `${bang}[${label}](${asset.url})` : match;
+        const note = resolveTarget(targetPath, noteSrcDir, maps.noteByRel, maps.noteByBase);
+        if (note) return buildWikiLink(note.wikiPath, heading, label.trim() || undefined);
         return match;
       },
     );
@@ -249,9 +264,16 @@ function transformNoteContent(content: string, noteSrcDir: string, maps: LinkMap
     return out;
   };
 
-  return splitCode(content)
-    .map((segment, i) => (i % 2 === 1 ? segment : rewriteSegment(segment)))
-    .join('');
+  // YAML frontmatter is metadata, not prose — leave it alone. (An unquoted
+  // rewritten [[link]] would also change how the YAML parses.)
+  const frontmatter = /^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/.exec(content)?.[0] ?? '';
+
+  return (
+    frontmatter +
+    splitCode(content.slice(frontmatter.length))
+      .map((segment, i) => (i % 2 === 1 ? segment : rewriteSegment(segment)))
+      .join('')
+  );
 }
 
 async function importTree(
@@ -298,11 +320,45 @@ async function importTree(
     }
   };
 
+  // readdir order is platform-dependent (ext4 returns hash order) and it
+  // decides both collision suffixes and duplicate-basename winners — sort so
+  // imports are deterministic.
+  files.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0));
+
+  // Distinct source folders can map to one name — Notion siblings
+  // "Page <id1>" and "Page <id2>" both become "Page" — and must not silently
+  // merge their children. Claim a unique destination folder per source folder.
+  const dirDest = new Map<string, string>([['', '']]);
+  const mapDirPath = (srcDir: string): string => {
+    const cached = dirDest.get(srcDir);
+    if (cached !== undefined) return cached;
+    const slash = srcDir.lastIndexOf('/');
+    const parent = mapDirPath(slash === -1 ? '' : srcDir.slice(0, slash));
+    const name = srcDir.slice(slash + 1);
+    const mapped = sanitizeSegment(opts.mode === 'notion' ? stripNotionId(name) : name);
+    const dest = claimDest(parent ? `${parent}/${mapped}` : mapped);
+    dirDest.set(srcDir, dest);
+    return dest;
+  };
+
+  // Bare-basename links ([[Note]]) with duplicate names across folders:
+  // prefer the shallowest source path, then alphabetical (via the sort above).
+  // Same-folder matches already win earlier, inside resolveTarget.
+  const depth = (rel: string): number => rel.split('/').length;
+  const claimBase = <T extends { srcRel: string }>(map: Map<string, T>, key: string, item: T) => {
+    const prev = map.get(key);
+    if (!prev || depth(item.srcRel) < depth(prev.srcRel)) map.set(key, item);
+  };
+
   for (const file of files) {
-    const mappedRel = claimDest(mapRelPath(file.rel, opts.mode));
+    const slash = file.rel.lastIndexOf('/');
+    const destDir = mapDirPath(slash === -1 ? '' : file.rel.slice(0, slash));
+    const baseName = file.rel.slice(slash + 1);
+    const mappedName = mapRelPath(baseName, opts.mode);
+    const mappedRel = claimDest(destDir ? `${destDir}/${mappedName}` : mappedName);
     const isNote = path.posix.extname(file.rel).toLowerCase() === '.md';
-    const srcKey = relKey(file.rel.toLowerCase());
-    const srcBaseKey = relKey((file.rel.split('/').pop() ?? file.rel).toLowerCase());
+    const srcKey = relKey(file.rel);
+    const srcBaseKey = relKey(baseName);
     if (isNote) {
       const note: PlannedNote = {
         abs: file.abs,
@@ -312,18 +368,19 @@ async function importTree(
       };
       notes.push(note);
       maps.noteByRel.set(srcKey, note);
-      if (!maps.noteByBase.has(srcBaseKey)) maps.noteByBase.set(srcBaseKey, note);
+      claimBase(maps.noteByBase, srcBaseKey, note);
     } else {
       const asset: PlannedAsset = {
         abs: file.abs,
         srcRel: file.rel,
         destRel: `${assetsRootRel}/${mappedRel}`,
         url: '',
+        copied: false,
       };
       asset.url = toWorkspaceUrl(asset.destRel);
       assets.push(asset);
       maps.assetByRel.set(srcKey, asset);
-      if (!maps.assetByBase.has(srcBaseKey)) maps.assetByBase.set(srcBaseKey, asset);
+      claimBase(maps.assetByBase, srcBaseKey, asset);
     }
   }
 
@@ -340,6 +397,7 @@ async function importTree(
       const dest = resolveWorkspacePath(asset.destRel);
       await fs.mkdir(path.dirname(dest), { recursive: true });
       await fs.copyFile(asset.abs, dest);
+      asset.copied = true;
       copiedAssets += 1;
     } catch (err) {
       console.error(`[ImportNotes] Failed to copy attachment ${asset.srcRel}:`, err);
@@ -367,7 +425,7 @@ async function importTree(
 }
 
 // Extract a zip with zip-slip/symlink guards (same discipline as apps/installer).
-async function extractZip(zipPath: string, destDir: string): Promise<void> {
+export async function extractZip(zipPath: string, destDir: string): Promise<void> {
   await fs.mkdir(destDir, { recursive: true });
   await new Promise<void>((resolve, reject) => {
     yauzl.open(zipPath, { lazyEntries: true }, (err, zip) => {
@@ -425,7 +483,7 @@ async function extractZip(zipPath: string, destDir: string): Promise<void> {
 
 // Notion export zips often wrap everything in a single "Export-<uuid>/" folder
 // (and large exports ship as nested Part-N.zip files). Unwrap to the real root.
-async function findContentRoot(dir: string): Promise<string> {
+export async function findContentRoot(dir: string): Promise<string> {
   for (let depth = 0; depth < 4; depth++) {
     const entries = (await fs.readdir(dir, { withFileTypes: true })).filter(
       (e) => !e.name.startsWith('.') && !e.name.startsWith('__MACOSX'),
