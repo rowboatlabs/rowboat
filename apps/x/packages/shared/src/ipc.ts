@@ -58,6 +58,22 @@ const KnowledgeSourceConfigSchema = z.object({
   filters: z.record(z.string(), z.unknown()).optional(),
 });
 
+// Lifecycle of the client auto-updater (apps/main/src/updater.ts).
+// - disabled: dev build — the updater never initializes
+// - unsupported: platform can't auto-update (`reason` says why)
+// - ready: an update is downloaded and installed; restart switches to it
+const UpdaterStatusSchema = z.object({
+  state: z.enum(['disabled', 'unsupported', 'idle', 'checking', 'downloading', 'ready', 'error']),
+  version: z.string(),
+  reason: z.enum(['dev', 'platform', 'not-in-applications']).optional(),
+  newVersion: z.string().optional(),
+  // Markdown body of the staged update's GitHub release, when known — the
+  // restart card renders it as "What's new".
+  releaseNotes: z.string().optional(),
+  error: z.string().optional(),
+  lastCheckedAt: z.number().optional(),
+});
+
 const ipcSchemas = {
   'app:getVersions': {
     req: z.null(),
@@ -797,6 +813,37 @@ const ipcSchemas = {
     res: z.object({
       url: z.string().nullable(),
     }),
+  },
+  // Consume-once "the app was just updated" notice. `updatedFrom` is the
+  // previously recorded version on the first invoke of the first launch
+  // after an update, and null on every other invoke (fresh install,
+  // unchanged version, or already consumed this run).
+  'app:consumeUpdateInfo': {
+    req: z.null(),
+    res: z.object({
+      version: z.string(),
+      updatedFrom: z.string().nullable(),
+    }),
+  },
+  // --- Client auto-update (apps/main/src/updater.ts) ---
+  // Pushed to all windows whenever the updater state changes.
+  'updater:status': {
+    req: UpdaterStatusSchema,
+    res: z.null(),
+  },
+  'updater:getStatus': {
+    req: z.null(),
+    res: UpdaterStatusSchema,
+  },
+  // Kick off a manual check (no-op unless idle/error); progress arrives via
+  // updater:status pushes. Returns the snapshot after initiating.
+  'updater:check': {
+    req: z.null(),
+    res: UpdaterStatusSchema,
+  },
+  'updater:quitAndInstall': {
+    req: z.null(),
+    res: z.object({}),
   },
   // Tray commands issued before the renderer was ready (mirrors the pending
   // deep-link pull above): the renderer drains this once on mount.

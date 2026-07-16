@@ -79,6 +79,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Toaster } from "@/components/ui/sonner"
+import { UpdateCard } from "@/components/update-card"
 import { BillingErrorDialog } from "@/components/billing-error-dialog"
 import { matchBillingError, type BillingErrorMatch } from "@/lib/billing-error"
 import { dispatchCreditExhausted, dispatchCreditReplenished } from "@/lib/credit-status"
@@ -4703,6 +4704,23 @@ function App() {
     return window.ipc.on('app:openUrl', ({ url }) => handle(url))
   }, [])
 
+  // "Updated to vX.Y.Z" card on the first launch after an update. Main
+  // compares its persisted version stamp against the running version and
+  // hands out `updatedFrom` exactly once, so reloads don't re-show this.
+  useEffect(() => {
+    void window.ipc.invoke('app:consumeUpdateInfo', null).then(({ version, updatedFrom }) => {
+      if (!updatedFrom) return
+      toast(`Updated to v${version}`, {
+        description: `Rowboat was updated from v${updatedFrom}.`,
+        action: {
+          label: "What's new",
+          onClick: () => window.open(`https://github.com/rowboatlabs/rowboat/releases/tag/v${version}`, '_blank'),
+        },
+        duration: 10000,
+      })
+    })
+  }, [])
+
   // Report the UI theme to the apps server (spec §7.1): apps read it from
   // GET /_rowboat/app and get live changes via the SSE theme event.
   useEffect(() => {
@@ -7186,6 +7204,7 @@ function App() {
         />
       </SidebarSectionProvider>
       <Toaster />
+      <UpdateCard />
       <BillingErrorDialog
         open={billingErrorOpen}
         match={billingErrorMatch}

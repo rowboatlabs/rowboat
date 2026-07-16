@@ -18,7 +18,7 @@ import {
 import { disposeAllTerminals } from "./terminal.js";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname } from "node:path";
-import { updateElectronApp, UpdateSourceType } from "update-electron-app";
+import { initUpdater } from "./updater.js";
 import { init as initGmailSync } from "@x/core/dist/knowledge/sync_gmail.js";
 import { init as initCalendarSync } from "@x/core/dist/knowledge/sync_calendar.js";
 import { init as initFirefliesSync } from "@x/core/dist/knowledge/sync_fireflies.js";
@@ -449,16 +449,9 @@ app.whenReady().then(async () => {
   // serves workspace files via app://workspace/<rel-path> for media previews.
   registerAppProtocol();
 
-  // Initialize auto-updater (only in production)
-  if (app.isPackaged) {
-    updateElectronApp({
-      updateSource: {
-        type: UpdateSourceType.ElectronPublicUpdateService,
-        repo: "rowboatlabs/rowboat",
-      },
-      notifyUser: true, // Shows native dialog when update is available
-    });
-  }
+  // Initialize auto-updater (no-ops in dev). Update state is pushed to the
+  // renderer (updater:status), which owns the restart prompt — see updater.ts.
+  initUpdater();
 
   // The agent-slack CLI ships bundled with the app (.package/dist/agent-slack.cjs)
   // and is resolved per call by the shared executor in @x/core. Availability is

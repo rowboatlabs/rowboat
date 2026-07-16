@@ -85,6 +85,8 @@ import * as appsIndexer from '@x/core/dist/apps/indexer.js';
 import * as appsServer from '@x/core/dist/apps/server.js';
 import * as appsAgents from '@x/core/dist/apps/agents.js';
 import { capture } from '@x/core/dist/analytics/posthog.js';
+import { recordAppVersion, isVersionUpgrade } from '@x/core/dist/config/app_version.js';
+import { getUpdaterStatus, checkForUpdates, quitAndInstallUpdate } from './updater.js';
 import * as githubAuth from '@x/core/dist/apps/github-auth.js';
 import * as appsStars from '@x/core/dist/apps/stars.js';
 import * as appsInstaller from '@x/core/dist/apps/installer.js';
@@ -833,6 +835,10 @@ export function stopServicesWatcher(): void {
 // Handler Implementations
 // ============================================================================
 
+// app:consumeUpdateInfo returns `updatedFrom` at most once per app run, so a
+// renderer reload doesn't re-show the "updated to vX" card.
+let updateNoticeConsumed = false;
+
 /**
  * Register all IPC handlers
  * Add new handlers here as you add channels to IPCChannels
@@ -855,6 +861,28 @@ export function setupIpcHandlers() {
     },
     'app:consumePendingDeepLink': async () => {
       return { url: consumePendingDeepLink() };
+    },
+    'app:consumeUpdateInfo': async () => {
+      const version = app.getVersion();
+      if (updateNoticeConsumed) return { version, updatedFrom: null };
+      updateNoticeConsumed = true;
+      const changedFrom = recordAppVersion(version);
+      // Downgrades still restamp (so the next upgrade reports correctly) but
+      // don't toast "Updated to vX" or count as a client update.
+      const updatedFrom = changedFrom && isVersionUpgrade(changedFrom, version) ? changedFrom : null;
+      // 'app_updated' is taken by the in-app apps feature; this is the client itself.
+      if (updatedFrom) capture('client_updated', { from: updatedFrom, to: version });
+      return { version, updatedFrom };
+    },
+    'updater:getStatus': async () => {
+      return getUpdaterStatus();
+    },
+    'updater:check': async () => {
+      return checkForUpdates();
+    },
+    'updater:quitAndInstall': async () => {
+      quitAndInstallUpdate();
+      return {};
     },
     'app:consumePendingTrayCommand': async () => {
       return { toggleMeetingNotes: consumePendingToggleMeetingNotes() };

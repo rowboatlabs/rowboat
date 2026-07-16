@@ -29,6 +29,7 @@ import { AccountSettings } from "@/components/settings/account-settings"
 import { ConnectedAccountsSettings } from "@/components/settings/connected-accounts-settings"
 import { MobileChannelsSettings } from "@/components/settings/mobile-channels-settings"
 import type { ApprovalPolicy } from "@x/shared/src/code-mode.js"
+import type { ipc as ipcShared } from "@x/shared"
 import { startProvisioning, useProvisioning, enabledOptimistic, type AgentStatus, type CodeModeAgentStatus } from "@/lib/code-mode-provisioning"
 import { useProviderModels } from "@/hooks/use-provider-models"
 
@@ -132,11 +133,139 @@ interface SettingsDialogProps {
   onOpenChange?: (open: boolean) => void
 }
 
+// --- Updates section (Help tab) ---
+
+type UpdaterStatus = ipcShared.IPCChannels['updater:status']['req']
+
+function UpdateSettings() {
+  const [status, setStatus] = useState<UpdaterStatus | null>(null)
+
+  useEffect(() => {
+    void window.ipc.invoke('updater:getStatus', null).then(setStatus)
+    return window.ipc.on('updater:status', setStatus)
+  }, [])
+
+  if (!status) return null
+
+  const checkNow = () => {
+    // Progress arrives via updater:status pushes; using the invoke's snapshot
+    // here could stomp a newer pushed state.
+    void window.ipc.invoke('updater:check', null)
+  }
+
+  let body: React.ReactNode
+  switch (status.state) {
+    case 'disabled':
+      body = (
+        <p className="text-xs text-muted-foreground">
+          Automatic updates are disabled in development builds.
+        </p>
+      )
+      break
+    case 'unsupported':
+      body = status.reason === 'not-in-applications' ? (
+        <p className="text-xs text-muted-foreground flex items-start gap-1.5">
+          <AlertTriangle className="size-3.5 shrink-0 mt-0.5 text-amber-500" />
+          Quit Rowboat and move it to the Applications folder to enable automatic updates.
+        </p>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          {"Automatic updates aren't available on this platform. "}
+          <a
+            href="https://github.com/rowboatlabs/rowboat/releases/latest"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline hover:text-foreground transition-colors"
+          >
+            Get the latest release
+          </a>
+        </p>
+      )
+      break
+    case 'checking':
+    case 'downloading':
+      body = (
+        <Button size="sm" variant="outline" disabled>
+          <Loader2 className="size-3.5 animate-spin" />
+          {status.state === 'checking' ? 'Checking for updates…' : 'Downloading update…'}
+        </Button>
+      )
+      break
+    case 'ready':
+      body = (
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-xs text-muted-foreground">
+            {status.newVersion
+              ? `Rowboat ${status.newVersion} is ready to install.`
+              : 'An update is ready to install.'}
+          </p>
+          <Button
+            size="sm"
+            className="shrink-0"
+            onClick={() => void window.ipc.invoke('updater:quitAndInstall', null)}
+          >
+            Restart to update
+          </Button>
+        </div>
+      )
+      break
+    case 'error':
+      body = (
+        <div className="flex items-start justify-between gap-3">
+          <p className="text-xs text-muted-foreground flex items-start gap-1.5">
+            <AlertTriangle className="size-3.5 shrink-0 mt-0.5 text-destructive" />
+            {`Update check failed: ${status.error ?? 'unknown error'}`}
+          </p>
+          <Button size="sm" variant="outline" className="shrink-0" onClick={checkNow}>
+            Try again
+          </Button>
+        </div>
+      )
+      break
+    case 'idle':
+      body = (
+        <div className="space-y-2">
+          {/* lastCheckedAt only exists after a check that found no update
+              (an available update moves the state to downloading/ready), so
+              idle + lastCheckedAt genuinely means "on the latest version". */}
+          {status.lastCheckedAt !== undefined && (
+            <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+              <CheckCircle2 className="size-3.5 text-green-500 shrink-0" />
+              <span>
+                {`You're up to date! Rowboat v${status.version} is the latest version.`}
+                <span className="text-muted-foreground/60">
+                  {` Checked at ${new Date(status.lastCheckedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.`}
+                </span>
+              </span>
+            </p>
+          )}
+          <Button size="sm" variant="outline" onClick={checkNow}>
+            <RefreshCw className="size-3.5" />
+            Check for updates
+          </Button>
+        </div>
+      )
+      break
+  }
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <h4 className="text-sm font-medium">Updates</h4>
+        <p className="text-xs text-muted-foreground mt-0.5">Rowboat v{status.version}</p>
+      </div>
+      {body}
+    </div>
+  )
+}
+
 // --- Help & Support tab ---
 
 function HelpSettings() {
   return (
     <div className="space-y-4">
+      <UpdateSettings />
+      <Separator />
       <div>
         <h4 className="text-sm font-medium">Help &amp; Support</h4>
         <p className="text-xs text-muted-foreground mt-0.5">Get help from our community</p>
