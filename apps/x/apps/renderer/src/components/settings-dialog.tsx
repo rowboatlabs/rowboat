@@ -25,6 +25,8 @@ import { useTheme } from "@/contexts/theme-context"
 import { toast } from "sonner"
 import { AnthropicIcon, DiscordIcon, GenericApiIcon, GitHubIcon, GoogleIcon, OllamaIcon, OpenAIIcon, OpenRouterIcon, VercelIcon } from "@/components/onboarding/provider-icons"
 import { AccountSettings } from "@/components/settings/account-settings"
+import { ModelSelect } from "@/components/model-select"
+import { modelKey, parseModelKey, useModelOptions } from "@/hooks/use-model-options"
 import { ConnectedAccountsSettings } from "@/components/settings/connected-accounts-settings"
 import { MobileChannelsSettings } from "@/components/settings/mobile-channels-settings"
 import type { ApprovalPolicy } from "@x/shared/src/code-mode.js"
@@ -374,7 +376,12 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
   // Top-level subagentModels config (provider-qualified refs), saved
   // immediately on change like the defer toggle. Only rendered when not
   // signed in — the signed-in surface (RowboatModelSettings) has its own.
+  // Gateway models are excluded: they need sign-in to be usable.
   const [subagentTiers, setSubagentTiers] = useState<Record<string, { provider: string; model: string }>>({})
+  const { options: tierModelOptions } = useModelOptions({
+    enabled: dialogOpen && !rowboatConnected,
+    includeGateway: false,
+  })
 
   const activeConfig = providerConfigs[provider]
   const showApiKey = provider === "openai" || provider === "anthropic" || provider === "google" || provider === "openrouter" || provider === "aigateway" || provider === "openai-compatible"
@@ -485,11 +492,11 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
 
   const handleTierChange = useCallback(async (tier: "light" | "medium" | "heavy", key: string) => {
     const next = { ...subagentTiers }
-    if (!key) {
-      delete next[tier]
+    const ref = key ? parseModelKey(key) : null
+    if (ref) {
+      next[tier] = ref
     } else {
-      const sep = key.indexOf("::")
-      next[tier] = { provider: key.slice(0, sep), model: key.slice(sep + 2) }
+      delete next[tier]
     }
     setSubagentTiers(next)
     try {
@@ -1009,72 +1016,34 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
       </div>
 
       {/* Sub-agent tier models (top-level config, spans all configured providers) */}
-      {!rowboatConnected && (() => {
-        const tierOptions: Array<{ key: string; label: string; provider: string }> = []
-        const seen = new Set<string>()
-        for (const [flavor, cfg] of Object.entries(providerConfigs)) {
-          const configured = cfg.apiKey.trim() !== "" || cfg.models.some((m) => m.trim() !== "")
-          if (!configured) continue
-          const catalogModels = modelsCatalog[flavor] || []
-          const entries = catalogModels.length > 0
-            ? catalogModels.map((m) => ({ id: m.id, name: m.name || m.id }))
-            : cfg.models.filter((m) => m.trim() !== "").map((m) => ({ id: m, name: m }))
-          for (const m of entries) {
-            const key = `${flavor}::${m.id}`
-            if (seen.has(key)) continue
-            seen.add(key)
-            tierOptions.push({ key, label: m.name, provider: flavor })
-          }
-        }
-        const tierRows: Array<{ tier: "light" | "medium" | "heavy"; label: string }> = [
-          { tier: "light", label: "Light (extraction, search, summaries)" },
-          { tier: "medium", label: "Medium (comparison, synthesis)" },
-          { tier: "heavy", label: "Heavy (hard analysis)" },
-        ]
-        return (
-          <div className="space-y-3 rounded-md border px-3 py-2.5">
-            <div className="min-w-0">
-              <div className="text-sm font-medium">Sub-agent models</div>
-              <div className="text-xs text-muted-foreground mt-0.5">
-                Models for spawned sub-agents by task difficulty. Unset tiers use the conversation's model.
-              </div>
+      {!rowboatConnected && (
+        <div className="space-y-3 rounded-md border px-3 py-2.5">
+          <div className="min-w-0">
+            <div className="text-sm font-medium">Sub-agent models</div>
+            <div className="text-xs text-muted-foreground mt-0.5">
+              Models for spawned sub-agents by task difficulty. Unset tiers use the conversation's model.
             </div>
-            {tierRows.map(({ tier, label }) => {
-              const current = subagentTiers[tier]
-              const currentKey = current ? `${current.provider}::${current.model}` : ""
-              const currentInOptions = !currentKey || tierOptions.some((o) => o.key === currentKey)
-              return (
-                <div key={tier} className="space-y-1">
-                  <span className="text-xs font-medium text-muted-foreground">{label}</span>
-                  <Select
-                    value={currentKey || "__same__"}
-                    onValueChange={(v) => handleTierChange(tier, v === "__same__" ? "" : v)}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Same as conversation model" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__same__">Same as conversation model</SelectItem>
-                      {!currentInOptions && (
-                        <SelectItem value={currentKey}>
-                          {current!.model}
-                          <span className="ml-2 text-xs text-muted-foreground">{current!.provider}</span>
-                        </SelectItem>
-                      )}
-                      {tierOptions.map((o) => (
-                        <SelectItem key={o.key} value={o.key}>
-                          {o.label}
-                          <span className="ml-2 text-xs text-muted-foreground">{o.provider}</span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )
-            })}
           </div>
-        )
-      })()}
+          {([
+            { tier: "light", label: "Light (extraction, search, summaries)" },
+            { tier: "medium", label: "Medium (comparison, synthesis)" },
+            { tier: "heavy", label: "Heavy (hard analysis)" },
+          ] as const).map(({ tier, label }) => {
+            const current = subagentTiers[tier]
+            return (
+              <ModelSelect
+                key={tier}
+                label={label}
+                labelClassName="text-xs font-medium text-muted-foreground"
+                value={current ? modelKey(current.provider, current.model) : ""}
+                onChange={(key) => handleTierChange(tier, key)}
+                options={tierModelOptions}
+                defaultLabel="Same as conversation model"
+              />
+            )
+          })}
+        </div>
+      )}
 
       {/* Test & Save button */}
       <Button
@@ -1419,34 +1388,10 @@ function ToolsLibrarySettings({ dialogOpen, rowboatConnected }: { dialogOpen: bo
 // refs, so a signed-in user can e.g. keep the gateway assistant while
 // running background agents on a local Ollama model.
 
-interface HybridModelOption {
-  provider: string
-  model: string
-  label: string
-}
-
-const providerDisplayNames: Record<string, string> = {
-  openai: 'OpenAI',
-  anthropic: 'Anthropic',
-  google: 'Gemini',
-  ollama: 'Ollama',
-  openrouter: 'OpenRouter',
-  aigateway: 'AI Gateway',
-  'openai-compatible': 'OpenAI-Compatible',
-  rowboat: 'Rowboat',
-}
-
-const HYBRID_SEP = "::"
-const hybridKey = (provider: string, model: string) => `${provider}${HYBRID_SEP}${model}`
-
-function parseHybridKey(key: string): { provider: string; model: string } | null {
-  const index = key.indexOf(HYBRID_SEP)
-  if (index <= 0) return null
-  return { provider: key.slice(0, index), model: key.slice(index + HYBRID_SEP.length) }
-}
-
 function RowboatModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
-  const [options, setOptions] = useState<HybridModelOption[]>([])
+  // Options loading lives in the hook; this component only loads/saves the
+  // user's selections and renders.
+  const { options, loading: optionsLoading } = useModelOptions({ enabled: dialogOpen })
   const [selectedDefault, setSelectedDefault] = useState("")
   const [selectedKg, setSelectedKg] = useState("")
   const [selectedLiveNote, setSelectedLiveNote] = useState("")
@@ -1463,45 +1408,11 @@ function RowboatModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
     async function load() {
       setLoading(true)
       try {
-        const collected: HybridModelOption[] = []
-        const seen = new Set<string>()
-        const push = (provider: string, model: string, label?: string) => {
-          if (!model) return
-          const key = hybridKey(provider, model)
-          if (seen.has(key)) return
-          seen.add(key)
-          collected.push({ provider, model, label: label || model })
-        }
-
-        const catalog: Record<string, LlmModelOption[]> = {}
-        try {
-          const listResult = await window.ipc.invoke("models:list", null)
-          for (const p of listResult.providers || []) {
-            catalog[p.id] = p.models || []
-          }
-        } catch { /* offline — BYOK entries below still load */ }
-        for (const m of catalog["rowboat"] || []) push("rowboat", m.id, m.name || m.id)
-
         let parsed: Record<string, unknown> = {}
         try {
           const configResult = await window.ipc.invoke("workspace:readFile", { path: "config/models.json" })
           parsed = JSON.parse(configResult.data)
         } catch { /* no BYOK config yet */ }
-
-        const providersMap = (parsed.providers ?? {}) as Record<string, Record<string, unknown>>
-        for (const [flavor, entry] of Object.entries(providersMap)) {
-          const hasKey = typeof entry.apiKey === "string" && (entry.apiKey as string).trim().length > 0
-          const hasBaseURL = typeof entry.baseURL === "string" && (entry.baseURL as string).trim().length > 0
-          if (!hasKey && !hasBaseURL) continue
-          push(flavor, typeof entry.model === "string" ? entry.model : "")
-          const catalogModels = catalog[flavor] || []
-          if (catalogModels.length > 0) {
-            for (const m of catalogModels) push(flavor, m.id, m.name || m.id)
-          } else {
-            for (const m of Array.isArray(entry.models) ? entry.models as string[] : []) push(flavor, m)
-          }
-        }
-        setOptions(collected)
 
         // Current selections. Legacy string overrides pair with the BYOK
         // top-level flavor (mirrors core/models/defaults.ts).
@@ -1509,11 +1420,11 @@ function RowboatModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
         const toKey = (value: unknown): string => {
           if (!value) return ""
           if (typeof value === "string") {
-            return typeof legacyFlavor === "string" ? hybridKey(legacyFlavor, value) : ""
+            return typeof legacyFlavor === "string" ? modelKey(legacyFlavor, value) : ""
           }
           const ref = value as { provider?: unknown; model?: unknown }
           return typeof ref.provider === "string" && typeof ref.model === "string"
-            ? hybridKey(ref.provider, ref.model)
+            ? modelKey(ref.provider, ref.model)
             : ""
         }
         setSelectedDefault(toKey(parsed.defaultSelection))
@@ -1537,7 +1448,7 @@ function RowboatModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
   const handleSave = useCallback(async () => {
     setSaving(true)
     try {
-      const toRef = (key: string) => (key ? parseHybridKey(key) : null)
+      const toRef = (key: string) => (key ? parseModelKey(key) : null)
       // The whole object is written each save; unset tiers mean "inherit
       // the conversation model". A later sign-in resets tiers to the
       // curated defaults (see seedSubagentModelDefaults).
@@ -1570,47 +1481,17 @@ function RowboatModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
     value: string,
     onChange: (v: string) => void,
     defaultLabel: string,
-  ) => {
-    // A configured value can reference a model outside the current options
-    // (BYOK-era tier pick, model dropped from the catalog). Render it as a
-    // selectable item instead of a blank control.
-    const valueInOptions = !value || options.some((o) => hybridKey(o.provider, o.model) === value)
-    const currentRef = !valueInOptions ? parseHybridKey(value) : null
-    return (
-      <div className="space-y-2">
-        <label className="text-sm font-medium">{label}</label>
-        <Select value={value || "__default__"} onValueChange={(v) => onChange(v === "__default__" ? "" : v)}>
-          <SelectTrigger className="w-full">
-            <SelectValue placeholder={defaultLabel} />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__default__">{defaultLabel}</SelectItem>
-            {currentRef && (
-              <SelectItem value={value}>
-                {currentRef.model}
-                <span className="ml-2 text-xs text-muted-foreground">
-                  {providerDisplayNames[currentRef.provider] || currentRef.provider}
-                </span>
-              </SelectItem>
-            )}
-            {options.map((o) => {
-              const key = hybridKey(o.provider, o.model)
-              return (
-                <SelectItem key={key} value={key}>
-                  {o.label}
-                  <span className="ml-2 text-xs text-muted-foreground">
-                    {providerDisplayNames[o.provider] || o.provider}
-                  </span>
-                </SelectItem>
-              )
-            })}
-          </SelectContent>
-        </Select>
-      </div>
-    )
-  }
+  ) => (
+    <ModelSelect
+      label={label}
+      value={value}
+      onChange={onChange}
+      options={options}
+      defaultLabel={defaultLabel}
+    />
+  )
 
-  if (loading) {
+  if (loading || optionsLoading) {
     return (
       <div className="flex items-center justify-center py-12 text-muted-foreground">
         <Loader2 className="size-5 animate-spin" />
