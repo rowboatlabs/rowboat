@@ -62,6 +62,7 @@ import {
   usePromptInputController,
 } from '@/components/ai-elements/prompt-input'
 import { toast } from 'sonner'
+import { useModelOptions } from '@/hooks/use-model-options'
 
 export type StagedAttachment = {
   id: string
@@ -318,18 +319,14 @@ function ChatInputInner({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const canSubmit = (Boolean(message.trim()) || attachments.length > 0) && !isProcessing
 
-  const [configuredModels, setConfiguredModels] = useState<ConfiguredModel[]>([])
   const [activeModelKey, setActiveModelKey] = useState('')
   // The effective runtime default (what a run actually uses when the user
   // hasn't picked a model) — shown in the picker instead of guessing from
   // list order, which can disagree with the real default.
   const [defaultModel, setDefaultModel] = useState<ConfiguredModel | null>(null)
-  const loadModelConfigEpoch = useRef(0)
   const [lockedModel, setLockedModel] = useState<SelectedModel | null>(null)
-  // '' = auto. Per-model reasoning capability ("provider/model" → flag) from
-  // models:list; the effort control renders only for known-reasoning models.
+  // '' = auto. The effort control renders only for known-reasoning models.
   const [reasoningEffort, setReasoningEffort] = useState<'' | ReasoningEffortLevel>('')
-  const [reasoningByKey, setReasoningByKey] = useState<Record<string, boolean>>({})
   const [searchEnabled, setSearchEnabled] = useState(false)
   const [searchAvailable, setSearchAvailable] = useState(false)
   const [isRowboatConnected, setIsRowboatConnected] = useState(false)
@@ -421,113 +418,50 @@ function ChatInputInner({
     return cleanup
   }, [])
 
-  // Load the list of models the user can choose from. Hybrid mode: signed-in
-  // users get the gateway list AND every BYOK provider configured in
-  // models.json (selecting a BYOK model routes that message through the
-  // user's own key / local server). Signed-out users get BYOK only.
-  const loadModelConfig = useCallback(async () => {
-    // Concurrent runs race (mount fires one before the sign-in state resolves,
-    // which fires another) — only the newest run may write state, else a slow
-    // stale run can clobber the fresh list with an empty one.
-    const epoch = ++loadModelConfigEpoch.current
+  // The pickable models. Hybrid mode: signed-in users get the gateway list
+  // AND every BYOK provider configured in models.json (selecting a BYOK
+  // model routes that message through the user's own key / local server);
+  // signed-out users get BYOK only. Loading, ordering (default selection
+  // first), dedupe, and the models-config-changed refresh all live in the
+  // hook — this component only renders its output.
+  const { options: modelOptions } = useModelOptions({ includeGateway: isRowboatConnected })
+  const configuredModels = useMemo<ConfiguredModel[]>(
+    () => modelOptions.map((o) => ({ provider: o.provider as ProviderName, model: o.model })),
+    [modelOptions],
+  )
+  // Per-model reasoning capability ("provider/model" → flag); the effort
+  // control renders only for known-reasoning models.
+  const reasoningByKey = useMemo<Record<string, boolean>>(
+    () =>
+      Object.fromEntries(
+        modelOptions
+          .filter((o) => typeof o.reasoning === 'boolean')
+          .map((o) => [`${o.provider}/${o.model}`, o.reasoning as boolean]),
+      ),
+    [modelOptions],
+  )
+
+  // The effective runtime default is resolved in core (llm:getDefaultModel);
+  // refresh it alongside the options.
+  const loadDefaultModel = useCallback(async () => {
     try {
       const def = await window.ipc.invoke('llm:getDefaultModel', null)
-      if (loadModelConfigEpoch.current !== epoch) return
       setDefaultModel({ provider: def.provider as ProviderName, model: def.model })
     } catch {
-      if (loadModelConfigEpoch.current === epoch) setDefaultModel(null)
+      setDefaultModel(null)
     }
-    try {
-      const models: ConfiguredModel[] = []
-      const seen = new Set<string>()
-      const push = (provider: string, model: string) => {
-        if (!model) return
-        const key = `${provider}/${model}`
-        if (seen.has(key)) return
-        seen.add(key)
-        models.push({ provider: provider as ProviderName, model })
-      }
-
-      // Full catalog per provider (gateway + cloud). Providers with no
-      // catalog (Ollama, OpenAI-compatible) fall back to the models saved in
-      // config below.
-      const catalog: Record<string, string[]> = {}
-      const reasoningFlags: Record<string, boolean> = {}
-      try {
-        const listResult = await window.ipc.invoke('models:list', null)
-        for (const p of listResult.providers || []) {
-          catalog[p.id] = (p.models || []).map((m: { id: string }) => m.id)
-          for (const m of p.models || []) {
-            if (typeof m.reasoning === 'boolean') {
-              reasoningFlags[`${p.id}/${m.id}`] = m.reasoning
-            }
-          }
-        }
-      } catch { /* offline / no catalog — fall back to saved config below */ }
-      if (loadModelConfigEpoch.current === epoch) setReasoningByKey(reasoningFlags)
-
-      if (isRowboatConnected) {
-        for (const m of catalog['rowboat'] || []) push('rowboat', m)
-      }
-
-      try {
-        const result = await window.ipc.invoke('workspace:readFile', { path: 'config/models.json' })
-        const parsed = JSON.parse(result.data)
-
-        // List the default provider first so its default model leads the
-        // BYOK section of the picker.
-        const defaultFlavor = typeof parsed?.provider?.flavor === 'string' ? parsed.provider.flavor : ''
-        const flavors = Object.keys(parsed?.providers || {})
-          .sort((a, b) => (a === defaultFlavor ? -1 : b === defaultFlavor ? 1 : 0))
-
-        for (const flavor of flavors) {
-          const e = (parsed.providers[flavor] || {}) as Record<string, unknown>
-          const hasKey = typeof e.apiKey === 'string' && (e.apiKey as string).trim().length > 0
-          const hasBaseURL = typeof e.baseURL === 'string' && (e.baseURL as string).trim().length > 0
-          if (!hasKey && !hasBaseURL) continue // provider not configured
-
-          // The provider's saved default model leads, then the rest of its catalog.
-          push(flavor, typeof e.model === 'string' ? e.model : '')
-          const catalogModels = catalog[flavor] || []
-          if (catalogModels.length > 0) {
-            for (const m of catalogModels) push(flavor, m)
-          } else {
-            // No catalog (local provider) — fall back to whatever is saved.
-            const saved = Array.isArray(e.models) ? e.models as string[] : []
-            for (const m of saved) push(flavor, m)
-          }
-        }
-
-        // The user's explicit default selection leads the whole picker.
-        const sel = parsed?.defaultSelection
-        if (sel && typeof sel.provider === 'string' && typeof sel.model === 'string') {
-          const selKey = `${sel.provider}/${sel.model}`
-          const index = models.findIndex((m) => `${m.provider}/${m.model}` === selKey)
-          if (index > 0) {
-            const [entry] = models.splice(index, 1)
-            models.unshift(entry)
-          }
-        }
-      } catch { /* no BYOK config yet */ }
-
-      if (loadModelConfigEpoch.current !== epoch) return
-      setConfiguredModels(models)
-    } catch (err) {
-      // No config yet — but surface unexpected failures for diagnosis.
-      console.error('[chat-input] failed to load model list', err)
-    }
-  }, [isRowboatConnected])
+  }, [])
 
   useEffect(() => {
-    loadModelConfig()
-  }, [isActive, loadModelConfig])
+    loadDefaultModel()
+  }, [isActive, loadDefaultModel])
 
   // Reload when model config changes (e.g. from settings dialog)
   useEffect(() => {
-    const handler = () => { loadModelConfig() }
+    const handler = () => { loadDefaultModel() }
     window.addEventListener('models-config-changed', handler)
     return () => window.removeEventListener('models-config-changed', handler)
-  }, [loadModelConfig])
+  }, [loadDefaultModel])
 
   // Load the global code-mode feature flag (from settings) and stay in sync.
   useEffect(() => {

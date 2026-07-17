@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
+import { useModelsCatalog } from "@/hooks/use-model-options"
 import { GoogleClientIdModal } from "@/components/google-client-id-modal"
 import { setGoogleCredentials } from "@/lib/google-credentials-store"
 import { toast } from "sonner"
@@ -44,21 +45,17 @@ type OnboardingPath = 'rowboat' | 'byok' | null
 
 type LlmProviderFlavor = "openai" | "anthropic" | "google" | "openrouter" | "aigateway" | "ollama" | "openai-compatible"
 
-interface LlmModelOption {
-  id: string
-  name?: string
-  release_date?: string
-}
-
 export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   const [currentStep, setCurrentStep] = useState<Step>(0)
   const [onboardingPath, setOnboardingPath] = useState<OnboardingPath>(null)
 
   // LLM setup state
   const [llmProvider, setLlmProvider] = useState<LlmProviderFlavor>("openai")
-  const [modelsCatalog, setModelsCatalog] = useState<Record<string, LlmModelOption[]>>({})
-  const [modelsLoading, setModelsLoading] = useState(false)
-  const [modelsError, setModelsError] = useState<string | null>(null)
+  // Raw catalog for provider setup — loading lives in the hook.
+  const { byId: modelsCatalog, loading: modelsLoading } = useModelsCatalog({ enabled: open })
+  const modelsError = !modelsLoading && Object.keys(modelsCatalog).length === 0
+    ? "Failed to load models list"
+    : null
   const [providerConfigs, setProviderConfigs] = useState<Record<LlmProviderFlavor, { apiKey: string; baseURL: string; model: string; knowledgeGraphModel: string; meetingNotesModel: string; liveNoteAgentModel: string }>>({
     openai: { apiKey: "", baseURL: "", model: "", knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "" },
     anthropic: { apiKey: "", baseURL: "", model: "", knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "" },
@@ -153,32 +150,6 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
     }
     // (Composio Gmail/Calendar flag fetches removed — sync was deleted.)
     loadProviders()
-  }, [open])
-
-  // Load LLM models catalog on open
-  useEffect(() => {
-    if (!open) return
-
-    async function loadModels() {
-      try {
-        setModelsLoading(true)
-        setModelsError(null)
-        const result = await window.ipc.invoke("models:list", null)
-        const catalog: Record<string, LlmModelOption[]> = {}
-        for (const provider of result.providers || []) {
-          catalog[provider.id] = provider.models || []
-        }
-        setModelsCatalog(catalog)
-      } catch (error) {
-        console.error("Failed to load models catalog:", error)
-        setModelsError("Failed to load models list")
-        setModelsCatalog({})
-      } finally {
-        setModelsLoading(false)
-      }
-    }
-
-    loadModels()
   }, [open])
 
   // Preferred default models for each provider

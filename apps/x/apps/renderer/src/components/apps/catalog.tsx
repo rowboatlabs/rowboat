@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { BadgeCheck, Bot, Download, Link2, RefreshCw, Search, ShieldAlert, Star } from 'lucide-react'
 import type { rowboatApp } from '@x/shared'
+import { useModelsCatalog } from '@/hooks/use-model-options'
 
 // Catalog tab (spec §14): search the registry, install with the D18 capability
 // disclosure, install from a direct bundle URL.
@@ -88,21 +89,18 @@ function EnableAgentsDialog({ appName, names, defaultModel, busy, onEnable, onSk
   onEnable: (model: ModelChoice | null) => void
   onSkip: () => void
 }) {
-  const [options, setOptions] = useState<Array<ModelChoice & { label: string }>>([])
+  // Full raw catalog: an app template may pin any model, not just ones the
+  // user has configured. On load failure the picker is empty and enabling
+  // keeps the pinned model.
+  const { providers: catalogProviders } = useModelsCatalog()
+  const options: Array<ModelChoice & { label: string }> = catalogProviders.flatMap((p) =>
+    p.models.map((m) => ({
+      provider: p.id,
+      model: m.id,
+      label: `${m.name ?? m.id} (${p.name})`,
+    })),
+  )
   const [selected, setSelected] = useState<string>(defaultModel ? `${defaultModel.provider}::${defaultModel.model}` : '')
-
-  useEffect(() => {
-    void (async () => {
-      try {
-        const r = await window.ipc.invoke('models:list', null)
-        setOptions(r.providers.flatMap((p) => p.models.map((m) => ({
-          provider: p.id,
-          model: m.id,
-          label: `${m.name ?? m.id} (${p.name})`,
-        }))))
-      } catch { /* no picker — enable keeps the pinned model */ }
-    })()
-  }, [])
 
   const choice = (): ModelChoice | null => {
     const [provider, model] = selected.split('::')

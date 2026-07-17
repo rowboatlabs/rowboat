@@ -23,46 +23,17 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import type { ProjectRow } from './use-code-sessions'
+import { useModelOptions } from '@/hooks/use-model-options'
 
 type AgentStatus = { installed: boolean; signedIn: boolean }
-type ModelOption = { provider: string; model: string }
+// Rowboat-mode turns can run on any model the user can pick in the chat
+// composer — same hook, same list (gateway when signed in + configured
+// BYOK providers).
 
 const POLICY_LABEL: Record<ApprovalPolicy, string> = {
   ask: 'Ask every time',
   'auto-approve-reads': 'Auto-approve reads',
   yolo: 'Auto-approve everything (YOLO)',
-}
-
-// Models the user can pick for Rowboat-mode turns — mirrors the chat
-// composer's loading: gateway list when signed in, models.json otherwise.
-async function loadModelOptions(): Promise<ModelOption[]> {
-  try {
-    const oauth = await window.ipc.invoke('oauth:getState', null)
-    const connected = oauth.config?.rowboat?.connected ?? false
-    if (connected) {
-      const listResult = await window.ipc.invoke('models:list', null)
-      const rowboatProvider = (listResult.providers as Array<{ id: string; models?: Array<{ id: string }> }> | undefined)
-        ?.find((p) => p.id === 'rowboat')
-      return (rowboatProvider?.models ?? []).map((m) => ({ provider: 'rowboat', model: m.id }))
-    }
-    const result = await window.ipc.invoke('workspace:readFile', { path: 'config/models.json' })
-    const parsed = JSON.parse(result.data)
-    const models: ModelOption[] = []
-    if (parsed?.providers) {
-      for (const [flavor, entry] of Object.entries(parsed.providers)) {
-        const e = entry as Record<string, unknown>
-        const modelList: string[] = Array.isArray(e.models) ? e.models as string[] : []
-        const singleModel = typeof e.model === 'string' ? e.model : ''
-        const allModels = modelList.length > 0 ? modelList : singleModel ? [singleModel] : []
-        for (const model of allModels) {
-          if (model) models.push({ provider: flavor, model })
-        }
-      }
-    }
-    return models
-  } catch {
-    return []
-  }
 }
 
 export function NewSessionDialog({
@@ -84,7 +55,8 @@ export function NewSessionDialog({
   const [isolation, setIsolation] = useState<'in-repo' | 'worktree'>('in-repo')
   const [title, setTitle] = useState('')
   const [creating, setCreating] = useState(false)
-  const [modelOptions, setModelOptions] = useState<ModelOption[]>([])
+  const [rowboatConnected, setRowboatConnected] = useState(false)
+  const { options: modelOptions } = useModelOptions({ enabled: open, includeGateway: rowboatConnected })
   // 'default' = let the backend use the configured default model.
   const [modelKey, setModelKey] = useState('default')
   // The coding agent's own model + reasoning effort. 'default' leaves the
@@ -105,7 +77,9 @@ export function NewSessionDialog({
     setModelKey('default')
     setAgentModel('default')
     setAgentEffort('default')
-    void loadModelOptions().then(setModelOptions)
+    void window.ipc.invoke('oauth:getState', null)
+      .then((oauth) => setRowboatConnected(oauth.config?.rowboat?.connected ?? false))
+      .catch(() => setRowboatConnected(false))
     void window.ipc.invoke('codeMode:checkAgentStatus', null).then((status) => {
       setAgentStatus(status)
       // Default to whichever agent is actually ready.

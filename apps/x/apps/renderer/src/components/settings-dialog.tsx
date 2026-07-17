@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { useState, useEffect, useCallback, useMemo } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Terminal, AlertTriangle, RefreshCw, PanelRight, Bell, Smartphone } from "lucide-react"
 
 import {
@@ -26,7 +26,7 @@ import { toast } from "sonner"
 import { AnthropicIcon, DiscordIcon, GenericApiIcon, GitHubIcon, GoogleIcon, OllamaIcon, OpenAIIcon, OpenRouterIcon, VercelIcon } from "@/components/onboarding/provider-icons"
 import { AccountSettings } from "@/components/settings/account-settings"
 import { ModelSelect } from "@/components/model-select"
-import { modelKey, parseModelKey, useModelOptions } from "@/hooks/use-model-options"
+import { modelKey, parseModelKey, useModelOptions, useModelsCatalog } from "@/hooks/use-model-options"
 import { ConnectedAccountsSettings } from "@/components/settings/connected-accounts-settings"
 import { MobileChannelsSettings } from "@/components/settings/mobile-channels-settings"
 import type { ApprovalPolicy } from "@x/shared/src/code-mode.js"
@@ -311,12 +311,6 @@ function AppearanceSettings() {
 
 type LlmProviderFlavor = "openai" | "anthropic" | "google" | "openrouter" | "aigateway" | "ollama" | "openai-compatible"
 
-interface LlmModelOption {
-  id: string
-  name?: string
-  release_date?: string
-}
-
 const primaryProviders: Array<{ id: LlmProviderFlavor; name: string; description: string; icon: React.ElementType }> = [
   { id: "openai", name: "OpenAI", description: "GPT models", icon: OpenAIIcon },
   { id: "anthropic", name: "Anthropic", description: "Claude models", icon: AnthropicIcon },
@@ -362,9 +356,12 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
     ollama: { apiKey: "", baseURL: "http://localhost:11434", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
     "openai-compatible": { apiKey: "", baseURL: "http://localhost:1234/v1", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
   })
-  const [modelsCatalog, setModelsCatalog] = useState<Record<string, LlmModelOption[]>>({})
-  const [modelsLoading, setModelsLoading] = useState(false)
-  const [modelsError, setModelsError] = useState<string | null>(null)
+  // Raw catalog for the per-provider fields — loading (and the no-flash
+  // cache) lives in the hook.
+  const { byId: modelsCatalog, loading: modelsLoading } = useModelsCatalog({ enabled: dialogOpen })
+  const modelsError = !modelsLoading && Object.keys(modelsCatalog).length === 0
+    ? "Failed to load models list"
+    : null
   const [testState, setTestState] = useState<{ status: "idle" | "testing" | "success" | "error"; error?: string }>({ status: "idle" })
   const [configLoading, setConfigLoading] = useState(true)
   const [showMoreProviders, setShowMoreProviders] = useState(false)
@@ -521,30 +518,6 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
     }
   }, [])
 
-  // Load models catalog
-  useEffect(() => {
-    if (!dialogOpen) return
-
-    async function loadModels() {
-      try {
-        setModelsLoading(true)
-        setModelsError(null)
-        const result = await window.ipc.invoke("models:list", null)
-        const catalog: Record<string, LlmModelOption[]> = {}
-        for (const p of result.providers || []) {
-          catalog[p.id] = p.models || []
-        }
-        setModelsCatalog(catalog)
-      } catch {
-        setModelsError("Failed to load models list")
-        setModelsCatalog({})
-      } finally {
-        setModelsLoading(false)
-      }
-    }
-
-    loadModels()
-  }, [dialogOpen])
 
   // Set default models from catalog when catalog loads
   useEffect(() => {
@@ -1401,12 +1374,17 @@ function RowboatModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
   const [selectedSubagentHeavy, setSelectedSubagentHeavy] = useState("")
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  // Reopening the dialog refreshes selections silently; the blocking
+  // spinner only ever shows before the first successful load.
+  const selectionsLoadedRef = useRef(false)
 
   useEffect(() => {
     if (!dialogOpen) return
 
     async function load() {
-      setLoading(true)
+      if (!selectionsLoadedRef.current) {
+        setLoading(true)
+      }
       try {
         let parsed: Record<string, unknown> = {}
         try {
@@ -1438,6 +1416,7 @@ function RowboatModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
       } catch {
         toast.error("Failed to load models")
       } finally {
+        selectionsLoadedRef.current = true
         setLoading(false)
       }
     }

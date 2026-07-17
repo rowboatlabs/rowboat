@@ -1,6 +1,6 @@
 import { renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { useModelOptions } from './use-model-options'
+import { clearModelOptionsCache, useModelOptions } from './use-model-options'
 
 // Stub the preload surface: invoke routes by channel through a per-test
 // handler map (same pattern as use-turn.test.tsx).
@@ -24,6 +24,7 @@ function serveConfig(config: Record<string, unknown>): void {
 
 beforeEach(() => {
   handlers = {}
+  clearModelOptionsCache()
 })
 
 describe('useModelOptions', () => {
@@ -80,6 +81,19 @@ describe('useModelOptions', () => {
     const { result } = renderHook(() => useModelOptions())
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.options).toEqual([])
+  })
+
+  it('serves cached options instantly on remount (no loading flash)', async () => {
+    serveCatalog([{ id: 'rowboat', models: [{ id: 'google/gemini-3.5-flash' }] }])
+    serveConfig({})
+    const first = renderHook(() => useModelOptions())
+    await waitFor(() => expect(first.result.current.loading).toBe(false))
+    first.unmount()
+
+    const second = renderHook(() => useModelOptions())
+    // Cached options render synchronously; the refresh happens silently.
+    expect(second.result.current.loading).toBe(false)
+    expect(second.result.current.options.map((o) => o.model)).toEqual(['google/gemini-3.5-flash'])
   })
 
   it('does not load while disabled', async () => {
