@@ -262,10 +262,29 @@ function spawnHelper(helperPath: string): void {
     });
 }
 
+/**
+ * Is the mic being used by something that could be a meeting? With owner
+ * attribution (macOS 14.4+), only call-capable owners count — system daemons
+ * like corespeechd ("Hey Siri" keeps a permanent low-power mic tap open),
+ * dictation, or audio recorders neither start the detection debounce nor
+ * claim the once-per-session slot. Keying the session on raw mic-in-use
+ * shipped a bug where Siri's always-on tap claimed the session at launch and
+ * never released it, so real meetings never prompted. Without attribution,
+ * fall back to raw device state.
+ */
+function meetingRelevantMicInUse(): boolean {
+    if (!micInUse) return false;
+    if (micOwners.length === 0) return true;
+    return micOwners.some((owner) => {
+        const match = matchOwner(owner);
+        return match !== null && match !== "self";
+    });
+}
+
 function tick(onDetected: DetectorOptions["onDetected"]): void {
     const now = Date.now();
 
-    if (!micInUse) {
+    if (!meetingRelevantMicInUse()) {
         micInUseSince = null;
         if (micIdleSince === null) micIdleSince = now;
         if (sessionNotified && now - micIdleSince >= MIC_SESSION_RESET_MS) {
