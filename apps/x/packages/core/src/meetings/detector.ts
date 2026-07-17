@@ -43,9 +43,10 @@ const MIC_SESSION_RESET_MS = 30_000;
 // (Granola merges ad-hoc calls within 15 minutes of a scheduled event).
 const CALENDAR_MERGE_LEAD_MS = 15 * 60_000;
 // While recording, the meeting app must be off the mic this long before we
-// call the meeting over. Kept short so notes arrive right after hang-up;
-// only guards against sub-poll device churn, not full reconnects.
-const CALL_END_GRACE_MS = 1_000;
+// call the meeting over. Long enough to survive an input-device switch
+// (AirPods in/out tears down and rebuilds the app's audio engine, often >1s)
+// while still wrapping up within seconds of a real hang-up.
+const CALL_END_GRACE_MS = 5_000;
 const CALENDAR_SYNC_DIR = path.join(WorkDir, "calendar_sync");
 const HELPER_MAX_RESTARTS = 3;
 
@@ -61,6 +62,12 @@ export interface DetectedMeeting {
     noteTitle: string;
     /** Raw calendar event JSON when a nearby event matched. */
     calendarEvent?: Record<string, unknown>;
+    /**
+     * WorkDir-relative path of the matched event's calendar_sync JSON —
+     * downstream (note frontmatter → summarizer) uses it to load attendees
+     * and organizer. Only set when calendarEvent is.
+     */
+    calendarEventSource?: string;
 }
 
 interface PlatformMatch {
@@ -86,20 +93,14 @@ const BUNDLE_MATCHERS: Array<{ prefix: string; app: string; kind: DetectedMeetin
     { prefix: "org.mozilla.firefox", app: "Firefox", kind: "meeting" },
     { prefix: "com.brave.browser", app: "Brave Browser", kind: "meeting" },
     { prefix: "com.microsoft.edgemac", app: "Microsoft Edge", kind: "meeting" },
+    // Dia before Arc: both are The Browser Company bundles, so the more
+    // specific prefix must win.
+    { prefix: "company.thebrowser.dia", app: "Dia", kind: "meeting" },
     { prefix: "company.thebrowser", app: "Arc", kind: "meeting" },
 ];
 
 // Rowboat's own capture (and the dev Electron shell) — never a "meeting".
 const SELF_BUNDLE_PREFIXES = ["com.rowboat", "com.github.electron"];
-
-const BROWSER_APPS = new Set([
-    "Google Chrome",
-    "Safari",
-    "Firefox",
-    "Brave Browser",
-    "Microsoft Edge",
-    "Arc",
-]);
 
 // Process-name fallbacks (case-insensitive prefix on the executable
 // basename): used when an owner has no bundle ID, and by the pre-14.4
@@ -125,6 +126,11 @@ const BROWSERS = [
     "Dia",
     "Comet",
 ];
+
+// Single source of truth for "is this app a browser": derived, so a browser
+// added to BROWSERS can never silently count as a dedicated meeting app in
+// the attribution preference.
+const BROWSER_APPS = new Set(BROWSERS);
 
 const KIND_TITLES: Record<DetectedMeetingKind, string> = {
     huddle: "Huddle detected",
@@ -171,6 +177,11 @@ let callEndFired = false;
  * prompt about our own audio.
  */
 export function setSelfCaptureActive(active: boolean): void {
+    // No-op invokes (e.g. an assistant voice-state flicker while a meeting
+    // recording keeps the combined state true) must not touch the armed
+    // call-end watch — a reset landing after the meeting app's last mic
+    // release would make re-arming impossible and silently kill auto-stop.
+    if (active === selfCaptureActive) return;
     selfCaptureActive = active;
     // Fresh capture session — re-arm call-end tracking.
     externalAppSeen = false;
@@ -368,16 +379,18 @@ async function detect(onDetected: DetectorOptions["onDetected"]): Promise<void> 
         return;
     }
 
-    const calendarEvent = await findNearbyCalendarEvent();
+    const nearby = await findNearbyCalendarEvent();
     const eventSummary =
-        typeof calendarEvent?.summary === "string" ? calendarEvent.summary.trim() : "";
+        typeof nearby?.event.summary === "string" ? nearby.event.summary.trim() : "";
 
     const meeting: DetectedMeeting = {
         kind: source.kind,
         title: KIND_TITLES[source.kind],
         appName: source.app,
         noteTitle: eventSummary || defaultNoteTitle(source),
-        ...(calendarEvent ? { calendarEvent } : {}),
+        ...(nearby
+            ? { calendarEvent: nearby.event, calendarEventSource: nearby.sourcePath }
+            : {}),
     };
 
     console.log(
@@ -390,9 +403,7 @@ async function detect(onDetected: DetectorOptions["onDetected"]): Promise<void> 
 function defaultNoteTitle(source: PlatformMatch): string {
     if (source.kind === "huddle") return `${source.app} huddle`;
     if (source.kind === "call") return `${source.app} call`;
-    return BROWSER_APPS.has(source.app) || BROWSERS.includes(source.app)
-        ? "Meeting"
-        : `${source.app} meeting`;
+    return BROWSER_APPS.has(source.app) ? "Meeting" : `${source.app} meeting`;
 }
 
 /** Match a mic owner to a platform (or to Rowboat itself). */
@@ -500,7 +511,11 @@ interface CalendarEvent {
  * before its start through its end. Skips all-day, cancelled, and
  * self-declined events. Ties go to the event that started most recently.
  */
-async function findNearbyCalendarEvent(): Promise<CalendarEvent | null> {
+async function findNearbyCalendarEvent(): Promise<{
+    event: CalendarEvent;
+    /** WorkDir-relative path to the event's calendar_sync JSON. */
+    sourcePath: string;
+} | null> {
     let files: string[];
     try {
         files = await fs.readdir(CALENDAR_SYNC_DIR);
@@ -509,7 +524,7 @@ async function findNearbyCalendarEvent(): Promise<CalendarEvent | null> {
     }
 
     const now = Date.now();
-    let best: { event: CalendarEvent; startMs: number } | null = null;
+    let best: { event: CalendarEvent; sourcePath: string; startMs: number } | null = null;
 
     for (const name of files) {
         if (!name.endsWith(".json") || name.startsWith("sync_state")) continue;
@@ -531,8 +546,10 @@ async function findNearbyCalendarEvent(): Promise<CalendarEvent | null> {
         const endMs = endStr ? Date.parse(endStr) : startMs + 60 * 60_000;
 
         if (now < startMs - CALENDAR_MERGE_LEAD_MS || now > endMs) continue;
-        if (!best || startMs > best.startMs) best = { event, startMs };
+        if (!best || startMs > best.startMs) {
+            best = { event, sourcePath: `calendar_sync/${name}`, startMs };
+        }
     }
 
-    return best?.event ?? null;
+    return best ? { event: best.event, sourcePath: best.sourcePath } : null;
 }

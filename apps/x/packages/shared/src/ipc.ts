@@ -792,7 +792,10 @@ const ipcSchemas = {
   // Bring the main app window to the foreground (e.g. the assistant navigated
   // the UI during a call while the user was in another app).
   'app:focusMainWindow': {
-    req: z.null(),
+    // steal: also take the OS foreground from another app. Opt-in — right
+    // for the post-meeting notes redirect, wrong for ambient callers like
+    // in-call assistant navigation.
+    req: z.union([z.null(), z.object({ steal: z.boolean().optional() })]),
     res: z.object({}),
   },
   'app:takeMeetingNotes': {
@@ -851,6 +854,10 @@ const ipcSchemas = {
     req: z.null(),
     res: z.object({
       toggleMeetingNotes: z.boolean(),
+      // A parked app:takeMeetingNotes payload ({event, openMeeting, source})
+      // that couldn't be pushed — pushes race listener registration on a
+      // freshly created window.
+      takeMeetingNotes: z.unknown().optional(),
     }),
   },
   // Main → renderer: tray menu "Start/Stop meeting notes" — runs the same

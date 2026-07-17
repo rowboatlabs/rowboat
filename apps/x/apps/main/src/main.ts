@@ -1,8 +1,8 @@
 import { app, BrowserWindow, desktopCapturer, dialog, protocol, net, shell, session, safeStorage, type Session } from "electron";
 import path from "node:path";
-import os from "node:os";
 import {
   setupIpcHandlers,
+  resetCaptureState,
   startRunsWatcher, startSessionsWatcher, startTurnEventsWatcher, markSessionsIndexReady,
   startCodeRunFeedWatcher,
   startChannelsWatcher,
@@ -63,12 +63,19 @@ import {
   dispatchUrl,
   extractDeepLinkFromArgv,
   setMainWindowForDeepLinks,
+  setRevealAppForDeepLinks,
 } from "./deeplink.js";
 import { disconnectGoogleIfScopesStale } from "./oauth-handler.js";
 import { startModelsDevRefresh } from "@x/core/dist/models/models-dev.js";
 import { loadAppSettings, saveAppSettings } from "@x/core/dist/config/app_settings.js";
 import { init as initMeetingDetection } from "@x/core/dist/meetings/detector.js";
-import { createAppTray, hasTray, isRecordingActive, markPendingToggleMeetingNotes } from "./tray.js";
+import {
+  createAppTray,
+  hasTray,
+  isRecordingActive,
+  markPendingTakeMeetingNotes,
+  markPendingToggleMeetingNotes,
+} from "./tray.js";
 import { initMeetingPopup, showMeetingPopup } from "./meeting-popup.js";
 
 // Captured as early as possible so it reflects actual process start. Used to
@@ -136,6 +143,10 @@ app.on("open-url", (event, url) => {
 app.on("second-instance", (_event, argv) => {
   const url = extractDeepLinkFromArgv(argv);
   if (url) dispatchUrl(url);
+  // A second launch is the user asking for the app. With the tray keeping
+  // the process alive after the window closes (Windows/Linux especially),
+  // this is the only path that can reopen the window on those platforms.
+  showApp();
 });
 
 // Fix PATH for packaged Electron apps on macOS/Linux.
@@ -322,21 +333,36 @@ function showApp(): void {
  * Used to start with the window hidden so login launches are invisible.
  *
  * - Windows: our login item registers with an explicit --hidden arg.
- * - macOS: wasOpenedAtLogin when available. On macOS 13+ (SMAppService)
- *   Electron doesn't reliably populate it (electron#37244), so fall back to
- *   a heuristic: a packaged launch while registered as a login item within
- *   two minutes of boot is treated as a login launch.
+ * - macOS: wasOpenedAtLogin only. On macOS 13+ (SMAppService) Electron may
+ *   not populate it (electron#37244) — a login launch then shows the window,
+ *   which is the acceptable failure direction. The previous uptime<120s
+ *   heuristic failed the other way: a MANUAL launch right after boot started
+ *   hidden and looked like the app didn't open at all.
  */
 function wasLaunchedAtLogin(): boolean {
   if (process.argv.includes("--hidden")) return true;
   if (process.platform !== "darwin" || !app.isPackaged) return false;
   try {
-    const settings = app.getLoginItemSettings();
-    if (settings.wasOpenedAtLogin) return true;
-    return settings.openAtLogin && os.uptime() < 120;
+    return app.getLoginItemSettings().wasOpenedAtLogin === true;
   } catch {
     return false;
   }
+}
+
+/**
+ * Deliver a take-meeting-notes payload to the renderer. On a freshly created
+ * (or still-loading) window a push races the renderer's listener
+ * registration — React subscribes after mount, later than did-finish-load —
+ * so the payload is parked and the renderer pulls it on mount instead (same
+ * pattern as pending deep links and tray toggles).
+ */
+function sendTakeMeetingNotes(payload: { event: unknown; openMeeting: boolean; source?: string }): void {
+  const win = mainWindow;
+  if (!win || win.isDestroyed() || win.webContents.isLoading()) {
+    markPendingTakeMeetingNotes(payload);
+    return;
+  }
+  win.webContents.send("app:takeMeetingNotes", payload);
 }
 
 function createWindow(options: { startHidden?: boolean } = {}) {
@@ -371,6 +397,15 @@ function createWindow(options: { startHidden?: boolean } = {}) {
   win.on("closed", () => {
     if (mainWindow === win) mainWindow = null;
     setMainWindowForDeepLinks(null);
+    // The renderer owned any active capture — it died with the window and
+    // can never send recording:false. Without this reset the tray stays on
+    // "Stop recording", future popup Take Notes clicks are swallowed, and
+    // ambient detection stays suppressed until app restart.
+    resetCaptureState();
+  });
+  win.webContents.on("render-process-gone", () => {
+    // Same invariant on a crashed renderer that leaves the window up.
+    resetCaptureState();
   });
 
   // Show window when content is ready to prevent blank screen.
@@ -519,6 +554,9 @@ app.whenReady().then(async () => {
   }
 
   createWindow({ startHidden: wasLaunchedAtLogin() });
+  // Deep links / notification clicks must be able to reveal (or recreate)
+  // the window when the app is tray-resident with none open.
+  setRevealAppForDeepLinks(showApp);
 
   // Menu bar icon: open the app / start-stop meeting notes without the
   // window. If the renderer isn't ready to receive the toggle (window closed
@@ -548,20 +586,16 @@ app.whenReady().then(async () => {
       // The user may have started recording between popup and click —
       // sending the take-notes flow then would toggle it OFF.
       if (isRecordingActive()) return;
-      const payload = {
+      sendTakeMeetingNotes({
         event: meeting.calendarEvent ?? { summary: meeting.noteTitle },
         openMeeting: false,
-        source: "detected",
-      };
-      const win = mainWindow;
-      if (!win || win.isDestroyed()) return;
-      if (win.webContents.isLoading()) {
-        win.webContents.once("did-finish-load", () => {
-          if (!win.isDestroyed()) win.webContents.send("app:takeMeetingNotes", payload);
-        });
-        return;
-      }
-      win.webContents.send("app:takeMeetingNotes", payload);
+        // A matched event carries its calendar_sync path so the summarizer
+        // can resolve attendees/organizer; ad-hoc detections are marked
+        // 'detected' and never masquerade as calendar data downstream.
+        source: meeting.calendarEvent
+          ? meeting.calendarEventSource ?? "calendar-sync"
+          : "detected",
+      });
     },
   });
   initMeetingDetection({

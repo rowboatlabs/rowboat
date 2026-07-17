@@ -40,6 +40,22 @@ export function consumePendingToggleMeetingNotes(): boolean {
   return value;
 }
 
+// A take-meeting-notes payload (detection popup / calendar notification)
+// that couldn't be delivered: pushes race the renderer's listener
+// registration on a freshly created window, so the renderer pulls this on
+// mount instead.
+let pendingTakeMeetingNotes: unknown | null = null;
+
+export function markPendingTakeMeetingNotes(payload: unknown): void {
+  pendingTakeMeetingNotes = payload;
+}
+
+export function consumePendingTakeMeetingNotes(): unknown | null {
+  const value = pendingTakeMeetingNotes;
+  pendingTakeMeetingNotes = null;
+  return value;
+}
+
 function buildTrayIcon() {
   const icon = nativeImage.createEmpty();
   icon.addRepresentation({

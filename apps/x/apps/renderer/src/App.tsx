@@ -687,6 +687,45 @@ function viewStatesEqual(a: ViewState, b: ViewState): boolean {
  *   live-notes:       ?type=live-notes
  *   email:            ?type=email
  */
+interface TakeMeetingNotesPayload {
+  event: unknown
+  openMeeting?: boolean
+  source?: string
+}
+
+// Start the take-meeting-notes flow from a main-process payload (calendar
+// notification click or detection popup). Module-level so both the live IPC
+// push and the mount-time pending drain share one implementation. When
+// `openMeeting` is true, also opens the meeting URL in the system browser.
+function handleTakeMeetingNotesPayload({ event, openMeeting, source }: TakeMeetingNotesPayload) {
+  const e = event as {
+    summary?: string
+    start?: { dateTime?: string; date?: string; timeZone?: string }
+    end?: { dateTime?: string; date?: string; timeZone?: string }
+    location?: string
+    htmlLink?: string
+    hangoutLink?: string
+    conferenceData?: { entryPoints?: Array<{ entryPointType?: string; uri?: string }> }
+  }
+  if (!e || typeof e !== 'object') return
+  const conferenceLink = extractConferenceLink(e as Record<string, unknown>)
+  if (openMeeting && conferenceLink) {
+    window.open(conferenceLink, '_blank')
+  } else if (openMeeting) {
+    console.warn('[take-meeting-notes] openMeeting requested but event has no conference link', e)
+  }
+  window.__pendingCalendarEvent = {
+    summary: e.summary,
+    start: e.start,
+    end: e.end,
+    location: e.location,
+    htmlLink: e.htmlLink,
+    conferenceLink,
+    source: source ?? 'calendar-sync',
+  }
+  window.dispatchEvent(new Event('calendar-block:join-meeting'))
+}
+
 function parseDeepLink(input: string): ViewState | null {
   const SCHEME = 'rowboat://'
   if (!input.startsWith(SCHEME)) return null
@@ -1105,7 +1144,14 @@ function App() {
   const practiceModeRef = useRef(false)
 
   const handleToggleMeetingRef = useRef<(() => void) | undefined>(undefined)
+  // Why the recording stopped — decides the post-summary behavior. A
+  // call-end or manual stop foregrounds Rowboat on the finished note; a
+  // silence-backstop stop (user forgot a recording was running, possibly
+  // long ago) must never yank focus — the background notification is the
+  // re-entry point there.
+  const meetingStopReasonRef = useRef<'manual' | 'silence' | 'call-ended'>('manual')
   const meetingTranscription = useMeetingTranscription(() => {
+    meetingStopReasonRef.current = 'silence'
     handleToggleMeetingRef.current?.()
   })
 
@@ -1123,6 +1169,7 @@ function App() {
   useEffect(() => {
     if (meetingTranscription.state !== 'recording') return
     return window.ipc.on('meeting:externalCallEnded', () => {
+      meetingStopReasonRef.current = 'call-ended'
       handleToggleMeetingRef.current?.()
     })
   }, [meetingTranscription.state])
@@ -4735,49 +4782,29 @@ function App() {
   }, [])
 
   // Tray menu "Start/Stop meeting notes": same toggle as the Meetings header
-  // button. Also drains a toggle parked while the window was closed/loading
-  // (mirrors the pending deep-link pull above).
+  // button. Also drains commands parked while the window was closed/loading
+  // (mirrors the pending deep-link pull above): the toggle flag AND any
+  // take-meeting-notes payload whose push would have raced this mount.
   useEffect(() => {
-    void window.ipc.invoke('app:consumePendingTrayCommand', null).then(({ toggleMeetingNotes }) => {
-      if (toggleMeetingNotes) handleToggleMeetingRef.current?.()
+    void window.ipc.invoke('app:consumePendingTrayCommand', null).then(({ toggleMeetingNotes, takeMeetingNotes }) => {
+      if (takeMeetingNotes) {
+        handleTakeMeetingNotesPayload(takeMeetingNotes as TakeMeetingNotesPayload)
+      }
+      if (toggleMeetingNotes) {
+        meetingStopReasonRef.current = 'manual'
+        handleToggleMeetingRef.current?.()
+      }
     })
     return window.ipc.on('app:toggleMeetingNotes', () => {
+      meetingStopReasonRef.current = 'manual'
       handleToggleMeetingRef.current?.()
     })
   }, [])
 
-  // Triggered by main when the user clicks a calendar-meeting notification.
-  // Reuses the same flow as the in-app "Join meeting & take notes" button.
-  // When `openMeeting` is true, also opens the meeting URL in the system browser.
+  // Triggered by main when the user clicks a calendar-meeting notification
+  // or the detection popup's Take Notes (pushed live, or drained above).
   useEffect(() => {
-    return window.ipc.on('app:takeMeetingNotes', ({ event, openMeeting, source }) => {
-      const e = event as {
-        summary?: string
-        start?: { dateTime?: string; date?: string; timeZone?: string }
-        end?: { dateTime?: string; date?: string; timeZone?: string }
-        location?: string
-        htmlLink?: string
-        hangoutLink?: string
-        conferenceData?: { entryPoints?: Array<{ entryPointType?: string; uri?: string }> }
-      }
-      if (!e || typeof e !== 'object') return
-      const conferenceLink = extractConferenceLink(e as Record<string, unknown>)
-      if (openMeeting && conferenceLink) {
-        window.open(conferenceLink, '_blank')
-      } else if (openMeeting) {
-        console.warn('[take-meeting-notes] openMeeting requested but event has no conference link', e)
-      }
-      window.__pendingCalendarEvent = {
-        summary: e.summary,
-        start: e.start,
-        end: e.end,
-        location: e.location,
-        htmlLink: e.htmlLink,
-        conferenceLink,
-        source: source ?? 'calendar-sync',
-      }
-      window.dispatchEvent(new Event('calendar-block:join-meeting'))
-    })
+    return window.ipc.on('app:takeMeetingNotes', handleTakeMeetingNotesPayload)
   }, [])
 
   const handleBaseConfigChange = useCallback((path: string, config: BaseConfig) => {
@@ -5714,10 +5741,15 @@ function App() {
               // Refresh the file view
               await handleVoiceNoteCreated(notePath)
               // Notes are done — bring Rowboat to the foreground on the
-              // finished note (the post-call "redirect"). The notification
-              // below is background-only, so it only fires if the focus
-              // grab didn't take.
-              void window.ipc.invoke('app:focusMainWindow', null).catch(() => {})
+              // finished note (the post-call "redirect"), but only for stops
+              // the user is expecting NOW (hang-up detection or a manual
+              // stop). A silence-backstop stop fires with zero user action,
+              // possibly long after the user forgot the recording — stealing
+              // focus then is hostile; the background-only notification
+              // below is the re-entry point in every case.
+              if (meetingStopReasonRef.current !== 'silence') {
+                void window.ipc.invoke('app:focusMainWindow', { steal: true }).catch(() => {})
+              }
               void window.ipc
                 .invoke('meeting:notifyNotesReady', { notePath, title: noteTitle })
                 .catch(() => { /* notification is best-effort */ })
@@ -5729,6 +5761,7 @@ function App() {
         }
         setMeetingSummarizing(false)
         meetingNotePathRef.current = null
+        meetingStopReasonRef.current = 'manual'
       }
     } else if (meetingTranscription.state === 'idle') {
       // On macOS, check screen recording permission before starting

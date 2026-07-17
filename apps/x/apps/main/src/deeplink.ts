@@ -2,6 +2,7 @@ import { BrowserWindow } from "electron";
 import path from "node:path";
 import fs from "node:fs/promises";
 import { WorkDir } from "@x/core/dist/config/config.js";
+import { markPendingTakeMeetingNotes } from "./tray.js";
 
 export const DEEP_LINK_SCHEME = "rowboat";
 const URL_PREFIX = `${DEEP_LINK_SCHEME}://`;
@@ -9,9 +10,18 @@ const ACTION_HOST = "action";
 
 let pendingUrl: string | null = null;
 let mainWindowRef: BrowserWindow | null = null;
+// Registered by main.ts (showApp): creates/reveals the main window. The app
+// can be alive with NO window (tray-resident) when a notification is
+// clicked — deep links must be able to bring the window back, and importing
+// main.ts from here would be a cycle.
+let revealAppRef: (() => void) | null = null;
 
 export function setMainWindowForDeepLinks(win: BrowserWindow | null): void {
     mainWindowRef = win;
+}
+
+export function setRevealAppForDeepLinks(reveal: () => void): void {
+    revealAppRef = reveal;
 }
 
 export function consumePendingDeepLink(): string | null {
@@ -54,7 +64,12 @@ export function dispatchDeepLink(url: string): void {
     pendingUrl = url;
 
     const win = mainWindowRef;
-    if (!win || win.isDestroyed()) return;
+    if (!win || win.isDestroyed()) {
+        // Tray-resident with no window: create/reveal one — the fresh
+        // renderer drains pendingUrl on mount.
+        revealAppRef?.();
+        return;
+    }
     focusWindow(win);
 
     if (win.webContents.isLoading()) return;
@@ -94,10 +109,6 @@ async function dispatchAction(url: string): Promise<void> {
 }
 
 async function handleTakeMeetingNotes(eventId: string, openMeeting: boolean): Promise<void> {
-    const win = mainWindowRef;
-    if (!win || win.isDestroyed()) return;
-    focusWindow(win);
-
     const filePath = path.join(WorkDir, "calendar_sync", `${eventId}.json`);
     let event: unknown;
     try {
@@ -108,15 +119,21 @@ async function handleTakeMeetingNotes(eventId: string, openMeeting: boolean): Pr
         return;
     }
 
-    const payload = { event, openMeeting };
+    // The real calendar_sync path lets the summarizer resolve attendees.
+    const payload = { event, openMeeting, source: `calendar_sync/${eventId}.json` };
 
-    if (win.webContents.isLoading()) {
-        win.webContents.once("did-finish-load", () => {
-            win.webContents.send("app:takeMeetingNotes", payload);
-        });
+    const win = mainWindowRef;
+    if (!win || win.isDestroyed() || win.webContents.isLoading()) {
+        // No window (tray-resident), or a fresh window whose renderer hasn't
+        // registered listeners yet (a did-finish-load push races React's
+        // mount) — park the payload for the renderer's mount-time drain and
+        // make sure a window is coming.
+        markPendingTakeMeetingNotes(payload);
+        revealAppRef?.();
         return;
     }
 
+    focusWindow(win);
     win.webContents.send("app:takeMeetingNotes", payload);
 }
 
