@@ -69,3 +69,12 @@ export function composeSystemInstructions({
     }
     return composed;
 }
+
+// LLMs have no reliable self-knowledge: without an explicit line, a copilot
+// running gpt-5.5 confidently claims to be Claude (observed live — context
+// full of Claude mentions biases the guess). Appended by both agent
+// resolvers so every agent gets it. Cache-neutral: prefix caches are
+// per-model, so a model name in the prompt never busts a shareable cache.
+export function modelIdentityLine(model: { provider: string; model: string }): string {
+    return `\n\nYou are running on the model "${model.model}".`;
+}

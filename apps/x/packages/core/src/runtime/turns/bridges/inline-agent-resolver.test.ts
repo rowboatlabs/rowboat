@@ -1,3 +1,4 @@
+import { modelIdentityLine } from "../../assembly/compose-instructions.js";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import type { BuiltinTools } from "../../tools/catalog.js";
@@ -60,7 +61,9 @@ describe("InlineAgentResolver", () => {
             },
         });
         expect(resolved.agentId).toBe("inline:researcher");
-        expect(resolved.systemPrompt).toBe("You research things.");
+        expect(resolved.systemPrompt).toBe(
+            "You research things." + modelIdentityLine({ provider: "p1", model: "m1" }),
+        );
         expect(resolved.model).toEqual({ provider: "p1", model: "m1" });
         expect(resolved.tools).toEqual([
             expect.objectContaining({

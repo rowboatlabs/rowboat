@@ -6,7 +6,7 @@ import {
     SPAWN_AGENT_TOOL_NAME,
     type ToolDescriptor,
 } from "@x/shared/dist/turns.js";
-import { composeSystemInstructions } from "../../assembly/compose-instructions.js";
+import { composeSystemInstructions, modelIdentityLine } from "../../assembly/compose-instructions.js";
 import {
     loadAgentNotesContext,
     loadUserWorkDir,
@@ -147,7 +147,7 @@ export class RealAgentResolver {
         }
         return ResolvedAgent.parse({
             agentId: requested.agentId,
-            systemPrompt,
+            systemPrompt: systemPrompt + modelIdentityLine(model),
             model,
             tools,
         });

@@ -10,6 +10,7 @@ import { ResolvedAgent as ResolvedAgentSchema } from "@x/shared/dist/turns.js";
 import { BuiltinTools } from "../../tools/catalog.js";
 import { getDefaultModelAndProvider } from "../../../models/defaults.js";
 import { builtinToolDescriptor } from "../../tools/descriptors.js";
+import { modelIdentityLine } from "../../assembly/compose-instructions.js";
 
 // Default tool profile for inline agents that omit `tools`: every builtin
 // except the ones that make no sense headlessly or in a child. Mirrors the
@@ -92,7 +93,7 @@ export class InlineAgentResolver {
 
         return ResolvedAgentSchema.parse({
             agentId: inlineAgentId(spec.name),
-            systemPrompt: spec.instructions,
+            systemPrompt: spec.instructions + modelIdentityLine(model),
             model,
             tools,
         });

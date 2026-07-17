@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import type { Agent } from "@x/shared/dist/agent.js";
-import { composeSystemInstructions } from "../../assembly/compose-instructions.js";
+import { composeSystemInstructions, modelIdentityLine } from "../../assembly/compose-instructions.js";
 import type { BuiltinTools } from "../../tools/catalog.js";
 import { RealAgentResolver } from "./real-agent-resolver.js";
 
@@ -165,7 +165,7 @@ describe("RealAgentResolver", () => {
                 codeCwd: null,
                 videoMode: false,
                 coachMode: false,
-            }),
+            }) + modelIdentityLine(resolved.model),
         );
     });
 
