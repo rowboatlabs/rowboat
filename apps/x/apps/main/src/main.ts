@@ -40,6 +40,7 @@ import { startSkillsWatcher, stopSkillsWatcher } from "@x/core/dist/runtime/asse
 import { init as initAppsServer, shutdown as shutdownAppsServer } from "@x/core/dist/apps/server.js";
 import { registerAppsHostApi } from "@x/core/dist/apps/host-api.js";
 import { setTokenCipher as setGithubTokenCipher } from "@x/core/dist/apps/github-auth.js";
+import { setTokenCipher as setChatGPTTokenCipher } from "@x/core/dist/auth/chatgpt-auth.js";
 import { shutdown as shutdownAnalytics } from "@x/core/dist/analytics/posthog.js";
 import { identifyIfSignedIn } from "@x/core/dist/analytics/identify.js";
 import { migrateRuns } from "@x/core/dist/migrations/runs/migrate.js";
@@ -494,6 +495,12 @@ app.whenReady().then(async () => {
   // GitHub publish token at rest: encrypt via the OS keychain when available
   // (core stays electron-free; the cipher is injected here).
   setGithubTokenCipher({
+    isAvailable: () => safeStorage.isEncryptionAvailable(),
+    encrypt: (plain) => safeStorage.encryptString(plain).toString('base64'),
+    decrypt: (encrypted) => safeStorage.decryptString(Buffer.from(encrypted, 'base64')),
+  });
+  // ChatGPT subscription tokens at rest: same keychain-backed cipher.
+  setChatGPTTokenCipher({
     isAvailable: () => safeStorage.isEncryptionAvailable(),
     encrypt: (plain) => safeStorage.encryptString(plain).toString('base64'),
     decrypt: (encrypted) => safeStorage.decryptString(Buffer.from(encrypted, 'base64')),

@@ -40,6 +40,9 @@ import { isSignedIn } from '@x/core/dist/account/account.js';
 import { listGatewayModels } from '@x/core/dist/models/gateway.js';
 import type { IModelConfigRepo } from '@x/core/dist/models/repo.js';
 import type { IOAuthRepo } from '@x/core/dist/auth/repo.js';
+import { getChatGPTStatus, signOutChatGPT } from '@x/core/dist/auth/chatgpt-auth.js';
+import { listCodexModels } from '@x/core/dist/models/codex.js';
+import { signInWithChatGPT, cancelChatGPTSignIn } from './chatgpt-signin.js';
 import { IGranolaConfigRepo } from '@x/core/dist/knowledge/granola/repo.js';
 import { ICodeModeConfigRepo } from '@x/core/dist/code-mode/repo.js';
 import { CodePermissionRegistry } from '@x/core/dist/code-mode/acp/permission-registry.js';
@@ -1232,10 +1235,21 @@ export function setupIpcHandlers() {
       }
     },
     'models:list': async () => {
-      if (await isSignedIn()) {
-        return await listGatewayModels();
+      const base = (await isSignedIn())
+        ? await listGatewayModels()
+        : await listOnboardingModels();
+      // ChatGPT-subscription (codex) models are additive and independent of
+      // Rowboat sign-in; their failure must never break the main list.
+      try {
+        const chatgpt = await getChatGPTStatus();
+        if (chatgpt.signedIn) {
+          const codex = await listCodexModels();
+          return { providers: [...base.providers, ...codex.providers] };
+        }
+      } catch (error) {
+        console.warn('[Codex] Listing subscription models failed:', error);
       }
-      return await listOnboardingModels();
+      return base;
     },
     'models:test': async (_event, args) => {
       return await testModelConnection(args.provider, args.model);
@@ -1284,6 +1298,32 @@ export function setupIpcHandlers() {
       const repo = container.resolve<IOAuthRepo>('oauthRepo');
       const config = await repo.getClientFacingConfig();
       return { config };
+    },
+    'chatgpt:getStatus': async () => {
+      return await getChatGPTStatus();
+    },
+    'chatgpt:signIn': async () => {
+      const result = await signInWithChatGPT();
+      if (result.signedIn) {
+        // Model lists gate on sign-in state (composer picker, models:list) —
+        // push the change so they refresh without polling.
+        broadcastToWindows('chatgpt:statusChanged', { signedIn: true });
+      }
+      return result;
+    },
+    'chatgpt:cancelSignIn': async () => {
+      await cancelChatGPTSignIn();
+      return { success: true };
+    },
+    'chatgpt:signOut': async () => {
+      try {
+        await signOutChatGPT();
+        broadcastToWindows('chatgpt:statusChanged', { signedIn: false });
+        return { success: true };
+      } catch (error) {
+        console.error('[ChatGPTAuth] Sign-out failed:', error);
+        return { success: false };
+      }
     },
     'account:getRowboat': async () => {
       const signedIn = await isSignedIn();

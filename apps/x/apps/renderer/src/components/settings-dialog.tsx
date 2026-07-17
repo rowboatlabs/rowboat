@@ -32,6 +32,7 @@ import type { ApprovalPolicy } from "@x/shared/src/code-mode.js"
 import type { ipc as ipcShared } from "@x/shared"
 import { startProvisioning, useProvisioning, enabledOptimistic, type AgentStatus, type CodeModeAgentStatus } from "@/lib/code-mode-provisioning"
 import { useProviderModels } from "@/hooks/use-provider-models"
+import { useChatGPT } from "@/hooks/useChatGPT"
 
 type ConfigTab = "account" | "connections" | "mobile" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "notifications" | "note-tagging" | "help"
 
@@ -554,6 +555,9 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
     apiKey: activeConfig.apiKey,
     baseURL: activeConfig.baseURL,
   })
+  // "Sign in with ChatGPT" subscription state — only rendered on the OpenAI
+  // card; independent of the API-key providerConfigs state above.
+  const chatgpt = useChatGPT()
   const showApiKey = provider === "openai" || provider === "anthropic" || provider === "google" || provider === "openrouter" || provider === "aigateway" || provider === "openai-compatible"
   const requiresApiKey = provider === "openai" || provider === "anthropic" || provider === "google" || provider === "openrouter" || provider === "aigateway"
   const showBaseURL = provider === "ollama" || provider === "openai-compatible" || provider === "aigateway"
@@ -1078,6 +1082,53 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
             onBlur={() => providerModels.refetch()}
             placeholder="Paste your API key"
           />
+        </div>
+      )}
+
+      {/* ChatGPT subscription — OAuth sign-in, independent of the API key and
+          of models.json (the Codex model client consumes the token via core) */}
+      {provider === "openai" && (
+        <div className="space-y-2">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+            ChatGPT Subscription
+          </span>
+          {chatgpt.status.signedIn ? (
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 text-sm text-green-600 min-w-0">
+                <CheckCircle2 className="size-4 shrink-0" />
+                <span className="truncate">
+                  Connected as {chatgpt.status.email ?? "your ChatGPT account"}
+                </span>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="shrink-0 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                onClick={chatgpt.signOut}
+              >
+                Sign Out
+              </Button>
+            </div>
+          ) : chatgpt.isSigningIn ? (
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" />
+                Waiting for browser…
+              </div>
+              <Button variant="outline" size="sm" className="shrink-0" onClick={chatgpt.cancelSignIn}>
+                Cancel
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm text-muted-foreground">
+                Use your ChatGPT Plus/Pro subscription
+              </span>
+              <Button variant="outline" size="sm" className="shrink-0" onClick={chatgpt.signIn}>
+                Sign In
+              </Button>
+            </div>
+          )}
         </div>
       )}
 
