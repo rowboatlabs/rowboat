@@ -821,6 +821,15 @@ const ipcSchemas = {
       success: z.boolean(),
     }),
   },
+  // Push event (main → renderer): ChatGPT sign-in state changed. Model
+  // pickers listen and refresh — subscription models appear/disappear with
+  // the session.
+  'chatgpt:statusChanged': {
+    req: z.object({
+      signedIn: z.boolean(),
+    }),
+    res: z.null(),
+  },
   'app:openUrl': {
     req: z.object({
       url: z.string(),

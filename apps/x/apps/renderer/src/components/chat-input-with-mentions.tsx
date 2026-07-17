@@ -94,9 +94,12 @@ const providerDisplayNames: Record<string, string> = {
   aigateway: 'AI Gateway',
   'openai-compatible': 'OpenAI-Compatible',
   rowboat: 'Rowboat',
+  // Matches what other subscription clients call this provider; the auth
+  // itself is "Sign in with ChatGPT" (Plus/Pro subscription).
+  codex: 'OpenAI Codex',
 }
 
-type ProviderName = "openai" | "anthropic" | "google" | "openrouter" | "aigateway" | "ollama" | "openai-compatible" | "rowboat"
+type ProviderName = "openai" | "anthropic" | "google" | "openrouter" | "aigateway" | "ollama" | "openai-compatible" | "rowboat" | "codex"
 
 interface ConfiguredModel {
   provider: ProviderName
@@ -540,6 +543,12 @@ function ChatInputInner({
         groups.push({ kind: 'catalog', flavor: 'rowboat', models: catalog['rowboat'] })
       }
 
+      // ChatGPT subscription (codex): models:list only carries this catalog
+      // while signed in with ChatGPT, so presence is the gate.
+      if ((catalog['codex'] || []).length > 0) {
+        groups.push({ kind: 'catalog', flavor: 'codex', models: catalog['codex'] })
+      }
+
       try {
         const result = await window.ipc.invoke('workspace:readFile', { path: 'config/models.json' })
         const parsed = JSON.parse(result.data)
@@ -614,6 +623,12 @@ function ChatInputInner({
   useEffect(() => {
     loadModelConfig()
   }, [isActive, loadModelConfig])
+
+  // ChatGPT subscription models appear/disappear with the ChatGPT session.
+  useEffect(() => {
+    const cleanup = window.ipc.on('chatgpt:statusChanged', () => { loadModelConfig() })
+    return cleanup
+  }, [loadModelConfig])
 
   // Reload when model config changes (e.g. from settings dialog)
   useEffect(() => {

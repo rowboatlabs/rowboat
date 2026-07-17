@@ -78,6 +78,11 @@ export async function resolveProviderConfig(name: string): Promise<z.infer<typeo
     if (name === "rowboat") {
         return { flavor: "rowboat" };
     }
+    if (name === "codex") {
+        // ChatGPT subscription: auth lives in chatgpt-auth.json (core auth
+        // layer), never in models.json — which may not exist at all.
+        return { flavor: "codex" };
+    }
     const repo = container.resolve<IModelConfigRepo>("modelConfigRepo");
     const cfg = await repo.getConfig();
     const entry = cfg.providers?.[name];
