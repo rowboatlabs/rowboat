@@ -113,7 +113,7 @@ import { invalidateKnowledgeIndex } from '@x/core/dist/knowledge/knowledge_index
 import { versionHistory, voice } from '@x/core';
 import { classifySchedule, processRowboatInstruction } from '@x/core/dist/knowledge/inline_tasks.js';
 import { getBillingInfo } from '@x/core/dist/billing/billing.js';
-import { getCreditsState, maybeActivateCredit, subscribeCreditActivations } from '@x/core/dist/billing/credits.js';
+import { claimReferralCode, getCreditsState, maybeActivateCredit, subscribeCreditActivations } from '@x/core/dist/billing/credits.js';
 import { summarizeMeeting } from '@x/core/dist/knowledge/summarize_meeting.js';
 import { getAccessToken } from '@x/core/dist/auth/tokens.js';
 import { getRowboatConfig } from '@x/core/dist/config/rowboat.js';
@@ -2541,6 +2541,9 @@ export function setupIpcHandlers() {
     // First-time-action credit rewards
     'credits:getState': async () => {
       return await getCreditsState();
+    },
+    'referral:claim': async (_event, args) => {
+      return await claimReferralCode(args.code);
     },
     'notifications:getSettings': async () => {
       return loadNotificationSettings();

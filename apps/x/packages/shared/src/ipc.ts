@@ -21,7 +21,7 @@ import { ZListToolkitsResponse } from './composio.js';
 import { AppSummarySchema, RegistryRecordSchema, RowboatAppManifestSchema } from './rowboat-app.js';
 import { BrowserStateSchema, DisplayMediaRequestSchema, HttpAuthRequestSchema } from './browser-control.js';
 import { BillingInfoSchema } from './billing.js';
-import { CreditActivatedEventSchema, CreditsStateSchema } from './credits.js';
+import { CreditActivatedEventSchema, CreditsStateSchema, ReferralClaimResultSchema } from './credits.js';
 import { EmailBlockSchema, GmailThreadSchema } from './blocks.js';
 import { PermissionDecision, ApprovalPolicy, CodingAgent, type CodeRunFeedEvent } from './code-mode.js';
 import { NotificationSettingsSchema } from './notification-settings.js';
@@ -2438,6 +2438,11 @@ const ipcSchemas = {
   'credits:didActivate': {
     req: CreditActivatedEventSchema,
     res: z.null(),
+  },
+  // Redeem another user's invite (referral) code — both sides earn credits.
+  'referral:claim': {
+    req: z.object({ code: z.string() }),
+    res: ReferralClaimResultSchema,
   },
   // Notification settings channels
   'notifications:getSettings': {

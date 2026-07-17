@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useState } from "react"
-import { Check, ChevronRight, Gift, X } from "lucide-react"
+import { Check, ChevronRight, Copy, Gift, UserPlus, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Popover, PopoverArrow, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { CREDIT_ACTIVITY_ICONS, useCreditsState } from "@/hooks/use-credits-state"
@@ -35,6 +35,7 @@ export function SidebarCreditRewards({
   const state = useCreditsState()
   const [dismissed, setDismissed] = useState(() => localStorage.getItem(DISMISSED_KEY) === "1")
   const [open, setOpen] = useState(false)
+  const [copied, setCopied] = useState(false)
 
   const handleDismiss = useCallback(() => {
     localStorage.setItem(DISMISSED_KEY, "1")
@@ -44,11 +45,29 @@ export function SidebarCreditRewards({
 
   if (dismissed || !state || !state.enabled || !state.eligible) return null
 
+  const referral = state.referral
+  const inviteSlotsLeft = referral ? Math.max(0, referral.maxClaims - referral.claimsUsed) : 0
   const remaining = state.activities.filter((a) => !a.claimed)
-  if (remaining.length === 0) return null
+  if (remaining.length === 0 && inviteSlotsLeft === 0) return null
 
-  const earnedCount = state.activities.length - remaining.length
-  const remainingTotal = remaining.reduce((sum, a) => sum + a.credits, 0)
+  // invites count as one checklist item, earned once every claim slot is used
+  const totalCount = state.activities.length + (referral ? 1 : 0)
+  const earnedCount =
+    state.activities.length - remaining.length + (referral && inviteSlotsLeft === 0 ? 1 : 0)
+  const remainingTotal =
+    remaining.reduce((sum, a) => sum + a.credits, 0) +
+    (referral ? inviteSlotsLeft * referral.referrerCredits : 0)
+
+  const copyInviteCode = async () => {
+    if (!referral) return
+    try {
+      await navigator.clipboard.writeText(referral.code)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch (error) {
+      console.error("Failed to copy invite code:", error)
+    }
+  }
 
   const actionFor = (code: CreditActivityCode): (() => void) | undefined => {
     switch (code) {
@@ -74,7 +93,7 @@ export function SidebarCreditRewards({
                 Earn {formatCreditsAsDollars(remainingTotal)} in credits
               </span>
               <span className="block text-[10px] text-sidebar-foreground/60">
-                {earnedCount} of {state.activities.length} earned
+                {earnedCount} of {totalCount} earned
               </span>
             </div>
             <ChevronRight className="size-3 shrink-0 text-sidebar-foreground/50" />
@@ -153,6 +172,61 @@ export function SidebarCreditRewards({
               )
             })}
           </div>
+          {referral && (
+            <div className="border-t p-2">
+              <div className="flex items-center gap-2.5 px-2 py-1.5">
+                <div
+                  className={cn(
+                    "flex size-6 shrink-0 items-center justify-center rounded-full",
+                    inviteSlotsLeft === 0 ? "bg-emerald-500/15" : "bg-muted",
+                  )}
+                >
+                  {inviteSlotsLeft === 0 ? (
+                    <Check className="size-3.5 text-emerald-600" />
+                  ) : (
+                    <UserPlus className="size-3.5 text-muted-foreground" />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <span className="block text-[13px] font-medium">Invite friends</span>
+                  <span className="block text-[11px] text-muted-foreground">
+                    {referral.claimsUsed} of {referral.maxClaims} joined
+                  </span>
+                </div>
+                <span
+                  className={cn(
+                    "shrink-0 rounded-full px-1.5 py-px text-[11px] font-medium tabular-nums",
+                    inviteSlotsLeft === 0 ? "text-muted-foreground" : "bg-primary/10 text-primary",
+                  )}
+                >
+                  {inviteSlotsLeft === 0
+                    ? "Earned"
+                    : `+${formatCreditsAsDollars(referral.referrerCredits)} each`}
+                </span>
+              </div>
+              {inviteSlotsLeft > 0 && (
+                <div className="mx-2 mb-1 flex items-center gap-2">
+                  <code className="flex-1 truncate rounded-md bg-muted px-2 py-1 text-center font-mono text-xs tracking-wider">
+                    {referral.code}
+                  </code>
+                  <button
+                    type="button"
+                    onClick={copyInviteCode}
+                    className="flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  >
+                    {copied ? <Check className="size-3 text-emerald-600" /> : <Copy className="size-3" />}
+                    {copied ? "Copied" : "Copy"}
+                  </button>
+                </div>
+              )}
+              {inviteSlotsLeft > 0 && (
+                <p className="mx-2 mb-1 text-[11px] leading-snug text-muted-foreground">
+                  Share your code — you each get {formatCreditsAsDollars(referral.referrerCredits)} when a
+                  friend signs up and enters it.
+                </p>
+              )}
+            </div>
+          )}
         </PopoverContent>
       </Popover>
     </div>

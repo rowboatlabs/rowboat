@@ -1,8 +1,10 @@
 "use client"
 
-import { Check, Gift } from "lucide-react"
+import { useState } from "react"
+import { Check, Copy, Gift, UserPlus } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { CREDIT_ACTIVITY_ICONS, useCreditsState } from "@/hooks/use-credits-state"
+import { InviteCodeClaim } from "@/components/invite-code-claim"
 import { formatCreditsAsDollars } from "@x/shared/dist/credits.js"
 import type { BillingStoreBucket } from "@x/shared/dist/billing.js"
 
@@ -19,13 +21,31 @@ interface CreditRewardsProps {
  */
 export function CreditRewards({ store }: CreditRewardsProps) {
   const state = useCreditsState()
+  const [copied, setCopied] = useState(false)
 
   // Hidden while loading, when the feature flag is off, when not eligible
   // (rewards are for signed-in free-tier users — not BYOK, not paid plans),
-  // or when the API hasn't served a reward catalog.
-  if (!state || !state.enabled || !state.eligible || state.activities.length === 0) return null
+  // or when there is nothing to show (no reward catalog and no referral).
+  if (!state || !state.enabled || !state.eligible) return null
+  if (state.activities.length === 0 && !state.referral) return null
 
-  const earnedCount = state.activities.filter((a) => a.claimed).length
+  const referral = state.referral
+  const inviteSlotsLeft = referral ? Math.max(0, referral.maxClaims - referral.claimsUsed) : 0
+  // invites count as one list item, earned once every claim slot is used
+  const totalCount = state.activities.length + (referral ? 1 : 0)
+  const earnedCount =
+    state.activities.filter((a) => a.claimed).length + (referral && inviteSlotsLeft === 0 ? 1 : 0)
+
+  const copyInviteCode = async () => {
+    if (!referral) return
+    try {
+      await navigator.clipboard.writeText(referral.code)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch (error) {
+      console.error("Failed to copy invite code:", error)
+    }
+  }
 
   return (
     <div className="space-y-3">
@@ -39,7 +59,7 @@ export function CreditRewards({ store }: CreditRewardsProps) {
       <div className="rounded-lg border">
         <div className="flex items-center justify-between border-b px-4 py-2.5">
           <p className="text-xs text-muted-foreground">
-            {earnedCount} of {state.activities.length} earned
+            {earnedCount} of {totalCount} earned
           </p>
           {store && (
             <p className="text-xs font-medium tabular-nums">
@@ -85,8 +105,62 @@ export function CreditRewards({ store }: CreditRewardsProps) {
               </div>
             )
           })}
+          {referral && (
+            <div className="flex items-center gap-3 px-4 py-3">
+              <div
+                className={cn(
+                  "flex size-8 shrink-0 items-center justify-center rounded-full",
+                  inviteSlotsLeft === 0 ? "bg-emerald-500/15" : "bg-muted",
+                )}
+              >
+                {inviteSlotsLeft === 0 ? (
+                  <Check className="size-4 text-emerald-600" />
+                ) : (
+                  <UserPlus className="size-4 text-muted-foreground" />
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className={cn("text-sm font-medium", inviteSlotsLeft === 0 && "text-muted-foreground")}>
+                  Invite friends
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {inviteSlotsLeft === 0
+                    ? `All ${referral.maxClaims} invites used`
+                    : `You each get ${formatCreditsAsDollars(referral.referrerCredits)} when a friend signs up with your code · ${referral.claimsUsed} of ${referral.maxClaims} joined`}
+                </p>
+                {inviteSlotsLeft > 0 && (
+                  <div className="mt-1.5 flex items-center gap-2">
+                    <code className="rounded-md bg-muted px-2 py-1 font-mono text-xs tracking-wider">
+                      {referral.code}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={copyInviteCode}
+                      className="flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                    >
+                      {copied ? <Check className="size-3 text-emerald-600" /> : <Copy className="size-3" />}
+                      {copied ? "Copied" : "Copy"}
+                    </button>
+                  </div>
+                )}
+              </div>
+              <span
+                className={cn(
+                  "shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums",
+                  inviteSlotsLeft === 0
+                    ? "bg-emerald-500/15 text-emerald-600"
+                    : "bg-primary/10 text-primary",
+                )}
+              >
+                {inviteSlotsLeft === 0
+                  ? "Earned"
+                  : `+${formatCreditsAsDollars(referral.referrerCredits)} each`}
+              </span>
+            </div>
+          )}
         </div>
       </div>
+      <InviteCodeClaim />
     </div>
   )
 }

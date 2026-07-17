@@ -201,3 +201,84 @@ describe("maybeActivateCredit", () => {
     expect(state.activities.find((a) => a.code === "first_email_sent")?.claimed).toBe(false);
   });
 });
+
+const REFERRAL_STATUS = {
+  code: "ABC-DEF-GHJ",
+  claimsUsed: 1,
+  maxClaims: 3,
+  referrerCredits: 500,
+  refereeCredits: 500,
+};
+
+// route fetches by URL: GET /v1/referral -> status, POST /v1/referral/claims -> claim
+function mockReferralApi(claim: () => Response, status: () => Response = () => new Response(JSON.stringify(REFERRAL_STATUS), { status: 200 })) {
+  fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+    if (String(url).endsWith("/v1/referral")) return status();
+    if (String(url).endsWith("/v1/referral/claims") && init?.method === "POST") return claim();
+    throw new Error(`unexpected fetch: ${url}`);
+  });
+}
+
+describe("referrals", () => {
+  it("includes the referral status in state", async () => {
+    mockReferralApi(() => new Response(null, { status: 500 }));
+    const credits = await loadCredits();
+    const state = await credits.getCreditsState();
+    expect(state.referral).toEqual({ ...REFERRAL_STATUS, claimedByMe: false });
+  });
+
+  it("omits referral when the status fetch fails", async () => {
+    mockReferralApi(
+      () => new Response(null, { status: 500 }),
+      () => new Response(JSON.stringify({ error: "boom" }), { status: 500 }),
+    );
+    const credits = await loadCredits();
+    const state = await credits.getCreditsState();
+    expect(state.eligible).toBe(true);
+    expect(state.referral).toBeUndefined();
+  });
+
+  it("claims an invite code once, notifies, and marks the account", async () => {
+    mockReferralApi(() => new Response(JSON.stringify({ creditsGranted: 500 }), { status: 200 }));
+    const credits = await loadCredits();
+    const seen: unknown[] = [];
+    credits.subscribeCreditActivations((event) => seen.push(event));
+
+    const result = await credits.claimReferralCode(" abc-def-ghj ");
+    expect(result).toEqual({ ok: true, creditsGranted: 500 });
+    expect(seen).toEqual([{ code: "referral_claimed", title: "Invite code applied", credits: 500 }]);
+
+    const state = await credits.getCreditsState();
+    expect(state.referral?.claimedByMe).toBe(true);
+
+    // a second attempt is refused locally, without a network call
+    const fetchCalls = fetchMock.mock.calls.length;
+    const second = await credits.claimReferralCode("XYZ-XYZ-XYZ");
+    expect(second.ok).toBe(false);
+    expect(fetchMock.mock.calls.length).toBe(fetchCalls);
+  });
+
+  it("surfaces backend claim errors and stays retryable", async () => {
+    mockReferralApi(() => new Response(JSON.stringify({ error: "Unknown referral code" }), { status: 404 }));
+    const credits = await loadCredits();
+
+    const bad = await credits.claimReferralCode("BAD-BAD-BAD");
+    expect(bad).toEqual({ ok: false, message: "Unknown referral code" });
+
+    // rejected claims don't mark the account — a valid code still works
+    mockReferralApi(() => new Response(JSON.stringify({ creditsGranted: 500 }), { status: 200 }));
+    expect((await credits.claimReferralCode("ABC-DEF-GHJ")).ok).toBe(true);
+  });
+
+  it("marks the account claimed on a definitive already-claimed answer", async () => {
+    mockReferralApi(() =>
+      new Response(JSON.stringify({ error: "This account has already claimed a referral code" }), { status: 409 }),
+    );
+    const credits = await loadCredits();
+
+    const result = await credits.claimReferralCode("ABC-DEF-GHJ");
+    expect(result.ok).toBe(false);
+    const state = await credits.getCreditsState();
+    expect(state.referral?.claimedByMe).toBe(true);
+  });
+});
