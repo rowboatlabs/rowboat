@@ -4281,6 +4281,9 @@ function App() {
       setEmailInitialThreadId(threadId)
       setEmailThreadIdVersion((v) => v + 1)
     }
+    // Same reason as in navigateToView: a stale assistant-driven search must
+    // not repopulate the search box when the user re-enters the email view.
+    setEmailInitialSearchQuery(null)
     ensureEmailFileTab()
   }, [ensureEmailFileTab])
 
@@ -4455,6 +4458,10 @@ function App() {
         if (view.searchQuery) {
           setEmailInitialSearchQuery(view.searchQuery)
           setEmailSearchQueryVersion((v) => v + 1)
+        } else {
+          // Otherwise a past assistant-driven search would be re-applied on
+          // every re-entry, even after the user cleared the search box.
+          setEmailInitialSearchQuery(null)
         }
         ensureEmailFileTab()
         return
