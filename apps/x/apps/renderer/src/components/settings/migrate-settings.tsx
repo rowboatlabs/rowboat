@@ -5,8 +5,9 @@ import { MigrateSourceCard, MigrateStatus, useNotesMigration } from '@/component
  * Obsidian vault, or a full Notion workspace export. Everything lands in a new
  * subfolder of knowledge/, so a migration never mixes into existing notes.
  */
-export function MigrateSettings() {
-  const { migrating, result, error, runMigration } = useNotesMigration()
+export function MigrateSettings({ onNavigateToNotes }: { onNavigateToNotes?: () => void }) {
+  const migration = useNotesMigration()
+  const { migrating, runMigration, viewInNotes } = migration
 
   return (
     <div className="space-y-4">
@@ -31,7 +32,13 @@ export function MigrateSettings() {
         />
       </div>
 
-      <MigrateStatus migrating={migrating} error={error} result={result} />
+      <MigrateStatus
+        migration={migration}
+        onViewInNotes={() => {
+          viewInNotes()
+          onNavigateToNotes?.()
+        }}
+      />
     </div>
   )
 }

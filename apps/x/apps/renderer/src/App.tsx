@@ -4665,6 +4665,19 @@ function App() {
     return window.ipc.on('app:openUrl', ({ url }) => handle(url))
   }, [])
 
+  // "View in Notes" after a notes migration (dispatched by
+  // apps/renderer/src/components/migrate-notes.tsx).
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const ev = e as CustomEvent<{ folderPath?: string }>
+      const folderPath = ev.detail?.folderPath
+      if (!folderPath) return
+      void navigateToViewRef.current({ type: 'knowledge-view', folderPath, mode: 'files' })
+    }
+    window.addEventListener('rowboat:open-knowledge-folder', handler as EventListener)
+    return () => window.removeEventListener('rowboat:open-knowledge-folder', handler as EventListener)
+  }, [])
+
   // Report the UI theme to the apps server (spec §7.1): apps read it from
   // GET /_rowboat/app and get live changes via the SSE theme event.
   useEffect(() => {

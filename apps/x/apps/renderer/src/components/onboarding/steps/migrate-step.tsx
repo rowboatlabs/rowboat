@@ -9,7 +9,8 @@ interface MigrateStepProps {
 
 export function MigrateStep({ state }: MigrateStepProps) {
   const { handleNext, handleBack } = state
-  const { migrating, result, error, runMigration } = useNotesMigration()
+  const migration = useNotesMigration()
+  const { migrating, runMigration } = migration
 
   // Navigation is locked while an import runs: the import itself continues in
   // the main process, but leaving the step unmounts the summary/error UI.
@@ -34,7 +35,7 @@ export function MigrateStep({ state }: MigrateStepProps) {
           disabled={busy}
           onClick={() => void runMigration('obsidian')}
         />
-        <MigrateStatus migrating={migrating} error={error} result={result} />
+        <MigrateStatus migration={migration} />
       </div>
 
       {/* Footer */}

@@ -1564,6 +1564,10 @@ const ipcSchemas = {
     req: z.object({
       defaultPath: z.string().optional(),
       title: z.string().optional(),
+      filters: z.array(z.object({
+        name: z.string(),
+        extensions: z.array(z.string()),
+      })).optional(),
     }),
     res: z.object({
       paths: z.array(z.string()),
@@ -1606,8 +1610,31 @@ const ipcSchemas = {
       notes: z.number(),
       attachments: z.number(),
       skipped: z.number(),
+      skippedFiles: z.array(z.object({
+        file: z.string(),
+        reason: z.enum(['too-large', 'copy-failed', 'unreadable-note']),
+      })),
       root: RelPath,
+      assetsRoot: RelPath,
     }),
+  },
+  // Copy/write progress pushed to the requesting window during an import.
+  'knowledge:importProgress': {
+    req: z.object({
+      done: z.number(),
+      total: z.number(),
+      stage: z.enum(['attachments', 'notes']),
+    }),
+    res: z.null(),
+  },
+  // Remove everything an import created (both folders come from the
+  // ImportNotesSummary of the import being undone).
+  'knowledge:undoImport': {
+    req: z.object({
+      root: RelPath,
+      assetsRoot: RelPath,
+    }),
+    res: z.object({ ok: z.literal(true) }),
   },
   // Google Docs linked knowledge files
   'google-docs:getStatus': {

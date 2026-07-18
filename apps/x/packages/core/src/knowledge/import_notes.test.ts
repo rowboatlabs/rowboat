@@ -479,7 +479,7 @@ describe('extractZip', () => {
   it('rejects files that are not zips', async () => {
     const zipPath = path.join(tmpDir, 'garbage.zip');
     await fs.writeFile(zipPath, 'not a zip at all');
-    await expect(mod.extractZip(zipPath, path.join(tmpDir, 'out-garbage'))).rejects.toThrow(/Could not read the zip file/);
+    await expect(mod.extractZip(zipPath, path.join(tmpDir, 'out-garbage'))).rejects.toThrow(/valid \.zip archive/);
   });
 });
 
@@ -500,7 +500,14 @@ describe('importObsidianVault', () => {
     const vault = await makeVault('MyVault');
     const summary = await mod.importObsidianVault(vault, 'knowledge');
 
-    expect(summary).toEqual({ notes: 2, attachments: 1, skipped: 0, root: 'knowledge/MyVault' });
+    expect(summary).toEqual({
+      notes: 2,
+      attachments: 1,
+      skipped: 0,
+      skippedFiles: [],
+      root: 'knowledge/MyVault',
+      assetsRoot: 'knowledge/.assets/imports/MyVault',
+    });
 
     const noteA = await fs.readFile(path.join(workspaceDir, 'knowledge', 'MyVault', 'Note A.md'), 'utf8');
     expect(noteA).toContain('[[MyVault/Sub/Note B]]');
@@ -535,6 +542,67 @@ describe('importObsidianVault', () => {
     const vault = await makeVault('EscapeVault');
     await expect(mod.importObsidianVault(vault, 'somewhere-else')).rejects.toThrow(/knowledge/);
   });
+
+  it('reports per-file progress across both stages', async () => {
+    const vault = await makeVault('ProgressVault');
+    const events: Array<{ done: number; total: number; stage: string }> = [];
+    await mod.importObsidianVault(vault, 'knowledge', (p) => events.push(p));
+    // 1 attachment + 2 notes = 3 ticks, attachments first.
+    expect(events).toEqual([
+      { done: 1, total: 3, stage: 'attachments' },
+      { done: 2, total: 3, stage: 'notes' },
+      { done: 3, total: 3, stage: 'notes' },
+    ]);
+  });
+
+  it('reports oversized attachments as too-large and keeps their links original', async () => {
+    const vault = await makeVault('BigVault');
+    const summary = await mod.importTree(vault, 'knowledge', {
+      mode: 'obsidian',
+      rootName: 'BigVault',
+      maxAttachmentBytes: 2, // pic.png is 4 bytes
+    });
+    expect(summary.attachments).toBe(0);
+    expect(summary.skipped).toBe(1);
+    expect(summary.skippedFiles).toEqual([{ file: 'pic.png', reason: 'too-large' }]);
+    const noteA = await fs.readFile(path.join(workspaceDir, 'knowledge', 'BigVault', 'Note A.md'), 'utf8');
+    expect(noteA).toContain('![[pic.png]]');
+    expect(noteA).not.toContain('app://workspace');
+  });
+
+  it('creates a version-history checkpoint after the import', async () => {
+    const vault = await makeVault('CheckpointVault');
+    await mod.importObsidianVault(vault, 'knowledge');
+    const vh = await import('./version_history.js');
+    expect(vi.mocked(vh.commitAll)).toHaveBeenCalledWith('Import CheckpointVault', 'You');
+  });
+});
+
+describe('undoImport', () => {
+  it('removes the import root and its assets folder', async () => {
+    const vault = path.join(tmpDir, 'UndoVault');
+    await fs.mkdir(vault, { recursive: true });
+    await fs.writeFile(path.join(vault, 'Note.md'), 'body ![[pic.png]]');
+    await fs.writeFile(path.join(vault, 'pic.png'), Buffer.from([1, 2, 3]));
+    const summary = await mod.importObsidianVault(vault, 'knowledge');
+
+    await mod.undoImport(summary.root, summary.assetsRoot);
+
+    await expect(fs.access(path.join(workspaceDir, summary.root))).rejects.toThrow();
+    await expect(fs.access(path.join(workspaceDir, summary.assetsRoot))).rejects.toThrow();
+  });
+
+  it('refuses anything that is not an import folder', async () => {
+    await expect(mod.undoImport('knowledge', 'knowledge/.assets/imports/x')).rejects.toThrow(/Not an import folder/);
+    await expect(mod.undoImport('knowledge/', 'knowledge/.assets/imports/x')).rejects.toThrow(/Not an import folder/);
+    await expect(mod.undoImport('somewhere/x', 'knowledge/.assets/imports/x')).rejects.toThrow(/Not an import folder/);
+    // Dot segments would reach shared folders like knowledge/.assets.
+    await expect(mod.undoImport('knowledge/.assets', 'knowledge/.assets/imports/x')).rejects.toThrow(/Not an import folder/);
+    await expect(mod.undoImport('knowledge/x/.git', 'knowledge/.assets/imports/x')).rejects.toThrow(/Not an import folder/);
+    await expect(mod.undoImport('knowledge/x', 'knowledge/.assets/other')).rejects.toThrow(/Not an import assets folder/);
+    await expect(mod.undoImport('knowledge/x', 'knowledge/.assets/imports/')).rejects.toThrow(/Not an import assets folder/);
+    await expect(mod.undoImport('knowledge/x', 'knowledge/.assets/imports/../../evil')).rejects.toThrow(/Not an import assets folder/);
+  });
 });
 
 describe('importNotionExport', () => {
@@ -550,7 +618,14 @@ describe('importNotionExport', () => {
     ]);
 
     const summary = await mod.importNotionExport(zipPath, 'knowledge');
-    expect(summary).toEqual({ notes: 2, attachments: 1, skipped: 0, root: 'knowledge/Notion import' });
+    expect(summary).toEqual({
+      notes: 2,
+      attachments: 1,
+      skipped: 0,
+      skippedFiles: [],
+      root: 'knowledge/Notion import',
+      assetsRoot: 'knowledge/.assets/imports/Notion import',
+    });
 
     const parent = await fs.readFile(path.join(workspaceDir, 'knowledge', 'Notion import', 'Parent.md'), 'utf8');
     expect(parent).toContain('[[Notion import/Parent/Sub Page|Sub Page]]');

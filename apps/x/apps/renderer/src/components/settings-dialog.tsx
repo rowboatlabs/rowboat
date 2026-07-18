@@ -2425,7 +2425,7 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
               ) : activeTab === "notifications" ? (
                 <NotificationSettings dialogOpen={open} />
               ) : activeTab === "migrate" ? (
-                <MigrateSettings />
+                <MigrateSettings onNavigateToNotes={() => setOpen(false)} />
               ) : activeTab === "help" ? (
                 <HelpSettings />
               ) : activeTab === "code-mode" ? (

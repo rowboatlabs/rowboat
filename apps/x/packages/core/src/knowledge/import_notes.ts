@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import yauzl from 'yauzl';
 import { resolveWorkspacePath } from '../workspace/workspace.js';
+import { commitAll } from './version_history.js';
 
 /**
  * Bulk note import from other apps:
@@ -20,13 +21,29 @@ import { resolveWorkspacePath } from '../workspace/workspace.js';
  * No index bookkeeping is needed — the workspace watcher picks up the files.
  */
 
+export type SkippedFile = {
+  file: string; // source-relative path
+  reason: 'too-large' | 'copy-failed' | 'unreadable-note';
+};
+
 export type ImportNotesSummary = {
   notes: number;
   attachments: number;
   skipped: number;
+  skippedFiles: SkippedFile[];
   // Workspace-relative folder the notes landed in (navigate here after import).
   root: string;
+  // Workspace-relative folder the attachments landed in (removed on undo).
+  assetsRoot: string;
 };
+
+export type ImportProgress = {
+  done: number;
+  total: number;
+  stage: 'attachments' | 'notes';
+};
+
+export type ImportProgressCallback = (progress: ImportProgress) => void;
 
 type ImportMode = 'obsidian' | 'notion';
 
@@ -276,10 +293,15 @@ export function transformNoteContent(content: string, noteSrcDir: string, maps: 
   );
 }
 
-async function importTree(
+export async function importTree(
   sourceRoot: string,
   targetFolder: string,
-  opts: { mode: ImportMode; rootName: string },
+  opts: {
+    mode: ImportMode;
+    rootName: string;
+    onProgress?: ImportProgressCallback;
+    maxAttachmentBytes?: number;
+  },
 ): Promise<ImportNotesSummary> {
   const folder = normalizeKnowledgeDir(targetFolder);
   const files = await walkDir(sourceRoot);
@@ -384,14 +406,21 @@ async function importTree(
     }
   }
 
-  let skipped = 0;
+  const skippedFiles: SkippedFile[] = [];
   let copiedAssets = 0;
+  const maxAttachmentBytes = opts.maxAttachmentBytes ?? MAX_ATTACHMENT_BYTES;
+  const total = assets.length + notes.length;
+  let done = 0;
+  const tick = (stage: ImportProgress['stage']) => {
+    done += 1;
+    opts.onProgress?.({ done, total, stage });
+  };
 
   for (const asset of assets) {
     try {
       const stat = await fs.stat(asset.abs);
-      if (stat.size > MAX_ATTACHMENT_BYTES) {
-        skipped += 1;
+      if (stat.size > maxAttachmentBytes) {
+        skippedFiles.push({ file: asset.srcRel, reason: 'too-large' });
         continue;
       }
       const dest = resolveWorkspacePath(asset.destRel);
@@ -401,7 +430,9 @@ async function importTree(
       copiedAssets += 1;
     } catch (err) {
       console.error(`[ImportNotes] Failed to copy attachment ${asset.srcRel}:`, err);
-      skipped += 1;
+      skippedFiles.push({ file: asset.srcRel, reason: 'copy-failed' });
+    } finally {
+      tick('attachments');
     }
   }
 
@@ -417,11 +448,56 @@ async function importTree(
       writtenNotes += 1;
     } catch (err) {
       console.error(`[ImportNotes] Failed to import note ${note.srcRel}:`, err);
-      skipped += 1;
+      skippedFiles.push({ file: note.srcRel, reason: 'unreadable-note' });
+    } finally {
+      tick('notes');
     }
   }
 
-  return { notes: writtenNotes, attachments: copiedAssets, skipped, root: rootRel };
+  // Version-history checkpoint so the whole import shows up as one restorable
+  // step. Never fail the import over it.
+  try {
+    await commitAll(`Import ${rootName}`, 'You');
+  } catch (err) {
+    console.error('[ImportNotes] Failed to create version-history checkpoint:', err);
+  }
+
+  return {
+    notes: writtenNotes,
+    attachments: copiedAssets,
+    skipped: skippedFiles.length,
+    skippedFiles,
+    root: rootRel,
+    assetsRoot: assetsRootRel,
+  };
+}
+
+/**
+ * Remove everything a completed import created: the notes folder and its
+ * attachments folder. Both paths come from the ImportNotesSummary of the
+ * import being undone; anything shaped differently is refused.
+ */
+export async function undoImport(root: string, assetsRoot: string): Promise<void> {
+  // Dot segments are refused outright: 'knowledge/.assets' would take every
+  // attachment in the workspace with it.
+  const safeUnder = (rel: string, prefix: string): boolean => {
+    if (!rel.startsWith(prefix)) return false;
+    const segments = rel.slice(prefix.length).split('/');
+    return segments.length > 0 && segments.every((s) => s.length > 0 && !s.startsWith('.'));
+  };
+  if (!safeUnder(root, 'knowledge/')) {
+    throw new Error(`Not an import folder: ${root}`);
+  }
+  if (!safeUnder(assetsRoot, 'knowledge/.assets/imports/')) {
+    throw new Error(`Not an import assets folder: ${assetsRoot}`);
+  }
+  await fs.rm(resolveWorkspacePath(root), { recursive: true, force: true });
+  await fs.rm(resolveWorkspacePath(assetsRoot), { recursive: true, force: true });
+  try {
+    await commitAll(`Undo import ${path.posix.basename(root)}`, 'You');
+  } catch (err) {
+    console.error('[ImportNotes] Failed to checkpoint undo:', err);
+  }
 }
 
 // Extract a zip with zip-slip/symlink guards (same discipline as apps/installer).
@@ -429,7 +505,10 @@ export async function extractZip(zipPath: string, destDir: string): Promise<void
   await fs.mkdir(destDir, { recursive: true });
   await new Promise<void>((resolve, reject) => {
     yauzl.open(zipPath, { lazyEntries: true }, (err, zip) => {
-      if (err || !zip) return reject(new Error(`Could not read the zip file: ${String(err)}`));
+      if (err || !zip) {
+        console.error(`[ImportNotes] Failed to open zip ${zipPath}:`, err);
+        return reject(new Error('That file doesn’t look like a valid .zip archive.'));
+      }
       let entries = 0;
       let uncompressed = 0;
 
@@ -461,7 +540,8 @@ export async function extractZip(zipPath: string, destDir: string): Promise<void
         zip.openReadStream(entry, (streamErr, stream) => {
           if (streamErr || !stream) {
             zip.close();
-            return reject(new Error(`Could not read the zip file: ${String(streamErr)}`));
+            console.error(`[ImportNotes] Failed to read zip entry ${name}:`, streamErr);
+            return reject(new Error('The .zip appears to be damaged — try exporting it again.'));
           }
           const dest = path.join(destDir, name);
           void fs.mkdir(path.dirname(dest), { recursive: true }).then(() => {
@@ -475,7 +555,11 @@ export async function extractZip(zipPath: string, destDir: string): Promise<void
       });
 
       zip.on('end', () => resolve());
-      zip.on('error', reject);
+      // Keep yauzl's detail — it names the offending entry — but lead with
+      // something a person can act on.
+      zip.on('error', (zipErr: Error) =>
+        reject(new Error(`The .zip could not be read (${zipErr.message}).`)),
+      );
       zip.readEntry();
     });
   });
@@ -503,17 +587,19 @@ export async function findContentRoot(dir: string): Promise<string> {
 export async function importObsidianVault(
   vaultPath: string,
   targetFolder: string,
+  onProgress?: ImportProgressCallback,
 ): Promise<ImportNotesSummary> {
   const stat = await fs.stat(vaultPath).catch(() => null);
   if (!stat?.isDirectory()) throw new Error('Choose the folder that contains your vault.');
   const rootName = path.basename(vaultPath) || 'Obsidian import';
-  return importTree(vaultPath, targetFolder, { mode: 'obsidian', rootName });
+  return importTree(vaultPath, targetFolder, { mode: 'obsidian', rootName, onProgress });
 }
 
 /** Import a Notion "Markdown & CSV" export zip. */
 export async function importNotionExport(
   zipPath: string,
   targetFolder: string,
+  onProgress?: ImportProgressCallback,
 ): Promise<ImportNotesSummary> {
   const stat = await fs.stat(zipPath).catch(() => null);
   if (!stat?.isFile() || !zipPath.toLowerCase().endsWith('.zip')) {
@@ -532,7 +618,7 @@ export async function importNotionExport(
       }
     }
     const root = await findContentRoot(tmp);
-    return await importTree(root, targetFolder, { mode: 'notion', rootName: 'Notion import' });
+    return await importTree(root, targetFolder, { mode: 'notion', rootName: 'Notion import', onProgress });
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }
