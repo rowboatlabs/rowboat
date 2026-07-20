@@ -70,6 +70,14 @@ function filePermissionTargets(toolName: string, args: Record<string, unknown>):
         }
         case 'file-remove':
             return pathArg ? { operation: 'delete', paths: [pathArg] } : null;
+        case 'generate-image': {
+            // Output always lands inside the workspace; only reading source
+            // images (from e.g. Desktop) can cross the boundary.
+            const sources = Array.isArray(args.sourceImagePaths)
+                ? args.sourceImagePaths.filter((p): p is string => typeof p === 'string')
+                : [];
+            return sources.length ? { operation: 'read', paths: sources } : null;
+        }
         default:
             return null;
     }

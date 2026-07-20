@@ -21,6 +21,7 @@ import { TurnActivityIndicator } from '@/components/turn-activity-indicator'
 import { Tool, ToolContent, ToolGroupComponent, ToolHeader, ToolTabbedContent } from '@/components/ai-elements/tool'
 import { WebSearchResult } from '@/components/ai-elements/web-search-result'
 import { ComposioConnectCard } from '@/components/ai-elements/composio-connect-card'
+import { GeneratedImageCard } from '@/components/ai-elements/generated-image-card'
 import { PermissionRequest } from '@/components/ai-elements/permission-request'
 import { AutoPermissionDecision } from '@/components/ai-elements/auto-permission-decision'
 import { TerminalOutput } from '@/components/terminal-output'
@@ -45,6 +46,7 @@ import {
   createEmptyChatTabViewState,
   getWebSearchCardData,
   getComposioConnectCardData,
+  getGeneratedImageCardData,
   getToolDisplayName,
   getToolErrorText,
   groupConversationItems,
@@ -449,6 +451,18 @@ export function ChatSidebar({
             results={webSearchData.results}
             status={item.status}
             title={webSearchData.title}
+          />
+        )
+      }
+      const generatedImageData = getGeneratedImageCardData(item)
+      if (generatedImageData) {
+        return (
+          <GeneratedImageCard
+            key={item.id}
+            prompt={generatedImageData.prompt}
+            path={generatedImageData.path}
+            error={generatedImageData.error}
+            status={item.status}
           />
         )
       }
