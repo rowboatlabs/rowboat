@@ -1814,6 +1814,13 @@ export function setupIpcHandlers() {
         lastAppsFingerprint = fingerprint;
         invalidateCopilotInstructionsCache();
       }
+      // The copilot builds apps by writing the folder directly — apps:create is
+      // never on that path — so the first-app reward triggers off observed
+      // state instead: a valid non-installed app means the user built one.
+      // Cheap on repeat polls (maybeActivateCredit short-circuits once claimed).
+      if (apps.some((a) => a.kind === 'local' && a.status === 'ok')) {
+        void maybeActivateCredit('first_app_built');
+      }
       return {
         serverRunning: status.running,
         ...(status.error ? { serverError: status.error } : {}),
