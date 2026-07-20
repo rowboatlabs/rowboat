@@ -83,7 +83,7 @@ You can set up background agents that run on events like new email or on schedul
 <tr>
 <td width="40%" valign="middle">
 <h3>Built-in Browser</h3>
-Rowboat includes a browser that lets you and assistant collaborate on web tasks. Because its isolated from your main browser, you can log in only to the accounts that want the assistant to access.
+Rowboat includes a browser that lets you and assistant collaborate on web tasks. Because it's isolated from your main browser, you can log in only to the accounts that want the assistant to access.
 </td>
 <td width="60%">
 <img width="1512" height="948" alt="Browser screenshot" src="assets/readme-dark/browser.png" />
@@ -110,7 +110,7 @@ Code mode lets you spin up parallel coding agents with Claude Code or Codex, and
 <tr>
 <td width="40%" valign="middle">
 <h3>Apps</h3>
-You can bulild your own work surfaces inside Rowboat — they get acess to all the tools and integrations, and you can share them with other people.
+You can build your own work surfaces inside Rowboat — they get access to all the tools and integrations, and you can share them with other people.
 </td>
 <td width="60%">
 <img width="1512" height="949" alt="Apps screenshot" src="assets/readme-dark/apps.png" />
