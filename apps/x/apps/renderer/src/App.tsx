@@ -205,6 +205,10 @@ const TITLEBAR_HEADER_GAP_PX = 8
 const TITLEBAR_TOGGLE_MARGIN_LEFT_PX = 12
 const TITLEBAR_BUTTONS_COLLAPSED = 1
 const TITLEBAR_BUTTON_GAPS_COLLAPSED = 0
+// Push-to-talk: a press shorter than this is a click (mic button = mute
+// toggle) or a shortcut combo (Ctrl) rather than a hold; the assistant is
+// only interrupted once a hold commits.
+const PTT_COMMIT_MS = 300
 const GRAPH_TAB_PATH = '__rowboat_graph_view__'
 const SUGGESTED_TOPICS_TAB_PATH = '__rowboat_suggested_topics__'
 const MEETINGS_TAB_PATH = '__rowboat_meetings__'
@@ -1355,6 +1359,102 @@ function App() {
     }
   }, [voiceSegments, activeIsProcessing])
 
+  // Ref mirror so the push-to-talk handlers stay referentially stable — the
+  // interrupt callback re-binds on every voiceSegments change, and a fresh
+  // identity mid-hold would tear down the keyboard listeners under the user.
+  const interruptAssistantRef = useRef(handleInterruptAssistant)
+  useEffect(() => {
+    interruptAssistantRef.current = handleInterruptAssistant
+  })
+
+  // Push-to-talk (Wispr Flow / Zoom hold-space style): hold the mic button —
+  // or hold Ctrl anywhere in the app — to be heard, release to send
+  // immediately (the release IS the endpoint; no silence auto-detection).
+  // Works muted or not; while muted it's the only way to be heard. A press
+  // only "commits" after PTT_COMMIT_MS: a quicker mic-button press is the
+  // plain mute toggle, and Ctrl going down for a shortcut combo (Ctrl+C…)
+  // cancels the hold — so the assistant-interrupt below never fires
+  // spuriously for either.
+  const [pttActive, setPttActive] = useState(false)
+  const pttRef = useRef<{ source: 'key' | 'mic'; committed: boolean; commitTimer: number } | null>(null)
+
+  const handlePttDown = useCallback((source: 'key' | 'mic') => {
+    if (!inCallRef.current || pttRef.current) return
+    // Capture starts on press so no first words are lost; if the press turns
+    // out to be a click or a combo, the hold is cancelled and discarded.
+    voiceRef.current.startHold()
+    const entry = { source, committed: false, commitTimer: 0 }
+    entry.commitTimer = window.setTimeout(() => {
+      entry.committed = true
+      setPttActive(true)
+      // The user is talking over the assistant on purpose — stop it, exactly
+      // like the Stop control (silence TTS, abort a still-generating run).
+      interruptAssistantRef.current()
+    }, PTT_COMMIT_MS)
+    pttRef.current = entry
+  }, [])
+
+  const handlePttUp = useCallback((source: 'key' | 'mic') => {
+    const entry = pttRef.current
+    if (!entry || entry.source !== source) return
+    clearTimeout(entry.commitTimer)
+    pttRef.current = null
+    setPttActive(false)
+    if (entry.committed || source === 'key') {
+      // Send whatever was heard — an empty hold (quick Ctrl tap) is a no-op.
+      if (entry.committed) analytics.callPttUsed(source)
+      void voiceRef.current.endHold()
+    } else {
+      // A quick mic-button press is still the plain mute toggle.
+      voiceRef.current.cancelHold()
+      setMicMuted((m) => !m)
+    }
+  }, [])
+
+  const handlePttCancel = useCallback(() => {
+    const entry = pttRef.current
+    if (!entry) return
+    clearTimeout(entry.commitTimer)
+    pttRef.current = null
+    setPttActive(false)
+    voiceRef.current.cancelHold()
+  }, [])
+
+  // The keyboard half: hold Ctrl to talk (same key on macOS and Windows —
+  // the Fn key never reaches the renderer as a key event). Only listens
+  // while the app window itself is focused; from the floating pill over
+  // another app, use the pill's mic button instead.
+  useEffect(() => {
+    if (!inCall) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Control') {
+        if (!e.repeat) handlePttDown('key')
+        return
+      }
+      // Any other key while holding: this was a shortcut combo, not
+      // push-to-talk — abandon the hold and let the combo through.
+      if (pttRef.current?.source === 'key') handlePttCancel()
+    }
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'Control') handlePttUp('key')
+    }
+    // Cmd-tabbing away mid-hold swallows the keyup — release rather than
+    // leave the mic hot.
+    const onBlur = () => {
+      if (pttRef.current?.source === 'key') handlePttUp('key')
+    }
+    window.addEventListener('keydown', onKeyDown, true)
+    window.addEventListener('keyup', onKeyUp, true)
+    window.addEventListener('blur', onBlur)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown, true)
+      window.removeEventListener('keyup', onKeyUp, true)
+      window.removeEventListener('blur', onBlur)
+      // Call ended (or hot-reload) mid-hold — drop it, whatever the source.
+      handlePttCancel()
+    }
+  }, [inCall, handlePttDown, handlePttUp, handlePttCancel])
+
   // Current phase of the call (null when not in one).
   const videoCallStatus: 'listening' | 'thinking' | 'speaking' | null =
     inCall
@@ -1409,11 +1509,12 @@ function App() {
         status: videoCallStatus,
         cameraOn: video.cameraOn,
         micMuted,
+        pttActive,
         screenSharing: video.screenState === 'live',
         interimText: voice.interimText || null,
       })
       .catch(() => {})
-  }, [inCall, tts.state, videoCallStatus, video.cameraOn, micMuted, video.screenState, voice.interimText])
+  }, [inCall, tts.state, videoCallStatus, video.cameraOn, micMuted, pttActive, video.screenState, voice.interimText])
 
   // Execute popout control-bar actions (the popout window has no access to
   // the call's mic/camera/capture — they live here). 'expand' goes full
@@ -1422,6 +1523,8 @@ function App() {
   useEffect(() => {
     return window.ipc.on('video:popout-action', ({ action }) => {
       if (action === 'toggle-mic') handleToggleMic()
+      else if (action === 'mic-down') handlePttDown('mic')
+      else if (action === 'mic-up') handlePttUp('mic')
       else if (action === 'toggle-camera') handleToggleCamera()
       else if (action === 'toggle-share') void handleToggleScreenShare()
       else if (action === 'stop-speaking') handleInterruptAssistant()
@@ -1431,7 +1534,7 @@ function App() {
         setCallMinimized(false)
       }
     })
-  }, [handleToggleMic, handleToggleCamera, handleToggleScreenShare, handleInterruptAssistant, endCall, video])
+  }, [handleToggleMic, handlePttDown, handlePttUp, handleToggleCamera, handleToggleScreenShare, handleInterruptAssistant, endCall, video])
 
   // Enter to submit voice input, Escape to cancel
   useEffect(() => {
@@ -7172,7 +7275,9 @@ function App() {
                 cameraOn={video.cameraOn}
                 onToggleCamera={handleToggleCamera}
                 micMuted={micMuted}
-                onToggleMic={handleToggleMic}
+                pttActive={pttActive}
+                onMicDown={() => handlePttDown('mic')}
+                onMicUp={() => handlePttUp('mic')}
                 practiceMode={practiceMode}
                 onMinimize={() => void handleMinimizeCall()}
                 onInterrupt={handleInterruptAssistant}

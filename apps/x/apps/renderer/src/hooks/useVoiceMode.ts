@@ -85,6 +85,9 @@ export function useVoiceMode() {
     const continuousCbRef = useRef<((text: string) => void) | null>(null);
     // While true (assistant is speaking), mic audio is dropped instead of streamed.
     const pausedRef = useRef(false);
+    // Push-to-talk hold (calls): while true, audio flows even when paused and
+    // the utterance never auto-fires — it ends when the user releases the hold.
+    const holdRef = useRef(false);
     const keepAliveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
     // Pending mid-thought hold (smart endpointing) — see maybeEndUtterance.
     const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -114,7 +117,7 @@ export function useVoiceMode() {
             clearTimeout(holdTimerRef.current);
             holdTimerRef.current = null;
         }
-        if (!continuousCbRef.current || pausedRef.current) return;
+        if (!continuousCbRef.current || pausedRef.current || holdRef.current) return;
         const utterance = transcriptBufferRef.current.trim();
         transcriptBufferRef.current = '';
         interimRef.current = '';
@@ -127,7 +130,9 @@ export function useVoiceMode() {
     // trails off mid-sentence ("so what I want is…"), hold a little longer —
     // resumed speech cancels the hold and the utterance keeps growing.
     const maybeEndUtterance = useCallback(() => {
-        if (!continuousCbRef.current || pausedRef.current) return;
+        // A push-to-talk hold owns the endpoint: the utterance ends when the
+        // user releases, never on silence detection.
+        if (!continuousCbRef.current || pausedRef.current || holdRef.current) return;
         const buffered = transcriptBufferRef.current.trim();
         if (!buffered) return;
         if (COMPLETE_THOUGHT_RE.test(buffered)) {
@@ -300,6 +305,7 @@ export function useVoiceMode() {
         }
         continuousCbRef.current = null;
         pausedRef.current = false;
+        holdRef.current = false;
         if (holdTimerRef.current) {
             clearTimeout(holdTimerRef.current);
             holdTimerRef.current = null;
@@ -377,8 +383,10 @@ export function useVoiceMode() {
 
         processor.onaudioprocess = (e) => {
             // Paused (assistant is speaking in a call): drop mic audio so the
-            // assistant's own TTS never gets transcribed back at it.
-            if (pausedRef.current) return;
+            // assistant's own TTS never gets transcribed back at it. A
+            // push-to-talk hold overrides the pause — the user explicitly
+            // asked to be heard.
+            if (pausedRef.current && !holdRef.current) return;
             const float32 = e.inputBuffer.getChannelData(0);
             const int16 = new Int16Array(float32.length);
             let sumSquares = 0;
@@ -479,10 +487,68 @@ export function useVoiceMode() {
         }
     }, []);
 
+    /**
+     * Push-to-talk during a call (Wispr Flow style): start capturing on
+     * hold, regardless of mute/auto-pause. While held, silence never ends the
+     * utterance — endHold() is the one and only endpoint.
+     */
+    const startHold = useCallback(() => {
+        if (!continuousCbRef.current || holdRef.current) return;
+        // While paused (muted or assistant busy) the buffers only ever hold
+        // stale fragments — start the held utterance clean.
+        if (pausedRef.current) {
+            transcriptBufferRef.current = '';
+            interimRef.current = '';
+            setInterimText('');
+        }
+        if (holdTimerRef.current) {
+            clearTimeout(holdTimerRef.current);
+            holdTimerRef.current = null;
+        }
+        holdRef.current = true;
+    }, []);
+
+    /** Release the push-to-talk hold: flush Deepgram and fire the utterance now. */
+    const endHold = useCallback(async () => {
+        if (!holdRef.current) return;
+        holdRef.current = false;
+        const cb = continuousCbRef.current;
+        if (!cb) return;
+        // Ask Deepgram to flush its tail so the last words land in the buffer.
+        // (Finalize flushes the live stream without closing it.)
+        await finalizeDeepgramStream(wsRef.current);
+        // If we're not paused, the finalize response's speech_final may have
+        // already fired the utterance through the normal path — the buffer is
+        // then empty and this is a no-op instead of a double submit.
+        let text = transcriptBufferRef.current;
+        if (interimRef.current) {
+            text += (text ? ' ' : '') + interimRef.current;
+        }
+        text = text.trim();
+        transcriptBufferRef.current = '';
+        interimRef.current = '';
+        setInterimText('');
+        if (text) cb(text);
+    }, []);
+
+    /** Abandon a push-to-talk hold without submitting (e.g. it was a combo keypress). */
+    const cancelHold = useCallback(() => {
+        if (!holdRef.current) return;
+        holdRef.current = false;
+        // Paused = the hold was the only reason audio flowed; what it heard
+        // must not leak into a later utterance. Unpaused = the buffer holds a
+        // live hands-free utterance — leave it alone.
+        if (pausedRef.current) {
+            transcriptBufferRef.current = '';
+            interimRef.current = '';
+            setInterimText('');
+        }
+    }, []);
+
     /** Pre-cache auth details so mic click skips IPC round-trips */
     const warmup = useCallback(() => {
         refreshAuth().catch(() => {});
     }, [refreshAuth]);
 
-    return { state, interimText, audioLevelsRef, start, submit, cancel, warmup, startContinuous, setPaused };
+    return { state, interimText, audioLevelsRef, start, submit, cancel, warmup, startContinuous, setPaused, startHold, endHold, cancelHold };
 }

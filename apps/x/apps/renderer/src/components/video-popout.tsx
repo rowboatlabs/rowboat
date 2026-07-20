@@ -9,6 +9,8 @@ type PopoutState = {
   cameraOn: boolean
   /** User mute = full input pause: no mic audio AND no frame capture. */
   micMuted: boolean
+  /** Push-to-talk hold in progress — listening even while muted. */
+  pttActive: boolean
   screenSharing: boolean
   interimText: string | null
 }
@@ -36,7 +38,7 @@ export function VideoPopout() {
   // Camera defaults OFF: guessing "on" would flash the user's video for a
   // beat before the real state arrives — which reads as a bug. The true
   // state is fetched immediately below.
-  const [state, setState] = useState<PopoutState>({ ttsState: 'idle', status: null, cameraOn: false, micMuted: false, screenSharing: false, interimText: null })
+  const [state, setState] = useState<PopoutState>({ ttsState: 'idle', status: null, cameraOn: false, micMuted: false, pttActive: false, screenSharing: false, interimText: null })
   const videoRef = useRef<HTMLVideoElement | null>(null)
 
   useEffect(() => {
@@ -82,7 +84,7 @@ export function VideoPopout() {
   // so the mascot still animates while the assistant speaks in the main window.
   const getLevel = useCallback(() => 0.45 + 0.35 * Math.sin(performance.now() / 90), [])
 
-  const sendAction = useCallback((action: 'toggle-mic' | 'toggle-camera' | 'toggle-share' | 'stop-speaking' | 'end-call' | 'expand') => {
+  const sendAction = useCallback((action: 'toggle-mic' | 'mic-down' | 'mic-up' | 'toggle-camera' | 'toggle-share' | 'stop-speaking' | 'end-call' | 'expand') => {
     void window.ipc.invoke('video:popoutAction', { action }).catch(() => {})
   }, [])
 
@@ -122,12 +124,17 @@ export function VideoPopout() {
               {state.micMuted ? 'Sharing paused' : 'Sharing screen'}
             </span>
           )}
-          {state.micMuted && (
+          {state.pttActive ? (
+            <span className="absolute bottom-1 right-1.5 flex items-center gap-1 rounded bg-green-600/90 px-1.5 py-0.5 text-[10px] font-medium text-white">
+              <Mic className="h-2.5 w-2.5" />
+              Listening
+            </span>
+          ) : state.micMuted ? (
             <span className="absolute bottom-1 right-1.5 flex items-center gap-1 rounded bg-red-600/90 px-1.5 py-0.5 text-[10px] font-medium text-white">
               <MicOff className="h-2.5 w-2.5" />
               Muted
             </span>
-          )}
+          ) : null}
         </div>
         <div className="relative flex flex-1 items-center justify-center overflow-hidden rounded-lg bg-neutral-800">
           <TalkingHead ttsState={state.ttsState} getLevel={getLevel} size={84} />
@@ -136,8 +143,14 @@ export function VideoPopout() {
           </span>
           {statusDisplay && (
             <span className="absolute right-1.5 top-1.5 flex items-center gap-1 rounded-full bg-black/50 px-1.5 py-0.5 text-[10px] font-medium text-white">
-              {/* Muted overrides "Listening" — the green pulse would be a lie. */}
-              {state.micMuted && state.status === 'listening' ? (
+              {/* A push-to-talk hold overrides everything; muted overrides
+                  "Listening" — the green pulse would be a lie. */}
+              {state.pttActive ? (
+                <>
+                  <span className="block h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
+                  Release to send
+                </>
+              ) : state.micMuted && state.status === 'listening' ? (
                 <>
                   <span className="block h-1.5 w-1.5 rounded-full bg-red-500" />
                   Muted
@@ -178,16 +191,38 @@ export function VideoPopout() {
       <div className="flex h-7 shrink-0 items-center justify-center gap-2" style={noDragRegion}>
         <button
           type="button"
-          onClick={() => sendAction('toggle-mic')}
+          onPointerDown={(e) => {
+            // Raw press/release — the app window turns a quick press into the
+            // mute toggle and a sustained one into a push-to-talk hold.
+            // Capture the pointer so the release always lands here.
+            e.currentTarget.setPointerCapture(e.pointerId)
+            sendAction('mic-down')
+          }}
+          onPointerUp={() => sendAction('mic-up')}
+          onPointerCancel={() => sendAction('mic-up')}
+          onClick={(e) => {
+            // Keyboard activation (Enter/Space) emits click with detail 0 and
+            // no pointer events — treat it as a quick press (mute toggle).
+            if (e.detail === 0) {
+              sendAction('mic-down')
+              sendAction('mic-up')
+            }
+          }}
           className={`flex h-6 w-6 items-center justify-center rounded-full transition-colors ${
-            state.micMuted
-              ? 'bg-red-600 text-white hover:bg-red-500'
-              : 'bg-neutral-700 text-white/90 hover:bg-neutral-600'
+            state.pttActive
+              ? 'bg-green-600 text-white'
+              : state.micMuted
+                ? 'bg-red-600 text-white hover:bg-red-500'
+                : 'bg-neutral-700 text-white/90 hover:bg-neutral-600'
           }`}
-          aria-label={state.micMuted ? 'Unmute' : 'Mute (pauses mic and frame capture)'}
-          title={state.micMuted ? 'Unmute' : 'Mute — pauses your mic and all frame capture'}
+          aria-label={state.micMuted ? 'Unmute (hold to talk)' : 'Mute (hold to talk)'}
+          title={
+            state.micMuted
+              ? 'Click to unmute · hold to talk, release to send'
+              : 'Click to mute · hold to talk, release to send'
+          }
         >
-          {state.micMuted ? <MicOff className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
+          {state.micMuted && !state.pttActive ? <MicOff className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
         </button>
         <button
           type="button"

@@ -435,6 +435,7 @@ let lastVideoPopoutState: {
   status: 'listening' | 'thinking' | 'speaking' | null;
   cameraOn: boolean;
   micMuted: boolean;
+  pttActive: boolean;
   screenSharing: boolean;
   interimText: string | null;
 } | null = null;

@@ -71,6 +71,12 @@ export function callStarted(preset: 'voice' | 'video' | 'share' | 'practice') {
   posthog.capture('call_started', { preset })
 }
 
+// A committed push-to-talk hold was released during a call (mic button held
+// or Ctrl held) — the walkie-talkie alternative to hands-free listening.
+export function callPttUsed(source: 'key' | 'mic') {
+  posthog.capture('call_ptt_used', { source })
+}
+
 // Voice-to-voice latency breakdown for one call turn (all milliseconds):
 // utterance accepted → message submitted → first TTS speak() → audio playing.
 export function callTurnLatency(props: {

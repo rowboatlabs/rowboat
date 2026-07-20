@@ -1920,6 +1920,9 @@ const ipcSchemas = {
       cameraOn: z.boolean(),
       // User mute: mic audio and frame capture are both paused.
       micMuted: z.boolean(),
+      // Push-to-talk hold in progress (mic button or Ctrl held down) — the
+      // assistant is listening even while muted.
+      pttActive: z.boolean(),
       screenSharing: z.boolean(),
       // Live transcript of the in-progress utterance.
       interimText: z.string().nullable(),
@@ -1939,6 +1942,7 @@ const ipcSchemas = {
           status: z.enum(['listening', 'thinking', 'speaking']).nullable(),
           cameraOn: z.boolean(),
           micMuted: z.boolean(),
+          pttActive: z.boolean(),
           screenSharing: z.boolean(),
           interimText: z.string().nullable(),
         })
@@ -1947,10 +1951,12 @@ const ipcSchemas = {
   },
   // Popout control bar → main process → relayed to the app window, which
   // executes the action on the live call. 'expand' additionally focuses the
-  // main app window (handled in the main process).
+  // main app window (handled in the main process). The mic button sends raw
+  // press/release ('mic-down'/'mic-up') — the app window decides whether it
+  // was a click (toggle mute) or a push-to-talk hold.
   'video:popoutAction': {
     req: z.object({
-      action: z.enum(['toggle-mic', 'toggle-camera', 'toggle-share', 'stop-speaking', 'end-call', 'expand']),
+      action: z.enum(['toggle-mic', 'mic-down', 'mic-up', 'toggle-camera', 'toggle-share', 'stop-speaking', 'end-call', 'expand']),
     }),
     res: z.object({}),
   },
@@ -1961,6 +1967,7 @@ const ipcSchemas = {
       status: z.enum(['listening', 'thinking', 'speaking']).nullable(),
       cameraOn: z.boolean(),
       micMuted: z.boolean(),
+      pttActive: z.boolean(),
       screenSharing: z.boolean(),
       interimText: z.string().nullable(),
     }),
@@ -1969,7 +1976,7 @@ const ipcSchemas = {
   // Push channel: main → app window with a popout control-bar action.
   'video:popout-action': {
     req: z.object({
-      action: z.enum(['toggle-mic', 'toggle-camera', 'toggle-share', 'stop-speaking', 'end-call', 'expand']),
+      action: z.enum(['toggle-mic', 'mic-down', 'mic-up', 'toggle-camera', 'toggle-share', 'stop-speaking', 'end-call', 'expand']),
     }),
     res: z.null(),
   },

@@ -56,7 +56,32 @@ assistant listening in. Devices stay acquired for instant unmute (camera
 light and macOS share indicator stay on — the pill's share badge switches to
 "Sharing paused"), the status chip shows "Muted" instead of "Listening",
 and assistant output is unaffected (in-flight speech keeps playing; Stop
-handles that). Mute resets to off at call start/end. While the assistant is thinking or speaking, a
+handles that). Mute resets to off at call start/end.
+
+**Push-to-talk** (Wispr Flow / Zoom hold-space style): *holding* the mic
+button — on either surface — or holding **Ctrl** (app window focused; same
+key on macOS and Windows, the Fn key emits no renderer key events) opens the
+mic for exactly as long as it's held, muted or not, and the release IS the
+endpoint: the utterance submits immediately with no silence auto-detection.
+While muted it's the only way to be heard (walkie-talkie mode); while
+listening hands-free it force-ends the utterance deterministically. A press
+only *commits* after 300ms (`PTT_COMMIT_MS` in `App.tsx`): a quicker
+mic-button press stays a plain mute toggle, and another key going down while
+Ctrl is held means a shortcut combo (Ctrl+C…) — the hold is abandoned and
+what it heard is discarded. On commit the assistant is interrupted exactly
+like the Stop control (TTS silenced, an in-flight run aborted) — pressing to
+talk is barge-in. Capture starts on press (no first words lost); a hold that
+turns out to be a click/combo discards its audio buffer. UI: green mic
+button + "Release to send" status chip on both surfaces; muted full-screen
+calls show a "hold to talk" hint in the caption strip. The popout's mic
+button sends raw `mic-down`/`mic-up` popout actions and the app window does
+the click-vs-hold discrimination (`handlePttDown`/`handlePttUp`); the hook
+half lives in `useVoiceMode.startHold`/`endHold`/`cancelHold` (hold
+suppresses the smart endpoint, bypasses the pause gate, and release sends a
+Deepgram `Finalize` to flush the tail). `call_ptt_used` `{source}` is the
+PostHog event. Known gap: the Ctrl hold only works while the app window is
+focused — from the pill over another app, hold the pill's mic button (a true
+global hold needs a native key hook). While the assistant is thinking or speaking, a
 red **Stop** button appears on the mascot tile — it silences TTS instantly,
 skips queued voice segments, and aborts the run if it's still generating
 (stopping a run from anywhere, including the composer, also silences TTS). Captions of the in-progress utterance and the
@@ -132,6 +157,12 @@ is live) to the outgoing message as `UserImagePart`s and sets
   audio (so TTS is never transcribed back), discards half-heard buffer,
   sends Deepgram KeepAlives every 5s. `App.tsx` drives this from
   `activeIsProcessing || tts.state !== 'idle'`.
+- `startHold()` / `endHold()` / `cancelHold()`: the push-to-talk hold. While
+  held, audio flows even when paused/muted and the smart endpoint never
+  fires; `endHold` sends Deepgram `Finalize` to flush the tail, then submits
+  buffer+interim through the continuous callback. `cancelHold` discards what
+  was heard only when paused (unpaused, the buffer is a live hands-free
+  utterance and is left alone).
 - Mid-call socket drops reconnect after 1s; the offline audio backlog is
   capped (~30s).
 
@@ -239,8 +270,9 @@ screen frame per message unless the screen changed.
 
 ## Known limitations
 
-- Turn-taking is strict — no barge-in (would need echo cancellation against
-  TTS output).
+- Turn-taking is strict — no *voice-activated* barge-in (would need echo
+  cancellation against TTS output). Push-to-talk is the manual barge-in: a
+  committed hold interrupts the assistant.
 - Frame sampling, not video: motion between frames is invisible (the prompt
   tells the model not to claim otherwise).
 - Vocal-delivery feedback is limited: Deepgram reduces speech to text, so

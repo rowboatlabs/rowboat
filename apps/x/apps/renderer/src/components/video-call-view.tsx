@@ -14,7 +14,12 @@ interface VideoCallViewProps {
   onToggleCamera: () => void
   /** User mute = full input pause: no mic audio AND no frame capture. */
   micMuted: boolean
-  onToggleMic: () => void
+  /** Push-to-talk hold in progress — listening even while muted. */
+  pttActive: boolean
+  /** Raw mic-button press/release — App.tsx decides click (mute toggle) vs
+   *  push-to-talk hold (release sends the utterance immediately). */
+  onMicDown: () => void
+  onMicUp: () => void
   /** Starting a share collapses this view into the floating popout (the
    *  surface is derived from devices — see App.tsx). */
   onToggleScreenShare: () => void
@@ -55,7 +60,9 @@ export function VideoCallView({
   cameraOn,
   onToggleCamera,
   micMuted,
-  onToggleMic,
+  pttActive,
+  onMicDown,
+  onMicUp,
   onToggleScreenShare,
   practiceMode,
   onMinimize,
@@ -133,12 +140,17 @@ export function VideoCallView({
           <span className="absolute bottom-3 left-3 rounded-md bg-black/50 px-2 py-0.5 text-sm text-white">
             You
           </span>
-          {micMuted && (
+          {pttActive ? (
+            <span className="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-md bg-green-600/90 px-2 py-0.5 text-sm font-medium text-white">
+              <Mic className="h-3.5 w-3.5" />
+              Listening — release to send
+            </span>
+          ) : micMuted ? (
             <span className="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-md bg-red-600/90 px-2 py-0.5 text-sm font-medium text-white">
               <MicOff className="h-3.5 w-3.5" />
               Muted — nothing is heard or captured
             </span>
-          )}
+          ) : null}
         </div>
 
         {/* Assistant */}
@@ -185,20 +197,31 @@ export function VideoCallView({
 
       {/* Captions */}
       <div className="flex h-14 items-center justify-center px-6">
-        {caption && (
+        {caption ? (
           <div className="max-w-3xl truncate rounded-lg bg-black/60 px-4 py-2 text-sm text-white/90">
             <span className="mr-2 font-semibold text-white">{caption.who}:</span>
             {caption.text}
           </div>
-        )}
+        ) : micMuted && !pttActive ? (
+          <span className="text-sm text-white/40">
+            Hold the mic button — or hold Ctrl — to talk; release to send
+          </span>
+        ) : null}
       </div>
 
       {/* Control bar */}
       <div className="flex items-center justify-center gap-4 pb-5">
         <span className="flex items-center gap-2 rounded-full bg-neutral-800 px-3 py-1.5 text-xs font-medium text-white/90">
-          {/* Muted overrides "Listening" — the green pulse would be a lie.
-              Thinking/speaking still show: output continues while muted. */}
-          {micMuted && status === 'listening' ? (
+          {/* A push-to-talk hold overrides everything — the user IS being
+              heard right now. Muted overrides "Listening" — the green pulse
+              would be a lie. Thinking/speaking still show: output continues
+              while muted. */}
+          {pttActive ? (
+            <>
+              <span className="block h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+              Release to send
+            </>
+          ) : micMuted && status === 'listening' ? (
             <>
               <span className="block h-2 w-2 rounded-full bg-red-500" />
               Muted
@@ -212,17 +235,39 @@ export function VideoCallView({
         </span>
         <button
           type="button"
-          onClick={onToggleMic}
+          onPointerDown={(e) => {
+            // Capture the pointer so the release always lands here, even if
+            // the cursor drifts off the button mid-hold.
+            e.currentTarget.setPointerCapture(e.pointerId)
+            onMicDown()
+          }}
+          onPointerUp={onMicUp}
+          onPointerCancel={onMicUp}
+          onClick={(e) => {
+            // Keyboard activation (Enter/Space) emits click with detail 0 and
+            // no pointer events — treat it as a quick press (mute toggle).
+            // Mouse clicks (detail > 0) already went through pointerdown/up.
+            if (e.detail === 0) {
+              onMicDown()
+              onMicUp()
+            }
+          }}
           className={cn(
             'flex h-10 w-10 items-center justify-center rounded-full transition-colors',
-            micMuted
-              ? 'bg-red-600 text-white hover:bg-red-500'
-              : 'bg-neutral-800 text-white/90 hover:bg-neutral-700'
+            pttActive
+              ? 'bg-green-600 text-white'
+              : micMuted
+                ? 'bg-red-600 text-white hover:bg-red-500'
+                : 'bg-neutral-800 text-white/90 hover:bg-neutral-700'
           )}
-          aria-label={micMuted ? 'Unmute' : 'Mute (pauses mic and frame capture)'}
-          title={micMuted ? 'Unmute' : 'Mute — pauses your mic and all frame capture'}
+          aria-label={micMuted ? 'Unmute (hold to talk)' : 'Mute (hold to talk)'}
+          title={
+            micMuted
+              ? 'Click to unmute · hold to talk (or hold Ctrl)'
+              : 'Click to mute · hold to talk, release to send (or hold Ctrl)'
+          }
         >
-          {micMuted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
+          {micMuted && !pttActive ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
         </button>
         <button
           type="button"
