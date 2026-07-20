@@ -55,6 +55,11 @@ export function UpdateCard() {
   if (!visible || status?.state !== "ready") return null
 
   const releaseUrl = version ? `${RELEASES_URL}/tag/v${version}` : `${RELEASES_URL}/latest`
+  // Release bodies usually open with their own "What's new" heading, which
+  // would duplicate the card's label above the box — drop it.
+  const releaseNotes = status.releaseNotes
+    ?.replace(/^\s*#{1,6}[ \t]*what[’']?s new[ \t]*\r?\n+/i, "")
+    .trim()
 
   return (
     <div
@@ -81,10 +86,13 @@ export function UpdateCard() {
       </p>
       <div className="mt-3">
         <h5 className="text-xs font-semibold">What&apos;s new</h5>
-        {status.releaseNotes ? (
-          <div className="mt-1.5 max-h-56 overflow-y-auto">
+        {releaseNotes ? (
+          // A bordered, fixed-height scroll box (not a bare max-h clip): the
+          // frame and inset scrollbar signal there is more content below the
+          // fold on every platform.
+          <div className="mt-1.5 max-h-56 overflow-y-auto overscroll-contain rounded-md border border-border/60 bg-muted/30 p-2.5">
             <Streamdown className="prose prose-sm dark:prose-invert max-w-none text-xs [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
-              {status.releaseNotes}
+              {releaseNotes}
             </Streamdown>
           </div>
         ) : (
