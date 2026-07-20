@@ -81,6 +81,7 @@ import { Button } from "@/components/ui/button"
 import { Toaster } from "@/components/ui/sonner"
 import { UpdateCard } from "@/components/update-card"
 import { BillingErrorDialog } from "@/components/billing-error-dialog"
+import { CreditCelebration } from "@/components/credit-celebration"
 import { matchBillingError, type BillingErrorMatch } from "@/lib/billing-error"
 import { dispatchCreditExhausted, dispatchCreditReplenished } from "@/lib/credit-status"
 import { ensureMarkdownExtension, normalizeWikiPath, splitWikiFragment, stripKnowledgePrefix, toKnowledgePath, wikiLabel } from '@/lib/wiki-links'
@@ -7213,6 +7214,7 @@ function App() {
       </SidebarSectionProvider>
       <Toaster />
       <UpdateCard />
+      <CreditCelebration />
       <BillingErrorDialog
         open={billingErrorOpen}
         match={billingErrorMatch}

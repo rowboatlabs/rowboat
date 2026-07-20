@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 import { GoogleClientIdModal } from "@/components/google-client-id-modal"
+import { InviteCodeClaim } from "@/components/invite-code-claim"
 import { setGoogleCredentials } from "@/lib/google-credentials-store"
 import { toast } from "sonner"
 import { ComposioApiKeyModal } from "@/components/composio-api-key-modal"
@@ -1413,6 +1414,11 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
             </div>
           </div>
         )}
+
+        {/* invite-code redemption (self-gating: signed-in, free-tier, unclaimed) */}
+        <div className="mt-6 w-full max-w-sm text-left">
+          <InviteCodeClaim />
+        </div>
 
         <Button onClick={handleComplete} size="lg" className="mt-8 w-full max-w-xs">
           Start Using Rowboat

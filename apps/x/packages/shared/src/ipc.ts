@@ -21,6 +21,7 @@ import { ZListToolkitsResponse } from './composio.js';
 import { AppSummarySchema, RegistryRecordSchema, RowboatAppManifestSchema } from './rowboat-app.js';
 import { BrowserStateSchema, DisplayMediaRequestSchema, HttpAuthRequestSchema } from './browser-control.js';
 import { BillingInfoSchema } from './billing.js';
+import { CreditActivatedEventSchema, CreditsStateSchema, ReferralClaimResultSchema } from './credits.js';
 import { EmailBlockSchema, GmailThreadSchema } from './blocks.js';
 import { PermissionDecision, ApprovalPolicy, CodingAgent, type CodeRunFeedEvent } from './code-mode.js';
 import { NotificationSettingsSchema } from './notification-settings.js';
@@ -2425,6 +2426,23 @@ const ipcSchemas = {
   'billing:getInfo': {
     req: z.null(),
     res: BillingInfoSchema,
+  },
+  // First-time-action credit rewards (see shared/src/credits.ts)
+  'credits:getState': {
+    req: z.null(),
+    res: CreditsStateSchema,
+  },
+  // Main → renderer: the backend confirmed a credit grant. All activation
+  // triggers live in main/core (oauth success, gmail send, meeting summarize,
+  // bg-task create, app create); the renderer only listens and celebrates.
+  'credits:didActivate': {
+    req: CreditActivatedEventSchema,
+    res: z.null(),
+  },
+  // Redeem another user's invite (referral) code — both sides earn credits.
+  'referral:claim': {
+    req: z.object({ code: z.string() }),
+    res: ReferralClaimResultSchema,
   },
   // Notification settings channels
   'notifications:getSettings': {

@@ -113,6 +113,7 @@ import { invalidateKnowledgeIndex } from '@x/core/dist/knowledge/knowledge_index
 import { versionHistory, voice } from '@x/core';
 import { classifySchedule, processRowboatInstruction } from '@x/core/dist/knowledge/inline_tasks.js';
 import { getBillingInfo } from '@x/core/dist/billing/billing.js';
+import { claimReferralCode, getCreditsState, maybeActivateCredit, subscribeCreditActivations } from '@x/core/dist/billing/credits.js';
 import { summarizeMeeting } from '@x/core/dist/knowledge/summarize_meeting.js';
 import { getAccessToken } from '@x/core/dist/auth/tokens.js';
 import { getRowboatConfig } from '@x/core/dist/config/rowboat.js';
@@ -662,6 +663,11 @@ export function emitOAuthEvent(event: { provider: string; success: boolean; erro
   // prompt, so any OAuth state change must rebuild it.
   invalidateCopilotInstructionsCache();
   broadcastToWindows('oauth:didConnect', event);
+  // Google connect (both BYOK and rowboat-mode paths funnel through here) is
+  // the "connected Gmail" first-time reward.
+  if (event.provider === 'google' && event.success) {
+    void maybeActivateCredit('first_gmail_connected');
+  }
 }
 
 async function requireCodeSession(sessionId: string): Promise<CodeSession> {
@@ -850,6 +856,10 @@ export function setupIpcHandlers() {
   // Forward knowledge commit events to renderer for panel refresh
   versionHistory.onCommit(() => emitKnowledgeCommitEvent());
 
+  // Relay backend-confirmed credit grants (first-time-action rewards) to all
+  // windows so the UI can update balances and celebrate.
+  subscribeCreditActivations((event) => broadcastToWindows('credits:didActivate', event));
+
   // Pre-warm the Gmail contact indices so the first compose-box keystroke is instant.
   // - warmContactIndex(): synchronous local-snapshot fallback (instant, narrow coverage).
   // - warmSentContacts(): kicks off a background Gmail API sync of the SENT label
@@ -992,7 +1002,11 @@ export function setupIpcHandlers() {
       return {};
     },
     'gmail:sendReply': async (_event, args) => {
-      return sendThreadReply(args);
+      const result = await sendThreadReply(args);
+      if (!result.error) {
+        void maybeActivateCredit('first_email_sent');
+      }
+      return result;
     },
     'gmail:saveDraft': async (_event, args) => {
       return saveThreadDraft(args);
@@ -1819,6 +1833,7 @@ export function setupIpcHandlers() {
     'apps:create': async (_event, args) => {
       const app = await appsIndexer.createApp(args);
       capture('app_created', { folder: app.folder });
+      void maybeActivateCredit('first_app_built');
       return { app };
     },
     'apps:delete': async (_event, args) => {
@@ -2192,6 +2207,9 @@ export function setupIpcHandlers() {
     },
     'meeting:summarize': async (_event, args) => {
       const notes = await summarizeMeeting(args.transcript, args.meetingStartTime, args.calendarEventJson);
+      if (notes && notes.trim()) {
+        void maybeActivateCredit('first_meeting_note');
+      }
       return { notes };
     },
     'meeting-prep:resolve': async (_event, args) => {
@@ -2483,6 +2501,7 @@ export function setupIpcHandlers() {
           ...(args.model ? { model: args.model } : {}),
           ...(args.provider ? { provider: args.provider } : {}),
         });
+        void maybeActivateCredit('first_bg_agent');
         return { success: true, slug };
       } catch (err) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };
@@ -2518,6 +2537,13 @@ export function setupIpcHandlers() {
     // Billing handler
     'billing:getInfo': async () => {
       return await getBillingInfo();
+    },
+    // First-time-action credit rewards
+    'credits:getState': async () => {
+      return await getCreditsState();
+    },
+    'referral:claim': async (_event, args) => {
+      return await claimReferralCode(args.code);
     },
     'notifications:getSettings': async () => {
       return loadNotificationSettings();
