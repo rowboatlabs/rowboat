@@ -1,4 +1,4 @@
-import { app, autoUpdater, nativeImage, BrowserWindow } from "electron";
+import { app, autoUpdater, net, nativeImage, BrowserWindow } from "electron";
 import { capture } from "@x/core/dist/analytics/posthog.js";
 import type { ipc } from "@x/shared";
 
@@ -90,6 +90,12 @@ export function initUpdater(): void {
       releaseNotes: releaseNotes || undefined,
     });
     showReadyBadge();
+    // Squirrel.Windows never carries notes, and Squirrel.Mac's copy is a
+    // snapshot from download time — stale when the release body is edited
+    // after publish (update.electronjs.org caching widens that window).
+    // Refresh from the GitHub API; on failure the snapshot (or the card's
+    // static fallback line) stands.
+    void backfillReleaseNotes(releaseName || undefined);
   });
   autoUpdater.on("error", (err) => {
     setStatus({ state: "error", error: err.message, lastCheckedAt: status.lastCheckedAt });
@@ -108,6 +114,30 @@ export function initUpdater(): void {
   // update is already staged.
   checkForUpdates();
   setInterval(checkForUpdates, CHECK_INTERVAL_MS);
+}
+
+/**
+ * Replace the staged update's release notes with the current GitHub release
+ * body. releaseName is "0.7.7" from Squirrel.Windows and "v0.7.7" from
+ * Squirrel.Mac — normalize to the tag form.
+ */
+async function backfillReleaseNotes(releaseName: string | undefined): Promise<void> {
+  if (!releaseName) return;
+  try {
+    const tag = `v${releaseName.replace(/^v/, "")}`;
+    const res = await net.fetch(`https://api.github.com/repos/${REPO}/releases/tags/${tag}`, {
+      headers: { Accept: "application/vnd.github+json", "User-Agent": "Rowboat" },
+    });
+    if (!res.ok) return;
+    const { body } = (await res.json()) as { body?: string };
+    const notes = body?.trim();
+    // Re-check the state: the fetch raced user actions (quitAndInstall).
+    if (notes && status.state === "ready" && status.newVersion === releaseName) {
+      setStatus({ ...status, releaseNotes: notes });
+    }
+  } catch {
+    // Offline or rate-limited — the Squirrel snapshot / fallback line stands.
+  }
 }
 
 /**
