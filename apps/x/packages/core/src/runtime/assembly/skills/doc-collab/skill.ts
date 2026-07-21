@@ -224,7 +224,7 @@ Renders a chart from inline data.
 - \`data\` (optional): Array of objects with the data points
 - \`source\` (optional): Relative path to a JSON file containing the data array (alternative to inline data)
 - \`x\` (required): Key name for the x-axis / label field
-- \`y\` (required): Key name for the y-axis / value field
+- \`y\` (required): Key name for the y-axis / value field — or an array of key names to plot several series on one chart (each row then carries one key per series)
 
 ### Table Block
 Renders a styled table from structured data.

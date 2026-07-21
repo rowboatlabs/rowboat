@@ -22,6 +22,33 @@ interface ChartRendererProps {
 }
 
 /**
+ * Parse a chart fence body. Distinguishes the three states the renderer
+ * shows: `streaming` (JSON incomplete — the model is still writing),
+ * `invalid` (complete JSON that fails the schema), and a parsed config.
+ * Models occasionally reach for pie-flavored field names despite the
+ * skill's schema; the predictable label/value aliases map to x/y.
+ */
+export function parseChartSource(
+  source: string,
+): { config: blocks.ChartBlock | null; invalid: boolean } {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(source)
+  } catch {
+    return { config: null, invalid: false }
+  }
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    const obj = parsed as Record<string, unknown>
+    if (obj.x === undefined && typeof obj.label === 'string') obj.x = obj.label
+    if (obj.y === undefined && typeof obj.value === 'string') obj.y = obj.value
+  }
+  const result = blocks.ChartBlockSchema.safeParse(parsed)
+  return result.success
+    ? { config: result.data, invalid: false }
+    : { config: null, invalid: true }
+}
+
+/**
  * Inline chart for chat messages: renders a ```chart fenced block (same
  * ChartBlockSchema the notes chart block uses) via recharts. Invalid or
  * still-streaming JSON renders as a quiet placeholder rather than an error —
@@ -33,26 +60,7 @@ export function ChartRenderer({ source }: ChartRendererProps) {
   const gridStroke = resolvedTheme === 'dark' ? '#3a3a38' : '#e4e4e0'
   const textColor = resolvedTheme === 'dark' ? '#c3c2b7' : '#52514e'
 
-  const { config, invalid } = useMemo(() => {
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(source)
-    } catch {
-      // Incomplete JSON — the fence body is still streaming in.
-      return { config: null, invalid: false }
-    }
-    // Models occasionally reach for pie-flavored field names despite the
-    // skill's schema; map the predictable aliases before validating.
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      const obj = parsed as Record<string, unknown>
-      if (obj.x === undefined && typeof obj.label === 'string') obj.x = obj.label
-      if (obj.y === undefined && typeof obj.value === 'string') obj.y = obj.value
-    }
-    const result = blocks.ChartBlockSchema.safeParse(parsed)
-    return result.success
-      ? { config: result.data, invalid: false }
-      : { config: null, invalid: true }
-  }, [source])
+  const { config, invalid } = useMemo(() => parseChartSource(source), [source])
 
   // Complete JSON that fails the schema is a real error — say so instead of
   // showing the streaming placeholder forever.
