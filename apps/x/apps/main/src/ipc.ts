@@ -69,6 +69,7 @@ import { rankSlackHomeMessages } from '@x/core/dist/knowledge/sources/rank_slack
 import { syncSlackKnowledgeSources, triggerSync as triggerSlackKnowledgeSync, getSlackKnowledgeSyncStatus } from '@x/core/dist/knowledge/sources/sync_slack.js';
 import { isOnboardingComplete, markOnboardingComplete } from '@x/core/dist/config/note_creation_config.js';
 import { loadNotificationSettings, saveNotificationSettings } from '@x/core/dist/config/notification_config.js';
+import { loadTurnLimitsSettings, saveTurnLimitsSettings } from '@x/core/dist/config/turn_limits.js';
 import { saveAppSettings } from '@x/core/dist/config/app_settings.js';
 import { setSelfCaptureActive } from '@x/core/dist/meetings/detector.js';
 import { notifyIfEnabled } from '@x/core/dist/application/notification/notifier.js';
@@ -2557,6 +2558,13 @@ export function setupIpcHandlers() {
     },
     'notifications:setSettings': async (_event, args) => {
       saveNotificationSettings(args);
+      return { success: true };
+    },
+    'turnLimits:getSettings': async () => {
+      return loadTurnLimitsSettings();
+    },
+    'turnLimits:setSettings': async (_event, args) => {
+      saveTurnLimitsSettings(args);
       return { success: true };
     },
     // Embedded browser handlers (WebContentsView + navigation)

@@ -512,7 +512,13 @@ Rules:
 - `input` is the user message that defines this turn boundary.
 - `autoPermission` defaults to `false` before persistence.
 - `humanAvailable` is required explicitly.
-- `maxModelCalls` defaults to `20` before persistence.
+- `maxModelCalls`, when omitted, is resolved at creation from the user's
+  turn-limit settings (`config/turn_limits.json`) via the injected
+  `ITurnLimitsResolver`: turns with `humanAvailable: true` use the chat
+  override when set, otherwise the global limit; headless turns always use
+  the global limit. Without a resolver (tests) it defaults to `20`. Spawned
+  sub-agents default to the global limit, which also caps the budget a
+  parent may grant them. Settings changes affect only newly created turns.
 - Persisted values are fully resolved and immutable.
 
 The capability is named `humanAvailable`, not `headless`. `headless` describes

@@ -54,10 +54,9 @@ export const SpawnAgentInput = z.object({
         .number()
         .int()
         .min(1)
-        .max(DEFAULT_MAX_MODEL_CALLS)
         .optional()
         .describe(
-            `Model-call budget for the sub-agent (default and cap: ${DEFAULT_MAX_MODEL_CALLS}).`,
+            "Model-call budget for the sub-agent. Defaults to the configured global limit, which is also the cap — higher values are clamped to it.",
         ),
     reasoning_effort: z
         .enum(["low", "medium", "high"])
@@ -89,6 +88,9 @@ export interface SpawnedAgentCallbacks {
     services?: {
         turnRuntime: import("../turns/api.js").ITurnRuntime;
         headlessRunner: import("./headless.js").IHeadlessAgentRunner;
+        // Default and cap for the child's model-call budget; production
+        // reads the user's global limit setting.
+        globalMaxModelCalls?: number;
     };
 }
 
@@ -112,7 +114,7 @@ export async function runSpawnedAgent(
 
     // Lazy: this module is imported by the BuiltinTools catalog, which the
     // DI container's bridges import at startup.
-    const { turnRuntime, headlessRunner } =
+    const { turnRuntime, headlessRunner, globalMaxModelCalls } =
         opts.services ?? (await resolveServices());
 
     let parentModel: z.infer<typeof ModelDescriptor> | undefined;
@@ -167,9 +169,12 @@ export async function runSpawnedAgent(
               },
           };
 
+    // The user's global limit is both the default and the cap: a parent can
+    // grant a child less budget than the setting allows, never more.
+    const spawnCap = globalMaxModelCalls ?? DEFAULT_MAX_MODEL_CALLS;
     const maxModelCalls = Math.min(
-        input.max_model_calls ?? DEFAULT_MAX_MODEL_CALLS,
-        DEFAULT_MAX_MODEL_CALLS,
+        input.max_model_calls ?? spawnCap,
+        spawnCap,
     );
 
     let handle: Awaited<ReturnType<typeof headlessRunner.start>>;
@@ -231,6 +236,9 @@ async function resolveServices(): Promise<
     NonNullable<SpawnedAgentCallbacks["services"]>
 > {
     const { lazyResolve } = await import("../../di/lazy-resolve.js");
+    const { loadTurnLimitsSettings } = await import(
+        "../../config/turn_limits.js"
+    );
     return {
         turnRuntime:
             await lazyResolve<import("../turns/api.js").ITurnRuntime>(
@@ -239,6 +247,7 @@ async function resolveServices(): Promise<
         headlessRunner: await lazyResolve<
             import("./headless.js").IHeadlessAgentRunner
         >("headlessAgentRunner"),
+        globalMaxModelCalls: loadTurnLimitsSettings().maxModelCalls,
     };
 }
 

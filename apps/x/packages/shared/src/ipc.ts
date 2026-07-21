@@ -25,6 +25,7 @@ import { CreditActivatedEventSchema, CreditsStateSchema, ReferralClaimResultSche
 import { EmailBlockSchema, GmailThreadSchema } from './blocks.js';
 import { PermissionDecision, ApprovalPolicy, CodingAgent, type CodeRunFeedEvent } from './code-mode.js';
 import { NotificationSettingsSchema } from './notification-settings.js';
+import { TurnLimitsSettingsSchema } from './turn-limits.js';
 import { CodeProject, CodeSession, CodeSessionMode, CodeSessionStatus, GitRepoInfo, GitStatusFile, CodeAgentModelOptions } from './code-sessions.js';
 import { ChannelsConfig, ChannelsStatus } from './channels.js';
 
@@ -2451,6 +2452,17 @@ const ipcSchemas = {
   },
   'notifications:setSettings': {
     req: NotificationSettingsSchema,
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  // Model-call limit settings channels
+  'turnLimits:getSettings': {
+    req: z.null(),
+    res: TurnLimitsSettingsSchema,
+  },
+  'turnLimits:setSettings': {
+    req: TurnLimitsSettingsSchema,
     res: z.object({
       success: z.literal(true),
     }),

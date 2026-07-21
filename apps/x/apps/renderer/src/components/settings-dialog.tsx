@@ -34,7 +34,7 @@ import { startProvisioning, useProvisioning, enabledOptimistic, type AgentStatus
 import { useProviderModels } from "@/hooks/use-provider-models"
 import { useChatGPT } from "@/hooks/useChatGPT"
 
-type ConfigTab = "account" | "connections" | "mobile" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "notifications" | "note-tagging" | "help"
+type ConfigTab = "account" | "connections" | "mobile" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "notifications" | "note-tagging" | "advanced" | "help"
 
 interface TabConfig {
   id: ConfigTab
@@ -110,6 +110,12 @@ const tabs: TabConfig[] = [
     description: "Configure tags for notes and emails",
   },
   {
+    id: "advanced",
+    label: "Advanced",
+    icon: Wrench,
+    description: "Advanced runtime and cost controls",
+  },
+  {
     id: "help",
     label: "Help",
     icon: HelpCircle,
@@ -120,7 +126,7 @@ const tabs: TabConfig[] = [
 /** Sidebar nav grouping: identity first, capabilities, then app-level. */
 const NAV_SECTIONS: { label: string | null; ids: ConfigTab[] }[] = [
   { label: null, ids: ["account", "connections", "mobile"] },
-  { label: "Configure", ids: ["models", "mcp", "security", "code-mode", "note-tagging"] },
+  { label: "Configure", ids: ["models", "mcp", "security", "code-mode", "note-tagging", "advanced"] },
   { label: "App", ids: ["appearance", "notifications", "help"] },
 ]
 
@@ -2632,6 +2638,126 @@ function NotificationSettings({ dialogOpen }: { dialogOpen: boolean }) {
   )
 }
 
+// --- Advanced (runtime/cost controls) tab ---
+
+const MODEL_CALL_LIMIT_MIN = 1
+const MODEL_CALL_LIMIT_MAX = 100
+
+function AdvancedSettings({ dialogOpen }: { dialogOpen: boolean }) {
+  // Inputs are kept as strings so the user can clear a field while typing;
+  // validation happens on save (blur).
+  const [globalLimit, setGlobalLimit] = useState("")
+  const [chatLimit, setChatLimit] = useState("")
+  const [loaded, setLoaded] = useState(false)
+
+  useEffect(() => {
+    if (!dialogOpen) return
+    let cancelled = false
+    window.ipc.invoke("turnLimits:getSettings", null)
+      .then((settings) => {
+        if (cancelled) return
+        setGlobalLimit(String(settings.maxModelCalls))
+        setChatLimit(settings.chatMaxModelCalls !== undefined ? String(settings.chatMaxModelCalls) : "")
+        setLoaded(true)
+      })
+      .catch(() => {
+        if (!cancelled) toast.error("Failed to load advanced settings")
+      })
+    return () => { cancelled = true }
+  }, [dialogOpen])
+
+  const parseLimit = (value: string): number | null => {
+    const n = Number(value.trim())
+    if (!Number.isInteger(n) || n < MODEL_CALL_LIMIT_MIN || n > MODEL_CALL_LIMIT_MAX) return null
+    return n
+  }
+
+  const handleSave = useCallback(async () => {
+    const global = parseLimit(globalLimit)
+    if (global === null) {
+      toast.error(`Model-call limit must be a whole number between ${MODEL_CALL_LIMIT_MIN} and ${MODEL_CALL_LIMIT_MAX}`)
+      return
+    }
+    let chat: number | undefined
+    if (chatLimit.trim() !== "") {
+      const parsed = parseLimit(chatLimit)
+      if (parsed === null) {
+        toast.error(`Chat limit must be empty or a whole number between ${MODEL_CALL_LIMIT_MIN} and ${MODEL_CALL_LIMIT_MAX}`)
+        return
+      }
+      chat = parsed
+    }
+    try {
+      await window.ipc.invoke("turnLimits:setSettings", {
+        maxModelCalls: global,
+        ...(chat === undefined ? {} : { chatMaxModelCalls: chat }),
+      })
+      toast.success("Model-call limits saved. Applies to new turns.")
+    } catch {
+      toast.error("Failed to save model-call limits")
+    }
+  }, [globalLimit, chatLimit])
+
+  if (!loaded) {
+    return (
+      <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
+        <Loader2 className="size-4 animate-spin mr-2" />
+        Loading...
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="text-sm text-muted-foreground leading-relaxed">
+        Runtime cost and safety controls. A turn is stopped once it reaches its model-call limit;
+        changes apply to newly started turns only.
+      </div>
+
+      <div className="space-y-2">
+        <div className="rounded-md border px-3 py-3 flex items-center gap-4">
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-medium">Model-call limit</div>
+            <div className="text-xs text-muted-foreground mt-0.5">
+              Maximum model calls per turn. Applies to everything by default — background and
+              knowledge work, scheduled agents, and sub-agents (it also caps sub-agent budgets).
+            </div>
+          </div>
+          <Input
+            type="number"
+            min={MODEL_CALL_LIMIT_MIN}
+            max={MODEL_CALL_LIMIT_MAX}
+            value={globalLimit}
+            onChange={(e) => setGlobalLimit(e.target.value)}
+            onBlur={handleSave}
+            className="w-24 shrink-0"
+          />
+        </div>
+
+        <div className="rounded-md border px-3 py-3 flex items-center gap-4">
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-medium">Chat model-call limit</div>
+            <div className="text-xs text-muted-foreground mt-0.5">
+              Optional separate limit for interactive chat turns. Leave empty to use the
+              model-call limit above.
+            </div>
+          </div>
+          <Input
+            type="number"
+            min={MODEL_CALL_LIMIT_MIN}
+            max={MODEL_CALL_LIMIT_MAX}
+            value={chatLimit}
+            onChange={(e) => setChatLimit(e.target.value)}
+            onBlur={handleSave}
+            placeholder="Same as above"
+            className="w-32 shrink-0"
+          />
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // --- Main Settings Dialog ---
 
 export function SettingsDialog({ children, defaultTab = "account", open: controlledOpen, onOpenChange }: SettingsDialogProps) {
@@ -2684,7 +2810,7 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
   }
 
   const loadConfig = useCallback(async (tab: ConfigTab) => {
-    if (tab === "appearance" || tab === "models" || tab === "note-tagging" || tab === "account" || tab === "connections" || tab === "help" || tab === "code-mode" || tab === "notifications") return
+    if (tab === "appearance" || tab === "models" || tab === "note-tagging" || tab === "account" || tab === "connections" || tab === "help" || tab === "code-mode" || tab === "notifications" || tab === "advanced") return
     const tabConfig = tabs.find((t) => t.id === tab)!
     if (!tabConfig.path) return
     setLoading(true)
@@ -2806,7 +2932,7 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
             </div>
 
             {/* Content */}
-            <div className={cn("flex-1 px-6 pb-5 min-h-0", (activeTab === "models" || activeTab === "connections" || activeTab === "mobile" || activeTab === "account" || activeTab === "code-mode" || activeTab === "notifications") ? "overflow-y-auto" : activeTab === "note-tagging" ? "overflow-hidden flex flex-col" : "overflow-hidden")}>
+            <div className={cn("flex-1 px-6 pb-5 min-h-0", (activeTab === "models" || activeTab === "connections" || activeTab === "mobile" || activeTab === "account" || activeTab === "code-mode" || activeTab === "notifications" || activeTab === "advanced") ? "overflow-y-auto" : activeTab === "note-tagging" ? "overflow-hidden flex flex-col" : "overflow-hidden")}>
               {activeTab === "account" ? (
                 <AccountSettings dialogOpen={open} />
               ) : activeTab === "connections" ? (
@@ -2845,6 +2971,8 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
                 <AppearanceSettings />
               ) : activeTab === "notifications" ? (
                 <NotificationSettings dialogOpen={open} />
+              ) : activeTab === "advanced" ? (
+                <AdvancedSettings dialogOpen={open} />
               ) : activeTab === "help" ? (
                 <HelpSettings />
               ) : activeTab === "code-mode" ? (

@@ -54,6 +54,7 @@ import type { IPermissionChecker, IPermissionClassifier } from "./permission.js"
 import type { ITurnRepo } from "./repo.js";
 import { HotStream } from "./stream.js";
 import type { IToolRegistry, RuntimeTool, SyncRuntimeTool } from "./tool-registry.js";
+import type { ITurnLimitsResolver } from "./turn-limits-resolver.js";
 
 type TEvent = z.infer<typeof TurnEvent>;
 
@@ -73,6 +74,8 @@ export interface TurnRuntimeDependencies {
     lifecycleBus: ITurnLifecycleBus;
     turnEventBus: ITurnEventBus;
     usageReporter: IUsageReporter;
+    // Optional: absent (tests) falls back to DEFAULT_MAX_MODEL_CALLS.
+    turnLimitsResolver?: ITurnLimitsResolver;
 }
 
 // Immutable dependency container: holds no mutable per-turn state. All active
@@ -90,6 +93,7 @@ export class TurnRuntime implements ITurnRuntime {
     private readonly lifecycleBus: ITurnLifecycleBus;
     private readonly turnEventBus: ITurnEventBus;
     private readonly usageReporter: IUsageReporter;
+    private readonly turnLimitsResolver?: ITurnLimitsResolver;
 
     constructor({
         turnRepo,
@@ -104,6 +108,7 @@ export class TurnRuntime implements ITurnRuntime {
         lifecycleBus,
         turnEventBus,
         usageReporter,
+        turnLimitsResolver,
     }: TurnRuntimeDependencies) {
         this.turnRepo = turnRepo;
         this.idGenerator = idGenerator;
@@ -117,6 +122,7 @@ export class TurnRuntime implements ITurnRuntime {
         this.lifecycleBus = lifecycleBus;
         this.turnEventBus = turnEventBus;
         this.usageReporter = usageReporter;
+        this.turnLimitsResolver = turnLimitsResolver;
     }
 
     async createTurn(input: CreateTurnInput): Promise<string> {
@@ -163,7 +169,12 @@ export class TurnRuntime implements ITurnRuntime {
             config: {
                 autoPermission: input.config.autoPermission ?? false,
                 humanAvailable: input.config.humanAvailable,
-                maxModelCalls: input.config.maxModelCalls ?? DEFAULT_MAX_MODEL_CALLS,
+                maxModelCalls:
+                    input.config.maxModelCalls ??
+                    this.turnLimitsResolver?.resolve({
+                        humanAvailable: input.config.humanAvailable,
+                    }) ??
+                    DEFAULT_MAX_MODEL_CALLS,
                 ...(input.config.reasoningEffort === undefined
                     ? {}
                     : { reasoningEffort: input.config.reasoningEffort }),
