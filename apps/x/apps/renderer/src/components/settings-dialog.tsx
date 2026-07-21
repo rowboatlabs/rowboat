@@ -33,6 +33,7 @@ import type { ipc as ipcShared } from "@x/shared"
 import { startProvisioning, useProvisioning, enabledOptimistic, type AgentStatus, type CodeModeAgentStatus } from "@/lib/code-mode-provisioning"
 import { useProviderModels } from "@/hooks/use-provider-models"
 import { useChatGPT } from "@/hooks/useChatGPT"
+import { ModelSelector, type ModelRef } from "@/components/model-selector"
 
 type ConfigTab = "account" | "connections" | "mobile" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "notifications" | "note-tagging" | "help"
 
@@ -1727,44 +1728,19 @@ function ToolsLibrarySettings({ dialogOpen, rowboatConnected }: { dialogOpen: bo
 
 // --- Rowboat Model Settings (when signed in via Rowboat) ---
 //
-// Hybrid mode: every dropdown lists the gateway catalog PLUS any models from
-// BYOK providers configured below. Values are provider-qualified
-// ("provider::model") and saved via models:updateConfig as {provider, model}
-// refs, so a signed-in user can e.g. keep the gateway assistant while
-// running background agents on a local Ollama model.
-
-interface HybridModelOption {
-  provider: string
-  model: string
-  label: string
-}
-
-const providerDisplayNames: Record<string, string> = {
-  openai: 'OpenAI',
-  anthropic: 'Anthropic',
-  google: 'Gemini',
-  ollama: 'Ollama',
-  openrouter: 'OpenRouter',
-  aigateway: 'AI Gateway',
-  'openai-compatible': 'OpenAI-Compatible',
-  rowboat: 'Rowboat',
-}
-
-const HYBRID_SEP = "::"
-const hybridKey = (provider: string, model: string) => `${provider}${HYBRID_SEP}${model}`
-
-function parseHybridKey(key: string): { provider: string; model: string } | null {
-  const index = key.indexOf(HYBRID_SEP)
-  if (index <= 0) return null
-  return { provider: key.slice(0, index), model: key.slice(index + HYBRID_SEP.length) }
-}
+// Hybrid mode: every picker lists the gateway catalog PLUS any BYOK
+// providers configured below (ModelSelector renders the shared store's
+// groups, live-fetching list-less providers inside the open dropdown).
+// Saved via models:updateConfig as {provider, model} refs, so a signed-in
+// user can e.g. keep the gateway assistant while running background agents
+// on a local Ollama model. Selections stay local until Save — unlike the
+// composer, picking here must not write anything by itself.
 
 function RowboatModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
-  const [options, setOptions] = useState<HybridModelOption[]>([])
-  const [selectedDefault, setSelectedDefault] = useState("")
-  const [selectedKg, setSelectedKg] = useState("")
-  const [selectedLiveNote, setSelectedLiveNote] = useState("")
-  const [selectedAutoPermission, setSelectedAutoPermission] = useState("")
+  const [selectedDefault, setSelectedDefault] = useState<ModelRef | null>(null)
+  const [selectedKg, setSelectedKg] = useState<ModelRef | null>(null)
+  const [selectedLiveNote, setSelectedLiveNote] = useState<ModelRef | null>(null)
+  const [selectedAutoPermission, setSelectedAutoPermission] = useState<ModelRef | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
@@ -1774,63 +1750,29 @@ function RowboatModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
     async function load() {
       setLoading(true)
       try {
-        const collected: HybridModelOption[] = []
-        const seen = new Set<string>()
-        const push = (provider: string, model: string, label?: string) => {
-          if (!model) return
-          const key = hybridKey(provider, model)
-          if (seen.has(key)) return
-          seen.add(key)
-          collected.push({ provider, model, label: label || model })
-        }
-
-        const catalog: Record<string, LlmModelOption[]> = {}
-        try {
-          const listResult = await window.ipc.invoke("models:list", null)
-          for (const p of listResult.providers || []) {
-            catalog[p.id] = p.models || []
-          }
-        } catch { /* offline — BYOK entries below still load */ }
-        for (const m of catalog["rowboat"] || []) push("rowboat", m.id, m.name || m.id)
-
         let parsed: Record<string, unknown> = {}
         try {
           const configResult = await window.ipc.invoke("workspace:readFile", { path: "config/models.json" })
           parsed = JSON.parse(configResult.data)
-        } catch { /* no BYOK config yet */ }
-
-        const providersMap = (parsed.providers ?? {}) as Record<string, Record<string, unknown>>
-        for (const [flavor, entry] of Object.entries(providersMap)) {
-          const hasKey = typeof entry.apiKey === "string" && (entry.apiKey as string).trim().length > 0
-          const hasBaseURL = typeof entry.baseURL === "string" && (entry.baseURL as string).trim().length > 0
-          if (!hasKey && !hasBaseURL) continue
-          push(flavor, typeof entry.model === "string" ? entry.model : "")
-          const catalogModels = catalog[flavor] || []
-          if (catalogModels.length > 0) {
-            for (const m of catalogModels) push(flavor, m.id, m.name || m.id)
-          } else {
-            for (const m of Array.isArray(entry.models) ? entry.models as string[] : []) push(flavor, m)
-          }
-        }
-        setOptions(collected)
+        } catch { /* no config yet */ }
 
         // Current selections. Legacy string overrides pair with the BYOK
         // top-level flavor (mirrors core/models/defaults.ts).
         const legacyFlavor = (parsed.provider as Record<string, unknown> | undefined)?.flavor
-        const toKey = (value: unknown): string => {
-          if (!value) return ""
+        const toRef = (value: unknown): ModelRef | null => {
+          if (!value) return null
           if (typeof value === "string") {
-            return typeof legacyFlavor === "string" ? hybridKey(legacyFlavor, value) : ""
+            return typeof legacyFlavor === "string" ? { provider: legacyFlavor, model: value } : null
           }
           const ref = value as { provider?: unknown; model?: unknown }
           return typeof ref.provider === "string" && typeof ref.model === "string"
-            ? hybridKey(ref.provider, ref.model)
-            : ""
+            ? { provider: ref.provider, model: ref.model }
+            : null
         }
-        setSelectedDefault(toKey(parsed.defaultSelection))
-        setSelectedKg(toKey(parsed.knowledgeGraphModel))
-        setSelectedLiveNote(toKey(parsed.liveNoteAgentModel))
-        setSelectedAutoPermission(toKey(parsed.autoPermissionDecisionModel))
+        setSelectedDefault(toRef(parsed.defaultSelection))
+        setSelectedKg(toRef(parsed.knowledgeGraphModel))
+        setSelectedLiveNote(toRef(parsed.liveNoteAgentModel))
+        setSelectedAutoPermission(toRef(parsed.autoPermissionDecisionModel))
       } catch {
         toast.error("Failed to load models")
       } finally {
@@ -1844,12 +1786,11 @@ function RowboatModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
   const handleSave = useCallback(async () => {
     setSaving(true)
     try {
-      const toRef = (key: string) => (key ? parseHybridKey(key) : null)
       await window.ipc.invoke("models:updateConfig", {
-        defaultSelection: toRef(selectedDefault),
-        knowledgeGraphModel: toRef(selectedKg),
-        liveNoteAgentModel: toRef(selectedLiveNote),
-        autoPermissionDecisionModel: toRef(selectedAutoPermission),
+        defaultSelection: selectedDefault,
+        knowledgeGraphModel: selectedKg,
+        liveNoteAgentModel: selectedLiveNote,
+        autoPermissionDecisionModel: selectedAutoPermission,
       })
       window.dispatchEvent(new Event("models-config-changed"))
       toast.success("Model configuration saved")
@@ -1860,33 +1801,19 @@ function RowboatModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
     }
   }, [selectedDefault, selectedKg, selectedLiveNote, selectedAutoPermission])
 
-  const renderSelect = (
+  const renderModelField = (
     label: string,
-    value: string,
-    onChange: (v: string) => void,
-    defaultLabel: string,
+    value: ModelRef | null,
+    onChange: (v: ModelRef | null) => void,
   ) => (
     <div className="space-y-2">
       <label className="text-sm font-medium">{label}</label>
-      <Select value={value || "__default__"} onValueChange={(v) => onChange(v === "__default__" ? "" : v)}>
-        <SelectTrigger className="w-full">
-          <SelectValue placeholder={defaultLabel} />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="__default__">{defaultLabel}</SelectItem>
-          {options.map((o) => {
-            const key = hybridKey(o.provider, o.model)
-            return (
-              <SelectItem key={key} value={key}>
-                {o.label}
-                <span className="ml-2 text-xs text-muted-foreground">
-                  {providerDisplayNames[o.provider] || o.provider}
-                </span>
-              </SelectItem>
-            )
-          })}
-        </SelectContent>
-      </Select>
+      <ModelSelector
+        variant="field"
+        value={value}
+        onChange={onChange}
+        defaultOption={{ label: "Rowboat default" }}
+      />
     </div>
   )
 
@@ -1904,10 +1831,10 @@ function RowboatModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
         Select the models Rowboat uses. Rowboat models are provided through your account; models from your own providers route through your keys or local runtimes.
       </p>
 
-      {renderSelect("Assistant model", selectedDefault, setSelectedDefault, "Rowboat default")}
-      {renderSelect("Knowledge graph model", selectedKg, setSelectedKg, "Rowboat default")}
-      {renderSelect("Background agents model", selectedLiveNote, setSelectedLiveNote, "Rowboat default")}
-      {renderSelect("Permission checks model", selectedAutoPermission, setSelectedAutoPermission, "Rowboat default")}
+      {renderModelField("Assistant model", selectedDefault, setSelectedDefault)}
+      {renderModelField("Knowledge graph model", selectedKg, setSelectedKg)}
+      {renderModelField("Background agents model", selectedLiveNote, setSelectedLiveNote)}
+      {renderModelField("Permission checks model", selectedAutoPermission, setSelectedAutoPermission)}
 
       {/* Save */}
       <Button onClick={handleSave} disabled={saving}>
