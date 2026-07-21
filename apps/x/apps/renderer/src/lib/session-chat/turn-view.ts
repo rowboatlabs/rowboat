@@ -336,8 +336,8 @@ export function buildTurnConversation(state: TurnState): ConversationItem[] {
     // limit; if a hard limit failure still lands here, explain it and point
     // at the setting instead of showing the raw runtime error.
     const message = state.terminal.code === MODEL_CALL_LIMIT_ERROR_CODE
-      ? `This turn stopped after reaching its model-call limit of ${state.definition.config.maxModelCalls}. ` +
-        'Work completed so far is saved above. You can raise the limit in Settings → Advanced.'
+      ? `This turn hit its model-call limit of ${state.definition.config.maxModelCalls} before it could finish. ` +
+        'You can raise the limit in Settings → Advanced.'
       : state.terminal.error
     items.push({
       id: `${turnId}:error`,

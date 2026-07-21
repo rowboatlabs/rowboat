@@ -248,8 +248,9 @@ export function wrapUpNotice(
         role: "user",
         content:
             `[system notice] You are on the final model call this turn's budget allows (model-call limit: ${maxModelCalls}); tools are no longer available. ` +
-            "Give your best final answer using only the work above: present what you completed, state clearly what remains unfinished, " +
-            "and let the user know the turn was cut short by the model-call limit, which they can raise in Settings → Advanced.",
+            "Now answer the user's request as fully and substantively as you can from the tool results and information already gathered above — " +
+            "give them the actual content, not a status report. Then briefly note which parts you didn't get to, " +
+            "and mention the turn was cut short by the model-call limit, which they can raise in Settings → Advanced.",
     };
 }
 
