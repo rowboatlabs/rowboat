@@ -53,6 +53,9 @@ describe('useModels', () => {
     ])
     expect(first.result.current.reasoningByKey).toEqual({ 'openai/gpt-5.4': true })
     expect(first.result.current.defaultModel).toEqual({ provider: 'openai', model: 'gpt-5.4' })
+    // Raw catalog is exposed for provider-scoped pickers (unconfigured
+    // providers have no group but may have a catalog).
+    expect(first.result.current.catalogByProvider).toEqual({ openai: ['gpt-5.4', 'gpt-5.4-mini'] })
     // Both consumers see the same store snapshot, not copies.
     expect(second.result.current.groups).toBe(first.result.current.groups)
   })

@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { useModels, type ModelPickerGroup, type ModelRef } from '@/hooks/use-models'
 import { useProviderModels } from '@/hooks/use-provider-models'
+import { cn } from '@/lib/utils'
 
 export type { ModelRef } from '@/hooks/use-models'
 
@@ -110,17 +111,40 @@ function LiveProviderGroupItems({ group, label, pinnedModels, filter, onModelRow
   )
 }
 
-// Phase 1 of the model-selection consolidation: this is the chat composer's
-// picker extracted verbatim (full catalog grouped by provider, live groups,
-// search filter, reasoning effort). Later phases add the other selection
-// modes on top of the same controlled value/onChange contract — a use-case
-// default with a "Rowboat default" sentinel, "(global default)" inheritance
-// for per-task overrides, and caller-supplied restricted lists — as new
-// optional props, not new components.
+// The standardized model picker (model-selection consolidation): the chat
+// composer's picker (full catalog grouped by provider, live groups, search
+// filter, reasoning effort) plus the settings modes — a pinned default
+// sentinel, a form-field trigger, provider scoping, and a typed-id escape
+// hatch. Remaining planned mode: "(global default)" inheritance for
+// per-task overrides — a new optional prop, not a new component.
 export interface ModelSelectorProps {
-  /** Current selection; null follows the app default. */
+  /** Current selection; null follows the app default / the sentinel. */
   value: ModelRef | null
-  onChange: (value: ModelRef) => void
+  /** null only ever fires when defaultOption is set (sentinel picked). */
+  onChange: (value: ModelRef | null) => void
+  /**
+   * Pinned top entry ("Rowboat default", "Same as assistant") that selects
+   * null. When set, a null value renders this label instead of the app
+   * default model.
+   */
+  defaultOption?: { label: string }
+  /**
+   * 'pill' is the composer's compact rounded trigger; 'field' is a
+   * full-width bordered Select-style trigger for forms.
+   */
+  variant?: 'pill' | 'field'
+  /**
+   * Restrict the picker to one provider's group (catalog or live). Providers
+   * not configured in models.json fall back to their static models:list
+   * catalog so a provider mid-setup still lists models.
+   */
+  providerFilter?: string
+  /**
+   * When the search text matches no rows, offer a `Use "<text>"` row that
+   * selects the typed id — arbitrary ids for ollama / openai-compatible.
+   * Requires providerFilter (the typed id needs a provider to attach to).
+   */
+  allowCustom?: boolean
   /** Frozen selection: renders a static label + tooltip instead of the dropdown. */
   lockedModel?: ModelRef | null
   /**
@@ -133,14 +157,30 @@ export interface ModelSelectorProps {
   onEffortChange?: (effort: '' | ReasoningEffortLevel) => void
 }
 
+// Radio value for the defaultOption sentinel row. Never a valid model key
+// (real keys always contain "provider/").
+const DEFAULT_OPTION_KEY = '__default__'
+
 export function ModelSelector({
   value,
   onChange,
+  defaultOption,
+  variant = 'pill',
+  providerFilter,
+  allowCustom = false,
   lockedModel = null,
   effort = '',
   onEffortChange,
 }: ModelSelectorProps) {
-  const { groups, reasoningByKey, defaultModel } = useModels()
+  const { groups: allGroups, reasoningByKey, defaultModel, catalogByProvider } = useModels()
+
+  const groups = useMemo<ModelPickerGroup[]>(() => {
+    if (!providerFilter) return allGroups
+    const scoped = allGroups.filter((g) => g.flavor === providerFilter)
+    if (scoped.length > 0) return scoped
+    const catalogModels = catalogByProvider[providerFilter] || []
+    return catalogModels.length > 0 ? [{ kind: 'catalog', flavor: providerFilter, models: catalogModels }] : []
+  }, [allGroups, providerFilter, catalogByProvider])
 
   // Search filter for the model dropdown. Reset each time the menu opens;
   // matching is a case-insensitive substring test on the model id. Live
@@ -157,14 +197,16 @@ export function ModelSelector({
   // The effective default always renders even when no group carries it (the
   // gateway list failed, or its provider was removed from config) — the
   // picker must never be missing the model that actually runs. Live groups
-  // pin the default themselves, so a flavor match is enough there.
+  // pin the default themselves, so a flavor match is enough there. A
+  // provider-scoped picker only shows it when it belongs to that provider.
   const standaloneDefault = useMemo<ModelRef | null>(() => {
     if (!defaultModel) return null
+    if (providerFilter && defaultModel.provider !== providerFilter) return null
     const covered = groups.some((g) =>
       g.flavor === defaultModel.provider &&
       (g.kind === 'live' || g.models.includes(defaultModel.model)))
     return covered ? null : defaultModel
-  }, [groups, defaultModel])
+  }, [groups, defaultModel, providerFilter])
 
   const standaloneVisible = standaloneDefault !== null &&
     (!modelFilterValue || standaloneDefault.model.toLowerCase().includes(modelFilterValue))
@@ -178,6 +220,10 @@ export function ModelSelector({
 
   const handleModelChange = useCallback((key: string) => {
     if (lockedModel) return
+    if (key === DEFAULT_OPTION_KEY) {
+      onChange(null)
+      return
+    }
     const slash = key.indexOf('/')
     if (slash <= 0 || slash === key.length - 1) return
     onChange({ provider: key.slice(0, slash), model: key.slice(slash + 1) })
@@ -262,18 +308,42 @@ export function ModelSelector({
           }}
         >
           <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              className="flex h-7 min-w-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            >
-              <span className="min-w-0 truncate">
-                {getModelDisplayName(value?.model || defaultModel?.model || 'Model')}
-              </span>
-              <ChevronDown className="h-3 w-3 shrink-0" />
-            </button>
+            {variant === 'field' ? (
+              // Styled after ui/select's SelectTrigger so it sits naturally
+              // in forms next to real Select fields.
+              <button
+                type="button"
+                className="flex h-9 w-full items-center justify-between gap-2 rounded-md border border-input bg-transparent px-3 py-2 text-sm whitespace-nowrap shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30 dark:hover:bg-input/50"
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className="truncate">
+                    {value ? value.model : (defaultOption?.label || defaultModel?.model || 'Select a model')}
+                  </span>
+                  {value && !providerFilter && (
+                    <span className="shrink-0 text-xs text-muted-foreground">
+                      {providerDisplayNames[value.provider] || value.provider}
+                    </span>
+                  )}
+                </span>
+                <ChevronDown className="size-4 shrink-0 opacity-50" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="flex h-7 min-w-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <span className="min-w-0 truncate">
+                  {getModelDisplayName(value?.model || defaultModel?.model || 'Model')}
+                </span>
+                <ChevronDown className="h-3 w-3 shrink-0" />
+              </button>
+            )}
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="p-0 overflow-hidden">
-            {groups.length === 0 && !standaloneDefault ? (
+          <DropdownMenuContent
+            align={variant === 'field' ? 'start' : 'end'}
+            className={cn('p-0 overflow-hidden', variant === 'field' && 'min-w-[var(--radix-dropdown-menu-trigger-width)]')}
+          >
+            {groups.length === 0 && !standaloneDefault && !defaultOption && !(allowCustom && providerFilter) ? (
               <div className="p-1">
                 <DropdownMenuItem disabled>Connect a provider in Settings</DropdownMenuItem>
               </div>
@@ -300,9 +370,20 @@ export function ModelSelector({
                 </div>
                 <div className="max-h-80 overflow-y-auto p-1 pt-0">
                 <DropdownMenuRadioGroup
-                  value={value ? `${value.provider}/${value.model}` : (defaultModel ? `${defaultModel.provider}/${defaultModel.model}` : '')}
+                  value={
+                    value
+                      ? `${value.provider}/${value.model}`
+                      : defaultOption
+                        ? DEFAULT_OPTION_KEY
+                        : (defaultModel ? `${defaultModel.provider}/${defaultModel.model}` : '')
+                  }
                   onValueChange={handleModelChange}
                 >
+                  {defaultOption && (
+                    <DropdownMenuRadioItem value={DEFAULT_OPTION_KEY}>
+                      <span className="truncate">{defaultOption.label}</span>
+                    </DropdownMenuRadioItem>
+                  )}
                   {standaloneDefault && standaloneVisible && (
                     <DropdownMenuRadioItem value={`${standaloneDefault.provider}/${standaloneDefault.model}`}>
                       <span className="truncate">{standaloneDefault.model}</span>
@@ -352,7 +433,18 @@ export function ModelSelector({
                     )
                   })}
                   {modelFilterValue && !anyModelRowVisible && (
-                    <div className="px-2 py-1.5 text-xs text-muted-foreground">No models match</div>
+                    allowCustom && providerFilter ? (
+                      // Escape hatch for ids the lists don't carry (local
+                      // servers, brand-new models): select exactly what was
+                      // typed, attached to the scoped provider.
+                      <DropdownMenuItem
+                        onSelect={() => onChange({ provider: providerFilter, model: modelFilter.trim() })}
+                      >
+                        <span className="truncate">Use &quot;{modelFilter.trim()}&quot;</span>
+                      </DropdownMenuItem>
+                    ) : (
+                      <div className="px-2 py-1.5 text-xs text-muted-foreground">No models match</div>
+                    )
                   )}
                 </DropdownMenuRadioGroup>
                 </div>

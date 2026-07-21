@@ -555,8 +555,11 @@ function ChatInputInner({
   // re-fetches the shared store too — that re-read lands on the same
   // selection (selectedModel is untouched, the live lists come from the
   // useProviderModels cache), so it's visually a no-op.
-  const handleModelChange = useCallback((model: SelectedModel) => {
+  const handleModelChange = useCallback((model: SelectedModel | null) => {
     if (lockedModel) return
+    // null = the sentinel row, which the composer never renders (no
+    // defaultOption) — guard for the widened onChange contract only.
+    if (!model) return
     setSelectedModel(model)
     onSelectedModelChange?.(model)
     void window.ipc.invoke('models:updateConfig', { defaultSelection: { provider: model.provider, model: model.model } })

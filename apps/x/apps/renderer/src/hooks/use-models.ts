@@ -31,6 +31,10 @@ export interface ModelsSnapshot {
   // order, which can disagree with the real default.
   defaultModel: ModelRef | null
   isRowboatConnected: boolean
+  // Raw models:list catalog per provider id. Groups only cover providers
+  // configured in models.json; provider-scoped pickers fall back to this so
+  // a provider mid-setup (key typed, not saved) still lists its catalog.
+  catalogByProvider: Record<string, string[]>
 }
 
 export interface UseModelsResult extends ModelsSnapshot {
@@ -43,6 +47,7 @@ const EMPTY_SNAPSHOT: ModelsSnapshot = {
   reasoningByKey: {},
   defaultModel: null,
   isRowboatConnected: false,
+  catalogByProvider: {},
 }
 
 // Module-level store: every mounted consumer shares one snapshot and one
@@ -162,7 +167,7 @@ async function buildSnapshot(): Promise<ModelsSnapshot> {
     }
   } catch { /* no BYOK config yet */ }
 
-  return { groups, reasoningByKey, defaultModel, isRowboatConnected }
+  return { groups, reasoningByKey, defaultModel, isRowboatConnected, catalogByProvider: catalog }
 }
 
 function startFetch(): void {
