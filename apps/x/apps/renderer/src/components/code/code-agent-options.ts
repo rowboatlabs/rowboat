@@ -23,6 +23,20 @@ export function withDefault(options: CodeAgentOption[]): CodeAgentOption[] {
   return options.some((o) => o.value === 'default') ? options : [{ value: 'default', label: 'Default' }, ...options]
 }
 
+// Adapt an engine option list for ModelSelector: the 'default' entry becomes
+// the sentinel (keeping the engine's own label, e.g. Claude's "Default
+// (recommended)"), the rest become staticOptions rows.
+export function toSelectorOptions(options: CodeAgentOption[]): {
+  defaultLabel: string
+  options: Array<{ id: string; label?: string }>
+} {
+  const all = withDefault(options)
+  return {
+    defaultLabel: all.find((o) => o.value === 'default')?.label ?? 'Default',
+    options: all.filter((o) => o.value !== 'default').map((o) => ({ id: o.value, label: o.label })),
+  }
+}
+
 export function optionLabel(options: CodeAgentOption[], value: string | undefined): string {
   return options.find((o) => o.value === (value ?? 'default'))?.label ?? value ?? 'Default'
 }

@@ -162,6 +162,37 @@ describe('ModelSelector', () => {
     expect(onChange).toHaveBeenCalledWith({ provider: 'openai', model: 'my-local-model' })
   })
 
+  it('staticOptions renders only the supplied rows and round-trips ids and null', async () => {
+    serveTwoProviders()
+    const onChange = vi.fn()
+    render(
+      <ModelSelector
+        variant="field"
+        value={null}
+        onChange={onChange}
+        defaultOption={{ label: 'Default (recommended)' }}
+        staticOptions={[
+          { id: 'opus', label: 'Opus' },
+          { id: 'claude-opus-4-8', label: 'Opus' },
+          { id: 'sonnet', label: 'Sonnet' },
+        ]}
+      />,
+    )
+    await openMenu()
+    // Only the caller's rows — nothing from the shared catalog store.
+    expect(screen.queryByText('gpt-5.4')).toBeNull()
+    expect(screen.queryByText('claude-opus-4-8', { selector: '[role="menuitemradio"] span' })).not.toBeNull()
+    // Colliding "Opus" labels are disambiguated by their raw id.
+    expect(screen.getAllByText('Opus')).toHaveLength(2)
+
+    fireEvent.click(screen.getByText('Sonnet'))
+    expect(onChange).toHaveBeenCalledWith({ provider: '', model: 'sonnet' })
+
+    await openMenu()
+    fireEvent.click(screen.getByText('Default (recommended)', { selector: '[role="menuitemradio"] span' }))
+    expect(onChange).toHaveBeenCalledWith(null)
+  })
+
   it('allowCustom offers the typed id when nothing matches', async () => {
     serveTwoProviders()
     const onChange = vi.fn()

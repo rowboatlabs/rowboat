@@ -111,12 +111,13 @@ function LiveProviderGroupItems({ group, label, pinnedModels, filter, onModelRow
   )
 }
 
-// The standardized model picker (model-selection consolidation): the chat
-// composer's picker (full catalog grouped by provider, live groups, search
-// filter, reasoning effort) plus the settings modes — a pinned default
-// sentinel, a form-field trigger, provider scoping, and a typed-id escape
-// hatch. Remaining planned mode: "(global default)" inheritance for
-// per-task overrides — a new optional prop, not a new component.
+// The standardized model picker (model-selection consolidation), mounted
+// everywhere models are chosen. One controlled value/onChange contract with
+// per-surface modes layered on as optional props: the composer's full
+// catalog picker (provider groups, live fetches, search, reasoning effort),
+// settings' default sentinel / field trigger / provider scoping / typed-id
+// escape hatch, per-task "(global default)" inheritance, and caller-supplied
+// restricted lists (coding-agent options).
 export interface ModelSelectorProps {
   /** Current selection; null follows the app default / the sentinel. */
   value: ModelRef | null
@@ -156,6 +157,19 @@ export interface ModelSelectorProps {
    * no slash attaches to the global default's provider.
    */
   allowCustom?: boolean
+  /**
+   * Caller-supplied restricted list (e.g. a coding agent's own model
+   * options): the picker renders ONLY these rows plus the defaultOption
+   * sentinel — no catalog groups, no live fetches. Entries are opaque
+   * engine ids, not provider/model pairs, so the selected ref is
+   * {provider: '', model: id} — the id travels in .model and provider is
+   * meaningless. Search filters on label and id; rows whose label differs
+   * from their id show the id as secondary text (labels can collide, e.g.
+   * Claude lists both the 'opus' alias and the concrete id as "Opus").
+   */
+  staticOptions?: Array<{ id: string; label?: string }>
+  /** Optional title attribute for the trigger button (header tooltips). */
+  triggerTitle?: string
   /** Frozen selection: renders a static label + tooltip instead of the dropdown. */
   lockedModel?: ModelRef | null
   /**
@@ -206,6 +220,8 @@ export function ModelSelector({
   variant = 'pill',
   providerFilter,
   allowCustom = false,
+  staticOptions,
+  triggerTitle,
   lockedModel = null,
   effort = '',
   onEffortChange,
@@ -253,13 +269,23 @@ export function ModelSelector({
 
   const standaloneVisible = standaloneDefault !== null &&
     (!modelFilterValue || standaloneDefault.model.toLowerCase().includes(modelFilterValue))
+  // Static mode replaces all store-driven rows with the caller's list.
+  const staticVisible = useMemo(() => {
+    if (!staticOptions) return null
+    if (!modelFilterValue) return staticOptions
+    return staticOptions.filter((o) =>
+      (o.label ?? o.id).toLowerCase().includes(modelFilterValue) || o.id.toLowerCase().includes(modelFilterValue))
+  }, [staticOptions, modelFilterValue])
+  const staticLabelFor = (id: string) => staticOptions?.find((o) => o.id === id)?.label ?? id
   // Nothing matches anywhere → "No models match". Live groups that haven't
   // reported yet (first render after opening) count as having rows so the
   // empty row never flashes.
-  const anyModelRowVisible = standaloneVisible || groups.some((g) =>
-    g.kind === 'catalog'
-      ? g.models.some((m) => m.toLowerCase().includes(modelFilterValue))
-      : liveGroupHasRows[g.flavor] !== false)
+  const anyModelRowVisible = staticVisible
+    ? staticVisible.length > 0
+    : standaloneVisible || groups.some((g) =>
+      g.kind === 'catalog'
+        ? g.models.some((m) => m.toLowerCase().includes(modelFilterValue))
+        : liveGroupHasRows[g.flavor] !== false)
 
   const handleModelChange = useCallback((key: string) => {
     if (lockedModel) return
@@ -267,10 +293,16 @@ export function ModelSelector({
       onChange(null)
       return
     }
+    // Static keys are opaque engine ids — no provider/model split (ids may
+    // themselves contain slashes).
+    if (staticOptions) {
+      onChange({ provider: '', model: key })
+      return
+    }
     const slash = key.indexOf('/')
     if (slash <= 0 || slash === key.length - 1) return
     onChange({ provider: key.slice(0, slash), model: key.slice(slash + 1) })
-  }, [lockedModel, onChange])
+  }, [lockedModel, onChange, staticOptions])
 
   // Reasoning effort applies to the model the next message will actually use:
   // the frozen model when locked, else the picker selection, else the app
@@ -356,13 +388,16 @@ export function ModelSelector({
               // in forms next to real Select fields.
               <button
                 type="button"
+                title={triggerTitle}
                 className="flex h-9 w-full items-center justify-between gap-2 rounded-md border border-input bg-transparent px-3 py-2 text-sm whitespace-nowrap shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30 dark:hover:bg-input/50"
               >
                 <span className="flex min-w-0 items-center gap-2">
                   <span className={cn('truncate', !value && sentinelMuted && 'text-muted-foreground')}>
-                    {value ? value.model : (sentinel?.label || defaultModel?.model || 'Select a model')}
+                    {value
+                      ? (staticOptions ? staticLabelFor(value.model) : value.model)
+                      : (sentinel?.label || defaultModel?.model || 'Select a model')}
                   </span>
-                  {value && !providerFilter && (
+                  {value && !providerFilter && !staticOptions && (
                     <span className="shrink-0 text-xs text-muted-foreground">
                       {providerDisplayNames[value.provider] || value.provider}
                     </span>
@@ -373,10 +408,13 @@ export function ModelSelector({
             ) : (
               <button
                 type="button"
+                title={triggerTitle}
                 className="flex h-7 min-w-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               >
                 <span className="min-w-0 truncate">
-                  {getModelDisplayName(value?.model || defaultModel?.model || 'Model')}
+                  {staticOptions
+                    ? (value ? staticLabelFor(value.model) : (sentinel?.label ?? 'Model'))
+                    : getModelDisplayName(value?.model || defaultModel?.model || 'Model')}
                 </span>
                 <ChevronDown className="h-3 w-3 shrink-0" />
               </button>
@@ -386,7 +424,7 @@ export function ModelSelector({
             align={variant === 'field' ? 'start' : 'end'}
             className={cn('p-0 overflow-hidden', variant === 'field' && 'min-w-[var(--radix-dropdown-menu-trigger-width)]')}
           >
-            {groups.length === 0 && !standaloneDefault && !sentinel && !allowCustom ? (
+            {!staticOptions && groups.length === 0 && !standaloneDefault && !sentinel && !allowCustom ? (
               <div className="p-1">
                 <DropdownMenuItem disabled>Connect a provider in Settings</DropdownMenuItem>
               </div>
@@ -415,7 +453,7 @@ export function ModelSelector({
                 <DropdownMenuRadioGroup
                   value={
                     value
-                      ? `${value.provider}/${value.model}`
+                      ? (staticOptions ? value.model : `${value.provider}/${value.model}`)
                       : sentinel
                         ? DEFAULT_OPTION_KEY
                         : (defaultModel ? `${defaultModel.provider}/${defaultModel.model}` : '')
@@ -427,7 +465,15 @@ export function ModelSelector({
                       <span className="truncate">{sentinel.label}</span>
                     </DropdownMenuRadioItem>
                   )}
-                  {standaloneDefault && standaloneVisible && (
+                  {staticVisible?.map((o) => (
+                    <DropdownMenuRadioItem key={o.id} value={o.id}>
+                      <span className="truncate">{o.label ?? o.id}</span>
+                      {o.label && o.label !== o.id && (
+                        <span className="ml-2 shrink-0 text-xs text-muted-foreground">{o.id}</span>
+                      )}
+                    </DropdownMenuRadioItem>
+                  ))}
+                  {!staticOptions && standaloneDefault && standaloneVisible && (
                     <DropdownMenuRadioItem value={`${standaloneDefault.provider}/${standaloneDefault.model}`}>
                       <span className="truncate">{standaloneDefault.model}</span>
                       <span className="ml-2 text-xs text-muted-foreground">
@@ -435,7 +481,7 @@ export function ModelSelector({
                       </span>
                     </DropdownMenuRadioItem>
                   )}
-                  {groups.map((g) => {
+                  {!staticOptions && groups.map((g) => {
                     const label = providerDisplayNames[g.flavor] || g.flavor
                     if (g.kind === 'live') {
                       // The app default leads its live group; the group's
