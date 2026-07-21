@@ -19,6 +19,7 @@ import type { ConversationItem } from '@/lib/chat-conversation'
 import { fetchAgentRunTranscript } from '@/lib/agent-transcript'
 import { useAgentRunTranscript } from '@/hooks/use-agent-run-transcript'
 import { CompactConversation } from '@/components/compact-conversation'
+import { ModelSelector, modelOverrideToRef, refToModelOverride } from '@/components/model-selector'
 import { RichMarkdownViewer } from '@/components/rich-markdown-viewer'
 import { HtmlFileViewer } from '@/components/html-file-viewer'
 
@@ -924,19 +925,13 @@ function SetupTab({
                 {showAdvanced && (
                     <div className="mt-3">
                         <div className="grid grid-cols-[74px_1fr] gap-x-3 gap-y-2.5 text-xs">
-                            <span className="pt-1.5 text-muted-foreground">Model</span>
-                            <Input
-                                value={draft.model ?? ''}
-                                onChange={e => setDraft({ ...draft, model: e.target.value || undefined })}
-                                placeholder="(global default)"
-                                className="h-7 font-mono text-xs"
-                            />
-                            <span className="pt-1.5 text-muted-foreground">Provider</span>
-                            <Input
-                                value={draft.provider ?? ''}
-                                onChange={e => setDraft({ ...draft, provider: e.target.value || undefined })}
-                                placeholder="(global default)"
-                                className="h-7 font-mono text-xs"
+                            <span className="pt-2 text-muted-foreground">Model</span>
+                            <ModelSelector
+                                variant="field"
+                                inheritDefault={{ label: '(global default)' }}
+                                allowCustom
+                                value={modelOverrideToRef(draft.model, draft.provider)}
+                                onChange={(ref) => setDraft({ ...draft, ...refToModelOverride(ref) })}
                             />
                         </div>
                         <div className="mt-4">
