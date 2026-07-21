@@ -92,9 +92,9 @@ describe("saveTurnLimitsSettings", () => {
   it("rejects out-of-range values", async () => {
     const { saveTurnLimitsSettings } = await loadTurnLimits();
     expect(() => saveTurnLimitsSettings({ maxModelCalls: 0 })).toThrow();
-    expect(() => saveTurnLimitsSettings({ maxModelCalls: 101 })).toThrow();
+    expect(() => saveTurnLimitsSettings({ maxModelCalls: 501 })).toThrow();
     expect(() =>
-      saveTurnLimitsSettings({ maxModelCalls: 20, chatMaxModelCalls: 500 }),
+      saveTurnLimitsSettings({ maxModelCalls: 20, chatMaxModelCalls: 501 }),
     ).toThrow();
   });
 });

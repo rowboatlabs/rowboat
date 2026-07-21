@@ -14,7 +14,7 @@ import { DEFAULT_MAX_MODEL_CALLS } from './turns.js';
  * resolved limit in turn_created.config.maxModelCalls.
  */
 export const MIN_MODEL_CALL_LIMIT = 1;
-export const MAX_MODEL_CALL_LIMIT = 100;
+export const MAX_MODEL_CALL_LIMIT = 500;
 
 const limit = z
   .number()
