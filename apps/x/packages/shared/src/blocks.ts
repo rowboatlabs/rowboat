@@ -47,10 +47,17 @@ export const ChartBlockSchema = z.object({
   data: z.array(z.record(z.string(), z.unknown())).optional(),
   source: z.string().optional(),
   x: z.string(),
-  y: z.string(),
+  // One series (string) or several (array of data keys). Pie ignores all
+  // but the first.
+  y: z.union([z.string(), z.array(z.string()).min(1)]),
 });
 
 export type ChartBlock = z.infer<typeof ChartBlockSchema>;
+
+/** The y series list regardless of which form the block used. */
+export function chartSeries(block: ChartBlock): string[] {
+  return Array.isArray(block.y) ? block.y : [block.y];
+}
 
 export const TableBlockSchema = z.object({
   columns: z.array(z.string()),
