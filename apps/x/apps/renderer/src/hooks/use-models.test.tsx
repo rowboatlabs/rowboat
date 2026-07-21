@@ -82,6 +82,10 @@ describe('useModels', () => {
       openai: { apiKey: 'sk-test', model: 'gpt-5.4' },
       ollama: { baseURL: 'http://localhost:11434' },
     })
+    // The settings Save path: models:updateConfig lands first, then the
+    // event fires — the refetch must see the new default (this is what
+    // moves a fresh composer tab's trigger label without a restart).
+    handlers['llm:getDefaultModel'] = async () => ({ provider: 'ollama', model: 'llama3' })
     act(() => {
       window.dispatchEvent(new Event('models-config-changed'))
     })
@@ -90,6 +94,7 @@ describe('useModels', () => {
     expect(result.current.groups[1]).toEqual({
       kind: 'live', flavor: 'ollama', apiKey: '', baseURL: 'http://localhost:11434', savedModel: '',
     })
+    expect(result.current.defaultModel).toEqual({ provider: 'ollama', model: 'llama3' })
     expect(invokeCounts['models:list']).toBe(2)
   })
 })
