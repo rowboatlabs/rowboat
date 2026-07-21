@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { z } from "zod";
 import {
     MODEL_CALL_LIMIT_ERROR_CODE,
@@ -40,7 +40,16 @@ import type {
     SyncRuntimeTool,
     ToolExecutionContext,
 } from "./tool-registry.js";
-import type { ITurnLimitsResolver } from "./turn-limits-resolver.js";
+
+// createTurn defaults an omitted maxModelCalls from the fs-backed settings
+// module; mock it so tests stay hermetic (no real WorkDir reads) and can
+// steer the configured global limit.
+const turnLimitsMock = vi.hoisted(() => ({ maxModelCalls: 50 }));
+vi.mock("../../config/turn_limits.js", () => ({
+    loadTurnLimitsSettings: async () => ({
+        maxModelCalls: turnLimitsMock.maxModelCalls,
+    }),
+}));
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -323,7 +332,6 @@ function makeRuntime(opts: {
     idStart?: number;
     modelRegistry?: IModelRegistry;
     toolRegistry?: IToolRegistry;
-    turnLimitsResolver?: ITurnLimitsResolver;
 } = {}) {
     const repo = opts.repo ?? new InMemoryTurnRepo();
     const models = new FakeModelRegistry(opts.models ?? []);
@@ -345,7 +353,6 @@ function makeRuntime(opts: {
         lifecycleBus: bus,
         turnEventBus,
         usageReporter: usage,
-        turnLimitsResolver: opts.turnLimitsResolver,
     });
     return { runtime, repo, models, checker, classifier, bus, turnEventBus, usage };
 }
@@ -3069,13 +3076,6 @@ describe("turn event bus", () => {
 // ---------------------------------------------------------------------------
 
 describe("model-call limit resolution", () => {
-    // Chat turns (humanAvailable) and headless turns resolve through the
-    // injected settings-backed resolver; an explicit maxModelCalls always
-    // wins; without a resolver the built-in default (20) applies.
-    const contextualResolver: ITurnLimitsResolver = {
-        resolve: ({ humanAvailable }) => (humanAvailable ? 7 : 42),
-    };
-
     async function createdMaxModelCalls(
         runtime: TurnRuntime,
         repo: InMemoryTurnRepo,
@@ -3087,34 +3087,28 @@ describe("model-call limit resolution", () => {
         return created.config.maxModelCalls;
     }
 
-    it("resolves an omitted limit by execution context", async () => {
-        const { runtime, repo } = makeRuntime({
-            turnLimitsResolver: contextualResolver,
-        });
-        expect(
-            await createdMaxModelCalls(runtime, repo, { humanAvailable: true }),
-        ).toBe(7);
-        expect(
-            await createdMaxModelCalls(runtime, repo, { humanAvailable: false }),
-        ).toBe(42);
+    it("an omitted limit defaults to the configured global limit", async () => {
+        turnLimitsMock.maxModelCalls = 42;
+        try {
+            const { runtime, repo } = makeRuntime();
+            expect(
+                await createdMaxModelCalls(runtime, repo, { humanAvailable: true }),
+            ).toBe(42);
+            expect(
+                await createdMaxModelCalls(runtime, repo, { humanAvailable: false }),
+            ).toBe(42);
+        } finally {
+            turnLimitsMock.maxModelCalls = 50;
+        }
     });
 
-    it("an explicit per-call limit wins over the resolver", async () => {
-        const { runtime, repo } = makeRuntime({
-            turnLimitsResolver: contextualResolver,
-        });
+    it("an explicit per-call limit wins over the setting", async () => {
+        const { runtime, repo } = makeRuntime();
         expect(
             await createdMaxModelCalls(runtime, repo, {
                 humanAvailable: true,
                 maxModelCalls: 3,
             }),
         ).toBe(3);
-    });
-
-    it("falls back to the built-in default without a resolver", async () => {
-        const { runtime, repo } = makeRuntime();
-        expect(
-            await createdMaxModelCalls(runtime, repo, { humanAvailable: true }),
-        ).toBe(50);
     });
 });

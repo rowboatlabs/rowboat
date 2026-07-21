@@ -247,7 +247,7 @@ async function resolveServices(): Promise<
         headlessRunner: await lazyResolve<
             import("./headless.js").IHeadlessAgentRunner
         >("headlessAgentRunner"),
-        globalMaxModelCalls: loadTurnLimitsSettings().maxModelCalls,
+        globalMaxModelCalls: (await loadTurnLimitsSettings()).maxModelCalls,
     };
 }
 

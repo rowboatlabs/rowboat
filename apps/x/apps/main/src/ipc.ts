@@ -2561,10 +2561,10 @@ export function setupIpcHandlers() {
       return { success: true };
     },
     'turnLimits:getSettings': async () => {
-      return loadTurnLimitsSettings();
+      return await loadTurnLimitsSettings();
     },
     'turnLimits:setSettings': async (_event, args) => {
-      saveTurnLimitsSettings(args);
+      await saveTurnLimitsSettings(args);
       return { success: true };
     },
     // Embedded browser handlers (WebContentsView + navigation)

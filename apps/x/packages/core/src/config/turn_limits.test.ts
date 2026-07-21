@@ -45,13 +45,13 @@ async function writeSettings(content: string): Promise<void> {
 describe("loadTurnLimitsSettings", () => {
   it("defaults to the built-in limit (50) when no file exists", async () => {
     const { loadTurnLimitsSettings } = await loadTurnLimits();
-    expect(loadTurnLimitsSettings()).toEqual({ maxModelCalls: 50 });
+    expect(await loadTurnLimitsSettings()).toEqual({ maxModelCalls: 50 });
   });
 
   it("reads persisted settings", async () => {
     await writeSettings(JSON.stringify({ maxModelCalls: 60, chatMaxModelCalls: 10 }));
     const { loadTurnLimitsSettings } = await loadTurnLimits();
-    expect(loadTurnLimitsSettings()).toEqual({
+    expect(await loadTurnLimitsSettings()).toEqual({
       maxModelCalls: 60,
       chatMaxModelCalls: 10,
     });
@@ -60,7 +60,7 @@ describe("loadTurnLimitsSettings", () => {
   it("fills a missing global limit from the default", async () => {
     await writeSettings(JSON.stringify({ chatMaxModelCalls: 5 }));
     const { loadTurnLimitsSettings } = await loadTurnLimits();
-    expect(loadTurnLimitsSettings()).toEqual({
+    expect(await loadTurnLimitsSettings()).toEqual({
       maxModelCalls: 50,
       chatMaxModelCalls: 5,
     });
@@ -69,21 +69,21 @@ describe("loadTurnLimitsSettings", () => {
   it("falls back to defaults on a corrupt file", async () => {
     await writeSettings("{not json");
     const { loadTurnLimitsSettings } = await loadTurnLimits();
-    expect(loadTurnLimitsSettings()).toEqual({ maxModelCalls: 50 });
+    expect(await loadTurnLimitsSettings()).toEqual({ maxModelCalls: 50 });
   });
 
   it("falls back to defaults on out-of-range values", async () => {
     await writeSettings(JSON.stringify({ maxModelCalls: 5000 }));
     const { loadTurnLimitsSettings } = await loadTurnLimits();
-    expect(loadTurnLimitsSettings()).toEqual({ maxModelCalls: 50 });
+    expect(await loadTurnLimitsSettings()).toEqual({ maxModelCalls: 50 });
   });
 });
 
 describe("saveTurnLimitsSettings", () => {
   it("persists valid settings for the next load", async () => {
     const { saveTurnLimitsSettings, loadTurnLimitsSettings } = await loadTurnLimits();
-    saveTurnLimitsSettings({ maxModelCalls: 80, chatMaxModelCalls: 15 });
-    expect(loadTurnLimitsSettings()).toEqual({
+    await saveTurnLimitsSettings({ maxModelCalls: 80, chatMaxModelCalls: 15 });
+    expect(await loadTurnLimitsSettings()).toEqual({
       maxModelCalls: 80,
       chatMaxModelCalls: 15,
     });
@@ -91,36 +91,10 @@ describe("saveTurnLimitsSettings", () => {
 
   it("rejects out-of-range values", async () => {
     const { saveTurnLimitsSettings } = await loadTurnLimits();
-    expect(() => saveTurnLimitsSettings({ maxModelCalls: 0 })).toThrow();
-    expect(() => saveTurnLimitsSettings({ maxModelCalls: 501 })).toThrow();
-    expect(() =>
+    await expect(saveTurnLimitsSettings({ maxModelCalls: 0 })).rejects.toThrow();
+    await expect(saveTurnLimitsSettings({ maxModelCalls: 501 })).rejects.toThrow();
+    await expect(
       saveTurnLimitsSettings({ maxModelCalls: 20, chatMaxModelCalls: 501 }),
-    ).toThrow();
-  });
-});
-
-describe("resolveMaxModelCalls", () => {
-  it("uses the global limit for headless work", async () => {
-    await writeSettings(JSON.stringify({ maxModelCalls: 60, chatMaxModelCalls: 10 }));
-    const { resolveMaxModelCalls } = await loadTurnLimits();
-    expect(resolveMaxModelCalls({ humanAvailable: false })).toBe(60);
-  });
-
-  it("uses the chat override for interactive turns when set", async () => {
-    await writeSettings(JSON.stringify({ maxModelCalls: 60, chatMaxModelCalls: 10 }));
-    const { resolveMaxModelCalls } = await loadTurnLimits();
-    expect(resolveMaxModelCalls({ humanAvailable: true })).toBe(10);
-  });
-
-  it("falls back to the global limit for chat when no override is set", async () => {
-    await writeSettings(JSON.stringify({ maxModelCalls: 60 }));
-    const { resolveMaxModelCalls } = await loadTurnLimits();
-    expect(resolveMaxModelCalls({ humanAvailable: true })).toBe(60);
-  });
-
-  it("resolves 50 everywhere with no settings file", async () => {
-    const { resolveMaxModelCalls } = await loadTurnLimits();
-    expect(resolveMaxModelCalls({ humanAvailable: true })).toBe(50);
-    expect(resolveMaxModelCalls({ humanAvailable: false })).toBe(50);
+    ).rejects.toThrow();
   });
 });
