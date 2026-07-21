@@ -519,6 +519,13 @@ Rules:
   the global limit. Without a resolver (tests) it defaults to `20`. Spawned
   sub-agents default to the global limit, which also caps the budget a
   parent may grant them. Settings changes affect only newly created turns.
+- Budget exhaustion (§20): interactive turns (`humanAvailable: true`) spend
+  their final budgeted call wrapping up — the request records `wrapUp: true`,
+  and the composer strips tools and appends the shared `wrapUpNotice`, so
+  the turn completes with a real answer that admits what's unfinished.
+  Headless turns (and a wrap-up call that still emits tool calls) keep the
+  hard `turn_failed` with `model-call-limit` — automation needs the
+  machine-readable outcome.
 - Persisted values are fully resolved and immutable.
 
 The capability is named `humanAvailable`, not `headless`. `headless` describes

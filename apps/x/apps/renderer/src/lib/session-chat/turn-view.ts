@@ -6,6 +6,7 @@ import type {
   ToolPermissionRequestEvent,
 } from '@x/shared/src/runs.js'
 import {
+  MODEL_CALL_LIMIT_ERROR_CODE,
   deriveTurnStatus,
   outstandingAsyncTools,
   outstandingPermissions,
@@ -331,10 +332,17 @@ export function buildTurnConversation(state: TurnState): ConversationItem[] {
   }
 
   if (state.terminal?.type === 'turn_failed') {
+    // Interactive turns normally wrap up gracefully before hitting the
+    // limit; if a hard limit failure still lands here, explain it and point
+    // at the setting instead of showing the raw runtime error.
+    const message = state.terminal.code === MODEL_CALL_LIMIT_ERROR_CODE
+      ? `This turn stopped after reaching its model-call limit of ${state.definition.config.maxModelCalls}. ` +
+        'Work completed so far is saved above. You can raise the limit in Settings → Advanced.'
+      : state.terminal.error
     items.push({
       id: `${turnId}:error`,
       kind: 'error',
-      message: state.terminal.error,
+      message,
       timestamp: ts(),
     } satisfies ErrorMessage)
   }

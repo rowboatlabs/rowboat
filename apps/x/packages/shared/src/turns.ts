@@ -233,7 +233,25 @@ export const ModelRequest = z.object({
     contextRef: TurnContextRef.optional(),
     messages: z.array(ModelRequestMessageRef),
     parameters: z.record(z.string(), z.json()),
+    // Final budgeted call of an interactive turn: the composer strips tools
+    // and appends wrapUpNotice() so the model ends with a real answer
+    // instead of the turn failing with model-call-limit (issue #768).
+    wrapUp: z.literal(true).optional(),
 });
+
+// The message appended to a wrap-up call's request. A pure function of the
+// turn's durable config, so replaying the log reproduces the wire bytes.
+export function wrapUpNotice(
+    maxModelCalls: number,
+): z.infer<typeof ConversationMessage> {
+    return {
+        role: "user",
+        content:
+            `[system notice] You are on the final model call this turn's budget allows (model-call limit: ${maxModelCalls}); tools are no longer available. ` +
+            "Give your best final answer using only the work above: present what you completed, state clearly what remains unfinished, " +
+            "and let the user know the turn was cut short by the model-call limit, which they can raise in Settings → Advanced.",
+    };
+}
 
 export const ModelCallRequested = z.object({
     type: z.literal("model_call_requested"),

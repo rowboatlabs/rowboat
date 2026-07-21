@@ -1790,6 +1790,81 @@ describe("model-call limit (26.9)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Graceful budget wrap-up (issue #768)
+// ---------------------------------------------------------------------------
+
+describe("model-call limit wrap-up", () => {
+    function persistedRequests(log: TEvent[]) {
+        return log.filter(
+            (e): e is Extract<TEvent, { type: "model_call_requested" }> =>
+                e.type === "model_call_requested",
+        );
+    }
+
+    it("spends the final budgeted call of a chat turn wrapping up without tools", async () => {
+        const { runtime, repo, models } = makeRuntime({
+            models: [
+                respond(completedResp(assistantCalls(toolCallPart("S", "echo")))),
+                respond(completedResp(assistantText("partial summary"))),
+            ],
+        });
+        const turnId = await newTurn(runtime, {
+            config: { humanAvailable: true, maxModelCalls: 2 },
+        });
+        const { outcome } = await advanceAndSettle(runtime, turnId);
+        expect(outcome?.status).toBe("completed");
+
+        // The wrap-up rides the durable request…
+        const requests = persistedRequests(await persisted(repo, turnId));
+        expect(requests[0].request.wrapUp).toBeUndefined();
+        expect(requests[1].request.wrapUp).toBe(true);
+
+        // …and the wire request had no tools plus the budget notice.
+        expect(models.requests[0].tools.length).toBeGreaterThan(0);
+        expect(models.requests[1].tools).toEqual([]);
+        const messages = models.requests[1].messages;
+        const last = messages[messages.length - 1] as { role: string; content: string };
+        expect(last.role).toBe("user");
+        expect(last.content).toMatch(/model-call limit/);
+    });
+
+    it("a 1-call chat budget answers directly as a wrap-up call", async () => {
+        const { runtime, models } = makeRuntime({
+            models: [respond(completedResp(assistantText("hi")))],
+        });
+        const turnId = await newTurn(runtime, {
+            config: { humanAvailable: true, maxModelCalls: 1 },
+        });
+        const { outcome } = await advanceAndSettle(runtime, turnId);
+        expect(outcome?.status).toBe("completed");
+        expect(models.requests[0].tools).toEqual([]);
+    });
+
+    it("headless turns keep the hard model-call-limit failure with tools intact", async () => {
+        const { runtime, models } = makeRuntime({
+            models: [
+                respond(completedResp(assistantCalls(toolCallPart("S", "echo")))),
+                respond(completedResp(assistantCalls(toolCallPart("S2", "echo")))),
+            ],
+        });
+        const turnId = await newTurn(runtime, {
+            config: {
+                humanAvailable: false,
+                autoPermission: true,
+                maxModelCalls: 2,
+            },
+        });
+        const { outcome } = await advanceAndSettle(runtime, turnId);
+        expect(outcome).toMatchObject({
+            status: "failed",
+            code: MODEL_CALL_LIMIT_ERROR_CODE,
+        });
+        // No wrap-up in headless: the final call was composed with tools.
+        expect(models.requests[1].tools.length).toBeGreaterThan(0);
+    });
+});
+
+// ---------------------------------------------------------------------------
 // Tool progress
 // ---------------------------------------------------------------------------
 
