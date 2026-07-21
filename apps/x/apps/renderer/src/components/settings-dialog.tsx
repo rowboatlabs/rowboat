@@ -2732,7 +2732,13 @@ function AdvancedSettings({ dialogOpen }: { dialogOpen: boolean }) {
       .then((settings) => {
         if (cancelled) return
         setGlobalLimit(String(settings.maxModelCalls))
-        setChatLimit(settings.chatMaxModelCalls !== undefined ? String(settings.chatMaxModelCalls) : "")
+        // A chat override equal to the global limit is no override — show
+        // "Same as above" (legacy files; saves already collapse this).
+        setChatLimit(
+          settings.chatMaxModelCalls !== undefined && settings.chatMaxModelCalls !== settings.maxModelCalls
+            ? String(settings.chatMaxModelCalls)
+            : ""
+        )
         setLoaded(true)
       })
       .catch(() => {
@@ -2758,6 +2764,9 @@ function AdvancedSettings({ dialogOpen }: { dialogOpen: boolean }) {
       }
       chat = parsed
     }
+    // An override equal to the global limit is meaningless — persist it as
+    // "use the global limit" so the field reopens as "Same as above".
+    if (chat === global) chat = undefined
     try {
       await window.ipc.invoke("turnLimits:setSettings", {
         maxModelCalls: global,
