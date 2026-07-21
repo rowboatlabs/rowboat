@@ -2704,7 +2704,7 @@ function LimitStepper({
           // The 11px placeholder sits on the 14px text baseline, so it reads
           // slightly low; nudge it up for optical centering. Only applies
           // while the placeholder is visible, so typed text is unaffected.
-          "placeholder:text-[11px] placeholder:text-muted-foreground/70 placeholder-shown:pb-0.5",
+          "placeholder:text-[11px] placeholder:text-muted-foreground/70 placeholder-shown:pb-1",
           placeholder ? "w-24" : "w-16",
         )}
       />
