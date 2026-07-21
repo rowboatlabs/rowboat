@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { BadgeCheck, Bot, Download, Link2, RefreshCw, Search, ShieldAlert, Star } from 'lucide-react'
 import type { rowboatApp } from '@x/shared'
 import { themeForIndex, patternFor } from '@/components/apps/card-theme'
+import { ModelSelector } from '@/components/model-selector'
 
 // Catalog tab (spec §14): search the registry, install with the D18 capability
 // disclosure, install from a direct bundle URL.
@@ -89,26 +90,9 @@ function EnableAgentsDialog({ appName, names, defaultModel, busy, onEnable, onSk
   onEnable: (model: ModelChoice | null) => void
   onSkip: () => void
 }) {
-  const [options, setOptions] = useState<Array<ModelChoice & { label: string }>>([])
-  const [selected, setSelected] = useState<string>(defaultModel ? `${defaultModel.provider}::${defaultModel.model}` : '')
-
-  useEffect(() => {
-    void (async () => {
-      try {
-        const r = await window.ipc.invoke('models:list', null)
-        setOptions(r.providers.flatMap((p) => p.models.map((m) => ({
-          provider: p.id,
-          model: m.id,
-          label: `${m.name ?? m.id} (${p.name})`,
-        }))))
-      } catch { /* no picker — enable keeps the pinned model */ }
-    })()
-  }, [])
-
-  const choice = (): ModelChoice | null => {
-    const [provider, model] = selected.split('::')
-    return provider && model ? { provider, model } : null
-  }
+  // Pre-seeded with the host-pinned model; "(default)" (null) enables
+  // without a model patch, keeping whatever each agent has pinned.
+  const [selected, setSelected] = useState<ModelChoice | null>(defaultModel ?? null)
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
@@ -123,24 +107,21 @@ function EnableAgentsDialog({ appName, names, defaultModel, busy, onEnable, onSk
         <ul className="mb-3 list-inside list-disc text-sm text-muted-foreground">
           {names.map((n) => <li key={n}>{n}</li>)}
         </ul>
-        {options.length > 0 && (
-          <label className="mb-3 flex items-center gap-2 text-sm text-muted-foreground">
-            Run with
-            <select value={selected} onChange={(e) => setSelected(e.target.value)}
-              className="min-w-0 flex-1 truncate rounded-md border border-border bg-background px-2 py-1 text-sm">
-              {defaultModel && !options.some((o) => o.provider === defaultModel.provider && o.model === defaultModel.model) && (
-                <option value={`${defaultModel.provider}::${defaultModel.model}`}>{defaultModel.model} (default)</option>
-              )}
-              {options.map((o) => (
-                <option key={`${o.provider}::${o.model}`} value={`${o.provider}::${o.model}`}>{o.label}</option>
-              ))}
-            </select>
-          </label>
-        )}
+        <label className="mb-3 flex items-center gap-2 text-sm text-muted-foreground">
+          Run with
+          <div className="min-w-0 flex-1">
+            <ModelSelector
+              variant="field"
+              inheritDefault={{ label: '(default)' }}
+              value={selected}
+              onChange={setSelected}
+            />
+          </div>
+        </label>
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onSkip} disabled={busy}
             className="rounded-md border border-border px-3 py-1.5 text-sm font-medium hover:bg-accent">Not now</button>
-          <button type="button" onClick={() => onEnable(choice())} disabled={busy}
+          <button type="button" onClick={() => onEnable(selected)} disabled={busy}
             className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50">
             {busy ? 'Turning on…' : 'Turn on & run now'}
           </button>
