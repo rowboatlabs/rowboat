@@ -479,12 +479,6 @@ function AppearanceSettings() {
 
 type LlmProviderFlavor = "openai" | "anthropic" | "google" | "openrouter" | "aigateway" | "ollama" | "openai-compatible"
 
-interface LlmModelOption {
-  id: string
-  name?: string
-  release_date?: string
-}
-
 const primaryProviders: Array<{ id: LlmProviderFlavor; name: string; description: string; icon: React.ElementType }> = [
   { id: "openai", name: "OpenAI", description: "GPT models", icon: OpenAIIcon },
   { id: "anthropic", name: "Anthropic", description: "Claude models", icon: AnthropicIcon },
@@ -534,8 +528,6 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
     ollama: { apiKey: "", baseURL: "http://localhost:11434", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
     "openai-compatible": { apiKey: "", baseURL: "http://localhost:1234/v1", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
   })
-  const [modelsCatalog, setModelsCatalog] = useState<Record<string, LlmModelOption[]>>({})
-  const [modelsLoading, setModelsLoading] = useState(false)
   const [testState, setTestState] = useState<{ status: "idle" | "testing" | "success" | "error"; error?: string }>({ status: "idle" })
   const [configLoading, setConfigLoading] = useState(true)
   const [showMoreProviders, setShowMoreProviders] = useState(false)
@@ -564,8 +556,6 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
   const showBaseURL = provider === "ollama" || provider === "openai-compatible" || provider === "aigateway"
   const requiresBaseURL = provider === "ollama" || provider === "openai-compatible"
   const isLocalProvider = provider === "ollama" || provider === "openai-compatible"
-  const modelsForProvider = modelsCatalog[provider] || []
-  const showModelInput = isLocalProvider || modelsForProvider.length === 0
   const isMoreProvider = moreProviders.some(p => p.id === provider)
 
   const primaryModel = activeConfig.models[0] || ""
@@ -704,29 +694,6 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
       toast.error("Failed to save setting")
     }
   }, [])
-
-  // Load models catalog
-  useEffect(() => {
-    if (!dialogOpen) return
-
-    async function loadModels() {
-      try {
-        setModelsLoading(true)
-        const result = await window.ipc.invoke("models:list", null)
-        const catalog: Record<string, LlmModelOption[]> = {}
-        for (const p of result.providers || []) {
-          catalog[p.id] = p.models || []
-        }
-        setModelsCatalog(catalog)
-      } catch {
-        setModelsCatalog({})
-      } finally {
-        setModelsLoading(false)
-      }
-    }
-
-    loadModels()
-  }, [dialogOpen])
 
   // A saved openai-compatible model that the server's list doesn't confirm
   // (not listed, or /models unreachable) belongs in the visible Model field,
@@ -1226,144 +1193,33 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
         </div>
       )}
 
-      {/* Per-function model overrides */}
+      {/* Per-function model overrides. Persisted as bare model-id strings
+          inside providers[flavor] ('' = "Same as assistant"), so the
+          ModelRef picker value is adapted at this boundary: string ↔
+          {provider, model} with the active card's flavor. allowCustom keeps
+          arbitrary ids typeable (local servers, unlisted models). */}
       <div className="grid grid-cols-2 gap-3">
         {!rowboatConnected && (<>
-        {/* Knowledge graph model (right column) */}
-        <div className="space-y-2">
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Knowledge graph model</span>
-          {modelsLoading ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" />
-              Loading...
+          {(
+            [
+              { label: "Knowledge graph model", field: "knowledgeGraphModel" },
+              { label: "Meeting notes model", field: "meetingNotesModel" },
+              { label: "Track block model", field: "liveNoteAgentModel" },
+              { label: "Auto-permission model", field: "autoPermissionDecisionModel" },
+            ] as const
+          ).map(({ label, field }) => (
+            <div key={field} className="space-y-2">
+              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{label}</span>
+              <ModelSelector
+                variant="field"
+                providerFilter={provider}
+                allowCustom
+                defaultOption={{ label: "Same as assistant" }}
+                value={activeConfig[field] ? { provider, model: activeConfig[field] } : null}
+                onChange={(ref) => updateConfig(provider, { [field]: ref ? ref.model : "" })}
+              />
             </div>
-          ) : showModelInput ? (
-            <Input
-              value={activeConfig.knowledgeGraphModel}
-              onChange={(e) => updateConfig(provider, { knowledgeGraphModel: e.target.value })}
-              placeholder={primaryModel || "Enter model"}
-            />
-          ) : (
-            <Select
-              value={activeConfig.knowledgeGraphModel || "__same__"}
-              onValueChange={(value) => updateConfig(provider, { knowledgeGraphModel: value === "__same__" ? "" : value })}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select a model" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__same__">Same as assistant</SelectItem>
-                {modelsForProvider.map((m) => (
-                  <SelectItem key={m.id} value={m.id}>
-                    {m.name || m.id}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-        </div>
-
-        {/* Meeting notes model */}
-        <div className="space-y-2">
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Meeting notes model</span>
-          {modelsLoading ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" />
-              Loading...
-            </div>
-          ) : showModelInput ? (
-            <Input
-              value={activeConfig.meetingNotesModel}
-              onChange={(e) => updateConfig(provider, { meetingNotesModel: e.target.value })}
-              placeholder={primaryModel || "Enter model"}
-            />
-          ) : (
-            <Select
-              value={activeConfig.meetingNotesModel || "__same__"}
-              onValueChange={(value) => updateConfig(provider, { meetingNotesModel: value === "__same__" ? "" : value })}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select a model" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__same__">Same as assistant</SelectItem>
-                {modelsForProvider.map((m) => (
-                  <SelectItem key={m.id} value={m.id}>
-                    {m.name || m.id}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-        </div>
-
-        {/* Track block model */}
-        <div className="space-y-2">
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Track block model</span>
-          {modelsLoading ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" />
-              Loading...
-            </div>
-          ) : showModelInput ? (
-            <Input
-              value={activeConfig.liveNoteAgentModel}
-              onChange={(e) => updateConfig(provider, { liveNoteAgentModel: e.target.value })}
-              placeholder={primaryModel || "Enter model"}
-            />
-          ) : (
-            <Select
-              value={activeConfig.liveNoteAgentModel || "__same__"}
-              onValueChange={(value) => updateConfig(provider, { liveNoteAgentModel: value === "__same__" ? "" : value })}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select a model" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__same__">Same as assistant</SelectItem>
-                {modelsForProvider.map((m) => (
-                  <SelectItem key={m.id} value={m.id}>
-                    {m.name || m.id}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-        </div>
-
-        {/* Auto-permission model */}
-        <div className="space-y-2">
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Auto-permission model</span>
-          {modelsLoading ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" />
-              Loading...
-            </div>
-          ) : showModelInput ? (
-            <Input
-              value={activeConfig.autoPermissionDecisionModel}
-              onChange={(e) => updateConfig(provider, { autoPermissionDecisionModel: e.target.value })}
-              placeholder={primaryModel || "Enter model"}
-            />
-          ) : (
-            <Select
-              value={activeConfig.autoPermissionDecisionModel || "__same__"}
-              onValueChange={(value) => updateConfig(provider, { autoPermissionDecisionModel: value === "__same__" ? "" : value })}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select a model" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__same__">Same as assistant</SelectItem>
-                {modelsForProvider.map((m) => (
-                  <SelectItem key={m.id} value={m.id}>
-                    {m.name || m.id}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-        </div>
+          ))}
         </>)}
       </div>
 
