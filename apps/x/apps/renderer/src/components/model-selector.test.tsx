@@ -108,6 +108,60 @@ describe('ModelSelector', () => {
     expect(screen.queryByText('gpt-5.4')).toBeNull()
   })
 
+  it('inheritDefault renders its label muted in the trigger when value is null', () => {
+    serveTwoProviders()
+    render(
+      <ModelSelector
+        variant="field"
+        value={null}
+        onChange={() => {}}
+        inheritDefault={{ label: '(global default)' }}
+      />,
+    )
+    const label = screen.getByText('(global default)')
+    expect(label.className).toContain('text-muted-foreground')
+  })
+
+  it('un-scoped allowCustom splits "provider/model" on the first slash', async () => {
+    serveTwoProviders()
+    const onChange = vi.fn()
+    render(
+      <ModelSelector
+        variant="field"
+        value={null}
+        onChange={onChange}
+        inheritDefault={{ label: '(global default)' }}
+        allowCustom
+      />,
+    )
+    await openMenu()
+    fireEvent.change(screen.getByPlaceholderText('Search models…'), {
+      target: { value: 'openrouter/meituan/longcat-2.0' },
+    })
+    fireEvent.click(await screen.findByText('Use "openrouter/meituan/longcat-2.0"'))
+    expect(onChange).toHaveBeenCalledWith({ provider: 'openrouter', model: 'meituan/longcat-2.0' })
+  })
+
+  it('un-scoped allowCustom pairs slash-less text with the default provider', async () => {
+    serveTwoProviders()
+    const onChange = vi.fn()
+    render(
+      <ModelSelector
+        variant="field"
+        value={null}
+        onChange={onChange}
+        inheritDefault={{ label: '(global default)' }}
+        allowCustom
+      />,
+    )
+    await openMenu()
+    // Wait for the store snapshot (the default provider comes from it).
+    await screen.findByText('claude-opus-4-8')
+    fireEvent.change(screen.getByPlaceholderText('Search models…'), { target: { value: 'my-local-model' } })
+    fireEvent.click(await screen.findByText('Use "my-local-model"'))
+    expect(onChange).toHaveBeenCalledWith({ provider: 'openai', model: 'my-local-model' })
+  })
+
   it('allowCustom offers the typed id when nothing matches', async () => {
     serveTwoProviders()
     const onChange = vi.fn()

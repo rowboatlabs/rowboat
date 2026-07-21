@@ -129,6 +129,14 @@ export interface ModelSelectorProps {
    */
   defaultOption?: { label: string }
   /**
+   * Inheritance flavor of defaultOption for per-task overrides
+   * ("(global default)"): same sentinel row and null semantics, but null
+   * means "inherit the global default at runtime" and the trigger renders
+   * the label muted, so an un-overridden field reads like a placeholder.
+   * Mutually exclusive with defaultOption (defaultOption wins).
+   */
+  inheritDefault?: { label: string }
+  /**
    * 'pill' is the composer's compact rounded trigger; 'field' is a
    * full-width bordered Select-style trigger for forms.
    */
@@ -142,7 +150,10 @@ export interface ModelSelectorProps {
   /**
    * When the search text matches no rows, offer a `Use "<text>"` row that
    * selects the typed id — arbitrary ids for ollama / openai-compatible.
-   * Requires providerFilter (the typed id needs a provider to attach to).
+   * With providerFilter the typed id attaches to that provider. Without it,
+   * "provider/model" splits on the FIRST slash (so an OpenRouter id must be
+   * typed provider-qualified: "openrouter/meituan/longcat-2.0"); text with
+   * no slash attaches to the global default's provider.
    */
   allowCustom?: boolean
   /** Frozen selection: renders a static label + tooltip instead of the dropdown. */
@@ -161,10 +172,37 @@ export interface ModelSelectorProps {
 // (real keys always contain "provider/").
 const DEFAULT_OPTION_KEY = '__default__'
 
+// Un-scoped custom entries can't know their provider, so the rule is:
+// scoped → the scoped provider; "provider/model" → split on the FIRST
+// slash; no slash → the global default's provider (matching how the
+// runtime pairs a provider-less model override).
+function parseCustomModel(text: string, providerFilter: string | undefined, defaultModel: ModelRef | null): ModelRef {
+  if (providerFilter) return { provider: providerFilter, model: text }
+  const slash = text.indexOf('/')
+  if (slash > 0 && slash < text.length - 1) {
+    return { provider: text.slice(0, slash), model: text.slice(slash + 1) }
+  }
+  return { provider: defaultModel?.provider ?? '', model: text }
+}
+
+// Adapters for surfaces that persist a per-item override as two optional
+// strings (BackgroundTask.model/provider, LiveNote.model/provider) where
+// unset = inherit the global default. A model without a provider is legal
+// (the runtime pairs it with the default provider), so '' round-trips to
+// undefined and a null ref clears both fields.
+export function modelOverrideToRef(model: string | undefined, provider: string | undefined): ModelRef | null {
+  return model ? { provider: provider ?? '', model } : null
+}
+
+export function refToModelOverride(ref: ModelRef | null): { model: string | undefined; provider: string | undefined } {
+  return { model: ref?.model || undefined, provider: ref?.provider || undefined }
+}
+
 export function ModelSelector({
   value,
   onChange,
   defaultOption,
+  inheritDefault,
   variant = 'pill',
   providerFilter,
   allowCustom = false,
@@ -173,6 +211,11 @@ export function ModelSelector({
   onEffortChange,
 }: ModelSelectorProps) {
   const { groups: allGroups, reasoningByKey, defaultModel, catalogByProvider } = useModels()
+
+  // inheritDefault is defaultOption with placeholder styling — one sentinel
+  // code path, not two.
+  const sentinel = defaultOption ?? inheritDefault
+  const sentinelMuted = !defaultOption && Boolean(inheritDefault)
 
   const groups = useMemo<ModelPickerGroup[]>(() => {
     if (!providerFilter) return allGroups
@@ -316,8 +359,8 @@ export function ModelSelector({
                 className="flex h-9 w-full items-center justify-between gap-2 rounded-md border border-input bg-transparent px-3 py-2 text-sm whitespace-nowrap shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30 dark:hover:bg-input/50"
               >
                 <span className="flex min-w-0 items-center gap-2">
-                  <span className="truncate">
-                    {value ? value.model : (defaultOption?.label || defaultModel?.model || 'Select a model')}
+                  <span className={cn('truncate', !value && sentinelMuted && 'text-muted-foreground')}>
+                    {value ? value.model : (sentinel?.label || defaultModel?.model || 'Select a model')}
                   </span>
                   {value && !providerFilter && (
                     <span className="shrink-0 text-xs text-muted-foreground">
@@ -343,7 +386,7 @@ export function ModelSelector({
             align={variant === 'field' ? 'start' : 'end'}
             className={cn('p-0 overflow-hidden', variant === 'field' && 'min-w-[var(--radix-dropdown-menu-trigger-width)]')}
           >
-            {groups.length === 0 && !standaloneDefault && !defaultOption && !(allowCustom && providerFilter) ? (
+            {groups.length === 0 && !standaloneDefault && !sentinel && !allowCustom ? (
               <div className="p-1">
                 <DropdownMenuItem disabled>Connect a provider in Settings</DropdownMenuItem>
               </div>
@@ -373,15 +416,15 @@ export function ModelSelector({
                   value={
                     value
                       ? `${value.provider}/${value.model}`
-                      : defaultOption
+                      : sentinel
                         ? DEFAULT_OPTION_KEY
                         : (defaultModel ? `${defaultModel.provider}/${defaultModel.model}` : '')
                   }
                   onValueChange={handleModelChange}
                 >
-                  {defaultOption && (
+                  {sentinel && (
                     <DropdownMenuRadioItem value={DEFAULT_OPTION_KEY}>
-                      <span className="truncate">{defaultOption.label}</span>
+                      <span className="truncate">{sentinel.label}</span>
                     </DropdownMenuRadioItem>
                   )}
                   {standaloneDefault && standaloneVisible && (
@@ -433,12 +476,14 @@ export function ModelSelector({
                     )
                   })}
                   {modelFilterValue && !anyModelRowVisible && (
-                    allowCustom && providerFilter ? (
+                    allowCustom ? (
                       // Escape hatch for ids the lists don't carry (local
                       // servers, brand-new models): select exactly what was
-                      // typed, attached to the scoped provider.
+                      // typed. Scoped pickers attach it to their provider;
+                      // un-scoped ones split "provider/model" on the first
+                      // slash, else pair the text with the default provider.
                       <DropdownMenuItem
-                        onSelect={() => onChange({ provider: providerFilter, model: modelFilter.trim() })}
+                        onSelect={() => onChange(parseCustomModel(modelFilter.trim(), providerFilter, defaultModel))}
                       >
                         <span className="truncate">Use &quot;{modelFilter.trim()}&quot;</span>
                       </DropdownMenuItem>
