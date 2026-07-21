@@ -33,15 +33,38 @@ export function ChartRenderer({ source }: ChartRendererProps) {
   const gridStroke = resolvedTheme === 'dark' ? '#3a3a38' : '#e4e4e0'
   const textColor = resolvedTheme === 'dark' ? '#c3c2b7' : '#52514e'
 
-  const config = useMemo(() => {
+  const { config, invalid } = useMemo(() => {
+    let parsed: unknown
     try {
-      return blocks.ChartBlockSchema.parse(JSON.parse(source))
+      parsed = JSON.parse(source)
     } catch {
-      return null
+      // Incomplete JSON — the fence body is still streaming in.
+      return { config: null, invalid: false }
     }
+    // Models occasionally reach for pie-flavored field names despite the
+    // skill's schema; map the predictable aliases before validating.
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const obj = parsed as Record<string, unknown>
+      if (obj.x === undefined && typeof obj.label === 'string') obj.x = obj.label
+      if (obj.y === undefined && typeof obj.value === 'string') obj.y = obj.value
+    }
+    const result = blocks.ChartBlockSchema.safeParse(parsed)
+    return result.success
+      ? { config: result.data, invalid: false }
+      : { config: null, invalid: true }
   }, [source])
 
-  if (!config || !config.data || config.data.length === 0) {
+  // Complete JSON that fails the schema is a real error — say so instead of
+  // showing the streaming placeholder forever.
+  if (invalid || (config && (!config.data || config.data.length === 0))) {
+    return (
+      <div className="my-2 flex h-24 items-center justify-center gap-2 rounded-md border border-border bg-muted/30 text-xs text-muted-foreground">
+        <BarChart3 className="size-3.5" />
+        {invalid ? 'Chart config invalid — ask me to redraw it' : 'Chart has no data'}
+      </div>
+    )
+  }
+  if (!config) {
     return (
       <div className="my-2 flex h-24 items-center justify-center gap-2 rounded-md border border-border bg-muted/30 text-xs text-muted-foreground">
         <BarChart3 className="size-3.5" />
@@ -50,7 +73,7 @@ export function ChartRenderer({ source }: ChartRendererProps) {
     )
   }
 
-  const data = config.data
+  const data = config.data ?? []
   const series = blocks.chartSeries(config)
   const axisProps = {
     stroke: textColor,

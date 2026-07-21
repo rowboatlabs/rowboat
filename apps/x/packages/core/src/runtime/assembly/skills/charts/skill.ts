@@ -15,11 +15,18 @@ Emit a fenced code block with language \`chart\` anywhere in your reply. The app
 
 ## Config schema
 
+The ONLY fields are \`chart\`, \`data\`, \`x\`, \`y\`, \`title\` — nothing else exists (no \`label\`, \`value\`, \`series\`, \`color\`, etc.). Unknown fields are ignored; a missing \`x\` or \`y\` breaks the chart.
+
 - **\`chart\`** (required): \`"line"\` | \`"bar"\` | \`"pie"\`
 - **\`data\`** (required): array of flat objects — the rows to plot. Put REAL values you gathered this turn here; never invent numbers.
-- **\`x\`** (required): key of the label/category field in each row
-- **\`y\`** (required): key of the value field — a string for one series, or an array of keys for several series on one chart
+- **\`x\`** (required): key of the label/category field in each row. For pie: the slice-name key.
+- **\`y\`** (required): key of the value field — a string for one series, or an array of keys for several series on one chart. For pie: the slice-value key.
 - **\`title\`** (optional): short heading shown above the chart
+
+**Data must be wide-format**: one row per x value, one key per series. Never long/tidy format (a row per series-point with a series-name column) — multiple series means multiple keys in the SAME row:
+
+WRONG: \`[{ "day": "Mon", "index": "S&P", "pct": 0.1 }, { "day": "Mon", "index": "Dow", "pct": 0.2 }]\`
+RIGHT: \`[{ "day": "Mon", "S&P": 0.1, "Dow": 0.2 }]\` with \`"y": ["S&P", "Dow"]\`
 
 ## Picking the form
 
@@ -58,6 +65,22 @@ Single-series bar:
     { "area": "sync", "count": 14 },
     { "area": "editor", "count": 9 },
     { "area": "billing", "count": 3 }
+  ]
+}
+\`\`\`
+
+Pie (x names the slice, y is its value — same keys as every other chart):
+
+\`\`\`chart
+{
+  "chart": "pie",
+  "title": "Time spent by project",
+  "x": "project",
+  "y": "hours",
+  "data": [
+    { "project": "Alpha", "hours": 14 },
+    { "project": "Beta", "hours": 6 },
+    { "project": "Internal", "hours": 3 }
   ]
 }
 \`\`\`
