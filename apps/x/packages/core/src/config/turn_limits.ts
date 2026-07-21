@@ -11,8 +11,8 @@ const TURN_LIMITS_CONFIG_PATH = path.join(WorkDir, 'config', 'turn_limits.json')
 
 /**
  * Load the model-call limit settings, falling back to the defaults (global
- * limit 20, no chat override) when the file is absent or malformed — so
- * existing installations keep today's behavior until the user changes it.
+ * limit DEFAULT_MAX_MODEL_CALLS, no chat override) when the file is absent
+ * or malformed.
  */
 export function loadTurnLimitsSettings(): TurnLimitsSettings {
     try {

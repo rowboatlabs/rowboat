@@ -29,6 +29,7 @@ import { AccountSettings } from "@/components/settings/account-settings"
 import { ConnectedAccountsSettings } from "@/components/settings/connected-accounts-settings"
 import { MobileChannelsSettings } from "@/components/settings/mobile-channels-settings"
 import type { ApprovalPolicy } from "@x/shared/src/code-mode.js"
+import { DEFAULT_TURN_LIMITS_SETTINGS } from "@x/shared/src/turn-limits.js"
 import type { ipc as ipcShared } from "@x/shared"
 import { startProvisioning, useProvisioning, enabledOptimistic, type AgentStatus, type CodeModeAgentStatus } from "@/lib/code-mode-provisioning"
 import { useProviderModels } from "@/hooks/use-provider-models"
@@ -2807,7 +2808,7 @@ function AdvancedSettings({ dialogOpen }: { dialogOpen: boolean }) {
           </div>
           <LimitStepper
             value={globalLimit}
-            fallback={20}
+            fallback={DEFAULT_TURN_LIMITS_SETTINGS.maxModelCalls}
             onInput={setGlobalLimit}
             onCommit={(next) => {
               setGlobalLimit(next)
@@ -2841,7 +2842,7 @@ function AdvancedSettings({ dialogOpen }: { dialogOpen: boolean }) {
             )}
             <LimitStepper
               value={chatLimit}
-              fallback={parseLimit(globalLimit) ?? 20}
+              fallback={parseLimit(globalLimit) ?? DEFAULT_TURN_LIMITS_SETTINGS.maxModelCalls}
               placeholder="Same as above"
               onInput={setChatLimit}
               onCommit={(next) => {

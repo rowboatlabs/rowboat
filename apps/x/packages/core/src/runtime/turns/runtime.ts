@@ -1190,20 +1190,11 @@ class TurnAdvance {
         // what it ran with, and the model bridge maps the canonical value to
         // provider-specific options at invoke time.
         const reasoningEffort = this.definition.config.reasoningEffort;
-        // Interactive turns spend their final budgeted call wrapping up: the
-        // composer strips tools and appends the budget notice, so the user
-        // gets a real answer instead of a model-call-limit failure. Headless
-        // turns keep the hard failure — automation needs the machine-readable
-        // outcome, and sub-agents already surface partial results.
-        const wrapUp =
-            this.definition.config.humanAvailable &&
-            index === this.definition.config.maxModelCalls - 1;
         const request: z.infer<typeof ModelRequest> = {
             ...(isRef && index === 0 ? { contextRef: context } : {}),
             messages: refs,
             parameters:
                 reasoningEffort === undefined ? {} : { reasoningEffort },
-            ...(wrapUp ? { wrapUp: true as const } : {}),
         };
         await this.append({
             type: "model_call_requested",

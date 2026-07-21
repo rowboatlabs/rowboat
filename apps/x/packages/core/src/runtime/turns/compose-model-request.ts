@@ -7,7 +7,6 @@ import {
     type TurnState,
     effectiveTools,
     requestMessagesFor,
-    wrapUpNotice,
 } from "@x/shared/dist/turns.js";
 import type { IContextResolver } from "./context-resolver.js";
 
@@ -47,21 +46,12 @@ export function composeModelRequest(
     for (let index = 0; index <= modelCallIndex; index++) {
         structural.push(...requestMessagesFor(state, index));
     }
-    // A wrap-up call (final budgeted call of an interactive turn) sends no
-    // tools and appends the budget notice, so the model must answer in text.
-    // Both derive from the durable request flag + config, preserving exact
-    // wire reproducibility.
-    if (call.request.wrapUp) {
-        structural.push(wrapUpNotice(state.definition.config.maxModelCalls));
-    }
     return {
         systemPrompt: agent.systemPrompt,
         messages: encode(structural),
         // The snapshot's base tools plus any durable mid-turn extensions
         // recorded before this call (tools_extended events).
-        tools: call.request.wrapUp
-            ? []
-            : effectiveTools(state, modelCallIndex, agent.tools),
+        tools: effectiveTools(state, modelCallIndex, agent.tools),
         parameters: call.request.parameters,
     };
 }

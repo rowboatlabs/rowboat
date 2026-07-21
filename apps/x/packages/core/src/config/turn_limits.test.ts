@@ -43,9 +43,9 @@ async function writeSettings(content: string): Promise<void> {
 }
 
 describe("loadTurnLimitsSettings", () => {
-  it("defaults to the built-in limit (20) when no file exists", async () => {
+  it("defaults to the built-in limit (50) when no file exists", async () => {
     const { loadTurnLimitsSettings } = await loadTurnLimits();
-    expect(loadTurnLimitsSettings()).toEqual({ maxModelCalls: 20 });
+    expect(loadTurnLimitsSettings()).toEqual({ maxModelCalls: 50 });
   });
 
   it("reads persisted settings", async () => {
@@ -61,7 +61,7 @@ describe("loadTurnLimitsSettings", () => {
     await writeSettings(JSON.stringify({ chatMaxModelCalls: 5 }));
     const { loadTurnLimitsSettings } = await loadTurnLimits();
     expect(loadTurnLimitsSettings()).toEqual({
-      maxModelCalls: 20,
+      maxModelCalls: 50,
       chatMaxModelCalls: 5,
     });
   });
@@ -69,13 +69,13 @@ describe("loadTurnLimitsSettings", () => {
   it("falls back to defaults on a corrupt file", async () => {
     await writeSettings("{not json");
     const { loadTurnLimitsSettings } = await loadTurnLimits();
-    expect(loadTurnLimitsSettings()).toEqual({ maxModelCalls: 20 });
+    expect(loadTurnLimitsSettings()).toEqual({ maxModelCalls: 50 });
   });
 
   it("falls back to defaults on out-of-range values", async () => {
     await writeSettings(JSON.stringify({ maxModelCalls: 5000 }));
     const { loadTurnLimitsSettings } = await loadTurnLimits();
-    expect(loadTurnLimitsSettings()).toEqual({ maxModelCalls: 20 });
+    expect(loadTurnLimitsSettings()).toEqual({ maxModelCalls: 50 });
   });
 });
 
@@ -118,9 +118,9 @@ describe("resolveMaxModelCalls", () => {
     expect(resolveMaxModelCalls({ humanAvailable: true })).toBe(60);
   });
 
-  it("resolves 20 everywhere with no settings file", async () => {
+  it("resolves 50 everywhere with no settings file", async () => {
     const { resolveMaxModelCalls } = await loadTurnLimits();
-    expect(resolveMaxModelCalls({ humanAvailable: true })).toBe(20);
-    expect(resolveMaxModelCalls({ humanAvailable: false })).toBe(20);
+    expect(resolveMaxModelCalls({ humanAvailable: true })).toBe(50);
+    expect(resolveMaxModelCalls({ humanAvailable: false })).toBe(50);
   });
 });

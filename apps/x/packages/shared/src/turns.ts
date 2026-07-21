@@ -16,7 +16,7 @@ import { ReasoningEffort } from "./models.js";
 
 export type JsonValue = z.infer<ReturnType<typeof z.json>>;
 
-export const DEFAULT_MAX_MODEL_CALLS = 20;
+export const DEFAULT_MAX_MODEL_CALLS = 50;
 export const MODEL_CALL_LIMIT_ERROR_CODE = "model-call-limit";
 
 // ---------------------------------------------------------------------------
@@ -233,26 +233,7 @@ export const ModelRequest = z.object({
     contextRef: TurnContextRef.optional(),
     messages: z.array(ModelRequestMessageRef),
     parameters: z.record(z.string(), z.json()),
-    // Final budgeted call of an interactive turn: the composer strips tools
-    // and appends wrapUpNotice() so the model ends with a real answer
-    // instead of the turn failing with model-call-limit (issue #768).
-    wrapUp: z.literal(true).optional(),
 });
-
-// The message appended to a wrap-up call's request. A pure function of the
-// turn's durable config, so replaying the log reproduces the wire bytes.
-export function wrapUpNotice(
-    maxModelCalls: number,
-): z.infer<typeof ConversationMessage> {
-    return {
-        role: "user",
-        content:
-            `[system notice] You are on the final model call this turn's budget allows (model-call limit: ${maxModelCalls}); tools are no longer available. ` +
-            "Now answer the user's request as fully and substantively as you can from the tool results and information already gathered above — " +
-            "give them the actual content, not a status report. Then briefly note which parts you didn't get to, " +
-            "and mention the turn was cut short by the model-call limit, which they can raise in Settings → Advanced.",
-    };
-}
 
 export const ModelCallRequested = z.object({
     type: z.literal("model_call_requested"),

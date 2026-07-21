@@ -116,7 +116,7 @@ describe("runSpawnedAgent", () => {
                 model: { provider: "parent-p", model: "parent-m" },
             },
         });
-        expect(started[0].maxModelCalls).toBe(20);
+        expect(started[0].maxModelCalls).toBe(50);
         expect(started[0].signal).toBe(signal);
         expect(progress).toEqual([
             { childTurnId: "child-1", agentName: "researcher", task: "find things" },
@@ -194,11 +194,11 @@ describe("runSpawnedAgent", () => {
     it("clamps a model-call budget above the global limit to it", async () => {
         const { services, started } = fakeServices({});
         const result = await runSpawnedAgent(
-            { task: "t", instructions: "x", max_model_calls: 50 },
+            { task: "t", instructions: "x", max_model_calls: 80 },
             { parentTurnId: "parent-1", signal, services },
         );
         expect(result.isError).toBe(false);
-        expect(started[0].maxModelCalls).toBe(20);
+        expect(started[0].maxModelCalls).toBe(50);
     });
 
     it("uses the configured global limit as the sub-agent default and cap", async () => {
