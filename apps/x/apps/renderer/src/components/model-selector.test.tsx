@@ -162,6 +162,34 @@ describe('ModelSelector', () => {
     expect(onChange).toHaveBeenCalledWith({ provider: 'openai', model: 'my-local-model' })
   })
 
+  it('liveCredentials live-fetches a provider that is not saved anywhere', async () => {
+    serveTwoProviders()
+    // openrouter is absent from models.json AND the static catalog — only
+    // the form's typed credentials can produce its list.
+    handlers['models:listForProvider'] = async () => ({
+      success: true,
+      models: ['meituan/longcat-2.0', 'qwen/qwen-3'],
+    })
+    const onChange = vi.fn()
+    render(
+      <ModelSelector
+        variant="field"
+        value={null}
+        onChange={onChange}
+        providerFilter="openrouter"
+        liveCredentials={{ flavor: 'openrouter', apiKey: 'sk-or-typed', baseURL: '' }}
+        allowCustom
+        defaultOption={{ label: 'Auto (recommended)' }}
+      />,
+    )
+    await openMenu()
+    // 600ms debounce in useProviderModels before the fetch fires.
+    const row = await screen.findByText('meituan/longcat-2.0', undefined, { timeout: 3000 })
+    expect(screen.queryByText('gpt-5.4')).toBeNull()
+    fireEvent.click(row)
+    expect(onChange).toHaveBeenCalledWith({ provider: 'openrouter', model: 'meituan/longcat-2.0' })
+  })
+
   it('staticOptions renders only the supplied rows and round-trips ids and null', async () => {
     serveTwoProviders()
     const onChange = vi.fn()

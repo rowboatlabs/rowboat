@@ -544,9 +544,6 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
   // auto-enable) has ever set it, so we only auto-enable once.
   const [deferBackgroundTasks, setDeferBackgroundTasks] = useState(false)
   const [deferExplicit, setDeferExplicit] = useState(false)
-  // openai-compatible only: free-text model that takes precedence over the
-  // fetched list (many such servers don't implement /models at all).
-  const [customModel, setCustomModel] = useState("")
 
   const activeConfig = providerConfigs[provider]
   // Live per-key model list for the active provider — drives the primary
@@ -567,23 +564,21 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
   const isMoreProvider = moreProviders.some(p => p.id === provider)
 
   const primaryModel = activeConfig.models[0] || ""
-  // Settings no longer exposes model selection — the model is resolved
-  // silently when the user connects (the config schema still requires one;
-  // background agents/channels read it). Precedence: a typed escape-hatch
-  // value (openai-compatible Model field, offline manual input) > the saved
-  // model when the fetched list still has it > the flavor's preferred
-  // default > the first fetched id.
-  const resolvedModel = (() => {
-    if (provider === "openai-compatible" && customModel.trim()) return customModel.trim()
-    const saved = primaryModel.trim()
-    if (providerModels.status === "loaded" && providerModels.models.length > 0) {
-      if (saved && providerModels.models.includes(saved)) return saved
-      const preferred = preferredDefaults[provider]
-      if (preferred && providerModels.models.includes(preferred)) return preferred
-      return providerModels.models[0]
-    }
-    return saved
+  // What "Auto" resolves to right now: the flavor's preferred default when
+  // the fetched list carries it, else the first fetched id. Empty while the
+  // live list hasn't settled — the sentinel label and handleTestAndSave's
+  // on-demand fetch cover that window.
+  const autoResolvePreview = (() => {
+    if (providerModels.status !== "loaded" || providerModels.models.length === 0) return ""
+    const preferred = preferredDefaults[provider]
+    return preferred && providerModels.models.includes(preferred) ? preferred : providerModels.models[0]
   })()
+  // The model chats run on. An explicit pick (the Assistant model field,
+  // including its typed-id escape hatch and the offline manual inputs)
+  // lives in models[0] and always wins — connecting must never silently
+  // swap a model the user chose; models:test reports honestly if it's bad.
+  // Empty ("Auto") keeps the silent resolve this card has always done.
+  const resolvedModel = primaryModel.trim() || autoResolvePreview
   // Gate Connect on credentials only, NOT on resolvedModel — that derives
   // from the live fetch, which hasn't settled the instant a key is pasted, so
   // gating on it made the first click a no-op (the model is resolved, fetching
@@ -703,16 +698,6 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
     }
   }, [])
 
-  // A saved openai-compatible model that the server's list doesn't confirm
-  // (not listed, or /models unreachable) belongs in the visible Model field,
-  // where it stays editable and wins over the silent pick.
-  useEffect(() => {
-    if (provider !== "openai-compatible" || customModel || !primaryModel) return
-    if (providerModels.status === "error" || (providerModels.status === "loaded" && !providerModels.models.includes(primaryModel))) {
-      setCustomModel(primaryModel)
-    }
-  }, [provider, providerModels.status, providerModels.models, primaryModel, customModel])
-
   const handleTestAndSave = useCallback(async () => {
     if (!canTest) return
     setTestState({ status: "testing" })
@@ -721,8 +706,8 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
       // set. But a Connect click right after pasting a key can beat the
       // debounced key-change fetch — so when nothing is resolved yet, fetch
       // the list on demand (one fetch, then save) instead of forcing a second
-      // click. Same silent precedence as resolvedModel, minus the customModel
-      // branch (that path only runs when resolvedModel is already empty).
+      // click. Same silent precedence as the Auto path (this branch can only
+      // run when no explicit model is set — an explicit pick IS resolved).
       let model = resolvedModel
       if (!model) {
         const listRes = await window.ipc.invoke("models:listForProvider", {
@@ -1185,21 +1170,27 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
         )}
       </div>
 
-      {/* openai-compatible escape hatch: its /models often doesn't exist, and
-          a typed model always wins over the silent pick */}
-      {provider === "openai-compatible" && (
-        <div className="space-y-2">
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Model</span>
-          <Input
-            value={customModel}
-            onChange={(e) => {
-              setCustomModel(e.target.value)
-              setPrimaryModel(provider, e.target.value)
-            }}
-            placeholder="Model ID (leave empty to auto-select)"
-          />
-        </div>
-      )}
+      {/* The model chats run on — the anchor the category fields' "Same as
+          assistant" points at. Auto keeps the silent resolve; the picker
+          live-fetches with the card's CURRENT inputs (typed, maybe unsaved),
+          and allowCustom subsumes the old openai-compatible free-text field
+          (its /models often doesn't exist — type the id in the search).
+          Explicit picks land in models[0] via setPrimaryModel (preserving
+          models[1..]); the offline manual inputs above write the same slot. */}
+      <div className="space-y-2">
+        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          {rowboatConnected ? "Model" : "Assistant model"}
+        </span>
+        <ModelSelector
+          variant="field"
+          providerFilter={provider}
+          liveCredentials={{ flavor: provider, apiKey: activeConfig.apiKey, baseURL: activeConfig.baseURL }}
+          allowCustom
+          defaultOption={{ label: autoResolvePreview ? `Auto (currently ${autoResolvePreview})` : "Auto (recommended)" }}
+          value={primaryModel.trim() ? { provider, model: primaryModel.trim() } : null}
+          onChange={(ref) => setPrimaryModel(provider, ref ? ref.model : "")}
+        />
+      </div>
 
       {/* Per-function model overrides. Persisted as bare model-id strings
           inside providers[flavor] ('' = "Same as assistant"), so the
