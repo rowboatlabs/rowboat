@@ -208,7 +208,9 @@ function wireGlobalEvents(): void {
   window.addEventListener('models-config-changed', refreshModels)
   wiredCleanups = [
     () => window.removeEventListener('models-config-changed', refreshModels),
-    // Rowboat sign-in swaps the whole hybrid list.
+    // Rowboat sign-in/out swaps the whole hybrid list. Despite the name,
+    // main broadcasts this channel on every OAuth state change — including
+    // disconnect (disconnectProvider emits { provider, success: false }).
     window.ipc.on('oauth:didConnect', refreshModels),
     // ChatGPT subscription models appear/disappear with the ChatGPT session.
     window.ipc.on('chatgpt:statusChanged', refreshModels),
