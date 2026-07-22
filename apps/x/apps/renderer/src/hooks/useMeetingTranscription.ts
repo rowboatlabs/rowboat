@@ -54,6 +54,13 @@ const MUTE_POLLS_TO_STOP = 3;
 // event fires normally (handled by the listener in start()), so the poll below is
 // gated to macOS.
 const isMac = typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac');
+// On Linux getDisplayMedia loopback works too (Chromium captures the default
+// sink's monitor through the PulseAudio layer), but the request needs special
+// handling in main.ts — see setDisplayMediaRequestHandler there. Note that
+// capturing the monitor *source* directly via enumerateDevices/getUserMedia
+// is NOT an option: Chromium filters monitor sources out of device
+// enumeration on Linux (audio_manager_pulse.cc), so they never appear.
+const isLinux = typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('linux');
 
 // ---------------------------------------------------------------------------
 // Headphone detection
@@ -286,7 +293,10 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
                     autoGainControl: true,
                 },
             }),
-            // 4. Get system audio via getDisplayMedia (loopback)
+            // 4. Get system audio via getDisplayMedia (loopback). Works on all
+            // platforms; on Linux main.ts answers this request with the
+            // requesting frame as the throwaway video source (avoids the
+            // flaky Wayland screen-capture portal) + Pulse loopback audio.
             (async () => {
                 const stream = await navigator.mediaDevices.getDisplayMedia({ audio: true, video: true });
                 stream.getVideoTracks().forEach(t => t.stop());
@@ -307,7 +317,15 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
         if (failed) {
             if (wsResult.status === 'rejected') console.error('[meeting] WebSocket setup failed:', wsResult.reason);
             if (micResult.status === 'rejected') console.error('[meeting] Microphone access denied:', micResult.reason);
-            if (systemResult.status === 'rejected') console.error('[meeting] System audio access denied:', systemResult.reason);
+            if (systemResult.status === 'rejected') {
+                console.error('[meeting] System audio access denied:', systemResult.reason);
+                if (isLinux) {
+                    toast.error('Could not capture system audio', {
+                        description: 'Meeting audio capture needs PipeWire or PulseAudio. Make sure one of them is running, then try again.',
+                        duration: 10000,
+                    });
+                }
+            }
             // Clean up any resources that did succeed
             if (wsResult.status === 'fulfilled') { wsResult.value.close(); }
             if (micResult.status === 'fulfilled') { micResult.value.getTracks().forEach(t => t.stop()); }
@@ -375,6 +393,10 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
         // "Stop sharing"), the track fires "ended" — treat that as the meeting
         // ending and stop. Our own cleanup() calls track.stop(), which does NOT
         // fire "ended", so this won't double-trigger on a manual stop.
+        // On Linux the loopback stream mirrors the default output device, not
+        // the meeting app, so it stays live after the meeting closes and
+        // "ended" never fires — auto-stop on Linux comes from the silence
+        // detector armed below.
         systemStream.getAudioTracks().forEach(track => {
             track.addEventListener('ended', () => {
                 console.log('[meeting] system-audio track ended (shared source closed) — auto-stopping');
