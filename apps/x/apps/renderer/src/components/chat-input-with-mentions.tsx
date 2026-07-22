@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   ArrowUp,
@@ -17,7 +17,6 @@ import {
   Globe,
   ImagePlus,
   LoaderIcon,
-  Brain,
   Lock,
   Mic,
   MoreHorizontal,
@@ -38,15 +37,13 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { useProviderModels, type ProviderModelsFlavor } from '@/hooks/use-provider-models'
+import { ModelSelector, type ModelRef, type ReasoningEffortLevel } from '@/components/model-selector'
+import { useModels } from '@/hooks/use-models'
 import {
   type AttachmentIconKind,
   getAttachmentDisplayName,
@@ -85,130 +82,17 @@ const RECENT_WORK_DIRS_CONFIG_PATH = 'config/recent-work-dirs.json'
 const RECENT_WORK_DIRS_CHANGED_EVENT = 'rowboat-chat-recent-work-dirs-changed'
 
 
-const providerDisplayNames: Record<string, string> = {
-  openai: 'OpenAI',
-  anthropic: 'Anthropic',
-  google: 'Gemini',
-  ollama: 'Ollama',
-  openrouter: 'OpenRouter',
-  aigateway: 'AI Gateway',
-  'openai-compatible': 'OpenAI-Compatible',
-  rowboat: 'Rowboat',
-  // Matches what other subscription clients call this provider; the auth
-  // itself is "Sign in with ChatGPT" (Plus/Pro subscription).
-  codex: 'OpenAI Codex',
-}
-
-type ProviderName = "openai" | "anthropic" | "google" | "openrouter" | "aigateway" | "ollama" | "openai-compatible" | "rowboat" | "codex"
-
-interface ConfiguredModel {
-  provider: ProviderName
-  model: string
-}
-
-// One picker group per connected provider. Catalog groups carry a resolved
-// model list (models:list / saved config); live groups carry credentials and
-// fetch their list from the provider inside the dropdown via
-// useProviderModels (models:listForProvider).
-const LIVE_PICKER_FLAVORS = new Set<string>(['openrouter', 'aigateway', 'ollama', 'openai-compatible'])
-// Catalog-preferred flavors that degrade to a live fetch when models:list has
-// no catalog for them (signed-in mode returns only the rowboat provider, or
-// the models.dev cache is empty).
-const LIVE_FALLBACK_FLAVORS = new Set<string>(['openai', 'anthropic', 'google'])
-
-type ModelPickerGroup =
-  | { kind: 'catalog'; flavor: string; models: string[] }
-  | { kind: 'live'; flavor: ProviderModelsFlavor; apiKey: string; baseURL: string; savedModel: string }
-
-// Rendered inside the dropdown's radio group: each live provider fetches its
-// own list, so groups load and fail independently. Pinned models (the saved
-// default / app default) render first — the model that actually runs is
-// always pickable even while the fetch is pending or failed. Live-fetched
-// ids carry no reasoning metadata, so the effort control stays hidden for
-// them (reasoningByKey lookup misses default to off).
-//
-// The group owns its header so it can hide itself when the search filter
-// matches none of its rows. Loading/error rows are status, not models — they
-// render (with the header) regardless of the filter, and don't count toward
-// the parent's "No models match" check (which is what gets reported up).
-function LiveProviderGroupItems({ group, label, pinnedModels, filter, onModelRowsChange }: {
-  group: Extract<ModelPickerGroup, { kind: 'live' }>
-  label: string
-  pinnedModels: string[]
-  filter: string
-  onModelRowsChange: (flavor: string, hasModelRows: boolean) => void
-}) {
-  const { status, models, error, refetch } = useProviderModels({
-    flavor: group.flavor,
-    apiKey: group.apiKey,
-    baseURL: group.baseURL,
-  })
-  const items = [...pinnedModels, ...models.filter((m) => !pinnedModels.includes(m))]
-  const visible = filter ? items.filter((m) => m.toLowerCase().includes(filter)) : items
-  const showStatus = status === 'loading' || status === 'error'
-  const hasModelRows = visible.length > 0
-  useEffect(() => {
-    onModelRowsChange(group.flavor, hasModelRows)
-  }, [group.flavor, hasModelRows, onModelRowsChange])
-  if (!hasModelRows && !showStatus) return null
-  return (
-    <>
-      <DropdownMenuLabel className="text-xs text-muted-foreground">{label}</DropdownMenuLabel>
-      {visible.map((m) => {
-        const key = `${group.flavor}/${m}`
-        return (
-          <DropdownMenuRadioItem key={key} value={key}>
-            <span className="truncate">{m}</span>
-          </DropdownMenuRadioItem>
-        )
-      })}
-      {status === 'loading' && (
-        <div className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground">
-          <LoaderIcon className="h-3 w-3 animate-spin" />
-          Loading models…
-        </div>
-      )}
-      {status === 'error' && (
-        <DropdownMenuItem
-          onSelect={(e) => {
-            e.preventDefault()
-            refetch()
-          }}
-          className="text-xs"
-        >
-          <span className="truncate text-destructive">{error || 'Failed to load models'}</span>
-          <span className="ml-auto shrink-0 text-muted-foreground">Retry</span>
-        </DropdownMenuItem>
-      )}
-    </>
-  )
-}
-
 type RecentWorkDir = {
   path: string
   lastUsedAt: number
 }
 
-export interface SelectedModel {
-  provider: string
-  model: string
-}
-
-export type ReasoningEffortLevel = 'low' | 'medium' | 'high'
-
-// '' = auto (provider default). Ordered as shown in the picker.
-const REASONING_EFFORT_OPTIONS: Array<{ value: '' | ReasoningEffortLevel; label: string; hint: string }> = [
-  { value: '', label: 'Auto', hint: 'Provider default' },
-  { value: 'low', label: 'Fast', hint: 'Minimal thinking' },
-  { value: 'medium', label: 'Balanced', hint: 'Moderate thinking' },
-  { value: 'high', label: 'Thorough', hint: 'Deep thinking, costs more' },
-]
+// The picker itself lives in ModelSelector; these aliases keep the composer's
+// public prop surface stable for existing consumers (chat-sidebar, App).
+export type SelectedModel = ModelRef
+export type { ReasoningEffortLevel } from '@/components/model-selector'
 
 export type PermissionMode = 'manual' | 'auto'
-
-function getSelectedModelDisplayName(model: string) {
-  return model.split('/').pop() || model
-}
 
 function getAttachmentIcon(kind: AttachmentIconKind) {
   switch (kind) {
@@ -401,21 +285,15 @@ function ChatInputInner({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const canSubmit = (Boolean(message.trim()) || attachments.length > 0) && !isProcessing
 
-  const [modelGroups, setModelGroups] = useState<ModelPickerGroup[]>([])
-  const [activeModelKey, setActiveModelKey] = useState('')
-  // The effective runtime default (what a run actually uses when the user
-  // hasn't picked a model) — shown in the picker instead of guessing from
-  // list order, which can disagree with the real default.
-  const [defaultModel, setDefaultModel] = useState<ConfiguredModel | null>(null)
-  const loadModelConfigEpoch = useRef(0)
+  // Shared model-catalog store (one fetch app-wide); sign-in state also
+  // gates search availability below.
+  const { isRowboatConnected, refresh: refreshModels } = useModels()
+  const [selectedModel, setSelectedModel] = useState<SelectedModel | null>(null)
   const [lockedModel, setLockedModel] = useState<SelectedModel | null>(null)
-  // '' = auto. Per-model reasoning capability ("provider/model" → flag) from
-  // models:list; the effort control renders only for known-reasoning models.
+  // '' = auto. Effort is per-turn config: reported up, never persisted.
   const [reasoningEffort, setReasoningEffort] = useState<'' | ReasoningEffortLevel>('')
-  const [reasoningByKey, setReasoningByKey] = useState<Record<string, boolean>>({})
   const [searchEnabled, setSearchEnabled] = useState(false)
   const [searchAvailable, setSearchAvailable] = useState(false)
-  const [isRowboatConnected, setIsRowboatConnected] = useState(false)
   const [codingAgent, setCodingAgent] = useState<'claude' | 'codex'>('claude')
   const [codeModeEnabled, setCodeModeEnabled] = useState(false)
   const [codeModeFeatureEnabled, setCodeModeFeatureEnabled] = useState(false)
@@ -455,7 +333,7 @@ function ChatInputInner({
   // no-dep effect below still re-collapses if any toggle happens to widen the row.
   useLayoutEffect(() => {
     setCollapseLevel(0)
-  }, [workDir, searchAvailable, codeModeFeatureEnabled, lockedModel, activeModelKey])
+  }, [workDir, searchAvailable, codeModeFeatureEnabled, lockedModel, selectedModel])
 
   // After each render, if the left group still overflows, collapse one more step.
   // Runs before paint, so the intermediate (overflowing) state is never visible.
@@ -487,155 +365,17 @@ function ChatInputInner({
     }
   }, [])
 
-  // Check Rowboat sign-in state
+  // The store loads on mount and re-fetches on config/sign-in events by
+  // itself; re-fetch on tab activation too, preserving the old per-mount
+  // reload that picked up external edits to config/models.json.
+  const didLoadModelsRef = useRef(false)
   useEffect(() => {
-    window.ipc.invoke('oauth:getState', null).then((result) => {
-      setIsRowboatConnected(result.config?.rowboat?.connected ?? false)
-    }).catch(() => setIsRowboatConnected(false))
-  }, [isActive])
-
-  // Update sign-in state when OAuth events fire
-  useEffect(() => {
-    const cleanup = window.ipc.on('oauth:didConnect', () => {
-      window.ipc.invoke('oauth:getState', null).then((result) => {
-        setIsRowboatConnected(result.config?.rowboat?.connected ?? false)
-      }).catch(() => setIsRowboatConnected(false))
-    })
-    return cleanup
-  }, [])
-
-  // Load the list of models the user can choose from. Hybrid mode: signed-in
-  // users get the gateway list AND every BYOK provider configured in
-  // models.json (selecting a BYOK model routes that message through the
-  // user's own key / local server). Signed-out users get BYOK only.
-  const loadModelConfig = useCallback(async () => {
-    // Concurrent runs race (mount fires one before the sign-in state resolves,
-    // which fires another) — only the newest run may write state, else a slow
-    // stale run can clobber the fresh list with an empty one.
-    const epoch = ++loadModelConfigEpoch.current
-    try {
-      const def = await window.ipc.invoke('llm:getDefaultModel', null)
-      if (loadModelConfigEpoch.current !== epoch) return
-      setDefaultModel({ provider: def.provider as ProviderName, model: def.model })
-    } catch {
-      if (loadModelConfigEpoch.current === epoch) setDefaultModel(null)
+    if (!didLoadModelsRef.current) {
+      didLoadModelsRef.current = true
+      return
     }
-    try {
-      const groups: ModelPickerGroup[] = []
-
-      // Full catalog per provider (gateway + models.dev cloud providers).
-      const catalog: Record<string, string[]> = {}
-      const reasoningFlags: Record<string, boolean> = {}
-      try {
-        const listResult = await window.ipc.invoke('models:list', null)
-        for (const p of listResult.providers || []) {
-          catalog[p.id] = (p.models || []).map((m: { id: string }) => m.id)
-          for (const m of p.models || []) {
-            if (typeof m.reasoning === 'boolean') {
-              reasoningFlags[`${p.id}/${m.id}`] = m.reasoning
-            }
-          }
-        }
-      } catch { /* offline / no catalog — groups fall back to saved config below */ }
-      if (loadModelConfigEpoch.current === epoch) setReasoningByKey(reasoningFlags)
-
-      if (isRowboatConnected && (catalog['rowboat'] || []).length > 0) {
-        groups.push({ kind: 'catalog', flavor: 'rowboat', models: catalog['rowboat'] })
-      }
-
-      // ChatGPT subscription (codex): models:list only carries this catalog
-      // while signed in with ChatGPT, so presence is the gate.
-      if ((catalog['codex'] || []).length > 0) {
-        groups.push({ kind: 'catalog', flavor: 'codex', models: catalog['codex'] })
-      }
-
-      try {
-        const result = await window.ipc.invoke('workspace:readFile', { path: 'config/models.json' })
-        const parsed = JSON.parse(result.data)
-
-        // List the default provider's group first.
-        const defaultFlavor = typeof parsed?.provider?.flavor === 'string' ? parsed.provider.flavor : ''
-        const flavors = Object.keys(parsed?.providers || {})
-          .sort((a, b) => (a === defaultFlavor ? -1 : b === defaultFlavor ? 1 : 0))
-
-        for (const flavor of flavors) {
-          const e = (parsed.providers[flavor] || {}) as Record<string, unknown>
-          const apiKey = typeof e.apiKey === 'string' ? e.apiKey.trim() : ''
-          const baseURL = typeof e.baseURL === 'string' ? e.baseURL.trim() : ''
-          if (!apiKey && !baseURL) continue // provider not configured
-          const savedModel = typeof e.model === 'string' ? e.model : ''
-
-          // Live flavors fetch their list from the provider inside the
-          // dropdown, with the credentials saved in config. Catalog flavors
-          // degrade to the same live fetch when models:list carried no
-          // catalog for them (signed in, or empty models.dev cache).
-          const catalogModels = catalog[flavor] || []
-          if (LIVE_PICKER_FLAVORS.has(flavor) || (catalogModels.length === 0 && LIVE_FALLBACK_FLAVORS.has(flavor))) {
-            groups.push({ kind: 'live', flavor: flavor as ProviderModelsFlavor, apiKey, baseURL, savedModel })
-            continue
-          }
-
-          // Catalog group: the saved default model leads, then the catalog.
-          // Saved models[] survives as the fallback for unknown flavors the
-          // live fetch doesn't support.
-          const models: string[] = []
-          const push = (model: string) => {
-            if (model && !models.includes(model)) models.push(model)
-          }
-          push(savedModel)
-          if (catalogModels.length > 0) {
-            for (const m of catalogModels) push(m)
-          } else {
-            const saved = Array.isArray(e.models) ? e.models as string[] : []
-            for (const m of saved) push(m)
-          }
-          groups.push({ kind: 'catalog', flavor, models })
-        }
-
-        // The user's explicit default selection leads the picker: its group
-        // first and, within a catalog group, the model itself first. (Live
-        // groups pin the default at the top themselves.)
-        const sel = parsed?.defaultSelection
-        if (sel && typeof sel.provider === 'string' && typeof sel.model === 'string') {
-          const index = groups.findIndex((g) => g.flavor === sel.provider)
-          if (index >= 0) {
-            const [group] = groups.splice(index, 1)
-            groups.unshift(group)
-            if (group.kind === 'catalog') {
-              const mi = group.models.indexOf(sel.model)
-              if (mi > 0) {
-                group.models.splice(mi, 1)
-                group.models.unshift(sel.model)
-              }
-            }
-          }
-        }
-      } catch { /* no BYOK config yet */ }
-
-      if (loadModelConfigEpoch.current !== epoch) return
-      setModelGroups(groups)
-    } catch (err) {
-      // No config yet — but surface unexpected failures for diagnosis.
-      console.error('[chat-input] failed to load model list', err)
-    }
-  }, [isRowboatConnected])
-
-  useEffect(() => {
-    loadModelConfig()
-  }, [isActive, loadModelConfig])
-
-  // ChatGPT subscription models appear/disappear with the ChatGPT session.
-  useEffect(() => {
-    const cleanup = window.ipc.on('chatgpt:statusChanged', () => { loadModelConfig() })
-    return cleanup
-  }, [loadModelConfig])
-
-  // Reload when model config changes (e.g. from settings dialog)
-  useEffect(() => {
-    const handler = () => { loadModelConfig() }
-    window.addEventListener('models-config-changed', handler)
-    return () => window.removeEventListener('models-config-changed', handler)
-  }, [loadModelConfig])
+    refreshModels()
+  }, [isActive, refreshModels])
 
   // Load the global code-mode feature flag (from settings) and stay in sync.
   useEffect(() => {
@@ -809,82 +549,30 @@ function ChatInputInner({
     checkSearch()
   }, [isActive, isRowboatConnected])
 
-  // Search filter for the model dropdown. Reset each time the menu opens;
-  // matching is a case-insensitive substring test on the model id. Live
-  // groups filter themselves and report whether they still have rows, so the
-  // parent can render the global "No models match" row.
-  const [modelFilter, setModelFilter] = useState('')
-  const modelFilterInputRef = useRef<HTMLInputElement>(null)
-  const [liveGroupHasRows, setLiveGroupHasRows] = useState<Record<string, boolean>>({})
-  const modelFilterValue = modelFilter.trim().toLowerCase()
-  const handleLiveGroupRows = useCallback((flavor: string, hasRows: boolean) => {
-    setLiveGroupHasRows((prev) => (prev[flavor] === hasRows ? prev : { ...prev, [flavor]: hasRows }))
-  }, [])
-
-  // The effective default always renders even when no group carries it (the
-  // gateway list failed, or its provider was removed from config) — the
-  // picker must never be missing the model that actually runs. Live groups
-  // pin the default themselves, so a flavor match is enough there.
-  const standaloneDefault = useMemo<ConfiguredModel | null>(() => {
-    if (!defaultModel) return null
-    const covered = modelGroups.some((g) =>
-      g.flavor === defaultModel.provider &&
-      (g.kind === 'live' || g.models.includes(defaultModel.model)))
-    return covered ? null : defaultModel
-  }, [modelGroups, defaultModel])
-
-  const standaloneVisible = standaloneDefault !== null &&
-    (!modelFilterValue || standaloneDefault.model.toLowerCase().includes(modelFilterValue))
-  // Nothing matches anywhere → "No models match". Live groups that haven't
-  // reported yet (first render after opening) count as having rows so the
-  // empty row never flashes.
-  const anyModelRowVisible = standaloneVisible || modelGroups.some((g) =>
-    g.kind === 'catalog'
-      ? g.models.some((m) => m.toLowerCase().includes(modelFilterValue))
-      : liveGroupHasRows[g.flavor] !== false)
-
   // Selecting a model affects the *next* run created from this tab (frozen
   // once a run exists) AND persists as the app default so background agents
   // and new tabs follow the last pick. The models-config-changed dispatch
-  // re-runs loadModelConfig here too — that re-read lands on the same
-  // selection (activeModelKey is untouched, the live lists come from the
-  // hook's cache), so it's visually a no-op.
-  const handleModelChange = useCallback((key: string) => {
+  // re-fetches the shared store too — that re-read lands on the same
+  // selection (selectedModel is untouched, the live lists come from the
+  // useProviderModels cache), so it's visually a no-op.
+  const handleModelChange = useCallback((model: SelectedModel | null) => {
     if (lockedModel) return
-    const slash = key.indexOf('/')
-    if (slash <= 0 || slash === key.length - 1) return
-    const provider = key.slice(0, slash)
-    const model = key.slice(slash + 1)
-    setActiveModelKey(key)
-    onSelectedModelChange?.({ provider, model })
-    void window.ipc.invoke('models:updateConfig', { defaultSelection: { provider, model } })
+    // null = the sentinel row, which the composer never renders (no
+    // defaultOption) — guard for the widened onChange contract only.
+    if (!model) return
+    setSelectedModel(model)
+    onSelectedModelChange?.(model)
+    void window.ipc.invoke('models:updateConfig', { defaultSelection: { provider: model.provider, model: model.model } })
       .then(() => { window.dispatchEvent(new Event('models-config-changed')) })
       .catch(() => { toast.error('Failed to save default model') })
   }, [lockedModel, onSelectedModelChange])
 
-  // Reasoning effort applies to the model the next message will actually use:
-  // the run's frozen model once one exists, else the picker selection, else
-  // the app default. Only known-reasoning models show the control.
-  const effectiveModelKey = lockedModel
-    ? `${lockedModel.provider}/${lockedModel.model}`
-    : activeModelKey
-      || (defaultModel ? `${defaultModel.provider}/${defaultModel.model}` : '')
-  const reasoningAvailable = reasoningByKey[effectiveModelKey] === true
-
-  const handleReasoningEffortChange = useCallback((value: string) => {
-    const effort = value === 'low' || value === 'medium' || value === 'high' ? value : ''
+  // Effort is per-turn and unpersisted; ModelSelector reports '' when the
+  // effective model loses reasoning support so a stale effort never sticks.
+  const handleReasoningEffortChange = useCallback((effort: '' | ReasoningEffortLevel) => {
     setReasoningEffort(effort)
     onReasoningEffortChange?.(effort === '' ? null : effort)
   }, [onReasoningEffortChange])
-
-  // Switching to a model without reasoning support drops a stale selection —
-  // otherwise the next message would carry an effort the model rejects.
-  useEffect(() => {
-    if (!reasoningAvailable && reasoningEffort !== '') {
-      setReasoningEffort('')
-      onReasoningEffortChange?.(null)
-    }
-  }, [reasoningAvailable, reasoningEffort, onReasoningEffortChange])
 
   // Restore the tab draft when this input mounts.
   useEffect(() => {
@@ -1477,165 +1165,13 @@ function ChatInputInner({
           </DropdownMenu>
         )}
         <div className="flex-1" />
-        {reasoningAvailable && (
-          <DropdownMenu>
-            <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
-              <TooltipTrigger asChild>
-                <DropdownMenuTrigger asChild>
-                  <button
-                    type="button"
-                    className="flex h-7 shrink-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                  >
-                    <Brain className="h-3 w-3 shrink-0" />
-                    {reasoningEffort !== '' && (
-                      <span>{REASONING_EFFORT_OPTIONS.find((o) => o.value === reasoningEffort)?.label}</span>
-                    )}
-                    <ChevronDown className="h-3 w-3 shrink-0" />
-                  </button>
-                </DropdownMenuTrigger>
-              </TooltipTrigger>
-              <TooltipContent side="top">Reasoning effort — applies to your next message</TooltipContent>
-            </Tooltip>
-            <DropdownMenuContent align="end">
-              <DropdownMenuRadioGroup value={reasoningEffort} onValueChange={handleReasoningEffortChange}>
-                {REASONING_EFFORT_OPTIONS.map((option) => (
-                  <DropdownMenuRadioItem key={option.value || 'auto'} value={option.value}>
-                    <span>{option.label}</span>
-                    <span className="ml-2 text-xs text-muted-foreground">{option.hint}</span>
-                  </DropdownMenuRadioItem>
-                ))}
-              </DropdownMenuRadioGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-        {lockedModel ? (
-          <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
-            <TooltipTrigger asChild>
-              <span className="flex h-7 min-w-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground">
-                <span className="min-w-0 truncate">{getSelectedModelDisplayName(lockedModel.model)}</span>
-              </span>
-            </TooltipTrigger>
-            <TooltipContent side="top">
-              {providerDisplayNames[lockedModel.provider] || lockedModel.provider} — fixed for this chat
-            </TooltipContent>
-          </Tooltip>
-        ) : (
-          <DropdownMenu
-            onOpenChange={(open) => {
-              // The filter is per-opening, never sticky. Focus the search
-              // input once the content has mounted and Radix has run its own
-              // open-focus (DropdownMenu.Content has no onOpenAutoFocus).
-              if (open) {
-                setModelFilter('')
-                setLiveGroupHasRows({})
-                setTimeout(() => modelFilterInputRef.current?.focus(), 0)
-              }
-            }}
-          >
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                className="flex h-7 min-w-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              >
-                <span className="min-w-0 truncate">
-                  {getSelectedModelDisplayName(
-                    (activeModelKey ? activeModelKey.slice(activeModelKey.indexOf('/') + 1) : '')
-                      || defaultModel?.model
-                      || 'Model'
-                  )}
-                </span>
-                <ChevronDown className="h-3 w-3 shrink-0" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="p-0 overflow-hidden">
-              {modelGroups.length === 0 && !standaloneDefault ? (
-                <div className="p-1">
-                  <DropdownMenuItem disabled>Connect a provider in Settings</DropdownMenuItem>
-                </div>
-              ) : (
-                <>
-                  {/* Fixed search header — lives OUTSIDE the scroll area (the
-                      inner div below scrolls), so it's flush at the very top
-                      and always visible without any scroll. */}
-                  <div className="bg-popover p-1">
-                    <input
-                      ref={modelFilterInputRef}
-                      value={modelFilter}
-                      onChange={(e) => setModelFilter(e.target.value)}
-                      onKeyDown={(e) => {
-                        // Printable keys belong to the input, not the menu's
-                        // typeahead; arrows and Escape stay with the menu.
-                        if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Escape') {
-                          e.stopPropagation()
-                        }
-                      }}
-                      placeholder="Search models…"
-                      className="h-7 w-full rounded-sm border border-input bg-transparent px-2 text-xs outline-none placeholder:text-muted-foreground"
-                    />
-                  </div>
-                  <div className="max-h-80 overflow-y-auto p-1 pt-0">
-                  <DropdownMenuRadioGroup
-                    value={activeModelKey || (defaultModel ? `${defaultModel.provider}/${defaultModel.model}` : '')}
-                    onValueChange={handleModelChange}
-                  >
-                    {standaloneDefault && standaloneVisible && (
-                      <DropdownMenuRadioItem value={`${standaloneDefault.provider}/${standaloneDefault.model}`}>
-                        <span className="truncate">{standaloneDefault.model}</span>
-                        <span className="ml-2 text-xs text-muted-foreground">
-                          {providerDisplayNames[standaloneDefault.provider] || standaloneDefault.provider}
-                        </span>
-                      </DropdownMenuRadioItem>
-                    )}
-                    {modelGroups.map((g) => {
-                      const label = providerDisplayNames[g.flavor] || g.flavor
-                      if (g.kind === 'live') {
-                        // The app default leads its live group; the group's
-                        // own saved model follows (both stay pickable through
-                        // fetch loading/failure).
-                        const pinned: string[] = []
-                        if (defaultModel && defaultModel.provider === g.flavor) pinned.push(defaultModel.model)
-                        if (g.savedModel && !pinned.includes(g.savedModel)) pinned.push(g.savedModel)
-                        return (
-                          <LiveProviderGroupItems
-                            key={g.flavor}
-                            group={g}
-                            label={label}
-                            pinnedModels={pinned}
-                            filter={modelFilterValue}
-                            onModelRowsChange={handleLiveGroupRows}
-                          />
-                        )
-                      }
-                      const visibleModels = modelFilterValue
-                        ? g.models.filter((m) => m.toLowerCase().includes(modelFilterValue))
-                        : g.models
-                      if (visibleModels.length === 0) return null
-                      return (
-                        <Fragment key={g.flavor}>
-                          <DropdownMenuLabel className="text-xs text-muted-foreground">
-                            {label}
-                          </DropdownMenuLabel>
-                          {visibleModels.map((m) => {
-                            const key = `${g.flavor}/${m}`
-                            return (
-                              <DropdownMenuRadioItem key={key} value={key}>
-                                <span className="truncate">{m}</span>
-                              </DropdownMenuRadioItem>
-                            )
-                          })}
-                        </Fragment>
-                      )
-                    })}
-                    {modelFilterValue && !anyModelRowVisible && (
-                      <div className="px-2 py-1.5 text-xs text-muted-foreground">No models match</div>
-                    )}
-                  </DropdownMenuRadioGroup>
-                  </div>
-                </>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
+        <ModelSelector
+          value={selectedModel}
+          onChange={handleModelChange}
+          lockedModel={lockedModel}
+          effort={reasoningEffort}
+          onEffortChange={handleReasoningEffortChange}
+        />
         {onStartCall && (
           <div className="flex shrink-0 items-center">
             <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
