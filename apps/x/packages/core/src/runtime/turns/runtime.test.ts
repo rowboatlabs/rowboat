@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { z } from "zod";
 import {
     MODEL_CALL_LIMIT_ERROR_CODE,
@@ -40,6 +40,16 @@ import type {
     SyncRuntimeTool,
     ToolExecutionContext,
 } from "./tool-registry.js";
+
+// createTurn defaults an omitted maxModelCalls from the fs-backed settings
+// module; mock it so tests stay hermetic (no real WorkDir reads) and can
+// steer the configured global limit.
+const turnLimitsMock = vi.hoisted(() => ({ maxModelCalls: 50 }));
+vi.mock("../../config/turn_limits.js", () => ({
+    loadTurnLimitsSettings: async () => ({
+        maxModelCalls: turnLimitsMock.maxModelCalls,
+    }),
+}));
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -3058,5 +3068,47 @@ describe("turn event bus", () => {
         expect(durable.map((e) => e.event)).toEqual(log);
         expect(durable.map((e) => e.offset)).toEqual(log.map((_, i) => i + 1));
         expect(durable.every((e) => e.sessionId === null)).toBe(true);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Model-call limit resolution at createTurn (issue #768)
+// ---------------------------------------------------------------------------
+
+describe("model-call limit resolution", () => {
+    async function createdMaxModelCalls(
+        runtime: TurnRuntime,
+        repo: InMemoryTurnRepo,
+        config: { humanAvailable: boolean; maxModelCalls?: number },
+    ): Promise<number> {
+        const turnId = await newTurn(runtime, { config });
+        const [created] = await persisted(repo, turnId);
+        if (created.type !== "turn_created") throw new Error("no turn_created");
+        return created.config.maxModelCalls;
+    }
+
+    it("an omitted limit defaults to the configured global limit", async () => {
+        turnLimitsMock.maxModelCalls = 42;
+        try {
+            const { runtime, repo } = makeRuntime();
+            expect(
+                await createdMaxModelCalls(runtime, repo, { humanAvailable: true }),
+            ).toBe(42);
+            expect(
+                await createdMaxModelCalls(runtime, repo, { humanAvailable: false }),
+            ).toBe(42);
+        } finally {
+            turnLimitsMock.maxModelCalls = 50;
+        }
+    });
+
+    it("an explicit per-call limit wins over the setting", async () => {
+        const { runtime, repo } = makeRuntime();
+        expect(
+            await createdMaxModelCalls(runtime, repo, {
+                humanAvailable: true,
+                maxModelCalls: 3,
+            }),
+        ).toBe(3);
     });
 });

@@ -3021,6 +3021,13 @@ function App() {
       // via the agent resolver; keep them session-sticky where possible so the
       // provider prefix cache survives across turns.
       const reasoningEffort = reasoningEffortByTabRef.current.get(submitTabId)
+      // The runtime defaults omitted maxModelCalls to the global limit; the
+      // chat-specific override is the UI's job to pass explicitly. A failed
+      // settings read just falls back to the global limit.
+      const chatMaxModelCalls = await window.ipc
+        .invoke('turnLimits:getSettings', null)
+        .then((settings) => settings.chatMaxModelCalls)
+        .catch(() => undefined)
       const sendConfig = {
         agent: {
           agentId,
@@ -3039,6 +3046,7 @@ function App() {
         },
         autoPermission: (permissionMode ?? 'manual') === 'auto',
         ...(reasoningEffort ? { reasoningEffort } : {}),
+        ...(chatMaxModelCalls !== undefined ? { maxModelCalls: chatMaxModelCalls } : {}),
       }
       const userMessageContextFor = (middlePane: Awaited<ReturnType<typeof buildMiddlePaneContext>>) => ({
         currentDateTime: new Date().toISOString(),

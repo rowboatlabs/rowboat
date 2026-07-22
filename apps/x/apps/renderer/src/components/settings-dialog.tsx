@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Terminal, AlertTriangle, RefreshCw, PanelRight, Bell, Smartphone } from "lucide-react"
+import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, Minus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Terminal, AlertTriangle, RefreshCw, PanelRight, Bell, Smartphone } from "lucide-react"
 
 import {
   Dialog,
@@ -29,12 +29,13 @@ import { AccountSettings } from "@/components/settings/account-settings"
 import { ConnectedAccountsSettings } from "@/components/settings/connected-accounts-settings"
 import { MobileChannelsSettings } from "@/components/settings/mobile-channels-settings"
 import type { ApprovalPolicy } from "@x/shared/src/code-mode.js"
+import { DEFAULT_TURN_LIMITS_SETTINGS } from "@x/shared/src/turn-limits.js"
 import type { ipc as ipcShared } from "@x/shared"
 import { startProvisioning, useProvisioning, enabledOptimistic, type AgentStatus, type CodeModeAgentStatus } from "@/lib/code-mode-provisioning"
 import { useProviderModels } from "@/hooks/use-provider-models"
 import { useChatGPT } from "@/hooks/useChatGPT"
 
-type ConfigTab = "account" | "connections" | "mobile" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "notifications" | "note-tagging" | "help"
+type ConfigTab = "account" | "connections" | "mobile" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "notifications" | "note-tagging" | "advanced" | "help"
 
 interface TabConfig {
   id: ConfigTab
@@ -110,6 +111,12 @@ const tabs: TabConfig[] = [
     description: "Configure tags for notes and emails",
   },
   {
+    id: "advanced",
+    label: "Advanced",
+    icon: Wrench,
+    description: "Advanced runtime and cost controls",
+  },
+  {
     id: "help",
     label: "Help",
     icon: HelpCircle,
@@ -120,7 +127,7 @@ const tabs: TabConfig[] = [
 /** Sidebar nav grouping: identity first, capabilities, then app-level. */
 const NAV_SECTIONS: { label: string | null; ids: ConfigTab[] }[] = [
   { label: null, ids: ["account", "connections", "mobile"] },
-  { label: "Configure", ids: ["models", "mcp", "security", "code-mode", "note-tagging"] },
+  { label: "Configure", ids: ["models", "mcp", "security", "code-mode", "note-tagging", "advanced"] },
   { label: "App", ids: ["appearance", "notifications", "help"] },
 ]
 
@@ -2632,6 +2639,226 @@ function NotificationSettings({ dialogOpen }: { dialogOpen: boolean }) {
   )
 }
 
+// --- Advanced (runtime/cost controls) tab ---
+
+const MODEL_CALL_LIMIT_MIN = 1
+const MODEL_CALL_LIMIT_MAX = 500
+
+function parseLimit(value: string): number | null {
+  const n = Number(value.trim())
+  if (!Number.isInteger(n) || n < MODEL_CALL_LIMIT_MIN || n > MODEL_CALL_LIMIT_MAX) return null
+  return n
+}
+
+/**
+ * Compact segmented − / value / + stepper. The native number-input spinners
+ * are replaced entirely: typing is free-form digits, stepping clamps to the
+ * range and commits immediately. An empty value steps from `fallback` (the
+ * chat field starts from the global limit).
+ */
+function LimitStepper({
+  value,
+  fallback,
+  placeholder,
+  onInput,
+  onCommit,
+}: {
+  value: string
+  fallback: number
+  placeholder?: string
+  /** Every keystroke (no save). */
+  onInput: (next: string) => void
+  /** A settled change: step click or blur. */
+  onCommit: (next: string) => void
+}) {
+  const current = parseLimit(value)
+
+  const step = (delta: number) => {
+    // From an empty/invalid field, the first step lands on the fallback so
+    // the override starts where the effective value already is.
+    const next = current === null
+      ? Math.min(MODEL_CALL_LIMIT_MAX, Math.max(MODEL_CALL_LIMIT_MIN, fallback))
+      : Math.min(MODEL_CALL_LIMIT_MAX, Math.max(MODEL_CALL_LIMIT_MIN, current + delta))
+    onCommit(String(next))
+  }
+
+  return (
+    <div className="flex h-8 items-center overflow-hidden rounded-md border border-input bg-background shadow-xs shrink-0">
+      <button
+        type="button"
+        aria-label="Decrease limit"
+        onClick={() => step(-1)}
+        disabled={current !== null && current <= MODEL_CALL_LIMIT_MIN}
+        className="flex h-full w-7 items-center justify-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
+      >
+        <Minus className="size-3" />
+      </button>
+      <input
+        type="text"
+        inputMode="numeric"
+        value={value}
+        placeholder={placeholder}
+        onChange={(e) => onInput(e.target.value.replace(/[^0-9]/g, ""))}
+        onBlur={() => onCommit(value)}
+        className={cn(
+          "h-full border-x border-input bg-transparent text-center text-sm tabular-nums outline-none",
+          // The 11px placeholder sits on the 14px text baseline, so it reads
+          // slightly low; nudge it up for optical centering. Only applies
+          // while the placeholder is visible, so typed text is unaffected.
+          "placeholder:text-[11px] placeholder:text-muted-foreground/70 placeholder-shown:pb-1",
+          placeholder ? "w-24" : "w-16",
+        )}
+      />
+      <button
+        type="button"
+        aria-label="Increase limit"
+        onClick={() => step(1)}
+        disabled={current !== null && current >= MODEL_CALL_LIMIT_MAX}
+        className="flex h-full w-7 items-center justify-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
+      >
+        <Plus className="size-3" />
+      </button>
+    </div>
+  )
+}
+
+function AdvancedSettings({ dialogOpen }: { dialogOpen: boolean }) {
+  // Inputs are kept as strings so the user can clear a field while typing;
+  // validation happens on commit (step click or blur).
+  const [globalLimit, setGlobalLimit] = useState("")
+  const [chatLimit, setChatLimit] = useState("")
+  const [loaded, setLoaded] = useState(false)
+
+  useEffect(() => {
+    if (!dialogOpen) return
+    let cancelled = false
+    window.ipc.invoke("turnLimits:getSettings", null)
+      .then((settings) => {
+        if (cancelled) return
+        setGlobalLimit(String(settings.maxModelCalls))
+        // A chat override equal to the global limit is no override — show
+        // "Same as above" (legacy files; saves already collapse this).
+        setChatLimit(
+          settings.chatMaxModelCalls !== undefined && settings.chatMaxModelCalls !== settings.maxModelCalls
+            ? String(settings.chatMaxModelCalls)
+            : ""
+        )
+        setLoaded(true)
+      })
+      .catch(() => {
+        if (!cancelled) toast.error("Failed to load advanced settings")
+      })
+    return () => { cancelled = true }
+  }, [dialogOpen])
+
+  // Saves silently on success (a toast per stepper click would be noisy,
+  // matching the notification toggles); errors still surface.
+  const saveLimits = useCallback(async (globalStr: string, chatStr: string) => {
+    const global = parseLimit(globalStr)
+    if (global === null) {
+      toast.error(`Model-call limit must be a whole number between ${MODEL_CALL_LIMIT_MIN} and ${MODEL_CALL_LIMIT_MAX}`)
+      return
+    }
+    let chat: number | undefined
+    if (chatStr.trim() !== "") {
+      const parsed = parseLimit(chatStr)
+      if (parsed === null) {
+        toast.error(`Chat limit must be empty or a whole number between ${MODEL_CALL_LIMIT_MIN} and ${MODEL_CALL_LIMIT_MAX}`)
+        return
+      }
+      chat = parsed
+    }
+    // An override equal to the global limit is meaningless — persist it as
+    // "use the global limit" so the field reopens as "Same as above".
+    if (chat === global) chat = undefined
+    try {
+      await window.ipc.invoke("turnLimits:setSettings", {
+        maxModelCalls: global,
+        ...(chat === undefined ? {} : { chatMaxModelCalls: chat }),
+      })
+    } catch {
+      toast.error("Failed to save model-call limits")
+    }
+  }, [])
+
+  if (!loaded) {
+    return (
+      <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
+        <Loader2 className="size-4 animate-spin mr-2" />
+        Loading...
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="text-sm text-muted-foreground leading-relaxed">
+        Runtime cost and safety controls. A turn is stopped once it reaches its model-call limit;
+        changes apply to newly started turns only.
+      </div>
+
+      <div className="space-y-2">
+        <div className="rounded-md border px-3 py-3 flex items-center gap-4">
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-medium">Model-call limit</div>
+            <div className="text-xs text-muted-foreground mt-0.5">
+              Maximum model calls per turn. Applies to everything by default — background and
+              knowledge work, scheduled agents, and sub-agents (it also caps sub-agent budgets).
+            </div>
+          </div>
+          <LimitStepper
+            value={globalLimit}
+            fallback={DEFAULT_TURN_LIMITS_SETTINGS.maxModelCalls}
+            onInput={setGlobalLimit}
+            onCommit={(next) => {
+              setGlobalLimit(next)
+              void saveLimits(next, chatLimit)
+            }}
+          />
+        </div>
+
+        <div className="rounded-md border px-3 py-3 flex items-center gap-4">
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-medium">Chat model-call limit</div>
+            <div className="text-xs text-muted-foreground mt-0.5">
+              Optional separate limit for interactive chat turns. Leave empty to use the
+              model-call limit above.
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {chatLimit.trim() !== "" && (
+              <button
+                type="button"
+                aria-label="Use the global limit"
+                title="Use the global limit"
+                onClick={() => {
+                  setChatLimit("")
+                  void saveLimits(globalLimit, "")
+                }}
+                className="flex size-5 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <X className="size-3.5" />
+              </button>
+            )}
+            <LimitStepper
+              value={chatLimit}
+              fallback={parseLimit(globalLimit) ?? DEFAULT_TURN_LIMITS_SETTINGS.maxModelCalls}
+              placeholder="Same as above"
+              onInput={setChatLimit}
+              onCommit={(next) => {
+                setChatLimit(next)
+                // An emptied chat field on blur means "use the global
+                // limit" — persist the override removal.
+                void saveLimits(globalLimit, next)
+              }}
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // --- Main Settings Dialog ---
 
 export function SettingsDialog({ children, defaultTab = "account", open: controlledOpen, onOpenChange }: SettingsDialogProps) {
@@ -2684,7 +2911,7 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
   }
 
   const loadConfig = useCallback(async (tab: ConfigTab) => {
-    if (tab === "appearance" || tab === "models" || tab === "note-tagging" || tab === "account" || tab === "connections" || tab === "help" || tab === "code-mode" || tab === "notifications") return
+    if (tab === "appearance" || tab === "models" || tab === "note-tagging" || tab === "account" || tab === "connections" || tab === "help" || tab === "code-mode" || tab === "notifications" || tab === "advanced") return
     const tabConfig = tabs.find((t) => t.id === tab)!
     if (!tabConfig.path) return
     setLoading(true)
@@ -2806,7 +3033,7 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
             </div>
 
             {/* Content */}
-            <div className={cn("flex-1 px-6 pb-5 min-h-0", (activeTab === "models" || activeTab === "connections" || activeTab === "mobile" || activeTab === "account" || activeTab === "code-mode" || activeTab === "notifications") ? "overflow-y-auto" : activeTab === "note-tagging" ? "overflow-hidden flex flex-col" : "overflow-hidden")}>
+            <div className={cn("flex-1 px-6 pb-5 min-h-0", (activeTab === "models" || activeTab === "connections" || activeTab === "mobile" || activeTab === "account" || activeTab === "code-mode" || activeTab === "notifications" || activeTab === "advanced") ? "overflow-y-auto" : activeTab === "note-tagging" ? "overflow-hidden flex flex-col" : "overflow-hidden")}>
               {activeTab === "account" ? (
                 <AccountSettings dialogOpen={open} />
               ) : activeTab === "connections" ? (
@@ -2845,6 +3072,8 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
                 <AppearanceSettings />
               ) : activeTab === "notifications" ? (
                 <NotificationSettings dialogOpen={open} />
+              ) : activeTab === "advanced" ? (
+                <AdvancedSettings dialogOpen={open} />
               ) : activeTab === "help" ? (
                 <HelpSettings />
               ) : activeTab === "code-mode" ? (
