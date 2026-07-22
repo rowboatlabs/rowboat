@@ -251,13 +251,46 @@ function configureSessionPermissions(targetSession: Session, extraPermissions: r
   });
 }
 
+// On Linux, Chromium's loopback capture records the default sink's monitor
+// through the PulseAudio layer, at the monitor source's own volume. Desktop
+// tools sometimes leave that volume near zero — it's invisible plumbing that
+// doesn't affect what the user hears — which turns the whole capture into
+// digital silence with no error anywhere. Raise it back to 100% before
+// capture starts (raise only, so a deliberate >100% boost is left alone).
+// Best-effort: no pactl or no Pulse layer just skips.
+async function ensureLinuxMonitorVolume(): Promise<void> {
+  const execFileP = promisify(execFile);
+  try {
+    const { stdout: sinkOut } = await execFileP("pactl", ["get-default-sink"], { timeout: 3000 });
+    const monitor = `${sinkOut.trim()}.monitor`;
+    const { stdout: volOut } = await execFileP("pactl", ["get-source-volume", monitor], { timeout: 3000 });
+    const percents = [...volOut.matchAll(/(\d+)%/g)].map((m) => Number(m[1]));
+    if (percents.length === 0 || Math.min(...percents) >= 100) return;
+    await execFileP("pactl", ["set-source-volume", monitor, "100%"], { timeout: 3000 });
+    console.log(`[meeting] Raised ${monitor} volume from ${Math.min(...percents)}% to 100% for system-audio capture`);
+  } catch {
+    // pactl missing or non-Pulse audio stack — nothing to fix here.
+  }
+}
+
 // Auto-approve display media requests and route system audio as loopback.
 // Electron requires a video source in the callback even if we only want audio.
 // We pass the first available screen source; the renderer discards the video track.
 // App session only — the embedded browser partition registers its own handler
 // (a user-facing source picker) in BrowserViewManager.
 function configureAppDisplayMediaHandler(targetSession: Session): void {
-  targetSession.setDisplayMediaRequestHandler(async (_request, callback) => {
+  targetSession.setDisplayMediaRequestHandler(async (request, callback) => {
+    // On Linux, enumerating screens via desktopCapturer goes through the
+    // Wayland screencast portal, which can block on a system dialog or hang
+    // outright. Requests that want audio (meeting transcription — the only
+    // audio consumer; it discards the video track) don't need a real screen,
+    // so answer with the requesting frame as the mandatory video source and
+    // Chromium's PulseAudio loopback for the audio.
+    if (process.platform === 'linux' && request.audioRequested && request.frame) {
+      await ensureLinuxMonitorVolume();
+      callback({ video: request.frame, audio: 'loopback' });
+      return;
+    }
     const sources = await desktopCapturer.getSources({ types: ['screen'] });
     if (sources.length === 0) {
       callback({});
