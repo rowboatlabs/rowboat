@@ -19,11 +19,13 @@ import type { SessionBusEvent, SessionIndexEntry, SessionState } from './session
 import { RowboatApiConfig } from './rowboat-account.js';
 import { ZListToolkitsResponse } from './composio.js';
 import { AppSummarySchema, RegistryRecordSchema, RowboatAppManifestSchema } from './rowboat-app.js';
-import { BrowserStateSchema, HttpAuthRequestSchema } from './browser-control.js';
+import { BrowserStateSchema, DisplayMediaRequestSchema, HttpAuthRequestSchema } from './browser-control.js';
 import { BillingInfoSchema } from './billing.js';
+import { CreditActivatedEventSchema, CreditsStateSchema, ReferralClaimResultSchema } from './credits.js';
 import { EmailBlockSchema, GmailThreadSchema } from './blocks.js';
 import { PermissionDecision, ApprovalPolicy, CodingAgent, type CodeRunFeedEvent } from './code-mode.js';
 import { NotificationSettingsSchema } from './notification-settings.js';
+import { TurnLimitsSettingsSchema } from './turn-limits.js';
 import { CodeProject, CodeSession, CodeSessionMode, CodeSessionStatus, GitRepoInfo, GitStatusFile, CodeAgentModelOptions } from './code-sessions.js';
 import { ChannelsConfig, ChannelsStatus } from './channels.js';
 
@@ -56,6 +58,22 @@ const KnowledgeSourceConfigSchema = z.object({
   scopes: z.array(KnowledgeSourceScopeSchema).default([]),
   instructions: z.string().optional(),
   filters: z.record(z.string(), z.unknown()).optional(),
+});
+
+// Lifecycle of the client auto-updater (apps/main/src/updater.ts).
+// - disabled: dev build — the updater never initializes
+// - unsupported: platform can't auto-update (`reason` says why)
+// - ready: an update is downloaded and installed; restart switches to it
+const UpdaterStatusSchema = z.object({
+  state: z.enum(['disabled', 'unsupported', 'idle', 'checking', 'downloading', 'ready', 'error']),
+  version: z.string(),
+  reason: z.enum(['dev', 'platform', 'not-in-applications']).optional(),
+  newVersion: z.string().optional(),
+  // Markdown body of the staged update's GitHub release, when known — the
+  // restart card renders it as "What's new".
+  releaseNotes: z.string().optional(),
+  error: z.string().optional(),
+  lastCheckedAt: z.number().optional(),
 });
 
 const ipcSchemas = {
@@ -767,6 +785,53 @@ const ipcSchemas = {
     }),
     res: z.null(),
   },
+  // --- "Sign in with ChatGPT" (subscription OAuth via the Codex CLI client) ---
+  // Raw tokens are never exposed over IPC — the renderer only sees identity
+  // and connection state.
+  'chatgpt:getStatus': {
+    req: z.null(),
+    res: z.object({
+      signedIn: z.boolean(),
+      email: z.string().optional(),
+      accountId: z.string().optional(),
+    }),
+  },
+  // Resolves when the browser flow settles (success, denial, timeout, port
+  // busy, exchange failure, cancellation) — same shape as getStatus plus an
+  // error string; `cancelled` marks expected teardown (no error toast).
+  'chatgpt:signIn': {
+    req: z.null(),
+    res: z.object({
+      signedIn: z.boolean(),
+      email: z.string().optional(),
+      accountId: z.string().optional(),
+      cancelled: z.boolean().optional(),
+      error: z.string().optional(),
+    }),
+  },
+  // Abort the pending sign-in attempt: stops the loopback server and settles
+  // the in-flight chatgpt:signIn with a cancelled outcome. No-op when idle.
+  'chatgpt:cancelSignIn': {
+    req: z.null(),
+    res: z.object({
+      success: z.boolean(),
+    }),
+  },
+  'chatgpt:signOut': {
+    req: z.null(),
+    res: z.object({
+      success: z.boolean(),
+    }),
+  },
+  // Push event (main → renderer): ChatGPT sign-in state changed. Model
+  // pickers listen and refresh — subscription models appear/disappear with
+  // the session.
+  'chatgpt:statusChanged': {
+    req: z.object({
+      signedIn: z.boolean(),
+    }),
+    res: z.null(),
+  },
   'app:openUrl': {
     req: z.object({
       url: z.string(),
@@ -797,6 +862,37 @@ const ipcSchemas = {
     res: z.object({
       url: z.string().nullable(),
     }),
+  },
+  // Consume-once "the app was just updated" notice. `updatedFrom` is the
+  // previously recorded version on the first invoke of the first launch
+  // after an update, and null on every other invoke (fresh install,
+  // unchanged version, or already consumed this run).
+  'app:consumeUpdateInfo': {
+    req: z.null(),
+    res: z.object({
+      version: z.string(),
+      updatedFrom: z.string().nullable(),
+    }),
+  },
+  // --- Client auto-update (apps/main/src/updater.ts) ---
+  // Pushed to all windows whenever the updater state changes.
+  'updater:status': {
+    req: UpdaterStatusSchema,
+    res: z.null(),
+  },
+  'updater:getStatus': {
+    req: z.null(),
+    res: UpdaterStatusSchema,
+  },
+  // Kick off a manual check (no-op unless idle/error); progress arrives via
+  // updater:status pushes. Returns the snapshot after initiating.
+  'updater:check': {
+    req: z.null(),
+    res: UpdaterStatusSchema,
+  },
+  'updater:quitAndInstall': {
+    req: z.null(),
+    res: z.object({}),
   },
   // Tray commands issued before the renderer was ready (mirrors the pending
   // deep-link pull above): the renderer drains this once on mount.
@@ -2303,10 +2399,51 @@ const ipcSchemas = {
     }),
     res: z.object({ ok: z.boolean() }),
   },
+  // Screen-share picker for pages calling getDisplayMedia() in the embedded
+  // browser (main → renderer push). The renderer shows a source picker and
+  // answers via browser:displayMediaResponse.
+  'browser:displayMediaRequest': {
+    req: DisplayMediaRequestSchema,
+    res: z.null(),
+  },
+  // Main → renderer: a pending display-media request was resolved without the
+  // renderer answering (timed out, or the window went away), so the renderer
+  // must drop the corresponding picker dialog.
+  'browser:displayMediaResolved': {
+    req: z.object({ requestId: z.string() }),
+    res: z.null(),
+  },
+  // Renderer → main. Omit sourceId to cancel the request; `audio` asks for
+  // system-audio loopback alongside the shared screen.
+  'browser:displayMediaResponse': {
+    req: z.object({
+      requestId: z.string(),
+      sourceId: z.string().optional(),
+      audio: z.boolean().optional(),
+    }),
+    res: z.object({ ok: z.boolean() }),
+  },
   // Billing channels
   'billing:getInfo': {
     req: z.null(),
     res: BillingInfoSchema,
+  },
+  // First-time-action credit rewards (see shared/src/credits.ts)
+  'credits:getState': {
+    req: z.null(),
+    res: CreditsStateSchema,
+  },
+  // Main → renderer: the backend confirmed a credit grant. All activation
+  // triggers live in main/core (oauth success, gmail send, meeting summarize,
+  // bg-task create, app create); the renderer only listens and celebrates.
+  'credits:didActivate': {
+    req: CreditActivatedEventSchema,
+    res: z.null(),
+  },
+  // Redeem another user's invite (referral) code — both sides earn credits.
+  'referral:claim': {
+    req: z.object({ code: z.string() }),
+    res: ReferralClaimResultSchema,
   },
   // Notification settings channels
   'notifications:getSettings': {
@@ -2315,6 +2452,17 @@ const ipcSchemas = {
   },
   'notifications:setSettings': {
     req: NotificationSettingsSchema,
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  // Model-call limit settings channels
+  'turnLimits:getSettings': {
+    req: z.null(),
+    res: TurnLimitsSettingsSchema,
+  },
+  'turnLimits:setSettings': {
+    req: TurnLimitsSettingsSchema,
     res: z.object({
       success: z.literal(true),
     }),

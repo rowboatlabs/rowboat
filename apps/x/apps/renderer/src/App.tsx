@@ -79,7 +79,9 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Toaster } from "@/components/ui/sonner"
+import { UpdateCard } from "@/components/update-card"
 import { BillingErrorDialog } from "@/components/billing-error-dialog"
+import { CreditCelebration } from "@/components/credit-celebration"
 import { matchBillingError, type BillingErrorMatch } from "@/lib/billing-error"
 import { dispatchCreditExhausted, dispatchCreditReplenished } from "@/lib/credit-status"
 import { ensureMarkdownExtension, normalizeWikiPath, splitWikiFragment, stripKnowledgePrefix, toKnowledgePath, wikiLabel } from '@/lib/wiki-links'
@@ -3019,6 +3021,13 @@ function App() {
       // via the agent resolver; keep them session-sticky where possible so the
       // provider prefix cache survives across turns.
       const reasoningEffort = reasoningEffortByTabRef.current.get(submitTabId)
+      // The runtime defaults omitted maxModelCalls to the global limit; the
+      // chat-specific override is the UI's job to pass explicitly. A failed
+      // settings read just falls back to the global limit.
+      const chatMaxModelCalls = await window.ipc
+        .invoke('turnLimits:getSettings', null)
+        .then((settings) => settings.chatMaxModelCalls)
+        .catch(() => undefined)
       const sendConfig = {
         agent: {
           agentId,
@@ -3037,6 +3046,7 @@ function App() {
         },
         autoPermission: (permissionMode ?? 'manual') === 'auto',
         ...(reasoningEffort ? { reasoningEffort } : {}),
+        ...(chatMaxModelCalls !== undefined ? { maxModelCalls: chatMaxModelCalls } : {}),
       }
       const userMessageContextFor = (middlePane: Awaited<ReturnType<typeof buildMiddlePaneContext>>) => ({
         currentDateTime: new Date().toISOString(),
@@ -4280,6 +4290,9 @@ function App() {
       setEmailInitialThreadId(threadId)
       setEmailThreadIdVersion((v) => v + 1)
     }
+    // Same reason as in navigateToView: a stale assistant-driven search must
+    // not repopulate the search box when the user re-enters the email view.
+    setEmailInitialSearchQuery(null)
     ensureEmailFileTab()
   }, [ensureEmailFileTab])
 
@@ -4454,6 +4467,10 @@ function App() {
         if (view.searchQuery) {
           setEmailInitialSearchQuery(view.searchQuery)
           setEmailSearchQueryVersion((v) => v + 1)
+        } else {
+          // Otherwise a past assistant-driven search would be re-applied on
+          // every re-entry, even after the user cleared the search box.
+          setEmailInitialSearchQuery(null)
         }
         ensureEmailFileTab()
         return
@@ -4701,6 +4718,23 @@ function App() {
       if (url) handle(url)
     })
     return window.ipc.on('app:openUrl', ({ url }) => handle(url))
+  }, [])
+
+  // "Updated to vX.Y.Z" card on the first launch after an update. Main
+  // compares its persisted version stamp against the running version and
+  // hands out `updatedFrom` exactly once, so reloads don't re-show this.
+  useEffect(() => {
+    void window.ipc.invoke('app:consumeUpdateInfo', null).then(({ version, updatedFrom }) => {
+      if (!updatedFrom) return
+      toast(`Updated to v${version}`, {
+        description: `Rowboat was updated from v${updatedFrom}.`,
+        action: {
+          label: "What's new",
+          onClick: () => window.open(`https://github.com/rowboatlabs/rowboat/releases/tag/v${version}`, '_blank'),
+        },
+        duration: 10000,
+      })
+    })
   }, [])
 
   // Report the UI theme to the apps server (spec §7.1): apps read it from
@@ -6266,6 +6300,7 @@ function App() {
               onOpenBgTasks={() => { setBgTaskInitialSlug(null); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
               onOpenAgent={(slug) => { setBgTaskInitialSlug(slug); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
               onOpenApps={openAppsView}
+              onOpenApp={(folder) => { setAppInitialId(folder); setAppIdVersion((v) => v + 1); openAppsView() }}
               recentRuns={runs}
               onOpenRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
               onRenameRun={(rid, title) => {
@@ -7186,6 +7221,8 @@ function App() {
         />
       </SidebarSectionProvider>
       <Toaster />
+      <UpdateCard />
+      <CreditCelebration />
       <BillingErrorDialog
         open={billingErrorOpen}
         match={billingErrorMatch}

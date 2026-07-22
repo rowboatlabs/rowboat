@@ -1,31 +1,19 @@
 import { useEffect, useState } from 'react'
-import { Plus, RefreshCw } from 'lucide-react'
+import { PanelLeft, PanelLeftClose, Plus, RefreshCw } from 'lucide-react'
 import type { rowboatApp } from '@x/shared'
 import { AppFrame } from '@/components/apps/app-frame'
 import { CatalogTab } from '@/components/apps/catalog'
+import { themeForIndex, patternFor } from '@/components/apps/card-theme'
+import { getPinnedApps, onPinnedAppsChanged, pinApp, unpinApp } from '@/lib/pinned-apps'
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu'
 
 // Apps home (spec §14): "My apps" grid + Catalog placeholder (M3). Cards are
 // AppSummary-driven; click opens the app full-height on its own origin.
-
-type Theme = { accent: string; glow: string }
-
-const THEMES: Theme[] = [
-  { accent: '#FF4D8D', glow: 'rgba(255,77,141,0.45)' }, // Pink
-  { accent: '#EF4444', glow: 'rgba(239,68,68,0.45)' }, // Red
-  { accent: '#22C55E', glow: 'rgba(34,197,94,0.40)' }, // Emerald
-  { accent: '#F59E0B', glow: 'rgba(245,158,11,0.42)' }, // Amber
-  { accent: '#14B8A6', glow: 'rgba(20,184,166,0.40)' }, // Teal
-  { accent: '#EC4899', glow: 'rgba(236,72,153,0.42)' }, // Rose
-]
-const PATTERNS = ['dots', 'grid', 'diagonal', 'radial', 'waves', 'mesh', 'cross', 'rings', 'zigzag', 'plus', 'checker', 'beams']
-
-function hash(s: string): number {
-  let h = 0
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0
-  return Math.abs(h)
-}
-const themeForIndex = (i: number): Theme => THEMES[i % THEMES.length]
-const patternFor = (id: string): string => PATTERNS[hash(id + '·pat') % PATTERNS.length]
 
 const CARD_CSS = `
 .ma-page {
@@ -61,6 +49,14 @@ const CARD_CSS = `
 .ma-inner { max-width:1120px; margin:0 auto; padding:34px 30px 48px; }
 .ma-h1 { font-size:24px; font-weight:650; letter-spacing:-0.02em; color:var(--ma-h1); margin:0 0 4px; }
 .ma-sub { font-size:clamp(13px,1.5cqw,14px); color:var(--ma-sub); margin:0 0 clamp(14px,2cqw,20px); }
+.ma-hint { font-size:12.5px; color:var(--ma-sub); margin:-6px 0 clamp(12px,1.8cqw,16px); }
+.ma-welcome {
+  border:1px solid var(--ma-border); border-radius:12px; padding:12px 16px;
+  font-size:13.5px; color:var(--ma-desc); margin-bottom:clamp(14px,2cqw,20px);
+  background:color-mix(in srgb, var(--ma-title) 4%, transparent);
+}
+.ma-welcome button { color:var(--ma-title); font-weight:600; text-decoration:underline; text-underline-offset:3px; background:none; border:none; padding:0; font-size:inherit; cursor:pointer; }
+.ma-owner { font-size:12px; color:var(--ma-sub); margin:-4px 0 8px; }
 .ma-tabs { display:flex; gap:6px; margin-bottom:clamp(14px,2cqw,22px); }
 .ma-tab { border:1px solid var(--ma-border); background:transparent; color:var(--ma-sub); border-radius:999px; padding:5px 14px; font-size:13px; font-weight:600; cursor:pointer; }
 .ma-tab.on { color:var(--ma-title); border-color:var(--ma-border-hover); background:color-mix(in srgb, var(--ma-title) 6%, transparent); }
@@ -134,31 +130,47 @@ const CARD_CSS = `
 }
 `
 
-function Card({ app, index, onOpen }: { app: rowboatApp.AppSummary; index: number; onOpen: () => void }) {
+function Card({ app, index, onOpen, isPinned, onTogglePin }: {
+  app: rowboatApp.AppSummary
+  index: number
+  onOpen: () => void
+  isPinned: boolean
+  onTogglePin: () => void
+}) {
   const theme = themeForIndex(index)
   const pattern = patternFor(app.folder)
   const invalid = app.status === 'invalid'
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      title={invalid ? app.manifestError : undefined}
-      className={`ma-card ma-pat-${pattern}`}
-      style={{ '--accent': theme.accent, '--glow': theme.glow } as React.CSSProperties}
-    >
-      <div className="ma-top">
-        {invalid && <span className="ma-badge err">INVALID</span>}
-        <span className={`ma-badge${app.kind === 'installed' ? '' : ' off'}`}>
-          {app.kind === 'installed' ? 'INSTALLED' : 'LOCAL'}
-        </span>
-      </div>
-      <div className="ma-title">{app.manifest?.name ?? app.folder}</div>
-      <div className="ma-desc">{invalid ? (app.manifestError ?? 'Invalid manifest') : (app.manifest?.description || 'No description yet.')}</div>
-      <div className="ma-footer">
-        <span className="ma-source">v{app.manifest?.version ?? '?'}</span>
-        <span className="ma-lastrun">{app.folder}</span>
-      </div>
-    </button>
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <button
+          type="button"
+          onClick={onOpen}
+          title={invalid ? app.manifestError : undefined}
+          className={`ma-card ma-pat-${pattern}`}
+          style={{ '--accent': theme.accent, '--glow': theme.glow } as React.CSSProperties}
+        >
+          <div className="ma-top">
+            {invalid && <span className="ma-badge err">INVALID</span>}
+            <span className={`ma-badge${app.kind === 'installed' ? '' : ' off'}`}>
+              {app.kind === 'installed' ? 'INSTALLED' : 'LOCAL'}
+            </span>
+          </div>
+          <div className="ma-title">{app.manifest?.name ?? app.folder}</div>
+          <div className="ma-desc">{invalid ? (app.manifestError ?? 'Invalid manifest') : (app.manifest?.description || 'No description yet.')}</div>
+          <div className="ma-footer">
+            <span className="ma-source">v{app.manifest?.version ?? '?'}</span>
+            <span className="ma-lastrun">{app.folder}</span>
+          </div>
+        </button>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onClick={onTogglePin}>
+          {isPinned ? <PanelLeftClose className="mr-2 size-3.5" /> : <PanelLeft className="mr-2 size-3.5" />}
+          {isPinned ? 'Remove from sidebar' : 'Add to sidebar'}
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   )
 }
 
@@ -167,10 +179,16 @@ export function AppsView({ initialAppFolder, initialVersion, onNewApp }: {
   initialVersion?: number
   onNewApp?: () => void
 } = {}) {
-  const [tab, setTab] = useState<'mine' | 'catalog'>('mine')
+  // null = auto: land on "My apps" normally, but fall through to the catalog
+  // until the user has an app of their own. An explicit tab click wins.
+  const [tab, setTab] = useState<'mine' | 'catalog' | null>(null)
   const [selectedFolder, setSelectedFolder] = useState<string | null>(initialAppFolder ?? null)
   const [apps, setApps] = useState<rowboatApp.AppSummary[]>([])
+  const [appsLoaded, setAppsLoaded] = useState(false)
   const [serverError, setServerError] = useState<string | null>(null)
+  const [pinnedFolders, setPinnedFolders] = useState<string[]>(() => getPinnedApps())
+
+  useEffect(() => onPinnedAppsChanged(setPinnedFolders), [])
 
   // Open a specific app when asked from outside (app-navigation open-app).
   const [appliedVersion, setAppliedVersion] = useState(initialVersion)
@@ -186,11 +204,19 @@ export function AppsView({ initialAppFolder, initialVersion, onNewApp }: {
         const r = await window.ipc.invoke('apps:list', {})
         if (cancelled) return
         setApps(r.apps)
+        setAppsLoaded(true)
         // Drop a selection whose app no longer exists (uninstalled while
         // open). Left stale, a later reinstall makes this view yank the user
         // into the app frame mid-flow — e.g. while they're in the catalog's
         // post-install agent dialog.
         setSelectedFolder((cur) => (cur && !r.apps.some((a) => a.folder === cur) ? null : cur))
+        // Prune sidebar pins for apps that no longer exist (uninstalled via
+        // the copilot or another window) — but only off an authoritative
+        // list, never while the apps server is down.
+        if (r.serverRunning) {
+          const live = new Set(r.apps.map((a) => a.folder))
+          for (const f of getPinnedApps()) if (!live.has(f)) unpinApp(f)
+        }
         setServerError(r.serverRunning ? null : (r.serverError ?? 'Apps server is not running.'))
       } catch (e) {
         if (!cancelled) setServerError(e instanceof Error ? e.message : String(e))
@@ -206,6 +232,9 @@ export function AppsView({ initialAppFolder, initialVersion, onNewApp }: {
     return <AppFrame app={selected} onBack={() => setSelectedFolder(null)} />
   }
 
+  const noOwnApps = appsLoaded && apps.length === 0
+  const activeTab = tab ?? (noOwnApps ? 'catalog' : 'mine')
+
   return (
     <div className="ma-page">
       <style>{CARD_CSS}</style>
@@ -214,8 +243,8 @@ export function AppsView({ initialAppFolder, initialVersion, onNewApp }: {
         <p className="ma-sub">Apps that live inside Rowboat, powered by your agents and integrations.</p>
 
         <div className="ma-tabs">
-          <button type="button" className={`ma-tab${tab === 'mine' ? ' on' : ''}`} onClick={() => setTab('mine')}>My apps</button>
-          <button type="button" className={`ma-tab${tab === 'catalog' ? ' on' : ''}`} onClick={() => setTab('catalog')}>Catalog</button>
+          <button type="button" className={`ma-tab${activeTab === 'mine' ? ' on' : ''}`} onClick={() => setTab('mine')}>My apps</button>
+          <button type="button" className={`ma-tab${activeTab === 'catalog' ? ' on' : ''}`} onClick={() => setTab('catalog')}>Catalog</button>
         </div>
 
         {serverError && (
@@ -224,19 +253,39 @@ export function AppsView({ initialAppFolder, initialVersion, onNewApp }: {
           </div>
         )}
 
-        {tab === 'catalog' ? (
-          <CatalogTab onInstalled={(folder) => { setSelectedFolder(folder); setTab('mine') }} />
+        {!appsLoaded && !serverError ? null : activeTab === 'catalog' ? (
+          <>
+            {noOwnApps && (
+              <div className="ma-welcome">
+                You don&apos;t have any apps of your own yet. Install one from this catalog, or{' '}
+                <button type="button" onClick={onNewApp}>build your own</button>.
+              </div>
+            )}
+            <CatalogTab onInstalled={(folder) => { setSelectedFolder(folder); setTab('mine') }} />
+          </>
         ) : (
-          <div className="ma-grid">
-            {apps.map((app, i) => (
-              <Card key={app.folder} app={app} index={i} onOpen={() => setSelectedFolder(app.folder)} />
-            ))}
-            <button type="button" className="ma-new" onClick={onNewApp}>
-              <Plus className="size-5" />
-              <div className="ma-new-title">New app</div>
-              <div className="ma-new-hint">Describe one to the copilot</div>
-            </button>
-          </div>
+          <>
+            {apps.length > 0 && (
+              <p className="ma-hint">Tip: right-click an app to add it to the sidebar for quick access.</p>
+            )}
+            <div className="ma-grid">
+              {apps.map((app, i) => (
+                <Card
+                  key={app.folder}
+                  app={app}
+                  index={i}
+                  onOpen={() => setSelectedFolder(app.folder)}
+                  isPinned={pinnedFolders.includes(app.folder)}
+                  onTogglePin={() => (pinnedFolders.includes(app.folder) ? unpinApp(app.folder) : pinApp(app.folder))}
+                />
+              ))}
+              <button type="button" className="ma-new" onClick={onNewApp}>
+                <Plus className="size-5" />
+                <div className="ma-new-title">New app</div>
+                <div className="ma-new-hint">Describe one to the copilot</div>
+              </button>
+            </div>
+          </>
         )}
       </div>
     </div>

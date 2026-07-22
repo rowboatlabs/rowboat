@@ -40,6 +40,9 @@ import { isSignedIn } from '@x/core/dist/account/account.js';
 import { listGatewayModels } from '@x/core/dist/models/gateway.js';
 import type { IModelConfigRepo } from '@x/core/dist/models/repo.js';
 import type { IOAuthRepo } from '@x/core/dist/auth/repo.js';
+import { getChatGPTStatus, signOutChatGPT } from '@x/core/dist/auth/chatgpt-auth.js';
+import { listCodexModels } from '@x/core/dist/models/codex.js';
+import { signInWithChatGPT, cancelChatGPTSignIn } from './chatgpt-signin.js';
 import { IGranolaConfigRepo } from '@x/core/dist/knowledge/granola/repo.js';
 import { ICodeModeConfigRepo } from '@x/core/dist/code-mode/repo.js';
 import { CodePermissionRegistry } from '@x/core/dist/code-mode/acp/permission-registry.js';
@@ -66,6 +69,7 @@ import { rankSlackHomeMessages } from '@x/core/dist/knowledge/sources/rank_slack
 import { syncSlackKnowledgeSources, triggerSync as triggerSlackKnowledgeSync, getSlackKnowledgeSyncStatus } from '@x/core/dist/knowledge/sources/sync_slack.js';
 import { isOnboardingComplete, markOnboardingComplete } from '@x/core/dist/config/note_creation_config.js';
 import { loadNotificationSettings, saveNotificationSettings } from '@x/core/dist/config/notification_config.js';
+import { loadTurnLimitsSettings, saveTurnLimitsSettings } from '@x/core/dist/config/turn_limits.js';
 import { saveAppSettings } from '@x/core/dist/config/app_settings.js';
 import { setSelfCaptureActive } from '@x/core/dist/meetings/detector.js';
 import { notifyIfEnabled } from '@x/core/dist/application/notification/notifier.js';
@@ -85,6 +89,8 @@ import * as appsIndexer from '@x/core/dist/apps/indexer.js';
 import * as appsServer from '@x/core/dist/apps/server.js';
 import * as appsAgents from '@x/core/dist/apps/agents.js';
 import { capture } from '@x/core/dist/analytics/posthog.js';
+import { recordAppVersion, isVersionUpgrade } from '@x/core/dist/config/app_version.js';
+import { getUpdaterStatus, checkForUpdates, quitAndInstallUpdate } from './updater.js';
 import * as githubAuth from '@x/core/dist/apps/github-auth.js';
 import * as appsStars from '@x/core/dist/apps/stars.js';
 import * as appsInstaller from '@x/core/dist/apps/installer.js';
@@ -108,6 +114,7 @@ import { invalidateKnowledgeIndex } from '@x/core/dist/knowledge/knowledge_index
 import { versionHistory, voice } from '@x/core';
 import { classifySchedule, processRowboatInstruction } from '@x/core/dist/knowledge/inline_tasks.js';
 import { getBillingInfo } from '@x/core/dist/billing/billing.js';
+import { claimReferralCode, getCreditsState, maybeActivateCredit, subscribeCreditActivations } from '@x/core/dist/billing/credits.js';
 import { summarizeMeeting } from '@x/core/dist/knowledge/summarize_meeting.js';
 import { getAccessToken } from '@x/core/dist/auth/tokens.js';
 import { getRowboatConfig } from '@x/core/dist/config/rowboat.js';
@@ -657,6 +664,11 @@ export function emitOAuthEvent(event: { provider: string; success: boolean; erro
   // prompt, so any OAuth state change must rebuild it.
   invalidateCopilotInstructionsCache();
   broadcastToWindows('oauth:didConnect', event);
+  // Google connect (both BYOK and rowboat-mode paths funnel through here) is
+  // the "connected Gmail" first-time reward.
+  if (event.provider === 'google' && event.success) {
+    void maybeActivateCredit('first_gmail_connected');
+  }
 }
 
 async function requireCodeSession(sessionId: string): Promise<CodeSession> {
@@ -833,6 +845,10 @@ export function stopServicesWatcher(): void {
 // Handler Implementations
 // ============================================================================
 
+// app:consumeUpdateInfo returns `updatedFrom` at most once per app run, so a
+// renderer reload doesn't re-show the "updated to vX" card.
+let updateNoticeConsumed = false;
+
 /**
  * Register all IPC handlers
  * Add new handlers here as you add channels to IPCChannels
@@ -840,6 +856,10 @@ export function stopServicesWatcher(): void {
 export function setupIpcHandlers() {
   // Forward knowledge commit events to renderer for panel refresh
   versionHistory.onCommit(() => emitKnowledgeCommitEvent());
+
+  // Relay backend-confirmed credit grants (first-time-action rewards) to all
+  // windows so the UI can update balances and celebrate.
+  subscribeCreditActivations((event) => broadcastToWindows('credits:didActivate', event));
 
   // Pre-warm the Gmail contact indices so the first compose-box keystroke is instant.
   // - warmContactIndex(): synchronous local-snapshot fallback (instant, narrow coverage).
@@ -855,6 +875,28 @@ export function setupIpcHandlers() {
     },
     'app:consumePendingDeepLink': async () => {
       return { url: consumePendingDeepLink() };
+    },
+    'app:consumeUpdateInfo': async () => {
+      const version = app.getVersion();
+      if (updateNoticeConsumed) return { version, updatedFrom: null };
+      updateNoticeConsumed = true;
+      const changedFrom = recordAppVersion(version);
+      // Downgrades still restamp (so the next upgrade reports correctly) but
+      // don't toast "Updated to vX" or count as a client update.
+      const updatedFrom = changedFrom && isVersionUpgrade(changedFrom, version) ? changedFrom : null;
+      // 'app_updated' is taken by the in-app apps feature; this is the client itself.
+      if (updatedFrom) capture('client_updated', { from: updatedFrom, to: version });
+      return { version, updatedFrom };
+    },
+    'updater:getStatus': async () => {
+      return getUpdaterStatus();
+    },
+    'updater:check': async () => {
+      return checkForUpdates();
+    },
+    'updater:quitAndInstall': async () => {
+      quitAndInstallUpdate();
+      return {};
     },
     'app:consumePendingTrayCommand': async () => {
       return { toggleMeetingNotes: consumePendingToggleMeetingNotes() };
@@ -961,7 +1003,11 @@ export function setupIpcHandlers() {
       return {};
     },
     'gmail:sendReply': async (_event, args) => {
-      return sendThreadReply(args);
+      const result = await sendThreadReply(args);
+      if (!result.error) {
+        void maybeActivateCredit('first_email_sent');
+      }
+      return result;
     },
     'gmail:saveDraft': async (_event, args) => {
       return saveThreadDraft(args);
@@ -1204,10 +1250,21 @@ export function setupIpcHandlers() {
       }
     },
     'models:list': async () => {
-      if (await isSignedIn()) {
-        return await listGatewayModels();
+      const base = (await isSignedIn())
+        ? await listGatewayModels()
+        : await listOnboardingModels();
+      // ChatGPT-subscription (codex) models are additive and independent of
+      // Rowboat sign-in; their failure must never break the main list.
+      try {
+        const chatgpt = await getChatGPTStatus();
+        if (chatgpt.signedIn) {
+          const codex = await listCodexModels();
+          return { providers: [...base.providers, ...codex.providers] };
+        }
+      } catch (error) {
+        console.warn('[Codex] Listing subscription models failed:', error);
       }
-      return await listOnboardingModels();
+      return base;
     },
     'models:test': async (_event, args) => {
       return await testModelConnection(args.provider, args.model);
@@ -1256,6 +1313,32 @@ export function setupIpcHandlers() {
       const repo = container.resolve<IOAuthRepo>('oauthRepo');
       const config = await repo.getClientFacingConfig();
       return { config };
+    },
+    'chatgpt:getStatus': async () => {
+      return await getChatGPTStatus();
+    },
+    'chatgpt:signIn': async () => {
+      const result = await signInWithChatGPT();
+      if (result.signedIn) {
+        // Model lists gate on sign-in state (composer picker, models:list) —
+        // push the change so they refresh without polling.
+        broadcastToWindows('chatgpt:statusChanged', { signedIn: true });
+      }
+      return result;
+    },
+    'chatgpt:cancelSignIn': async () => {
+      await cancelChatGPTSignIn();
+      return { success: true };
+    },
+    'chatgpt:signOut': async () => {
+      try {
+        await signOutChatGPT();
+        broadcastToWindows('chatgpt:statusChanged', { signedIn: false });
+        return { success: true };
+      } catch (error) {
+        console.error('[ChatGPTAuth] Sign-out failed:', error);
+        return { success: false };
+      }
     },
     'account:getRowboat': async () => {
       const signedIn = await isSignedIn();
@@ -1732,6 +1815,13 @@ export function setupIpcHandlers() {
         lastAppsFingerprint = fingerprint;
         invalidateCopilotInstructionsCache();
       }
+      // The copilot builds apps by writing the folder directly — apps:create is
+      // never on that path — so the first-app reward triggers off observed
+      // state instead: a valid non-installed app means the user built one.
+      // Cheap on repeat polls (maybeActivateCredit short-circuits once claimed).
+      if (apps.some((a) => a.kind === 'local' && a.status === 'ok')) {
+        void maybeActivateCredit('first_app_built');
+      }
       return {
         serverRunning: status.running,
         ...(status.error ? { serverError: status.error } : {}),
@@ -1751,6 +1841,7 @@ export function setupIpcHandlers() {
     'apps:create': async (_event, args) => {
       const app = await appsIndexer.createApp(args);
       capture('app_created', { folder: app.folder });
+      void maybeActivateCredit('first_app_built');
       return { app };
     },
     'apps:delete': async (_event, args) => {
@@ -2124,6 +2215,9 @@ export function setupIpcHandlers() {
     },
     'meeting:summarize': async (_event, args) => {
       const notes = await summarizeMeeting(args.transcript, args.meetingStartTime, args.calendarEventJson);
+      if (notes && notes.trim()) {
+        void maybeActivateCredit('first_meeting_note');
+      }
       return { notes };
     },
     'meeting-prep:resolve': async (_event, args) => {
@@ -2415,6 +2509,7 @@ export function setupIpcHandlers() {
           ...(args.model ? { model: args.model } : {}),
           ...(args.provider ? { provider: args.provider } : {}),
         });
+        void maybeActivateCredit('first_bg_agent');
         return { success: true, slug };
       } catch (err) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };
@@ -2451,11 +2546,25 @@ export function setupIpcHandlers() {
     'billing:getInfo': async () => {
       return await getBillingInfo();
     },
+    // First-time-action credit rewards
+    'credits:getState': async () => {
+      return await getCreditsState();
+    },
+    'referral:claim': async (_event, args) => {
+      return await claimReferralCode(args.code);
+    },
     'notifications:getSettings': async () => {
       return loadNotificationSettings();
     },
     'notifications:setSettings': async (_event, args) => {
       saveNotificationSettings(args);
+      return { success: true };
+    },
+    'turnLimits:getSettings': async () => {
+      return await loadTurnLimitsSettings();
+    },
+    'turnLimits:setSettings': async (_event, args) => {
+      await saveTurnLimitsSettings(args);
       return { success: true };
     },
     // Embedded browser handlers (WebContentsView + navigation)

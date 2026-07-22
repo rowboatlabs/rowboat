@@ -16,7 +16,7 @@ import { ReasoningEffort } from "./models.js";
 
 export type JsonValue = z.infer<ReturnType<typeof z.json>>;
 
-export const DEFAULT_MAX_MODEL_CALLS = 20;
+export const DEFAULT_MAX_MODEL_CALLS = 50;
 export const MODEL_CALL_LIMIT_ERROR_CODE = "model-call-limit";
 
 // ---------------------------------------------------------------------------

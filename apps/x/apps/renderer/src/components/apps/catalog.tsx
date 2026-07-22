@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { BadgeCheck, Bot, Download, Link2, RefreshCw, Search, ShieldAlert, Star } from 'lucide-react'
 import type { rowboatApp } from '@x/shared'
+import { themeForIndex, patternFor } from '@/components/apps/card-theme'
+import { ModelSelector } from '@/components/model-selector'
 
 // Catalog tab (spec §14): search the registry, install with the D18 capability
 // disclosure, install from a direct bundle URL.
@@ -88,26 +90,9 @@ function EnableAgentsDialog({ appName, names, defaultModel, busy, onEnable, onSk
   onEnable: (model: ModelChoice | null) => void
   onSkip: () => void
 }) {
-  const [options, setOptions] = useState<Array<ModelChoice & { label: string }>>([])
-  const [selected, setSelected] = useState<string>(defaultModel ? `${defaultModel.provider}::${defaultModel.model}` : '')
-
-  useEffect(() => {
-    void (async () => {
-      try {
-        const r = await window.ipc.invoke('models:list', null)
-        setOptions(r.providers.flatMap((p) => p.models.map((m) => ({
-          provider: p.id,
-          model: m.id,
-          label: `${m.name ?? m.id} (${p.name})`,
-        }))))
-      } catch { /* no picker — enable keeps the pinned model */ }
-    })()
-  }, [])
-
-  const choice = (): ModelChoice | null => {
-    const [provider, model] = selected.split('::')
-    return provider && model ? { provider, model } : null
-  }
+  // Pre-seeded with the host-pinned model; "(default)" (null) enables
+  // without a model patch, keeping whatever each agent has pinned.
+  const [selected, setSelected] = useState<ModelChoice | null>(defaultModel ?? null)
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
@@ -122,24 +107,21 @@ function EnableAgentsDialog({ appName, names, defaultModel, busy, onEnable, onSk
         <ul className="mb-3 list-inside list-disc text-sm text-muted-foreground">
           {names.map((n) => <li key={n}>{n}</li>)}
         </ul>
-        {options.length > 0 && (
-          <label className="mb-3 flex items-center gap-2 text-sm text-muted-foreground">
-            Run with
-            <select value={selected} onChange={(e) => setSelected(e.target.value)}
-              className="min-w-0 flex-1 truncate rounded-md border border-border bg-background px-2 py-1 text-sm">
-              {defaultModel && !options.some((o) => o.provider === defaultModel.provider && o.model === defaultModel.model) && (
-                <option value={`${defaultModel.provider}::${defaultModel.model}`}>{defaultModel.model} (default)</option>
-              )}
-              {options.map((o) => (
-                <option key={`${o.provider}::${o.model}`} value={`${o.provider}::${o.model}`}>{o.label}</option>
-              ))}
-            </select>
-          </label>
-        )}
+        <label className="mb-3 flex items-center gap-2 text-sm text-muted-foreground">
+          Run with
+          <div className="min-w-0 flex-1">
+            <ModelSelector
+              variant="field"
+              inheritDefault={{ label: '(default)' }}
+              value={selected}
+              onChange={setSelected}
+            />
+          </div>
+        </label>
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onSkip} disabled={busy}
             className="rounded-md border border-border px-3 py-1.5 text-sm font-medium hover:bg-accent">Not now</button>
-          <button type="button" onClick={() => onEnable(choice())} disabled={busy}
+          <button type="button" onClick={() => onEnable(selected)} disabled={busy}
             className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50">
             {busy ? 'Turning on…' : 'Turn on & run now'}
           </button>
@@ -338,37 +320,58 @@ export function CatalogTab({ onInstalled }: { onInstalled: (folder: string) => v
           {query ? 'No apps match your search.' : 'No apps in the catalog yet — be the first to publish one.'}
         </div>
       ) : (
-        <div className="space-y-2">
-          {ranked.map((r) => (
-            <div key={r.name} className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3">
-              <div className="min-w-0 flex-1">
-                <div className="flex items-baseline gap-2">
-                  <span className="truncate text-sm font-semibold">{r.name}</span>
-                  <span className="text-xs text-muted-foreground">by {r.owner}</span>
+        <div className="ma-grid">
+          {ranked.map((r, i) => {
+            const theme = themeForIndex(i)
+            const installedFolder = installedByName.get(r.name)
+            return (
+              <div
+                key={r.name}
+                role="button"
+                tabIndex={0}
+                onClick={() => installedFolder ? onInstalled(installedFolder) : void startInstall(r.name)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    if (installedFolder) onInstalled(installedFolder)
+                    else void startInstall(r.name)
+                  }
+                }}
+                className={`ma-card ma-pat-${patternFor(r.name)}`}
+                style={{ '--accent': theme.accent, '--glow': theme.glow } as React.CSSProperties}
+              >
+                <div className="ma-top">
+                  {installedFolder && <span className="ma-badge">INSTALLED</span>}
+                  <button type="button"
+                    title={starred[r.repo] ? 'Unstar on GitHub' : 'Star on GitHub'}
+                    onClick={(e) => { e.stopPropagation(); void toggleStar(r.repo) }}
+                    className={`flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium hover:bg-foreground/10 ${starred[r.repo] ? 'text-amber-500' : 'text-muted-foreground'}`}>
+                    <Star className={`size-3.5 ${starred[r.repo] ? 'fill-current' : ''}`} />
+                    {stars[r.repo] ?? '—'}
+                  </button>
                 </div>
-                <p className="truncate text-xs text-muted-foreground">{r.description || 'No description.'}</p>
+                <div className="ma-title">{r.name}</div>
+                <div className="ma-owner">by {r.owner}</div>
+                <div className="ma-desc">{r.description || 'No description.'}</div>
+                <div className="ma-footer">
+                  <span className="ma-lastrun">{r.repo}</span>
+                  {installedFolder ? (
+                    <button type="button" title="Installed — open it"
+                      onClick={(e) => { e.stopPropagation(); onInstalled(installedFolder) }}
+                      className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium text-green-600 hover:bg-green-500/10 dark:text-green-500">
+                      <BadgeCheck className="size-4" /> Open
+                    </button>
+                  ) : (
+                    <button type="button"
+                      onClick={(e) => { e.stopPropagation(); void startInstall(r.name) }}
+                      className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm font-medium hover:bg-accent">
+                      <Download className="size-4" /> Install
+                    </button>
+                  )}
+                </div>
               </div>
-              <button type="button"
-                title={starred[r.repo] ? 'Unstar on GitHub' : 'Star on GitHub'}
-                onClick={() => void toggleStar(r.repo)}
-                className={`flex items-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium hover:bg-accent ${starred[r.repo] ? 'text-amber-500' : 'text-muted-foreground'}`}>
-                <Star className={`size-3.5 ${starred[r.repo] ? 'fill-current' : ''}`} />
-                {stars[r.repo] ?? '—'}
-              </button>
-              {installedByName.has(r.name) ? (
-                <button type="button" title="Installed — open it"
-                  onClick={() => onInstalled(installedByName.get(r.name)!)}
-                  className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium text-green-600 hover:bg-green-500/10 dark:text-green-500">
-                  <BadgeCheck className="size-4" /> Installed
-                </button>
-              ) : (
-                <button type="button" onClick={() => void startInstall(r.name)}
-                  className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm font-medium hover:bg-accent">
-                  <Download className="size-4" /> Install
-                </button>
-              )}
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
 

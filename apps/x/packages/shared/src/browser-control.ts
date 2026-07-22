@@ -23,6 +23,22 @@ export const HttpAuthRequestSchema = z.object({
   realm: z.string().optional(),
 });
 
+// A screen or window offered to the user when a page in the embedded browser
+// calls getDisplayMedia() (e.g. "Present now" in Google Meet). Main gathers
+// these via desktopCapturer and the renderer shows a picker dialog.
+export const DisplayMediaSourceSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  kind: z.enum(['screen', 'window']),
+  thumbnailDataUrl: z.string(),
+  appIconDataUrl: z.string().nullable(),
+});
+
+export const DisplayMediaRequestSchema = z.object({
+  requestId: z.string(),
+  sources: z.array(DisplayMediaSourceSchema),
+});
+
 export const BrowserPageElementSchema = z.object({
   index: z.number().int().positive(),
   tagName: z.string(),
@@ -144,6 +160,8 @@ export const BrowserControlResultSchema = z.object({
 export type BrowserTabState = z.infer<typeof BrowserTabStateSchema>;
 export type BrowserState = z.infer<typeof BrowserStateSchema>;
 export type HttpAuthRequest = z.infer<typeof HttpAuthRequestSchema>;
+export type DisplayMediaSource = z.infer<typeof DisplayMediaSourceSchema>;
+export type DisplayMediaRequest = z.infer<typeof DisplayMediaRequestSchema>;
 export type BrowserPageElement = z.infer<typeof BrowserPageElementSchema>;
 export type BrowserPageSnapshot = z.infer<typeof BrowserPageSnapshotSchema>;
 export type BrowserControlAction = z.infer<typeof BrowserControlActionSchema>;

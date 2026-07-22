@@ -1,6 +1,6 @@
 import { BrowserWindow } from 'electron';
 import { ipc } from '@x/shared';
-import { browserViewManager, type BrowserState, type HttpAuthRequest } from './view.js';
+import { browserViewManager, type BrowserState, type DisplayMediaRequest, type HttpAuthRequest } from './view.js';
 
 type IPCChannels = ipc.IPCChannels;
 
@@ -21,6 +21,7 @@ type BrowserHandlers = {
   'browser:reload': InvokeHandler<'browser:reload'>;
   'browser:getState': InvokeHandler<'browser:getState'>;
   'browser:httpAuthResponse': InvokeHandler<'browser:httpAuthResponse'>;
+  'browser:displayMediaResponse': InvokeHandler<'browser:displayMediaResponse'>;
 };
 
 /**
@@ -66,6 +67,9 @@ export const browserIpcHandlers: BrowserHandlers = {
   'browser:httpAuthResponse': async (_event, args) => {
     return browserViewManager.respondToHttpAuth(args);
   },
+  'browser:displayMediaResponse': async (_event, args) => {
+    return browserViewManager.respondToDisplayMedia(args);
+  },
 };
 
 /**
@@ -95,5 +99,13 @@ export function setupBrowserEventForwarding(): void {
 
   browserViewManager.on('http-auth-resolved', (requestId: string) => {
     broadcast('browser:httpAuthResolved', { requestId });
+  });
+
+  browserViewManager.on('display-media-request', (request: DisplayMediaRequest) => {
+    broadcast('browser:displayMediaRequest', request);
+  });
+
+  browserViewManager.on('display-media-resolved', (requestId: string) => {
+    broadcast('browser:displayMediaResolved', { requestId });
   });
 }

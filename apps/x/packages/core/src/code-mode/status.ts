@@ -5,6 +5,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import { CodeModeAgentStatus } from './types.js';
 import { isEngineProvisioned } from './acp/engine-provisioner.js';
+import { decodeJwtPayload } from '../auth/jwt.js';
 
 const execAsync = promisify(exec);
 
@@ -38,20 +39,6 @@ export function commonInstallPaths(binary: string): string[] {
         path.join(home, '.nvm', 'versions', 'node'),  // partial; nvm has versioned subdirs
         path.join(home, 'bin'),
     ].map(dir => path.join(dir, binary));
-}
-
-function decodeJwtPayload(token: string): Record<string, unknown> | null {
-    try {
-        const parts = token.split('.');
-        if (parts.length < 2) return null;
-        const padded = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-        const pad = padded.length % 4 === 0 ? '' : '='.repeat(4 - (padded.length % 4));
-        const json = Buffer.from(padded + pad, 'base64').toString('utf-8');
-        const parsed = JSON.parse(json);
-        return typeof parsed === 'object' && parsed !== null ? parsed as Record<string, unknown> : null;
-    } catch {
-        return null;
-    }
 }
 
 // Given the raw credentials JSON (from a file or the macOS Keychain), decide

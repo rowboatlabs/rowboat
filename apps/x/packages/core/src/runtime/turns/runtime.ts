@@ -163,7 +163,9 @@ export class TurnRuntime implements ITurnRuntime {
             config: {
                 autoPermission: input.config.autoPermission ?? false,
                 humanAvailable: input.config.humanAvailable,
-                maxModelCalls: input.config.maxModelCalls ?? DEFAULT_MAX_MODEL_CALLS,
+                maxModelCalls:
+                    input.config.maxModelCalls ??
+                    (await defaultMaxModelCalls()),
                 ...(input.config.reasoningEffort === undefined
                     ? {}
                     : { reasoningEffort: input.config.reasoningEffort }),
@@ -1357,6 +1359,21 @@ function parseToolAdditions(
     }
     const parsed = ToolAdditionsMetadata.safeParse(metadata);
     return parsed.success ? parsed.data.toolAdditions : undefined;
+}
+
+// The default budget for turns created without an explicit maxModelCalls:
+// the user's configured global limit (config/turn_limits.json). Loaded
+// lazily so this module doesn't statically pull in the fs-backed config;
+// any load problem falls back to the built-in default.
+async function defaultMaxModelCalls(): Promise<number> {
+    try {
+        const { loadTurnLimitsSettings } = await import(
+            "../../config/turn_limits.js"
+        );
+        return (await loadTurnLimitsSettings()).maxModelCalls;
+    } catch {
+        return DEFAULT_MAX_MODEL_CALLS;
+    }
 }
 
 function errorMessage(error: unknown): string {

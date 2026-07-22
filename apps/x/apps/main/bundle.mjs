@@ -91,6 +91,17 @@ if (!fs.existsSync(stagedBinary)) {
 }
 console.log('✅ node-pty staged in .package/node_modules');
 
+// electron-chrome-extensions injects a preload script into browser tabs to
+// implement the chrome.* extension APIs. It resolves that file at runtime:
+// via require.resolve when node_modules is present (dev), falling back to a
+// file next to the running bundle (packaged app, where node_modules is
+// gone). Stage it next to main.cjs for the packaged case.
+const crxPreloadSrc = fs.realpathSync(
+  path.join(here, 'node_modules', 'electron-chrome-extensions', 'dist', 'chrome-extension-api.preload.js'),
+);
+fs.copyFileSync(crxPreloadSrc, path.join(here, '.package', 'dist', 'chrome-extension-api.preload.js'));
+console.log('✅ electron-chrome-extensions preload staged');
+
 // Compile the mic-monitor helper (ambient meeting detection) on macOS.
 // Best-effort: without swiftc — or on other platforms — the app still works,
 // ad-hoc meeting detection just stays off (main checks the binary exists).

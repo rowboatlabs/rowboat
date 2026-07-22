@@ -29,6 +29,7 @@ import backgroundTaskSkill from "./background-task/skill.js";
 import notifyUserSkill from "./notify-user/skill.js";
 import appsSkill from "./apps/skill.js";
 import slackSkill from "./slack/skill.js";
+import chartsSkill from "./charts/skill.js";
 
 const CURRENT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const CATALOG_PREFIX = "src/runtime/assembly/skills";
@@ -76,6 +77,12 @@ const definitions: SkillDefinition[] = [
     title: "Meeting Prep",
     summary: "Prepare for meetings by gathering context about attendees from the knowledge base.",
     content: meetingPrepSkill,
+  },
+  {
+    id: "charts",
+    title: "Charts",
+    summary: "Render interactive charts (line, bar, pie) inline in the chat reply. Use when the user asks for a chart/graph/visualization or when gathered data is clearer as a picture.",
+    content: chartsSkill,
   },
   {
     id: "organize-files",

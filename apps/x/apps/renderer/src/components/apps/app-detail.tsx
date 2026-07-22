@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { X, RotateCcw, Play, UploadCloud, ArrowUpCircle, Trash2 } from 'lucide-react'
 import type { rowboatApp } from '@x/shared'
 import { PublishDialog } from '@/components/apps/publish-dialog'
+import { unpinApp } from '@/lib/pinned-apps'
 import * as analytics from '@/lib/analytics'
 
 // App detail panel (spec §14): manifest info, provenance/publish state,
@@ -79,6 +80,7 @@ export function AppDetail({ folder, onClose }: { folder: string; onClose: () => 
     const agentNote = agents.length ? `\n\nThis also deletes its background agents: ${agents.map((a) => a.name).join(', ')}.` : ''
     if (!window.confirm(`Uninstall this app? Its data/ folder will be deleted.${agentNote}`)) return
     await window.ipc.invoke('apps:uninstall', { folder })
+    unpinApp(folder)
     onClose()
   })
 
@@ -88,6 +90,7 @@ export function AppDetail({ folder, onClose }: { folder: string; onClose: () => 
     const publishNote = app?.publish ? '\n\nThe published copy (GitHub repo + catalog listing) is not touched.' : ''
     if (!window.confirm(`Delete this app? The whole folder, including data/, is removed from this machine.${publishNote}${agentNote}`)) return
     await window.ipc.invoke('apps:delete', { folder })
+    unpinApp(folder)
     onClose()
   })
 

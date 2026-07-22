@@ -96,6 +96,14 @@ All in `apps/renderer/src/lib/analytics.ts`:
 - `search_executed` — `{ types: string[] }`
 - `note_exported` — `{ format }`
 
+### Client auto-update funnel
+
+The desktop client's own updates — distinct from the in-app apps feature, which owns `app_updated`:
+
+- `update_prompted` — renderer (`apps/renderer/src/lib/analytics.ts`): the "Update available" card was shown for a staged update
+- `update_restarted` — main (`apps/main/src/updater.ts`), `{ from, to? }`: the user clicked restart-to-update (`to` may be missing when the update feed doesn't report the release name)
+- `update_failed` — main (`apps/main/src/updater.ts`), `{ message }`: the auto-updater errored (includes network errors for now)
+- `client_updated` — main (`apps/main/src/ipc.ts`), `{ from, to }`: first launch on a newer version (fires once per update, whatever the restart path; downgrades restamp silently and don't fire)
 ### `view_opened` — feature-importance funnel
 
 One event per view the user lands on, fired centrally from the `currentViewState` effect in `apps/renderer/src/App.tsx`. `view` is one of: `chat`, `file`, `graph`, `task`, `suggested-topics`, `meetings`, `live-notes`, `email`, `workspace`, `knowledge-view`, `chat-history`, `home`, `code`, `bg-tasks`, `apps`. Keyed on the view *type*, so switching files or threads inside a view doesn't re-fire.
@@ -173,7 +181,8 @@ All renderer events live in `apps/renderer/src/lib/analytics.ts` (typed wrappers
 
 - `email_send_failed` — send returned an error or threw (`components/email-view.tsx`)
 - `meeting_summarize_failed` — post-recording notes generation threw (`App.tsx`)
-- `bg_agent_run_failed` / `bg_agent_run_completed` — `{ trigger: 'manual' | 'cron' | 'window' | 'event' }` **(core)** — every background-agent run settles as exactly one of these (`packages/core/src/background-tasks/runner.ts`), giving a failure *rate* across all trigger sources, not just manual clicks
+- `bg_agent_run_failed` — `{ trigger: 'manual' | 'cron' | 'window' | 'event', error: string }` **(core)** — emitted when a background-agent run fails; `error` contains the normalized failure message
+- `bg_agent_run_completed` — `{ trigger: 'manual' | 'cron' | 'window' | 'event' }` **(core)** — emitted when a background-agent run succeeds; together these events give a failure *rate* across all trigger sources, not just manual clicks
 
 **Misc**:
 

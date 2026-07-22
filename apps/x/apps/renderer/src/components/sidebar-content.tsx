@@ -3,6 +3,7 @@
 import * as React from "react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
+  AppWindow,
   ArrowUpRight,
   Bot,
   ChevronRight,
@@ -16,6 +17,7 @@ import {
   LayoutGrid,
   Mic,
   MoreVertical,
+  PanelLeftClose,
   Pencil,
   Pin,
   SquarePen,
@@ -71,9 +73,17 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu"
 import { cn } from "@/lib/utils"
+import { getPinnedApps, onPinnedAppsChanged, unpinApp } from "@/lib/pinned-apps"
 import { isOutOfCredits, CREDIT_EXHAUSTED_EVENT, CREDIT_REPLENISHED_EVENT } from "@/lib/credit-status"
 import { SettingsDialog } from "@/components/settings-dialog"
+import { SidebarCreditRewards } from "@/components/sidebar-credit-rewards"
 import { MascotFaceIcon } from "@/components/talking-head"
 import { extractConferenceLink } from "@/lib/calendar-event"
 import { useBilling } from "@/hooks/useBilling"
@@ -180,6 +190,8 @@ type SidebarContentPanelProps = {
   onOpenCode?: () => void
   onOpenBgTasks?: () => void
   onOpenApps?: () => void
+  /** Open a specific app (pinned in the sidebar) inside the Apps view. */
+  onOpenApp?: (folder: string) => void
   onOpenAgent?: (slug: string) => void
   recentRuns?: { id: string; title?: string; createdAt: string; modifiedAt?: string }[]
   onOpenRun?: (runId: string) => void
@@ -436,6 +448,7 @@ export function SidebarContentPanel({
   onOpenCode,
   onOpenBgTasks,
   onOpenApps,
+  onOpenApp,
   recentRuns = [],
   onOpenRun,
   onRenameRun,
@@ -603,6 +616,27 @@ export function SidebarContentPanel({
     const rest = sorted.filter((r) => !pinnedChatIds.includes(r.id))
     return [...pinned, ...rest.slice(0, Math.max(0, 10 - pinned.length))]
   }, [recentRuns, pinnedChatIds])
+
+  // Apps pinned to the sidebar (right-click an app card in the Apps view).
+  // Names resolve via apps:list; until then rows show the folder slug, and
+  // pins whose app no longer exists are hidden (but kept in storage).
+  const [pinnedAppFolders, setPinnedAppFolders] = useState<string[]>(() => getPinnedApps())
+  const [pinnedAppNames, setPinnedAppNames] = useState<Map<string, string> | null>(null)
+  useEffect(() => onPinnedAppsChanged(setPinnedAppFolders), [])
+  useEffect(() => {
+    if (pinnedAppFolders.length === 0) return
+    let cancelled = false
+    void window.ipc.invoke('apps:list', {})
+      .then((r) => {
+        if (cancelled) return
+        setPinnedAppNames(new Map(r.apps.map((a) => [a.folder, a.manifest?.name ?? a.folder])))
+      })
+      .catch(() => { /* fall back to folder names */ })
+    return () => { cancelled = true }
+  }, [pinnedAppFolders])
+  const pinnedApps = pinnedAppFolders
+    .filter((f) => pinnedAppNames === null || pinnedAppNames.has(f))
+    .map((f) => ({ folder: f, name: pinnedAppNames?.get(f) ?? f }))
 
   // Chat pending delete confirmation, if any.
   const [deleteChatTarget, setDeleteChatTarget] = useState<{ id: string; title: string } | null>(null)
@@ -966,6 +1000,24 @@ export function SidebarContentPanel({
                   <span className="flex-1 truncate">Apps</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
+              {pinnedApps.map(({ folder, name }) => (
+                <SidebarMenuItem key={folder}>
+                  <ContextMenu>
+                    <ContextMenuTrigger asChild>
+                      <SidebarMenuButton onClick={() => onOpenApp?.(folder)} className="pl-7">
+                        <AppWindow className="size-4 shrink-0 text-muted-foreground" />
+                        <span className="flex-1 truncate">{name}</span>
+                      </SidebarMenuButton>
+                    </ContextMenuTrigger>
+                    <ContextMenuContent>
+                      <ContextMenuItem onClick={() => unpinApp(folder)}>
+                        <PanelLeftClose className="mr-2 size-3.5" />
+                        Remove from sidebar
+                      </ContextMenuItem>
+                    </ContextMenuContent>
+                  </ContextMenu>
+                </SidebarMenuItem>
+              ))}
               <SidebarMenuItem>
                 <SidebarMenuButton
                   data-tour-id="nav-agents"
@@ -1140,6 +1192,14 @@ export function SidebarContentPanel({
           </AlertDialogContent>
         </AlertDialog>
       </SidebarContent>
+      {/* First-time-action credit rewards (feature-flagged, signed-in only) */}
+      <SidebarCreditRewards
+        onOpenEmail={onOpenEmail}
+        onOpenMeetings={onOpenMeetings}
+        onOpenAgents={onOpenBgTasks}
+        onOpenApps={onOpenApps}
+        onConnectAccounts={() => setConnectionsSettingsOpen(true)}
+      />
       {/* Billing / upgrade CTA or Log in CTA */}
       {isRowboatConnected && billing ? (() => {
         const upgradeLabel = !billing.subscriptionPlanId || currentBillingPlan?.category === 'free' || currentBillingPlan?.category === 'starter' ? 'Upgrade' : 'Manage'

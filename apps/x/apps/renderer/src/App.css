@@ -1445,3 +1445,10 @@
     transform: translateX(-120%);
   }
 }
+
+/* Issue #749: BiDi. unicode-bidi:plaintext resolves direction PER BLOCK from
+   its first strong character, so a message mixing English + RTL paragraphs
+   aligns each block correctly. text-align:start follows the resolved dir. */
+.bidi-auto :is(p,h1,h2,h3,h4,h5,h6,li,blockquote,td,th){unicode-bidi:plaintext;text-align:start;}
+/* Code is inherently LTR — keep it stable inside RTL messages. */
+.bidi-auto :is(pre,code,kbd,samp){direction:ltr;unicode-bidi:isolate;text-align:left;}

@@ -91,6 +91,8 @@ export const backgroundTaskTools: z.infer<typeof BuiltinToolsSchema> = {
                     ...(input.model ? { model: input.model } : {}),
                     ...(input.provider ? { provider: input.provider } : {}),
                 });
+                const { maybeActivateCredit } = await import("../../../billing/credits.js");
+                void maybeActivateCredit('first_bg_agent');
                 return { success: true, slug: result.slug, ...(warning ? { warning } : {}) };
             } catch (err) {
                 return { success: false, error: err instanceof Error ? err.message : String(err) };

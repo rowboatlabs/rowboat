@@ -18,7 +18,7 @@ import {
 import { disposeAllTerminals } from "./terminal.js";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname } from "node:path";
-import { updateElectronApp, UpdateSourceType } from "update-electron-app";
+import { initUpdater } from "./updater.js";
 import { init as initGmailSync } from "@x/core/dist/knowledge/sync_gmail.js";
 import { init as initCalendarSync } from "@x/core/dist/knowledge/sync_calendar.js";
 import { init as initFirefliesSync } from "@x/core/dist/knowledge/sync_fireflies.js";
@@ -40,6 +40,7 @@ import { startSkillsWatcher, stopSkillsWatcher } from "@x/core/dist/runtime/asse
 import { init as initAppsServer, shutdown as shutdownAppsServer } from "@x/core/dist/apps/server.js";
 import { registerAppsHostApi } from "@x/core/dist/apps/host-api.js";
 import { setTokenCipher as setGithubTokenCipher } from "@x/core/dist/apps/github-auth.js";
+import { setTokenCipher as setChatGPTTokenCipher } from "@x/core/dist/auth/chatgpt-auth.js";
 import { shutdown as shutdownAnalytics } from "@x/core/dist/analytics/posthog.js";
 import { identifyIfSignedIn } from "@x/core/dist/analytics/identify.js";
 import { migrateRuns } from "@x/core/dist/migrations/runs/migrate.js";
@@ -56,6 +57,7 @@ import type { CodeModeManager } from "@x/core/dist/code-mode/acp/manager.js";
 import type { ISessions } from "@x/core/dist/runtime/sessions/index.js";
 import { browserViewManager, BROWSER_PARTITION } from "./browser/view.js";
 import { setupBrowserEventForwarding } from "./browser/ipc.js";
+import { setupBrowserExtensions } from "./browser/extensions.js";
 import { ElectronBrowserControlService } from "./browser/control-service.js";
 import { ElectronNotificationService } from "./notification/electron-notification-service.js";
 import {
@@ -227,52 +229,35 @@ protocol.registerSchemesAsPrivileged([
 
 const ALLOWED_SESSION_PERMISSIONS = new Set(["media", "display-capture", "clipboard-read", "clipboard-sanitized-write"]);
 
-// On Linux, Chromium's loopback capture records the default sink's monitor
-// through the PulseAudio layer, at the monitor source's own volume. Desktop
-// tools sometimes leave that volume near zero — it's invisible plumbing that
-// doesn't affect what the user hears — which turns the whole capture into
-// digital silence with no error anywhere. Raise it back to 100% before
-// capture starts (raise only, so a deliberate >100% boost is left alone).
-// Best-effort: no pactl or no Pulse layer just skips.
-async function ensureLinuxMonitorVolume(): Promise<void> {
-  const execFileP = promisify(execFile);
-  try {
-    const { stdout: sinkOut } = await execFileP("pactl", ["get-default-sink"], { timeout: 3000 });
-    const monitor = `${sinkOut.trim()}.monitor`;
-    const { stdout: volOut } = await execFileP("pactl", ["get-source-volume", monitor], { timeout: 3000 });
-    const percents = [...volOut.matchAll(/(\d+)%/g)].map((m) => Number(m[1]));
-    if (percents.length === 0 || Math.min(...percents) >= 100) return;
-    await execFileP("pactl", ["set-source-volume", monitor, "100%"], { timeout: 3000 });
-    console.log(`[meeting] Raised ${monitor} volume from ${Math.min(...percents)}% to 100% for system-audio capture`);
-  } catch {
-    // pactl missing or non-Pulse audio stack — nothing to fix here.
-  }
-}
+// Granted to the embedded browser partition on top of the base set.
+// `notifications` lets sites (WhatsApp Web, Gmail, Slack, ...) show native OS
+// notifications via the HTML5 Notification API — Electron renders these
+// through the system notification center once the permission resolves to
+// granted. Background Web Push is still unavailable (Electron has no FCM),
+// so notifications only fire while the site is loaded in a tab. The app's
+// own renderer keeps the base set; it notifies through the main-process
+// notification service instead.
+const BROWSER_EXTRA_PERMISSIONS = ["notifications"] as const;
 
-function configureSessionPermissions(targetSession: Session): void {
+function configureSessionPermissions(targetSession: Session, extraPermissions: readonly string[] = []): void {
+  const allowed = new Set([...ALLOWED_SESSION_PERMISSIONS, ...extraPermissions]);
+
   targetSession.setPermissionCheckHandler((_webContents, permission) => {
-    return ALLOWED_SESSION_PERMISSIONS.has(permission);
+    return allowed.has(permission);
   });
 
   targetSession.setPermissionRequestHandler((_webContents, permission, callback) => {
-    callback(ALLOWED_SESSION_PERMISSIONS.has(permission));
+    callback(allowed.has(permission));
   });
+}
 
-  // Auto-approve display media requests and route system audio as loopback.
-  // Electron requires a video source in the callback even if we only want audio.
-  // We pass the first available screen source; the renderer discards the video track.
-  targetSession.setDisplayMediaRequestHandler(async (request, callback) => {
-    // On Linux, enumerating screens via desktopCapturer goes through the
-    // Wayland screencast portal, which can block on a system dialog or hang
-    // outright. Requests that want audio (meeting transcription — the only
-    // audio consumer; it discards the video track) don't need a real screen,
-    // so answer with the requesting frame as the mandatory video source and
-    // Chromium's PulseAudio loopback for the audio.
-    if (process.platform === 'linux' && request.audioRequested && request.frame) {
-      await ensureLinuxMonitorVolume();
-      callback({ video: request.frame, audio: 'loopback' });
-      return;
-    }
+// Auto-approve display media requests and route system audio as loopback.
+// Electron requires a video source in the callback even if we only want audio.
+// We pass the first available screen source; the renderer discards the video track.
+// App session only — the embedded browser partition registers its own handler
+// (a user-facing source picker) in BrowserViewManager.
+function configureAppDisplayMediaHandler(targetSession: Session): void {
+  targetSession.setDisplayMediaRequestHandler(async (_request, callback) => {
     const sources = await desktopCapturer.getSources({ types: ['screen'] });
     if (sources.length === 0) {
       callback({});
@@ -380,7 +365,8 @@ function createWindow(options: { startHidden?: boolean } = {}) {
   });
 
   configureSessionPermissions(session.defaultSession);
-  configureSessionPermissions(session.fromPartition(BROWSER_PARTITION));
+  configureAppDisplayMediaHandler(session.defaultSession);
+  configureSessionPermissions(session.fromPartition(BROWSER_PARTITION), BROWSER_EXTRA_PERMISSIONS);
 
   mainWindow = win;
   setMainWindowForDeepLinks(win);
@@ -465,16 +451,9 @@ app.whenReady().then(async () => {
   // serves workspace files via app://workspace/<rel-path> for media previews.
   registerAppProtocol();
 
-  // Initialize auto-updater (only in production)
-  if (app.isPackaged) {
-    updateElectronApp({
-      updateSource: {
-        type: UpdateSourceType.ElectronPublicUpdateService,
-        repo: "rowboatlabs/rowboat",
-      },
-      notifyUser: true, // Shows native dialog when update is available
-    });
-  }
+  // Initialize auto-updater (no-ops in dev). Update state is pushed to the
+  // renderer (updater:status), which owns the restart prompt — see updater.ts.
+  initUpdater();
 
   // The agent-slack CLI ships bundled with the app (.package/dist/agent-slack.cjs)
   // and is resolved per call by the shared executor in @x/core. Availability is
@@ -505,6 +484,7 @@ app.whenReady().then(async () => {
 
   setupIpcHandlers();
   setupBrowserEventForwarding();
+  setupBrowserExtensions();
 
   // Start the Rowboat Apps server (per-app origins on 127.0.0.1:3210) BEFORE
   // the window and the long service-init chain below. The Apps view is
@@ -516,6 +496,12 @@ app.whenReady().then(async () => {
   // GitHub publish token at rest: encrypt via the OS keychain when available
   // (core stays electron-free; the cipher is injected here).
   setGithubTokenCipher({
+    isAvailable: () => safeStorage.isEncryptionAvailable(),
+    encrypt: (plain) => safeStorage.encryptString(plain).toString('base64'),
+    decrypt: (encrypted) => safeStorage.decryptString(Buffer.from(encrypted, 'base64')),
+  });
+  // ChatGPT subscription tokens at rest: same keychain-backed cipher.
+  setChatGPTTokenCipher({
     isAvailable: () => safeStorage.isEncryptionAvailable(),
     encrypt: (plain) => safeStorage.encryptString(plain).toString('base64'),
     decrypt: (encrypted) => safeStorage.decryptString(Buffer.from(encrypted, 'base64')),

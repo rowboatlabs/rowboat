@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Terminal, AlertTriangle, RefreshCw, PanelRight, Bell, Smartphone } from "lucide-react"
+import { Server, Key, Shield, Palette, Monitor, Sun, Moon, Loader2, CheckCircle2, Plus, Minus, X, Wrench, Search, ChevronRight, Link2, Tags, Mail, BookOpen, User, Plug, HelpCircle, MessageCircle, Terminal, AlertTriangle, RefreshCw, PanelRight, Bell, Smartphone } from "lucide-react"
 
 import {
   Dialog,
@@ -29,10 +29,14 @@ import { AccountSettings } from "@/components/settings/account-settings"
 import { ConnectedAccountsSettings } from "@/components/settings/connected-accounts-settings"
 import { MobileChannelsSettings } from "@/components/settings/mobile-channels-settings"
 import type { ApprovalPolicy } from "@x/shared/src/code-mode.js"
+import { DEFAULT_TURN_LIMITS_SETTINGS } from "@x/shared/src/turn-limits.js"
+import type { ipc as ipcShared } from "@x/shared"
 import { startProvisioning, useProvisioning, enabledOptimistic, type AgentStatus, type CodeModeAgentStatus } from "@/lib/code-mode-provisioning"
 import { useProviderModels } from "@/hooks/use-provider-models"
+import { useChatGPT } from "@/hooks/useChatGPT"
+import { ModelSelector, type ModelRef } from "@/components/model-selector"
 
-type ConfigTab = "account" | "connections" | "mobile" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "notifications" | "note-tagging" | "help"
+type ConfigTab = "account" | "connections" | "mobile" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "notifications" | "note-tagging" | "advanced" | "help"
 
 interface TabConfig {
   id: ConfigTab
@@ -108,6 +112,12 @@ const tabs: TabConfig[] = [
     description: "Configure tags for notes and emails",
   },
   {
+    id: "advanced",
+    label: "Advanced",
+    icon: Wrench,
+    description: "Advanced runtime and cost controls",
+  },
+  {
     id: "help",
     label: "Help",
     icon: HelpCircle,
@@ -118,7 +128,7 @@ const tabs: TabConfig[] = [
 /** Sidebar nav grouping: identity first, capabilities, then app-level. */
 const NAV_SECTIONS: { label: string | null; ids: ConfigTab[] }[] = [
   { label: null, ids: ["account", "connections", "mobile"] },
-  { label: "Configure", ids: ["models", "mcp", "security", "code-mode", "note-tagging"] },
+  { label: "Configure", ids: ["models", "mcp", "security", "code-mode", "note-tagging", "advanced"] },
   { label: "App", ids: ["appearance", "notifications", "help"] },
 ]
 
@@ -132,11 +142,139 @@ interface SettingsDialogProps {
   onOpenChange?: (open: boolean) => void
 }
 
+// --- Updates section (Help tab) ---
+
+type UpdaterStatus = ipcShared.IPCChannels['updater:status']['req']
+
+function UpdateSettings() {
+  const [status, setStatus] = useState<UpdaterStatus | null>(null)
+
+  useEffect(() => {
+    void window.ipc.invoke('updater:getStatus', null).then(setStatus)
+    return window.ipc.on('updater:status', setStatus)
+  }, [])
+
+  if (!status) return null
+
+  const checkNow = () => {
+    // Progress arrives via updater:status pushes; using the invoke's snapshot
+    // here could stomp a newer pushed state.
+    void window.ipc.invoke('updater:check', null)
+  }
+
+  let body: React.ReactNode
+  switch (status.state) {
+    case 'disabled':
+      body = (
+        <p className="text-xs text-muted-foreground">
+          Automatic updates are disabled in development builds.
+        </p>
+      )
+      break
+    case 'unsupported':
+      body = status.reason === 'not-in-applications' ? (
+        <p className="text-xs text-muted-foreground flex items-start gap-1.5">
+          <AlertTriangle className="size-3.5 shrink-0 mt-0.5 text-amber-500" />
+          Quit Rowboat and move it to the Applications folder to enable automatic updates.
+        </p>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          {"Automatic updates aren't available on this platform. "}
+          <a
+            href="https://github.com/rowboatlabs/rowboat/releases/latest"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline hover:text-foreground transition-colors"
+          >
+            Get the latest release
+          </a>
+        </p>
+      )
+      break
+    case 'checking':
+    case 'downloading':
+      body = (
+        <Button size="sm" variant="outline" disabled>
+          <Loader2 className="size-3.5 animate-spin" />
+          {status.state === 'checking' ? 'Checking for updates…' : 'Downloading update…'}
+        </Button>
+      )
+      break
+    case 'ready':
+      body = (
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-xs text-muted-foreground">
+            {status.newVersion
+              ? `Rowboat ${status.newVersion} is ready to install.`
+              : 'An update is ready to install.'}
+          </p>
+          <Button
+            size="sm"
+            className="shrink-0"
+            onClick={() => void window.ipc.invoke('updater:quitAndInstall', null)}
+          >
+            Restart to update
+          </Button>
+        </div>
+      )
+      break
+    case 'error':
+      body = (
+        <div className="flex items-start justify-between gap-3">
+          <p className="text-xs text-muted-foreground flex items-start gap-1.5">
+            <AlertTriangle className="size-3.5 shrink-0 mt-0.5 text-destructive" />
+            {`Update check failed: ${status.error ?? 'unknown error'}`}
+          </p>
+          <Button size="sm" variant="outline" className="shrink-0" onClick={checkNow}>
+            Try again
+          </Button>
+        </div>
+      )
+      break
+    case 'idle':
+      body = (
+        <div className="space-y-2">
+          {/* lastCheckedAt only exists after a check that found no update
+              (an available update moves the state to downloading/ready), so
+              idle + lastCheckedAt genuinely means "on the latest version". */}
+          {status.lastCheckedAt !== undefined && (
+            <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+              <CheckCircle2 className="size-3.5 text-green-500 shrink-0" />
+              <span>
+                {`You're up to date! Rowboat v${status.version} is the latest version.`}
+                <span className="text-muted-foreground/60">
+                  {` Checked at ${new Date(status.lastCheckedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.`}
+                </span>
+              </span>
+            </p>
+          )}
+          <Button size="sm" variant="outline" onClick={checkNow}>
+            <RefreshCw className="size-3.5" />
+            Check for updates
+          </Button>
+        </div>
+      )
+      break
+  }
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <h4 className="text-sm font-medium">Updates</h4>
+        <p className="text-xs text-muted-foreground mt-0.5">Rowboat v{status.version}</p>
+      </div>
+      {body}
+    </div>
+  )
+}
+
 // --- Help & Support tab ---
 
 function HelpSettings() {
   return (
     <div className="space-y-4">
+      <UpdateSettings />
+      <Separator />
       <div>
         <h4 className="text-sm font-medium">Help &amp; Support</h4>
         <p className="text-xs text-muted-foreground mt-0.5">Get help from our community</p>
@@ -348,12 +486,6 @@ function AppearanceSettings() {
 
 type LlmProviderFlavor = "openai" | "anthropic" | "google" | "openrouter" | "aigateway" | "ollama" | "openai-compatible"
 
-interface LlmModelOption {
-  id: string
-  name?: string
-  release_date?: string
-}
-
 const primaryProviders: Array<{ id: LlmProviderFlavor; name: string; description: string; icon: React.ElementType }> = [
   { id: "openai", name: "OpenAI", description: "GPT models", icon: OpenAIIcon },
   { id: "anthropic", name: "Anthropic", description: "Claude models", icon: AnthropicIcon },
@@ -403,8 +535,6 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
     ollama: { apiKey: "", baseURL: "http://localhost:11434", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
     "openai-compatible": { apiKey: "", baseURL: "http://localhost:1234/v1", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
   })
-  const [modelsCatalog, setModelsCatalog] = useState<Record<string, LlmModelOption[]>>({})
-  const [modelsLoading, setModelsLoading] = useState(false)
   const [testState, setTestState] = useState<{ status: "idle" | "testing" | "success" | "error"; error?: string }>({ status: "idle" })
   const [configLoading, setConfigLoading] = useState(true)
   const [showMoreProviders, setShowMoreProviders] = useState(false)
@@ -425,13 +555,14 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
     apiKey: activeConfig.apiKey,
     baseURL: activeConfig.baseURL,
   })
+  // "Sign in with ChatGPT" subscription state — only rendered on the OpenAI
+  // card; independent of the API-key providerConfigs state above.
+  const chatgpt = useChatGPT()
   const showApiKey = provider === "openai" || provider === "anthropic" || provider === "google" || provider === "openrouter" || provider === "aigateway" || provider === "openai-compatible"
   const requiresApiKey = provider === "openai" || provider === "anthropic" || provider === "google" || provider === "openrouter" || provider === "aigateway"
   const showBaseURL = provider === "ollama" || provider === "openai-compatible" || provider === "aigateway"
   const requiresBaseURL = provider === "ollama" || provider === "openai-compatible"
   const isLocalProvider = provider === "ollama" || provider === "openai-compatible"
-  const modelsForProvider = modelsCatalog[provider] || []
-  const showModelInput = isLocalProvider || modelsForProvider.length === 0
   const isMoreProvider = moreProviders.some(p => p.id === provider)
 
   const primaryModel = activeConfig.models[0] || ""
@@ -570,29 +701,6 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
       toast.error("Failed to save setting")
     }
   }, [])
-
-  // Load models catalog
-  useEffect(() => {
-    if (!dialogOpen) return
-
-    async function loadModels() {
-      try {
-        setModelsLoading(true)
-        const result = await window.ipc.invoke("models:list", null)
-        const catalog: Record<string, LlmModelOption[]> = {}
-        for (const p of result.providers || []) {
-          catalog[p.id] = p.models || []
-        }
-        setModelsCatalog(catalog)
-      } catch {
-        setModelsCatalog({})
-      } finally {
-        setModelsLoading(false)
-      }
-    }
-
-    loadModels()
-  }, [dialogOpen])
 
   // A saved openai-compatible model that the server's list doesn't confirm
   // (not listed, or /models unreachable) belongs in the visible Model field,
@@ -952,6 +1060,53 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
         </div>
       )}
 
+      {/* ChatGPT subscription — OAuth sign-in, independent of the API key and
+          of models.json (the Codex model client consumes the token via core) */}
+      {provider === "openai" && (
+        <div className="space-y-2">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+            ChatGPT Subscription
+          </span>
+          {chatgpt.status.signedIn ? (
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 text-sm text-green-600 min-w-0">
+                <CheckCircle2 className="size-4 shrink-0" />
+                <span className="truncate">
+                  Connected as {chatgpt.status.email ?? "your ChatGPT account"}
+                </span>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="shrink-0 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                onClick={chatgpt.signOut}
+              >
+                Sign Out
+              </Button>
+            </div>
+          ) : chatgpt.isSigningIn ? (
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" />
+                Waiting for browser…
+              </div>
+              <Button variant="outline" size="sm" className="shrink-0" onClick={chatgpt.cancelSignIn}>
+                Cancel
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm text-muted-foreground">
+                Use your ChatGPT Plus/Pro subscription
+              </span>
+              <Button variant="outline" size="sm" className="shrink-0" onClick={chatgpt.signIn}>
+                Sign In
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Base URL */}
       {showBaseURL && (
         <div className="space-y-2">
@@ -1045,144 +1200,33 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
         </div>
       )}
 
-      {/* Per-function model overrides */}
+      {/* Per-function model overrides. Persisted as bare model-id strings
+          inside providers[flavor] ('' = "Same as assistant"), so the
+          ModelRef picker value is adapted at this boundary: string ↔
+          {provider, model} with the active card's flavor. allowCustom keeps
+          arbitrary ids typeable (local servers, unlisted models). */}
       <div className="grid grid-cols-2 gap-3">
         {!rowboatConnected && (<>
-        {/* Knowledge graph model (right column) */}
-        <div className="space-y-2">
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Knowledge graph model</span>
-          {modelsLoading ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" />
-              Loading...
+          {(
+            [
+              { label: "Knowledge graph model", field: "knowledgeGraphModel" },
+              { label: "Meeting notes model", field: "meetingNotesModel" },
+              { label: "Track block model", field: "liveNoteAgentModel" },
+              { label: "Auto-permission model", field: "autoPermissionDecisionModel" },
+            ] as const
+          ).map(({ label, field }) => (
+            <div key={field} className="space-y-2">
+              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{label}</span>
+              <ModelSelector
+                variant="field"
+                providerFilter={provider}
+                allowCustom
+                defaultOption={{ label: "Same as assistant" }}
+                value={activeConfig[field] ? { provider, model: activeConfig[field] } : null}
+                onChange={(ref) => updateConfig(provider, { [field]: ref ? ref.model : "" })}
+              />
             </div>
-          ) : showModelInput ? (
-            <Input
-              value={activeConfig.knowledgeGraphModel}
-              onChange={(e) => updateConfig(provider, { knowledgeGraphModel: e.target.value })}
-              placeholder={primaryModel || "Enter model"}
-            />
-          ) : (
-            <Select
-              value={activeConfig.knowledgeGraphModel || "__same__"}
-              onValueChange={(value) => updateConfig(provider, { knowledgeGraphModel: value === "__same__" ? "" : value })}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select a model" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__same__">Same as assistant</SelectItem>
-                {modelsForProvider.map((m) => (
-                  <SelectItem key={m.id} value={m.id}>
-                    {m.name || m.id}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-        </div>
-
-        {/* Meeting notes model */}
-        <div className="space-y-2">
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Meeting notes model</span>
-          {modelsLoading ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" />
-              Loading...
-            </div>
-          ) : showModelInput ? (
-            <Input
-              value={activeConfig.meetingNotesModel}
-              onChange={(e) => updateConfig(provider, { meetingNotesModel: e.target.value })}
-              placeholder={primaryModel || "Enter model"}
-            />
-          ) : (
-            <Select
-              value={activeConfig.meetingNotesModel || "__same__"}
-              onValueChange={(value) => updateConfig(provider, { meetingNotesModel: value === "__same__" ? "" : value })}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select a model" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__same__">Same as assistant</SelectItem>
-                {modelsForProvider.map((m) => (
-                  <SelectItem key={m.id} value={m.id}>
-                    {m.name || m.id}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-        </div>
-
-        {/* Track block model */}
-        <div className="space-y-2">
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Track block model</span>
-          {modelsLoading ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" />
-              Loading...
-            </div>
-          ) : showModelInput ? (
-            <Input
-              value={activeConfig.liveNoteAgentModel}
-              onChange={(e) => updateConfig(provider, { liveNoteAgentModel: e.target.value })}
-              placeholder={primaryModel || "Enter model"}
-            />
-          ) : (
-            <Select
-              value={activeConfig.liveNoteAgentModel || "__same__"}
-              onValueChange={(value) => updateConfig(provider, { liveNoteAgentModel: value === "__same__" ? "" : value })}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select a model" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__same__">Same as assistant</SelectItem>
-                {modelsForProvider.map((m) => (
-                  <SelectItem key={m.id} value={m.id}>
-                    {m.name || m.id}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-        </div>
-
-        {/* Auto-permission model */}
-        <div className="space-y-2">
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Auto-permission model</span>
-          {modelsLoading ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" />
-              Loading...
-            </div>
-          ) : showModelInput ? (
-            <Input
-              value={activeConfig.autoPermissionDecisionModel}
-              onChange={(e) => updateConfig(provider, { autoPermissionDecisionModel: e.target.value })}
-              placeholder={primaryModel || "Enter model"}
-            />
-          ) : (
-            <Select
-              value={activeConfig.autoPermissionDecisionModel || "__same__"}
-              onValueChange={(value) => updateConfig(provider, { autoPermissionDecisionModel: value === "__same__" ? "" : value })}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select a model" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__same__">Same as assistant</SelectItem>
-                {modelsForProvider.map((m) => (
-                  <SelectItem key={m.id} value={m.id}>
-                    {m.name || m.id}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-        </div>
+          ))}
         </>)}
       </div>
 
@@ -1547,44 +1591,19 @@ function ToolsLibrarySettings({ dialogOpen, rowboatConnected }: { dialogOpen: bo
 
 // --- Rowboat Model Settings (when signed in via Rowboat) ---
 //
-// Hybrid mode: every dropdown lists the gateway catalog PLUS any models from
-// BYOK providers configured below. Values are provider-qualified
-// ("provider::model") and saved via models:updateConfig as {provider, model}
-// refs, so a signed-in user can e.g. keep the gateway assistant while
-// running background agents on a local Ollama model.
-
-interface HybridModelOption {
-  provider: string
-  model: string
-  label: string
-}
-
-const providerDisplayNames: Record<string, string> = {
-  openai: 'OpenAI',
-  anthropic: 'Anthropic',
-  google: 'Gemini',
-  ollama: 'Ollama',
-  openrouter: 'OpenRouter',
-  aigateway: 'AI Gateway',
-  'openai-compatible': 'OpenAI-Compatible',
-  rowboat: 'Rowboat',
-}
-
-const HYBRID_SEP = "::"
-const hybridKey = (provider: string, model: string) => `${provider}${HYBRID_SEP}${model}`
-
-function parseHybridKey(key: string): { provider: string; model: string } | null {
-  const index = key.indexOf(HYBRID_SEP)
-  if (index <= 0) return null
-  return { provider: key.slice(0, index), model: key.slice(index + HYBRID_SEP.length) }
-}
+// Hybrid mode: every picker lists the gateway catalog PLUS any BYOK
+// providers configured below (ModelSelector renders the shared store's
+// groups, live-fetching list-less providers inside the open dropdown).
+// Saved via models:updateConfig as {provider, model} refs, so a signed-in
+// user can e.g. keep the gateway assistant while running background agents
+// on a local Ollama model. Selections stay local until Save — unlike the
+// composer, picking here must not write anything by itself.
 
 function RowboatModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
-  const [options, setOptions] = useState<HybridModelOption[]>([])
-  const [selectedDefault, setSelectedDefault] = useState("")
-  const [selectedKg, setSelectedKg] = useState("")
-  const [selectedLiveNote, setSelectedLiveNote] = useState("")
-  const [selectedAutoPermission, setSelectedAutoPermission] = useState("")
+  const [selectedDefault, setSelectedDefault] = useState<ModelRef | null>(null)
+  const [selectedKg, setSelectedKg] = useState<ModelRef | null>(null)
+  const [selectedLiveNote, setSelectedLiveNote] = useState<ModelRef | null>(null)
+  const [selectedAutoPermission, setSelectedAutoPermission] = useState<ModelRef | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
@@ -1594,63 +1613,29 @@ function RowboatModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
     async function load() {
       setLoading(true)
       try {
-        const collected: HybridModelOption[] = []
-        const seen = new Set<string>()
-        const push = (provider: string, model: string, label?: string) => {
-          if (!model) return
-          const key = hybridKey(provider, model)
-          if (seen.has(key)) return
-          seen.add(key)
-          collected.push({ provider, model, label: label || model })
-        }
-
-        const catalog: Record<string, LlmModelOption[]> = {}
-        try {
-          const listResult = await window.ipc.invoke("models:list", null)
-          for (const p of listResult.providers || []) {
-            catalog[p.id] = p.models || []
-          }
-        } catch { /* offline — BYOK entries below still load */ }
-        for (const m of catalog["rowboat"] || []) push("rowboat", m.id, m.name || m.id)
-
         let parsed: Record<string, unknown> = {}
         try {
           const configResult = await window.ipc.invoke("workspace:readFile", { path: "config/models.json" })
           parsed = JSON.parse(configResult.data)
-        } catch { /* no BYOK config yet */ }
-
-        const providersMap = (parsed.providers ?? {}) as Record<string, Record<string, unknown>>
-        for (const [flavor, entry] of Object.entries(providersMap)) {
-          const hasKey = typeof entry.apiKey === "string" && (entry.apiKey as string).trim().length > 0
-          const hasBaseURL = typeof entry.baseURL === "string" && (entry.baseURL as string).trim().length > 0
-          if (!hasKey && !hasBaseURL) continue
-          push(flavor, typeof entry.model === "string" ? entry.model : "")
-          const catalogModels = catalog[flavor] || []
-          if (catalogModels.length > 0) {
-            for (const m of catalogModels) push(flavor, m.id, m.name || m.id)
-          } else {
-            for (const m of Array.isArray(entry.models) ? entry.models as string[] : []) push(flavor, m)
-          }
-        }
-        setOptions(collected)
+        } catch { /* no config yet */ }
 
         // Current selections. Legacy string overrides pair with the BYOK
         // top-level flavor (mirrors core/models/defaults.ts).
         const legacyFlavor = (parsed.provider as Record<string, unknown> | undefined)?.flavor
-        const toKey = (value: unknown): string => {
-          if (!value) return ""
+        const toRef = (value: unknown): ModelRef | null => {
+          if (!value) return null
           if (typeof value === "string") {
-            return typeof legacyFlavor === "string" ? hybridKey(legacyFlavor, value) : ""
+            return typeof legacyFlavor === "string" ? { provider: legacyFlavor, model: value } : null
           }
           const ref = value as { provider?: unknown; model?: unknown }
           return typeof ref.provider === "string" && typeof ref.model === "string"
-            ? hybridKey(ref.provider, ref.model)
-            : ""
+            ? { provider: ref.provider, model: ref.model }
+            : null
         }
-        setSelectedDefault(toKey(parsed.defaultSelection))
-        setSelectedKg(toKey(parsed.knowledgeGraphModel))
-        setSelectedLiveNote(toKey(parsed.liveNoteAgentModel))
-        setSelectedAutoPermission(toKey(parsed.autoPermissionDecisionModel))
+        setSelectedDefault(toRef(parsed.defaultSelection))
+        setSelectedKg(toRef(parsed.knowledgeGraphModel))
+        setSelectedLiveNote(toRef(parsed.liveNoteAgentModel))
+        setSelectedAutoPermission(toRef(parsed.autoPermissionDecisionModel))
       } catch {
         toast.error("Failed to load models")
       } finally {
@@ -1664,12 +1649,11 @@ function RowboatModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
   const handleSave = useCallback(async () => {
     setSaving(true)
     try {
-      const toRef = (key: string) => (key ? parseHybridKey(key) : null)
       await window.ipc.invoke("models:updateConfig", {
-        defaultSelection: toRef(selectedDefault),
-        knowledgeGraphModel: toRef(selectedKg),
-        liveNoteAgentModel: toRef(selectedLiveNote),
-        autoPermissionDecisionModel: toRef(selectedAutoPermission),
+        defaultSelection: selectedDefault,
+        knowledgeGraphModel: selectedKg,
+        liveNoteAgentModel: selectedLiveNote,
+        autoPermissionDecisionModel: selectedAutoPermission,
       })
       window.dispatchEvent(new Event("models-config-changed"))
       toast.success("Model configuration saved")
@@ -1680,33 +1664,19 @@ function RowboatModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
     }
   }, [selectedDefault, selectedKg, selectedLiveNote, selectedAutoPermission])
 
-  const renderSelect = (
+  const renderModelField = (
     label: string,
-    value: string,
-    onChange: (v: string) => void,
-    defaultLabel: string,
+    value: ModelRef | null,
+    onChange: (v: ModelRef | null) => void,
   ) => (
     <div className="space-y-2">
       <label className="text-sm font-medium">{label}</label>
-      <Select value={value || "__default__"} onValueChange={(v) => onChange(v === "__default__" ? "" : v)}>
-        <SelectTrigger className="w-full">
-          <SelectValue placeholder={defaultLabel} />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="__default__">{defaultLabel}</SelectItem>
-          {options.map((o) => {
-            const key = hybridKey(o.provider, o.model)
-            return (
-              <SelectItem key={key} value={key}>
-                {o.label}
-                <span className="ml-2 text-xs text-muted-foreground">
-                  {providerDisplayNames[o.provider] || o.provider}
-                </span>
-              </SelectItem>
-            )
-          })}
-        </SelectContent>
-      </Select>
+      <ModelSelector
+        variant="field"
+        value={value}
+        onChange={onChange}
+        defaultOption={{ label: "Rowboat default" }}
+      />
     </div>
   )
 
@@ -1724,10 +1694,10 @@ function RowboatModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
         Select the models Rowboat uses. Rowboat models are provided through your account; models from your own providers route through your keys or local runtimes.
       </p>
 
-      {renderSelect("Assistant model", selectedDefault, setSelectedDefault, "Rowboat default")}
-      {renderSelect("Knowledge graph model", selectedKg, setSelectedKg, "Rowboat default")}
-      {renderSelect("Background agents model", selectedLiveNote, setSelectedLiveNote, "Rowboat default")}
-      {renderSelect("Permission checks model", selectedAutoPermission, setSelectedAutoPermission, "Rowboat default")}
+      {renderModelField("Assistant model", selectedDefault, setSelectedDefault)}
+      {renderModelField("Knowledge graph model", selectedKg, setSelectedKg)}
+      {renderModelField("Background agents model", selectedLiveNote, setSelectedLiveNote)}
+      {renderModelField("Permission checks model", selectedAutoPermission, setSelectedAutoPermission)}
 
       {/* Save */}
       <Button onClick={handleSave} disabled={saving}>
@@ -2452,6 +2422,226 @@ function NotificationSettings({ dialogOpen }: { dialogOpen: boolean }) {
   )
 }
 
+// --- Advanced (runtime/cost controls) tab ---
+
+const MODEL_CALL_LIMIT_MIN = 1
+const MODEL_CALL_LIMIT_MAX = 500
+
+function parseLimit(value: string): number | null {
+  const n = Number(value.trim())
+  if (!Number.isInteger(n) || n < MODEL_CALL_LIMIT_MIN || n > MODEL_CALL_LIMIT_MAX) return null
+  return n
+}
+
+/**
+ * Compact segmented − / value / + stepper. The native number-input spinners
+ * are replaced entirely: typing is free-form digits, stepping clamps to the
+ * range and commits immediately. An empty value steps from `fallback` (the
+ * chat field starts from the global limit).
+ */
+function LimitStepper({
+  value,
+  fallback,
+  placeholder,
+  onInput,
+  onCommit,
+}: {
+  value: string
+  fallback: number
+  placeholder?: string
+  /** Every keystroke (no save). */
+  onInput: (next: string) => void
+  /** A settled change: step click or blur. */
+  onCommit: (next: string) => void
+}) {
+  const current = parseLimit(value)
+
+  const step = (delta: number) => {
+    // From an empty/invalid field, the first step lands on the fallback so
+    // the override starts where the effective value already is.
+    const next = current === null
+      ? Math.min(MODEL_CALL_LIMIT_MAX, Math.max(MODEL_CALL_LIMIT_MIN, fallback))
+      : Math.min(MODEL_CALL_LIMIT_MAX, Math.max(MODEL_CALL_LIMIT_MIN, current + delta))
+    onCommit(String(next))
+  }
+
+  return (
+    <div className="flex h-8 items-center overflow-hidden rounded-md border border-input bg-background shadow-xs shrink-0">
+      <button
+        type="button"
+        aria-label="Decrease limit"
+        onClick={() => step(-1)}
+        disabled={current !== null && current <= MODEL_CALL_LIMIT_MIN}
+        className="flex h-full w-7 items-center justify-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
+      >
+        <Minus className="size-3" />
+      </button>
+      <input
+        type="text"
+        inputMode="numeric"
+        value={value}
+        placeholder={placeholder}
+        onChange={(e) => onInput(e.target.value.replace(/[^0-9]/g, ""))}
+        onBlur={() => onCommit(value)}
+        className={cn(
+          "h-full border-x border-input bg-transparent text-center text-sm tabular-nums outline-none",
+          // The 11px placeholder sits on the 14px text baseline, so it reads
+          // slightly low; nudge it up for optical centering. Only applies
+          // while the placeholder is visible, so typed text is unaffected.
+          "placeholder:text-[11px] placeholder:text-muted-foreground/70 placeholder-shown:pb-1",
+          placeholder ? "w-24" : "w-16",
+        )}
+      />
+      <button
+        type="button"
+        aria-label="Increase limit"
+        onClick={() => step(1)}
+        disabled={current !== null && current >= MODEL_CALL_LIMIT_MAX}
+        className="flex h-full w-7 items-center justify-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
+      >
+        <Plus className="size-3" />
+      </button>
+    </div>
+  )
+}
+
+function AdvancedSettings({ dialogOpen }: { dialogOpen: boolean }) {
+  // Inputs are kept as strings so the user can clear a field while typing;
+  // validation happens on commit (step click or blur).
+  const [globalLimit, setGlobalLimit] = useState("")
+  const [chatLimit, setChatLimit] = useState("")
+  const [loaded, setLoaded] = useState(false)
+
+  useEffect(() => {
+    if (!dialogOpen) return
+    let cancelled = false
+    window.ipc.invoke("turnLimits:getSettings", null)
+      .then((settings) => {
+        if (cancelled) return
+        setGlobalLimit(String(settings.maxModelCalls))
+        // A chat override equal to the global limit is no override — show
+        // "Same as above" (legacy files; saves already collapse this).
+        setChatLimit(
+          settings.chatMaxModelCalls !== undefined && settings.chatMaxModelCalls !== settings.maxModelCalls
+            ? String(settings.chatMaxModelCalls)
+            : ""
+        )
+        setLoaded(true)
+      })
+      .catch(() => {
+        if (!cancelled) toast.error("Failed to load advanced settings")
+      })
+    return () => { cancelled = true }
+  }, [dialogOpen])
+
+  // Saves silently on success (a toast per stepper click would be noisy,
+  // matching the notification toggles); errors still surface.
+  const saveLimits = useCallback(async (globalStr: string, chatStr: string) => {
+    const global = parseLimit(globalStr)
+    if (global === null) {
+      toast.error(`Model-call limit must be a whole number between ${MODEL_CALL_LIMIT_MIN} and ${MODEL_CALL_LIMIT_MAX}`)
+      return
+    }
+    let chat: number | undefined
+    if (chatStr.trim() !== "") {
+      const parsed = parseLimit(chatStr)
+      if (parsed === null) {
+        toast.error(`Chat limit must be empty or a whole number between ${MODEL_CALL_LIMIT_MIN} and ${MODEL_CALL_LIMIT_MAX}`)
+        return
+      }
+      chat = parsed
+    }
+    // An override equal to the global limit is meaningless — persist it as
+    // "use the global limit" so the field reopens as "Same as above".
+    if (chat === global) chat = undefined
+    try {
+      await window.ipc.invoke("turnLimits:setSettings", {
+        maxModelCalls: global,
+        ...(chat === undefined ? {} : { chatMaxModelCalls: chat }),
+      })
+    } catch {
+      toast.error("Failed to save model-call limits")
+    }
+  }, [])
+
+  if (!loaded) {
+    return (
+      <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
+        <Loader2 className="size-4 animate-spin mr-2" />
+        Loading...
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="text-sm text-muted-foreground leading-relaxed">
+        Runtime cost and safety controls. A turn is stopped once it reaches its model-call limit;
+        changes apply to newly started turns only.
+      </div>
+
+      <div className="space-y-2">
+        <div className="rounded-md border px-3 py-3 flex items-center gap-4">
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-medium">Model-call limit</div>
+            <div className="text-xs text-muted-foreground mt-0.5">
+              Maximum model calls per turn. Applies to everything by default — background and
+              knowledge work, scheduled agents, and sub-agents (it also caps sub-agent budgets).
+            </div>
+          </div>
+          <LimitStepper
+            value={globalLimit}
+            fallback={DEFAULT_TURN_LIMITS_SETTINGS.maxModelCalls}
+            onInput={setGlobalLimit}
+            onCommit={(next) => {
+              setGlobalLimit(next)
+              void saveLimits(next, chatLimit)
+            }}
+          />
+        </div>
+
+        <div className="rounded-md border px-3 py-3 flex items-center gap-4">
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-medium">Chat model-call limit</div>
+            <div className="text-xs text-muted-foreground mt-0.5">
+              Optional separate limit for interactive chat turns. Leave empty to use the
+              model-call limit above.
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {chatLimit.trim() !== "" && (
+              <button
+                type="button"
+                aria-label="Use the global limit"
+                title="Use the global limit"
+                onClick={() => {
+                  setChatLimit("")
+                  void saveLimits(globalLimit, "")
+                }}
+                className="flex size-5 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <X className="size-3.5" />
+              </button>
+            )}
+            <LimitStepper
+              value={chatLimit}
+              fallback={parseLimit(globalLimit) ?? DEFAULT_TURN_LIMITS_SETTINGS.maxModelCalls}
+              placeholder="Same as above"
+              onInput={setChatLimit}
+              onCommit={(next) => {
+                setChatLimit(next)
+                // An emptied chat field on blur means "use the global
+                // limit" — persist the override removal.
+                void saveLimits(globalLimit, next)
+              }}
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // --- Main Settings Dialog ---
 
 export function SettingsDialog({ children, defaultTab = "account", open: controlledOpen, onOpenChange }: SettingsDialogProps) {
@@ -2504,7 +2694,7 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
   }
 
   const loadConfig = useCallback(async (tab: ConfigTab) => {
-    if (tab === "appearance" || tab === "models" || tab === "note-tagging" || tab === "account" || tab === "connections" || tab === "help" || tab === "code-mode" || tab === "notifications") return
+    if (tab === "appearance" || tab === "models" || tab === "note-tagging" || tab === "account" || tab === "connections" || tab === "help" || tab === "code-mode" || tab === "notifications" || tab === "advanced") return
     const tabConfig = tabs.find((t) => t.id === tab)!
     if (!tabConfig.path) return
     setLoading(true)
@@ -2626,7 +2816,7 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
             </div>
 
             {/* Content */}
-            <div className={cn("flex-1 px-6 pb-5 min-h-0", (activeTab === "models" || activeTab === "connections" || activeTab === "mobile" || activeTab === "account" || activeTab === "code-mode" || activeTab === "notifications") ? "overflow-y-auto" : activeTab === "note-tagging" ? "overflow-hidden flex flex-col" : "overflow-hidden")}>
+            <div className={cn("flex-1 px-6 pb-5 min-h-0", (activeTab === "models" || activeTab === "connections" || activeTab === "mobile" || activeTab === "account" || activeTab === "code-mode" || activeTab === "notifications" || activeTab === "advanced") ? "overflow-y-auto" : activeTab === "note-tagging" ? "overflow-hidden flex flex-col" : "overflow-hidden")}>
               {activeTab === "account" ? (
                 <AccountSettings dialogOpen={open} />
               ) : activeTab === "connections" ? (
@@ -2665,6 +2855,8 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
                 <AppearanceSettings />
               ) : activeTab === "notifications" ? (
                 <NotificationSettings dialogOpen={open} />
+              ) : activeTab === "advanced" ? (
+                <AdvancedSettings dialogOpen={open} />
               ) : activeTab === "help" ? (
                 <HelpSettings />
               ) : activeTab === "code-mode" ? (

@@ -38,7 +38,7 @@ function parentCreated(
             config: {
                 autoPermission: true,
                 humanAvailable: false,
-                maxModelCalls: 20,
+                maxModelCalls: 50,
             },
         } as z.infer<typeof TurnEvent>,
     ];
@@ -48,6 +48,7 @@ function fakeServices(opts: {
     parentEvents?: Array<z.infer<typeof TurnEvent>>;
     childResult?: Partial<HeadlessAgentResult>;
     startError?: string;
+    globalMaxModelCalls?: number;
 }) {
     const started: HeadlessAgentOptions[] = [];
     const turnRuntime = {
@@ -79,7 +80,16 @@ function fakeServices(opts: {
             throw new Error("unused");
         },
     };
-    return { services: { turnRuntime, headlessRunner }, started };
+    return {
+        services: {
+            turnRuntime,
+            headlessRunner,
+            ...(opts.globalMaxModelCalls === undefined
+                ? {}
+                : { globalMaxModelCalls: opts.globalMaxModelCalls }),
+        },
+        started,
+    };
 }
 
 const signal = new AbortController().signal;
@@ -106,7 +116,7 @@ describe("runSpawnedAgent", () => {
                 model: { provider: "parent-p", model: "parent-m" },
             },
         });
-        expect(started[0].maxModelCalls).toBe(20);
+        expect(started[0].maxModelCalls).toBe(50);
         expect(started[0].signal).toBe(signal);
         expect(progress).toEqual([
             { childTurnId: "child-1", agentName: "researcher", task: "find things" },
@@ -181,14 +191,35 @@ describe("runSpawnedAgent", () => {
         expect(agent.inline.instructions).toMatch(/headlessly/);
     });
 
-    it("rejects a model-call budget above the cap at the schema boundary", async () => {
-        const { services } = fakeServices({});
+    it("clamps a model-call budget above the global limit to it", async () => {
+        const { services, started } = fakeServices({});
         const result = await runSpawnedAgent(
-            { task: "t", instructions: "x", max_model_calls: 50 },
+            { task: "t", instructions: "x", max_model_calls: 80 },
             { parentTurnId: "parent-1", signal, services },
         );
-        expect(result.isError).toBe(true);
-        expect(result.output).toMatch(/invalid input/);
+        expect(result.isError).toBe(false);
+        expect(started[0].maxModelCalls).toBe(50);
+    });
+
+    it("uses the configured global limit as the sub-agent default and cap", async () => {
+        const { services, started } = fakeServices({ globalMaxModelCalls: 60 });
+        await runSpawnedAgent(
+            { task: "t", instructions: "x" },
+            { parentTurnId: "parent-1", signal, services },
+        );
+        expect(started[0].maxModelCalls).toBe(60);
+
+        await runSpawnedAgent(
+            { task: "t", instructions: "x", max_model_calls: 80 },
+            { parentTurnId: "parent-1", signal, services },
+        );
+        expect(started[1].maxModelCalls).toBe(60);
+
+        await runSpawnedAgent(
+            { task: "t", instructions: "x", max_model_calls: 5 },
+            { parentTurnId: "parent-1", signal, services },
+        );
+        expect(started[2].maxModelCalls).toBe(5);
     });
 
     it("refuses to spawn from a child parent (depth cap)", async () => {
