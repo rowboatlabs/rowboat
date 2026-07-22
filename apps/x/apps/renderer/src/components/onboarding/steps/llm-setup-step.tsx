@@ -39,9 +39,14 @@ export function LlmSetupStep({ state }: LlmSetupStepProps) {
     updateProviderConfig, handleTestAndSaveLlmConfig, handleTestAndAddAnother,
     connectedFlavors, handleNext, handleBack,
     upsellDismissed, setUpsellDismissed, handleSwitchToRowboat,
+    chatgpt,
   } = state
 
   const isMoreProvider = moreProviders.some(p => p.id === llmProvider)
+  // "Sign in with ChatGPT" (below the OpenAI card) is an alternative to a key:
+  // signing in counts as a connected provider alongside any saved BYOK one,
+  // which is what unlocks Continue when no API key was entered.
+  const hasConnectedProvider = connectedFlavors.size > 0 || chatgpt.status.signedIn
   // Connect-only, mirroring Settings: entering a key (or base URL) is enough
   // and the model is resolved silently at save. openai-compatible is the sole
   // exception with a visible Model field — its /models endpoint often doesn't
@@ -188,6 +193,56 @@ export function LlmSetupStep({ state }: LlmSetupStepProps) {
           </div>
         )}
 
+        {/* ChatGPT subscription — OAuth sign-in shown under the OpenAI card,
+            mirroring Settings (settings-dialog.tsx, gated on provider ===
+            "openai"). Alternative to an API key: signs in via the shared
+            chatgpt:* path, independent of models.json (the Codex model client
+            consumes the token in core). */}
+        {llmProvider === "openai" && (
+          <div className="space-y-2">
+            <label className="text-xs font-medium text-muted-foreground">
+              ChatGPT Subscription
+            </label>
+            {chatgpt.status.signedIn ? (
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 text-sm text-green-600 dark:text-green-400 min-w-0">
+                  <CheckCircle2 className="size-4 shrink-0" />
+                  <span className="truncate">
+                    Connected as {chatgpt.status.email ?? "your ChatGPT account"}
+                  </span>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  onClick={chatgpt.signOut}
+                >
+                  Sign Out
+                </Button>
+              </div>
+            ) : chatgpt.isSigningIn ? (
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="size-4 animate-spin" />
+                  Waiting for browser…
+                </div>
+                <Button variant="outline" size="sm" className="shrink-0" onClick={chatgpt.cancelSignIn}>
+                  Cancel
+                </Button>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm text-muted-foreground">
+                  Use your ChatGPT Plus/Pro subscription
+                </span>
+                <Button variant="outline" size="sm" className="shrink-0" onClick={chatgpt.signIn}>
+                  Sign In
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
+
         {showBaseURL && (
           <div className="space-y-2">
             <label className="text-xs font-medium text-muted-foreground">
@@ -241,12 +296,12 @@ export function LlmSetupStep({ state }: LlmSetupStepProps) {
           </Button>
           <Button
             onClick={canTest ? handleTestAndSaveLlmConfig : handleNext}
-            disabled={testState.status === "testing" || (!canTest && connectedFlavors.size === 0)}
+            disabled={testState.status === "testing" || (!canTest && !hasConnectedProvider)}
             className="min-w-[140px]"
           >
             {testState.status === "testing" ? (
               <><Loader2 className="size-4 animate-spin mr-2" />Testing...</>
-            ) : (canTest || connectedFlavors.size === 0) ? (
+            ) : (canTest || !hasConnectedProvider) ? (
               "Test & Continue"
             ) : (
               "Continue"

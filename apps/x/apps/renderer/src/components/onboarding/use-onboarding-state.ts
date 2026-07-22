@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react"
 import { setGoogleCredentials } from "@/lib/google-credentials-store"
+import { useChatGPT } from "@/hooks/useChatGPT"
 import { toast } from "sonner"
 
 export interface ProviderState {
@@ -43,6 +44,13 @@ export function useOnboardingState(open: boolean, onComplete: (opts?: { startTou
   })
   const [connectedFlavors, setConnectedFlavors] = useState<Set<LlmProviderFlavor>>(new Set())
   const [showMoreProviders, setShowMoreProviders] = useState(false)
+
+  // "Sign in with ChatGPT" (subscription OAuth) is offered below the OpenAI
+  // card, mirroring Settings. It isn't a LlmProviderFlavor — no API key, no
+  // models.json entry — it signs in via the dedicated chatgpt:* IPC (same
+  // path Settings uses) and the Codex model client consumes the token in
+  // core, leaving the BYOK config machinery untouched.
+  const chatgpt = useChatGPT()
 
   // OAuth provider states
   const [providers, setProviders] = useState<string[]>([])
@@ -704,6 +712,9 @@ export function useOnboardingState(open: boolean, onComplete: (opts?: { startTou
     updateProviderConfig,
     handleTestAndSaveLlmConfig,
     handleTestAndAddAnother,
+
+    // ChatGPT subscription sign-in (shown below the OpenAI card)
+    chatgpt,
 
     // OAuth state
     providers,
