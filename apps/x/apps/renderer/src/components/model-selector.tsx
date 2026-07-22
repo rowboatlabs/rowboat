@@ -12,7 +12,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useModels, type ModelPickerGroup, type ModelRef } from '@/hooks/use-models'
-import { useProviderModels } from '@/hooks/use-provider-models'
+import { useProviderModels, type ProviderModelsFlavor } from '@/hooks/use-provider-models'
 import { cn } from '@/lib/utils'
 
 export type { ModelRef } from '@/hooks/use-models'
@@ -149,6 +149,17 @@ export interface ModelSelectorProps {
    */
   providerFilter?: string
   /**
+   * Live-fetch credentials for a provider being configured right now (typed
+   * but possibly unsaved). Store groups only exist for providers saved in
+   * models.json and the catalog fallback only covers openai/anthropic/
+   * google — this synthesizes the scoped live group from the form's current
+   * inputs instead (and wins over a saved group, whose stored key may be
+   * stale). Requires providerFilter set to the same flavor; ignored until
+   * some credential is typed. useProviderModels debounces + caches, so
+   * keystrokes don't spray fetches.
+   */
+  liveCredentials?: { flavor: ProviderModelsFlavor; apiKey: string; baseURL: string }
+  /**
    * When the search text matches no rows, offer a `Use "<text>"` row that
    * selects the typed id — arbitrary ids for ollama / openai-compatible.
    * With providerFilter the typed id attaches to that provider. Without it,
@@ -219,6 +230,7 @@ export function ModelSelector({
   inheritDefault,
   variant = 'pill',
   providerFilter,
+  liveCredentials,
   allowCustom = false,
   staticOptions,
   triggerTitle,
@@ -233,13 +245,21 @@ export function ModelSelector({
   const sentinel = defaultOption ?? inheritDefault
   const sentinelMuted = !defaultOption && Boolean(inheritDefault)
 
+  const liveFlavor = liveCredentials?.flavor
+  const liveApiKey = liveCredentials?.apiKey.trim() ?? ''
+  const liveBaseURL = liveCredentials?.baseURL.trim() ?? ''
   const groups = useMemo<ModelPickerGroup[]>(() => {
     if (!providerFilter) return allGroups
+    // The form's typed credentials trump anything saved — same "configured"
+    // bar as the store (some credential present).
+    if (liveFlavor === providerFilter && (liveApiKey || liveBaseURL)) {
+      return [{ kind: 'live', flavor: liveFlavor, apiKey: liveApiKey, baseURL: liveBaseURL, savedModel: '' }]
+    }
     const scoped = allGroups.filter((g) => g.flavor === providerFilter)
     if (scoped.length > 0) return scoped
     const catalogModels = catalogByProvider[providerFilter] || []
     return catalogModels.length > 0 ? [{ kind: 'catalog', flavor: providerFilter, models: catalogModels }] : []
-  }, [allGroups, providerFilter, catalogByProvider])
+  }, [allGroups, providerFilter, catalogByProvider, liveFlavor, liveApiKey, liveBaseURL])
 
   // Search filter for the model dropdown. Reset each time the menu opens;
   // matching is a case-insensitive substring test on the model id. Live
