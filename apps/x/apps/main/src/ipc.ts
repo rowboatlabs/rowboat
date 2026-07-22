@@ -73,7 +73,7 @@ import { loadTurnLimitsSettings, saveTurnLimitsSettings } from '@x/core/dist/con
 import { saveAppSettings } from '@x/core/dist/config/app_settings.js';
 import { setSelfCaptureActive } from '@x/core/dist/meetings/detector.js';
 import { notifyIfEnabled } from '@x/core/dist/application/notification/notifier.js';
-import { consumePendingToggleMeetingNotes, setTrayRecordingState } from './tray.js';
+import { consumePendingTakeMeetingNotes, consumePendingToggleMeetingNotes, setTrayRecordingState } from './tray.js';
 import { closeMeetingPopup, getMeetingPopupPayload, handleMeetingPopupAction } from './meeting-popup.js';
 
 // Ambient meeting detection must ignore Rowboat's own mic use: meeting
@@ -83,6 +83,20 @@ let meetingRecordingActive = false;
 let voiceCallActive = false;
 function updateSelfCaptureState() {
   setSelfCaptureActive(meetingRecordingActive || voiceCallActive);
+}
+
+/**
+ * Forget all renderer-reported capture state. Called when the main window
+ * closes or its renderer dies: the process that owned the capture is gone
+ * and will never send recording:false — without this, the tray stays on
+ * "Stop recording", popup Take Notes clicks are swallowed, and ambient
+ * detection stays suppressed until app restart.
+ */
+export function resetCaptureState(): void {
+  meetingRecordingActive = false;
+  voiceCallActive = false;
+  updateSelfCaptureState();
+  setTrayRecordingState(false);
 }
 import * as composioHandler from './composio-handler.js';
 import * as appsIndexer from '@x/core/dist/apps/indexer.js';
@@ -452,7 +466,7 @@ function findMainAppWindow(): BrowserWindow | undefined {
     if (w === videoPopoutWin || w.isDestroyed()) return false;
     const url = w.webContents.getURL();
     const isAppWindow = url.startsWith('app://') || url.startsWith('http://localhost');
-    return isAppWindow && !url.includes('#video-popout');
+    return isAppWindow && !url.includes('#video-popout') && !url.includes('#meeting-detected');
   });
 }
 
@@ -899,7 +913,10 @@ export function setupIpcHandlers() {
       return {};
     },
     'app:consumePendingTrayCommand': async () => {
-      return { toggleMeetingNotes: consumePendingToggleMeetingNotes() };
+      return {
+        toggleMeetingNotes: consumePendingToggleMeetingNotes(),
+        takeMeetingNotes: consumePendingTakeMeetingNotes() ?? undefined,
+      };
     },
     'app:getLoginItemSettings': async () => {
       // Dev builds never register a login item (it would point at the dev
@@ -2383,15 +2400,17 @@ export function setupIpcHandlers() {
       }
       return {};
     },
-    'app:focusMainWindow': async () => {
+    'app:focusMainWindow': async (_event, args) => {
       const main = findMainAppWindow();
       if (main) {
         if (main.isMinimized()) main.restore();
         main.show();
         main.focus();
-        // The user is typically in another app (e.g. just left a meeting) —
-        // a plain focus() won't take the foreground from it.
-        app.focus({ steal: true });
+        // Stealing the OS foreground is opt-in: right for the post-meeting
+        // notes redirect (the user just left a call), wrong for ambient
+        // callers like in-call assistant navigation, where yanking focus
+        // mid-keystroke from the app the user is working in is hostile.
+        if (args?.steal) app.focus({ steal: true });
       }
       return {};
     },

@@ -99,7 +99,12 @@ function formatTranscript(entries: TranscriptEntry[], date: string, calendarEven
         `title: ${noteTitle}`,
         `date: "${date}"`,
     ];
-    if (calendarEvent) {
+    // Ad-hoc detected meetings carry a synthetic event that only names the
+    // note ("Slack huddle") — it is NOT calendar data. Writing it as
+    // calendar_event would make the summarizer treat it as a real linked
+    // event with zero attendees, whose prompt rules then strip every
+    // speaker name from the notes.
+    if (calendarEvent && calendarEvent.source !== 'detected') {
         // Serialize as a JSON string on one line — the frontmatter system
         // only supports flat key: value pairs, not nested YAML objects.
         const eventObj: Record<string, string> = {}
