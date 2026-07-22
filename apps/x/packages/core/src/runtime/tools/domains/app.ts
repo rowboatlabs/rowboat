@@ -10,7 +10,7 @@ import * as files from "../../../filesystem/files.js";
 import { WorkDir } from "../../../config/config.js";
 import { RowboatAppManifestSchema } from "@x/shared/dist/rowboat-app.js";
 import { listApps } from "../../../apps/indexer.js";
-import { listImportantThreads, searchThreads } from "../../../knowledge/sync_gmail.js";
+import { listImportantThreads, searchThreads, formatEmailDateLocal } from "../../../knowledge/sync_gmail.js";
 import { listTasks as listBackgroundTasks } from "../../../background-tasks/fileops.js";
 import type { ISessions } from "../../sessions/api.js";
 import { BuiltinToolsSchema } from "../types.js";
@@ -113,7 +113,9 @@ export const appNavigationTools: z.infer<typeof BuiltinToolsSchema> = {
                                     threadId: t.threadId,
                                     subject: t.subject ?? '(no subject)',
                                     from: t.from ?? '',
-                                    date: t.date ?? '',
+                                    // Local-timezone string for the model, not the raw
+                                    // header — otherwise it quotes email times in UTC.
+                                    date: formatEmailDateLocal(t.date),
                                     unread: t.unread ?? false,
                                     summary: t.summary ? t.summary.slice(0, 200) : undefined,
                                 }));
