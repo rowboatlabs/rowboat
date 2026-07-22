@@ -2802,7 +2802,10 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
             </div>
 
             {/* Content */}
-            <div className={cn("flex-1 px-6 pb-5 min-h-0", (activeTab === "models" || activeTab === "connections" || activeTab === "mobile" || activeTab === "account" || activeTab === "code-mode" || activeTab === "notifications" || activeTab === "advanced") ? "overflow-y-auto" : activeTab === "note-tagging" ? "overflow-hidden flex flex-col" : "overflow-hidden")}>
+            {/* JSON tabs render a full-height textarea (it scrolls itself);
+                note-tagging manages its own scroll region; everything else
+                scrolls here so tall tabs aren't clipped by the fixed dialog. */}
+            <div className={cn("flex-1 px-6 pb-5 min-h-0", isJsonTab ? "overflow-hidden" : activeTab === "note-tagging" ? "overflow-hidden flex flex-col" : "overflow-y-auto")}>
               {activeTab === "account" ? (
                 <AccountSettings dialogOpen={open} />
               ) : activeTab === "connections" ? (
