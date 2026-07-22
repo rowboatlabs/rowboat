@@ -4,12 +4,19 @@ import { __resetModelsForTests, useModels } from './use-models'
 
 // The hook wires a module-level store to window.ipc, so the tests stub the
 // preload surface: `invoke` routes by channel through a per-test handler map
-// and counts calls per channel to observe the store's fetch dedupe.
+// and counts calls per channel to observe the store's fetch dedupe; `on`
+// captures listeners so tests can fire main-process broadcasts.
 let handlers: Record<string, (args: unknown) => Promise<unknown>> = {}
 let invokeCounts: Record<string, number> = {}
+let ipcListeners: Record<string, Array<(payload: unknown) => void>> = {}
 
 ;(window as unknown as { ipc: unknown }).ipc = {
-  on: () => () => undefined,
+  on: (channel: string, handler: (payload: unknown) => void) => {
+    ;(ipcListeners[channel] ??= []).push(handler)
+    return () => {
+      ipcListeners[channel] = (ipcListeners[channel] ?? []).filter((h) => h !== handler)
+    }
+  },
   invoke: (channel: string, args: unknown) => {
     invokeCounts[channel] = (invokeCounts[channel] ?? 0) + 1
     const handler = handlers[channel]
@@ -34,6 +41,7 @@ beforeEach(() => {
   __resetModelsForTests()
   handlers = {}
   invokeCounts = {}
+  ipcListeners = {}
 })
 
 describe('useModels', () => {
@@ -70,6 +78,38 @@ describe('useModels', () => {
     // Loaded synchronously from the module cache — no loading flash, no IPC.
     expect(late.result.current.groups.length).toBeGreaterThan(0)
     expect(invokeCounts['models:list']).toBe(1)
+  })
+
+  it('sign-out via the oauth:didConnect broadcast flips isRowboatConnected and drops the rowboat group', async () => {
+    // Signed in: gateway catalog present.
+    handlers['oauth:getState'] = async () => ({ config: { rowboat: { connected: true } } })
+    handlers['llm:getDefaultModel'] = async () => ({ provider: 'rowboat', model: 'claude-opus-4-8' })
+    handlers['models:list'] = async () => ({
+      providers: [{ id: 'rowboat', name: 'Rowboat', models: [{ id: 'claude-opus-4-8' }] }],
+    })
+    handlers['workspace:readFile'] = async () => ({
+      data: JSON.stringify({ provider: { flavor: 'openai' }, model: 'gpt-5.4', providers: {} }),
+    })
+
+    const { result } = renderHook(() => useModels())
+    await waitFor(() => expect(result.current.isRowboatConnected).toBe(true))
+    expect(result.current.groups).toEqual([{ kind: 'catalog', flavor: 'rowboat', models: ['claude-opus-4-8'] }])
+
+    // Sign out: main broadcasts oauth:didConnect with success:false
+    // (disconnectProvider's emitOAuthEvent) — same channel as connect.
+    handlers['oauth:getState'] = async () => ({ config: { rowboat: { connected: false } } })
+    handlers['llm:getDefaultModel'] = async () => ({ provider: 'openai', model: 'gpt-5.4' })
+    handlers['models:list'] = async () => ({
+      providers: [{ id: 'openai', name: 'OpenAI', models: [{ id: 'gpt-5.4' }] }],
+    })
+    act(() => {
+      for (const listener of ipcListeners['oauth:didConnect'] ?? []) {
+        listener({ provider: 'rowboat', success: false })
+      }
+    })
+
+    await waitFor(() => expect(result.current.isRowboatConnected).toBe(false))
+    expect(result.current.groups.some((g) => g.flavor === 'rowboat')).toBe(false)
   })
 
   it('refetches on models-config-changed and updates every consumer', async () => {

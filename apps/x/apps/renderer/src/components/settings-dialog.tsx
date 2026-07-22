@@ -35,6 +35,7 @@ import { startProvisioning, useProvisioning, enabledOptimistic, type AgentStatus
 import { useProviderModels } from "@/hooks/use-provider-models"
 import { useChatGPT } from "@/hooks/useChatGPT"
 import { ModelSelector, type ModelRef } from "@/components/model-selector"
+import { useModels } from "@/hooks/use-models"
 
 type ConfigTab = "account" | "connections" | "mobile" | "models" | "mcp" | "security" | "code-mode" | "appearance" | "notifications" | "note-tagging" | "advanced" | "help"
 
@@ -2657,7 +2658,12 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [rowboatConnected, setRowboatConnected] = useState(false)
+  // Sign-in state comes from the shared model store (single source of
+  // truth), which refetches on the oauth:didConnect broadcast — emitted on
+  // BOTH connect and disconnect (disconnectProvider sends success:false).
+  // A dialog-open-time snapshot here went stale when the user signed out
+  // with the dialog open, leaving the Models tab on the signed-in section.
+  const { isRowboatConnected: rowboatConnected } = useModels()
 
   // Reset to the requested default tab each time the dialog is opened
   useEffect(() => {
@@ -2666,17 +2672,6 @@ export function SettingsDialog({ children, defaultTab = "account", open: control
       analytics.settingsOpened(defaultTab)
     }
   }, [open, defaultTab])
-
-  // Check if user is signed in to Rowboat
-  useEffect(() => {
-    if (!open) return
-    window.ipc.invoke('oauth:getState', null).then((result) => {
-      const connected = result.config?.rowboat?.connected ?? false
-      setRowboatConnected(connected)
-    }).catch(() => {
-      setRowboatConnected(false)
-    })
-  }, [open])
 
   // Hybrid mode: the Models tab is shown in both modes — signed-in users can
   // pick gateway models AND bring their own providers/models alongside.
