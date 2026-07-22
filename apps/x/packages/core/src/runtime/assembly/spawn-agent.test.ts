@@ -38,7 +38,7 @@ function parentCreated(
             config: {
                 autoPermission: true,
                 humanAvailable: false,
-                maxModelCalls: 20,
+                maxModelCalls: 50,
             },
         } as z.infer<typeof TurnEvent>,
     ];

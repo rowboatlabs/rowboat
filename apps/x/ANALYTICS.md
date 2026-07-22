@@ -181,7 +181,8 @@ All renderer events live in `apps/renderer/src/lib/analytics.ts` (typed wrappers
 
 - `email_send_failed` — send returned an error or threw (`components/email-view.tsx`)
 - `meeting_summarize_failed` — post-recording notes generation threw (`App.tsx`)
-- `bg_agent_run_failed` / `bg_agent_run_completed` — `{ trigger: 'manual' | 'cron' | 'window' | 'event' }` **(core)** — every background-agent run settles as exactly one of these (`packages/core/src/background-tasks/runner.ts`), giving a failure *rate* across all trigger sources, not just manual clicks
+- `bg_agent_run_failed` — `{ trigger: 'manual' | 'cron' | 'window' | 'event', error: string }` **(core)** — emitted when a background-agent run fails; `error` contains the normalized failure message
+- `bg_agent_run_completed` — `{ trigger: 'manual' | 'cron' | 'window' | 'event' }` **(core)** — emitted when a background-agent run succeeds; together these events give a failure *rate* across all trigger sources, not just manual clicks
 
 **Misc**:
 

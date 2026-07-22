@@ -93,6 +93,10 @@ Your task folder is \`${wsFolder}\`. The user-visible artifact is \`${wsFolder}i
 
 const runningTasks = new Set<string>();
 
+type RunAnalyticsOutcome =
+    | { event: 'bg_agent_run_completed'; properties: { trigger: BackgroundTaskTriggerType } }
+    | { event: 'bg_agent_run_failed'; properties: { trigger: BackgroundTaskTriggerType; error: string } };
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -113,6 +117,8 @@ export async function runBackgroundTask(
         return { slug, runId: null, summary: null, error: 'Already running' };
     }
     runningTasks.add(slug);
+
+    let analyticsOutcome: RunAnalyticsOutcome | undefined;
 
     try {
         const task = await fetchTask(slug);
@@ -211,7 +217,6 @@ export async function runBackgroundTask(
             });
 
             log.log(`${slug} — done summary="${truncate(summary)}"`);
-            capture('bg_agent_run_completed', { trigger });
 
             backgroundTaskBus.publish({
                 type: 'background_task_agent_complete',
@@ -220,9 +225,15 @@ export async function runBackgroundTask(
                 ...(summary ? { summary } : {}),
             });
 
+            analyticsOutcome = { event: 'bg_agent_run_completed', properties: { trigger } };
             return { slug, runId, summary };
         } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
+
+            analyticsOutcome = {
+                event: 'bg_agent_run_failed',
+                properties: { trigger, error: msg },
+            };
 
             // Failure — only record the error. `lastRunAt` and `lastRunSummary`
             // are deliberately untouched so the user keeps seeing the last good
@@ -235,7 +246,6 @@ export async function runBackgroundTask(
             }
 
             log.log(`${slug} — failed: ${truncate(msg)}`);
-            capture('bg_agent_run_failed', { trigger });
 
             backgroundTaskBus.publish({
                 type: 'background_task_agent_complete',
@@ -246,7 +256,22 @@ export async function runBackgroundTask(
 
             return { slug, runId, summary: null, error: msg };
         }
+    } catch (err) {
+        // Preserve the original throw behavior for setup/infrastructure errors,
+        // but still settle analytics for the attempted run. If the agent had
+        // already failed, keep that original failure reason.
+        analyticsOutcome ??= {
+            event: 'bg_agent_run_failed',
+            properties: {
+                trigger,
+                error: err instanceof Error ? err.message : String(err),
+            },
+        };
+        throw err;
     } finally {
+        if (analyticsOutcome) {
+            capture(analyticsOutcome.event, analyticsOutcome.properties);
+        }
         runningTasks.delete(slug);
     }
 }
