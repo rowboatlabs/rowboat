@@ -45,7 +45,7 @@ interface VideoCallViewProps {
 }
 
 const STATUS_DISPLAY: Record<VideoCallStatus, { label: string; dotClass: string }> = {
-  idle: { label: 'Hold right ⌘ to talk · tap to go hands-free', dotClass: 'bg-neutral-500' },
+  idle: { label: 'Hold right ⌘ to talk · press & release it to go hands-free', dotClass: 'bg-neutral-500' },
   listening: { label: 'Listening — release to send', dotClass: 'bg-green-500 animate-pulse' },
   thinking: { label: 'Thinking…', dotClass: 'bg-amber-400' },
   speaking: { label: 'Speaking', dotClass: 'bg-sky-400 animate-pulse' },
@@ -198,7 +198,7 @@ export function VideoCallView({
 
       {/* Control bar */}
       <div className="flex items-center justify-center gap-4 pb-5">
-        <span className="flex items-center gap-2 rounded-full bg-neutral-800 px-3 py-1.5 text-xs font-medium text-white/90">
+        <span className="flex h-10 items-center gap-2 rounded-full bg-neutral-800 px-4 text-xs font-medium text-white/90">
           {/* Muted overrides the PTT hint — pressing to talk does nothing
               while muted. Thinking/speaking still show: output continues. */}
           {micMuted && (status === 'idle' || status === 'listening') ? (
@@ -209,7 +209,7 @@ export function VideoCallView({
           ) : pttStatus === 'locked' ? (
             <>
               <span className="block h-2 w-2 rounded-full bg-green-500 animate-pulse" />
-              Hands-free — tap right ⌘ to send
+              Hands-free — press right ⌘ again to send
             </>
           ) : (
             <>
