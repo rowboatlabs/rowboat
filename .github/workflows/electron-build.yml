@@ -276,7 +276,10 @@ jobs:
             Sort-Object { [version]$_.Directory.Parent.Name } | Select-Object -Last 1
           if (-not $signtool) { throw "signtool.exe not found in Windows SDK" }
           Copy-Item $signtool.FullName "$dir\signtool.exe"
-          & "$dir\signtool.exe" | Select-Object -First 3
+          # NOTE: don't run signtool bare to "print usage" — it exits 1 and the
+          # Actions pwsh wrapper turns the last native exit code into a step
+          # failure. Read the version from file metadata instead.
+          echo "Using signtool $((Get-Item "$dir\signtool.exe").VersionInfo.ProductVersion) from $($signtool.FullName)"
 
           echo "AZURE_CODE_SIGNING_DLIB=$dlib" >> $env:GITHUB_ENV
           echo "AZURE_METADATA_JSON=$dir\metadata.json" >> $env:GITHUB_ENV
