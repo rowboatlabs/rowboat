@@ -207,6 +207,26 @@ const graphPalette = [
 const PTT_TAP_MS = 350
 const PTT_EDGE_ECHO_MS = 80
 
+// Speakable fallback for a call reply that skipped <voice> tags: strip the
+// markdown that reads terribly aloud and cap the length — a minute-long
+// monologue helps nobody.
+function toSpeakableText(markdown: string): string {
+  const text = markdown
+    .replace(/```[\s\S]*?(```|$)/g, ' — code omitted — ')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/^[-*+]\s+/gm, '')
+    .replace(/\*\*|__|\*/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (text.length <= 700) return text
+  const cut = text.slice(0, 700)
+  const lastStop = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('! '), cut.lastIndexOf('? '))
+  return lastStop > 200 ? cut.slice(0, lastStop + 1) : cut
+}
+
 const MACOS_TRAFFIC_LIGHTS_RESERVED_PX = 16 + 12 * 3 + 8 * 2
 const TITLEBAR_BUTTON_PX = 32
 const TITLEBAR_BUTTON_GAP_PX = 4
@@ -1049,6 +1069,15 @@ function App() {
   // segments that appeared after the current session became active.
   const spokenVoiceRef = useRef<{ key: string | null; count: number }>({ key: null, count: 0 })
   const voiceSegments = sessionChat.chatState?.voiceSegments
+  const voiceSegmentsRef = useRef(voiceSegments)
+  voiceSegmentsRef.current = voiceSegments
+  // Fallback-speech bookkeeping, armed per call turn at submit (see
+  // handlePromptSubmit) and consumed by the effect below the segment player.
+  const callTurnVoiceRef = useRef<{ pending: boolean; segmentsAtSubmit: number; submitAt: number }>({
+    pending: false,
+    segmentsAtSubmit: 0,
+    submitAt: 0,
+  })
   useEffect(() => {
     if (!voiceSegments) return
     if (spokenVoiceRef.current.key !== runId) {
@@ -1059,6 +1088,9 @@ function App() {
     while (spokenVoiceRef.current.count < voiceSegments.length) {
       const segment = voiceSegments[spokenVoiceRef.current.count]
       spokenVoiceRef.current.count += 1
+      // The user is mid-capture (PTT held/locked): speaking now would play
+      // TTS straight into their open mic. They interrupted — drop it.
+      if (pttStatusRef.current !== 'idle') continue
       if (ttsEnabledRef.current) {
         const marks = callTurnMarksRef.current
         if (marks && marks.speak === undefined) marks.speak = performance.now()
@@ -1067,6 +1099,43 @@ function App() {
       }
     }
   }, [voiceSegments, runId])
+
+  // Consistency net: 'full' voice output relies on the model wrapping its
+  // reply in <voice> tags — when it doesn't, the turn used to end in total
+  // silence. If a call turn finishes with no voice segment, read the reply
+  // text itself aloud.
+  useEffect(() => {
+    if (activeIsProcessing) return
+    const turn = callTurnVoiceRef.current
+    if (!turn.pending) return
+    if (!inCallRef.current || !ttsEnabledRef.current) {
+      turn.pending = false
+      return
+    }
+    if ((voiceSegmentsRef.current?.length ?? 0) > turn.segmentsAtSubmit) {
+      // Voice segments arrived (spoken, or deliberately skipped mid-capture)
+      // — the normal path handled this turn.
+      turn.pending = false
+      return
+    }
+    for (let i = conversation.length - 1; i >= 0; i--) {
+      const item = conversation[i]
+      if (!isChatMessage(item) || item.role !== 'assistant') continue
+      // Only a reply from THIS turn counts — an errored turn would otherwise
+      // re-speak the previous answer. An older newest-message means this
+      // turn's reply hasn't landed in the conversation yet: stay armed and
+      // let the next conversation update resolve it.
+      if (item.timestamp >= turn.submitAt) {
+        turn.pending = false
+        const speakable = toSpeakableText(item.content)
+        if (speakable) {
+          ttsRef.current.speak(speakable)
+          setAssistantCaption(speakable)
+        }
+      }
+      break
+    }
+  }, [activeIsProcessing, conversation])
 
   // Emit the turn's voice-to-voice latency breakdown once audio is audible.
   useEffect(() => {
@@ -1386,6 +1455,8 @@ function App() {
     if (voiceSegments) {
       spokenVoiceRef.current.count = voiceSegments.length
     }
+    // An interrupted turn must not fallback-speak its (aborted) reply.
+    callTurnVoiceRef.current.pending = false
     if (activeIsProcessing) {
       void stopRunRef.current?.()
     }
@@ -3159,7 +3230,14 @@ function App() {
     codeMode?: 'claude' | 'codex',
     permissionMode?: PermissionMode,
   ) => {
-    if (activeIsProcessing) return
+    if (activeIsProcessing) {
+      // In-call and quick-ask input arrives at arbitrary moments — a hard
+      // drop here silently ate utterances submitted while the previous turn
+      // was still stopping (the PTT interrupt is async). Finish the stop and
+      // proceed with this message instead.
+      if (!inCallRef.current && !quickAskActiveRef.current) return
+      await stopRunRef.current?.()
+    }
 
     const submitTabId = activeChatTabIdRef.current
     const { text } = message
@@ -3174,6 +3252,16 @@ function App() {
     const marks = callTurnMarksRef.current
     if (inCallRef.current && marks && marks.submit === undefined) {
       marks.submit = performance.now()
+    }
+
+    // Bookkeeping for the fallback-speech net: if this call turn ends with
+    // no <voice> segment spoken, the reply text itself gets read aloud.
+    if (inCallRef.current) {
+      callTurnVoiceRef.current = {
+        pending: true,
+        segmentsAtSubmit: voiceSegmentsRef.current?.length ?? 0,
+        submitAt: Date.now(),
+      }
     }
 
     const videoFrames = inCallRef.current ? video.collectFrames() : []
