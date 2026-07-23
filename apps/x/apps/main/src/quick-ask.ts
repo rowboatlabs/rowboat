@@ -104,6 +104,11 @@ export function toggleQuickAsk() {
   win.focus();
 }
 
+/** Show (never hide) — the discoverability toast's "Try it" action. */
+export function showQuickAsk() {
+  if (!getQuickAskWindow()?.isVisible()) toggleQuickAsk();
+}
+
 /** Grow/shrink the bar as the response area appears (renderer-driven). */
 export function resizeQuickAsk(height: number) {
   const win = getQuickAskWindow();

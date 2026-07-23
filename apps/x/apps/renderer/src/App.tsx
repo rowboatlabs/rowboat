@@ -1713,6 +1713,24 @@ function App() {
     })
   }, [handleToggleMic, handleToggleCamera, handleToggleScreenShare, handleInterruptAssistant, handlePttDown, handlePttUp, endCall, video])
 
+  // Discoverability: nothing else in the UI reveals the global quick-ask
+  // shortcut. One toast, once per install, shortly after launch.
+  useEffect(() => {
+    if (localStorage.getItem('quick-ask-tip-shown')) return
+    const timer = setTimeout(() => {
+      localStorage.setItem('quick-ask-tip-shown', '1')
+      toast('Ask Rowboat from anywhere', {
+        description: 'Press ⌥⇧Space in any app for a quick question — the answer shows up right there and in your chat.',
+        duration: 12000,
+        action: {
+          label: 'Try it',
+          onClick: () => void window.ipc.invoke('quickAsk:show', null).catch(() => {}),
+        },
+      })
+    }, 3000)
+    return () => clearTimeout(timer)
+  }, [])
+
   // Quick-ask bar: a question typed/spoken into the global ⌥⇧Space bar lands
   // in the current chat exactly like a composer message.
   const quickAskActiveRef = useRef(false)

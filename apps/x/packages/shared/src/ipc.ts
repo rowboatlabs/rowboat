@@ -1024,6 +1024,11 @@ const ipcSchemas = {
     req: z.null(),
     res: z.object({}),
   },
+  // App window → main: open the bar (the discoverability toast's "Try it").
+  'quickAsk:show': {
+    req: z.null(),
+    res: z.object({}),
+  },
   // Bar → main: grow/shrink the window as the response area changes.
   'quickAsk:resize': {
     req: z.object({ height: z.number() }),
