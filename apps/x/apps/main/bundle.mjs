@@ -59,10 +59,20 @@ const ptySrc = fs.realpathSync(path.join(here, 'node_modules', 'node-pty'));
 const ptyDest = path.join(here, '.package', 'node_modules', 'node-pty');
 fs.rmSync(ptyDest, { recursive: true, force: true });
 fs.mkdirSync(ptyDest, { recursive: true });
-for (const item of ['package.json', 'lib', 'prebuilds']) {
+for (const item of ['package.json', 'lib']) {
   fs.cpSync(path.join(ptySrc, item), path.join(ptyDest, item), { recursive: true, dereference: true });
 }
+// Stage only the CURRENT platform's prebuilds. Each OS packages natively in CI,
+// so other platforms' binaries are dead weight — and worse: Windows code signing
+// walks every .node file in the app and signtool hard-fails on the Mach-O darwin
+// pty.node ("file format cannot be signed").
+const prebuildsSrc = path.join(ptySrc, 'prebuilds');
 const prebuildsDir = path.join(ptyDest, 'prebuilds');
+fs.mkdirSync(prebuildsDir, { recursive: true });
+for (const dir of fs.readdirSync(prebuildsSrc)) {
+  if (!dir.startsWith(`${process.platform}-`)) continue;
+  fs.cpSync(path.join(prebuildsSrc, dir), path.join(prebuildsDir, dir), { recursive: true, dereference: true });
+}
 for (const dir of fs.readdirSync(prebuildsDir)) {
   const helper = path.join(prebuildsDir, dir, 'spawn-helper');
   if (fs.existsSync(helper)) fs.chmodSync(helper, 0o755);
