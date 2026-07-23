@@ -252,10 +252,15 @@ jobs:
           $dir = "C:\azsign"
           New-Item -ItemType Directory -Force -Path $dir | Out-Null
 
-          # The signtool plugin that delegates signing to Azure Trusted Signing.
-          nuget install Microsoft.Trusted.Signing.Client -x -OutputDirectory "$dir\nuget"
-          $dlib = "$dir\nuget\Microsoft.Trusted.Signing.Client\bin\x64\Azure.CodeSigning.Dlib.dll"
-          if (-not (Test-Path $dlib)) { throw "Azure.CodeSigning.Dlib.dll not found at $dlib" }
+          # The signtool plugin that delegates signing to Azure Trusted Signing
+          # (renamed "Artifact Signing" — the old Microsoft.Trusted.Signing.Client
+          # package is gone from NuGet, but the dlib inside kept its filename).
+          nuget install Microsoft.ArtifactSigning.Client -x -OutputDirectory "$dir\nuget"
+          $dlib = Get-ChildItem "$dir\nuget" -Recurse -Filter "Azure.CodeSigning.Dlib.dll" |
+            Where-Object { $_.FullName -match '\\x64\\' } |
+            Select-Object -First 1 -ExpandProperty FullName
+          if (-not $dlib) { throw "x64 Azure.CodeSigning.Dlib.dll not found under $dir\nuget" }
+          echo "Using dlib: $dlib"
 
           # Tells the dlib which account/profile to sign with.
           @{
