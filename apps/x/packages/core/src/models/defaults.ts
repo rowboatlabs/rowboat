@@ -14,9 +14,9 @@ const SIGNED_IN_DEFAULT_PROVIDER = "rowboat";
 const SIGNED_IN_KG_MODEL = "google/gemini-3.1-flash-lite";
 const SIGNED_IN_LIVE_NOTE_AGENT_MODEL = "google/gemini-3.1-flash-lite";
 const SIGNED_IN_AUTO_PERMISSION_DECISION_MODEL = "google/gemini-3.1-flash-lite";
-// 3.5-flash-lite is not on the gateway allowlist (only 3.1-flash-lite and
-// full 3.5-flash are) — the gateway 403s "Model not allowed" otherwise.
-const SIGNED_IN_CHAT_TITLE_MODEL = "google/gemini-3.5-flash";
+// Must be on the gateway's server-side allowlist or title calls 403
+// "Model not allowed" (and silently keep the placeholder title).
+const SIGNED_IN_CHAT_TITLE_MODEL = "google/gemini-3.5-flash-lite";
 
 export type ModelSelection = z.infer<typeof ModelRef>;
 
