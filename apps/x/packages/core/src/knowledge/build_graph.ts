@@ -420,9 +420,9 @@ export function meetingAttendeesBanner(filePath: string, content: string): strin
         return `> **ATTENDEES-GATE (computed by the system, authoritative): this recording has no linked calendar invite, so there is NO trusted attendee list.** Names in the transcript come from live speech recognition and are unreliable. You MUST NOT create a new People note for ANY name that appears only in this transcript. Allowed: updating an existing People note when the transcript clearly refers to that person (matching name/alias plus context), mentioning names in prose, and creating non-People notes (Topics/Projects) the discussion clearly warrants.`;
     }
 
-    return `> **ATTENDEES-GATE (computed by the system, authoritative): the calendar invite lists these attendees — the ONLY people who were in this meeting:**\n` +
+    return `> **ATTENDEES-GATE (computed by the system, authoritative): the calendar invite lists these attendees:**\n` +
         attendees.map(a => `> - ${a}`).join('\n') + '\n' +
-        `> New People notes from this meeting are allowed ONLY for people on this list (the owner still never gets one). Transcript names are speech-recognition output: a name that is similar to an attendee's ("Shubham" heard as "Shubhrant" or "Shivam") IS that attendee — resolve it to their one note (adding the variant to Aliases is fine), never create a second note for a name variant. A name with no plausible match on the list is a transcription artifact or a person merely mentioned: prose only, no note.`;
+        `> New People notes from this meeting are allowed ONLY for people on this list (the owner still never gets one). Transcript names are speech-recognition output: a name that is similar to an attendee's ("Shubham" heard as "Shubhrant" or "Shivam") IS that attendee — resolve it to their one note (adding the variant to Aliases is fine), never create a second note for a name variant. Someone not on the invite may still have joined: if an EXISTING People note clearly matches a transcript name (name/alias plus context), update that existing note — but NEVER create a new note for anyone off the list. A name with no plausible match on the list and no clearly matching existing note is a transcription artifact or a person merely mentioned: prose only, no note.`;
 }
 
 /**
