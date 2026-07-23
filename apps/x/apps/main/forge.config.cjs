@@ -12,6 +12,28 @@ const pkg = require('./package.json');
 const SKIP_PACMAN = process.env.ROWBOAT_SKIP_PACMAN === '1';
 const SKIP_CODE_SIGNING = process.env.ROWBOAT_SKIP_CODE_SIGNING === '1';
 
+// Windows code signing via Azure Trusted Signing — CI-only. The GitHub workflow
+// downloads the Azure dlib, writes metadata.json, and exports these env vars;
+// when they're absent (local builds, mac/linux jobs) Windows signing is skipped.
+// signtool loads Azure.CodeSigning.Dlib.dll (/dlib), which reads metadata.json
+// (/dmdf) for the endpoint/account/profile and authenticates via
+// AZURE_TENANT_ID / AZURE_CLIENT_ID / AZURE_CLIENT_SECRET.
+// NOTE: @electron/windows-sign splits signWithParams on spaces, so the dlib and
+// metadata paths must not contain spaces (the workflow stages them in C:\azsign).
+const WINDOWS_SIGN =
+    !SKIP_CODE_SIGNING &&
+    process.env.AZURE_CODE_SIGNING_DLIB &&
+    process.env.AZURE_METADATA_JSON
+        ? {
+              // The signtool vendored by @electron/windows-sign is too old for the
+              // Azure dlib; the workflow points this at the Windows SDK's signtool.
+              ...(process.env.SIGNTOOL_PATH ? { signToolPath: process.env.SIGNTOOL_PATH } : {}),
+              signWithParams: `/v /debug /dlib ${process.env.AZURE_CODE_SIGNING_DLIB} /dmdf ${process.env.AZURE_METADATA_JSON}`,
+              timestampServer: 'http://timestamp.acs.microsoft.com',
+              hashes: ['sha256'],
+          }
+        : undefined;
+
 // Stage the ACP coding-adapters (@agentclientprotocol/*-acp) and their full
 // production dependency closure into the packaged app.
 //
@@ -202,6 +224,9 @@ module.exports = {
             NSAudioCaptureUsageDescription: 'Rowboat needs access to system audio to transcribe meetings from other apps (Zoom, Meet, etc.)',
             NSCameraUsageDescription: 'Rowboat uses your camera in video chat mode so the assistant can see you and give feedback (e.g. pitch practice).',
         },
+        // Signs the packaged app's executables (rowboat.exe etc.); the Squirrel
+        // maker below separately signs the installer it produces.
+        ...(WINDOWS_SIGN ? { windowsSign: WINDOWS_SIGN } : {}),
         ...(SKIP_CODE_SIGNING ? {} : {
             osxSign: {
                 batchCodesignCalls: true,
@@ -260,6 +285,9 @@ module.exports = {
                 // GitHub release page next to setup.exe and users grab the
                 // wrong one (it neither launches the app nor auto-updates).
                 noMsi: true,
+                // Sign the Squirrel installer (setup.exe) and the binaries it
+                // repackages. No-op unless the CI signing env vars are set.
+                ...(WINDOWS_SIGN ? { windowsSign: WINDOWS_SIGN } : {}),
             })
         },
         {

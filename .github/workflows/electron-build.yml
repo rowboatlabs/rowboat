@@ -243,8 +243,45 @@ jobs:
         run: pnpm install --frozen-lockfile
         working-directory: apps/x
 
+      - name: Setup Azure Trusted Signing
+        shell: pwsh
+        run: |
+          # Stage everything under a path WITHOUT spaces: @electron/windows-sign
+          # splits signWithParams on spaces, so the /dlib and /dmdf paths must be
+          # space-free.
+          $dir = "C:\azsign"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+
+          # The signtool plugin that delegates signing to Azure Trusted Signing.
+          nuget install Microsoft.Trusted.Signing.Client -x -OutputDirectory "$dir\nuget"
+          $dlib = "$dir\nuget\Microsoft.Trusted.Signing.Client\bin\x64\Azure.CodeSigning.Dlib.dll"
+          if (-not (Test-Path $dlib)) { throw "Azure.CodeSigning.Dlib.dll not found at $dlib" }
+
+          # Tells the dlib which account/profile to sign with.
+          @{
+            Endpoint               = "${{ secrets.AZURE_ENDPOINT }}"
+            CodeSigningAccountName = "${{ secrets.AZURE_CODE_SIGNING_NAME }}"
+            CertificateProfileName = "${{ secrets.AZURE_CERT_PROFILE_NAME }}"
+          } | ConvertTo-Json | Out-File "$dir\metadata.json" -Encoding utf8
+
+          # Newest Windows SDK signtool (the one vendored by @electron/windows-sign
+          # is too old to load the dlib). Copied into the space-free dir.
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" |
+            Where-Object { $_.Directory.Parent.Name -match '^\d+(\.\d+)+$' } |
+            Sort-Object { [version]$_.Directory.Parent.Name } | Select-Object -Last 1
+          if (-not $signtool) { throw "signtool.exe not found in Windows SDK" }
+          Copy-Item $signtool.FullName "$dir\signtool.exe"
+          & "$dir\signtool.exe" | Select-Object -First 3
+
+          echo "AZURE_CODE_SIGNING_DLIB=$dlib" >> $env:GITHUB_ENV
+          echo "AZURE_METADATA_JSON=$dir\metadata.json" >> $env:GITHUB_ENV
+          echo "SIGNTOOL_PATH=$dir\signtool.exe" >> $env:GITHUB_ENV
+
       - name: Build electron app
         env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
           VITE_PUBLIC_POSTHOG_KEY: ${{ secrets.VITE_PUBLIC_POSTHOG_KEY }}
           VITE_PUBLIC_POSTHOG_HOST: ${{ secrets.VITE_PUBLIC_POSTHOG_HOST }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
