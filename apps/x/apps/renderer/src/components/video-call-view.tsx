@@ -245,7 +245,7 @@ export function VideoCallView({
               {pttStatus === 'idle' ? 'Hold to talk' : pttStatus === 'locked' ? 'Tap to send' : 'Release to send'}
             </button>
           </TooltipTrigger>
-          <TooltipContent>Hold to talk (tap to go hands-free) — or hold the right ⌘ key</TooltipContent>
+          <TooltipContent className="z-[110]">Hold to talk (tap to go hands-free) — or hold the right ⌘ key</TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -263,7 +263,7 @@ export function VideoCallView({
               {micMuted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
             </button>
           </TooltipTrigger>
-          <TooltipContent>{micMuted ? 'Unmute' : 'Mute — pauses your mic and all frame capture'}</TooltipContent>
+          <TooltipContent className="z-[110]">{micMuted ? 'Unmute' : 'Mute — pauses your mic and all frame capture'}</TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -281,7 +281,7 @@ export function VideoCallView({
               {cameraOn ? <Video className="h-5 w-5" /> : <VideoOff className="h-5 w-5" />}
             </button>
           </TooltipTrigger>
-          <TooltipContent>{cameraOn ? 'Turn off camera' : 'Turn on camera'}</TooltipContent>
+          <TooltipContent className="z-[110]">{cameraOn ? 'Turn off camera' : 'Turn on camera'}</TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -294,7 +294,7 @@ export function VideoCallView({
               <MonitorUp className="h-5 w-5" />
             </button>
           </TooltipTrigger>
-          <TooltipContent>Share your screen</TooltipContent>
+          <TooltipContent className="z-[110]">Share your screen</TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -312,7 +312,7 @@ export function VideoCallView({
               )}
             </button>
           </TooltipTrigger>
-          <TooltipContent>{mascotVisible ? 'Hide mascot' : 'Show mascot'}</TooltipContent>
+          <TooltipContent className="z-[110]">{mascotVisible ? 'Hide mascot' : 'Show mascot'}</TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -325,7 +325,7 @@ export function VideoCallView({
               <Minimize2 className="h-5 w-5" />
             </button>
           </TooltipTrigger>
-          <TooltipContent>Minimize — keep working with the floating pill</TooltipContent>
+          <TooltipContent className="z-[110]">Minimize — keep working with the floating pill</TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -338,7 +338,7 @@ export function VideoCallView({
               <PhoneOff className="h-5 w-5" />
             </button>
           </TooltipTrigger>
-          <TooltipContent>End call</TooltipContent>
+          <TooltipContent className="z-[110]">End call</TooltipContent>
         </Tooltip>
       </div>
     </div>
