@@ -74,4 +74,5 @@ export const LlmModelConfig = z.object({
   meetingNotesModel: ModelOverride.optional(),
   liveNoteAgentModel: ModelOverride.optional(),
   autoPermissionDecisionModel: ModelOverride.optional(),
+  chatTitleModel: ModelOverride.optional(),
 });
