@@ -954,6 +954,11 @@ export function setupIpcHandlers() {
     'ptt:openInputMonitoringSettings': async () => {
       return openInputMonitoringSettings();
     },
+    'app:relaunch': async () => {
+      app.relaunch();
+      app.exit(0);
+      return {};
+    },
     'app:openPrivacySettings': async (_event, args) => {
       if (process.platform !== 'darwin') return { success: false };
       const anchors = {

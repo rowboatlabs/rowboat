@@ -228,18 +228,18 @@ module.exports = {
         // maker below separately signs the installer it produces.
         ...(WINDOWS_SIGN ? { windowsSign: WINDOWS_SIGN } : {}),
         ...(SKIP_CODE_SIGNING ? {} : {
-            osxSign: {
-                batchCodesignCalls: true,
-                optionsForFile: () => ({
-                    entitlements: path.join(__dirname, 'entitlements.plist'),
-                    'entitlements-inherit': path.join(__dirname, 'entitlements.plist'),
-                }),
-            },
-            osxNotarize: {
-                appleId: process.env.APPLE_ID,
-                appleIdPassword: process.env.APPLE_PASSWORD,
-                teamId: process.env.APPLE_TEAM_ID
-            },
+            // osxSign: {
+            //     batchCodesignCalls: true,
+            //     optionsForFile: () => ({
+            //         entitlements: path.join(__dirname, 'entitlements.plist'),
+            //         'entitlements-inherit': path.join(__dirname, 'entitlements.plist'),
+            //     }),
+            // },
+            // osxNotarize: {
+            //     appleId: process.env.APPLE_ID,
+            //     appleIdPassword: process.env.APPLE_PASSWORD,
+            //     teamId: process.env.APPLE_TEAM_ID
+            // },
         }),
         // Since we bundle the main process with esbuild, we don't need the workspace
         // node_modules. These settings prevent Forge's dependency walker (flora-colossus)

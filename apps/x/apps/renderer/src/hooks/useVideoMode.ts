@@ -275,9 +275,17 @@ export function useVideoMode() {
         if (screenStateRef.current !== 'idle') return true;
         setScreenState('starting');
 
-        // Surfaces the macOS Screen Recording permission state and, on first
-        // use, registers the app in System Settings (same flow meetings use).
-        await window.ipc.invoke('meeting:checkScreenPermission', null).catch(() => null);
+        // Gate on the macOS Screen Recording permission (registering the app
+        // in System Settings on first use — same flow meetings use). This
+        // check MUST be honored: without the permission getDisplayMedia still
+        // "succeeds" but every frame is black — the call claims it's sharing
+        // while the assistant sees nothing.
+        const perm = await window.ipc.invoke('meeting:checkScreenPermission', null).catch(() => null);
+        if (perm && !perm.granted) {
+            console.error('[video] Screen Recording permission not granted');
+            setScreenState('idle');
+            return false;
+        }
 
         let stream: MediaStream | null = null;
         try {

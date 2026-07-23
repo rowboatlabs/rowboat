@@ -1331,17 +1331,10 @@ function App() {
     if (preset === 'share') {
       // If screen capture fails (usually the macOS Screen Recording
       // permission), continue as a voice call — sharing is one tap away on
-      // the pill once permission is granted.
+      // the pill once permission is granted. The dialog explains the grant +
+      // relaunch dance instead of failing silently.
       const shared = await video.startScreenShare()
-      if (!shared) {
-        toast("Couldn't share your screen", {
-          description: 'Grant Rowboat Screen Recording access, then tap the share button on the call.',
-          action: {
-            label: 'Open Settings',
-            onClick: () => void window.ipc.invoke('meeting:openScreenRecordingSettings', null).catch(() => {}),
-          },
-        })
-      }
+      if (!shared) setPermissionDialog('screen-recording')
     }
 
     // A manual push-to-talk recording can't coexist with the call's mic.
@@ -1414,7 +1407,13 @@ function App() {
     if (video.screenState === 'live') {
       video.stopScreenShare()
     } else {
-      await video.startScreenShare()
+      const shared = await video.startScreenShare()
+      if (!shared) {
+        setPermissionDialog('screen-recording')
+        // The toggle may have come from the floating pill while another app
+        // is frontmost — the dialog lives in the app window, bring it up.
+        void window.ipc.invoke('app:focusMainWindow', null).catch(() => {})
+      }
     }
   }, [video])
 
@@ -1442,7 +1441,8 @@ function App() {
   // to full screen.
   const handleMinimizeCall = useCallback(async () => {
     setCallMinimized(true)
-    await video.startScreenShare()
+    const shared = await video.startScreenShare()
+    if (!shared) setPermissionDialog('screen-recording')
   }, [video])
 
   // Interrupt the assistant: silence TTS immediately, skip anything already
@@ -1582,18 +1582,21 @@ function App() {
     if (micMuted) handlePttCancel()
   }, [micMuted, handlePttCancel])
 
-  // Global-PTT onboarding: shortly into the first call, if the key hook is
-  // running but has seen zero input events, macOS Input Monitoring hasn't
-  // taken effect — explain it once instead of letting Right ⌘ silently do
-  // nothing from other apps. (In-window PTT works regardless.)
+  // Global-PTT onboarding: shortly into a call, if the key hook is running
+  // but has seen zero input events, macOS Input Monitoring hasn't taken
+  // effect — explain it instead of letting Right ⌘ silently do nothing from
+  // other apps. At most once per app session: once-ever proved too little
+  // (dismiss without granting and global PTT stayed silently broken), every
+  // call would nag. (In-window PTT works regardless.)
+  const inputMonitoringPromptedRef = useRef(false)
   useEffect(() => {
     if (!inCall) return
-    if (localStorage.getItem('ptt-input-monitoring-prompted')) return
+    if (inputMonitoringPromptedRef.current) return
     const timer = setTimeout(async () => {
       try {
         const status = await window.ipc.invoke('ptt:getStatus', null)
         if (status.supported && status.running && !status.eventsSeen) {
-          localStorage.setItem('ptt-input-monitoring-prompted', '1')
+          inputMonitoringPromptedRef.current = true
           setPermissionDialog('input-monitoring')
         }
       } catch {

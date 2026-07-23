@@ -1002,6 +1002,12 @@ const ipcSchemas = {
     }),
     res: z.object({ success: z.boolean() }),
   },
+  // Relaunch the app — macOS requires it for a fresh Screen Recording grant
+  // to take effect.
+  'app:relaunch': {
+    req: z.null(),
+    res: z.object({}),
+  },
   // --- Quick-ask bar (global ⌥Space, own always-on-top window) ---
   // Bar → main: relay a typed/spoken question into the app window's chat.
   'quickAsk:submit': {

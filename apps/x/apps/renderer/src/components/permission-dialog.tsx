@@ -1,4 +1,4 @@
-import { Keyboard, Mic, Video } from 'lucide-react'
+import { Keyboard, Mic, MonitorUp, Video } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -10,11 +10,11 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 
-export type PermissionKind = 'microphone' | 'camera' | 'input-monitoring'
+export type PermissionKind = 'microphone' | 'camera' | 'screen-recording' | 'input-monitoring'
 
 const COPY: Record<
   PermissionKind,
-  { icon: typeof Mic; title: string; body: string; section: 'microphone' | 'camera' | 'input-monitoring' }
+  { icon: typeof Mic; title: string; body: string; section: PermissionKind }
 > = {
   microphone: {
     icon: Mic,
@@ -31,6 +31,16 @@ const COPY: Record<
       'Video calls are off because macOS is blocking the camera for Rowboat. ' +
       'Enable it under System Settings → Privacy & Security → Camera, then start the call again.',
     section: 'camera',
+  },
+  'screen-recording': {
+    icon: MonitorUp,
+    title: 'Rowboat can’t see your screen',
+    body:
+      'macOS is blocking Screen Recording for Rowboat — the call would show a "sharing" badge ' +
+      'while the assistant sees only black frames. Enable it under System Settings → ' +
+      'Privacy & Security → Screen Recording, then relaunch Rowboat (macOS requires a relaunch ' +
+      'for this permission to take effect).',
+    section: 'screen-recording',
   },
   'input-monitoring': {
     icon: Keyboard,
@@ -64,7 +74,9 @@ export function PermissionDialog({
   const Icon = copy?.icon ?? Mic
   return (
     <Dialog open={kind !== null} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      {/* z-[120]: share/PTT failures surface mid-call, above the z-[100]
+          full-screen call view. */}
+      <DialogContent className="z-[120] sm:max-w-md">
         {copy && (
           <>
             <DialogHeader>
@@ -87,6 +99,14 @@ export function PermissionDialog({
                   }}
                 >
                   I’ve enabled it
+                </Button>
+              )}
+              {kind === 'screen-recording' && (
+                <Button
+                  variant="outline"
+                  onClick={() => void window.ipc.invoke('app:relaunch', null).catch(() => {})}
+                >
+                  Relaunch Rowboat
                 </Button>
               )}
               <Button

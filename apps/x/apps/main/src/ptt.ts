@@ -42,6 +42,9 @@ export function initPtt(findTargets: () => BrowserWindow[]) {
 }
 
 function broadcast(event: PttKeyEvent) {
+  // Forwarding is gated on consumers, not on hook lifetime — see
+  // setPttActive for why the hook keeps running between calls.
+  if (reasons.size === 0) return;
   for (const win of findTargetWindows()) {
     if (!win.isDestroyed()) win.webContents.send('voice:ptt-key', event);
   }
@@ -120,15 +123,19 @@ function stopHook() {
 }
 
 /**
- * Reference-counted activation: the hook runs while at least one consumer
- * ('call', 'quick-ask') is active.
+ * Reference-counted activation: key events are forwarded while at least one
+ * consumer ('call', 'quick-ask') is active. The hook itself starts lazily on
+ * the first consumer and then STAYS running for the app's lifetime —
+ * libuiohook's stop/start cycle is unreliable on macOS (the recreated tap
+ * intermittently delivers nothing, which surfaced as PTT "randomly" dying
+ * on later calls). While no consumer is registered nothing is forwarded or
+ * retained.
  */
 export async function setPttActive(reason: string, active: boolean) {
   if (active) reasons.add(reason);
   else reasons.delete(reason);
-  const want = reasons.size > 0;
-  if (want && !running) await startHook();
-  else if (!want && running) stopHook();
+  if (reasons.size > 0 && !running) await startHook();
+  else if (reasons.size === 0) metaRightHeld = false;
 }
 
 export function getPttStatus() {
