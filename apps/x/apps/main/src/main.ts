@@ -72,6 +72,7 @@ import { loadAppSettings, saveAppSettings } from "@x/core/dist/config/app_settin
 import { init as initMeetingDetection } from "@x/core/dist/meetings/detector.js";
 import { createAppTray, hasTray, isRecordingActive, markPendingToggleMeetingNotes } from "./tray.js";
 import { initMeetingPopup, showMeetingPopup } from "./meeting-popup.js";
+import { initQuickAsk } from "./quick-ask.js";
 
 // Captured as early as possible so it reflects actual process start. Used to
 // gate grace-eligible notifications (e.g. the burst of background-task
@@ -518,6 +519,10 @@ app.whenReady().then(async () => {
   setupIpcHandlers();
   setupBrowserEventForwarding();
   setupBrowserExtensions();
+
+  // Quick-ask bar: global ⌥Space summons a Spotlight-style ask-anything
+  // window over whatever app the user is in.
+  initQuickAsk();
 
   // Start the Rowboat Apps server (per-app origins on 127.0.0.1:3210) BEFORE
   // the window and the long service-init chain below. The Apps view is

@@ -1,19 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Maximize2, Mic, MicOff, MonitorUp, PhoneOff, Square, User, Video, VideoOff } from 'lucide-react'
+import { Maximize2, Mic, MicOff, MonitorUp, PhoneOff, SendHorizontal, Square, User, Video, VideoOff } from 'lucide-react'
 
 import { TalkingHead } from '@/components/talking-head'
 
 type PopoutState = {
   ttsState: 'idle' | 'synthesizing' | 'speaking'
-  status: 'listening' | 'thinking' | 'speaking' | null
+  status: 'idle' | 'listening' | 'thinking' | 'speaking' | null
   cameraOn: boolean
   /** User mute = full input pause: no mic audio AND no frame capture. */
   micMuted: boolean
   screenSharing: boolean
   interimText: string | null
+  /** A quick ⌘ tap locked hands-free capture (until the next tap). */
+  pttLocked: boolean
 }
 
 const STATUS_DISPLAY: Record<NonNullable<PopoutState['status']>, { label: string; dotClass: string }> = {
+  idle: { label: 'Hold ⌘ to talk', dotClass: 'bg-neutral-500' },
   listening: { label: 'Listening', dotClass: 'bg-green-500 animate-pulse' },
   thinking: { label: 'Thinking…', dotClass: 'bg-amber-400' },
   speaking: { label: 'Speaking', dotClass: 'bg-sky-400 animate-pulse' },
@@ -36,8 +39,9 @@ export function VideoPopout() {
   // Camera defaults OFF: guessing "on" would flash the user's video for a
   // beat before the real state arrives — which reads as a bug. The true
   // state is fetched immediately below.
-  const [state, setState] = useState<PopoutState>({ ttsState: 'idle', status: null, cameraOn: false, micMuted: false, screenSharing: false, interimText: null })
+  const [state, setState] = useState<PopoutState>({ ttsState: 'idle', status: null, cameraOn: false, micMuted: false, screenSharing: false, interimText: null, pttLocked: false })
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  const [draft, setDraft] = useState('')
 
   useEffect(() => {
     const cleanup = window.ipc.on('video:popout-state', (next) => setState(next))
@@ -82,9 +86,16 @@ export function VideoPopout() {
   // so the mascot still animates while the assistant speaks in the main window.
   const getLevel = useCallback(() => 0.45 + 0.35 * Math.sin(performance.now() / 90), [])
 
-  const sendAction = useCallback((action: 'toggle-mic' | 'toggle-camera' | 'toggle-share' | 'stop-speaking' | 'end-call' | 'expand') => {
+  const sendAction = useCallback((action: 'toggle-mic' | 'toggle-camera' | 'toggle-share' | 'stop-speaking' | 'ptt-down' | 'ptt-up' | 'end-call' | 'expand') => {
     void window.ipc.invoke('video:popoutAction', { action }).catch(() => {})
   }, [])
+
+  const sendText = useCallback(() => {
+    const text = draft.trim()
+    if (!text) return
+    setDraft('')
+    void window.ipc.invoke('video:popoutAction', { action: 'send-text', text }).catch(() => {})
+  }, [draft])
 
   const statusDisplay = state.status ? STATUS_DISPLAY[state.status] : null
 
@@ -136,11 +147,17 @@ export function VideoPopout() {
           </span>
           {statusDisplay && (
             <span className="absolute right-1.5 top-1.5 flex items-center gap-1 rounded-full bg-black/50 px-1.5 py-0.5 text-[10px] font-medium text-white">
-              {/* Muted overrides "Listening" — the green pulse would be a lie. */}
-              {state.micMuted && state.status === 'listening' ? (
+              {/* Muted overrides the listening/PTT states — the green pulse
+                  (or the "hold to talk" invite) would be a lie. */}
+              {state.micMuted && (state.status === 'listening' || state.status === 'idle') ? (
                 <>
                   <span className="block h-1.5 w-1.5 rounded-full bg-red-500" />
                   Muted
+                </>
+              ) : state.pttLocked ? (
+                <>
+                  <span className="block h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
+                  Hands-free
                 </>
               ) : (
                 <>
@@ -176,6 +193,29 @@ export function VideoPopout() {
 
       {/* Control bar — actions execute in the main app window */}
       <div className="flex h-7 shrink-0 items-center justify-center gap-2" style={noDragRegion}>
+        {/* Push-to-talk: hold to talk, quick tap to lock hands-free —
+            mirrors the Right ⌘ key. Pointer capture keeps the release edge
+            even if the cursor slides off mid-hold. */}
+        <button
+          type="button"
+          onPointerDown={(e) => {
+            e.currentTarget.setPointerCapture(e.pointerId)
+            sendAction('ptt-down')
+          }}
+          onPointerUp={() => sendAction('ptt-up')}
+          onPointerCancel={() => sendAction('ptt-up')}
+          disabled={state.micMuted}
+          className={`flex h-6 items-center gap-1 rounded-full px-2 text-[10px] font-medium transition-colors select-none ${
+            state.status === 'listening' || state.pttLocked
+              ? 'bg-green-600 text-white hover:bg-green-500'
+              : 'bg-neutral-700 text-white/90 hover:bg-neutral-600'
+          } ${state.micMuted ? 'opacity-50' : ''}`}
+          aria-label="Hold to talk — or tap to go hands-free"
+          title="Hold to talk — or tap to go hands-free"
+        >
+          <Mic className="h-3 w-3" />
+          {state.pttLocked ? 'Tap to send' : state.status === 'listening' ? 'Release to send' : 'Hold to talk'}
+        </button>
         <button
           type="button"
           onClick={() => sendAction('toggle-mic')}
@@ -234,6 +274,35 @@ export function VideoPopout() {
           <Maximize2 className="h-3.5 w-3.5" />
         </button>
       </div>
+
+      {/* Typed input — lands in the chat exactly like a composer message
+          (current frames ride along), so the user can ask without speaking
+          or switching back to the app. */}
+      <form
+        className="flex h-7 shrink-0 items-center gap-1"
+        style={noDragRegion}
+        onSubmit={(e) => {
+          e.preventDefault()
+          sendText()
+        }}
+      >
+        <input
+          type="text"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder="Type a message…"
+          className="h-full min-w-0 flex-1 rounded-md bg-neutral-800 px-2 text-[11px] text-white placeholder:text-neutral-500 outline-none focus:ring-1 focus:ring-sky-500"
+        />
+        <button
+          type="submit"
+          disabled={!draft.trim()}
+          className="flex h-full w-7 items-center justify-center rounded-md bg-sky-600 text-white transition-colors hover:bg-sky-500 disabled:opacity-40"
+          aria-label="Send"
+          title="Send"
+        >
+          <SendHorizontal className="h-3.5 w-3.5" />
+        </button>
+      </form>
     </div>
   )
 }

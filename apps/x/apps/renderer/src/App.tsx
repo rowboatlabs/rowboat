@@ -132,6 +132,7 @@ import { useVoiceMode } from '@/hooks/useVoiceMode'
 import { useVideoMode } from '@/hooks/useVideoMode'
 import { useVoiceTTS } from '@/hooks/useVoiceTTS'
 import { VideoCallView } from '@/components/video-call-view'
+import { PermissionDialog, type PermissionKind } from '@/components/permission-dialog'
 import { ProductTour, type TourNavTarget } from '@/components/product-tour'
 import { useMeetingTranscription, type CalendarEventMeta } from '@/hooks/useMeetingTranscription'
 import { useAnalyticsIdentity } from '@/hooks/useAnalyticsIdentity'
@@ -198,6 +199,13 @@ const graphPalette = [
   { hue: 55, sat: 80, light: 52 },
   { hue: 0, sat: 72, light: 52 },
 ]
+
+// Push-to-talk gesture timing: a Right-⌘ press shorter than PTT_TAP_MS is a
+// tap (toggles hands-free lock); anything longer is a hold (release
+// submits). PTT_EDGE_ECHO_MS collapses the same key edge arriving from two
+// sources at once (global uiohook hook + in-window DOM listener).
+const PTT_TAP_MS = 350
+const PTT_EDGE_ECHO_MS = 80
 
 const MACOS_TRAFFIC_LIGHTS_RESERVED_PX = 16 + 12 * 3 + 8 * 2
 const TITLEBAR_BUTTON_PX = 32
@@ -1101,6 +1109,17 @@ function App() {
   // or shown while muted ever reaches the assistant. Output is untouched
   // (in-flight speech keeps playing; the Stop control handles that).
   const [micMuted, setMicMuted] = useState(false)
+  const micMutedRef = useRef(false)
+  micMutedRef.current = micMuted
+  // Push-to-talk: the mic gate is open while 'held' (key or on-screen button
+  // down) or 'locked' (a quick tap toggled hands-free capture). 'idle' means
+  // the assistant hears nothing.
+  const [pttStatus, setPttStatus] = useState<'idle' | 'held' | 'locked'>('idle')
+  const pttStatusRef = useRef<'idle' | 'held' | 'locked'>('idle')
+  const setPttState = useCallback((s: 'idle' | 'held' | 'locked') => {
+    pttStatusRef.current = s
+    setPttStatus(s)
+  }, [])
   // Practice preset: adds the coaching persona to the system prompt.
   const [practiceMode, setPracticeMode] = useState(false)
   const practiceModeRef = useRef(false)
@@ -1180,12 +1199,22 @@ function App() {
     return cleanup
   }, [])
 
+  // Which macOS permission explainer is up, if any (replaces the old silent
+  // failures: mic/camera denials did nothing visible).
+  const [permissionDialog, setPermissionDialog] = useState<PermissionKind | null>(null)
+
   const handleStartRecording = useCallback(() => {
     // A live call owns the mic — ignore push-to-talk while one is running.
     if (inCallRef.current) return
     setIsRecording(true)
     isRecordingRef.current = true
-    voice.start()
+    void voice.start().then((result) => {
+      if (result === 'mic-denied') {
+        setIsRecording(false)
+        isRecordingRef.current = false
+        setPermissionDialog('microphone')
+      }
+    })
   }, [voice])
 
   const handlePromptSubmitRef = useRef<((message: PromptInputMessage, mentions?: FileMention[], stagedAttachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => Promise<void>) | null>(null)
@@ -1225,7 +1254,11 @@ function App() {
     if (inCallRef.current) return
     const camera = preset === 'video' || preset === 'practice'
     const ok = await video.start({ camera })
-    if (!ok) return // camera denied/unavailable — stay out of the call
+    if (!ok) {
+      // Camera denied/unavailable — stay out of the call, and say why.
+      if (camera) setPermissionDialog('camera')
+      return
+    }
     if (preset === 'share') {
       // If screen capture fails (usually the macOS Screen Recording
       // permission), continue as a voice call — sharing is one tap away on
@@ -1250,14 +1283,23 @@ function App() {
     }
     ttsEnabledRef.current = true
     ttsModeRef.current = 'full'
-    void voiceRef.current.startContinuous((text) => {
-      // Instant "heard you" feedback + start of the latency clock.
-      playAckCue()
-      callTurnMarksRef.current = { t0: performance.now() }
-      pendingVoiceInputRef.current = true
-      handlePromptSubmitRef.current?.({ text, files: [] })
-    })
+    // Push-to-talk: the mic + Deepgram socket stay warm for the whole call,
+    // but nothing is heard until the user opens the gate (hold Right ⌘, or
+    // tap it to lock hands-free capture). The key release is the endpoint —
+    // no silence detection, no misfires.
+    void voiceRef.current
+      .startPtt((text) => {
+        // Instant "heard you" feedback + start of the latency clock.
+        playAckCue()
+        callTurnMarksRef.current = { t0: performance.now() }
+        pendingVoiceInputRef.current = true
+        handlePromptSubmitRef.current?.({ text, files: [] })
+      })
+      .then((result) => {
+        if (result === 'mic-denied') setPermissionDialog('microphone')
+      })
 
+    setPttState('idle')
     setPracticeMode(preset === 'practice')
     practiceModeRef.current = preset === 'practice'
     setMicMuted(false)
@@ -1267,7 +1309,7 @@ function App() {
     setInCall(true)
     callStartedAtMsRef.current = performance.now()
     analytics.callStarted(preset)
-  }, [video])
+  }, [video, setPttState])
 
   const endCall = useCallback(() => {
     if (!inCallRef.current) return
@@ -1283,18 +1325,11 @@ function App() {
     setPracticeMode(false)
     practiceModeRef.current = false
     setMicMuted(false)
+    setPttState('idle')
     setCallMinimized(false)
     inCallRef.current = false
     setInCall(false)
-  }, [video])
-
-  // During a call, mute the mic while the assistant is thinking or speaking
-  // so its own TTS (or a half-turn) never gets transcribed back at it — and
-  // whenever the user muted themselves.
-  useEffect(() => {
-    if (!inCall) return
-    voiceRef.current.setPaused(micMuted || activeIsProcessing || tts.state !== 'idle')
-  }, [inCall, micMuted, activeIsProcessing, tts.state])
+  }, [video, setPttState])
 
   // The user-mute half that lives in the video pipeline: stop sampling
   // camera/screen frames while muted (see useVideoMode.setCapturePaused).
@@ -1356,14 +1391,147 @@ function App() {
     }
   }, [voiceSegments, activeIsProcessing])
 
-  // Current phase of the call (null when not in one).
-  const videoCallStatus: 'listening' | 'thinking' | 'speaking' | null =
+  // --- Push-to-talk state machine ---
+  // One edge-triggered machine fed by every source: the global key hook
+  // (uiohook in main), the in-window DOM fallback, and the on-screen talk
+  // buttons (full-screen call + popout). Sources overlap while the app is
+  // focused, so identical edges arriving within the echo window collapse
+  // into one.
+  const pttDownAtRef = useRef(0)
+  const pttLastEdgeRef = useRef<{ type: 'down' | 'up'; at: number } | null>(null)
+  // Right ⌘ was used as a modifier (⌘C etc.) during this press — the
+  // matching release must not commit/lock.
+  const pttChordedRef = useRef(false)
+
+  const pttEdgeIsEcho = useCallback((type: 'down' | 'up') => {
+    const now = performance.now()
+    const last = pttLastEdgeRef.current
+    pttLastEdgeRef.current = { type, at: now }
+    return !!last && last.type === type && now - last.at < PTT_EDGE_ECHO_MS
+  }, [])
+
+  const handlePttDown = useCallback(() => {
+    if (!inCallRef.current || micMutedRef.current) return
+    if (pttEdgeIsEcho('down')) return
+    pttChordedRef.current = false
+    pttDownAtRef.current = performance.now()
+    if (pttStatusRef.current === 'idle') {
+      // Pressing to talk while the assistant is thinking/speaking is the
+      // interrupt gesture: silence it and listen.
+      handleInterruptAssistant()
+      voiceRef.current.pttBegin()
+      setPttState('held')
+    }
+    // 'locked': the mic is already open — the release decides what happens.
+  }, [pttEdgeIsEcho, handleInterruptAssistant, setPttState])
+
+  const handlePttUp = useCallback(() => {
+    if (pttStatusRef.current === 'idle') return
+    if (pttEdgeIsEcho('up')) return
+    if (pttChordedRef.current) {
+      pttChordedRef.current = false
+      return
+    }
+    const heldMs = performance.now() - pttDownAtRef.current
+    if (pttStatusRef.current === 'held' && heldMs < PTT_TAP_MS) {
+      // Quick tap: lock hands-free capture until the next press.
+      setPttState('locked')
+      return
+    }
+    // Releasing a hold (or pressing again while locked) submits.
+    setPttState('idle')
+    void voiceRef.current.pttEnd()
+  }, [pttEdgeIsEcho, setPttState])
+
+  const handlePttCancel = useCallback(() => {
+    if (pttStatusRef.current === 'idle') return
+    voiceRef.current.pttCancel()
+    setPttState('idle')
+  }, [setPttState])
+
+  const handlePttChord = useCallback(() => {
+    // The press was a keyboard shortcut, not a talk gesture.
+    if (pttStatusRef.current === 'held') {
+      voiceRef.current.pttCancel()
+      setPttState('idle')
+    } else if (pttStatusRef.current === 'locked') {
+      pttChordedRef.current = true
+    }
+  }, [setPttState])
+
+  // PTT key sources: the global hook (works over any app) plus in-window DOM
+  // listeners — the fallback that keeps PTT working while the app is focused
+  // even when macOS Input Monitoring hasn't been granted.
+  useEffect(() => {
+    if (!inCall) return
+    const offKey = window.ipc.on('voice:ptt-key', ({ type }) => {
+      if (type === 'down') handlePttDown()
+      else if (type === 'up') handlePttUp()
+      else handlePttChord()
+    })
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'MetaRight') {
+        if (!e.repeat) handlePttDown()
+        return
+      }
+      if (e.key === 'Escape' && pttStatusRef.current !== 'idle') {
+        e.preventDefault()
+        handlePttCancel()
+        return
+      }
+      if (pttStatusRef.current === 'held') handlePttChord()
+      else if (pttStatusRef.current === 'locked' && e.metaKey) handlePttChord()
+    }
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'MetaRight') handlePttUp()
+    }
+    document.addEventListener('keydown', onKeyDown)
+    document.addEventListener('keyup', onKeyUp)
+    return () => {
+      offKey()
+      document.removeEventListener('keydown', onKeyDown)
+      document.removeEventListener('keyup', onKeyUp)
+    }
+  }, [inCall, handlePttDown, handlePttUp, handlePttChord, handlePttCancel])
+
+  // Muting mid-capture discards the capture — nothing said while muted may
+  // reach the assistant.
+  useEffect(() => {
+    if (micMuted) handlePttCancel()
+  }, [micMuted, handlePttCancel])
+
+  // Global-PTT onboarding: shortly into the first call, if the key hook is
+  // running but has seen zero input events, macOS Input Monitoring hasn't
+  // taken effect — explain it once instead of letting Right ⌘ silently do
+  // nothing from other apps. (In-window PTT works regardless.)
+  useEffect(() => {
+    if (!inCall) return
+    if (localStorage.getItem('ptt-input-monitoring-prompted')) return
+    const timer = setTimeout(async () => {
+      try {
+        const status = await window.ipc.invoke('ptt:getStatus', null)
+        if (status.supported && status.running && !status.eventsSeen) {
+          localStorage.setItem('ptt-input-monitoring-prompted', '1')
+          setPermissionDialog('input-monitoring')
+        }
+      } catch {
+        // Hook unavailable — the DOM fallback still covers in-app PTT.
+      }
+    }, 4000)
+    return () => clearTimeout(timer)
+  }, [inCall])
+
+  // Current phase of the call (null when not in one). An open mic gate reads
+  // as listening no matter what the assistant is doing — the user is talking.
+  const videoCallStatus: 'idle' | 'listening' | 'thinking' | 'speaking' | null =
     inCall
-      ? tts.state === 'speaking'
-        ? 'speaking'
-        : tts.state === 'synthesizing' || activeIsProcessing
-          ? 'thinking'
-          : 'listening'
+      ? pttStatus !== 'idle'
+        ? 'listening'
+        : tts.state === 'speaking'
+          ? 'speaking'
+          : tts.state === 'synthesizing' || activeIsProcessing
+            ? 'thinking'
+            : 'idle'
       : null
 
   // The call's surface follows one rule: full screen and screen sharing are
@@ -1412,27 +1580,75 @@ function App() {
         micMuted,
         screenSharing: video.screenState === 'live',
         interimText: voice.interimText || null,
+        pttLocked: pttStatus === 'locked',
       })
       .catch(() => {})
-  }, [inCall, tts.state, videoCallStatus, video.cameraOn, micMuted, video.screenState, voice.interimText])
+  }, [inCall, tts.state, videoCallStatus, video.cameraOn, micMuted, video.screenState, voice.interimText, pttStatus])
 
   // Execute popout control-bar actions (the popout window has no access to
   // the call's mic/camera/capture — they live here). 'expand' goes full
   // screen, which by the exclusivity rule stops any running share; the main
   // process already refocused the app window.
   useEffect(() => {
-    return window.ipc.on('video:popout-action', ({ action }) => {
+    return window.ipc.on('video:popout-action', ({ action, text }) => {
       if (action === 'toggle-mic') handleToggleMic()
       else if (action === 'toggle-camera') handleToggleCamera()
       else if (action === 'toggle-share') void handleToggleScreenShare()
       else if (action === 'stop-speaking') handleInterruptAssistant()
+      else if (action === 'ptt-down') handlePttDown()
+      else if (action === 'ptt-up') handlePttUp()
+      else if (action === 'send-text') {
+        // Typed from the popout: exactly a composer message — frames ride
+        // along via handlePromptSubmit as with any typed mid-call message.
+        if (text?.trim()) handlePromptSubmitRef.current?.({ text: text.trim(), files: [] })
+      }
       else if (action === 'end-call') endCall()
       else if (action === 'expand') {
         if (video.screenState === 'live') video.stopScreenShare()
         setCallMinimized(false)
       }
     })
-  }, [handleToggleMic, handleToggleCamera, handleToggleScreenShare, handleInterruptAssistant, endCall, video])
+  }, [handleToggleMic, handleToggleCamera, handleToggleScreenShare, handleInterruptAssistant, handlePttDown, handlePttUp, endCall, video])
+
+  // Quick-ask bar: a question typed/spoken into the global ⌥Space bar lands
+  // in the current chat exactly like a composer message.
+  const quickAskActiveRef = useRef(false)
+  const quickAskStartedAtRef = useRef(0)
+  useEffect(() => {
+    return window.ipc.on('quick-ask:submit', ({ text }) => {
+      const trimmed = text.trim()
+      if (!trimmed) return
+      quickAskActiveRef.current = true
+      quickAskStartedAtRef.current = Date.now()
+      handlePromptSubmitRef.current?.({ text: trimmed, files: [] })
+    })
+  }, [])
+
+  // Mirror the in-flight answer back to the bar while a quick-ask turn is
+  // live: streaming text while generating, the final assistant message when
+  // done (which also ends the mirror). Only messages from AFTER the submit
+  // count — the previous turn's answer is still the newest one in the
+  // conversation at submit time.
+  useEffect(() => {
+    if (!quickAskActiveRef.current) return
+    let text = currentAssistantMessage
+    if (!text) {
+      for (let i = conversation.length - 1; i >= 0; i--) {
+        const item = conversation[i]
+        if (isChatMessage(item) && item.role === 'assistant') {
+          if (item.timestamp >= quickAskStartedAtRef.current) text = item.content
+          break
+        }
+      }
+    }
+    // Nothing new yet (run not started / no fresh answer): pushing would
+    // only flicker the bar's local "Thinking…" state away.
+    if (!text && !activeIsProcessing) return
+    void window.ipc
+      .invoke('quickAsk:state', { processing: activeIsProcessing, responseText: text || null })
+      .catch(() => {})
+    if (!activeIsProcessing && text) quickAskActiveRef.current = false
+  }, [activeIsProcessing, currentAssistantMessage, conversation])
 
   // Enter to submit voice input, Escape to cancel
   useEffect(() => {
@@ -7187,12 +7403,23 @@ function App() {
                 onInterrupt={handleInterruptAssistant}
                 ttsState={tts.state}
                 getTtsLevel={tts.getLevel}
-                status={videoCallStatus ?? 'listening'}
+                status={videoCallStatus ?? 'idle'}
+                pttStatus={pttStatus}
+                onPttDown={handlePttDown}
+                onPttUp={handlePttUp}
                 interimText={voice.interimText}
                 assistantCaption={assistantCaption}
                 onLeave={endCall}
               />
             )}
+            {/* macOS permission explainers (mic / camera / input monitoring) */}
+            <PermissionDialog
+              kind={permissionDialog}
+              onOpenChange={(open) => {
+                if (!open) setPermissionDialog(null)
+              }}
+              onRetry={() => void window.ipc.invoke('ptt:retryHook', null).catch(() => {})}
+            />
             {/* Mascot-guided product tour */}
             {tourActive && (
               <ProductTour

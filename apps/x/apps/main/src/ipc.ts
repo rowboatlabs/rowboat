@@ -26,6 +26,8 @@ const execFileAsync = promisify(execFile);
 // Active powerSaveBlocker id while Caffeinate is toggled on; null when off.
 let caffeinateBlockerId: number | null = null;
 
+import { initPtt, setPttActive, getPttStatus, retryPttHook, openInputMonitoringSettings } from './ptt.js';
+import { getQuickAskWindow, hideQuickAsk, resizeQuickAsk } from './quick-ask.js';
 import { RunEvent } from '@x/shared/dist/runs.js';
 import { ServiceEvent } from '@x/shared/dist/service-events.js';
 import type { SessionBusEvent } from '@x/shared/dist/sessions.js';
@@ -437,11 +439,12 @@ const activeTtsStreams = new Map<string, AbortController>();
 let videoPopoutWin: BrowserWindow | null = null;
 let lastVideoPopoutState: {
   ttsState: 'idle' | 'synthesizing' | 'speaking';
-  status: 'listening' | 'thinking' | 'speaking' | null;
+  status: 'idle' | 'listening' | 'thinking' | 'speaking' | null;
   cameraOn: boolean;
   micMuted: boolean;
   screenSharing: boolean;
   interimText: string | null;
+  pttLocked: boolean;
 } | null = null;
 
 // Match only real app windows — getAllWindows() can also contain the popout
@@ -455,6 +458,13 @@ function findMainAppWindow(): BrowserWindow | undefined {
     return isAppWindow && !url.includes('#video-popout');
   });
 }
+
+// Global PTT key events go to the app window (it owns the PTT state
+// machine) — the popout only mirrors state pushed back to it.
+initPtt(() => {
+  const main = findMainAppWindow();
+  return main ? [main] : [];
+});
 
 /**
  * Register all IPC handlers with type safety and runtime validation
@@ -931,7 +941,52 @@ export function setupIpcHandlers() {
     'voice:setCallActive': async (_event, args) => {
       voiceCallActive = args.active;
       updateSelfCaptureState();
+      // The global PTT key hook runs only while a call needs it.
+      void setPttActive('call', args.active);
       return { success: true as const };
+    },
+    'ptt:getStatus': async () => {
+      return getPttStatus();
+    },
+    'ptt:retryHook': async () => {
+      return retryPttHook();
+    },
+    'ptt:openInputMonitoringSettings': async () => {
+      return openInputMonitoringSettings();
+    },
+    'app:openPrivacySettings': async (_event, args) => {
+      if (process.platform !== 'darwin') return { success: false };
+      const anchors = {
+        microphone: 'Privacy_Microphone',
+        camera: 'Privacy_Camera',
+        'screen-recording': 'Privacy_ScreenCapture',
+        'input-monitoring': 'Privacy_ListenEvent',
+      } as const;
+      try {
+        await shell.openExternal(
+          `x-apple.systempreferences:com.apple.preference.security?${anchors[args.section]}`,
+        );
+        return { success: true };
+      } catch {
+        return { success: false };
+      }
+    },
+    // --- Quick-ask bar relays ---
+    'quickAsk:submit': async (_event, args) => {
+      findMainAppWindow()?.webContents.send('quick-ask:submit', args);
+      return {};
+    },
+    'quickAsk:hide': async () => {
+      hideQuickAsk();
+      return {};
+    },
+    'quickAsk:resize': async (_event, args) => {
+      resizeQuickAsk(args.height);
+      return {};
+    },
+    'quickAsk:state': async (_event, args) => {
+      getQuickAskWindow()?.webContents.send('quick-ask:state', args);
+      return {};
     },
     'meeting:notifyNotesReady': async (_event, args) => {
       // Granola-style re-entry point: the note refreshed in place, but the
@@ -2326,7 +2381,7 @@ export function setupIpcHandlers() {
 
       const workArea = screen.getPrimaryDisplay().workArea;
       const width = 340;
-      const height = 184;
+      const height = 218;
       const ipcDir = path.dirname(fileURLToPath(import.meta.url));
       const preloadPath = app.isPackaged
         ? path.join(ipcDir, '../preload/dist/preload.js')

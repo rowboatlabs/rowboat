@@ -28,11 +28,12 @@ await esbuild.build({
   platform: 'node',
   target: 'node20',
   outfile: './.package/dist/main.cjs',
-  // electron is provided by the runtime. node-pty is a NATIVE module: it can't
-  // be inlined (its loader requires .node binaries + a spawn-helper relative to
-  // its own package dir), so it stays external and is copied into
-  // .package/node_modules below, where require() from dist/main.cjs finds it.
-  external: ['electron', 'node-pty'],
+  // electron is provided by the runtime. node-pty and uiohook-napi are NATIVE
+  // modules: they can't be inlined (their loaders require .node binaries
+  // relative to their own package dirs), so they stay external and are copied
+  // into .package/node_modules below, where require() from dist/main.cjs
+  // finds them.
+  external: ['electron', 'node-pty', 'uiohook-napi'],
   // Use CommonJS format - many dependencies use require() which doesn't work
   // well with esbuild's ESM shim. CJS handles dynamic requires natively.
   format: 'cjs',
@@ -100,6 +101,32 @@ if (!fs.existsSync(stagedBinary)) {
   console.log(`✅ node-pty: staged ${hostTriple}/pty.node`);
 }
 console.log('✅ node-pty staged in .package/node_modules');
+
+// Ship uiohook-napi (global push-to-talk key hook) the same way. Its loader
+// is node-gyp-build, which resolves prebuilds/<platform>-<arch>/*.node
+// relative to the package dir — stage the package plus the loader. Only the
+// current platform's prebuild ships (same code-signing reason as node-pty).
+const uiohookSrc = fs.realpathSync(path.join(here, 'node_modules', 'uiohook-napi'));
+const uiohookDest = path.join(here, '.package', 'node_modules', 'uiohook-napi');
+fs.rmSync(uiohookDest, { recursive: true, force: true });
+fs.mkdirSync(uiohookDest, { recursive: true });
+for (const item of ['package.json', 'dist']) {
+  fs.cpSync(path.join(uiohookSrc, item), path.join(uiohookDest, item), { recursive: true, dereference: true });
+}
+const uiohookPrebuildsSrc = path.join(uiohookSrc, 'prebuilds');
+const uiohookPrebuildsDest = path.join(uiohookDest, 'prebuilds');
+fs.mkdirSync(uiohookPrebuildsDest, { recursive: true });
+for (const dir of fs.readdirSync(uiohookPrebuildsSrc)) {
+  if (!dir.startsWith(`${process.platform}-`)) continue;
+  fs.cpSync(path.join(uiohookPrebuildsSrc, dir), path.join(uiohookPrebuildsDest, dir), { recursive: true, dereference: true });
+}
+// The node-gyp-build loader itself (resolved through pnpm's virtual store —
+// it's a sibling of the real uiohook-napi package dir).
+const nodeGypBuildSrc = fs.realpathSync(path.join(uiohookSrc, '..', 'node-gyp-build'));
+const nodeGypBuildDest = path.join(here, '.package', 'node_modules', 'node-gyp-build');
+fs.rmSync(nodeGypBuildDest, { recursive: true, force: true });
+fs.cpSync(nodeGypBuildSrc, nodeGypBuildDest, { recursive: true, dereference: true });
+console.log('✅ uiohook-napi staged in .package/node_modules');
 
 // electron-chrome-extensions injects a preload script into browser tabs to
 // implement the chrome.* extension APIs. It resolves that file at runtime:

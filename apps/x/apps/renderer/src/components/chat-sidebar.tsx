@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { ChatHeader } from '@/components/chat-header'
 import { ChatEmptyState } from '@/components/chat-empty-state'
+import { CollapsibleResponse } from '@/components/collapsible-response'
 import {
   Conversation,
   ConversationContent,
@@ -430,10 +431,23 @@ export function ChatSidebar({
           </Message>
         )
       }
+      // Latest assistant reply stays expanded (it's being read); older long
+      // ones collapse to a preview so long sessions stay scannable.
+      const tabConversation = getTabState(tabId).conversation
+      let lastAssistantId: string | null = null
+      for (let i = tabConversation.length - 1; i >= 0; i--) {
+        const candidate = tabConversation[i]
+        if (isChatMessage(candidate) && candidate.role === 'assistant') {
+          lastAssistantId = candidate.id
+          break
+        }
+      }
       return (
         <Message key={item.id} from={item.role} data-message-id={item.id}>
           <MessageContent>
-            <MessageResponse components={streamdownComponents}>{item.content}</MessageResponse>
+            <CollapsibleResponse collapsedByDefault={item.id !== lastAssistantId}>
+              <MessageResponse components={streamdownComponents}>{item.content}</MessageResponse>
+            </CollapsibleResponse>
           </MessageContent>
         </Message>
       )
