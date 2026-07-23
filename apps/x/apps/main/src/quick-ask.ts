@@ -1,6 +1,6 @@
 /**
  * Quick-ask bar: a Spotlight-style floating window summoned with a global
- * shortcut (⌥Space) from anywhere — type (or hold Right ⌘ to speak) and the
+ * shortcut (⌥⇧Space) from anywhere — type (or hold Right ⌘ to speak) and the
  * question lands in the current chat; the answer streams back into the bar.
  *
  * The window is created once and shown/hidden on toggle so summoning is
@@ -114,11 +114,14 @@ export function resizeQuickAsk(height: number) {
 }
 
 export function initQuickAsk() {
-  const ok = globalShortcut.register('Alt+Space', toggleQuickAsk);
+  // ⌥⇧Space: plain ⌥Space is the most contested launcher chord on macOS
+  // (Raycast, ChatGPT desktop, …) — registering it would silently lose or,
+  // worse, double-fire alongside whatever owns it.
+  const ok = globalShortcut.register('Alt+Shift+Space', toggleQuickAsk);
   if (!ok) {
-    // Another app owns ⌥Space (e.g. an existing launcher) — quick-ask is
-    // simply unavailable rather than fighting over the chord.
-    console.warn('[quick-ask] failed to register Alt+Space (already taken?)');
+    // Another app owns the chord — quick-ask is simply unavailable rather
+    // than fighting over it.
+    console.warn('[quick-ask] failed to register Alt+Shift+Space (already taken?)');
   }
   app.on('will-quit', () => {
     globalShortcut.unregisterAll();

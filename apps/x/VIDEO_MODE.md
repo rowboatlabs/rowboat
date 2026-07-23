@@ -281,7 +281,7 @@ distribution (utterance → submit → first speak → audio playing):
 
 ## Quick-ask bar (related surface)
 
-Global ⌥Space summons a Spotlight-style bar over any app
+Global ⌥⇧Space summons a Spotlight-style bar over any app
 (`apps/main/src/quick-ask.ts` window + `components/quick-ask-bar.tsx`
 renderer, hash `#quick-ask`). Type — or hold Right ⌘ for local dictation
 (DOM events; the bar has focus, no Input Monitoring needed) — and the

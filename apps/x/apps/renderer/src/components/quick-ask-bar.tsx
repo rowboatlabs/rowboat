@@ -10,7 +10,7 @@ const BAR_HEIGHT = 88
 const ANSWER_HEIGHT = 380
 
 /**
- * Content of the quick-ask window (global ⌥Space — see main's quick-ask.ts).
+ * Content of the quick-ask window (global ⌥⇧Space — see main's quick-ask.ts).
  * A Spotlight-style bar floating over whatever the user is doing: type a
  * question (or hold Right ⌘ to speak it) and it lands in the current chat in
  * the app window; the answer streams back here over `quick-ask:state`.

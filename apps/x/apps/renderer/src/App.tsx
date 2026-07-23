@@ -1713,7 +1713,7 @@ function App() {
     })
   }, [handleToggleMic, handleToggleCamera, handleToggleScreenShare, handleInterruptAssistant, handlePttDown, handlePttUp, endCall, video])
 
-  // Quick-ask bar: a question typed/spoken into the global ⌥Space bar lands
+  // Quick-ask bar: a question typed/spoken into the global ⌥⇧Space bar lands
   // in the current chat exactly like a composer message.
   const quickAskActiveRef = useRef(false)
   const quickAskStartedAtRef = useRef(0)

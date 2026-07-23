@@ -520,7 +520,7 @@ app.whenReady().then(async () => {
   setupBrowserEventForwarding();
   setupBrowserExtensions();
 
-  // Quick-ask bar: global ⌥Space summons a Spotlight-style ask-anything
+  // Quick-ask bar: global ⌥⇧Space summons a Spotlight-style ask-anything
   // window over whatever app the user is in.
   initQuickAsk();
 
