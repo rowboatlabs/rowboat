@@ -212,6 +212,14 @@ function verifyAcpStaging(mainDir, placements) {
 }
 
 module.exports = {
+    // Skip @electron/rebuild entirely. Both native deps (node-pty,
+    // uiohook-napi) are N-API modules whose prebuilt binaries are staged by
+    // bundle.mjs — there is nothing to rebuild, and the default rebuild pass
+    // tries to DOWNLOAD Electron-ABI prebuilds from github.com (fails
+    // offline, and uiohook-napi has none to download anyway).
+    rebuildConfig: {
+        onlyModules: [],
+    },
     packagerConfig: {
         executableName: 'rowboat',
         icon: './icons/icon',  // .icns extension added automatically
