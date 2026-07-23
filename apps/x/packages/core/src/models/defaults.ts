@@ -14,6 +14,7 @@ const SIGNED_IN_DEFAULT_PROVIDER = "rowboat";
 const SIGNED_IN_KG_MODEL = "google/gemini-3.1-flash-lite";
 const SIGNED_IN_LIVE_NOTE_AGENT_MODEL = "google/gemini-3.1-flash-lite";
 const SIGNED_IN_AUTO_PERMISSION_DECISION_MODEL = "google/gemini-3.1-flash-lite";
+const SIGNED_IN_CHAT_TITLE_MODEL = "google/gemini-3.5-flash-lite";
 
 export type ModelSelection = z.infer<typeof ModelRef>;
 
@@ -156,6 +157,36 @@ export async function getAutoPermissionDecisionModel(): Promise<ModelSelection> 
  */
 export async function getMeetingNotesModel(): Promise<ModelSelection> {
     return getCategoryModel("meetingNotesModel", SIGNED_IN_DEFAULT_MODEL);
+}
+
+/**
+ * Model used to auto-name chat sessions from the first user message.
+ *
+ * Deliberately NOT getCategoryModel: that helper routes every signed-in user
+ * to the gateway, even one whose assistant default is a BYOK provider (the
+ * common "gateway limits exhausted, switched to own key" case) — and a title
+ * call against an exhausted gateway fails silently forever. Instead the
+ * curated model applies only when the assistant default itself routes
+ * through the gateway; otherwise titles follow the assistant provider.
+ */
+export async function getChatTitleModel(): Promise<ModelSelection> {
+    const signedIn = await isSignedIn();
+    const cfg = await readConfig();
+    const override = cfg?.chatTitleModel;
+    if (override) {
+        if (typeof override === "string") {
+            if (cfg) {
+                return { model: override, provider: cfg.provider.flavor };
+            }
+        } else if (override.provider !== "rowboat" || signedIn) {
+            return { model: override.model, provider: override.provider };
+        }
+    }
+    const dflt = await getDefaultModelAndProvider();
+    if (dflt.provider === SIGNED_IN_DEFAULT_PROVIDER) {
+        return { model: SIGNED_IN_CHAT_TITLE_MODEL, provider: SIGNED_IN_DEFAULT_PROVIDER };
+    }
+    return dflt;
 }
 
 /**
