@@ -1344,6 +1344,18 @@ function App() {
       // relaunch dance instead of failing silently.
       const shared = await video.startScreenShare()
       if (!shared) setPermissionDialog('screen-recording')
+    } else {
+      // Presets that don't share at start still settle the Screen Recording
+      // permission NOW — triggering the macOS prompt (first use) and the
+      // audible in-app dialog when the grant isn't effective — so by the
+      // time the user reaches for the share button it just works, instead
+      // of the permission dance ambushing them mid-call.
+      void window.ipc
+        .invoke('meeting:checkScreenPermission', null)
+        .then(({ granted }) => {
+          if (!granted) setPermissionDialog('screen-recording')
+        })
+        .catch(() => {})
     }
 
     // A manual push-to-talk recording can't coexist with the call's mic.
