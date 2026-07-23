@@ -8,7 +8,6 @@ import { ThemeProvider } from '@/contexts/theme-context'
 import { configureAnalyticsContext } from './lib/analytics'
 import { VideoPopout } from '@/components/video-popout'
 import { MeetingDetectedPopup } from '@/components/meeting-detected-popup'
-import { QuickAskBar } from '@/components/quick-ask-bar'
 
 // Fetch the stable installation ID from main so renderer + main share one
 // PostHog distinct_id. Falls back to PostHog's auto-generated anonymous ID
@@ -73,13 +72,6 @@ if (window.location.hash === '#video-popout') {
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
       <MeetingDetectedPopup />
-    </StrictMode>,
-  )
-} else if (window.location.hash === '#quick-ask') {
-  // Global ⌥⇧Space quick-ask bar; same pattern.
-  createRoot(document.getElementById('root')!).render(
-    <StrictMode>
-      <QuickAskBar />
     </StrictMode>,
   )
 } else {

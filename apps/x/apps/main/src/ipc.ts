@@ -27,7 +27,6 @@ const execFileAsync = promisify(execFile);
 let caffeinateBlockerId: number | null = null;
 
 import { initPtt, setPttActive, getPttStatus, retryPttHook, openInputMonitoringSettings } from './ptt.js';
-import { getQuickAskWindow, hideQuickAsk, showQuickAsk, resizeQuickAsk } from './quick-ask.js';
 import { RunEvent } from '@x/shared/dist/runs.js';
 import { ServiceEvent } from '@x/shared/dist/service-events.js';
 import type { SessionBusEvent } from '@x/shared/dist/sessions.js';
@@ -975,27 +974,6 @@ export function setupIpcHandlers() {
       } catch {
         return { success: false };
       }
-    },
-    // --- Quick-ask bar relays ---
-    'quickAsk:submit': async (_event, args) => {
-      findMainAppWindow()?.webContents.send('quick-ask:submit', args);
-      return {};
-    },
-    'quickAsk:hide': async () => {
-      hideQuickAsk();
-      return {};
-    },
-    'quickAsk:show': async () => {
-      showQuickAsk();
-      return {};
-    },
-    'quickAsk:resize': async (_event, args) => {
-      resizeQuickAsk(args.height);
-      return {};
-    },
-    'quickAsk:state': async (_event, args) => {
-      getQuickAskWindow()?.webContents.send('quick-ask:state', args);
-      return {};
     },
     'meeting:notifyNotesReady': async (_event, args) => {
       // Granola-style re-entry point: the note refreshed in place, but the

@@ -186,7 +186,7 @@ the key while muted does nothing; muting mid-capture discards it).
   "agent" app while the window exists — looks like Rowboat vanished). It is
   also `fullscreenable: false` — a window created while the active Space is
   fullscreen can otherwise open AS a fullscreen window (the pill swallowing
-  the whole screen). The quick-ask bar uses the same setup.
+  the whole screen).
 - Shown iff the derived `callSurface === 'popout'` (effect in `App.tsx`).
   Renderer asks `video:setPopout {show}`; main creates a frameless,
   `alwaysOnTop` ('floating'), all-workspaces BrowserWindow at the top-right
@@ -278,19 +278,6 @@ distribution (utterance → submit → first speak → audio playing):
   speech starts while the rest of the sentence generates.
 - **Acknowledgment cue** (`lib/call-sounds.ts`): a soft blip the instant an
   utterance is accepted — perceived latency matters as much as measured.
-
-## Quick-ask bar (related surface)
-
-Global ⌥⇧Space summons a Spotlight-style bar over any app
-(`apps/main/src/quick-ask.ts` window + `components/quick-ask-bar.tsx`
-renderer, hash `#quick-ask`). Type — or hold Right ⌘ for local dictation
-(DOM events; the bar has focus, no Input Monitoring needed) — and the
-question relays through main into the current chat (`quickAsk:submit` →
-`quick-ask:submit` → `handlePromptSubmit`); the answer mirrors back over
-`quickAsk:state` → `quick-ask:state` (streaming text from
-`currentAssistantMessage`, final text from the conversation — only messages
-timestamped after the submit count). The window is hidden, not destroyed,
-on dismiss (blur or Esc); it grows to show the answer via `quickAsk:resize`.
 
 ## Cost notes
 

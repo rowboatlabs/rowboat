@@ -1713,64 +1713,6 @@ function App() {
     })
   }, [handleToggleMic, handleToggleCamera, handleToggleScreenShare, handleInterruptAssistant, handlePttDown, handlePttUp, endCall, video])
 
-  // Discoverability: nothing else in the UI reveals the global quick-ask
-  // shortcut. One toast, once per install, shortly after launch.
-  useEffect(() => {
-    if (localStorage.getItem('quick-ask-tip-shown')) return
-    const timer = setTimeout(() => {
-      localStorage.setItem('quick-ask-tip-shown', '1')
-      toast('Ask Rowboat from anywhere', {
-        description: 'Press ⌥⇧Space in any app for a quick question — the answer shows up right there and in your chat.',
-        duration: 12000,
-        action: {
-          label: 'Try it',
-          onClick: () => void window.ipc.invoke('quickAsk:show', null).catch(() => {}),
-        },
-      })
-    }, 3000)
-    return () => clearTimeout(timer)
-  }, [])
-
-  // Quick-ask bar: a question typed/spoken into the global ⌥⇧Space bar lands
-  // in the current chat exactly like a composer message.
-  const quickAskActiveRef = useRef(false)
-  const quickAskStartedAtRef = useRef(0)
-  useEffect(() => {
-    return window.ipc.on('quick-ask:submit', ({ text }) => {
-      const trimmed = text.trim()
-      if (!trimmed) return
-      quickAskActiveRef.current = true
-      quickAskStartedAtRef.current = Date.now()
-      handlePromptSubmitRef.current?.({ text: trimmed, files: [] })
-    })
-  }, [])
-
-  // Mirror the in-flight answer back to the bar while a quick-ask turn is
-  // live: streaming text while generating, the final assistant message when
-  // done (which also ends the mirror). Only messages from AFTER the submit
-  // count — the previous turn's answer is still the newest one in the
-  // conversation at submit time.
-  useEffect(() => {
-    if (!quickAskActiveRef.current) return
-    let text = currentAssistantMessage
-    if (!text) {
-      for (let i = conversation.length - 1; i >= 0; i--) {
-        const item = conversation[i]
-        if (isChatMessage(item) && item.role === 'assistant') {
-          if (item.timestamp >= quickAskStartedAtRef.current) text = item.content
-          break
-        }
-      }
-    }
-    // Nothing new yet (run not started / no fresh answer): pushing would
-    // only flicker the bar's local "Thinking…" state away.
-    if (!text && !activeIsProcessing) return
-    void window.ipc
-      .invoke('quickAsk:state', { processing: activeIsProcessing, responseText: text || null })
-      .catch(() => {})
-    if (!activeIsProcessing && text) quickAskActiveRef.current = false
-  }, [activeIsProcessing, currentAssistantMessage, conversation])
-
   // Enter to submit voice input, Escape to cancel
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -3281,11 +3223,11 @@ function App() {
     permissionMode?: PermissionMode,
   ) => {
     if (activeIsProcessing) {
-      // In-call and quick-ask input arrives at arbitrary moments — a hard
-      // drop here silently ate utterances submitted while the previous turn
-      // was still stopping (the PTT interrupt is async). Finish the stop and
-      // proceed with this message instead.
-      if (!inCallRef.current && !quickAskActiveRef.current) return
+      // In-call input arrives at arbitrary moments — a hard drop here
+      // silently ate utterances submitted while the previous turn was still
+      // stopping (the PTT interrupt is async). Finish the stop and proceed
+      // with this message instead.
+      if (!inCallRef.current) return
       await stopRunRef.current?.()
     }
 

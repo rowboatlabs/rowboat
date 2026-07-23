@@ -1,8 +1,8 @@
 /**
  * Global push-to-talk key hook (uiohook-napi).
  *
- * Watches the Right ⌘ key system-wide while a call (or the quick-ask bar)
- * needs it and relays down/up/chord transitions to the app window, which
+ * Watches the Right ⌘ key system-wide while a call needs it and relays
+ * down/up/chord transitions to the app window, which
  * owns the PTT state machine. The hook only runs while a consumer is
  * registered — no input monitoring outside calls.
  *
@@ -124,7 +124,7 @@ function stopHook() {
 
 /**
  * Reference-counted activation: key events are forwarded while at least one
- * consumer ('call', 'quick-ask') is active. The hook itself starts lazily on
+ * consumer (currently just 'call') is active. The hook itself starts lazily on
  * the first consumer and then STAYS running for the app's lifetime —
  * libuiohook's stop/start cycle is unreliable on macOS (the recreated tap
  * intermittently delivers nothing, which surfaced as PTT "randomly" dying

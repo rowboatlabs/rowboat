@@ -1,5 +1,4 @@
 import { app, Menu, Tray, nativeImage } from "electron";
-import { toggleQuickAsk } from "./quick-ask.js";
 
 /**
  * Menu bar / system tray presence (Granola-style resident app).
@@ -151,15 +150,6 @@ function rebuildMenu(): void {
   if (!tray) return;
   const menu = Menu.buildFromTemplate([
     { label: "Open Rowboat", click: () => actions?.openApp() },
-    // Permanent discoverability for the global quick-ask shortcut — the
-    // accelerator renders next to the label (display only; the real binding
-    // is the globalShortcut in quick-ask.ts).
-    {
-      label: "Quick Ask",
-      accelerator: "Alt+Shift+Space",
-      registerAccelerator: false,
-      click: () => toggleQuickAsk(),
-    },
     recording
       ? {
           label: "Stop recording and generate notes",
