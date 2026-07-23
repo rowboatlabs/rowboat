@@ -15,7 +15,7 @@ import {
 } from './graph_state.js';
 import { buildKnowledgeIndex, formatIndexForPrompt } from './knowledge_index.js';
 import { limitEventItems } from './limit_event_items.js';
-import { commitAll } from './version_history.js';
+import { commitAll, hasHeadCommit, readFileAtHead } from './version_history.js';
 import { getTagDefinitions } from './tag_system.js';
 import { knowledgeSourcesRepo } from './sources/repo.js';
 import { syncSlackKnowledgeSources } from './sources/sync_slack.js';
@@ -38,6 +38,14 @@ const LEGACY_SUGGESTED_TOPICS_KNOWLEDGE_PATH = path.join(WorkDir, 'knowledge', '
 
 // Configuration for the graph builder service
 const SYNC_INTERVAL_MS = 15 * 1000; // 15 seconds
+
+// A meeting note whose last write is this recent is still in flight — the
+// recorder rewrites the file every ~1s while capturing, and the post-meeting
+// summary lands within a minute of the stop. Held files are simply not
+// processed this tick (state untouched), so they're picked up once quiet.
+// Must exceed the recorder's 5-minute silence backstop, or a long mid-meeting
+// lull would let a partial transcript through.
+const MEETING_NOTE_QUIET_MS = 6 * 60 * 1000;
 function getEnabledFileSources(): KnowledgeSourceConfig[] {
     return knowledgeSourcesRepo
         .listEnabledSources()
@@ -342,6 +350,82 @@ export function emailReplyGateBanner(filePath: string, content: string): string 
 }
 
 /**
+ * Compute the Meeting Attendees Gate for Rowboat-recorded meeting notes.
+ *
+ * Rowboat transcripts come from live ASR: speaker names in the text are
+ * routinely misheard ("Shubham" → "Shubhrant"/"Shivam"), so a model reading
+ * the raw transcript mints People notes for phantom name variants. The
+ * calendar invite is the ground truth for who was in the room. Code resolves
+ * the attendee list (stamped in the note's `calendar_event` frontmatter, or
+ * loaded from the linked calendar_sync event file); the model only maps
+ * transcript names onto it.
+ *
+ * Granola/Fireflies notes carry platform-reported attendee lists in their
+ * content and are not gated here.
+ */
+export function meetingAttendeesBanner(filePath: string, content: string): string | null {
+    const parts = filePath.split(path.sep);
+    const meetingsIdx = parts.indexOf('Meetings');
+    if (meetingsIdx === -1 || parts[meetingsIdx + 1] !== 'rowboat') return null;
+
+    type SyncedEvent = { summary?: string; start?: { dateTime?: string; date?: string }; attendees?: Array<{ displayName?: string; email?: string }> };
+    const attendeesFromEvent = (event: SyncedEvent): string[] =>
+        (event.attendees ?? [])
+            .map(a => (a.displayName && a.email ? `${a.displayName} <${a.email}>` : (a.displayName || a.email)))
+            .filter((a): a is string => Boolean(a));
+
+    const attendees: string[] = [];
+    const calEventMatch = content.match(/^calendar_event:\s*'(.+)'$/m);
+    if (calEventMatch) {
+        try {
+            const meta = JSON.parse(calEventMatch[1].replace(/''/g, "'")) as {
+                attendees?: unknown;
+                source?: string;
+                summary?: string;
+                start?: string;
+            };
+            if (Array.isArray(meta.attendees)) {
+                attendees.push(...meta.attendees.filter((a): a is string => typeof a === 'string'));
+            } else if (typeof meta.source === 'string' && fs.existsSync(path.join(WorkDir, meta.source)) && fs.statSync(path.join(WorkDir, meta.source)).isFile()) {
+                // Older notes don't carry attendees in frontmatter — load them
+                // from the linked calendar event file if it still exists.
+                const event = JSON.parse(fs.readFileSync(path.join(WorkDir, meta.source), 'utf-8')) as SyncedEvent;
+                attendees.push(...attendeesFromEvent(event));
+            } else if (meta.summary && meta.start) {
+                // Last resort (some launch paths store a tag, not a path, in
+                // `source`): find the synced event with the exact same title
+                // and start time.
+                const syncDir = path.join(WorkDir, 'calendar_sync');
+                if (fs.existsSync(syncDir)) {
+                    for (const name of fs.readdirSync(syncDir)) {
+                        if (!name.endsWith('.json') || name.startsWith('sync_state') || name.startsWith('composio_state')) continue;
+                        try {
+                            const event = JSON.parse(fs.readFileSync(path.join(syncDir, name), 'utf-8')) as SyncedEvent;
+                            if (event.summary === meta.summary && (event.start?.dateTime === meta.start || event.start?.date === meta.start)) {
+                                attendees.push(...attendeesFromEvent(event));
+                                break;
+                            }
+                        } catch {
+                            // Skip malformed event files.
+                        }
+                    }
+                }
+            }
+        } catch {
+            // Malformed frontmatter/event file — fall through to the no-list banner.
+        }
+    }
+
+    if (attendees.length === 0) {
+        return `> **ATTENDEES-GATE (computed by the system, authoritative): this recording has no linked calendar invite, so there is NO trusted attendee list.** Names in the transcript come from live speech recognition and are unreliable. You MUST NOT create a new People note for ANY name that appears only in this transcript. Allowed: updating an existing People note when the transcript clearly refers to that person (matching name/alias plus context), mentioning names in prose, and creating non-People notes (Topics/Projects) the discussion clearly warrants.`;
+    }
+
+    return `> **ATTENDEES-GATE (computed by the system, authoritative): the calendar invite lists these attendees:**\n` +
+        attendees.map(a => `> - ${a}`).join('\n') + '\n' +
+        `> New People notes from this meeting are allowed ONLY for people on this list (the owner still never gets one). Transcript names are speech-recognition output: a name that is similar to an attendee's ("Shubham" heard as "Shubhrant" or "Shivam") IS that attendee — resolve it to their one note (adding the variant to Aliases is fine), never create a second note for a name variant. Someone not on the invite may still have joined: if an EXISTING People note clearly matches a transcript name (name/alias plus context), update that existing note — but NEVER create a new note for anyone off the list. A name with no plausible match on the list and no clearly matching existing note is a transcription artifact or a person merely mentioned: prose only, no note.`;
+}
+
+/**
  * Run note creation agent on a batch of files to extract entities and create/update notes
  */
 async function createNotesFromBatch(
@@ -368,6 +452,7 @@ async function createNotesFromBatch(
     message += `- You may also create or update "${SUGGESTED_TOPICS_REL_PATH}" to maintain curated suggested-topic cards\n`;
     message += `- If the SAME entity appears in multiple files, merge the information into a single note (this is identity, not a relationship — do not link different entities across files)\n`;
     message += `- Use file tools to read existing notes or "${SUGGESTED_TOPICS_REL_PATH}" (when you need full content) and write updates\n`;
+    message += `- SOURCE FILES ARE READ-ONLY. Never file-writeText or file-editText a source file, and never write ANY path under knowledge/Meetings/ or other source folders (knowledge/Voice Memos/, gmail_sync/, knowledge_sources/) — there is no "meeting note" type to create or update. Reference meeting notes with [[Meetings/...]] links only. Your writable locations are knowledge/People/, knowledge/Organizations/, knowledge/Projects/, knowledge/Topics/, and ${SUGGESTED_TOPICS_REL_PATH}\n`;
     message += `- Follow the note templates and guidelines in your instructions\n\n`;
 
     // Add the knowledge base index
@@ -390,6 +475,10 @@ async function createNotesFromBatch(
         if (gateBanner) {
             message += gateBanner + `\n\n`;
         }
+        const attendeesBanner = meetingAttendeesBanner(file.path, file.content);
+        if (attendeesBanner) {
+            message += attendeesBanner + `\n\n`;
+        }
         message += file.content;
         message += `\n\n---\n\n`;
     });
@@ -403,7 +492,8 @@ async function createNotesFromBatch(
         message += `**FINAL REMINDER — the owner of this memory is ${ownerLabel}.** `;
         message += `(1) Never create or update a People note for them; in prose they are "I", never their name. `;
         message += `(2) Emails FROM ${user.email} are the owner's own actions ("I emailed…"), not an external contact. `;
-        message += `(3) No placeholder text ("Unknown"/"-") and no links between entities that didn't co-occur in one source file.\n`;
+        message += `(3) No placeholder text ("Unknown"/"-") and no links between entities that didn't co-occur in one source file. `;
+        message += `(4) Source files are read-only — never write or edit anything under knowledge/Meetings/, knowledge/Voice Memos/, gmail_sync/, or knowledge_sources/.\n`;
     }
 
     const { turnId, state } = await runWhenPossible({
@@ -419,6 +509,90 @@ async function createNotesFromBatch(
     const notesModified = toolInputPaths(state, ["file-editText"]);
 
     return { runId: turnId, notesCreated, notesModified };
+}
+
+/**
+ * Mechanical backstop for the "source files are read-only" prompt rule: if the
+ * note-creation agent wrote to a source file anyway, put it back before the
+ * post-batch commit. Observed failure without this: the agent rewrote a live
+ * meeting note into its own entity format, destroying the transcript and
+ * summary.
+ *
+ * Restore order per touched path under a protected root:
+ *  1. Batch source files — restored from the exact pre-run content already in
+ *     memory.
+ *  2. Files under knowledge/ tracked at HEAD — restored from git (a snapshot
+ *     commit runs right before each agent batch, so pre-existing files are
+ *     always tracked).
+ *  3. Untracked .md files under knowledge/ — created by the agent during the
+ *     run → deleted as fabrications.
+ *  4. Anything else (e.g. non-batch files outside the knowledge repo) can't be
+ *     restored mechanically — logged so it surfaces.
+ *
+ * Returns the touched-path strings (as the agent passed them) that were
+ * reverted, so callers can drop them from run summaries.
+ */
+async function revertAgentSourceWrites(
+    touched: Set<string>,
+    batchFiles: { path: string; content: string }[],
+): Promise<{ reverted: string[]; unrestorable: string[] }> {
+    const protectedRoots = new Set<string>([
+        path.join('knowledge', 'Meetings'),
+        path.join('knowledge', 'Voice Memos'),
+        'gmail_sync',
+        'knowledge_sources',
+    ]);
+    for (const source of getEnabledFileSources()) {
+        protectedRoots.add(path.normalize(source.artifactDir));
+    }
+
+    const batchContentByPath = new Map(batchFiles.map(f => [path.resolve(f.path), f.content]));
+    const reverted: string[] = [];
+    const unrestorable: string[] = [];
+    // Without a HEAD commit, "not tracked at HEAD" says nothing about whether
+    // the agent created the file — never delete on that basis.
+    const gitUsable = await hasHeadCommit();
+
+    for (const touchedPath of touched) {
+        const abs = path.resolve(path.isAbsolute(touchedPath) ? touchedPath : path.join(WorkDir, touchedPath));
+        const rel = path.relative(WorkDir, abs);
+        if (rel.startsWith('..')) continue;
+        const isProtected = [...protectedRoots].some(root => rel === root || rel.startsWith(root + path.sep));
+        if (!isProtected) continue;
+
+        try {
+            const batchContent = batchContentByPath.get(abs);
+            if (batchContent !== undefined) {
+                fs.writeFileSync(abs, batchContent, 'utf-8');
+                reverted.push(touchedPath);
+                continue;
+            }
+
+            const knowledgeRel = path.relative(NOTES_OUTPUT_DIR, abs);
+            if (!knowledgeRel.startsWith('..') && gitUsable) {
+                const headContent = await readFileAtHead(knowledgeRel);
+                if (headContent !== null) {
+                    fs.writeFileSync(abs, headContent, 'utf-8');
+                    reverted.push(touchedPath);
+                    continue;
+                }
+                // Not tracked at HEAD despite the pre-batch snapshot — the
+                // agent created it during this run. Only .md files are ever
+                // snapshotted, so restrict deletion to .md to be safe.
+                if (abs.endsWith('.md')) {
+                    if (fs.existsSync(abs)) fs.unlinkSync(abs);
+                    reverted.push(touchedPath);
+                    continue;
+                }
+            }
+            unrestorable.push(touchedPath);
+        } catch (error) {
+            console.error(`[GraphBuilder] Failed to revert agent write to source file ${touchedPath}:`, error);
+            unrestorable.push(touchedPath);
+        }
+    }
+
+    return { reverted, unrestorable };
 }
 
 /**
@@ -493,10 +667,45 @@ async function buildGraphWithFiles(
                     details: { filesInBatch: batch.length },
                 });
             }
+            // Snapshot BEFORE the agent runs so every pre-existing knowledge
+            // file (including in-flight meeting transcripts) is tracked at
+            // HEAD — the write guard below restores from there.
+            try {
+                await commitAll('Pre-agent snapshot', 'Rowboat');
+            } catch (err) {
+                console.error(`[GraphBuilder] Failed to commit pre-agent snapshot:`, err);
+            }
+
             const agentStartTime = Date.now();
             const batchResult = await createNotesFromBatch(batch, batchNumber, indexForPrompt);
             const agentDuration = ((Date.now() - agentStartTime) / 1000).toFixed(2);
             console.log(`Batch ${batchNumber}/${totalBatches} complete in ${agentDuration}s`);
+
+            // Backstop: undo any agent writes to read-only source files.
+            const touched = new Set([...batchResult.notesCreated, ...batchResult.notesModified]);
+            const guard = await revertAgentSourceWrites(touched, batch);
+            for (const p of [...guard.reverted, ...guard.unrestorable]) {
+                batchResult.notesCreated.delete(p);
+                batchResult.notesModified.delete(p);
+            }
+            if (guard.reverted.length > 0 || guard.unrestorable.length > 0) {
+                console.warn(
+                    `[GraphBuilder] Agent wrote to read-only source files — ` +
+                    `reverted: [${guard.reverted.join(', ')}]` +
+                    (guard.unrestorable.length > 0 ? `, could NOT restore: [${guard.unrestorable.join(', ')}]` : ''),
+                );
+                if (run) {
+                    await serviceLogger.log({
+                        type: 'progress',
+                        service: run.service,
+                        runId: run.runId,
+                        level: 'warn',
+                        message: `Reverted ${guard.reverted.length} agent write${guard.reverted.length === 1 ? '' : 's'} to read-only source files`,
+                        step: 'source-write-guard',
+                        details: { reverted: guard.reverted, unrestorable: guard.unrestorable },
+                    });
+                }
+            }
 
             for (const note of batchResult.notesCreated) {
                 notesCreated.add(note);
@@ -670,8 +879,40 @@ async function processVoiceMemosForKnowledge(): Promise<boolean> {
                 total: totalBatches,
                 details: { filesInBatch: batch.length },
             });
+            // Snapshot before the agent runs so the source-write guard can
+            // restore from HEAD (same protection as the main batch loop).
+            try {
+                await commitAll('Pre-agent snapshot', 'Rowboat');
+            } catch (err) {
+                console.error(`[GraphBuilder] Failed to commit pre-agent snapshot:`, err);
+            }
+
             const batchResult = await createNotesFromBatch(batch, batchNumber, indexForPrompt);
             console.log(`[GraphBuilder] Batch ${batchNumber}/${totalBatches} complete`);
+
+            // Backstop: undo any agent writes to read-only source files.
+            const touched = new Set([...batchResult.notesCreated, ...batchResult.notesModified]);
+            const guard = await revertAgentSourceWrites(touched, batch);
+            for (const p of [...guard.reverted, ...guard.unrestorable]) {
+                batchResult.notesCreated.delete(p);
+                batchResult.notesModified.delete(p);
+            }
+            if (guard.reverted.length > 0 || guard.unrestorable.length > 0) {
+                console.warn(
+                    `[GraphBuilder] Agent wrote to read-only source files — ` +
+                    `reverted: [${guard.reverted.join(', ')}]` +
+                    (guard.unrestorable.length > 0 ? `, could NOT restore: [${guard.unrestorable.join(', ')}]` : ''),
+                );
+                await serviceLogger.log({
+                    type: 'progress',
+                    service: run.service,
+                    runId: run.runId,
+                    level: 'warn',
+                    message: `Reverted ${guard.reverted.length} agent write${guard.reverted.length === 1 ? '' : 's'} to read-only source files`,
+                    step: 'source-write-guard',
+                    details: { reverted: guard.reverted, unrestorable: guard.unrestorable },
+                });
+            }
 
             for (const note of batchResult.notesCreated) {
                 notesCreated.add(note);
@@ -794,6 +1035,26 @@ export async function processAllSources(): Promise<void> {
                     }
                 });
                 saveState(state);
+            }
+
+            // Hold meeting notes that are still being written — an active
+            // recording rewrites its note every ~1s, so processing here would
+            // ingest a partial transcript (and re-run the LLM on every tick as
+            // the file keeps changing). State stays untouched: the file is
+            // picked up on the first tick after it goes quiet.
+            if (source.provider === 'meeting') {
+                filesToProcess = filesToProcess.filter(filePath => {
+                    try {
+                        const ageMs = Date.now() - fs.statSync(filePath).mtimeMs;
+                        if (ageMs < MEETING_NOTE_QUIET_MS) {
+                            console.log(`[GraphBuilder] Holding in-flight meeting note (last write ${Math.round(ageMs / 1000)}s ago): ${path.basename(filePath)}`);
+                            return false;
+                        }
+                        return true;
+                    } catch {
+                        return false;
+                    }
+                });
             }
 
             if (filesToProcess.length > 0) {

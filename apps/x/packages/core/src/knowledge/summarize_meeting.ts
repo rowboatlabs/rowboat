@@ -14,7 +14,7 @@ const SYSTEM_PROMPT = `You are a meeting notes assistant. Given a raw meeting tr
 ## Calendar matching
 You will be given the transcript (with a timestamp of when recording started) and recent calendar events with their titles, times, and attendees. If a calendar event clearly matches this meeting (overlapping time + content aligns), then:
 - Do NOT output a title or heading — the title is already set by the caller.
-- ONLY use names from the calendar event attendee list. Do NOT introduce names that are not in the attendee list — any unrecognized names in the transcript are transcription errors.
+- Prefer names from the calendar event attendee list. People sometimes join who are not on the invite: use a non-attendee name ONLY when the transcript clearly supports it — the person is introduced or addressed by that name repeatedly and consistently. Speech recognition mangles names, and similar-sounding variants ("Shubham"/"Shubhrant"/"Shivam") are the SAME person — pick the single most frequent spelling and use it throughout. A name heard only once, or inconsistently, is a transcription error — attribute those lines to "They" instead.
 - Replace generic speaker labels ("Speaker 0", "Speaker 1", "System audio") with actual attendee names from the list, but ONLY if you have HIGH CONFIDENCE about which speaker is which based on the discussion content. If unsure, use "They" instead of "Speaker 0" etc.
 - "You" in the transcript is the local user — if the calendar event has an organizer or you can identify who "You" is from context, use their name.
 
