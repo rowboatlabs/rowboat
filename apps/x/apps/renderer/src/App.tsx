@@ -1509,6 +1509,17 @@ function App() {
       setPttState('locked')
       return
     }
+    if (pttStatusRef.current === 'held') {
+      // First couple of real holds: teach the hands-free tap.
+      const shown = Number(localStorage.getItem('ptt-hold-tip-shown') ?? '0')
+      if (shown < 2) {
+        localStorage.setItem('ptt-hold-tip-shown', String(shown + 1))
+        toast('No need to keep holding', {
+          description: 'For longer turns, quick-tap right ⌘ instead — talk hands-free, then tap again to send.',
+          duration: 6000,
+        })
+      }
+    }
     // Releasing a hold (or pressing again while locked) submits.
     setPttState('idle')
     void voiceRef.current.pttEnd()
