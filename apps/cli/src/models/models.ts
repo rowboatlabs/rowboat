@@ -14,6 +14,7 @@ export const Flavor = z.enum([
     "rowboat [free]",
     "aigateway",
     "anthropic",
+    "edenai",
     "google",
     "ollama",
     "openai",
@@ -102,6 +103,16 @@ export async function getProvider(name: string = ""): Promise<ProviderV2> {
                 name,
                 apiKey,
                 baseURL : baseURL || "",
+                headers,
+            });
+            break;
+        // Eden AI: EU-hosted, OpenAI-compatible gateway to 100+ models
+        // (https://www.edenai.co). Models use the "provider/model" scheme.
+        case "edenai":
+            providerMap[name] = createOpenAICompatible({
+                name,
+                apiKey,
+                baseURL: baseURL || "https://api.edenai.run/v3",
                 headers,
             });
             break;
