@@ -137,7 +137,7 @@ import { ProductTour, type TourNavTarget } from '@/components/product-tour'
 import { useMeetingTranscription, type CalendarEventMeta } from '@/hooks/useMeetingTranscription'
 import { useAnalyticsIdentity } from '@/hooks/useAnalyticsIdentity'
 import * as analytics from '@/lib/analytics'
-import { playAckCue } from '@/lib/call-sounds'
+import { playAckCue, playAlertCue } from '@/lib/call-sounds'
 import { useTheme } from '@/contexts/theme-context'
 import { TokenUsageMenu } from '@/components/token-usage-menu'
 
@@ -1272,6 +1272,15 @@ function App() {
   // failures: mic/camera denials did nothing visible).
   const [permissionDialog, setPermissionDialog] = useState<PermissionKind | null>(null)
 
+  // A permission problem must be impossible to miss: chime and bring the app
+  // window to the front — the user may be in another app entirely (pill
+  // share toggle, global PTT) when the failure fires.
+  useEffect(() => {
+    if (!permissionDialog) return
+    playAlertCue()
+    void window.ipc.invoke('app:focusMainWindow', null).catch(() => {})
+  }, [permissionDialog])
+
   const handleStartRecording = useCallback(() => {
     // A live call owns the mic — ignore push-to-talk while one is running.
     if (inCallRef.current) return
@@ -1365,8 +1374,10 @@ function App() {
     setPracticeMode(preset === 'practice')
     practiceModeRef.current = preset === 'practice'
     setMicMuted(false)
-    // Pill-first presets start minimized; face-to-face presets start expanded.
-    setCallMinimized(preset === 'voice' || preset === 'share')
+    // Every preset starts in the floating pill (video included — the camera
+    // preview lives in the pill) except practice, where the coaching session
+    // is a deliberate face-to-face full screen.
+    setCallMinimized(preset !== 'practice')
     inCallRef.current = true
     setInCall(true)
     callStartedAtMsRef.current = performance.now()
@@ -1408,12 +1419,7 @@ function App() {
       video.stopScreenShare()
     } else {
       const shared = await video.startScreenShare()
-      if (!shared) {
-        setPermissionDialog('screen-recording')
-        // The toggle may have come from the floating pill while another app
-        // is frontmost — the dialog lives in the app window, bring it up.
-        void window.ipc.invoke('app:focusMainWindow', null).catch(() => {})
-      }
+      if (!shared) setPermissionDialog('screen-recording')
     }
   }, [video])
 

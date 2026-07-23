@@ -20,7 +20,7 @@ and ends it.
 |--------|------------------|---------------|
 | `share` — main click | screen on, camera off | floating pill |
 | `voice` — "Voice call" | camera off, screen off | floating mascot pill |
-| `video` — "Video call" | camera on | full-screen call |
+| `video` — "Video call" | camera on | floating pill (camera in the pill; expand for full screen) |
 | `practice` — "Practice session" | camera on, + coaching persona | full-screen call |
 
 **One surface rule** (`callSurface` in `App.tsx`): full screen and screen
