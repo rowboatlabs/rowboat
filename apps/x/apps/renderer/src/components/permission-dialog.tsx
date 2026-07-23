@@ -36,10 +36,10 @@ const COPY: Record<
     icon: MonitorUp,
     title: 'Rowboat can’t see your screen',
     body:
-      'macOS is blocking Screen Recording for Rowboat — the call would show a "sharing" badge ' +
-      'while the assistant sees only black frames. Enable it under System Settings → ' +
-      'Privacy & Security → Screen Recording, then relaunch Rowboat (macOS requires a relaunch ' +
-      'for this permission to take effect).',
+      'macOS is blocking Screen Recording, so the assistant would only see black frames. ' +
+      'Enable Rowboat under System Settings → Privacy & Security → Screen Recording, then ' +
+      'relaunch Rowboat. If Rowboat is already enabled there, toggle it off and on — an ' +
+      'updated app needs a fresh grant — and relaunch.',
     section: 'screen-recording',
   },
   'input-monitoring': {
@@ -86,13 +86,30 @@ export function PermissionDialog({
               </DialogTitle>
               <DialogDescription className="pt-1 leading-relaxed">{copy.body}</DialogDescription>
             </DialogHeader>
-            <DialogFooter className="gap-2 sm:gap-2">
-              <Button variant="ghost" onClick={() => onOpenChange(false)}>
-                Not now
+            {/* Stacked, full-width buttons: uniform sizing and no label
+                overflow regardless of how many actions a kind has. */}
+            <DialogFooter className="flex-col gap-2 sm:flex-col">
+              <Button
+                className="w-full"
+                onClick={() => {
+                  void window.ipc.invoke('app:openPrivacySettings', { section: copy.section }).catch(() => {})
+                }}
+              >
+                Open System Settings
               </Button>
+              {kind === 'screen-recording' && (
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => void window.ipc.invoke('app:relaunch', null).catch(() => {})}
+                >
+                  Relaunch Rowboat
+                </Button>
+              )}
               {kind === 'input-monitoring' && onRetry && (
                 <Button
                   variant="outline"
+                  className="w-full"
                   onClick={() => {
                     onRetry()
                     onOpenChange(false)
@@ -101,20 +118,8 @@ export function PermissionDialog({
                   I’ve enabled it
                 </Button>
               )}
-              {kind === 'screen-recording' && (
-                <Button
-                  variant="outline"
-                  onClick={() => void window.ipc.invoke('app:relaunch', null).catch(() => {})}
-                >
-                  Relaunch Rowboat
-                </Button>
-              )}
-              <Button
-                onClick={() => {
-                  void window.ipc.invoke('app:openPrivacySettings', { section: copy.section }).catch(() => {})
-                }}
-              >
-                Open System Settings
+              <Button variant="ghost" className="w-full" onClick={() => onOpenChange(false)}>
+                Not now
               </Button>
             </DialogFooter>
           </>

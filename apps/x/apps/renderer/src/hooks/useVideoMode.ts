@@ -3,6 +3,48 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 export type VideoModeState = 'idle' | 'starting' | 'live';
 export type ScreenShareState = 'idle' | 'starting' | 'live';
 
+/**
+ * Empirical Screen Recording permission check: without the TCC grant, macOS
+ * lets the capture start but delivers uniformly black frames. A real desktop
+ * — even a dark one — has structure (menu bar, windows), so near-zero mean
+ * AND variance means the content is blocked. Frames that can't be sampled
+ * yet report NOT blank, so a slow capture spin-up never false-blocks.
+ */
+async function screenFrameLooksBlank(stream: MediaStream): Promise<boolean> {
+    const video = document.createElement('video');
+    video.muted = true;
+    video.playsInline = true;
+    video.srcObject = stream;
+    await video.play().catch(() => {});
+    // The first frames after capture starts can be legitimately black.
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    try {
+        if (video.videoWidth === 0) return false;
+        const w = 160;
+        const h = 90;
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return false;
+        ctx.drawImage(video, 0, 0, w, h);
+        const { data } = ctx.getImageData(0, 0, w, h);
+        let sum = 0;
+        let sumSq = 0;
+        const pixels = w * h;
+        for (let i = 0; i < data.length; i += 4) {
+            const lum = 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2];
+            sum += lum;
+            sumSq += lum * lum;
+        }
+        const mean = sum / pixels;
+        const variance = sumSq / pixels - mean * mean;
+        return mean < 8 && variance < 4;
+    } finally {
+        video.srcObject = null;
+    }
+}
+
 export interface CapturedVideoFrame {
     /** base64-encoded JPEG bytes (no data: prefix) — shape of the UserImagePart wire format */
     data: string;
@@ -275,17 +317,13 @@ export function useVideoMode() {
         if (screenStateRef.current !== 'idle') return true;
         setScreenState('starting');
 
-        // Gate on the macOS Screen Recording permission (registering the app
-        // in System Settings on first use — same flow meetings use). This
-        // check MUST be honored: without the permission getDisplayMedia still
-        // "succeeds" but every frame is black — the call claims it's sharing
-        // while the assistant sees nothing.
-        const perm = await window.ipc.invoke('meeting:checkScreenPermission', null).catch(() => null);
-        if (perm && !perm.granted) {
-            console.error('[video] Screen Recording permission not granted');
-            setScreenState('idle');
-            return false;
-        }
+        // Registers the app in the macOS Screen Recording list on first use
+        // (and triggers the system prompt where applicable). The returned
+        // status is deliberately NOT trusted as a gate: it reads stale for
+        // rebuilt binaries (a re-signed app keeps its Settings toggle but a
+        // fresh TCC identity) in both directions. Ground truth comes from
+        // sampling an actual frame below.
+        await window.ipc.invoke('meeting:checkScreenPermission', null).catch(() => null);
 
         let stream: MediaStream | null = null;
         try {
@@ -295,6 +333,17 @@ export function useVideoMode() {
             });
         } catch (err) {
             console.error('[video] Screen share failed:', err);
+            setScreenState('idle');
+            return false;
+        }
+
+        // Without the permission, getDisplayMedia still "succeeds" — macOS
+        // blocks the CONTENT, not the capture, and every frame is uniformly
+        // black. Sample one real frame; a blank capture is a permission
+        // failure, not a share.
+        if (await screenFrameLooksBlank(stream).catch(() => false)) {
+            console.error('[video] screen capture delivers blank frames — Screen Recording permission not effective');
+            stream.getTracks().forEach((t) => t.stop());
             setScreenState('idle');
             return false;
         }
