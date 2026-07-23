@@ -7,10 +7,16 @@ import { withUseCase } from '../analytics/use_case.js';
 const SYSTEM_PROMPT = `You name chat conversations. Given the user's first message, reply with a concise title for the conversation.
 
 Rules:
-- 3 to 5 words
+- At least 2 words, at most 5 — never a single word
 - Same language as the message
 - No quotation marks, no ending punctuation, no emoji
-- Output the title and nothing else`;
+- Output the title and nothing else
+
+Examples:
+- "who are the investors in supabase" -> Supabase investor list
+- "help me write a python script that renames all files in a folder" -> Python file renaming script
+- "why is my docker build so slow" -> Slow Docker build debugging
+- "draft an email to my landlord about the broken heater" -> Broken heater landlord email`;
 
 // Long first messages are usually pasted documents or code; the opening is
 // enough signal for a title and keeps the call cheap.
@@ -53,5 +59,6 @@ export async function generateChatTitle(firstMessage: string): Promise<string | 
         .replace(/\s+/g, ' ')
         .trim();
     if (!title || title.length > MAX_TITLE_CHARS) return null;
+    if (!title.includes(' ')) return null;
     return title;
 }
