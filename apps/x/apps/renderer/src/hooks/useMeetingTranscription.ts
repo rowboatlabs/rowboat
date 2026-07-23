@@ -95,6 +95,9 @@ export interface CalendarEventMeta {
     htmlLink?: string
     conferenceLink?: string
     source?: string
+    /** Invitees as "Name <email>" strings — the knowledge pipeline's ground
+     *  truth for who was in the meeting (transcript names are ASR output). */
+    attendees?: string[]
 }
 
 function formatTranscript(entries: TranscriptEntry[], date: string, calendarEvent?: CalendarEventMeta): string {
@@ -109,7 +112,7 @@ function formatTranscript(entries: TranscriptEntry[], date: string, calendarEven
     if (calendarEvent) {
         // Serialize as a JSON string on one line — the frontmatter system
         // only supports flat key: value pairs, not nested YAML objects.
-        const eventObj: Record<string, string> = {}
+        const eventObj: Record<string, string | string[]> = {}
         if (calendarEvent.summary) eventObj.summary = calendarEvent.summary
         if (calendarEvent.start?.dateTime) eventObj.start = calendarEvent.start.dateTime
         else if (calendarEvent.start?.date) eventObj.start = calendarEvent.start.date
@@ -119,6 +122,7 @@ function formatTranscript(entries: TranscriptEntry[], date: string, calendarEven
         if (calendarEvent.htmlLink) eventObj.htmlLink = calendarEvent.htmlLink
         if (calendarEvent.conferenceLink) eventObj.conferenceLink = calendarEvent.conferenceLink
         if (calendarEvent.source) eventObj.source = calendarEvent.source
+        if (calendarEvent.attendees?.length) eventObj.attendees = calendarEvent.attendees
         lines.push(`calendar_event: '${JSON.stringify(eventObj).replace(/'/g, "''")}'`)
     }
     lines.push(
@@ -505,6 +509,27 @@ export function useMeetingTranscription(onAutoStop?: () => void) {
 
         merger.connect(processor);
         processor.connect(audioCtx.destination);
+
+        // Resolve the invite's attendee list from the linked calendar event
+        // file and stamp it into the note's frontmatter. The knowledge
+        // pipeline treats it as the authoritative "who was in this meeting"
+        // (transcript names are ASR output and get misheard), so the note
+        // must stay self-contained even after calendar sync prunes the event
+        // file. Best-effort: `source` is a tag, not a path, on some launch
+        // paths (those pass attendees directly).
+        if (calendarEvent?.source && !calendarEvent.attendees?.length) {
+            try {
+                const result = await window.ipc.invoke('workspace:readFile', { path: calendarEvent.source, encoding: 'utf8' });
+                const event = JSON.parse(result.data) as { attendees?: Array<{ displayName?: string; email?: string }> };
+                const attendees = (event.attendees ?? [])
+                    .map(a => (a.displayName && a.email ? `${a.displayName} <${a.email}>` : (a.displayName || a.email)))
+                    .filter((a): a is string => Boolean(a));
+                if (attendees.length > 0) calendarEvent = { ...calendarEvent, attendees };
+            } catch {
+                // No attendee list — the knowledge pipeline falls back to
+                // matching the event by title + start time.
+            }
+        }
 
         // Create the note file, organized by date like voice memos
         const now = new Date();
