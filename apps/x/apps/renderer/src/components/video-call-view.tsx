@@ -218,7 +218,7 @@ export function VideoCallView({
           ) : pttStatus === 'locked' ? (
             <>
               <span className="block h-2 w-2 rounded-full bg-green-500 animate-pulse" />
-              Hands-free — tap ⌘ to send
+              Hands-free — tap right ⌘ to send
             </>
           ) : (
             <>
@@ -247,7 +247,7 @@ export function VideoCallView({
             micMuted && 'opacity-50'
           )}
           aria-label={pttStatus === 'idle' ? 'Hold to talk' : pttStatus === 'locked' ? 'Tap to send' : 'Release to send'}
-          title="Hold to talk — or tap to go hands-free"
+          title="Hold to talk (tap to go hands-free) — or hold the right ⌘ key"
         >
           <Mic className="h-4 w-4" />
           {pttStatus === 'idle' ? 'Hold to talk' : pttStatus === 'locked' ? 'Tap to send' : 'Release to send'}

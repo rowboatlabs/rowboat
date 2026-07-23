@@ -16,7 +16,7 @@ type PopoutState = {
 }
 
 const STATUS_DISPLAY: Record<NonNullable<PopoutState['status']>, { label: string; dotClass: string }> = {
-  idle: { label: 'Hold ⌘ to talk', dotClass: 'bg-neutral-500' },
+  idle: { label: 'Hold right ⌘ to talk', dotClass: 'bg-neutral-500' },
   listening: { label: 'Listening', dotClass: 'bg-green-500 animate-pulse' },
   thinking: { label: 'Thinking…', dotClass: 'bg-amber-400' },
   speaking: { label: 'Speaking', dotClass: 'bg-sky-400 animate-pulse' },
@@ -210,8 +210,8 @@ export function VideoPopout() {
               ? 'bg-green-600 text-white hover:bg-green-500'
               : 'bg-neutral-700 text-white/90 hover:bg-neutral-600'
           } ${state.micMuted ? 'opacity-50' : ''}`}
-          aria-label="Hold to talk — or tap to go hands-free"
-          title="Hold to talk — or tap to go hands-free"
+          aria-label="Hold to talk — or hold the right ⌘ key from any app"
+          title="Hold to talk (tap to go hands-free) — or hold the right ⌘ key from any app"
         >
           <Mic className="h-3 w-3" />
           {state.pttLocked ? 'Tap to send' : state.status === 'listening' ? 'Release to send' : 'Hold to talk'}
