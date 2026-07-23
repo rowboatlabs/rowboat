@@ -62,7 +62,10 @@ import {
 import { TurnActivityIndicator } from '@/components/turn-activity-indicator';
 import { useSmoothedText } from './hooks/useSmoothedText';
 import { Tool, ToolContent, ToolGroupComponent, ToolHeader, ToolTabbedContent } from '@/components/ai-elements/tool';
-import { WebSearchResult } from '@/components/ai-elements/web-search-result';
+import {
+  WebSearchGroupResult,
+  WebSearchResult,
+} from '@/components/ai-elements/web-search-result';
 import { AppActionCard } from '@/components/ai-elements/app-action-card';
 import { ComposioConnectCard } from '@/components/ai-elements/composio-connect-card';
 import { PermissionRequest } from '@/components/ai-elements/permission-request';
@@ -117,6 +120,7 @@ import {
   isErrorMessage,
   isToolCall,
   isToolGroup,
+  isWebSearchGroup,
   isTurnUsageMessage,
   normalizeToolInput,
   normalizeToolOutput,
@@ -6904,6 +6908,14 @@ function App() {
                                   tabState.conversation,
                                   (id) => !!tabState.allPermissionRequests.get(id) || !!tabState.autoPermissionDecisions.get(id)
                                 ).map(item => {
+                                  if (isWebSearchGroup(item)) {
+                                    return (
+                                      <WebSearchGroupResult
+                                        key={item.groupId}
+                                        searches={item.items}
+                                      />
+                                    )
+                                  }
                                   if (isToolGroup(item)) {
                                     return (
                                       <ToolGroupComponent

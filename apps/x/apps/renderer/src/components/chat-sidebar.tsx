@@ -19,7 +19,10 @@ import {
 } from '@/components/ai-elements/message'
 import { TurnActivityIndicator } from '@/components/turn-activity-indicator'
 import { Tool, ToolContent, ToolGroupComponent, ToolHeader, ToolTabbedContent } from '@/components/ai-elements/tool'
-import { WebSearchResult } from '@/components/ai-elements/web-search-result'
+import {
+  WebSearchGroupResult,
+  WebSearchResult,
+} from '@/components/ai-elements/web-search-result'
 import { ComposioConnectCard } from '@/components/ai-elements/composio-connect-card'
 import { PermissionRequest } from '@/components/ai-elements/permission-request'
 import { AutoPermissionDecision } from '@/components/ai-elements/auto-permission-decision'
@@ -52,6 +55,7 @@ import {
   isErrorMessage,
   isToolCall,
   isToolGroup,
+  isWebSearchGroup,
   isTurnUsageMessage,
   normalizeToolInput,
   normalizeToolOutput,
@@ -666,6 +670,14 @@ export function ChatSidebar({
                                 tabState.conversation,
                                 (id) => !!tabState.allPermissionRequests.get(id) || !!tabState.autoPermissionDecisions.get(id)
                               ).map((item) => {
+                                if (isWebSearchGroup(item)) {
+                                  return (
+                                    <WebSearchGroupResult
+                                      key={item.groupId}
+                                      searches={item.items}
+                                    />
+                                  )
+                                }
                                 if (isToolGroup(item)) {
                                   return (
                                     <ToolGroupComponent

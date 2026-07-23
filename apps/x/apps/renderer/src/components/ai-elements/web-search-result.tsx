@@ -10,15 +10,22 @@ import {
   ChevronDownIcon,
   GlobeIcon,
   LoaderIcon,
+  XCircleIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
+import {
+  getWebSearchCardData,
+  getWebSearchGroupStatus,
+  type ToolCall,
+} from "@/lib/chat-conversation";
 
 interface WebSearchResultProps {
   query: string;
   results: Array<{ title: string; url: string; description: string }>;
   status: "pending" | "running" | "completed" | "error";
   title?: string;
+  className?: string;
 }
 
 // How long each fetched website stays on the rolling header before the
@@ -92,7 +99,13 @@ function buildSearchedSummary(domains: string[]): React.ReactNode {
 
 type RollPhase = "searching" | "rolling" | "settled";
 
-export function WebSearchResult({ query, results, status, title = "Searched the web" }: WebSearchResultProps) {
+export function WebSearchResult({
+  query,
+  results,
+  status,
+  title = "Searched the web",
+  className,
+}: WebSearchResultProps) {
   const isRunning = status === "pending" || status === "running";
   const [open, setOpen] = useState(false);
 
@@ -201,7 +214,10 @@ export function WebSearchResult({ query, results, status, title = "Searched the 
     <Collapsible
       open={open}
       onOpenChange={setOpen}
-      className="not-prose mb-4 w-full rounded-[28px] border bg-[var(--card-surface)] transition-colors duration-150 ease-out hover:border-foreground/30"
+      className={cn(
+        "not-prose mb-4 w-full rounded-[28px] border bg-[var(--card-surface)] transition-colors duration-150 ease-out hover:border-foreground/30",
+        className,
+      )}
     >
       <CollapsibleTrigger className="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-2.5">
         {/* Rolling header: clipped, fixed height so sliding lines stay contained */}
@@ -277,6 +293,88 @@ export function WebSearchResult({ query, results, status, title = "Searched the 
               <span>Searching...</span>
             </div>
           )}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+interface WebSearchGroupResultProps {
+  searches: ToolCall[];
+}
+
+export function WebSearchGroupResult({
+  searches,
+}: WebSearchGroupResultProps) {
+  const [open, setOpen] = useState(false);
+  const status = getWebSearchGroupStatus(searches);
+  const queryCount = searches.length;
+
+  const label =
+    status === "running"
+      ? "Searching the web…"
+      : status === "error"
+        ? "Web search finished with errors"
+        : "Searched the web";
+
+  return (
+    <Collapsible
+      open={open}
+      onOpenChange={setOpen}
+      className="not-prose mb-4 w-full rounded-[28px] border bg-[var(--card-surface)] transition-colors duration-150 ease-out hover:border-foreground/30"
+    >
+      <CollapsibleTrigger className="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-2.5">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          {status === "running" ? (
+            <LoaderIcon className="size-4 shrink-0 animate-spin text-muted-foreground" />
+          ) : status === "error" ? (
+            <XCircleIcon className="size-4 shrink-0 text-red-600" />
+          ) : (
+            <GlobeIcon className="size-4 shrink-0 text-muted-foreground" />
+          )}
+
+          <span className="truncate text-left text-sm font-medium">
+            {label}
+          </span>
+
+          <span className="shrink-0 text-xs text-muted-foreground">
+            ({queryCount} {queryCount === 1 ? "query" : "queries"})
+          </span>
+        </div>
+
+        <ChevronDownIcon
+          className={cn(
+            "size-4 shrink-0 text-muted-foreground transition-transform",
+            open && "rotate-180",
+          )}
+        />
+      </CollapsibleTrigger>
+
+      <CollapsibleContent className="overflow-hidden data-[state=open]:animate-[collapsible-down_0.09s_ease-out] data-[state=closed]:animate-[collapsible-up_0.08s_ease-in]">
+        <div className="flex flex-col gap-3 p-2">
+          {searches.map((search) => {
+            const data = getWebSearchCardData(search);
+            if (!data) return null;
+
+            return (
+              <div key={search.id} className="space-y-1.5">
+                <div className="flex min-w-0 items-center gap-2 px-2 text-sm text-muted-foreground">
+                  <GlobeIcon className="size-3.5 shrink-0" />
+                  <span className="truncate">
+                    {data.query || "Untitled query"}
+                  </span>
+                </div>
+
+                <WebSearchResult
+                  query={data.query}
+                  results={data.results}
+                  status={search.status}
+                  title={data.title}
+                  className="mb-0 rounded-[20px] border-border/60 bg-transparent"
+                />
+              </div>
+            );
+          })}
         </div>
       </CollapsibleContent>
     </Collapsible>
