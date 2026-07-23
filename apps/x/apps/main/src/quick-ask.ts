@@ -33,6 +33,14 @@ function createWindow(): BrowserWindow {
     height: BAR_HEIGHT,
     frame: false,
     resizable: false,
+    // Never fullscreenable — see the popout in ipc.ts: windows created while
+    // a fullscreen Space is active can otherwise open fullscreen themselves.
+    fullscreenable: false,
+    minimizable: false,
+    maximizable: false,
+    // NSPanel: the bar must appear over other apps' fullscreen Spaces — the
+    // whole point is summoning it from wherever the user is.
+    ...(process.platform === 'darwin' ? { type: 'panel' as const } : {}),
     alwaysOnTop: true,
     skipTaskbar: true,
     show: false,
@@ -45,10 +53,10 @@ function createWindow(): BrowserWindow {
       preload: preloadPath,
     },
   });
-  // Same all-workspaces setup as the call popout — and the same deliberate
-  // omission of `visibleOnFullScreen` (it would hide the Dock icon).
+  // Same all-workspaces setup as the call popout: float over fullscreen
+  // Spaces too, keeping the Dock icon (skipTransformProcessType).
   win.setAlwaysOnTop(true, 'floating');
-  win.setVisibleOnAllWorkspaces(true);
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
   // Spotlight behavior: clicking away dismisses the bar.
   win.on('blur', () => {
     if (!win.isDestroyed() && win.isVisible()) win.hide();

@@ -178,11 +178,15 @@ the key while muted does nothing; muting mid-capture discards it).
 
 ## Popout window
 
-- The popout window keeps the Dock icon alive: it uses
-  `setVisibleOnAllWorkspaces(true)` WITHOUT `visibleOnFullScreen` — that flag
-  turns the app into a macOS "agent" app and hides its Dock icon while the
-  window exists (looks like Rowboat vanished). Trade-off: the popout doesn't
-  hover over other apps' fullscreen Spaces.
+- The popout is an NSPanel (`type: 'panel'`) with
+  `setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true,
+  skipTransformProcessType: true })`: it floats over every Space INCLUDING
+  other apps' fullscreen Spaces, and `skipTransformProcessType` keeps the
+  Dock icon (without it, `visibleOnFullScreen` turns the app into a macOS
+  "agent" app while the window exists — looks like Rowboat vanished). It is
+  also `fullscreenable: false` — a window created while the active Space is
+  fullscreen can otherwise open AS a fullscreen window (the pill swallowing
+  the whole screen). The quick-ask bar uses the same setup.
 - Shown iff the derived `callSurface === 'popout'` (effect in `App.tsx`).
   Renderer asks `video:setPopout {show}`; main creates a frameless,
   `alwaysOnTop` ('floating'), all-workspaces BrowserWindow at the top-right

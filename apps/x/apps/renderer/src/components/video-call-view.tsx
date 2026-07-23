@@ -304,6 +304,15 @@ export function VideoCallView({
         </button>
         <button
           type="button"
+          onClick={onMinimize}
+          className="flex h-10 w-10 items-center justify-center rounded-full bg-neutral-800 text-white/90 transition-colors hover:bg-neutral-700"
+          aria-label="Minimize to the floating pill (shares your screen)"
+          title="Minimize — keep working with the floating pill"
+        >
+          <Minimize2 className="h-5 w-5" />
+        </button>
+        <button
+          type="button"
           onClick={onLeave}
           className="flex h-10 w-14 items-center justify-center rounded-full bg-red-600 text-white transition-colors hover:bg-red-500"
           aria-label="End call"

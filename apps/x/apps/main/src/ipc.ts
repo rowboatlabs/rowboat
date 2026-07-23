@@ -2393,6 +2393,16 @@ export function setupIpcHandlers() {
         y: workArea.y + 24,
         frame: false,
         resizable: false,
+        // Never let macOS fullscreen/tile the pill: creating a window while
+        // the app window is in a native-fullscreen Space can otherwise open
+        // it AS a fullscreen window (the pill swallowing the whole screen).
+        fullscreenable: false,
+        minimizable: false,
+        maximizable: false,
+        // NSPanel (macOS): auxiliary windows may join other apps' fullscreen
+        // Spaces — a plain window can't, which made the pill vanish whenever
+        // the user's current app was fullscreen.
+        ...(process.platform === 'darwin' ? { type: 'panel' as const } : {}),
         alwaysOnTop: true,
         skipTaskbar: true,
         show: false,
@@ -2405,13 +2415,12 @@ export function setupIpcHandlers() {
           preload: preloadPath,
         },
       });
-      // Float above other apps on every workspace. Deliberately NOT
-      // `visibleOnFullScreen: true`: on macOS that flag hides the app's Dock
-      // icon for as long as such a window exists (the app becomes an
-      // "agent" app), which reads as Rowboat having vanished. The trade-off
-      // is the popout won't hover over other apps' fullscreen Spaces.
+      // Float above other apps on every workspace, INCLUDING fullscreen
+      // Spaces. `skipTransformProcessType` keeps the Dock icon: without it,
+      // `visibleOnFullScreen` turns the app into a macOS "agent" app for as
+      // long as the window exists (reads as Rowboat having vanished).
       win.setAlwaysOnTop(true, 'floating');
-      win.setVisibleOnAllWorkspaces(true);
+      win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
       win.webContents.once('did-finish-load', () => {
         if (lastVideoPopoutState) {
           win.webContents.send('video:popout-state', lastVideoPopoutState);
