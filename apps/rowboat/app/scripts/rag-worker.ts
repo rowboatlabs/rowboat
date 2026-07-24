@@ -9,7 +9,6 @@ import { embeddingModel } from '../lib/embedding';
 import { qdrantClient } from '../lib/qdrant';
 import { PrefixLogger } from "../lib/utils";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import crypto from 'crypto';
 import { createOpenAI } from '@ai-sdk/openai';
 import { USE_BILLING, USE_GEMINI_FILE_PARSING } from '../lib/feature_flags';
 import { authorize, getCustomerIdForProject, logUsage, UsageTracker } from '../lib/billing';
@@ -153,7 +152,7 @@ async function runProcessFilePipeline(_logger: PrefixLogger, usageTracker: Usage
     // store embeddings in qdrant
     logger.log("Storing embeddings in Qdrant");
     const points: z.infer<typeof EmbeddingRecord>[] = embeddings.map((embedding, i) => ({
-        id: crypto.randomUUID(),
+        id: `${doc.id}-chunk-${i}`,
         vector: embedding,
         payload: {
             projectId: job.projectId,
@@ -222,7 +221,7 @@ async function runScrapePipeline(_logger: PrefixLogger, usageTracker: UsageTrack
     // store embeddings in qdrant
     logger.log("Storing embeddings in Qdrant");
     const points: z.infer<typeof EmbeddingRecord>[] = embeddings.map((embedding, i) => ({
-        id: crypto.randomUUID(),
+        id: `${doc.id}-chunk-${i}`,
         vector: embedding,
         payload: {
             projectId: job.projectId,
@@ -274,7 +273,7 @@ async function runProcessTextPipeline(_logger: PrefixLogger, usageTracker: Usage
     // store embeddings in qdrant
     logger.log("Storing embeddings in Qdrant");
     const points: z.infer<typeof EmbeddingRecord>[] = embeddings.map((embedding, i) => ({
-        id: crypto.randomUUID(),
+        id: `${doc.id}-chunk-${i}`,
         vector: embedding,
         payload: {
             projectId: job.projectId,
