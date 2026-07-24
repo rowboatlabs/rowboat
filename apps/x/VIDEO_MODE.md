@@ -1,11 +1,11 @@
 # Calls (Video Mode) — Deep Dive
 
-Calls let the user talk to the assistant hands-free while it *sees* them
-(webcam) and their screen (screen share). There is ONE call engine —
-continuous listening, auto-submitted utterances, forced read-aloud TTS, frame
-capture — entered through four presets that differ only in starting devices.
-This doc covers the product flow, the technical pipeline, and the LLM prompt
-surface with exact pointers.
+Calls let the user talk to the assistant while it *sees* them (webcam) and
+their screen (screen share). There is ONE call engine — push-to-talk voice
+input (hold Right ⌘ to talk, quick-tap to lock hands-free), forced
+read-aloud TTS, frame capture — entered through four presets that differ
+only in starting devices. This doc covers the product flow, the technical
+pipeline, and the LLM prompt surface with exact pointers.
 
 ## Product flow
 
@@ -20,7 +20,7 @@ and ends it.
 |--------|------------------|---------------|
 | `share` — main click | screen on, camera off | floating pill |
 | `voice` — "Voice call" | camera off, screen off | floating mascot pill |
-| `video` — "Video call" | camera on | full-screen call |
+| `video` — "Video call" | camera on | floating pill (camera in the pill; expand for full screen) |
 | `practice` — "Practice session" | camera on, + coaching persona | full-screen call |
 
 **One surface rule** (`callSurface` in `App.tsx`): full screen and screen
@@ -44,9 +44,19 @@ starts anyway as a voice call, with a toast linking to System Settings.
 Practice/coaching is always an explicit choice — expanding to full screen
 never turns the coach on.
 
-In-call controls (identical bar on both surfaces): mic mute, camera toggle
-(silhouette avatar while off, no webcam frames captured), screen share
-toggle, mascot ⇄ "R" letter avatar, end call. **Mute is a full input
+In-call controls (identical bar on both surfaces): push-to-talk button
+(hold to talk / tap to lock hands-free — mirrors the Right ⌘ key), mic
+mute, camera toggle (silhouette avatar while off, no webcam frames
+captured), screen share toggle, mascot ⇄ "R" letter avatar, end call. The
+status chip walks the user through PTT: "Hold right ⌘ to talk · tap to go
+hands-free" when idle, "Listening — release to send" while capturing,
+"Hands-free — tap ⌘ to send" while locked. The popout additionally has a
+small text input — typed messages land in the chat like composer messages,
+frames riding along — and a collapsible **response panel**: the latest
+assistant reply of the call streams into the pill (auto-opens on each new
+turn, `video:popoutResize` grows the window), so a typed question can be
+read right there without switching back to the app. Replies are spoken
+too; the panel is the readable half. **Mute is a full input
 pause**, not just audio — mic audio stops reaching Deepgram
 (`useVoiceMode.setPaused`, OR'd with the automatic thinking/speaking pause)
 AND camera/screen frame capture stops (`useVideoMode.setCapturePaused`;
@@ -118,35 +128,72 @@ is live) to the outgoing message as `UserImagePart`s and sets
 - The auto-permission classifier stringifies + truncates content to ~3KB per
   message, so inline base64 can't blow up its prompt.
 
-## Hands-free voice loop
+## Push-to-talk voice loop
 
-`apps/renderer/src/hooks/useVoiceMode.ts`:
+The user's key gesture is the endpoint — there is NO silence detection, no
+endpointing heuristics, and the assistant's TTS can never be transcribed
+back at it (the mic gate is closed unless the user is deliberately talking).
 
-- `startContinuous(onUtterance)` (line 404): push-to-talk params but with
-  `endpointing=1800` (line 25) so thinking pauses don't cut the user off,
-  plus `utterance_end_ms=2000` (line 38) as a second end-of-speech signal.
-  **Gotcha:** Deepgram's `speech_final` usually arrives on a result with an
-  EMPTY transcript — empty finals must reach the endpoint check or
-  utterances never complete (see the NOTE in `ws.onmessage`).
-- `setPaused(true)` (line 414) while the assistant thinks/speaks: drops mic
-  audio (so TTS is never transcribed back), discards half-heard buffer,
-  sends Deepgram KeepAlives every 5s. `App.tsx` drives this from
-  `activeIsProcessing || tts.state !== 'idle'`.
+Gestures (Right ⌘, or the on-screen talk button on either surface):
+
+- **Hold** (≥350ms): mic gate open while held; release submits the
+  utterance.
+- **Quick tap** (<350ms): locks hands-free capture; the next press submits.
+  While locked there is still no auto-submit — the closing tap is the
+  endpoint.
+- **Chord** (any other key/click while Right ⌘ is down): the press was a
+  keyboard shortcut, not a talk gesture — a live hold is cancelled, a
+  locked capture swallows the matching release. Escape also cancels.
+- **Pressing while the assistant thinks/speaks silences its AUDIO and
+  starts listening** — but the run and its reply survive: an accidental or
+  empty press never costs the answer (unspoken segments freeze and resume
+  on release). Only a real submitted utterance aborts the previous turn
+  and drops its unspoken backlog. The Stop button remains the hard abort.
+
+Key sources feed one edge-triggered machine in `App.tsx` (`handlePttDown` /
+`handlePttUp` / `handlePttChord`):
+
+- **Global key hook** (`apps/main/src/ptt.ts`, uiohook-napi): system-wide
+  Right ⌘ down/up/chord pushed over `voice:ptt-key`. Runs only while a call
+  is active (ref-counted via `voice:setCallActive`). Requires macOS Input
+  Monitoring; `eventsSeen` in `ptt:getStatus` is the liveness signal (a
+  running hook that has seen zero events = permission not effective) — the
+  app shows a one-time permission dialog ~4s into the first call.
+- **DOM listeners** (app window focused): `e.code === 'MetaRight'` keydown/
+  keyup — the fallback that works without Input Monitoring.
+- Sources overlap while the app is focused; identical edges within 80ms
+  collapse into one (`PTT_EDGE_ECHO_MS`).
+
+`apps/renderer/src/hooks/useVoiceMode.ts` session API:
+
+- `startPtt(onUtterance)`: mic + Deepgram socket acquired for the whole
+  call (instant capture on key-down), audio gated OFF via `setPaused(true)`;
+  KeepAlives every 5s hold the idle socket open.
+- `pttBegin()`: clears the transcript buffers and opens the gate.
+- `pttEnd()`: flushes buffered audio, sends Deepgram `Finalize`, reads the
+  finalized transcript + trailing interim, closes the gate, fires
+  `onUtterance`.
+- `pttCancel()`: closes the gate and discards everything heard.
 - Mid-call socket drops reconnect after 1s; the offline audio backlog is
   capped (~30s).
 
 Call lifecycle lives in `App.tsx` `startCall(preset)` / `endCall()`:
-entering a call saves/forces TTS settings, cancels any push-to-talk
-recording, and starts the continuous loop; ending restores everything.
-Push-to-talk is disabled while a call owns the mic.
+entering a call saves/forces TTS settings, cancels any composer dictation,
+and starts the PTT session; ending restores everything. Composer dictation
+is disabled while a call owns the mic. Mute blocks PTT entirely (pressing
+the key while muted does nothing; muting mid-capture discards it).
 
 ## Popout window
 
-- The popout window keeps the Dock icon alive: it uses
-  `setVisibleOnAllWorkspaces(true)` WITHOUT `visibleOnFullScreen` — that flag
-  turns the app into a macOS "agent" app and hides its Dock icon while the
-  window exists (looks like Rowboat vanished). Trade-off: the popout doesn't
-  hover over other apps' fullscreen Spaces.
+- The popout is an NSPanel (`type: 'panel'`) with
+  `setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true,
+  skipTransformProcessType: true })`: it floats over every Space INCLUDING
+  other apps' fullscreen Spaces, and `skipTransformProcessType` keeps the
+  Dock icon (without it, `visibleOnFullScreen` turns the app into a macOS
+  "agent" app while the window exists — looks like Rowboat vanished). It is
+  also `fullscreenable: false` — a window created while the active Space is
+  fullscreen can otherwise open AS a fullscreen window (the pill swallowing
+  the whole screen).
 - Shown iff the derived `callSurface === 'popout'` (effect in `App.tsx`).
   Renderer asks `video:setPopout {show}`; main creates a frameless,
   `alwaysOnTop` ('floating'), all-workspaces BrowserWindow at the top-right
@@ -171,6 +218,15 @@ Push-to-talk is disabled while a call owns the mic.
   `setDisplayMediaRequestHandler` in `main.ts` (no picker);
   `meeting:checkScreenPermission` registers the app in macOS Screen
   Recording settings on first use.
+- Input Monitoring (global PTT key hook): starting the uiohook event tap
+  triggers the macOS consent prompt on first use, but a missing grant
+  doesn't error — events just never arrive (`eventsSeen` stays false). A
+  tap created before the grant stays dead; `ptt:retryHook` recreates it.
+- Denials are never silent: `components/permission-dialog.tsx` is the one
+  dialog behind mic/camera/input-monitoring failures — explains the missing
+  permission and deep-links to the exact System Settings pane
+  (`app:openPrivacySettings`). Screen-share failure keeps its toast (a call
+  is live; a modal would be in the way).
 
 ## LLM prompts catalog
 
@@ -214,11 +270,11 @@ Voice-to-voice latency (user stops talking → assistant audio) is engineered
 at four points; the `call_turn_latency` PostHog event measures the real
 distribution (utterance → submit → first speak → audio playing):
 
-- **Smart endpointing** (`useVoiceMode.ts`): Deepgram endpoints at 600ms and
-  the client decides — a transcript ending in terminal punctuation fires
-  immediately (~600ms after last word); a mid-thought trail holds another
-  1.2s (resumed speech cancels the hold). Complete sentences turn around
-  ~1.2s faster than the old fixed 1800ms endpoint.
+- **Push-to-talk endpoint** (`useVoiceMode.ts` `pttEnd`): the key release
+  IS the endpoint — no silence detection at all. Submit latency after
+  release is just the Deepgram `Finalize` round-trip (typically well under
+  the old 600–1800ms endpointing wait), and misfires (utterances cut off
+  mid-thought, TTS bleed) are structurally impossible.
 - **Streaming TTS** (`voice:synthesizeStreamStart` → `voice:tts-chunk` →
   MediaSource playback in `useVoiceTTS.ts`): the first segment of an idle
   queue plays from the first MP3 chunk instead of after the full body
@@ -239,8 +295,11 @@ screen frame per message unless the screen changed.
 
 ## Known limitations
 
-- Turn-taking is strict — no barge-in (would need echo cancellation against
-  TTS output).
+- No open-mic barge-in — but pressing PTT while the assistant speaks
+  silences it and starts listening (the run is aborted once the new
+  utterance submits), so interrupting never requires the Stop button.
+- Global PTT (Right ⌘ from other apps) needs macOS Input Monitoring; without
+  it PTT only works while the app window is focused (DOM fallback).
 - Frame sampling, not video: motion between frames is invisible (the prompt
   tells the model not to claim otherwise).
 - Vocal-delivery feedback is limited: Deepgram reduces speech to text, so

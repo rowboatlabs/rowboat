@@ -12,6 +12,7 @@ allowBuilds:
   macos-alias: true
   node-pty: true
   protobufjs: true
+  uiohook-napi: true
 
 blockExoticSubdeps: false
 
