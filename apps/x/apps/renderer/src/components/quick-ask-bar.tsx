@@ -34,6 +34,16 @@ export function QuickAskBar() {
   const [micDenied, setMicDenied] = useState(false)
   const voice = useVoiceMode()
 
+  // Transparent window: the page's default (light) background paints the
+  // corner areas OUTSIDE the border-radius — white spurs at every corner.
+  // Clear every layer so only the rounded capsule is visible.
+  useEffect(() => {
+    document.documentElement.style.background = 'transparent'
+    document.body.style.background = 'transparent'
+    const root = document.getElementById('root')
+    if (root) root.style.background = 'transparent'
+  }, [])
+
   useEffect(() => {
     const focusInput = () => inputRef.current?.focus()
     focusInput()
