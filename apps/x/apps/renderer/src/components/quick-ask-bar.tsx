@@ -59,10 +59,24 @@ export function QuickAskBar() {
   }, [])
 
   // Ask main to grow/shrink the window when the answer area toggles.
+  // Content-driven: the panel takes only what the answer needs (short
+  // answers get a short panel), up to the unchanged ANSWER_HEIGHT cap.
+  // Measured off an inner wrapper so the scroll container's own size can
+  // never feed back into the measurement.
   const expanded = asked !== null
+  const panelContentRef = useRef<HTMLDivElement | null>(null)
+  // Panel chrome around the measured content: pt-5 + pb-3 + footer line +
+  // its mt-2 + the divider, in design px.
+  const PANEL_CHROME = 62
   useEffect(() => {
-    void window.ipc.invoke('quickAsk:resize', { height: expanded ? ANSWER_HEIGHT : BAR_HEIGHT }).catch(() => {})
-  }, [expanded])
+    if (!expanded) {
+      void window.ipc.invoke('quickAsk:resize', { height: BAR_HEIGHT }).catch(() => {})
+      return
+    }
+    const content = panelContentRef.current?.offsetHeight ?? 0
+    const needed = Math.min(ANSWER_HEIGHT, BAR_HEIGHT + PANEL_CHROME + content)
+    void window.ipc.invoke('quickAsk:resize', { height: needed }).catch(() => {})
+  }, [expanded, asked, answer?.text, answer?.statusText, answer?.processing])
 
   const submit = useCallback((raw: string) => {
     const text = raw.trim()
@@ -155,6 +169,7 @@ export function QuickAskBar() {
       {asked && (
         <div className="flex min-h-0 flex-1 flex-col border-b border-white/5 px-7 pb-3 pt-5">
           <div className="min-h-0 flex-1 overflow-y-auto text-sm leading-relaxed text-neutral-100">
+            <div ref={panelContentRef}>
             {/* Inside the scroll area — the question scrolls away with the
                 answer instead of persisting as a header. */}
             <div className="mb-2 text-sm font-medium text-neutral-400">{asked}</div>
@@ -168,6 +183,7 @@ export function QuickAskBar() {
               )
             )}
             {answer?.processing && answer.text && <span className="animate-pulse">▍</span>}
+            </div>
           </div>
           <div className="mt-2 shrink-0 text-[11px] text-neutral-600">
             Also in your Rowboat chat · Esc to {answer?.processing ? 'dismiss' : 'clear'}
