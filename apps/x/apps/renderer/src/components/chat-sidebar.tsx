@@ -60,6 +60,7 @@ import {
   toToolState,
 } from '@/lib/chat-conversation'
 import { matchBillingError } from '@/lib/billing-error'
+import { BillingErrorNotice } from '@/components/billing-error-notice'
 import { TokenUsageMenu } from '@/components/token-usage-menu'
 
 const streamdownComponents = { pre: MarkdownPreOverride }
@@ -510,8 +511,9 @@ export function ChatSidebar({
     }
 
     if (isErrorMessage(item)) {
-      if (matchBillingError(item.message)) {
-        return null
+      const billingMatch = matchBillingError(item.message)
+      if (billingMatch) {
+        return <BillingErrorNotice key={item.id} id={item.id} match={billingMatch} />
       }
       return (
         <Message key={item.id} from="assistant" data-message-id={item.id}>

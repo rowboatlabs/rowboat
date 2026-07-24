@@ -81,6 +81,7 @@ import { Button } from "@/components/ui/button"
 import { Toaster } from "@/components/ui/sonner"
 import { UpdateCard } from "@/components/update-card"
 import { BillingErrorDialog } from "@/components/billing-error-dialog"
+import { BillingErrorNotice } from "@/components/billing-error-notice"
 import { CreditCelebration } from "@/components/credit-celebration"
 import { matchBillingError, type BillingErrorMatch } from "@/lib/billing-error"
 import { dispatchCreditExhausted, dispatchCreditReplenished } from "@/lib/credit-status"
@@ -954,30 +955,34 @@ function App() {
   const [conversation, setConversation] = useState<ConversationItem[]>([])
   const [billingErrorMatch, setBillingErrorMatch] = useState<BillingErrorMatch | null>(null)
   const [billingErrorOpen, setBillingErrorOpen] = useState(false)
-  const lastHandledBillingErrorIdRef = useRef<string | null>(null)
+  const handledBillingErrorIdsRef = useRef<Set<string>>(new Set())
   const [currentAssistantMessage, setCurrentAssistantMessage] = useState<string>('')
-
-  useEffect(() => {
-    for (let i = conversation.length - 1; i >= 0; i--) {
-      const item = conversation[i]
-      if (!isErrorMessage(item)) continue
-      if (item.id === lastHandledBillingErrorIdRef.current) return
-      const match = matchBillingError(item.message)
-      if (match) {
-        lastHandledBillingErrorIdRef.current = item.id
-        setBillingErrorMatch(match)
-        setBillingErrorOpen(true)
-        if (match.kind === 'out_of_credits') dispatchCreditExhausted()
-      }
-      return
-    }
-  }, [conversation])
   const [, setModelUsage] = useState<UsageSummary | null>(null)
   const [runId, setRunId] = useState<string | null>(null)
   // New runtime: the active session's chat data + actions. All logic lives in
   // SessionChatStore (tested headlessly); the hook is a thin subscription.
   // runId IS the session id in the sessions runtime.
   const sessionChat = useSessionChat(runId)
+
+  // Watch the conversation that is actually rendered — the sessions-runtime
+  // one when loaded, the legacy state otherwise — so billing failures
+  // (out of credits, subscription lapsed) always pop the upgrade dialog.
+  const billingWatchedConversation = sessionChat.chatState?.conversation ?? conversation
+  useEffect(() => {
+    for (let i = billingWatchedConversation.length - 1; i >= 0; i--) {
+      const item = billingWatchedConversation[i]
+      if (!isErrorMessage(item)) continue
+      if (handledBillingErrorIdsRef.current.has(item.id)) return
+      const match = matchBillingError(item.message)
+      if (match) {
+        handledBillingErrorIdsRef.current.add(item.id)
+        setBillingErrorMatch(match)
+        setBillingErrorOpen(true)
+        if (match.kind === 'out_of_credits') dispatchCreditExhausted()
+      }
+      return
+    }
+  }, [billingWatchedConversation])
   const runIdRef = useRef<string | null>(null)
   const loadRunRequestIdRef = useRef(0)
   const [isProcessing, setIsProcessing] = useState(false)
@@ -6167,8 +6172,9 @@ function App() {
     }
 
     if (isErrorMessage(item)) {
-      if (matchBillingError(item.message)) {
-        return null
+      const billingMatch = matchBillingError(item.message)
+      if (billingMatch) {
+        return <BillingErrorNotice key={item.id} id={item.id} match={billingMatch} />
       }
       return (
         <Message key={item.id} from="assistant" data-message-id={item.id}>
