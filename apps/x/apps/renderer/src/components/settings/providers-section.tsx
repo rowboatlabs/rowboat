@@ -8,6 +8,8 @@ import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
 import { providerDisplayNames, type ModelRef } from "@/components/model-selector"
+import { selectInitialModel, selectInitialTaskModels } from "@x/shared/dist/initial-selection.js"
+import { normalizeModelRecommendation, type ModelRecommendations } from "@x/shared/dist/rowboat-account.js"
 import { useModels } from "@/hooks/use-models"
 import { useRowboatConfig } from "@/hooks/use-rowboat-config"
 import { useChatGPT } from "@/hooks/useChatGPT"
@@ -259,7 +261,7 @@ function AddProviderDialog({ open, onOpenChange, connectedIds, isRowboatConnecte
   chatgptSignedIn: boolean
   onChatGPTSignIn: () => Promise<unknown> | void
   hadAssistant: boolean
-  modelRecommendations: Record<string, string> | undefined
+  modelRecommendations: ModelRecommendations | undefined
   analyticsSource: 'connect' | 'onboarding'
 }) {
   const [step, setStep] = useState<AddStep>({ kind: "choose" })
@@ -368,11 +370,7 @@ function AddProviderDialog({ open, onOpenChange, connectedIds, isRowboatConnecte
       const listRes = await window.ipc.invoke("models:listForProvider", { provider: providerEntry })
       const list = listRes.success ? listRes.models ?? [] : []
       const typed = manualModel.trim()
-      let model = typed
-      if (!model) {
-        const recommended = modelRecommendations?.[flavor]
-        model = recommended && list.includes(recommended) ? recommended : (list[0] ?? "")
-      }
+      const model = typed || (selectInitialModel(flavor, list, modelRecommendations) ?? "")
       if (!listRes.success && !model) {
         setStep({ kind: "error", flavor, message: listRes.error || "Could not load the provider's model list." })
         return
@@ -394,11 +392,18 @@ function AddProviderDialog({ open, onOpenChange, connectedIds, isRowboatConnecte
       const cfgNow = await window.ipc.invoke("models:getConfig", null).catch(() => null)
       const hasAssistantNow = cfgNow ? cfgNow.assistantModel !== null : hadAssistant
       if (!hasAssistantNow) {
-        await window.ipc.invoke("models:updateConfig", { assistantModel: { provider: flavor, model } })
+        // Task recommendations ride along the seeding moment as visible
+        // overrides (validated against the live list; only differences).
+        const taskModels = selectInitialTaskModels(flavor, flavor, list, modelRecommendations, model)
+        await window.ipc.invoke("models:updateConfig", {
+          assistantModel: { provider: flavor, model },
+          ...(Object.keys(taskModels).length > 0 ? { taskModels } : {}),
+        })
         analytics.llmInitialModelSelected({
           flavor,
           model,
-          recommended: model === modelRecommendations?.[flavor],
+          recommended: model === normalizeModelRecommendation(modelRecommendations, flavor)?.assistantModel,
+          taskOverridesSeeded: Object.keys(taskModels).length,
           source: analyticsSource,
         })
       }

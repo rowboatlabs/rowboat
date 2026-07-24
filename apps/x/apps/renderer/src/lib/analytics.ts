@@ -345,7 +345,9 @@ export function llmInitialModelSelected(props: {
   flavor: string
   model: string
   recommended: boolean
+  taskOverridesSeeded: number
   source: 'connect' | 'onboarding'
 }) {
-  posthog.capture('llm_initial_model_selected', { ...props })
+  const { taskOverridesSeeded, ...rest } = props
+  posthog.capture('llm_initial_model_selected', { ...rest, task_overrides_seeded: taskOverridesSeeded })
 }

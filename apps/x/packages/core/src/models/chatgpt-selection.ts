@@ -2,7 +2,8 @@ import container from "../di/container.js";
 import { IModelConfigRepo } from "./repo.js";
 import { listCodexModels } from "./codex.js";
 import { getRowboatConfig } from "../config/rowboat.js";
-import { selectInitialModel } from "./initial-selection.js";
+import { selectInitialModel, selectInitialTaskModels } from "./initial-selection.js";
+import { normalizeModelRecommendation } from "@x/shared/dist/rowboat-account.js";
 import { capture } from "../analytics/posthog.js";
 
 /**
@@ -27,11 +28,18 @@ export async function applyCodexInitialSelection(): Promise<void> {
         const recommendations = (await getRowboatConfig().catch(() => null))?.modelRecommendations;
         const model = selectInitialModel("codex", ids, recommendations);
         if (model) {
-            await repo.updateConfig({ assistantModel: { provider: "codex", model } });
+            // Task recommendations ride along the seeding moment (codex has
+            // none today; the path is uniform across providers).
+            const taskModels = selectInitialTaskModels("codex", "codex", ids, recommendations, model);
+            await repo.updateConfig({
+                assistantModel: { provider: "codex", model },
+                ...(Object.keys(taskModels).length > 0 ? { taskModels } : {}),
+            });
             capture("llm_initial_model_selected", {
                 flavor: "codex",
                 model,
-                recommended: model === recommendations?.["codex"],
+                recommended: model === normalizeModelRecommendation(recommendations, "codex")?.assistantModel,
+                task_overrides_seeded: Object.keys(taskModels).length,
                 source: "sign_in",
             });
         }

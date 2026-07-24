@@ -2,7 +2,8 @@ import container from "../di/container.js";
 import { IModelConfigRepo } from "./repo.js";
 import { listGatewayModels } from "./gateway.js";
 import { getRowboatConfig } from "../config/rowboat.js";
-import { selectInitialModel } from "./initial-selection.js";
+import { selectInitialModel, selectInitialTaskModels } from "./initial-selection.js";
+import { normalizeModelRecommendation } from "@x/shared/dist/rowboat-account.js";
 import { capture } from "../analytics/posthog.js";
 
 /**
@@ -28,13 +29,22 @@ export async function applyRowboatInitialSelection(): Promise<void> {
         const recommendations = (await getRowboatConfig().catch(() => null))?.modelRecommendations;
         const model = selectInitialModel("rowboat", ids, recommendations);
         if (model) {
-            await repo.updateConfig({ assistantModel: { provider: "rowboat", model } });
+            // Task recommendations ride along the seeding moment: the
+            // gateway's lite-tier task models become visible overrides so
+            // always-on background work doesn't run on assistant-class
+            // models (plan-credit economics).
+            const taskModels = selectInitialTaskModels("rowboat", "rowboat", ids, recommendations, model);
+            await repo.updateConfig({
+                assistantModel: { provider: "rowboat", model },
+                ...(Object.keys(taskModels).length > 0 ? { taskModels } : {}),
+            });
             // Measures recommendation quality: hit = the backend's pick was
             // in the gateway list; miss = first-listed fallback.
             capture("llm_initial_model_selected", {
                 flavor: "rowboat",
                 model,
-                recommended: model === recommendations?.["rowboat"],
+                recommended: model === normalizeModelRecommendation(recommendations, "rowboat")?.assistantModel,
+                task_overrides_seeded: Object.keys(taskModels).length,
                 source: "sign_in",
             });
         }
