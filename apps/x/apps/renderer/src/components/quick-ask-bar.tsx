@@ -136,7 +136,10 @@ export function QuickAskBar() {
     // is a full capsule; expanded, the capsule softens so the answer panel
     // reads as one surface.
     <div
-      className={`flex h-screen w-screen select-none flex-col overflow-hidden border border-white/10 bg-[#1a1b1e]/95 text-white shadow-2xl ${
+      // No CSS shadow here: it would paint into the window's square corner
+      // zones (the only area it isn't clipped) as dark smudges — the native
+      // window shadow already provides the depth.
+      className={`flex h-screen w-screen select-none flex-col overflow-hidden border border-white/10 bg-[#1a1b1e]/95 text-white ${
         expanded ? 'rounded-[28px]' : 'rounded-full'
       }`}
     >
