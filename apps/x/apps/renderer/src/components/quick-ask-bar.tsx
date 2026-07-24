@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { CornerDownLeft, Mic } from 'lucide-react'
+import { Streamdown } from 'streamdown'
 
 import { useVoiceMode } from '@/hooks/useVoiceMode'
 
@@ -165,9 +166,11 @@ export function QuickAskBar() {
       {asked && (
         <div className="flex min-h-0 flex-1 flex-col border-t border-neutral-800 px-5 py-3">
           <div className="mb-2 shrink-0 truncate text-xs text-neutral-500">You asked: {asked}</div>
-          <div className="min-h-0 flex-1 overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed text-neutral-100">
+          <div className="min-h-0 flex-1 overflow-y-auto text-sm leading-relaxed text-neutral-100">
             {answer?.text ? (
-              answer.text
+              <Streamdown className="prose prose-sm prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-1.5 [&_ul]:my-1.5 [&_ol]:my-1.5 [&_pre]:my-2 [&_pre]:text-[11px] [&_code]:text-[11px]">
+                {answer.text}
+              </Streamdown>
             ) : (
               <span className="text-neutral-500">{answer?.processing ? 'Thinking…' : ''}</span>
             )}
