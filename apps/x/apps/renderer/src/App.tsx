@@ -1696,22 +1696,31 @@ function App() {
   let callResponseText: string | null = null
   let callQuestionText: string | null = null
   if (inCall) {
+    // The question the reply answers — shown above it in the pill's panel.
+    let questionAt = 0
+    for (let i = liveConversation.length - 1; i >= 0; i--) {
+      const item = liveConversation[i]
+      if (isChatMessage(item) && item.role === 'user') {
+        if (item.timestamp >= callStartedEpochRef.current) {
+          callQuestionText = item.content
+          questionAt = item.timestamp
+        }
+        break
+      }
+    }
     callResponseText = liveAssistantMessage || null
     if (!callResponseText) {
       for (let i = liveConversation.length - 1; i >= 0; i--) {
         const item = liveConversation[i]
         if (isChatMessage(item) && item.role === 'assistant') {
-          if (item.timestamp >= callStartedEpochRef.current) callResponseText = item.content
+          // Only a reply to the CURRENT question counts — right after a
+          // submit the newest assistant message is still the previous
+          // answer, which must not linger under the new question.
+          if (item.timestamp >= callStartedEpochRef.current && item.timestamp >= questionAt) {
+            callResponseText = item.content
+          }
           break
         }
-      }
-    }
-    // The question the reply answers — shown above it in the pill's panel.
-    for (let i = liveConversation.length - 1; i >= 0; i--) {
-      const item = liveConversation[i]
-      if (isChatMessage(item) && item.role === 'user') {
-        if (item.timestamp >= callStartedEpochRef.current) callQuestionText = item.content
-        break
       }
     }
   }
