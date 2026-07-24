@@ -1021,6 +1021,13 @@ function App() {
   const activeIsReasoning = sessionChat.chatState?.isReasoning ?? false
   const activeIsWaitingOnHuman = sessionChat.chatState?.isWaitingOnHuman ?? false
   const activeIsWorking = activeIsProcessing && !activeIsWaitingOnHuman
+  // LIVE chat data: the new runtime streams through sessionChat.chatState —
+  // the standalone conversation/currentAssistantMessage states are only the
+  // legacy pre-load fallback (see activeChatTabState). Anything mirroring
+  // the in-flight reply (pill response panel, fallback speech) must read
+  // these, never the legacy states.
+  const liveConversation = sessionChat.chatState?.conversation ?? conversation
+  const liveAssistantMessage = sessionChat.chatState?.currentAssistantMessage ?? currentAssistantMessage
   // A failed session load must be visible, not a blank chat.
   const sessionLoadErrorItems = React.useMemo<ConversationItem[]>(() => (
     sessionChat.error
@@ -1126,13 +1133,13 @@ function App() {
       return
     }
     if ((voiceSegmentsRef.current?.length ?? 0) > turn.segmentsAtSubmit) {
-      // Voice segments arrived (spoken, or deliberately skipped mid-capture)
-      // — the normal path handled this turn.
+      // Voice segments arrived (spoken, or frozen mid-capture) — the normal
+      // path handled this turn.
       turn.pending = false
       return
     }
-    for (let i = conversation.length - 1; i >= 0; i--) {
-      const item = conversation[i]
+    for (let i = liveConversation.length - 1; i >= 0; i--) {
+      const item = liveConversation[i]
       if (!isChatMessage(item) || item.role !== 'assistant') continue
       // Only a reply from THIS turn counts — an errored turn would otherwise
       // re-speak the previous answer. An older newest-message means this
@@ -1148,7 +1155,7 @@ function App() {
       }
       break
     }
-  }, [activeIsProcessing, conversation])
+  }, [activeIsProcessing, liveConversation])
 
   // Emit the turn's voice-to-voice latency breakdown once audio is audible.
   useEffect(() => {
@@ -1688,10 +1695,10 @@ function App() {
   // call started count.
   let callResponseText: string | null = null
   if (inCall) {
-    callResponseText = currentAssistantMessage || null
+    callResponseText = liveAssistantMessage || null
     if (!callResponseText) {
-      for (let i = conversation.length - 1; i >= 0; i--) {
-        const item = conversation[i]
+      for (let i = liveConversation.length - 1; i >= 0; i--) {
+        const item = liveConversation[i]
         if (isChatMessage(item) && item.role === 'assistant') {
           if (item.timestamp >= callStartedEpochRef.current) callResponseText = item.content
           break
