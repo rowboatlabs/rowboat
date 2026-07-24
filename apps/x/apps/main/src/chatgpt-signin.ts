@@ -3,6 +3,7 @@ import type { Server } from 'http';
 import { createAuthServer } from './auth-server.js';
 import * as oauthClient from '@x/core/dist/auth/oauth-client.js';
 import { exchangeChatGPTCode, getChatGPTStatus } from '@x/core/dist/auth/chatgpt-auth.js';
+import { applyCodexInitialSelection } from '@x/core/dist/models/chatgpt-selection.js';
 import {
   CHATGPT_AUTHORIZE_URL,
   CHATGPT_CALLBACK_PATH,
@@ -65,7 +66,14 @@ export async function signInWithChatGPT(): Promise<ChatGPTSignInResult> {
   void attempt.promise.finally(() => {
     if (activeAttempt === attempt) activeAttempt = null;
   });
-  return attempt.promise;
+  const result = await attempt.promise;
+  if (result.signedIn) {
+    // Signing in connects the codex provider: if no assistant model is
+    // saved yet, pick the initial one (recommendation if the subscription
+    // lists it, else first listed). Never replaces a saved choice.
+    await applyCodexInitialSelection();
+  }
+  return result;
 }
 
 /**

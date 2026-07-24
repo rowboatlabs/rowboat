@@ -115,9 +115,10 @@ Long-form docs for specific features. Read the relevant file before making chang
 
 ## Common Tasks
 
-### LLM configuration (single provider)
-- Config file: `~/.rowboat/config/models.json`
-- Schema: `{ provider: { flavor, apiKey?, baseURL?, headers? }, model: string }`
+### LLM configuration
+- Config file: `~/.rowboat/config/models.json` (v2; v1 files are migrated on boot by `core/models/migrate.ts`)
+- Schema: `{ version: 2, providers: { <id>: { flavor, apiKey?, baseURL?, … } }, assistantModel?: { provider, model }, taskModels?: { knowledgeGraph?, meetingNotes?, liveNoteAgent?, autoPermissionDecision?, chatTitle? }, deferBackgroundTasks? }`
+- Providers carry credentials only (no model fields) — model lists are always fetched live via the unified catalog (`core/models/catalog.ts`, `models:list` IPC). Model choices live in `assistantModel` (the one primary) and `taskModels` (optional overrides that otherwise inherit the assistant).
 - Models catalog cache: `~/.rowboat/config/models.dev.json` (OpenAI/Anthropic/Google only)
 
 ### Add a new shared type

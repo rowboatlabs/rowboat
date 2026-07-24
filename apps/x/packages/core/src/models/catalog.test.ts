@@ -38,11 +38,18 @@ vi.mock('../di/container.js', () => ({
 
 import { getModelCatalog, __resetModelCatalogForTests } from './catalog.js';
 
-function serveConfig(providers: Record<string, unknown>, defaultFlavor = 'openai'): void {
+// v2 config: providers keyed by instance id, flavor explicit inside (the
+// helper defaults flavor to the key — one instance per flavor today).
+function serveConfig(
+  providers: Record<string, Record<string, unknown>>,
+  assistantModel?: { provider: string; model: string },
+): void {
   mocks.getConfig.mockImplementation(async () => ({
-    provider: { flavor: defaultFlavor },
-    model: 'gpt-5.4',
-    providers,
+    version: 2,
+    providers: Object.fromEntries(
+      Object.entries(providers).map(([id, entry]) => [id, { flavor: id, ...entry }]),
+    ),
+    ...(assistantModel ? { assistantModel } : {}),
   }));
 }
 
@@ -61,7 +68,7 @@ describe('getModelCatalog', () => {
     mocks.isSignedIn.mockResolvedValue(true);
     mocks.getChatGPTStatus.mockResolvedValue({ signedIn: true });
     serveConfig({
-      ollama: { baseURL: 'http://localhost:11434', model: 'llama3' },
+      ollama: { baseURL: 'http://localhost:11434' },
     });
     mocks.listModelsForProvider.mockResolvedValue(['llama3', 'qwen3']);
 
@@ -70,19 +77,22 @@ describe('getModelCatalog', () => {
     expect(catalog.providers.map((p) => p.id)).toEqual(['rowboat', 'codex', 'ollama']);
     expect(catalog.providers.every((p) => p.status === 'ok')).toBe(true);
     expect(catalog.providers[0].models).toEqual([{ id: 'google/gemini-3.5-flash', reasoning: true }]);
-    expect(catalog.providers[2]).toMatchObject({ savedModel: 'llama3', models: [{ id: 'llama3' }, { id: 'qwen3' }] });
+    expect(catalog.providers[2]).toMatchObject({ flavor: 'ollama', models: [{ id: 'llama3' }, { id: 'qwen3' }] });
     expect(catalog.defaultModel).toEqual({ provider: 'openai', model: 'gpt-5.4' });
   });
 
-  it('skips providers-map entries that carry no credential', async () => {
-    serveConfig({
-      openai: { model: 'gpt-5.4' }, // no key — not connected
-      anthropic: { apiKey: 'sk-b' },
-    });
-    mocks.listModelsForProvider.mockResolvedValue(['claude-opus-4-8']);
+  it('orders the assistant model provider first among configured providers', async () => {
+    serveConfig(
+      {
+        openrouter: { apiKey: 'sk-1' },
+        ollama: { baseURL: 'http://localhost:11434' },
+      },
+      { provider: 'ollama', model: 'llama3' },
+    );
+    mocks.listModelsForProvider.mockResolvedValue(['m']);
 
     const catalog = await getModelCatalog();
-    expect(catalog.providers.map((p) => p.id)).toEqual(['anthropic']);
+    expect(catalog.providers.map((p) => p.id)).toEqual(['ollama', 'openrouter']);
   });
 
   it('serves cloud flavors from the models.dev catalog and only lists live when it is empty', async () => {
@@ -105,7 +115,7 @@ describe('getModelCatalog', () => {
   });
 
   it('reports a failed provider as status error instead of dropping it', async () => {
-    serveConfig({ ollama: { baseURL: 'http://localhost:11434', model: 'llama3' } });
+    serveConfig({ ollama: { baseURL: 'http://localhost:11434' } });
     mocks.listModelsForProvider.mockRejectedValue(new Error('connection refused'));
 
     const catalog = await getModelCatalog();
@@ -113,7 +123,6 @@ describe('getModelCatalog', () => {
       id: 'ollama',
       status: 'error',
       error: 'connection refused',
-      savedModel: 'llama3',
       models: [],
     });
   });

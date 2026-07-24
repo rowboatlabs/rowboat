@@ -83,17 +83,10 @@ async function buildSnapshot(refreshProvider?: string): Promise<ModelsSnapshot> 
         reasoningByKey[`${p.id}/${m.id}`] = m.reasoning
       }
     }
-    // The provider's saved default model leads its group; it stays pickable
-    // even when the fetched list doesn't carry it (or failed entirely).
-    const models: string[] = []
-    if (p.savedModel) models.push(p.savedModel)
-    for (const id of ids) {
-      if (!models.includes(id)) models.push(id)
-    }
     groups.push({
       id: p.id,
       flavor: p.flavor,
-      models,
+      models: ids,
       status: p.status,
       ...(p.error ? { error: p.error } : {}),
     })

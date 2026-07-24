@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { RelPath, Encoding, Stat, DirEntry, ReaddirOptions, ReadFileResult, WorkspaceChangeEvent, WriteFileOptions, WriteFileResult, RemoveOptions } from './workspace.js';
 import { ListToolsResponse } from './mcp.js';
 import { AskHumanResponsePayload, CreateRunOptions, Run, ListRunsResponse, ToolPermissionAuthorizePayload } from './runs.js';
-import { LlmModelConfig, LlmProvider, ModelOverride, ModelRef, ReasoningEffort } from './models.js';
+import { LlmProvider, ModelRef, ReasoningEffort } from './models.js';
 import { AgentScheduleConfig, AgentScheduleEntry } from './agent-schedule.js';
 import { AgentScheduleState } from './agent-schedule-state.js';
 import { ServiceEvent } from './service-events.js';
@@ -667,8 +667,6 @@ const ipcSchemas = {
         // 'error' = provider is connected but its model list failed to load.
         status: z.enum(['ok', 'error']),
         error: z.string().optional(),
-        // The provider's saved default model from models.json, if any.
-        savedModel: z.string().optional(),
         models: z.array(z.object({
           id: z.string(),
           name: z.string().optional(),
@@ -682,7 +680,10 @@ const ipcSchemas = {
     }),
   },
   'models:test': {
-    req: LlmModelConfig,
+    req: z.object({
+      provider: LlmProvider,
+      model: z.string(),
+    }),
     res: z.object({
       success: z.boolean(),
       error: z.string().optional(),
@@ -726,23 +727,40 @@ const ipcSchemas = {
       error: z.string().optional(),
     }),
   },
-  'models:saveConfig': {
-    req: LlmModelConfig,
+  // Upsert one provider entry (credentials + connection prefs). Model
+  // choices are NOT part of a provider — set them via models:updateConfig.
+  'models:setProvider': {
+    req: z.object({
+      id: z.string(),
+      provider: LlmProvider,
+    }),
     res: z.object({
       success: z.literal(true),
     }),
   },
-  // Partial top-level merge into models.json — used by hybrid (signed-in +
-  // BYOK) settings to set the default selection / category overrides without
-  // clobbering the BYOK provider config that saveConfig owns. Omitted keys
-  // are untouched; null clears a key back to its default.
+  // Remove a provider entry plus any assistantModel / task override that
+  // references it (dangling selections would just error at run time).
+  'models:removeProvider': {
+    req: z.object({
+      id: z.string(),
+    }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  // Partial merge of model selections into models.json. Omitted keys are
+  // untouched; null clears a key (a cleared task override inherits the
+  // assistant model again). taskModels merges per-key.
   'models:updateConfig': {
     req: z.object({
-      defaultSelection: ModelRef.nullable().optional(),
-      knowledgeGraphModel: ModelOverride.nullable().optional(),
-      meetingNotesModel: ModelOverride.nullable().optional(),
-      liveNoteAgentModel: ModelOverride.nullable().optional(),
-      autoPermissionDecisionModel: ModelOverride.nullable().optional(),
+      assistantModel: ModelRef.nullable().optional(),
+      taskModels: z.object({
+        knowledgeGraph: ModelRef.nullable().optional(),
+        meetingNotes: ModelRef.nullable().optional(),
+        liveNoteAgent: ModelRef.nullable().optional(),
+        autoPermissionDecision: ModelRef.nullable().optional(),
+        chatTitle: ModelRef.nullable().optional(),
+      }).optional(),
       deferBackgroundTasks: z.boolean().nullable().optional(),
     }),
     res: z.object({

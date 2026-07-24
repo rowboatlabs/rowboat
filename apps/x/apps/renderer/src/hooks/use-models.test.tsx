@@ -34,7 +34,6 @@ function serveCatalog(catalog: {
     flavor?: string
     status?: 'ok' | 'error'
     error?: string
-    savedModel?: string
     models: Array<{ id: string; reasoning?: boolean }>
   }>
   defaultModel: { provider: string; model: string } | null
@@ -99,32 +98,27 @@ describe('useModels', () => {
     expect(invokeCounts['models:list']).toBe(1)
   })
 
-  it('pins the saved model, orders the default group first, and passes error status through', async () => {
+  it('orders the default group and model first and passes error status through', async () => {
     serveCatalog({
       providers: [
-        { id: 'openai', savedModel: 'gpt-4.1', models: [{ id: 'gpt-5.4' }, { id: 'gpt-4.1' }] },
-        {
-          id: 'ollama',
-          status: 'error',
-          error: 'connection refused',
-          savedModel: 'llama3',
-          models: [],
-        },
+        { id: 'ollama', status: 'error', error: 'connection refused', models: [] },
+        { id: 'openai', models: [{ id: 'gpt-4.1' }, { id: 'gpt-5.4' }] },
       ],
-      defaultModel: { provider: 'ollama', model: 'llama3' },
+      defaultModel: { provider: 'openai', model: 'gpt-5.4' },
     })
 
     const { result } = renderHook(() => useModels())
     await waitFor(() => expect(result.current.groups.length).toBe(2))
 
-    // The default's group leads (despite arriving second) with its saved
-    // model still pickable; the failed status and error travel with it.
+    // The default's group leads (despite arriving second) and the default
+    // model leads within it.
     expect(result.current.groups[0]).toEqual({
-      id: 'ollama', flavor: 'ollama', models: ['llama3'], status: 'error', error: 'connection refused',
+      id: 'openai', flavor: 'openai', models: ['gpt-5.4', 'gpt-4.1'], status: 'ok',
     })
-    // Saved model leads its group ahead of the fetched list order.
+    // A failed provider keeps its group, with the error travelling along
+    // (ModelSelector renders it as an inline error row + Retry).
     expect(result.current.groups[1]).toEqual({
-      id: 'openai', flavor: 'openai', models: ['gpt-4.1', 'gpt-5.4'], status: 'ok',
+      id: 'ollama', flavor: 'ollama', models: [], status: 'error', error: 'connection refused',
     })
   })
 
@@ -171,7 +165,7 @@ describe('useModels', () => {
     serveCatalog({
       providers: [
         { id: 'openai', models: [{ id: 'gpt-5.4' }] },
-        { id: 'ollama', savedModel: 'llama3', models: [{ id: 'llama3' }] },
+        { id: 'ollama', models: [{ id: 'llama3' }] },
       ],
       defaultModel: { provider: 'ollama', model: 'llama3' },
     })

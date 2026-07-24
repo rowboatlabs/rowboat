@@ -562,7 +562,7 @@ function ChatInputInner({
     if (!model) return
     setSelectedModel(model)
     onSelectedModelChange?.(model)
-    void window.ipc.invoke('models:updateConfig', { defaultSelection: { provider: model.provider, model: model.model } })
+    void window.ipc.invoke('models:updateConfig', { assistantModel: { provider: model.provider, model: model.model } })
       .then(() => { window.dispatchEvent(new Event('models-config-changed')) })
       .catch(() => { toast.error('Failed to save default model') })
   }, [lockedModel, onSelectedModelChange])

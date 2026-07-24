@@ -43,8 +43,6 @@ export interface CatalogProviderEntry {
     /** "error" = the provider is connected but its model list failed to load. */
     status: "ok" | "error";
     error?: string;
-    /** The provider's saved default model from models.json, if any. */
-    savedModel?: string;
     models: CatalogModelEntry[];
 }
 
@@ -105,14 +103,9 @@ type ProviderConfig = z.infer<typeof LlmProvider>;
 
 interface DiscoveredProvider {
     id: string;
+    flavor: string;
     /** Absent for rowboat/codex — their auth lives outside models.json. */
     config?: ProviderConfig;
-    savedModel?: string;
-    /**
-     * Saved models[] from config — the list of last resort for flavors the
-     * live fetch doesn't support (an unknown flavor in the providers map).
-     */
-    savedModels?: string[];
 }
 
 async function readModelConfig(): Promise<z.infer<typeof LlmModelConfig> | null> {
@@ -128,45 +121,36 @@ async function readModelConfig(): Promise<z.infer<typeof LlmModelConfig> | null>
 /**
  * Which providers are connected right now. Rowboat and ChatGPT come from
  * their auth state; everything else from the models.json providers map
- * (an entry counts as connected once it carries some credential). The
- * default provider's entry leads, matching picker ordering.
+ * (entries carry credentials by construction in v2). The assistant model's
+ * provider leads, matching picker ordering.
  */
 async function discoverProviders(): Promise<DiscoveredProvider[]> {
     const discovered: DiscoveredProvider[] = [];
 
     if (await isSignedIn().catch(() => false)) {
-        discovered.push({ id: "rowboat" });
+        discovered.push({ id: "rowboat", flavor: "rowboat" });
     }
     try {
         const chatgpt = await getChatGPTStatus();
-        if (chatgpt.signedIn) discovered.push({ id: "codex" });
+        if (chatgpt.signedIn) discovered.push({ id: "codex", flavor: "codex" });
     } catch {
         // ChatGPT status failures must never break the main list.
     }
 
     const cfg = await readModelConfig();
     const providersMap = cfg?.providers ?? {};
-    const defaultFlavor = cfg?.provider.flavor ?? "";
-    const flavors = Object.keys(providersMap)
-        .sort((a, b) => (a === defaultFlavor ? -1 : b === defaultFlavor ? 1 : 0));
+    const assistantProvider = cfg?.assistantModel?.provider ?? "";
+    const ids = Object.keys(providersMap)
+        .sort((a, b) => (a === assistantProvider ? -1 : b === assistantProvider ? 1 : 0));
 
-    for (const flavor of flavors) {
-        const entry = providersMap[flavor] ?? {};
-        const apiKey = entry.apiKey?.trim() ?? "";
-        const baseURL = entry.baseURL?.trim() ?? "";
-        if (!apiKey && !baseURL) continue; // provider not configured
-        const savedModel = entry.model || undefined;
-        const parsed = LlmProvider.safeParse({ ...entry, flavor });
-        if (!parsed.success) {
-            // Unknown flavor: not live-listable — serve the saved list.
-            discovered.push({ id: flavor, savedModel, savedModels: entry.models ?? [] });
-            continue;
-        }
-        const config = parsed.data;
+    for (const id of ids) {
+        const entry = providersMap[id];
+        if (!entry) continue;
+        const config = { ...entry };
         if (config.flavor === "aigateway" && !config.baseURL) {
             config.baseURL = AIGATEWAY_DEFAULT_BASE_URL;
         }
-        discovered.push({ id: flavor, config, savedModel });
+        discovered.push({ id, flavor: entry.flavor, config });
     }
 
     return discovered;
@@ -192,10 +176,10 @@ async function fetchProviderEntry(
         } else if (provider.id === "codex") {
             const result = await listCodexModels();
             models = result.providers[0]?.models ?? [];
-        } else if (MODELS_DEV_FLAVORS.has(provider.id) && (modelsDevByFlavor.get(provider.id)?.length ?? 0) > 0) {
-            models = modelsDevByFlavor.get(provider.id) ?? [];
+        } else if (MODELS_DEV_FLAVORS.has(provider.flavor) && (modelsDevByFlavor.get(provider.flavor)?.length ?? 0) > 0) {
+            models = modelsDevByFlavor.get(provider.flavor) ?? [];
         } else if (!provider.config) {
-            models = (provider.savedModels ?? []).map((id) => ({ id }));
+            throw new Error(`Provider '${provider.id}' has no configuration to list models with`);
         } else {
             // Live listing: local/custom flavors always, cloud flavors only
             // when the models.dev cache is empty (offline fresh install).
@@ -251,7 +235,7 @@ export async function getModelCatalog(options?: GetModelCatalogOptions): Promise
     // One models.dev read serves every cloud flavor in the build (disk cache,
     // no network — refreshed by its own background loop).
     const modelsDevByFlavor = new Map<string, CatalogModelEntry[]>();
-    if (discovered.some((p) => MODELS_DEV_FLAVORS.has(p.id))) {
+    if (discovered.some((p) => MODELS_DEV_FLAVORS.has(p.flavor))) {
         try {
             const catalog = await listOnboardingModels();
             for (const p of catalog.providers) {
@@ -274,11 +258,9 @@ export async function getModelCatalog(options?: GetModelCatalogOptions): Promise
         );
         const result: CatalogProviderEntry = {
             id: provider.id,
-            // One instance per flavor today, so the id IS the flavor key.
-            flavor: provider.config?.flavor ?? provider.id,
+            flavor: provider.flavor,
             status: entry.status,
             ...(entry.error ? { error: entry.error } : {}),
-            ...(provider.savedModel ? { savedModel: provider.savedModel } : {}),
             models: entry.models,
         };
         return result;

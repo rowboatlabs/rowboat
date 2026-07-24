@@ -26,8 +26,8 @@ let handlers: Record<string, (args: unknown) => Promise<unknown>> = {}
 function serveTwoProviders(): void {
   handlers['models:list'] = async () => ({
     providers: [
-      { id: 'openai', flavor: 'openai', status: 'ok', savedModel: 'gpt-5.4', models: [{ id: 'gpt-5.4' }] },
-      { id: 'anthropic', flavor: 'anthropic', status: 'ok', savedModel: 'claude-opus-4-8', models: [{ id: 'claude-opus-4-8' }] },
+      { id: 'openai', flavor: 'openai', status: 'ok', models: [{ id: 'gpt-5.4' }] },
+      { id: 'anthropic', flavor: 'anthropic', status: 'ok', models: [{ id: 'claude-opus-4-8' }] },
     ],
     defaultModel: { provider: 'openai', model: 'gpt-5.4' },
   })

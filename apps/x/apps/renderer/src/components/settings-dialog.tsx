@@ -33,6 +33,7 @@ import { DEFAULT_TURN_LIMITS_SETTINGS } from "@x/shared/src/turn-limits.js"
 import type { ipc as ipcShared } from "@x/shared"
 import { startProvisioning, useProvisioning, enabledOptimistic, type AgentStatus, type CodeModeAgentStatus } from "@/lib/code-mode-provisioning"
 import { useProviderModels } from "@/hooks/use-provider-models"
+import { useRowboatConfig } from "@/hooks/use-rowboat-config"
 import { useChatGPT } from "@/hooks/useChatGPT"
 import { ModelSelector, type ModelRef } from "@/components/model-selector"
 import { useModels } from "@/hooks/use-models"
@@ -548,6 +549,9 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
   const activeConfig = providerConfigs[provider]
   // Live per-key model list for the active provider — drives the primary
   // model area. The per-function fields below still use the static catalog.
+  // Backend model recommendations (flavor-keyed) — used when a provider
+  // becomes the assistant without an explicit model pick.
+  const modelRecommendations = useRowboatConfig()?.modelRecommendations
   const providerModels = useProviderModels({
     flavor: provider,
     apiKey: activeConfig.apiKey,
@@ -624,6 +628,11 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
         const result = await window.ipc.invoke("workspace:readFile", {
           path: "config/models.json",
         })
+        // models.json v2: providers carry credentials only; the assistant
+        // model and per-task overrides live at the top level. This screen's
+        // per-provider "model" state is a UI concept — hydrated from
+        // assistantModel for its provider, empty for the rest (the picker
+        // lists come from the catalog / live probe, not from config).
         const parsed = JSON.parse(result.data)
         setDeferBackgroundTasks(parsed?.deferBackgroundTasks === true)
         setDeferExplicit(typeof parsed?.deferBackgroundTasks === "boolean")
@@ -631,51 +640,32 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
         setSavedProviders(new Set(
           Object.keys(parsed?.providers ?? {}).filter((k): k is LlmProviderFlavor => knownFlavors.has(k))
         ))
-        if (parsed?.provider?.flavor && parsed?.model) {
-          const flavor = parsed.provider.flavor as LlmProviderFlavor
-          setProvider(flavor)
-          setDefaultProvider(flavor)
-          setProviderConfigs(prev => {
-            const next = { ...prev };
-            // Hydrate all saved providers from the providers map
-            if (parsed.providers) {
-              for (const [key, entry] of Object.entries(parsed.providers)) {
-                if (key in next) {
-                  const e = entry as any;
-                  const savedModels: string[] = Array.isArray(e.models) && e.models.length > 0
-                    ? e.models
-                    : e.model ? [e.model] : [""];
-                  next[key as LlmProviderFlavor] = {
-                    apiKey: e.apiKey || "",
-                    baseURL: e.baseURL || (defaultBaseURLs[key as LlmProviderFlavor] || ""),
-                    models: savedModels,
-                    knowledgeGraphModel: asString(e.knowledgeGraphModel),
-                    meetingNotesModel: asString(e.meetingNotesModel),
-                    liveNoteAgentModel: asString(e.liveNoteAgentModel),
-                    autoPermissionDecisionModel: asString(e.autoPermissionDecisionModel),
-                  };
-                }
-              }
-            }
-            // Active provider takes precedence from top-level config,
-            // but only if it exists in the providers map (wasn't deleted)
-            if (parsed.providers?.[flavor]) {
-              const existingModels = next[flavor].models;
-              const activeModels = existingModels[0] === parsed.model
-                ? existingModels
-                : [parsed.model, ...existingModels.filter((m: string) => m && m !== parsed.model)];
-              next[flavor] = {
-                apiKey: parsed.provider.apiKey || "",
-                baseURL: parsed.provider.baseURL || (defaultBaseURLs[flavor] || ""),
-                models: activeModels.length > 0 ? activeModels : [""],
-                knowledgeGraphModel: asString(parsed.knowledgeGraphModel),
-                meetingNotesModel: asString(parsed.meetingNotesModel),
-                liveNoteAgentModel: asString(parsed.liveNoteAgentModel),
-                autoPermissionDecisionModel: asString(parsed.autoPermissionDecisionModel),
-              };
-            }
-            return next;
-          })
+        const assistant = parsed?.assistantModel as { provider?: string; model?: string } | undefined
+        const taskModels = (parsed?.taskModels ?? {}) as Record<string, { provider?: string; model?: string } | undefined>
+        const taskStringFor = (key: string, providerId: string): string => {
+          const ref = taskModels[key]
+          return ref?.provider === providerId ? asString(ref.model) : ""
+        }
+        setProviderConfigs(prev => {
+          const next = { ...prev };
+          for (const [key, entry] of Object.entries(parsed?.providers ?? {})) {
+            if (!(key in next)) continue
+            const e = entry as { apiKey?: string; baseURL?: string };
+            next[key as LlmProviderFlavor] = {
+              apiKey: e.apiKey || "",
+              baseURL: e.baseURL || (defaultBaseURLs[key as LlmProviderFlavor] || ""),
+              models: assistant?.provider === key && assistant.model ? [assistant.model] : [""],
+              knowledgeGraphModel: taskStringFor("knowledgeGraph", key),
+              meetingNotesModel: taskStringFor("meetingNotes", key),
+              liveNoteAgentModel: taskStringFor("liveNoteAgent", key),
+              autoPermissionDecisionModel: taskStringFor("autoPermissionDecision", key),
+            };
+          }
+          return next;
+        })
+        if (assistant?.provider && knownFlavors.has(assistant.provider)) {
+          setProvider(assistant.provider as LlmProviderFlavor)
+          setDefaultProvider(assistant.provider as LlmProviderFlavor)
         }
       } catch {
         // No existing config or parse error - use defaults
@@ -727,32 +717,36 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
         toast.error("Enter a model to connect")
         return
       }
-      // The silently resolved model takes the primary slot; the rest of the
-      // saved list is preserved (same semantics setPrimaryModel had).
-      const existing = activeConfig.models.map(m => m.trim())
-      const allModels = [model, ...existing.slice(1).filter(m => m && m !== model)]
-      const providerConfig = {
-        provider: {
-          flavor: provider,
-          apiKey: activeConfig.apiKey.trim() || undefined,
-          baseURL: activeConfig.baseURL.trim() || undefined,
-        },
-        model: allModels[0] || "",
-        models: allModels,
-        ...(rowboatConnected ? {} : {
-          knowledgeGraphModel: activeConfig.knowledgeGraphModel.trim() || undefined,
-          meetingNotesModel: activeConfig.meetingNotesModel.trim() || undefined,
-          liveNoteAgentModel: activeConfig.liveNoteAgentModel.trim() || undefined,
-          autoPermissionDecisionModel: activeConfig.autoPermissionDecisionModel.trim() || undefined,
-        }),
+      const providerEntry = {
+        flavor: provider,
+        apiKey: activeConfig.apiKey.trim() || undefined,
+        baseURL: activeConfig.baseURL.trim() || undefined,
       }
-      const result = await window.ipc.invoke("models:test", providerConfig)
+      const result = await window.ipc.invoke("models:test", { provider: providerEntry, model })
       if (result.success) {
-        await window.ipc.invoke("models:saveConfig", providerConfig)
+        // v2 writes: the provider entry carries credentials only; the model
+        // choice becomes the assistant model, and the BYOK per-task strings
+        // become task overrides scoped to this provider ('' clears → inherit).
+        const taskRef = (value: string) => {
+          const trimmed = value.trim()
+          return trimmed ? { provider, model: trimmed } : null
+        }
+        await window.ipc.invoke("models:setProvider", { id: provider, provider: providerEntry })
+        await window.ipc.invoke("models:updateConfig", {
+          assistantModel: { provider, model },
+          ...(rowboatConnected ? {} : {
+            taskModels: {
+              knowledgeGraph: taskRef(activeConfig.knowledgeGraphModel),
+              meetingNotes: taskRef(activeConfig.meetingNotesModel),
+              liveNoteAgent: taskRef(activeConfig.liveNoteAgentModel),
+              autoPermissionDecision: taskRef(activeConfig.autoPermissionDecisionModel),
+            },
+          }),
+        })
         setDefaultProvider(provider)
         setProviderConfigs(prev => ({
           ...prev,
-          [provider]: { ...prev[provider], models: allModels },
+          [provider]: { ...prev[provider], models: [model] },
         }))
         setSavedProviders(prev => new Set(prev).add(provider))
         setTestState({ status: "success" })
@@ -784,134 +778,63 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
     }
   }, [canTest, resolvedModel, provider, activeConfig, rowboatConnected, deferExplicit, deferBackgroundTasks, handleDeferToggle])
 
+  // "Set as default" = choose this provider's model as the assistant model.
+  // The UI state only knows a model for the provider that was already the
+  // assistant, so other providers resolve one the same way a first connect
+  // does: recommendation if the provider lists it, else the first listed.
   const handleSetDefault = useCallback(async (prov: LlmProviderFlavor) => {
     const config = providerConfigs[prov]
-    const allModels = config.models.map(m => m.trim()).filter(Boolean)
-    if (!allModels[0]) return
     try {
-      await window.ipc.invoke("models:saveConfig", {
-        provider: {
-          flavor: prov,
-          apiKey: config.apiKey.trim() || undefined,
-          baseURL: config.baseURL.trim() || undefined,
-        },
-        model: allModels[0],
-        models: allModels,
-        ...(rowboatConnected ? {} : {
-          knowledgeGraphModel: config.knowledgeGraphModel.trim() || undefined,
-          meetingNotesModel: config.meetingNotesModel.trim() || undefined,
-          liveNoteAgentModel: config.liveNoteAgentModel.trim() || undefined,
-          autoPermissionDecisionModel: config.autoPermissionDecisionModel.trim() || undefined,
-        }),
-      })
+      let model = config.models[0]?.trim() || ""
+      if (!model) {
+        const listRes = await window.ipc.invoke("models:listForProvider", {
+          provider: {
+            flavor: prov,
+            apiKey: config.apiKey.trim() || undefined,
+            baseURL: config.baseURL.trim() || undefined,
+          },
+        })
+        const list = listRes.success ? listRes.models ?? [] : []
+        const recommended = modelRecommendations?.[prov]
+        model = (recommended && list.includes(recommended)) ? recommended : (list[0] ?? "")
+      }
+      if (!model) {
+        toast.error("Couldn't determine a model for this provider")
+        return
+      }
+      await window.ipc.invoke("models:updateConfig", { assistantModel: { provider: prov, model } })
       setDefaultProvider(prov)
+      setProviderConfigs(prev => ({
+        ...prev,
+        [prov]: { ...prev[prov], models: [model] },
+      }))
       window.dispatchEvent(new Event('models-config-changed'))
       toast.success("Default provider updated")
     } catch {
       toast.error("Failed to set default provider")
     }
-  }, [providerConfigs, rowboatConnected])
+  }, [providerConfigs, modelRecommendations])
 
   const handleDeleteProvider = useCallback(async (prov: LlmProviderFlavor) => {
     const isDefaultProv = defaultProvider === prov
     try {
-      const result = await window.ipc.invoke("workspace:readFile", { path: "config/models.json" })
-      let parsed = JSON.parse(result.data)
+      // Removes the entry AND any assistant/task selection referencing it
+      // (repo-side dangling cleanup).
+      await window.ipc.invoke("models:removeProvider", { id: prov })
 
-      // Disconnecting the default provider: silently promote another
-      // connected provider first — the connect-only UI has no usable
-      // set-as-default step to send the user to. Prefer the provider the
-      // user's explicit defaultSelection points at; promotion goes through
-      // the same models:saveConfig path Set-as-default uses, so the repo
-      // writes a valid top-level provider/model.
+      // Disconnecting the assistant's provider: promote another connected
+      // provider — the connect-only UI has no usable set-as-default step to
+      // send the user to. Best-effort; with none left the composer shows
+      // its connect hint.
       let promoted: LlmProviderFlavor | null = null
       if (isDefaultProv) {
-        const selProvider = parsed?.defaultSelection?.provider
-        const candidates = Object.keys(parsed?.providers ?? {})
-          .filter((k): k is LlmProviderFlavor => k !== prov && k in providerConfigs)
-          .sort((a, b) => (a === selProvider ? -1 : b === selProvider ? 1 : 0))
-        for (const candidate of candidates) {
-          const config = providerConfigs[candidate]
-          const allModels = config.models.map(m => m.trim()).filter(Boolean)
-          // Same silent precedence as connect, minus the live list we don't
-          // have here: the provider's saved model, else its preferred default.
-          const model = allModels[0] || preferredDefaults[candidate] || ""
-          if (!model) continue
-          await window.ipc.invoke("models:saveConfig", {
-            provider: {
-              flavor: candidate,
-              apiKey: config.apiKey.trim() || undefined,
-              baseURL: config.baseURL.trim() || undefined,
-            },
-            model,
-            models: allModels.length > 0 ? allModels : [model],
-            ...(rowboatConnected ? {} : {
-              knowledgeGraphModel: config.knowledgeGraphModel.trim() || undefined,
-              meetingNotesModel: config.meetingNotesModel.trim() || undefined,
-              liveNoteAgentModel: config.liveNoteAgentModel.trim() || undefined,
-              autoPermissionDecisionModel: config.autoPermissionDecisionModel.trim() || undefined,
-            }),
-          })
+        const candidate = [...savedProviders].find((p): p is LlmProviderFlavor => p !== prov)
+        if (candidate) {
+          await handleSetDefault(candidate)
           promoted = candidate
-          break
-        }
-        if (promoted) {
-          // saveConfig rewrote top-level and the providers map — re-read so
-          // the deletion write below doesn't clobber the promotion.
-          const fresh = await window.ipc.invoke("workspace:readFile", { path: "config/models.json" })
-          parsed = JSON.parse(fresh.data)
         }
       }
 
-      if (parsed?.providers?.[prov]) {
-        delete parsed.providers[prov]
-      }
-      // A defaultSelection pointing at the removed provider is dangling —
-      // drop it so llm:getDefaultModel falls back cleanly.
-      if (parsed?.defaultSelection?.provider === prov) {
-        delete parsed.defaultSelection
-      }
-      // If the deleted provider is the current top-level active one,
-      // switch top-level config to the current default provider
-      if (parsed?.provider?.flavor === prov && defaultProvider && defaultProvider !== prov) {
-        const defConfig = providerConfigs[defaultProvider]
-        const defModels = defConfig.models.map(m => m.trim()).filter(Boolean)
-        parsed.provider = {
-          flavor: defaultProvider,
-          apiKey: defConfig.apiKey.trim() || undefined,
-          baseURL: defConfig.baseURL.trim() || undefined,
-        }
-        parsed.model = defModels[0] || ""
-        parsed.models = defModels
-        if (!rowboatConnected) {
-          parsed.knowledgeGraphModel = defConfig.knowledgeGraphModel.trim() || undefined
-          parsed.meetingNotesModel = defConfig.meetingNotesModel.trim() || undefined
-          parsed.liveNoteAgentModel = defConfig.liveNoteAgentModel.trim() || undefined
-          parsed.autoPermissionDecisionModel = defConfig.autoPermissionDecisionModel.trim() || undefined
-        }
-      } else if (parsed?.provider?.flavor === prov) {
-        // Removing the last connected provider: drop the top-level pair
-        // entirely. The schema requires it, so core's readConfig() treats
-        // the file as "no config" — signed-in falls back to the curated
-        // gateway default and signed-out llm:getDefaultModel rejects, which
-        // the composer already handles (it shows the connect hint).
-        delete parsed.provider
-        delete parsed.model
-        delete parsed.models
-        delete parsed.knowledgeGraphModel
-        delete parsed.meetingNotesModel
-        delete parsed.liveNoteAgentModel
-        delete parsed.autoPermissionDecisionModel
-        // With no BYOK providers left, any non-gateway selection is dangling.
-        if (parsed?.defaultSelection && parsed.defaultSelection.provider !== "rowboat"
-          && Object.keys(parsed?.providers ?? {}).length === 0) {
-          delete parsed.defaultSelection
-        }
-      }
-      await window.ipc.invoke("workspace:writeFile", {
-        path: "config/models.json",
-        data: JSON.stringify(parsed, null, 2),
-      })
       setProviderConfigs(prev => ({
         ...prev,
         [prov]: { apiKey: "", baseURL: defaultBaseURLs[prov] || "", models: [""], knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "", autoPermissionDecisionModel: "" },
@@ -933,7 +856,7 @@ function ModelSettings({ dialogOpen, rowboatConnected = false }: { dialogOpen: b
     } catch {
       toast.error("Failed to remove provider")
     }
-  }, [defaultProvider, providerConfigs, rowboatConnected])
+  }, [defaultProvider, savedProviders, handleSetDefault])
 
   const renderProviderCard = (p: { id: LlmProviderFlavor; name: string; description: string; icon: React.ElementType }) => {
     const isDefault = defaultProvider === p.id
@@ -1611,23 +1534,18 @@ function RowboatModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
           parsed = JSON.parse(configResult.data)
         } catch { /* no config yet */ }
 
-        // Current selections. Legacy string overrides pair with the BYOK
-        // top-level flavor (mirrors core/models/defaults.ts).
-        const legacyFlavor = (parsed.provider as Record<string, unknown> | undefined)?.flavor
+        // models.json v2: assistantModel + taskModels refs.
         const toRef = (value: unknown): ModelRef | null => {
-          if (!value) return null
-          if (typeof value === "string") {
-            return typeof legacyFlavor === "string" ? { provider: legacyFlavor, model: value } : null
-          }
-          const ref = value as { provider?: unknown; model?: unknown }
-          return typeof ref.provider === "string" && typeof ref.model === "string"
+          const ref = value as { provider?: unknown; model?: unknown } | null | undefined
+          return ref && typeof ref.provider === "string" && typeof ref.model === "string"
             ? { provider: ref.provider, model: ref.model }
             : null
         }
-        setSelectedDefault(toRef(parsed.defaultSelection))
-        setSelectedKg(toRef(parsed.knowledgeGraphModel))
-        setSelectedLiveNote(toRef(parsed.liveNoteAgentModel))
-        setSelectedAutoPermission(toRef(parsed.autoPermissionDecisionModel))
+        const taskModels = (parsed.taskModels ?? {}) as Record<string, unknown>
+        setSelectedDefault(toRef(parsed.assistantModel))
+        setSelectedKg(toRef(taskModels.knowledgeGraph))
+        setSelectedLiveNote(toRef(taskModels.liveNoteAgent))
+        setSelectedAutoPermission(toRef(taskModels.autoPermissionDecision))
       } catch {
         toast.error("Failed to load models")
       } finally {
@@ -1642,10 +1560,16 @@ function RowboatModelSettings({ dialogOpen }: { dialogOpen: boolean }) {
     setSaving(true)
     try {
       await window.ipc.invoke("models:updateConfig", {
-        defaultSelection: selectedDefault,
-        knowledgeGraphModel: selectedKg,
-        liveNoteAgentModel: selectedLiveNote,
-        autoPermissionDecisionModel: selectedAutoPermission,
+        // The "Rowboat default" sentinel no longer maps to a hidden curated
+        // default — a null task ref simply inherits the assistant model. The
+        // assistant itself is only written when explicitly picked (clearing
+        // it would leave the app with no model at all).
+        ...(selectedDefault ? { assistantModel: selectedDefault } : {}),
+        taskModels: {
+          knowledgeGraph: selectedKg,
+          liveNoteAgent: selectedLiveNote,
+          autoPermissionDecision: selectedAutoPermission,
+        },
       })
       window.dispatchEvent(new Event("models-config-changed"))
       toast.success("Model configuration saved")

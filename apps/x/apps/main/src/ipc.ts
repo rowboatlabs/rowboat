@@ -1271,9 +1271,14 @@ export function setupIpcHandlers() {
       console.log(`[llm:generate] -> provider=${result.provider ?? '?'} model=${result.model ?? '?'} chars=${result.text?.length ?? 0}${result.error ? ` error=${result.error}` : ''}`);
       return result;
     },
-    'models:saveConfig': async (_event, args) => {
+    'models:setProvider': async (_event, args) => {
       const repo = container.resolve<IModelConfigRepo>('modelConfigRepo');
-      await repo.setConfig(args);
+      await repo.setProvider(args.id, args.provider);
+      return { success: true };
+    },
+    'models:removeProvider': async (_event, args) => {
+      const repo = container.resolve<IModelConfigRepo>('modelConfigRepo');
+      await repo.removeProvider(args.id);
       return { success: true };
     },
     'models:updateConfig': async (_event, args) => {
