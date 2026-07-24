@@ -145,7 +145,7 @@ export function QuickAskBar() {
     >
       {asked && (
         <div className="flex min-h-0 flex-1 flex-col border-b border-white/5 px-7 pb-3 pt-5">
-          <div className="mb-2 shrink-0 truncate text-xs text-neutral-500">{asked}</div>
+          <div className="mb-2 shrink-0 truncate text-sm font-medium text-neutral-400">{asked}</div>
           <div className="min-h-0 flex-1 overflow-y-auto text-sm leading-relaxed text-neutral-100">
             {answer?.text ? (
               <Streamdown className="prose prose-sm prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-1.5 [&_ul]:my-1.5 [&_ol]:my-1.5 [&_pre]:my-2 [&_pre]:text-[11px] [&_code]:text-[11px]">
