@@ -1840,11 +1840,28 @@ function App() {
     // Nothing new yet (run not started / no fresh answer): pushing would
     // only flicker the bar's local "Thinking…" state away.
     if (!text && !activeIsProcessing) return
+    // What's happening right now, for the bar's blinking status line: the
+    // most recent activity wins — a running tool by name, else reasoning,
+    // else plain thinking.
+    let statusText: string | null = null
+    if (activeIsProcessing) {
+      statusText = activeIsReasoning ? 'Reasoning…' : 'Thinking…'
+      for (let i = liveConversation.length - 1; i >= 0; i--) {
+        const item = liveConversation[i]
+        if (isToolCall(item)) {
+          if (item.status === 'pending' || item.status === 'running') {
+            statusText = `${getToolDisplayName(item)}…`
+          }
+          break
+        }
+        if (isChatMessage(item)) break
+      }
+    }
     void window.ipc
-      .invoke('quickAsk:state', { processing: activeIsProcessing, responseText: text || null })
+      .invoke('quickAsk:state', { processing: activeIsProcessing, responseText: text || null, statusText })
       .catch(() => {})
     if (!activeIsProcessing && text) quickAskActiveRef.current = false
-  }, [activeIsProcessing, liveAssistantMessage, liveConversation])
+  }, [activeIsProcessing, activeIsReasoning, liveAssistantMessage, liveConversation])
 
   // Enter to submit voice input, Escape to cancel
   useEffect(() => {

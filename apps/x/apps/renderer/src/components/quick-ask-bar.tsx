@@ -20,7 +20,7 @@ const ANSWER_HEIGHT = 380
 export function QuickAskBar() {
   const [draft, setDraft] = useState('')
   const [asked, setAsked] = useState<string | null>(null)
-  const [answer, setAnswer] = useState<{ processing: boolean; text: string } | null>(null)
+  const [answer, setAnswer] = useState<{ processing: boolean; text: string; statusText: string | null } | null>(null)
   // Only answer pushes that follow OUR submit render — the app window's chat
   // may show unrelated turns from before the bar was opened.
   const awaitingRef = useRef(false)
@@ -44,7 +44,7 @@ export function QuickAskBar() {
   useEffect(() => {
     return window.ipc.on('quick-ask:state', (s) => {
       if (!awaitingRef.current) return
-      setAnswer({ processing: s.processing, text: s.responseText ?? '' })
+      setAnswer({ processing: s.processing, text: s.responseText ?? '', statusText: s.statusText ?? null })
     })
   }, [])
 
@@ -60,7 +60,7 @@ export function QuickAskBar() {
     setAsked(text)
     setDraft('')
     awaitingRef.current = true
-    setAnswer({ processing: true, text: '' })
+    setAnswer({ processing: true, text: '', statusText: 'Thinking…' })
     void window.ipc.invoke('quickAsk:submit', { text }).catch(() => {})
   }, [])
 
@@ -133,7 +133,9 @@ export function QuickAskBar() {
                 {answer.text}
               </Streamdown>
             ) : (
-              <span className="text-neutral-500">{answer?.processing ? 'Thinking…' : ''}</span>
+              answer?.processing && (
+                <span className="animate-pulse text-neutral-500">{answer.statusText ?? 'Thinking…'}</span>
+              )
             )}
             {answer?.processing && answer.text && <span className="animate-pulse">▍</span>}
           </div>

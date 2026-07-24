@@ -1040,6 +1040,9 @@ const ipcSchemas = {
     req: z.object({
       processing: z.boolean(),
       responseText: z.string().nullable(),
+      // What the agent is doing right now ("Reasoning…", "Web search…") —
+      // shown blinking in the bar until the answer starts streaming.
+      statusText: z.string().nullable(),
     }),
     res: z.object({}),
   },
@@ -1048,6 +1051,9 @@ const ipcSchemas = {
     req: z.object({
       processing: z.boolean(),
       responseText: z.string().nullable(),
+      // What the agent is doing right now ("Reasoning…", "Web search…") —
+      // shown blinking in the bar until the answer starts streaming.
+      statusText: z.string().nullable(),
     }),
     res: z.null(),
   },
