@@ -13,6 +13,7 @@ import { classifyThread, getUserEmail, type EmailCategory } from './classify_thr
 import { recordImportanceCorrection } from './email_importance_feedback.js';
 import { recordCategoryCorrection } from './email_category_feedback.js';
 import { notifyIfEnabled } from '../application/notification/notifier.js';
+import { formatTimestampForModel } from '@x/shared/dist/time.js';
 
 // Configuration
 const SYNC_DIR = path.join(WorkDir, 'gmail_sync');
@@ -365,33 +366,6 @@ export const NEW_EMAIL_MAX_AGE_MS = 5 * 60 * 1000;
  */
 export function isEmailTooOldToNotify(dateMs: number, now: number = Date.now()): boolean {
     return dateMs > 0 && now - dateMs > NEW_EMAIL_MAX_AGE_MS;
-}
-
-/**
- * Format a raw email `Date:` header into the user's local timezone for any text
- * shown to the LLM (tool output, knowledge markdown, thread summaries). Email
- * headers carry their own offset (marketing mail is typically `+0000`); handed
- * to the model raw, it quotes them verbatim in UTC instead of converting to
- * local time — e.g. a 1:06 PM IST email described as "7:36 AM" in chat. Runs in
- * the main process, so `toLocaleString` uses the desktop's system timezone.
- *
- * NOT for the structured `date` field on snapshots/messages — the renderer
- * parses that with `new Date(...)`, so it must stay a raw parseable header.
- * Non-date input (e.g. 'Unknown', '') is returned unchanged.
- */
-export function formatEmailDateLocal(raw: string | undefined | null): string {
-    if (!raw) return '';
-    const parsed = new Date(raw);
-    if (Number.isNaN(parsed.getTime())) return raw;
-    return parsed.toLocaleString('en-US', {
-        weekday: 'short',
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit',
-        timeZoneName: 'short',
-    });
 }
 
 /**
@@ -1184,7 +1158,7 @@ async function parseThreadSnapshot(
     const earlier = visibleMessages.slice(0, -1);
     const earlierSummary = earlier
         .map((msg) => {
-            const date = msg.date ? ` (${formatEmailDateLocal(msg.date)})` : '';
+            const date = msg.date ? ` (${formatTimestampForModel(msg.date)})` : '';
             const body = msg.body.replace(/\s+/g, ' ').slice(0, 500).trim();
             return `${msg.from}${date}: ${body}`;
         })
@@ -1357,7 +1331,7 @@ async function processThread(auth: OAuth2Client, threadId: string, syncDir: stri
             const date = headers.find(h => h.name === 'Date')?.value || 'Unknown';
 
             mdContent += `### From: ${from}\n`;
-            mdContent += `**Date:** ${formatEmailDateLocal(date)}\n\n`;
+            mdContent += `**Date:** ${formatTimestampForModel(date)}\n\n`;
 
             if (msg.payload) {
                 const body = getBody(msg.payload);
