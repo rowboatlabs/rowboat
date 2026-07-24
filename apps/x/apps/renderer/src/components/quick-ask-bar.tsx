@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { CornerDownLeft, Mic } from 'lucide-react'
+import { Command, CornerDownLeft, Mic } from 'lucide-react'
 import { Streamdown } from 'streamdown'
 
 import { useVoiceMode } from '@/hooks/useVoiceMode'
@@ -122,11 +122,17 @@ export function QuickAskBar() {
 
   return (
     // Bottom-anchored window (grows upward): the answer stacks ABOVE the
-    // input row, which stays pinned to the bottom edge.
-    <div className="flex h-screen w-screen select-none flex-col overflow-hidden rounded-2xl border border-neutral-700/60 bg-neutral-900 text-white">
+    // input row, which stays pinned to the bottom edge. Collapsed, the bar
+    // is a full capsule; expanded, the capsule softens so the answer panel
+    // reads as one surface.
+    <div
+      className={`flex h-screen w-screen select-none flex-col overflow-hidden border border-white/10 bg-[#1a1b1e]/95 text-white shadow-2xl ${
+        expanded ? 'rounded-[28px]' : 'rounded-full'
+      }`}
+    >
       {asked && (
-        <div className="flex min-h-0 flex-1 flex-col border-b border-neutral-800 px-5 py-3">
-          <div className="mb-2 shrink-0 truncate text-xs text-neutral-500">You asked: {asked}</div>
+        <div className="flex min-h-0 flex-1 flex-col border-b border-white/5 px-7 pb-3 pt-5">
+          <div className="mb-2 shrink-0 truncate text-xs text-neutral-500">{asked}</div>
           <div className="min-h-0 flex-1 overflow-y-auto text-sm leading-relaxed text-neutral-100">
             {answer?.text ? (
               <Streamdown className="prose prose-sm prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-1.5 [&_ul]:my-1.5 [&_ol]:my-1.5 [&_pre]:my-2 [&_pre]:text-[11px] [&_code]:text-[11px]">
@@ -146,18 +152,21 @@ export function QuickAskBar() {
       )}
 
       <form
-        className="flex h-[88px] shrink-0 items-center gap-3 px-5"
+        className="flex h-[88px] shrink-0 items-center gap-4 pl-4 pr-4"
         onSubmit={(e) => {
           e.preventDefault()
           submit(draft)
         }}
       >
+        {/* Mic orb: blue accent with a soft glow; green pulse while live. */}
         <span
-          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
-            recording ? 'bg-green-600 animate-pulse' : 'bg-sky-600'
+          className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full transition-colors ${
+            recording
+              ? 'animate-pulse bg-green-500/20 shadow-[0_0_24px_rgba(34,197,94,0.35)] ring-1 ring-green-400/40'
+              : 'bg-blue-500/15 shadow-[0_0_24px_rgba(59,130,246,0.3)] ring-1 ring-blue-400/30'
           }`}
         >
-          <Mic className="h-4 w-4" />
+          <Mic className={`h-5 w-5 ${recording ? 'text-green-400' : 'text-blue-400'}`} />
         </span>
         <input
           ref={inputRef}
@@ -165,7 +174,7 @@ export function QuickAskBar() {
           value={inputValue}
           onChange={(e) => setDraft(e.target.value)}
           placeholder={recording ? 'Listening…' : 'Ask Rowboat anything…'}
-          className="h-full min-w-0 flex-1 bg-transparent text-lg outline-none placeholder:text-neutral-500"
+          className="h-full min-w-0 flex-1 bg-transparent text-xl font-light outline-none placeholder:text-neutral-500"
         />
         {micDenied ? (
           <button
@@ -176,14 +185,22 @@ export function QuickAskBar() {
             Mic blocked — open System Settings
           </button>
         ) : (
-          <span className="flex shrink-0 items-center gap-2 text-[11px] text-neutral-500">
-            <kbd className="rounded border border-neutral-700 px-1.5 py-0.5">hold right ⌘</kbd>
-            to speak
-            <kbd className="rounded border border-neutral-700 px-1.5 py-0.5">
-              <CornerDownLeft className="h-3 w-3" />
-            </kbd>
+          <span className="flex shrink-0 items-center gap-3">
+            <span className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3.5 py-2 text-sm text-neutral-300">
+              <Command className="h-4 w-4 text-blue-400" />
+              Hold right
+            </span>
+            <span className="text-sm text-neutral-400">to speak</span>
           </span>
         )}
+        <button
+          type="submit"
+          disabled={!draft.trim()}
+          aria-label="Send"
+          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/5 text-neutral-200 transition-colors hover:bg-white/10 disabled:opacity-40"
+        >
+          <CornerDownLeft className="h-5 w-5" />
+        </button>
       </form>
     </div>
   )
