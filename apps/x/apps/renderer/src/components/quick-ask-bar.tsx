@@ -40,6 +40,12 @@ export function QuickAskBar() {
   useEffect(() => {
     document.documentElement.style.background = 'transparent'
     document.body.style.background = 'transparent'
+    // The document must never scroll: during window resize transitions the
+    // layout can be a frame taller than the viewport, and a wheel event in
+    // that frame scrolls the whole capsule out of place (input row drifting
+    // up, content bleeding past it).
+    document.documentElement.style.overflow = 'hidden'
+    document.body.style.overflow = 'hidden'
     const root = document.getElementById('root')
     if (root) root.style.background = 'transparent'
   }, [])
@@ -76,6 +82,8 @@ export function QuickAskBar() {
     const content = panelContentRef.current?.offsetHeight ?? 0
     const needed = Math.min(ANSWER_HEIGHT, BAR_HEIGHT + PANEL_CHROME + content)
     void window.ipc.invoke('quickAsk:resize', { height: needed }).catch(() => {})
+    // Undo any scroll offset a resize frame let slip through.
+    window.scrollTo(0, 0)
   }, [expanded, asked, answer?.text, answer?.statusText, answer?.processing])
 
   const submit = useCallback((raw: string) => {
