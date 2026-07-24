@@ -121,7 +121,28 @@ export function QuickAskBar() {
   const inputValue = recording ? voice.interimText || draft : draft
 
   return (
+    // Bottom-anchored window (grows upward): the answer stacks ABOVE the
+    // input row, which stays pinned to the bottom edge.
     <div className="flex h-screen w-screen select-none flex-col overflow-hidden bg-neutral-900 text-white">
+      {asked && (
+        <div className="flex min-h-0 flex-1 flex-col border-b border-neutral-800 px-5 py-3">
+          <div className="mb-2 shrink-0 truncate text-xs text-neutral-500">You asked: {asked}</div>
+          <div className="min-h-0 flex-1 overflow-y-auto text-sm leading-relaxed text-neutral-100">
+            {answer?.text ? (
+              <Streamdown className="prose prose-sm prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-1.5 [&_ul]:my-1.5 [&_ol]:my-1.5 [&_pre]:my-2 [&_pre]:text-[11px] [&_code]:text-[11px]">
+                {answer.text}
+              </Streamdown>
+            ) : (
+              <span className="text-neutral-500">{answer?.processing ? 'Thinking…' : ''}</span>
+            )}
+            {answer?.processing && answer.text && <span className="animate-pulse">▍</span>}
+          </div>
+          <div className="mt-2 shrink-0 text-[11px] text-neutral-600">
+            Also in your Rowboat chat · Esc to {answer?.processing ? 'dismiss' : 'clear'}
+          </div>
+        </div>
+      )}
+
       <form
         className="flex h-[88px] shrink-0 items-center gap-3 px-5"
         onSubmit={(e) => {
@@ -162,25 +183,6 @@ export function QuickAskBar() {
           </span>
         )}
       </form>
-
-      {asked && (
-        <div className="flex min-h-0 flex-1 flex-col border-t border-neutral-800 px-5 py-3">
-          <div className="mb-2 shrink-0 truncate text-xs text-neutral-500">You asked: {asked}</div>
-          <div className="min-h-0 flex-1 overflow-y-auto text-sm leading-relaxed text-neutral-100">
-            {answer?.text ? (
-              <Streamdown className="prose prose-sm prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-1.5 [&_ul]:my-1.5 [&_ol]:my-1.5 [&_pre]:my-2 [&_pre]:text-[11px] [&_code]:text-[11px]">
-                {answer.text}
-              </Streamdown>
-            ) : (
-              <span className="text-neutral-500">{answer?.processing ? 'Thinking…' : ''}</span>
-            )}
-            {answer?.processing && answer.text && <span className="animate-pulse">▍</span>}
-          </div>
-          <div className="mt-2 shrink-0 text-[11px] text-neutral-600">
-            Also in your Rowboat chat · Esc to {answer?.processing ? 'dismiss' : 'clear'}
-          </div>
-        </div>
-      )}
     </div>
   )
 }

@@ -73,15 +73,19 @@ function createWindow(): BrowserWindow {
   return win;
 }
 
+// Gap between the bar's bottom edge and the bottom of the work area.
+const BOTTOM_MARGIN = 96;
+
 function positionOnActiveDisplay(win: BrowserWindow) {
   // The display the cursor is on — the user summons the bar where they're
-  // working, which may not be where the app window lives.
+  // working, which may not be where the app window lives. Bottom-centered,
+  // dock-style.
   const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
   const { workArea } = display;
-  const [width] = win.getSize();
+  const [width, height] = win.getSize();
   win.setPosition(
     Math.round(workArea.x + (workArea.width - width) / 2),
-    Math.round(workArea.y + workArea.height * 0.2),
+    Math.round(workArea.y + workArea.height - height - BOTTOM_MARGIN),
   );
 }
 
@@ -109,13 +113,19 @@ export function showQuickAsk() {
   if (!getQuickAskWindow()?.isVisible()) toggleQuickAsk();
 }
 
-/** Grow/shrink the bar as the response area appears (renderer-driven). */
+/**
+ * Grow/shrink the bar as the response area appears (renderer-driven).
+ * The bar is bottom-anchored, so growth extends UPWARD: the bottom edge
+ * stays put and the top rises.
+ */
 export function resizeQuickAsk(height: number) {
   const win = getQuickAskWindow();
   if (!win) return;
   const clamped = Math.max(BAR_HEIGHT, Math.min(MAX_HEIGHT, Math.round(height)));
-  const [width] = win.getSize();
-  win.setSize(width, clamped);
+  const [x, y] = win.getPosition();
+  const [width, currentHeight] = win.getSize();
+  const bottom = y + currentHeight;
+  win.setBounds({ x, y: bottom - clamped, width, height: clamped });
 }
 
 export function initQuickAsk() {
