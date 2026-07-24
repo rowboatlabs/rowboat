@@ -15,6 +15,8 @@ type PopoutState = {
   pttLocked: boolean
   /** Latest assistant reply of this call (streams while generating). */
   responseText: string | null
+  /** The user message that reply answers. */
+  questionText: string | null
 }
 
 // Window heights the pill asks main for: the base pill, and with the
@@ -47,7 +49,7 @@ export function VideoPopout() {
   // Camera defaults OFF: guessing "on" would flash the user's video for a
   // beat before the real state arrives — which reads as a bug. The true
   // state is fetched immediately below.
-  const [state, setState] = useState<PopoutState>({ ttsState: 'idle', status: null, cameraOn: false, micMuted: false, screenSharing: false, interimText: null, pttLocked: false, responseText: null })
+  const [state, setState] = useState<PopoutState>({ ttsState: 'idle', status: null, cameraOn: false, micMuted: false, screenSharing: false, interimText: null, pttLocked: false, responseText: null, questionText: null })
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const [draft, setDraft] = useState('')
   // Response panel: auto-opens when a new turn starts generating, user can
@@ -55,21 +57,20 @@ export function VideoPopout() {
   const [responseOpen, setResponseOpen] = useState(true)
   const responseRef = useRef<HTMLDivElement | null>(null)
 
+  // A new turn re-opens the panel and rewinds to the top — the reply reads
+  // from its beginning, not wherever the last one left off.
   useEffect(() => {
-    if (state.status === 'thinking') setResponseOpen(true)
+    if (state.status === 'thinking') {
+      setResponseOpen(true)
+      if (responseRef.current) responseRef.current.scrollTop = 0
+    }
   }, [state.status])
 
-  // Grow/shrink the window with the panel; keep the streaming text pinned
-  // to the bottom so the newest words stay visible.
-  const showResponse = Boolean(state.responseText) && responseOpen
+  // Grow/shrink the window with the panel.
+  const showResponse = Boolean(state.responseText || state.questionText) && responseOpen
   useEffect(() => {
     void window.ipc.invoke('video:popoutResize', { height: showResponse ? RESPONSE_HEIGHT : BASE_HEIGHT }).catch(() => {})
   }, [showResponse])
-  useEffect(() => {
-    if (showResponse && responseRef.current) {
-      responseRef.current.scrollTop = responseRef.current.scrollHeight
-    }
-  }, [showResponse, state.responseText])
 
   useEffect(() => {
     const cleanup = window.ipc.on('video:popout-state', (next) => setState(next))
@@ -219,30 +220,6 @@ export function VideoPopout() {
         )}
       </div>
 
-      {/* Assistant reply, readable in the pill ("drop-down"): auto-opens
-          when a turn starts, collapsible, streams while generating. */}
-      {state.responseText && (
-        <div className="flex min-h-0 shrink-0 flex-col gap-1" style={noDragRegion}>
-          <button
-            type="button"
-            onClick={() => setResponseOpen((v) => !v)}
-            className="flex items-center gap-1 self-start text-[10px] font-medium text-neutral-400 transition-colors hover:text-white"
-          >
-            {responseOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-            {responseOpen ? 'Hide response' : 'Show response'}
-          </button>
-          {responseOpen && (
-            <div
-              ref={responseRef}
-              className="h-[150px] overflow-y-auto whitespace-pre-wrap rounded-md bg-neutral-800 px-2 py-1.5 text-[11px] leading-relaxed text-neutral-100"
-            >
-              {state.responseText}
-              {state.status === 'thinking' && <span className="animate-pulse">▍</span>}
-            </div>
-          )}
-        </div>
-      )}
-
       {/* Control bar — actions execute in the main app window */}
       <div className="flex h-7 shrink-0 items-center justify-center gap-2" style={noDragRegion}>
         {/* Push-to-talk: hold to talk, quick tap to lock hands-free —
@@ -326,6 +303,38 @@ export function VideoPopout() {
           <Maximize2 className="h-3.5 w-3.5" />
         </button>
       </div>
+
+      {/* The current exchange, readable in the pill ("drop-down"): the
+          question plus its streaming reply. Auto-opens each turn,
+          collapsible, sits between the controls and the input. */}
+      {(state.responseText || state.questionText) && (
+        <div className="flex min-h-0 shrink-0 flex-col gap-1" style={noDragRegion}>
+          <button
+            type="button"
+            onClick={() => setResponseOpen((v) => !v)}
+            className="flex items-center gap-1 self-start text-[10px] font-medium text-neutral-400 transition-colors hover:text-white"
+          >
+            {responseOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+            {responseOpen ? 'Hide response' : 'Show response'}
+          </button>
+          {responseOpen && (
+            <div
+              ref={responseRef}
+              className="h-[150px] overflow-y-auto rounded-md bg-neutral-800 px-2 py-1.5 text-[11px] leading-relaxed"
+            >
+              {state.questionText && (
+                <div className="mb-1.5 whitespace-pre-wrap border-l-2 border-sky-500/70 pl-1.5 text-neutral-400">
+                  {state.questionText}
+                </div>
+              )}
+              <div className="whitespace-pre-wrap text-neutral-100">
+                {state.responseText}
+                {state.status === 'thinking' && <span className="animate-pulse">▍</span>}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Typed input — lands in the chat exactly like a composer message
           (current frames ride along), so the user can ask without speaking

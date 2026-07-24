@@ -2024,6 +2024,7 @@ const ipcSchemas = {
       // Latest assistant reply of this call (streaming) — readable in the
       // pill's response panel without switching back to the app.
       responseText: z.string().nullable(),
+      questionText: z.string().nullable(),
     }),
     res: z.object({}),
   },
@@ -2050,6 +2051,7 @@ const ipcSchemas = {
           interimText: z.string().nullable(),
           pttLocked: z.boolean(),
           responseText: z.string().nullable(),
+          questionText: z.string().nullable(),
         })
         .nullable(),
     }),
@@ -2077,6 +2079,7 @@ const ipcSchemas = {
       interimText: z.string().nullable(),
       pttLocked: z.boolean(),
       responseText: z.string().nullable(),
+      questionText: z.string().nullable(),
     }),
     res: z.null(),
   },

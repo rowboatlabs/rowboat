@@ -1694,6 +1694,7 @@ function App() {
   // generates, the final message once it lands. Only replies from after the
   // call started count.
   let callResponseText: string | null = null
+  let callQuestionText: string | null = null
   if (inCall) {
     callResponseText = liveAssistantMessage || null
     if (!callResponseText) {
@@ -1703,6 +1704,14 @@ function App() {
           if (item.timestamp >= callStartedEpochRef.current) callResponseText = item.content
           break
         }
+      }
+    }
+    // The question the reply answers — shown above it in the pill's panel.
+    for (let i = liveConversation.length - 1; i >= 0; i--) {
+      const item = liveConversation[i]
+      if (isChatMessage(item) && item.role === 'user') {
+        if (item.timestamp >= callStartedEpochRef.current) callQuestionText = item.content
+        break
       }
     }
   }
@@ -1722,9 +1731,10 @@ function App() {
         interimText: voice.interimText || null,
         pttLocked: pttStatus === 'locked',
         responseText: callResponseText,
+        questionText: callQuestionText,
       })
       .catch(() => {})
-  }, [inCall, tts.state, videoCallStatus, video.cameraOn, micMuted, video.screenState, voice.interimText, pttStatus, callResponseText])
+  }, [inCall, tts.state, videoCallStatus, video.cameraOn, micMuted, video.screenState, voice.interimText, pttStatus, callResponseText, callQuestionText])
 
   // Execute popout control-bar actions (the popout window has no access to
   // the call's mic/camera/capture — they live here). 'expand' goes full

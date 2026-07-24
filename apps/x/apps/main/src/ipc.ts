@@ -445,6 +445,7 @@ let lastVideoPopoutState: {
   interimText: string | null;
   pttLocked: boolean;
   responseText: string | null;
+  questionText: string | null;
 } | null = null;
 
 // Popout window height bounds: the base pill, and the ceiling with the
