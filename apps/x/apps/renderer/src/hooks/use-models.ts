@@ -1,45 +1,48 @@
 import { useMemo, useSyncExternalStore } from 'react'
-import type { ProviderModelsFlavor } from './use-provider-models'
 
 export interface ModelRef {
   provider: string
   model: string
 }
 
-// One picker group per connected provider. Catalog groups carry a resolved
-// model list (models:list / saved config); live groups carry credentials and
-// fetch their list from the provider inside the dropdown via
-// useProviderModels (models:listForProvider).
-export type ModelPickerGroup =
-  | { kind: 'catalog'; flavor: string; models: string[] }
-  | { kind: 'live'; flavor: ProviderModelsFlavor; apiKey: string; baseURL: string; savedModel: string }
-
-const LIVE_PICKER_FLAVORS = new Set<string>(['openrouter', 'aigateway', 'ollama', 'openai-compatible'])
-// Catalog-preferred flavors that degrade to a live fetch when models:list has
-// no catalog for them (signed-in mode returns only the rowboat provider, or
-// the models.dev cache is empty).
-const LIVE_FALLBACK_FLAVORS = new Set<string>(['openai', 'anthropic', 'google'])
+// One picker group per connected provider, straight from the unified model
+// catalog (models:list → core/models/catalog.ts). Every provider — Rowboat
+// gateway, ChatGPT subscription (codex), BYOK keys, local endpoints — comes
+// through the same pipeline with a resolved list and a status; there is no
+// renderer-side fetching or per-flavor special casing.
+export interface ModelPickerGroup {
+  /** Provider instance id — what ModelRef.provider joins on. */
+  id: string
+  /** Provider type ("openai", "ollama", "rowboat", …) — display naming. */
+  flavor: string
+  models: string[]
+  /** 'error' = provider is connected but its model list failed to load. */
+  status: 'ok' | 'error'
+  error?: string
+}
 
 export interface ModelsSnapshot {
   groups: ModelPickerGroup[]
-  // Per-model reasoning capability ("provider/model" → flag) from models:list.
-  // Live-fetched ids carry no reasoning metadata, so lookups miss → treated
-  // as non-reasoning.
+  // Per-model reasoning capability ("provider/model" → flag) from the
+  // catalog. Ids without metadata miss → treated as non-reasoning.
   reasoningByKey: Record<string, boolean>
   // The effective runtime default (what a run actually uses when the user
   // hasn't picked a model) — shown in pickers instead of guessing from list
   // order, which can disagree with the real default.
   defaultModel: ModelRef | null
   isRowboatConnected: boolean
-  // Raw models:list catalog per provider id. Groups only cover providers
-  // configured in models.json; provider-scoped pickers fall back to this so
-  // a provider mid-setup (key typed, not saved) still lists its catalog.
+  // Raw catalog model ids per provider id, unpinned — for provider-scoped
+  // pickers that need a provider's list without group ordering applied.
   catalogByProvider: Record<string, string[]>
 }
 
 export interface UseModelsResult extends ModelsSnapshot {
-  /** Force a refetch now (e.g. a composer tab becoming active). */
-  refresh: () => void
+  /**
+   * Force a refetch now (e.g. a composer tab becoming active). With a
+   * provider id, that provider's cached list is dropped and refetched
+   * (the error-row Retry).
+   */
+  refresh: (providerId?: string) => void
 }
 
 const EMPTY_SNAPSHOT: ModelsSnapshot = {
@@ -61,122 +64,72 @@ let wired = false
 let wiredCleanups: Array<() => void> = []
 const subscribers = new Set<() => void>()
 
-// Hybrid mode: signed-in users get the gateway list AND every BYOK provider
-// configured in models.json (selecting a BYOK model routes that message
-// through the user's own key / local server). Signed-out users get BYOK only.
-async function buildSnapshot(): Promise<ModelsSnapshot> {
-  let isRowboatConnected = false
-  try {
-    const state = await window.ipc.invoke('oauth:getState', null)
-    isRowboatConnected = state.config?.rowboat?.connected ?? false
-  } catch { /* treat as signed out */ }
+async function buildSnapshot(refreshProvider?: string): Promise<ModelsSnapshot> {
+  const catalog = await window.ipc.invoke(
+    'models:list',
+    refreshProvider ? { refreshProvider } : null,
+  )
 
-  let defaultModel: ModelRef | null = null
-  try {
-    const def = await window.ipc.invoke('llm:getDefaultModel', null)
-    defaultModel = { provider: def.provider, model: def.model }
-  } catch { /* no default resolvable */ }
-
-  const groups: ModelPickerGroup[] = []
+  const defaultModel: ModelRef | null = catalog.defaultModel
   const reasoningByKey: Record<string, boolean> = {}
+  const catalogByProvider: Record<string, string[]> = {}
+  const groups: ModelPickerGroup[] = []
 
-  // Full catalog per provider (gateway + models.dev cloud providers).
-  const catalog: Record<string, string[]> = {}
-  try {
-    const listResult = await window.ipc.invoke('models:list', null)
-    for (const p of listResult.providers || []) {
-      catalog[p.id] = (p.models || []).map((m: { id: string }) => m.id)
-      for (const m of p.models || []) {
-        if (typeof m.reasoning === 'boolean') {
-          reasoningByKey[`${p.id}/${m.id}`] = m.reasoning
-        }
+  for (const p of catalog.providers) {
+    const ids = p.models.map((m) => m.id)
+    catalogByProvider[p.id] = ids
+    for (const m of p.models) {
+      if (typeof m.reasoning === 'boolean') {
+        reasoningByKey[`${p.id}/${m.id}`] = m.reasoning
       }
     }
-  } catch { /* offline / no catalog — groups fall back to saved config below */ }
-
-  if (isRowboatConnected && (catalog['rowboat'] || []).length > 0) {
-    groups.push({ kind: 'catalog', flavor: 'rowboat', models: catalog['rowboat'] })
+    // The provider's saved default model leads its group; it stays pickable
+    // even when the fetched list doesn't carry it (or failed entirely).
+    const models: string[] = []
+    if (p.savedModel) models.push(p.savedModel)
+    for (const id of ids) {
+      if (!models.includes(id)) models.push(id)
+    }
+    groups.push({
+      id: p.id,
+      flavor: p.flavor,
+      models,
+      status: p.status,
+      ...(p.error ? { error: p.error } : {}),
+    })
   }
 
-  // ChatGPT subscription (codex): models:list only carries this catalog
-  // while signed in with ChatGPT, so presence is the gate.
-  if ((catalog['codex'] || []).length > 0) {
-    groups.push({ kind: 'catalog', flavor: 'codex', models: catalog['codex'] })
+  // The effective default leads the picker: its group first and, within the
+  // group, the model itself first.
+  if (defaultModel) {
+    const index = groups.findIndex((g) => g.id === defaultModel.provider)
+    if (index >= 0) {
+      const [group] = groups.splice(index, 1)
+      groups.unshift(group)
+      const mi = group.models.indexOf(defaultModel.model)
+      if (mi > 0) {
+        group.models.splice(mi, 1)
+        group.models.unshift(defaultModel.model)
+      }
+    }
   }
 
-  try {
-    const result = await window.ipc.invoke('workspace:readFile', { path: 'config/models.json' })
-    const parsed = JSON.parse(result.data)
-
-    // List the default provider's group first.
-    const defaultFlavor = typeof parsed?.provider?.flavor === 'string' ? parsed.provider.flavor : ''
-    const flavors = Object.keys(parsed?.providers || {})
-      .sort((a, b) => (a === defaultFlavor ? -1 : b === defaultFlavor ? 1 : 0))
-
-    for (const flavor of flavors) {
-      const e = (parsed.providers[flavor] || {}) as Record<string, unknown>
-      const apiKey = typeof e.apiKey === 'string' ? e.apiKey.trim() : ''
-      const baseURL = typeof e.baseURL === 'string' ? e.baseURL.trim() : ''
-      if (!apiKey && !baseURL) continue // provider not configured
-      const savedModel = typeof e.model === 'string' ? e.model : ''
-
-      // Live flavors fetch their list from the provider inside the
-      // dropdown, with the credentials saved in config. Catalog flavors
-      // degrade to the same live fetch when models:list carried no
-      // catalog for them (signed in, or empty models.dev cache).
-      const catalogModels = catalog[flavor] || []
-      if (LIVE_PICKER_FLAVORS.has(flavor) || (catalogModels.length === 0 && LIVE_FALLBACK_FLAVORS.has(flavor))) {
-        groups.push({ kind: 'live', flavor: flavor as ProviderModelsFlavor, apiKey, baseURL, savedModel })
-        continue
-      }
-
-      // Catalog group: the saved default model leads, then the catalog.
-      // Saved models[] survives as the fallback for unknown flavors the
-      // live fetch doesn't support.
-      const models: string[] = []
-      const push = (model: string) => {
-        if (model && !models.includes(model)) models.push(model)
-      }
-      push(savedModel)
-      if (catalogModels.length > 0) {
-        for (const m of catalogModels) push(m)
-      } else {
-        const saved = Array.isArray(e.models) ? e.models as string[] : []
-        for (const m of saved) push(m)
-      }
-      groups.push({ kind: 'catalog', flavor, models })
-    }
-
-    // The user's explicit default selection leads the picker: its group
-    // first and, within a catalog group, the model itself first. (Live
-    // groups pin the default at the top themselves.)
-    const sel = parsed?.defaultSelection
-    if (sel && typeof sel.provider === 'string' && typeof sel.model === 'string') {
-      const index = groups.findIndex((g) => g.flavor === sel.provider)
-      if (index >= 0) {
-        const [group] = groups.splice(index, 1)
-        groups.unshift(group)
-        if (group.kind === 'catalog') {
-          const mi = group.models.indexOf(sel.model)
-          if (mi > 0) {
-            group.models.splice(mi, 1)
-            group.models.unshift(sel.model)
-          }
-        }
-      }
-    }
-  } catch { /* no BYOK config yet */ }
-
-  return { groups, reasoningByKey, defaultModel, isRowboatConnected, catalogByProvider: catalog }
+  return {
+    groups,
+    reasoningByKey,
+    defaultModel,
+    isRowboatConnected: catalog.providers.some((p) => p.id === 'rowboat'),
+    catalogByProvider,
+  }
 }
 
-function startFetch(): void {
+function startFetch(refreshProvider?: string): void {
   // Concurrent fetches race (an event can fire while one is in flight) —
   // only the newest run may write the snapshot, else a slow stale run can
   // clobber the fresh list.
   const seq = ++fetchSeq
   fetching = true
-  void buildSnapshot()
+  void buildSnapshot(refreshProvider)
     .then((next) => {
       if (seq !== fetchSeq) return
       snapshot = next
@@ -192,8 +145,8 @@ function startFetch(): void {
     })
 }
 
-function refreshModels(): void {
-  startFetch()
+function refreshModels(providerId?: string): void {
+  startFetch(typeof providerId === 'string' ? providerId : undefined)
 }
 
 function ensureLoaded(): void {
@@ -203,17 +156,19 @@ function ensureLoaded(): void {
 function wireGlobalEvents(): void {
   if (wired) return
   wired = true
+  // Event payloads must not leak into startFetch's refreshProvider arg.
+  const refetch = () => startFetch()
   // Config edits anywhere in the app (settings dialog, composer pick,
   // onboarding) announce themselves on this window event.
-  window.addEventListener('models-config-changed', refreshModels)
+  window.addEventListener('models-config-changed', refetch)
   wiredCleanups = [
-    () => window.removeEventListener('models-config-changed', refreshModels),
-    // Rowboat sign-in/out swaps the whole hybrid list. Despite the name,
-    // main broadcasts this channel on every OAuth state change — including
+    () => window.removeEventListener('models-config-changed', refetch),
+    // Rowboat sign-in/out swaps the provider set. Despite the name, main
+    // broadcasts this channel on every OAuth state change — including
     // disconnect (disconnectProvider emits { provider, success: false }).
-    window.ipc.on('oauth:didConnect', refreshModels),
+    window.ipc.on('oauth:didConnect', refetch),
     // ChatGPT subscription models appear/disappear with the ChatGPT session.
-    window.ipc.on('chatgpt:statusChanged', refreshModels),
+    window.ipc.on('chatgpt:statusChanged', refetch),
   ]
 }
 

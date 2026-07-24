@@ -24,23 +24,12 @@ let handlers: Record<string, (args: unknown) => Promise<unknown>> = {}
 }
 
 function serveTwoProviders(): void {
-  handlers['oauth:getState'] = async () => ({ config: { rowboat: { connected: false } } })
-  handlers['llm:getDefaultModel'] = async () => ({ provider: 'openai', model: 'gpt-5.4' })
   handlers['models:list'] = async () => ({
     providers: [
-      { id: 'openai', name: 'OpenAI', models: [{ id: 'gpt-5.4' }] },
-      { id: 'anthropic', name: 'Anthropic', models: [{ id: 'claude-opus-4-8' }] },
+      { id: 'openai', flavor: 'openai', status: 'ok', savedModel: 'gpt-5.4', models: [{ id: 'gpt-5.4' }] },
+      { id: 'anthropic', flavor: 'anthropic', status: 'ok', savedModel: 'claude-opus-4-8', models: [{ id: 'claude-opus-4-8' }] },
     ],
-  })
-  handlers['workspace:readFile'] = async () => ({
-    data: JSON.stringify({
-      provider: { flavor: 'openai' },
-      model: 'gpt-5.4',
-      providers: {
-        openai: { apiKey: 'sk-a', model: 'gpt-5.4' },
-        anthropic: { apiKey: 'sk-b', model: 'claude-opus-4-8' },
-      },
-    }),
+    defaultModel: { provider: 'openai', model: 'gpt-5.4' },
   })
 }
 

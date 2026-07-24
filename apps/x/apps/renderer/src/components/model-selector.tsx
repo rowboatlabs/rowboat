@@ -47,42 +47,42 @@ function getModelDisplayName(model: string) {
   return model.split('/').pop() || model
 }
 
-// Rendered inside the dropdown's radio group: each live provider fetches its
-// own list, so groups load and fail independently. Pinned models (the saved
-// default / app default) render first — the model that actually runs is
-// always pickable even while the fetch is pending or failed. Live-fetched
-// ids carry no reasoning metadata, so the effort control stays hidden for
-// them (reasoningByKey lookup misses default to off).
+// The one remaining renderer-side fetch: probing a provider that is being
+// configured RIGHT NOW (credentials typed into a form but not yet saved).
+// Connected providers all come pre-listed through the unified catalog
+// (useModels); this path exists only because unsaved credentials, by
+// definition, aren't in that catalog. Pinned models (the app default) render
+// first so the model that actually runs stays pickable while the fetch is
+// pending or failed. Probe-fetched ids carry no reasoning metadata, so the
+// effort control stays hidden for them.
 //
 // The group owns its header so it can hide itself when the search filter
 // matches none of its rows. Loading/error rows are status, not models — they
 // render (with the header) regardless of the filter, and don't count toward
 // the parent's "No models match" check (which is what gets reported up).
-function LiveProviderGroupItems({ group, label, pinnedModels, filter, onModelRowsChange }: {
-  group: Extract<ModelPickerGroup, { kind: 'live' }>
+function ProbeProviderGroupItems({ flavor, apiKey, baseURL, label, pinnedModels, filter, onModelRowsChange }: {
+  flavor: ProviderModelsFlavor
+  apiKey: string
+  baseURL: string
   label: string
   pinnedModels: string[]
   filter: string
   onModelRowsChange: (flavor: string, hasModelRows: boolean) => void
 }) {
-  const { status, models, error, refetch } = useProviderModels({
-    flavor: group.flavor,
-    apiKey: group.apiKey,
-    baseURL: group.baseURL,
-  })
+  const { status, models, error, refetch } = useProviderModels({ flavor, apiKey, baseURL })
   const items = [...pinnedModels, ...models.filter((m) => !pinnedModels.includes(m))]
   const visible = filter ? items.filter((m) => m.toLowerCase().includes(filter)) : items
   const showStatus = status === 'loading' || status === 'error'
   const hasModelRows = visible.length > 0
   useEffect(() => {
-    onModelRowsChange(group.flavor, hasModelRows)
-  }, [group.flavor, hasModelRows, onModelRowsChange])
+    onModelRowsChange(flavor, hasModelRows)
+  }, [flavor, hasModelRows, onModelRowsChange])
   if (!hasModelRows && !showStatus) return null
   return (
     <>
       <DropdownMenuLabel className="text-xs text-muted-foreground">{label}</DropdownMenuLabel>
       {visible.map((m) => {
-        const key = `${group.flavor}/${m}`
+        const key = `${flavor}/${m}`
         return (
           <DropdownMenuRadioItem key={key} value={key}>
             <span className="truncate">{m}</span>
@@ -238,54 +238,55 @@ export function ModelSelector({
   effort = '',
   onEffortChange,
 }: ModelSelectorProps) {
-  const { groups: allGroups, reasoningByKey, defaultModel, catalogByProvider } = useModels()
+  const { groups: allGroups, reasoningByKey, defaultModel, catalogByProvider, refresh } = useModels()
 
   // inheritDefault is defaultOption with placeholder styling — one sentinel
   // code path, not two.
   const sentinel = defaultOption ?? inheritDefault
   const sentinelMuted = !defaultOption && Boolean(inheritDefault)
 
+  // Probe mode: the form's typed credentials trump anything saved — an
+  // unsaved provider isn't in the catalog, so its list is probe-fetched.
   const liveFlavor = liveCredentials?.flavor
   const liveApiKey = liveCredentials?.apiKey.trim() ?? ''
   const liveBaseURL = liveCredentials?.baseURL.trim() ?? ''
+  const probeActive = Boolean(providerFilter && liveFlavor === providerFilter && (liveApiKey || liveBaseURL))
+
   const groups = useMemo<ModelPickerGroup[]>(() => {
+    if (probeActive) return []
     if (!providerFilter) return allGroups
-    // The form's typed credentials trump anything saved — same "configured"
-    // bar as the store (some credential present).
-    if (liveFlavor === providerFilter && (liveApiKey || liveBaseURL)) {
-      return [{ kind: 'live', flavor: liveFlavor, apiKey: liveApiKey, baseURL: liveBaseURL, savedModel: '' }]
-    }
-    const scoped = allGroups.filter((g) => g.flavor === providerFilter)
+    const scoped = allGroups.filter((g) => g.id === providerFilter)
     if (scoped.length > 0) return scoped
     const catalogModels = catalogByProvider[providerFilter] || []
-    return catalogModels.length > 0 ? [{ kind: 'catalog', flavor: providerFilter, models: catalogModels }] : []
-  }, [allGroups, providerFilter, catalogByProvider, liveFlavor, liveApiKey, liveBaseURL])
+    return catalogModels.length > 0
+      ? [{ id: providerFilter, flavor: providerFilter, models: catalogModels, status: 'ok' }]
+      : []
+  }, [allGroups, providerFilter, catalogByProvider, probeActive])
 
   // Search filter for the model dropdown. Reset each time the menu opens;
-  // matching is a case-insensitive substring test on the model id. Live
-  // groups filter themselves and report whether they still have rows, so the
+  // matching is a case-insensitive substring test on the model id. The probe
+  // group filters itself and reports whether it still has rows, so the
   // parent can render the global "No models match" row.
   const [modelFilter, setModelFilter] = useState('')
   const modelFilterInputRef = useRef<HTMLInputElement>(null)
-  const [liveGroupHasRows, setLiveGroupHasRows] = useState<Record<string, boolean>>({})
+  const [probeHasRows, setProbeHasRows] = useState(true)
   const modelFilterValue = modelFilter.trim().toLowerCase()
-  const handleLiveGroupRows = useCallback((flavor: string, hasRows: boolean) => {
-    setLiveGroupHasRows((prev) => (prev[flavor] === hasRows ? prev : { ...prev, [flavor]: hasRows }))
+  const handleProbeRows = useCallback((_flavor: string, hasRows: boolean) => {
+    setProbeHasRows(hasRows)
   }, [])
 
   // The effective default always renders even when no group carries it (the
-  // gateway list failed, or its provider was removed from config) — the
-  // picker must never be missing the model that actually runs. Live groups
-  // pin the default themselves, so a flavor match is enough there. A
-  // provider-scoped picker only shows it when it belongs to that provider.
+  // provider's list failed, or its provider was removed from config) — the
+  // picker must never be missing the model that actually runs. The probe
+  // group pins the default itself, so it opts out here. A provider-scoped
+  // picker only shows it when it belongs to that provider.
   const standaloneDefault = useMemo<ModelRef | null>(() => {
-    if (!defaultModel) return null
+    if (!defaultModel || probeActive) return null
     if (providerFilter && defaultModel.provider !== providerFilter) return null
     const covered = groups.some((g) =>
-      g.flavor === defaultModel.provider &&
-      (g.kind === 'live' || g.models.includes(defaultModel.model)))
+      g.id === defaultModel.provider && g.models.includes(defaultModel.model))
     return covered ? null : defaultModel
-  }, [groups, defaultModel, providerFilter])
+  }, [groups, defaultModel, providerFilter, probeActive])
 
   const standaloneVisible = standaloneDefault !== null &&
     (!modelFilterValue || standaloneDefault.model.toLowerCase().includes(modelFilterValue))
@@ -297,15 +298,14 @@ export function ModelSelector({
       (o.label ?? o.id).toLowerCase().includes(modelFilterValue) || o.id.toLowerCase().includes(modelFilterValue))
   }, [staticOptions, modelFilterValue])
   const staticLabelFor = (id: string) => staticOptions?.find((o) => o.id === id)?.label ?? id
-  // Nothing matches anywhere → "No models match". Live groups that haven't
-  // reported yet (first render after opening) count as having rows so the
+  // Nothing matches anywhere → "No models match". A probe that hasn't
+  // reported yet (first render after opening) counts as having rows so the
   // empty row never flashes.
   const anyModelRowVisible = staticVisible
     ? staticVisible.length > 0
-    : standaloneVisible || groups.some((g) =>
-      g.kind === 'catalog'
-        ? g.models.some((m) => m.toLowerCase().includes(modelFilterValue))
-        : liveGroupHasRows[g.flavor] !== false)
+    : standaloneVisible
+      || groups.some((g) => g.models.some((m) => m.toLowerCase().includes(modelFilterValue)))
+      || (probeActive && probeHasRows)
 
   const handleModelChange = useCallback((key: string) => {
     if (lockedModel) return
@@ -397,7 +397,7 @@ export function ModelSelector({
             // open-focus (DropdownMenu.Content has no onOpenAutoFocus).
             if (open) {
               setModelFilter('')
-              setLiveGroupHasRows({})
+              setProbeHasRows(true)
               setTimeout(() => modelFilterInputRef.current?.focus(), 0)
             }
           }}
@@ -444,7 +444,7 @@ export function ModelSelector({
             align={variant === 'field' ? 'start' : 'end'}
             className={cn('p-0 overflow-hidden', variant === 'field' && 'min-w-[var(--radix-dropdown-menu-trigger-width)]')}
           >
-            {!staticOptions && groups.length === 0 && !standaloneDefault && !sentinel && !allowCustom ? (
+            {!staticOptions && !probeActive && groups.length === 0 && !standaloneDefault && !sentinel && !allowCustom ? (
               <div className="p-1">
                 <DropdownMenuItem disabled>Connect a provider in Settings</DropdownMenuItem>
               </div>
@@ -503,44 +503,53 @@ export function ModelSelector({
                   )}
                   {!staticOptions && groups.map((g) => {
                     const label = providerDisplayNames[g.flavor] || g.flavor
-                    if (g.kind === 'live') {
-                      // The app default leads its live group; the group's
-                      // own saved model follows (both stay pickable through
-                      // fetch loading/failure).
-                      const pinned: string[] = []
-                      if (defaultModel && defaultModel.provider === g.flavor) pinned.push(defaultModel.model)
-                      if (g.savedModel && !pinned.includes(g.savedModel)) pinned.push(g.savedModel)
-                      return (
-                        <LiveProviderGroupItems
-                          key={g.flavor}
-                          group={g}
-                          label={label}
-                          pinnedModels={pinned}
-                          filter={modelFilterValue}
-                          onModelRowsChange={handleLiveGroupRows}
-                        />
-                      )
-                    }
                     const visibleModels = modelFilterValue
                       ? g.models.filter((m) => m.toLowerCase().includes(modelFilterValue))
                       : g.models
-                    if (visibleModels.length === 0) return null
+                    // Error rows are status, not models: they render (with
+                    // the header) regardless of the filter and don't count
+                    // toward "No models match".
+                    const showError = g.status === 'error'
+                    if (visibleModels.length === 0 && !showError) return null
                     return (
-                      <Fragment key={g.flavor}>
+                      <Fragment key={g.id}>
                         <DropdownMenuLabel className="text-xs text-muted-foreground">
                           {label}
                         </DropdownMenuLabel>
                         {visibleModels.map((m) => {
-                          const key = `${g.flavor}/${m}`
+                          const key = `${g.id}/${m}`
                           return (
                             <DropdownMenuRadioItem key={key} value={key}>
                               <span className="truncate">{m}</span>
                             </DropdownMenuRadioItem>
                           )
                         })}
+                        {showError && (
+                          <DropdownMenuItem
+                            onSelect={(e) => {
+                              e.preventDefault()
+                              refresh(g.id)
+                            }}
+                            className="text-xs"
+                          >
+                            <span className="truncate text-destructive">{g.error || 'Failed to load models'}</span>
+                            <span className="ml-auto shrink-0 text-muted-foreground">Retry</span>
+                          </DropdownMenuItem>
+                        )}
                       </Fragment>
                     )
                   })}
+                  {probeActive && liveFlavor && (
+                    <ProbeProviderGroupItems
+                      flavor={liveFlavor}
+                      apiKey={liveApiKey}
+                      baseURL={liveBaseURL}
+                      label={providerDisplayNames[liveFlavor] || liveFlavor}
+                      pinnedModels={defaultModel && defaultModel.provider === liveFlavor ? [defaultModel.model] : []}
+                      filter={modelFilterValue}
+                      onModelRowsChange={handleProbeRows}
+                    />
+                  )}
                   {modelFilterValue && !anyModelRowVisible && (
                     allowCustom ? (
                       // Escape hatch for ids the lists don't carry (local

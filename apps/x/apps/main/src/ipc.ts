@@ -33,15 +33,13 @@ import { isDurableTurnEvent } from '@x/shared/dist/turns.js';
 import type { ISessions, EmitterSessionBus } from '@x/core/dist/runtime/sessions/index.js';
 import type { ITurnEventBus } from '@x/core/dist/runtime/turns/event-hub.js';
 import container from '@x/core/dist/di/container.js';
-import { listOnboardingModels } from '@x/core/dist/models/models-dev.js';
 import { testModelConnection, listModelsForProvider, generateOneShot } from '@x/core/dist/models/models.js';
+import { getModelCatalog } from '@x/core/dist/models/catalog.js';
 import { getDefaultModelAndProvider } from '@x/core/dist/models/defaults.js';
 import { isSignedIn } from '@x/core/dist/account/account.js';
-import { listGatewayModels } from '@x/core/dist/models/gateway.js';
 import type { IModelConfigRepo } from '@x/core/dist/models/repo.js';
 import type { IOAuthRepo } from '@x/core/dist/auth/repo.js';
 import { getChatGPTStatus, signOutChatGPT } from '@x/core/dist/auth/chatgpt-auth.js';
-import { listCodexModels } from '@x/core/dist/models/codex.js';
 import { signInWithChatGPT, cancelChatGPTSignIn } from './chatgpt-signin.js';
 import { IGranolaConfigRepo } from '@x/core/dist/knowledge/granola/repo.js';
 import { ICodeModeConfigRepo } from '@x/core/dist/code-mode/repo.js';
@@ -1249,22 +1247,8 @@ export function setupIpcHandlers() {
         return { success: false, error: message };
       }
     },
-    'models:list': async () => {
-      const base = (await isSignedIn())
-        ? await listGatewayModels()
-        : await listOnboardingModels();
-      // ChatGPT-subscription (codex) models are additive and independent of
-      // Rowboat sign-in; their failure must never break the main list.
-      try {
-        const chatgpt = await getChatGPTStatus();
-        if (chatgpt.signedIn) {
-          const codex = await listCodexModels();
-          return { providers: [...base.providers, ...codex.providers] };
-        }
-      } catch (error) {
-        console.warn('[Codex] Listing subscription models failed:', error);
-      }
-      return base;
+    'models:list': async (_event, args) => {
+      return await getModelCatalog({ refreshProvider: args?.refreshProvider });
     },
     'models:test': async (_event, args) => {
       return await testModelConnection(args.provider, args.model);

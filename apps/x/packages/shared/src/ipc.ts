@@ -646,22 +646,39 @@ const ipcSchemas = {
     req: BackgroundTaskAgentEvent,
     res: z.null(),
   },
+  // The unified model catalog (core/models/catalog.ts): every connected
+  // provider — Rowboat gateway, ChatGPT subscription (codex), BYOK keys,
+  // local/custom endpoints — listed the same way, with per-provider status.
   'models:list': {
-    req: z.null(),
+    req: z.object({
+      // Drop this provider's cached list and refetch (Retry / Refresh).
+      refreshProvider: z.string().optional(),
+    }).nullable(),
     res: z.object({
       providers: z.array(z.object({
+        // Provider INSTANCE id — what ModelRef.provider / defaultSelection /
+        // refreshProvider reference. One instance per flavor today, so it
+        // always equals the flavor key; kept distinct so a future
+        // multi-instance setup ("openai-work") is additive.
         id: z.string(),
-        name: z.string(),
+        // Provider TYPE ("openai", "ollama", "rowboat", "codex", …) —
+        // drives display naming and credential-field UI.
+        flavor: z.string(),
+        // 'error' = provider is connected but its model list failed to load.
+        status: z.enum(['ok', 'error']),
+        error: z.string().optional(),
+        // The provider's saved default model from models.json, if any.
+        savedModel: z.string().optional(),
         models: z.array(z.object({
           id: z.string(),
           name: z.string().optional(),
-          release_date: z.string().optional(),
           // models.dev "supports reasoning/extended thinking" flag; absent =
           // unknown. Gates the composer's reasoning-effort control.
           reasoning: z.boolean().optional(),
         })),
       })),
-      lastUpdated: z.string().optional(),
+      // The effective runtime default (what runs when nothing is picked).
+      defaultModel: ModelRef.nullable(),
     }),
   },
   'models:test': {
