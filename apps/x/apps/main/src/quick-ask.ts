@@ -108,6 +108,7 @@ export function toggleQuickAsk() {
   // to type. The renderer focuses its input on window focus.
   win.show();
   win.focus();
+  if (process.platform === 'darwin') win.invalidateShadow();
 }
 
 /** Show (never hide) — the discoverability toast's "Try it" action. */
@@ -128,6 +129,9 @@ export function resizeQuickAsk(height: number) {
   const [width, currentHeight] = win.getSize();
   const bottom = y + currentHeight;
   win.setBounds({ x, y: bottom - clamped, width, height: clamped });
+  // Transparent windows keep a stale native shadow for the PREVIOUS shape
+  // after a resize (ghost outline hugging the old edges) — recompute it.
+  if (process.platform === 'darwin') win.invalidateShadow();
 }
 
 export function initQuickAsk() {
