@@ -182,15 +182,23 @@ export function QuickAskBar() {
           submit(draft)
         }}
       >
-        {/* Mic orb: blue accent with a soft glow; green pulse while live. */}
+        {/* Mic orb: layered like a physical button — a soft vertical
+            gradient base, an inset hairline, a top sheen, and a tight halo.
+            Green (and breathing) while live. */}
         <span
-          className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full transition-colors ${
+          className={`relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full ring-1 ring-inset transition-all duration-300 ${
             recording
-              ? 'animate-pulse bg-green-500/20 shadow-[0_0_24px_rgba(34,197,94,0.35)] ring-1 ring-green-400/40'
-              : 'bg-blue-500/15 shadow-[0_0_24px_rgba(59,130,246,0.3)] ring-1 ring-blue-400/30'
+              ? 'animate-pulse bg-gradient-to-b from-emerald-400/30 to-emerald-600/10 shadow-[0_0_18px_rgba(52,211,153,0.35)] ring-white/20'
+              : 'bg-gradient-to-b from-sky-400/25 via-blue-500/15 to-indigo-500/10 shadow-[0_0_16px_rgba(96,165,250,0.25)] ring-white/15'
           }`}
         >
-          <Mic className={`h-5 w-5 ${recording ? 'text-green-400' : 'text-blue-400'}`} />
+          {/* top sheen */}
+          <span className="pointer-events-none absolute inset-x-1 top-0.5 h-1/2 rounded-full bg-gradient-to-b from-white/20 to-transparent" />
+          <Mic
+            className={`relative h-5 w-5 drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)] ${
+              recording ? 'text-emerald-100' : 'text-sky-100'
+            }`}
+          />
         </span>
         <input
           ref={inputRef}
