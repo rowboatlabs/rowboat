@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { RelPath, Encoding, Stat, DirEntry, ReaddirOptions, ReadFileResult, WorkspaceChangeEvent, WriteFileOptions, WriteFileResult, RemoveOptions } from './workspace.js';
 import { ListToolsResponse } from './mcp.js';
 import { AskHumanResponsePayload, CreateRunOptions, Run, ListRunsResponse, ToolPermissionAuthorizePayload } from './runs.js';
-import { LlmModelConfig, LlmProvider, ModelOverride, ModelRef, ReasoningEffort } from './models.js';
+import { LlmProvider, ModelRef, ReasoningEffort } from './models.js';
 import { AgentScheduleConfig, AgentScheduleEntry } from './agent-schedule.js';
 import { AgentScheduleState } from './agent-schedule-state.js';
 import { ServiceEvent } from './service-events.js';
@@ -646,26 +646,44 @@ const ipcSchemas = {
     req: BackgroundTaskAgentEvent,
     res: z.null(),
   },
+  // The unified model catalog (core/models/catalog.ts): every connected
+  // provider — Rowboat gateway, ChatGPT subscription (codex), BYOK keys,
+  // local/custom endpoints — listed the same way, with per-provider status.
   'models:list': {
-    req: z.null(),
+    req: z.object({
+      // Drop this provider's cached list and refetch (Retry / Refresh).
+      refreshProvider: z.string().optional(),
+    }).nullable(),
     res: z.object({
       providers: z.array(z.object({
+        // Provider INSTANCE id — what ModelRef.provider / assistantModel /
+        // refreshProvider reference. One instance per flavor today, so it
+        // always equals the flavor key; kept distinct so a future
+        // multi-instance setup ("openai-work") is additive.
         id: z.string(),
-        name: z.string(),
+        // Provider TYPE ("openai", "ollama", "rowboat", "codex", …) —
+        // drives display naming and credential-field UI.
+        flavor: z.string(),
+        // 'error' = provider is connected but its model list failed to load.
+        status: z.enum(['ok', 'error']),
+        error: z.string().optional(),
         models: z.array(z.object({
           id: z.string(),
           name: z.string().optional(),
-          release_date: z.string().optional(),
           // models.dev "supports reasoning/extended thinking" flag; absent =
           // unknown. Gates the composer's reasoning-effort control.
           reasoning: z.boolean().optional(),
         })),
       })),
-      lastUpdated: z.string().optional(),
+      // The effective runtime default (what runs when nothing is picked).
+      defaultModel: ModelRef.nullable(),
     }),
   },
   'models:test': {
-    req: LlmModelConfig,
+    req: z.object({
+      provider: LlmProvider,
+      model: z.string(),
+    }),
     res: z.object({
       success: z.boolean(),
       error: z.string().optional(),
@@ -709,23 +727,69 @@ const ipcSchemas = {
       error: z.string().optional(),
     }),
   },
-  'models:saveConfig': {
-    req: LlmModelConfig,
+  // Upsert one provider entry (credentials + connection prefs). Model
+  // choices are NOT part of a provider — set them via models:updateConfig.
+  'models:setProvider': {
+    req: z.object({
+      id: z.string(),
+      provider: LlmProvider,
+    }),
     res: z.object({
       success: z.literal(true),
     }),
   },
-  // Partial top-level merge into models.json — used by hybrid (signed-in +
-  // BYOK) settings to set the default selection / category overrides without
-  // clobbering the BYOK provider config that saveConfig owns. Omitted keys
-  // are untouched; null clears a key back to its default.
+  // Remove a provider entry plus any assistantModel / task override that
+  // references it (dangling selections would just error at run time).
+  'models:removeProvider': {
+    req: z.object({
+      id: z.string(),
+    }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  // Current model selections plus credential-FREE provider metadata (the
+  // renderer never needs keys to render pickers or provider cards). Null
+  // assistantModel = not configured yet.
+  'models:getConfig': {
+    req: z.null(),
+    res: z.object({
+      // Configured BYOK provider entries, secrets stripped: enough to
+      // render manage/edit surfaces (masked key indicator, endpoint).
+      providers: z.array(z.object({
+        id: z.string(),
+        flavor: z.string(),
+        baseURL: z.string().optional(),
+        hasApiKey: z.boolean(),
+      })),
+      assistantModel: ModelRef.nullable(),
+      taskModels: z.object({
+        knowledgeGraph: ModelRef.nullable(),
+        meetingNotes: ModelRef.nullable(),
+        liveNoteAgent: ModelRef.nullable(),
+        autoPermissionDecision: ModelRef.nullable(),
+        chatTitle: ModelRef.nullable(),
+        backgroundTask: ModelRef.nullable(),
+        subagent: ModelRef.nullable(),
+      }),
+      deferBackgroundTasks: z.boolean(),
+    }),
+  },
+  // Partial merge of model selections into models.json. Omitted keys are
+  // untouched; null clears a key (a cleared task override inherits the
+  // assistant model again). taskModels merges per-key.
   'models:updateConfig': {
     req: z.object({
-      defaultSelection: ModelRef.nullable().optional(),
-      knowledgeGraphModel: ModelOverride.nullable().optional(),
-      meetingNotesModel: ModelOverride.nullable().optional(),
-      liveNoteAgentModel: ModelOverride.nullable().optional(),
-      autoPermissionDecisionModel: ModelOverride.nullable().optional(),
+      assistantModel: ModelRef.nullable().optional(),
+      taskModels: z.object({
+        knowledgeGraph: ModelRef.nullable().optional(),
+        meetingNotes: ModelRef.nullable().optional(),
+        liveNoteAgent: ModelRef.nullable().optional(),
+        autoPermissionDecision: ModelRef.nullable().optional(),
+        chatTitle: ModelRef.nullable().optional(),
+        backgroundTask: ModelRef.nullable().optional(),
+        subagent: ModelRef.nullable().optional(),
+      }).optional(),
       deferBackgroundTasks: z.boolean().nullable().optional(),
     }),
     res: z.object({
@@ -773,8 +837,15 @@ const ipcSchemas = {
     res: z.object({
       signedIn: z.boolean(),
       accessToken: z.string().nullable(),
-      config: RowboatApiConfig.nullable(),
     }),
+  },
+  // The unauthenticated /v1/config bootstrap (service URLs, billing catalog,
+  // model recommendations). Independent of sign-in state — main caches the
+  // fetch once per app run; null when the API is unreachable. Renderer
+  // consumers go through the useRowboatConfig() hook.
+  'rowboat:getConfig': {
+    req: z.null(),
+    res: RowboatApiConfig.nullable(),
   },
   'oauth:didConnect': {
     req: z.object({

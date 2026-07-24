@@ -43,6 +43,7 @@ import { setTokenCipher as setGithubTokenCipher } from "@x/core/dist/apps/github
 import { setTokenCipher as setChatGPTTokenCipher } from "@x/core/dist/auth/chatgpt-auth.js";
 import { shutdown as shutdownAnalytics } from "@x/core/dist/analytics/posthog.js";
 import { identifyIfSignedIn } from "@x/core/dist/analytics/identify.js";
+import { syncModelProviderPersonProperties } from "@x/core/dist/analytics/model-providers.js";
 import { migrateRuns } from "@x/core/dist/migrations/runs/migrate.js";
 
 import { initConfigs } from "@x/core/dist/config/initConfigs.js";
@@ -510,6 +511,11 @@ app.whenReady().then(async () => {
   // Otherwise main-process events stay anonymous until the user re-signs-in.
   identifyIfSignedIn().catch((error) => {
     console.error('[Analytics] Failed to identify on startup:', error);
+  });
+  // Baseline the provider person properties (llm_provider_flavors et al) on
+  // every launch — existing installs get them without any provider action.
+  syncModelProviderPersonProperties().catch((error) => {
+    console.error('[Analytics] Failed to sync provider properties:', error);
   });
 
   registerBrowserControlService(new ElectronBrowserControlService());

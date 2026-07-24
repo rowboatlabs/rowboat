@@ -87,6 +87,7 @@ import { SidebarCreditRewards } from "@/components/sidebar-credit-rewards"
 import { MascotFaceIcon } from "@/components/talking-head"
 import { extractConferenceLink } from "@/lib/calendar-event"
 import { useBilling } from "@/hooks/useBilling"
+import { useRowboatConfig } from "@/hooks/use-rowboat-config"
 import { toast } from "@/lib/toast"
 import { getBillingPlanData } from "@x/shared/dist/billing.js"
 import { ServiceEvent } from "@x/shared/src/service-events.js"
@@ -477,7 +478,7 @@ export function SidebarContentPanel({
   const outOfCreditsRef = useRef(false)
   const creditPopoverAutoShownRef = useRef(false)
   const [loggingIn, setLoggingIn] = useState(false)
-  const [appUrl, setAppUrl] = useState<string | null>(null)
+  const appUrl = useRowboatConfig()?.appUrl ?? null
   const { billing, refresh: refreshBilling } = useBilling(isRowboatConnected)
   const currentBillingPlan = billing ? getBillingPlanData(billing.catalog, billing.subscriptionPlanId) : null
 
@@ -733,12 +734,6 @@ export function SidebarContentPanel({
           if (!hasError) {
             setShowOauthAlert(true)
           }
-        }
-        if (connected && mounted) {
-          try {
-            const account = await window.ipc.invoke('account:getRowboat', null)
-            if (mounted) setAppUrl(account.config?.appUrl ?? null)
-          } catch { /* ignore */ }
         }
       } catch (error) {
         console.error('Failed to fetch OAuth state:', error)

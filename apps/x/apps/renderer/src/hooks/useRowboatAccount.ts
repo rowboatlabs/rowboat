@@ -1,12 +1,12 @@
-import { z } from 'zod';
 import { useCallback, useEffect, useState } from 'react';
-import { RowboatApiConfig } from '@x/shared/dist/rowboat-account.js';
 
-
+// Account state only — sign-in status and the access token. The bootstrap
+// config (/v1/config: service URLs, billing catalog, model recommendations)
+// is deliberately NOT part of this snapshot: it's unauthenticated and
+// sign-in independent, so consumers read it from use-rowboat-config instead.
 interface RowboatAccountState {
   signedIn: boolean;
   accessToken: string | null;
-  config: z.infer<typeof RowboatApiConfig> | null;
 }
 
 export type RowboatAccountSnapshot = RowboatAccountState;
@@ -14,7 +14,6 @@ export type RowboatAccountSnapshot = RowboatAccountState;
 const DEFAULT_STATE: RowboatAccountState = {
   signedIn: false,
   accessToken: null,
-  config: null,
 };
 
 export function useRowboatAccount() {
@@ -28,7 +27,6 @@ export function useRowboatAccount() {
       const next: RowboatAccountSnapshot = {
         signedIn: result.signedIn,
         accessToken: result.accessToken,
-        config: result.config,
       };
       setState(next);
       return next;
@@ -58,7 +56,6 @@ export function useRowboatAccount() {
   return {
     signedIn: state.signedIn,
     accessToken: state.accessToken,
-    config: state.config,
     isLoading,
     refresh,
   };

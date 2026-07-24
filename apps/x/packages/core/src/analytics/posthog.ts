@@ -92,6 +92,21 @@ export function reset(): void {
 }
 
 /**
+ * Merge person properties onto the CURRENT identity — the rowboat user once
+ * identified, else the anonymous installation id (identify on the same
+ * distinctId merges properties without changing identity).
+ */
+export function setPersonProperties(properties: Record<string, unknown>): void {
+  const ph = getClient();
+  if (!ph) return;
+  try {
+    ph.identify({ distinctId: activeDistinctId(), properties });
+  } catch (err) {
+    console.error('[Analytics] setPersonProperties failed:', err);
+  }
+}
+
+/**
  * Evaluate a PostHog feature flag for the current identity (rowboat user id
  * once identified, installation id before that). `defaultValue` is returned
  * when the flag can't be definitively evaluated — analytics disabled, flags

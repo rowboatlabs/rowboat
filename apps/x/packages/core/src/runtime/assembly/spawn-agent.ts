@@ -135,12 +135,15 @@ export async function runSpawnedAgent(
         parentModel = undefined;
     }
 
+    // Model precedence: explicit per-spawn args > the user's configured
+    // subagent override (taskModels.subagent) > the parent turn's model.
+    const subagentOverride = input.model ? null : await readSubagentOverride();
     const model: z.infer<typeof ModelDescriptor> | undefined = input.model
         ? {
               provider: input.provider ?? parentModel?.provider ?? "",
               model: input.model,
           }
-        : parentModel;
+        : subagentOverride ?? parentModel;
     if (model && !model.provider) {
         return spawnError(
             "`model` was set but no provider could be determined; pass `provider` too",
@@ -230,6 +233,21 @@ export async function runSpawnedAgent(
         },
         isError: true,
     };
+}
+
+// Lazy for the same import-cycle reason as resolveServices; best-effort —
+// an unreadable config means "no override", never a failed spawn.
+async function readSubagentOverride(): Promise<
+    z.infer<typeof ModelDescriptor> | null
+> {
+    try {
+        const { getSubagentModelOverride } = await import(
+            "../../models/defaults.js"
+        );
+        return await getSubagentModelOverride();
+    } catch {
+        return null;
+    }
 }
 
 async function resolveServices(): Promise<

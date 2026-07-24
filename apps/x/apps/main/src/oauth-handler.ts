@@ -17,6 +17,8 @@ import { capture as analyticsCapture, identify as analyticsIdentify, reset as an
 import { isSignedIn } from '@x/core/dist/account/account.js';
 import { getWebappUrl } from '@x/core/dist/config/remote-config.js';
 import { claimTokensViaBackend } from '@x/core/dist/auth/google-backend-oauth.js';
+import { applyRowboatInitialSelection, clearRowboatSelections } from '@x/core/dist/models/rowboat-selection.js';
+import { captureProviderConnected, captureProviderDisconnected } from '@x/core/dist/analytics/model-providers.js';
 
 function buildRedirectUri(port: number): string {
   return `http://localhost:${port}/oauth/callback`;
@@ -339,6 +341,12 @@ export async function connectProvider(provider: string, credentials?: { clientId
           // multiple renderer hooks race to create the user, causing duplicates.
           let signedInUserId: string | undefined;
           if (provider === 'rowboat') {
+            // Signing in connects the rowboat provider: if no assistant
+            // model is saved yet, pick the initial one (recommendation if
+            // the gateway lists it, else first listed). Never replaces a
+            // saved choice; best-effort by design.
+            await applyRowboatInitialSelection();
+            captureProviderConnected('rowboat');
             try {
               const billing = await getBillingInfo();
               if (billing.userId) {
@@ -530,6 +538,11 @@ export async function disconnectProvider(provider: string): Promise<{ success: b
     if (provider === 'rowboat') {
       analyticsCapture('user_signed_out');
       analyticsReset();
+      // Signing out disconnects the rowboat provider: drop the model
+      // selections that reference it (same dangling-ref cleanup as removing
+      // any provider). The composer prompts for a new pick.
+      await clearRowboatSelections();
+      captureProviderDisconnected('rowboat');
     }
     // Notify renderer so sidebar, voice, and billing re-check state
     emitOAuthEvent({ provider, success: false });

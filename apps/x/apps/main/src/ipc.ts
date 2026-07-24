@@ -33,15 +33,14 @@ import { isDurableTurnEvent } from '@x/shared/dist/turns.js';
 import type { ISessions, EmitterSessionBus } from '@x/core/dist/runtime/sessions/index.js';
 import type { ITurnEventBus } from '@x/core/dist/runtime/turns/event-hub.js';
 import container from '@x/core/dist/di/container.js';
-import { listOnboardingModels } from '@x/core/dist/models/models-dev.js';
 import { testModelConnection, listModelsForProvider, generateOneShot } from '@x/core/dist/models/models.js';
+import { getModelCatalog } from '@x/core/dist/models/catalog.js';
+import { captureProviderConnected, captureProviderDisconnected } from '@x/core/dist/analytics/model-providers.js';
 import { getDefaultModelAndProvider } from '@x/core/dist/models/defaults.js';
 import { isSignedIn } from '@x/core/dist/account/account.js';
-import { listGatewayModels } from '@x/core/dist/models/gateway.js';
 import type { IModelConfigRepo } from '@x/core/dist/models/repo.js';
 import type { IOAuthRepo } from '@x/core/dist/auth/repo.js';
 import { getChatGPTStatus, signOutChatGPT } from '@x/core/dist/auth/chatgpt-auth.js';
-import { listCodexModels } from '@x/core/dist/models/codex.js';
 import { signInWithChatGPT, cancelChatGPTSignIn } from './chatgpt-signin.js';
 import { IGranolaConfigRepo } from '@x/core/dist/knowledge/granola/repo.js';
 import { ICodeModeConfigRepo } from '@x/core/dist/code-mode/repo.js';
@@ -1249,22 +1248,8 @@ export function setupIpcHandlers() {
         return { success: false, error: message };
       }
     },
-    'models:list': async () => {
-      const base = (await isSignedIn())
-        ? await listGatewayModels()
-        : await listOnboardingModels();
-      // ChatGPT-subscription (codex) models are additive and independent of
-      // Rowboat sign-in; their failure must never break the main list.
-      try {
-        const chatgpt = await getChatGPTStatus();
-        if (chatgpt.signedIn) {
-          const codex = await listCodexModels();
-          return { providers: [...base.providers, ...codex.providers] };
-        }
-      } catch (error) {
-        console.warn('[Codex] Listing subscription models failed:', error);
-      }
-      return base;
+    'models:list': async (_event, args) => {
+      return await getModelCatalog({ refreshProvider: args?.refreshProvider });
     },
     'models:test': async (_event, args) => {
       return await testModelConnection(args.provider, args.model);
@@ -1287,9 +1272,38 @@ export function setupIpcHandlers() {
       console.log(`[llm:generate] -> provider=${result.provider ?? '?'} model=${result.model ?? '?'} chars=${result.text?.length ?? 0}${result.error ? ` error=${result.error}` : ''}`);
       return result;
     },
-    'models:saveConfig': async (_event, args) => {
+    'models:getConfig': async () => {
       const repo = container.resolve<IModelConfigRepo>('modelConfigRepo');
-      await repo.setConfig(args);
+      const cfg = await repo.getConfig().catch(() => null);
+      const tasks = cfg?.taskModels ?? {};
+      return {
+        providers: Object.entries(cfg?.providers ?? {}).map(([id, entry]) => ({
+          id,
+          flavor: entry.flavor,
+          ...(entry.baseURL ? { baseURL: entry.baseURL } : {}),
+          hasApiKey: Boolean(entry.apiKey),
+        })),
+        assistantModel: cfg?.assistantModel ?? null,
+        taskModels: {
+          knowledgeGraph: tasks.knowledgeGraph ?? null,
+          meetingNotes: tasks.meetingNotes ?? null,
+          liveNoteAgent: tasks.liveNoteAgent ?? null,
+          autoPermissionDecision: tasks.autoPermissionDecision ?? null,
+          chatTitle: tasks.chatTitle ?? null,
+          backgroundTask: tasks.backgroundTask ?? null,
+          subagent: tasks.subagent ?? null,
+        },
+        deferBackgroundTasks: cfg?.deferBackgroundTasks === true,
+      };
+    },
+    'models:setProvider': async (_event, args) => {
+      const repo = container.resolve<IModelConfigRepo>('modelConfigRepo');
+      await repo.setProvider(args.id, args.provider);
+      return { success: true };
+    },
+    'models:removeProvider': async (_event, args) => {
+      const repo = container.resolve<IModelConfigRepo>('modelConfigRepo');
+      await repo.removeProvider(args.id);
       return { success: true };
     },
     'models:updateConfig': async (_event, args) => {
@@ -1323,6 +1337,7 @@ export function setupIpcHandlers() {
         // Model lists gate on sign-in state (composer picker, models:list) —
         // push the change so they refresh without polling.
         broadcastToWindows('chatgpt:statusChanged', { signedIn: true });
+        captureProviderConnected('codex');
       }
       return result;
     },
@@ -1334,6 +1349,7 @@ export function setupIpcHandlers() {
       try {
         await signOutChatGPT();
         broadcastToWindows('chatgpt:statusChanged', { signedIn: false });
+        captureProviderDisconnected('codex');
         return { success: true };
       } catch (error) {
         console.error('[ChatGPTAuth] Sign-out failed:', error);
@@ -1343,17 +1359,20 @@ export function setupIpcHandlers() {
     'account:getRowboat': async () => {
       const signedIn = await isSignedIn();
       if (!signedIn) {
-        return { signedIn: false, accessToken: null, config: null };
+        return { signedIn: false, accessToken: null };
       }
-
-      const config = await getRowboatConfig();
-
       try {
         const accessToken = await getAccessToken();
-        return { signedIn: true, accessToken, config };
+        return { signedIn: true, accessToken };
       } catch {
-        return { signedIn: true, accessToken: null, config };
+        return { signedIn: true, accessToken: null };
       }
+    },
+    // Unauthenticated /v1/config bootstrap, independent of sign-in (signed-out
+    // BYOK users need its model recommendations when connecting a provider).
+    // getRowboatConfig caches once per app run; best-effort null on failure.
+    'rowboat:getConfig': async () => {
+      return await getRowboatConfig().catch(() => null);
     },
     'granola:getConfig': async () => {
       const repo = container.resolve<IGranolaConfigRepo>('granolaConfigRepo');
