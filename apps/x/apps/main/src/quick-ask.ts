@@ -13,9 +13,15 @@ import { app, BrowserWindow, globalShortcut, screen } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// Design-space dimensions (what the renderer lays out against, in CSS px).
 const BAR_WIDTH = 640;
 const BAR_HEIGHT = 88;
 const MAX_HEIGHT = 480;
+// Uniform downscale: the window shrinks and the page zooms by the SAME
+// factor, so every proportion of the design survives exactly — unlike
+// hand-shrinking individual sizes, which broke the alignment.
+const SCALE = 0.9;
+const scaled = (v: number) => Math.round(v * SCALE);
 
 let quickAskWin: BrowserWindow | null = null;
 
@@ -29,8 +35,8 @@ function createWindow(): BrowserWindow {
     ? path.join(hereDir, '../preload/dist/preload.js')
     : path.join(hereDir, '../../../preload/dist/preload.js');
   const win = new BrowserWindow({
-    width: BAR_WIDTH,
-    height: BAR_HEIGHT,
+    width: scaled(BAR_WIDTH),
+    height: scaled(BAR_HEIGHT),
     frame: false,
     resizable: false,
     // Never fullscreenable — see the popout in ipc.ts: windows created while
@@ -65,6 +71,10 @@ function createWindow(): BrowserWindow {
   });
   win.on('closed', () => {
     if (quickAskWin === win) quickAskWin = null;
+  });
+  // Zoom factor resets on navigation — apply it once the page is in.
+  win.webContents.on('did-finish-load', () => {
+    win.webContents.setZoomFactor(SCALE);
   });
   if (app.isPackaged) {
     void win.loadURL('app://-/index.html#quick-ask');
@@ -124,7 +134,9 @@ export function showQuickAsk() {
 export function resizeQuickAsk(height: number) {
   const win = getQuickAskWindow();
   if (!win) return;
-  const clamped = Math.max(BAR_HEIGHT, Math.min(MAX_HEIGHT, Math.round(height)));
+  // The renderer requests design-space heights; the window lives in scaled
+  // space.
+  const clamped = scaled(Math.max(BAR_HEIGHT, Math.min(MAX_HEIGHT, Math.round(height))));
   const [x, y] = win.getPosition();
   const [width, currentHeight] = win.getSize();
   const bottom = y + currentHeight;
