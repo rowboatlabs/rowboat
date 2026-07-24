@@ -1089,11 +1089,14 @@ function App() {
   const voiceSegments = sessionChat.chatState?.voiceSegments
   const voiceSegmentsRef = useRef(voiceSegments)
   voiceSegmentsRef.current = voiceSegments
+  // Whether any voice segment of the CURRENT call turn has been spoken —
+  // cleared at submit, set by the segment player; the fallback-speech net
+  // fires only when this is still false at turn completion.
+  const spokeSegmentThisTurnRef = useRef(false)
   // Fallback-speech bookkeeping, armed per call turn at submit (see
   // handlePromptSubmit) and consumed by the effect below the segment player.
-  const callTurnVoiceRef = useRef<{ pending: boolean; segmentsAtSubmit: number; submitAt: number }>({
+  const callTurnVoiceRef = useRef<{ pending: boolean; submitAt: number }>({
     pending: false,
-    segmentsAtSubmit: 0,
     submitAt: 0,
   })
   useEffect(() => {
@@ -1102,6 +1105,14 @@ function App() {
       // Session switch: skip anything already streamed before we arrived.
       spokenVoiceRef.current = { key: runId, count: voiceSegments.length }
       return
+    }
+    // The overlay's segment list is PER-TURN: the store resets it to [] on
+    // every turn_created (store.ts). A shrink therefore means "new turn" —
+    // restart consumption from the top. Without this, the new reply's first
+    // segments sat below the stale counter and only the tail was spoken
+    // (or nothing at all when the new reply was shorter than the old one).
+    if (voiceSegments.length < spokenVoiceRef.current.count) {
+      spokenVoiceRef.current.count = 0
     }
     while (spokenVoiceRef.current.count < voiceSegments.length) {
       // The user is mid-capture (PTT held/locked): speaking now would play
@@ -1114,6 +1125,7 @@ function App() {
       if (ttsEnabledRef.current) {
         const marks = callTurnMarksRef.current
         if (marks && marks.speak === undefined) marks.speak = performance.now()
+        spokeSegmentThisTurnRef.current = true
         ttsRef.current.speak(segment)
         setAssistantCaption(segment)
       }
@@ -1132,9 +1144,12 @@ function App() {
       turn.pending = false
       return
     }
-    if ((voiceSegmentsRef.current?.length ?? 0) > turn.segmentsAtSubmit) {
-      // Voice segments arrived (spoken, or frozen mid-capture) — the normal
-      // path handled this turn.
+    // Mid-capture: stay armed and re-evaluate on release (pttStatus dep) —
+    // speaking now would go into the open mic, and the frozen segment
+    // backlog may still cover this turn once it drains.
+    if (pttStatusRef.current !== 'idle') return
+    if (spokeSegmentThisTurnRef.current) {
+      // The segment player voiced (part of) this turn — no fallback.
       turn.pending = false
       return
     }
@@ -1155,7 +1170,7 @@ function App() {
       }
       break
     }
-  }, [activeIsProcessing, liveConversation])
+  }, [activeIsProcessing, liveConversation, pttStatus])
 
   // Emit the turn's voice-to-voice latency breakdown once audio is audible.
   useEffect(() => {
@@ -3306,16 +3321,18 @@ function App() {
     if (inCallRef.current) {
       // A new question supersedes whatever of the previous reply was still
       // unspoken — silence it and drop the frozen backlog so it never plays
-      // over the new turn.
+      // over the new turn. (The overlay resets its segment list when the
+      // new turn starts; the segment player detects that shrink and
+      // restarts from the top.)
       ttsRef.current.cancel()
       if (voiceSegmentsRef.current) {
         spokenVoiceRef.current.count = voiceSegmentsRef.current.length
       }
       // Bookkeeping for the fallback-speech net: if this call turn ends with
       // no <voice> segment spoken, the reply text itself gets read aloud.
+      spokeSegmentThisTurnRef.current = false
       callTurnVoiceRef.current = {
         pending: true,
-        segmentsAtSubmit: voiceSegmentsRef.current?.length ?? 0,
         submitAt: Date.now(),
       }
     }
