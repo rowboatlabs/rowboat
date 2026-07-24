@@ -3054,7 +3054,18 @@ function App() {
         ...(chatMaxModelCalls !== undefined ? { maxModelCalls: chatMaxModelCalls } : {}),
       }
       const userMessageContextFor = (middlePane: Awaited<ReturnType<typeof buildMiddlePaneContext>>) => ({
-        currentDateTime: new Date().toISOString(),
+        // Local wall-clock with explicit timezone, never toISOString: the model
+        // adopts this as its time frame, so a UTC "now" makes it quote email
+        // timestamps (which carry their own offsets) in UTC instead of local.
+        currentDateTime: `${new Date().toLocaleString('en-US', {
+          weekday: 'long',
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit',
+          timeZoneName: 'short',
+        })} (${Intl.DateTimeFormat().resolvedOptions().timeZone})`,
         middlePane: middlePane ?? { kind: 'empty' as const },
       })
 

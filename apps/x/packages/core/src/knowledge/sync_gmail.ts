@@ -13,6 +13,7 @@ import { classifyThread, getUserEmail, type EmailCategory } from './classify_thr
 import { recordImportanceCorrection } from './email_importance_feedback.js';
 import { recordCategoryCorrection } from './email_category_feedback.js';
 import { notifyIfEnabled } from '../application/notification/notifier.js';
+import { formatTimestampForModel } from '@x/shared/dist/time.js';
 
 // Configuration
 const SYNC_DIR = path.join(WorkDir, 'gmail_sync');
@@ -1157,7 +1158,7 @@ async function parseThreadSnapshot(
     const earlier = visibleMessages.slice(0, -1);
     const earlierSummary = earlier
         .map((msg) => {
-            const date = msg.date ? ` (${msg.date})` : '';
+            const date = msg.date ? ` (${formatTimestampForModel(msg.date)})` : '';
             const body = msg.body.replace(/\s+/g, ' ').slice(0, 500).trim();
             return `${msg.from}${date}: ${body}`;
         })
@@ -1330,7 +1331,7 @@ async function processThread(auth: OAuth2Client, threadId: string, syncDir: stri
             const date = headers.find(h => h.name === 'Date')?.value || 'Unknown';
 
             mdContent += `### From: ${from}\n`;
-            mdContent += `**Date:** ${date}\n\n`;
+            mdContent += `**Date:** ${formatTimestampForModel(date)}\n\n`;
 
             if (msg.payload) {
                 const body = getBody(msg.payload);
