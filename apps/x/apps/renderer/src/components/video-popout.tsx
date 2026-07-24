@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Maximize2, Mic, MicOff, MonitorUp, PhoneOff, SendHorizontal, Square, User, Video, VideoOff } from 'lucide-react'
+import { ChevronDown, ChevronUp, Maximize2, Mic, MicOff, MonitorUp, PhoneOff, SendHorizontal, Square, User, Video, VideoOff } from 'lucide-react'
 
 import { TalkingHead } from '@/components/talking-head'
 
@@ -13,7 +13,15 @@ type PopoutState = {
   interimText: string | null
   /** A quick ⌘ tap locked hands-free capture (until the next tap). */
   pttLocked: boolean
+  /** Latest assistant reply of this call (streams while generating). */
+  responseText: string | null
 }
+
+// Window heights the pill asks main for: the base pill, and with the
+// response panel expanded. Fixed steps so the window never feedback-loops
+// with its own resize.
+const BASE_HEIGHT = 218
+const RESPONSE_HEIGHT = 400
 
 const STATUS_DISPLAY: Record<NonNullable<PopoutState['status']>, { label: string; dotClass: string }> = {
   idle: { label: 'Hold right ⌘ to talk', dotClass: 'bg-neutral-500' },
@@ -39,9 +47,29 @@ export function VideoPopout() {
   // Camera defaults OFF: guessing "on" would flash the user's video for a
   // beat before the real state arrives — which reads as a bug. The true
   // state is fetched immediately below.
-  const [state, setState] = useState<PopoutState>({ ttsState: 'idle', status: null, cameraOn: false, micMuted: false, screenSharing: false, interimText: null, pttLocked: false })
+  const [state, setState] = useState<PopoutState>({ ttsState: 'idle', status: null, cameraOn: false, micMuted: false, screenSharing: false, interimText: null, pttLocked: false, responseText: null })
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const [draft, setDraft] = useState('')
+  // Response panel: auto-opens when a new turn starts generating, user can
+  // fold it away. The reply is also spoken — this is the readable half.
+  const [responseOpen, setResponseOpen] = useState(true)
+  const responseRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (state.status === 'thinking') setResponseOpen(true)
+  }, [state.status])
+
+  // Grow/shrink the window with the panel; keep the streaming text pinned
+  // to the bottom so the newest words stay visible.
+  const showResponse = Boolean(state.responseText) && responseOpen
+  useEffect(() => {
+    void window.ipc.invoke('video:popoutResize', { height: showResponse ? RESPONSE_HEIGHT : BASE_HEIGHT }).catch(() => {})
+  }, [showResponse])
+  useEffect(() => {
+    if (showResponse && responseRef.current) {
+      responseRef.current.scrollTop = responseRef.current.scrollHeight
+    }
+  }, [showResponse, state.responseText])
 
   useEffect(() => {
     const cleanup = window.ipc.on('video:popout-state', (next) => setState(next))
@@ -190,6 +218,30 @@ export function VideoPopout() {
           </div>
         )}
       </div>
+
+      {/* Assistant reply, readable in the pill ("drop-down"): auto-opens
+          when a turn starts, collapsible, streams while generating. */}
+      {state.responseText && (
+        <div className="flex min-h-0 shrink-0 flex-col gap-1" style={noDragRegion}>
+          <button
+            type="button"
+            onClick={() => setResponseOpen((v) => !v)}
+            className="flex items-center gap-1 self-start text-[10px] font-medium text-neutral-400 transition-colors hover:text-white"
+          >
+            {responseOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+            {responseOpen ? 'Hide response' : 'Show response'}
+          </button>
+          {responseOpen && (
+            <div
+              ref={responseRef}
+              className="h-[150px] overflow-y-auto whitespace-pre-wrap rounded-md bg-neutral-800 px-2 py-1.5 text-[11px] leading-relaxed text-neutral-100"
+            >
+              {state.responseText}
+              {state.status === 'thinking' && <span className="animate-pulse">▍</span>}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Control bar — actions execute in the main app window */}
       <div className="flex h-7 shrink-0 items-center justify-center gap-2" style={noDragRegion}>

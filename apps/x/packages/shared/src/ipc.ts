@@ -2021,7 +2021,16 @@ const ipcSchemas = {
       interimText: z.string().nullable(),
       // A quick ⌘ tap locked hands-free capture (until the next tap).
       pttLocked: z.boolean(),
+      // Latest assistant reply of this call (streaming) — readable in the
+      // pill's response panel without switching back to the app.
+      responseText: z.string().nullable(),
     }),
+    res: z.object({}),
+  },
+  // Popout → main: grow/shrink the pill window as the response panel
+  // opens/closes (height clamped in main).
+  'video:popoutResize': {
+    req: z.object({ height: z.number() }),
     res: z.object({}),
   },
   // Popout window → fetch the latest cached call state on mount. The
@@ -2040,6 +2049,7 @@ const ipcSchemas = {
           screenSharing: z.boolean(),
           interimText: z.string().nullable(),
           pttLocked: z.boolean(),
+          responseText: z.string().nullable(),
         })
         .nullable(),
     }),
@@ -2066,6 +2076,7 @@ const ipcSchemas = {
       screenSharing: z.boolean(),
       interimText: z.string().nullable(),
       pttLocked: z.boolean(),
+      responseText: z.string().nullable(),
     }),
     res: z.null(),
   },

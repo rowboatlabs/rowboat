@@ -444,7 +444,13 @@ let lastVideoPopoutState: {
   screenSharing: boolean;
   interimText: string | null;
   pttLocked: boolean;
+  responseText: string | null;
 } | null = null;
+
+// Popout window height bounds: the base pill, and the ceiling with the
+// response panel expanded (renderer-driven via video:popoutResize).
+const POPOUT_BASE_HEIGHT = 218;
+const POPOUT_MAX_HEIGHT = 500;
 
 // Match only real app windows — getAllWindows() can also contain the popout
 // itself and hidden utility windows (e.g. PDF-export renderers), which must
@@ -2368,7 +2374,7 @@ export function setupIpcHandlers() {
 
       const workArea = screen.getPrimaryDisplay().workArea;
       const width = 340;
-      const height = 218;
+      const height = POPOUT_BASE_HEIGHT;
       const ipcDir = path.dirname(fileURLToPath(import.meta.url));
       const preloadPath = app.isPackaged
         ? path.join(ipcDir, '../preload/dist/preload.js')
@@ -2431,6 +2437,14 @@ export function setupIpcHandlers() {
       lastVideoPopoutState = args;
       if (videoPopoutWin && !videoPopoutWin.isDestroyed()) {
         videoPopoutWin.webContents.send('video:popout-state', args);
+      }
+      return {};
+    },
+    'video:popoutResize': async (_event, args) => {
+      if (videoPopoutWin && !videoPopoutWin.isDestroyed()) {
+        const clamped = Math.max(POPOUT_BASE_HEIGHT, Math.min(POPOUT_MAX_HEIGHT, Math.round(args.height)));
+        const [width] = videoPopoutWin.getSize();
+        videoPopoutWin.setSize(width, clamped);
       }
       return {};
     },

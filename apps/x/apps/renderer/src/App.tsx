@@ -1327,6 +1327,9 @@ function App() {
   // off, floating pill — the user keeps working while the assistant watches
   // along. 'video'/'practice' open face-to-face full screen instead.
   const callStartedAtMsRef = useRef<number | null>(null)
+  // Epoch twin of the perf-clock mark above — gates which conversation
+  // messages belong to THIS call (the pill's response mirror).
+  const callStartedEpochRef = useRef(0)
 
   const startCall = useCallback(async (preset: CallPreset) => {
     if (inCallRef.current) return
@@ -1393,6 +1396,7 @@ function App() {
     inCallRef.current = true
     setInCall(true)
     callStartedAtMsRef.current = performance.now()
+    callStartedEpochRef.current = Date.now()
     analytics.callStarted(preset)
   }, [video, setPttState])
 
@@ -1670,6 +1674,25 @@ function App() {
     }
   }, [video.screenState, video])
 
+  // Latest assistant reply of this call — mirrored into the pill so a typed
+  // question can be READ there without switching back to the app (replies
+  // are spoken too; this is the visual half). Streaming text while the turn
+  // generates, the final message once it lands. Only replies from after the
+  // call started count.
+  let callResponseText: string | null = null
+  if (inCall) {
+    callResponseText = currentAssistantMessage || null
+    if (!callResponseText) {
+      for (let i = conversation.length - 1; i >= 0; i--) {
+        const item = conversation[i]
+        if (isChatMessage(item) && item.role === 'assistant') {
+          if (item.timestamp >= callStartedEpochRef.current) callResponseText = item.content
+          break
+        }
+      }
+    }
+  }
+
   // Keep the popout's mascot/status/devices/caption mirror of the call fresh.
   // The main process caches the latest state and replays it when the popout
   // loads.
@@ -1684,9 +1707,10 @@ function App() {
         screenSharing: video.screenState === 'live',
         interimText: voice.interimText || null,
         pttLocked: pttStatus === 'locked',
+        responseText: callResponseText,
       })
       .catch(() => {})
-  }, [inCall, tts.state, videoCallStatus, video.cameraOn, micMuted, video.screenState, voice.interimText, pttStatus])
+  }, [inCall, tts.state, videoCallStatus, video.cameraOn, micMuted, video.screenState, voice.interimText, pttStatus, callResponseText])
 
   // Execute popout control-bar actions (the popout window has no access to
   // the call's mic/camera/capture — they live here). 'expand' goes full

@@ -52,7 +52,11 @@ status chip walks the user through PTT: "Hold right ⌘ to talk · tap to go
 hands-free" when idle, "Listening — release to send" while capturing,
 "Hands-free — tap ⌘ to send" while locked. The popout additionally has a
 small text input — typed messages land in the chat like composer messages,
-frames riding along. **Mute is a full input
+frames riding along — and a collapsible **response panel**: the latest
+assistant reply of the call streams into the pill (auto-opens on each new
+turn, `video:popoutResize` grows the window), so a typed question can be
+read right there without switching back to the app. Replies are spoken
+too; the panel is the readable half. **Mute is a full input
 pause**, not just audio — mic audio stops reaching Deepgram
 (`useVoiceMode.setPaused`, OR'd with the automatic thinking/speaking pause)
 AND camera/screen frame capture stops (`useVideoMode.setCapturePaused`;
