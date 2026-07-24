@@ -192,8 +192,9 @@ export function QuickAskBar() {
               : 'bg-gradient-to-b from-sky-400/25 via-blue-500/15 to-indigo-500/10 shadow-[0_0_16px_rgba(96,165,250,0.25)] ring-white/15'
           }`}
         >
-          {/* top sheen */}
-          <span className="pointer-events-none absolute inset-x-1 top-0.5 h-1/2 rounded-full bg-gradient-to-b from-white/20 to-transparent" />
+          {/* top sheen — a radial fade from the top center, so there is no
+              shape edge to see (the previous half-ellipse showed its rim) */}
+          <span className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(120%_80%_at_50%_0%,rgba(255,255,255,0.2),transparent_55%)]" />
           <Mic
             className={`relative h-5 w-5 drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)] ${
               recording ? 'text-emerald-100' : 'text-sky-100'
