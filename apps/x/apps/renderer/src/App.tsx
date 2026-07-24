@@ -1819,15 +1819,18 @@ function App() {
 
   // Mirror the in-flight answer back to the bar while a quick-ask turn is
   // live: streaming text while generating, the final assistant message when
-  // done (which also ends the mirror). Only messages from AFTER the submit
-  // count — the previous turn's answer is still the newest one in the
-  // conversation at submit time.
+  // done (which also ends the mirror). Reads the LIVE chat state — the
+  // standalone conversation/currentAssistantMessage states are legacy
+  // pre-load fallbacks the new runtime never feeds (the original quick-ask
+  // read those, which is why its mirror never showed anything). Only
+  // messages from AFTER the submit count — the previous turn's answer is
+  // still the newest one in the conversation at submit time.
   useEffect(() => {
     if (!quickAskActiveRef.current) return
-    let text = currentAssistantMessage
+    let text = liveAssistantMessage
     if (!text) {
-      for (let i = conversation.length - 1; i >= 0; i--) {
-        const item = conversation[i]
+      for (let i = liveConversation.length - 1; i >= 0; i--) {
+        const item = liveConversation[i]
         if (isChatMessage(item) && item.role === 'assistant') {
           if (item.timestamp >= quickAskStartedAtRef.current) text = item.content
           break
@@ -1841,7 +1844,7 @@ function App() {
       .invoke('quickAsk:state', { processing: activeIsProcessing, responseText: text || null })
       .catch(() => {})
     if (!activeIsProcessing && text) quickAskActiveRef.current = false
-  }, [activeIsProcessing, currentAssistantMessage, conversation])
+  }, [activeIsProcessing, liveAssistantMessage, liveConversation])
 
   // Enter to submit voice input, Escape to cancel
   useEffect(() => {
