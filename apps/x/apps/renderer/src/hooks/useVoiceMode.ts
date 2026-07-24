@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from 'react';
 import { buildDeepgramListenUrl } from '@/lib/deepgram-listen-url';
 import { finalizeDeepgramStream } from '@/lib/deepgram-finalize';
 import { useRowboatAccount } from '@/hooks/useRowboatAccount';
+import { fetchRowboatConfig } from '@/hooks/use-rowboat-config';
 import posthog from 'posthog-js';
 import * as analytics from '@/lib/analytics';
 
@@ -91,13 +92,19 @@ export function useVoiceMode() {
 
     // Refresh cached auth details (called on warmup, not on mic click)
     const refreshAuth = useCallback(async () => {
-        const account = await refreshRowboatAccount();
+        // Auth (account) and the websocket URL (bootstrap config) are
+        // separate concerns: the token comes from account refresh, the URL
+        // from the sign-in-independent config store.
+        const [account, rowboatConfig] = await Promise.all([
+            refreshRowboatAccount(),
+            fetchRowboatConfig(),
+        ]);
         if (
             account?.signedIn &&
             account.accessToken &&
-            account.config?.websocketApiUrl
+            rowboatConfig?.websocketApiUrl
         ) {
-            cachedAuth = { type: 'rowboat', url: account.config.websocketApiUrl, token: account.accessToken };
+            cachedAuth = { type: 'rowboat', url: rowboatConfig.websocketApiUrl, token: account.accessToken };
         } else {
             const config = await window.ipc.invoke('voice:getConfig', null);
             if (config?.deepgram) {

@@ -1327,17 +1327,20 @@ export function setupIpcHandlers() {
     'account:getRowboat': async () => {
       const signedIn = await isSignedIn();
       if (!signedIn) {
-        return { signedIn: false, accessToken: null, config: null };
+        return { signedIn: false, accessToken: null };
       }
-
-      const config = await getRowboatConfig();
-
       try {
         const accessToken = await getAccessToken();
-        return { signedIn: true, accessToken, config };
+        return { signedIn: true, accessToken };
       } catch {
-        return { signedIn: true, accessToken: null, config };
+        return { signedIn: true, accessToken: null };
       }
+    },
+    // Unauthenticated /v1/config bootstrap, independent of sign-in (signed-out
+    // BYOK users need its model recommendations when connecting a provider).
+    // getRowboatConfig caches once per app run; best-effort null on failure.
+    'rowboat:getConfig': async () => {
+      return await getRowboatConfig().catch(() => null);
     },
     'granola:getConfig': async () => {
       const repo = container.resolve<IGranolaConfigRepo>('granolaConfigRepo');

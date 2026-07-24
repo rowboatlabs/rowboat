@@ -790,8 +790,15 @@ const ipcSchemas = {
     res: z.object({
       signedIn: z.boolean(),
       accessToken: z.string().nullable(),
-      config: RowboatApiConfig.nullable(),
     }),
+  },
+  // The unauthenticated /v1/config bootstrap (service URLs, billing catalog,
+  // model recommendations). Independent of sign-in state — main caches the
+  // fetch once per app run; null when the API is unreachable. Renderer
+  // consumers go through the useRowboatConfig() hook.
+  'rowboat:getConfig': {
+    req: z.null(),
+    res: RowboatApiConfig.nullable(),
   },
   'oauth:didConnect': {
     req: z.object({
