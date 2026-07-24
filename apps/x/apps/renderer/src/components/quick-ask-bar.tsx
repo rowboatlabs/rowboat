@@ -123,7 +123,7 @@ export function QuickAskBar() {
   return (
     // Bottom-anchored window (grows upward): the answer stacks ABOVE the
     // input row, which stays pinned to the bottom edge.
-    <div className="flex h-screen w-screen select-none flex-col overflow-hidden bg-neutral-900 text-white">
+    <div className="flex h-screen w-screen select-none flex-col overflow-hidden rounded-2xl border border-neutral-700/60 bg-neutral-900 text-white">
       {asked && (
         <div className="flex min-h-0 flex-1 flex-col border-b border-neutral-800 px-5 py-3">
           <div className="mb-2 shrink-0 truncate text-xs text-neutral-500">You asked: {asked}</div>

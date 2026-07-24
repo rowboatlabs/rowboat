@@ -45,7 +45,9 @@ function createWindow(): BrowserWindow {
     skipTaskbar: true,
     show: false,
     hasShadow: true,
-    backgroundColor: '#171717',
+    // Transparent window + CSS border-radius on the root gives the bar its
+    // large rounded corners (the frameless default radius is much tighter).
+    transparent: true,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
