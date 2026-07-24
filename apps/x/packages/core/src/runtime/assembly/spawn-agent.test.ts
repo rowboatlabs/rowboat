@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { z } from "zod";
 import type { TurnEvent, TurnState } from "@x/shared/dist/turns.js";
 import type { ITurnRuntime } from "../turns/api.js";
@@ -9,6 +9,16 @@ import type {
     IHeadlessAgentRunner,
 } from "./headless.js";
 import { runSpawnedAgent } from "./spawn-agent.js";
+
+// spawn-agent reads the configured subagent override lazily from
+// models/defaults.js; stub it so tests control the whole precedence chain
+// (explicit args > configured override > parent model).
+const subagentOverride = vi.hoisted(() => ({
+    value: null as { provider: string; model: string } | null,
+}));
+vi.mock("../../models/defaults.js", () => ({
+    getSubagentModelOverride: async () => subagentOverride.value,
+}));
 
 const TS = "2026-07-07T10:00:00Z";
 
@@ -95,6 +105,34 @@ function fakeServices(opts: {
 const signal = new AbortController().signal;
 
 describe("runSpawnedAgent", () => {
+    beforeEach(() => {
+        subagentOverride.value = null;
+    });
+
+    it("uses the configured subagent override when no explicit model is passed", async () => {
+        subagentOverride.value = { provider: "ollama", model: "qwen3" };
+        const { services, started } = fakeServices({});
+        await runSpawnedAgent(
+            { task: "t", instructions: "x" },
+            { parentTurnId: "parent-1", signal, services },
+        );
+        expect(started[0].agent).toMatchObject({
+            inline: { model: { provider: "ollama", model: "qwen3" } },
+        });
+    });
+
+    it("explicit per-spawn model args beat the configured override", async () => {
+        subagentOverride.value = { provider: "ollama", model: "qwen3" };
+        const { services, started } = fakeServices({});
+        await runSpawnedAgent(
+            { task: "t", instructions: "x", model: "gpt-5.4", provider: "openai" },
+            { parentTurnId: "parent-1", signal, services },
+        );
+        expect(started[0].agent).toMatchObject({
+            inline: { model: { provider: "openai", model: "gpt-5.4" } },
+        });
+    });
+
     it("runs an inline child on the parent's model and returns the result envelope", async () => {
         const { services, started } = fakeServices({});
         const progress: unknown[] = [];

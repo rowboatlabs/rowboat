@@ -190,8 +190,12 @@ describe('useModels', () => {
     const { result } = renderHook(() => useModels())
     await waitFor(() => expect(result.current.groups.length).toBe(1))
 
-    act(() => result.current.refresh('ollama'))
-    await waitFor(() => expect(invokeCounts['models:list']).toBe(2))
+    // Promise-returning so callers (Manage's "Refresh models") can render
+    // progress and confirm completion.
+    await act(async () => {
+      await result.current.refresh('ollama')
+    })
+    expect(invokeCounts['models:list']).toBe(2)
     expect(invokeArgs['models:list'][1]).toEqual({ refreshProvider: 'ollama' })
   })
 })

@@ -131,11 +131,15 @@ export function migrateModelsConfig(rawInput: unknown, signedIn: boolean): V2 | 
   const assistantModel = v1EffectiveAssistant(raw, signedIn);
 
   // Old effective model per task, via the deleted v1 rules.
+  const liveNoteEffective = v1Override(raw, "liveNoteAgentModel", signedIn)
+    ?? (signedIn ? { provider: "rowboat", model: V1_CURATED_LITE } : assistantModel);
   const oldTaskModels: Record<string, Ref | undefined> = {
     knowledgeGraph: v1Override(raw, "knowledgeGraphModel", signedIn)
       ?? (signedIn ? { provider: "rowboat", model: V1_CURATED_LITE } : assistantModel),
-    liveNoteAgent: v1Override(raw, "liveNoteAgentModel", signedIn)
-      ?? (signedIn ? { provider: "rowboat", model: V1_CURATED_LITE } : assistantModel),
+    liveNoteAgent: liveNoteEffective,
+    // v1 had no backgroundTask key — getBackgroundTaskAgentModel mirrored
+    // the live-note model (override included). v2 gives it its own slot.
+    backgroundTask: liveNoteEffective,
     autoPermissionDecision: v1Override(raw, "autoPermissionDecisionModel", signedIn)
       ?? (signedIn ? { provider: "rowboat", model: V1_CURATED_LITE } : assistantModel),
     meetingNotes: v1Override(raw, "meetingNotesModel", signedIn)

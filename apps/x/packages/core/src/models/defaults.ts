@@ -107,12 +107,18 @@ export async function getChatTitleModel(): Promise<ModelSelection> {
     return getCategoryModel("chatTitle");
 }
 
-/**
- * Model used by the background-task agent + routing classifier. Currently
- * mirrors `getLiveNoteAgentModel()` — both surfaces want a fast, reliable
- * agent model. Split into its own getter so a future per-feature override
- * doesn't require touching all call sites.
- */
+/** Model used by the background-task agent + routing classifier. */
 export async function getBackgroundTaskAgentModel(): Promise<ModelSelection> {
-    return getLiveNoteAgentModel();
+    return getCategoryModel("backgroundTask");
+}
+
+/**
+ * Explicit subagent model override, or null to inherit the PARENT turn's
+ * model (spawn-agent's default — which is the assistant for a top-level
+ * chat). Not getCategoryModel: the no-override fallback is the parent, not
+ * the assistant, and the caller owns that resolution.
+ */
+export async function getSubagentModelOverride(): Promise<ModelSelection | null> {
+    const cfg = await readConfig();
+    return cfg?.taskModels?.subagent ?? null;
 }

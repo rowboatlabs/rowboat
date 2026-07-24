@@ -41,13 +41,17 @@ export const ModelRef = z.object({
   model: z.string(),
 });
 
-// The per-task model override slots. Absence = inherit the assistant model.
+// The per-task model override slots. Absence = inherit the assistant model
+// (except `subagent`, whose default is the PARENT turn's model — which is
+// the assistant for a top-level chat).
 export const TaskModels = z.object({
   knowledgeGraph: ModelRef.optional(),
   meetingNotes: ModelRef.optional(),
   liveNoteAgent: ModelRef.optional(),
   autoPermissionDecision: ModelRef.optional(),
   chatTitle: ModelRef.optional(),
+  backgroundTask: ModelRef.optional(),
+  subagent: ModelRef.optional(),
 });
 export type TaskModelKey = keyof z.infer<typeof TaskModels>;
 

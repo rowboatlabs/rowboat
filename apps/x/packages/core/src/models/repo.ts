@@ -90,8 +90,20 @@ export class FSModelConfigRepo implements IModelConfigRepo {
     }
 
     async setProvider(id: string, provider: z.infer<typeof LlmProvider>): Promise<void> {
+        // The credential-less flavors are never stored: their connection IS
+        // their auth token store (oauth.json / chatgpt-auth.json), and the
+        // catalog derives their presence from auth state — a providers-map
+        // entry would double-list them.
+        if (provider.flavor === "rowboat" || provider.flavor === "codex") {
+            throw new Error(`Provider flavor '${provider.flavor}' is auth-derived and cannot be stored in models.json`);
+        }
         const config = await this.read();
-        config.providers[id] = LlmProvider.parse(provider);
+        // Merge over an existing entry: replacing a key must not wipe
+        // hand-tuned connection prefs (contextLength, reasoningEffort).
+        config.providers[id] = LlmProvider.parse({
+            ...config.providers[id],
+            ...provider,
+        });
         await this.write(config);
     }
 

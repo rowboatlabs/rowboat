@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from "react"
 import { setGoogleCredentials } from "@/lib/google-credentials-store"
-import { useChatGPT } from "@/hooks/useChatGPT"
 import { toast } from "sonner"
 
 export interface ProviderState {
@@ -13,44 +12,9 @@ export type Step = 0 | 1 | 2 | 3 | 4
 
 export type OnboardingPath = 'rowboat' | 'byok' | null
 
-export type LlmProviderFlavor = "openai" | "anthropic" | "google" | "openrouter" | "aigateway" | "ollama" | "openai-compatible"
-
-export interface LlmModelOption {
-  id: string
-  name?: string
-  release_date?: string
-}
-
 export function useOnboardingState(open: boolean, onComplete: (opts?: { startTour?: boolean }) => void) {
   const [currentStep, setCurrentStep] = useState<Step>(0)
   const [onboardingPath, setOnboardingPath] = useState<OnboardingPath>(null)
-
-  // LLM setup state
-  const [llmProvider, setLlmProvider] = useState<LlmProviderFlavor>("openai")
-  const [modelsCatalog, setModelsCatalog] = useState<Record<string, LlmModelOption[]>>({})
-  const [modelsLoading, setModelsLoading] = useState(false)
-  const [modelsError, setModelsError] = useState<string | null>(null)
-  const [providerConfigs, setProviderConfigs] = useState<Record<LlmProviderFlavor, { apiKey: string; baseURL: string; model: string; knowledgeGraphModel: string; meetingNotesModel: string; liveNoteAgentModel: string }>>({
-    openai: { apiKey: "", baseURL: "", model: "", knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "" },
-    anthropic: { apiKey: "", baseURL: "", model: "", knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "" },
-    google: { apiKey: "", baseURL: "", model: "", knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "" },
-    openrouter: { apiKey: "", baseURL: "", model: "", knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "" },
-    aigateway: { apiKey: "", baseURL: "", model: "", knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "" },
-    ollama: { apiKey: "", baseURL: "http://localhost:11434", model: "", knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "" },
-    "openai-compatible": { apiKey: "", baseURL: "http://localhost:1234/v1", model: "", knowledgeGraphModel: "", meetingNotesModel: "", liveNoteAgentModel: "" },
-  })
-  const [testState, setTestState] = useState<{ status: "idle" | "testing" | "success" | "error"; error?: string }>({
-    status: "idle",
-  })
-  const [connectedFlavors, setConnectedFlavors] = useState<Set<LlmProviderFlavor>>(new Set())
-  const [showMoreProviders, setShowMoreProviders] = useState(false)
-
-  // "Sign in with ChatGPT" (subscription OAuth) is offered below the OpenAI
-  // card, mirroring Settings. It isn't a LlmProviderFlavor — no API key, no
-  // models.json entry — it signs in via the dedicated chatgpt:* IPC (same
-  // path Settings uses) and the Codex model client consumes the token in
-  // core, leaving the BYOK config machinery untouched.
-  const chatgpt = useChatGPT()
 
   // OAuth provider states
   const [providers, setProviders] = useState<string[]>([])
@@ -72,9 +36,6 @@ export function useOnboardingState(open: boolean, onComplete: (opts?: { startTou
   const [slackDiscovering, setSlackDiscovering] = useState(false)
   const [slackDiscoverError, setSlackDiscoverError] = useState<string | null>(null)
 
-  // Inline upsell callout dismissed
-  const [upsellDismissed, setUpsellDismissed] = useState(false)
-
   // Composio Gmail/Calendar sync was removed — flags are seeded false and
   // never flipped. Kept here so legacy gating expressions still type-check.
   const [useComposioForGoogle] = useState(false)
@@ -88,27 +49,6 @@ export function useOnboardingState(open: boolean, onComplete: (opts?: { startTou
   const [googleCalendarConnected, setGoogleCalendarConnected] = useState(false)
   const [googleCalendarLoading, setGoogleCalendarLoading] = useState(true)
   const [googleCalendarConnecting, setGoogleCalendarConnecting] = useState(false)
-
-  const updateProviderConfig = useCallback(
-    (provider: LlmProviderFlavor, updates: Partial<{ apiKey: string; baseURL: string; model: string; knowledgeGraphModel: string; meetingNotesModel: string; liveNoteAgentModel: string }>) => {
-      setProviderConfigs(prev => ({
-        ...prev,
-        [provider]: { ...prev[provider], ...updates },
-      }))
-      setTestState({ status: "idle" })
-    },
-    []
-  )
-
-  const activeConfig = providerConfigs[llmProvider]
-  const showApiKey = llmProvider === "openai" || llmProvider === "anthropic" || llmProvider === "google" || llmProvider === "openrouter" || llmProvider === "aigateway" || llmProvider === "openai-compatible"
-  const requiresApiKey = llmProvider === "openai" || llmProvider === "anthropic" || llmProvider === "google" || llmProvider === "openrouter" || llmProvider === "aigateway"
-  const requiresBaseURL = llmProvider === "ollama" || llmProvider === "openai-compatible"
-  const showBaseURL = llmProvider === "ollama" || llmProvider === "openai-compatible" || llmProvider === "aigateway"
-  const isLocalProvider = llmProvider === "ollama" || llmProvider === "openai-compatible"
-  const canTest =
-    (!requiresApiKey || activeConfig.apiKey.trim().length > 0) &&
-    (!requiresBaseURL || activeConfig.baseURL.trim().length > 0)
 
   // Track connected providers for the completion step
   const connectedProviders = Object.entries(providerStates)
@@ -134,56 +74,6 @@ export function useOnboardingState(open: boolean, onComplete: (opts?: { startTou
     // (Composio Gmail/Calendar flag fetches removed — sync was deleted; flags stay false.)
     loadProviders()
   }, [open])
-
-  // Load LLM models catalog on open
-  useEffect(() => {
-    if (!open) return
-
-    async function loadModels() {
-      try {
-        setModelsLoading(true)
-        setModelsError(null)
-        const result = await window.ipc.invoke("models:list", null)
-        const catalog: Record<string, LlmModelOption[]> = {}
-        for (const provider of result.providers || []) {
-          catalog[provider.id] = provider.models || []
-        }
-        setModelsCatalog(catalog)
-      } catch (error) {
-        console.error("Failed to load models catalog:", error)
-        setModelsError("Failed to load models list")
-        setModelsCatalog({})
-      } finally {
-        setModelsLoading(false)
-      }
-    }
-
-    loadModels()
-  }, [open])
-
-  // Preferred default models for each provider
-  const preferredDefaults: Partial<Record<LlmProviderFlavor, string>> = {
-    openai: "gpt-5.4",
-    anthropic: "claude-opus-4-8",
-  }
-
-  // Initialize default models from catalog
-  useEffect(() => {
-    if (Object.keys(modelsCatalog).length === 0) return
-    setProviderConfigs(prev => {
-      const next = { ...prev }
-      const cloudProviders: LlmProviderFlavor[] = ["openai", "anthropic", "google"]
-      for (const provider of cloudProviders) {
-        const models = modelsCatalog[provider]
-        if (models?.length && !next[provider].model) {
-          const preferredModel = preferredDefaults[provider]
-          const hasPreferred = preferredModel && models.some(m => m.id === preferredModel)
-          next[provider] = { ...next[provider], model: hasPreferred ? preferredModel : (models[0]?.id || "") }
-        }
-      }
-      return next
-    })
-  }, [modelsCatalog])
 
   // Load Granola config
   const refreshGranolaConfig = useCallback(async () => {
@@ -389,11 +279,7 @@ export function useOnboardingState(open: boolean, onComplete: (opts?: { startTou
   // BYOK path: 0 (welcome) → 1 (llm setup) → 2 (connect) → 3 (code mode) → 4 (done)
   const handleNext = useCallback(() => {
     if (currentStep === 0) {
-      if (onboardingPath === 'byok') {
-        setCurrentStep(1)
-      } else {
-        setCurrentStep(2)
-      }
+      setCurrentStep(1)
     } else if (currentStep === 1) {
       setCurrentStep(2)
     } else if (currentStep === 2) {
@@ -408,11 +294,7 @@ export function useOnboardingState(open: boolean, onComplete: (opts?: { startTou
       setCurrentStep(0)
       setOnboardingPath(null)
     } else if (currentStep === 2) {
-      if (onboardingPath === 'rowboat') {
-        setCurrentStep(0)
-      } else {
-        setCurrentStep(1)
-      }
+      setCurrentStep(1)
     } else if (currentStep === 3) {
       setCurrentStep(2)
     }
@@ -428,103 +310,6 @@ export function useOnboardingState(open: boolean, onComplete: (opts?: { startTou
   const handleCompleteWithTour = useCallback(() => {
     onComplete({ startTour: true })
   }, [onComplete])
-
-  // Test the active provider's credentials and persist its config. Returns
-  // whether it succeeded so callers can decide whether to advance or stay.
-  const testAndSaveActiveProvider = useCallback(async (): Promise<boolean> => {
-    if (!canTest) return false
-    setTestState({ status: "testing" })
-    try {
-      const apiKey = activeConfig.apiKey.trim() || undefined
-      const baseURL = activeConfig.baseURL.trim() || undefined
-      const provider = { flavor: llmProvider, apiKey, baseURL }
-
-      // Fetch the provider's models from the key — this both validates the
-      // credentials and gives us the list to populate the chat picker.
-      const result = await window.ipc.invoke("models:listForProvider", { provider })
-      if (!result.success) {
-        setTestState({ status: "error", error: result.error })
-        toast.error(result.error || "Connection test failed")
-        return false
-      }
-
-      const catalog: string[] = result.models ?? []
-      const typed = activeConfig.model.trim()
-      // Hosted providers hide the model field (it holds an auto-seeded
-      // default), so only treat it as user intent where the field is shown —
-      // mirrors showModelInput in llm-setup-step.
-      const hostedProviders: LlmProviderFlavor[] = ["openai", "anthropic", "google"]
-      const modelInputShown = !hostedProviders.includes(llmProvider)
-
-      if (modelInputShown && typed && llmProvider === "ollama" && catalog.length > 0 && !catalog.includes(typed)) {
-        // Ollama's tag list is authoritative: an unlisted model isn't pulled,
-        // so saving it would break chat at runtime with no obvious cause.
-        const error = `Model '${typed}' is not available on this Ollama server. Pull it first (ollama pull ${typed}) or pick one of: ${catalog.slice(0, 5).join(", ")}${catalog.length > 5 ? ", …" : ""}`
-        setTestState({ status: "error", error })
-        toast.error(error)
-        return false
-      }
-
-      // Resolve the model silently — same precedence as the settings dialog's
-      // resolvedModel, so onboarding no longer asks users to type one.
-      // openai-compatible keeps a visible Model field (its /models is
-      // unreliable), so a typed value there wins; otherwise the typed/saved
-      // model if the fetched list still has it, else the flavor's preferred
-      // default, else the first fetched id. An empty list falls back to
-      // whatever was typed/seeded.
-      let model: string
-      if (llmProvider === "openai-compatible" && typed) {
-        model = typed
-      } else if (catalog.length > 0) {
-        const preferred = preferredDefaults[llmProvider]
-        model = (typed && catalog.includes(typed))
-          ? typed
-          : ((preferred && catalog.includes(preferred)) ? preferred : catalog[0])
-      } else {
-        model = typed
-      }
-
-      // v2 writes: the provider entry carries credentials only; the resolved
-      // model becomes the assistant model (onboarding's connect doubles as
-      // the initial selection).
-      await window.ipc.invoke("models:setProvider", { id: llmProvider, provider })
-      if (model) {
-        await window.ipc.invoke("models:updateConfig", {
-          assistantModel: { provider: llmProvider, model },
-        })
-      }
-      window.dispatchEvent(new Event('models-config-changed'))
-      setTestState({ status: "success" })
-      setConnectedFlavors(prev => new Set(prev).add(llmProvider))
-      return true
-    } catch (error) {
-      console.error("Connection test failed:", error)
-      setTestState({ status: "error", error: "Connection test failed" })
-      toast.error("Connection test failed")
-      return false
-    }
-  }, [activeConfig.apiKey, activeConfig.baseURL, activeConfig.model, canTest, llmProvider])
-
-  // Save the active provider and advance to the next step.
-  const handleTestAndSaveLlmConfig = useCallback(async () => {
-    const ok = await testAndSaveActiveProvider()
-    if (ok) handleNext()
-  }, [testAndSaveActiveProvider, handleNext])
-
-  // Save the active provider but stay on the step. Switch to the next provider the
-  // user hasn't connected yet so the form is fresh and the buttons re-enable once
-  // they enter that key. (Clearing the current field instead left the buttons
-  // disabled on an empty form with no clear next step.)
-  const handleTestAndAddAnother = useCallback(async () => {
-    const ok = await testAndSaveActiveProvider()
-    if (!ok) return
-    // setConnectedFlavors is async, so include the just-saved provider here.
-    const connectedNow = new Set(connectedFlavors).add(llmProvider)
-    const order: LlmProviderFlavor[] = ["openai", "anthropic", "google", "openrouter", "aigateway", "ollama", "openai-compatible"]
-    const next = order.find(p => !connectedNow.has(p))
-    if (next) setLlmProvider(next)
-    setTestState({ status: "idle" })
-  }, [testAndSaveActiveProvider, connectedFlavors, llmProvider])
 
   // Check connection status for all providers
   const refreshAllStatuses = useCallback(async () => {
@@ -681,44 +466,12 @@ export function useOnboardingState(open: boolean, onComplete: (opts?: { startTou
     startConnect('google', { clientId, clientSecret })
   }, [startConnect])
 
-  // Switch to rowboat path from BYOK inline callout
-  const handleSwitchToRowboat = useCallback(() => {
-    setOnboardingPath('rowboat')
-    setCurrentStep(0)
-  }, [])
-
   return {
     // Step state
     currentStep,
     setCurrentStep,
     onboardingPath,
     setOnboardingPath,
-
-    // LLM state
-    llmProvider,
-    setLlmProvider,
-    modelsCatalog,
-    modelsLoading,
-    modelsError,
-    providerConfigs,
-    activeConfig,
-    testState,
-    setTestState,
-    showApiKey,
-    requiresApiKey,
-    requiresBaseURL,
-    showBaseURL,
-    isLocalProvider,
-    canTest,
-    connectedFlavors,
-    showMoreProviders,
-    setShowMoreProviders,
-    updateProviderConfig,
-    handleTestAndSaveLlmConfig,
-    handleTestAndAddAnother,
-
-    // ChatGPT subscription sign-in (shown below the OpenAI card)
-    chatgpt,
 
     // OAuth state
     providers,
@@ -750,10 +503,6 @@ export function useOnboardingState(open: boolean, onComplete: (opts?: { startTou
     handleSlackSaveWorkspaces,
     handleSlackDisable,
 
-    // Upsell
-    upsellDismissed,
-    setUpsellDismissed,
-
     // Composio/Gmail state
     useComposioForGoogle,
     gmailConnected,
@@ -777,7 +526,6 @@ export function useOnboardingState(open: boolean, onComplete: (opts?: { startTou
     handleBack,
     handleComplete,
     handleCompleteWithTour,
-    handleSwitchToRowboat,
   }
 }
 

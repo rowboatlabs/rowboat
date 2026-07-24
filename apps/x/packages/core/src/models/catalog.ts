@@ -29,7 +29,7 @@ export interface CatalogModelEntry {
 
 export interface CatalogProviderEntry {
     /**
-     * Provider INSTANCE identifier — what ModelRef.provider, defaultSelection,
+     * Provider INSTANCE identifier — what ModelRef.provider, assistantModel,
      * task overrides, and refreshProvider all reference. Today one instance
      * exists per flavor, so id always equals the flavor key ("openai",
      * "ollama", "rowboat", …); a future multi-key setup ("openai-work" /

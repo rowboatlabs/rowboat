@@ -1,18 +1,23 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Brain, ChevronDown, LoaderIcon } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Brain, Check, ChevronDown } from 'lucide-react'
 
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import {
+  Command,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command'
 import { useModels, type ModelPickerGroup, type ModelRef } from '@/hooks/use-models'
-import { useProviderModels, type ProviderModelsFlavor } from '@/hooks/use-provider-models'
 import { cn } from '@/lib/utils'
 
 export type { ModelRef } from '@/hooks/use-models'
@@ -21,7 +26,7 @@ export type ReasoningEffortLevel = 'low' | 'medium' | 'high'
 
 const TOOLTIP_DELAY_MS = 1000
 
-const providerDisplayNames: Record<string, string> = {
+export const providerDisplayNames: Record<string, string> = {
   openai: 'OpenAI',
   anthropic: 'Anthropic',
   google: 'Gemini',
@@ -47,94 +52,34 @@ function getModelDisplayName(model: string) {
   return model.split('/').pop() || model
 }
 
-// The one remaining renderer-side fetch: probing a provider that is being
-// configured RIGHT NOW (credentials typed into a form but not yet saved).
-// Connected providers all come pre-listed through the unified catalog
-// (useModels); this path exists only because unsaved credentials, by
-// definition, aren't in that catalog. Pinned models (the app default) render
-// first so the model that actually runs stays pickable while the fetch is
-// pending or failed. Probe-fetched ids carry no reasoning metadata, so the
-// effort control stays hidden for them.
-//
-// The group owns its header so it can hide itself when the search filter
-// matches none of its rows. Loading/error rows are status, not models — they
-// render (with the header) regardless of the filter, and don't count toward
-// the parent's "No models match" check (which is what gets reported up).
-function ProbeProviderGroupItems({ flavor, apiKey, baseURL, label, pinnedModels, filter, onModelRowsChange }: {
-  flavor: ProviderModelsFlavor
-  apiKey: string
-  baseURL: string
-  label: string
-  pinnedModels: string[]
-  filter: string
-  onModelRowsChange: (flavor: string, hasModelRows: boolean) => void
-}) {
-  const { status, models, error, refetch } = useProviderModels({ flavor, apiKey, baseURL })
-  const items = [...pinnedModels, ...models.filter((m) => !pinnedModels.includes(m))]
-  const visible = filter ? items.filter((m) => m.toLowerCase().includes(filter)) : items
-  const showStatus = status === 'loading' || status === 'error'
-  const hasModelRows = visible.length > 0
-  useEffect(() => {
-    onModelRowsChange(flavor, hasModelRows)
-  }, [flavor, hasModelRows, onModelRowsChange])
-  if (!hasModelRows && !showStatus) return null
-  return (
-    <>
-      <DropdownMenuLabel className="text-xs text-muted-foreground">{label}</DropdownMenuLabel>
-      {visible.map((m) => {
-        const key = `${flavor}/${m}`
-        return (
-          <DropdownMenuRadioItem key={key} value={key}>
-            <span className="truncate">{m}</span>
-          </DropdownMenuRadioItem>
-        )
-      })}
-      {status === 'loading' && (
-        <div className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground">
-          <LoaderIcon className="h-3 w-3 animate-spin" />
-          Loading models…
-        </div>
-      )}
-      {status === 'error' && (
-        <DropdownMenuItem
-          onSelect={(e) => {
-            e.preventDefault()
-            refetch()
-          }}
-          className="text-xs"
-        >
-          <span className="truncate text-destructive">{error || 'Failed to load models'}</span>
-          <span className="ml-auto shrink-0 text-muted-foreground">Retry</span>
-        </DropdownMenuItem>
-      )}
-    </>
-  )
-}
-
 // The standardized model picker (model-selection consolidation), mounted
-// everywhere models are chosen. One controlled value/onChange contract with
-// per-surface modes layered on as optional props: the composer's full
-// catalog picker (provider groups, live fetches, search, reasoning effort),
-// settings' default sentinel / field trigger / provider scoping / typed-id
-// escape hatch, per-task "(global default)" inheritance, and caller-supplied
-// restricted lists (coding-agent options).
+// everywhere models are chosen — the composer pill, every settings field,
+// per-task overrides, and the coding-agent restricted lists. One controlled
+// value/onChange contract with per-surface modes layered on as optional
+// props.
+//
+// The dropdown is a Popover + cmdk Command. With the search empty and more
+// than one provider connected, it browses as a SPLIT VIEW: providers on the
+// left (the assistant's provider pre-selected), the chosen provider's models
+// on the right — ←/→ switches provider, ↑/↓ navigates models. Typing
+// collapses to one flat list filtered across ALL providers (model ids and
+// provider names both match). Scoped/static pickers stay flat.
 export interface ModelSelectorProps {
   /** Current selection; null follows the app default / the sentinel. */
   value: ModelRef | null
   /** null only ever fires when defaultOption is set (sentinel picked). */
   onChange: (value: ModelRef | null) => void
   /**
-   * Pinned top entry ("Rowboat default", "Same as assistant") that selects
-   * null. When set, a null value renders this label instead of the app
-   * default model.
+   * Pinned top entry ("Same as Assistant") that selects null. When set, a
+   * null value renders this label instead of the app default model.
    */
   defaultOption?: { label: string }
   /**
-   * Inheritance flavor of defaultOption for per-task overrides
-   * ("(global default)"): same sentinel row and null semantics, but null
-   * means "inherit the global default at runtime" and the trigger renders
-   * the label muted, so an un-overridden field reads like a placeholder.
-   * Mutually exclusive with defaultOption (defaultOption wins).
+   * Inheritance flavor of defaultOption for per-task overrides: same
+   * sentinel row and null semantics, but null means "inherit at runtime"
+   * and the trigger renders the label muted, so an un-overridden field
+   * reads like a placeholder. Mutually exclusive with defaultOption
+   * (defaultOption wins).
    */
   inheritDefault?: { label: string }
   /**
@@ -143,22 +88,9 @@ export interface ModelSelectorProps {
    */
   variant?: 'pill' | 'field'
   /**
-   * Restrict the picker to one provider's group (catalog or live). Providers
-   * not configured in models.json fall back to their static models:list
-   * catalog so a provider mid-setup still lists models.
+   * Restrict the picker to one connected provider's group.
    */
   providerFilter?: string
-  /**
-   * Live-fetch credentials for a provider being configured right now (typed
-   * but possibly unsaved). Store groups only exist for providers saved in
-   * models.json and the catalog fallback only covers openai/anthropic/
-   * google — this synthesizes the scoped live group from the form's current
-   * inputs instead (and wins over a saved group, whose stored key may be
-   * stale). Requires providerFilter set to the same flavor; ignored until
-   * some credential is typed. useProviderModels debounces + caches, so
-   * keystrokes don't spray fetches.
-   */
-  liveCredentials?: { flavor: ProviderModelsFlavor; apiKey: string; baseURL: string }
   /**
    * When the search text matches no rows, offer a `Use "<text>"` row that
    * selects the typed id — arbitrary ids for ollama / openai-compatible.
@@ -171,12 +103,11 @@ export interface ModelSelectorProps {
   /**
    * Caller-supplied restricted list (e.g. a coding agent's own model
    * options): the picker renders ONLY these rows plus the defaultOption
-   * sentinel — no catalog groups, no live fetches. Entries are opaque
-   * engine ids, not provider/model pairs, so the selected ref is
-   * {provider: '', model: id} — the id travels in .model and provider is
-   * meaningless. Search filters on label and id; rows whose label differs
-   * from their id show the id as secondary text (labels can collide, e.g.
-   * Claude lists both the 'opus' alias and the concrete id as "Opus").
+   * sentinel — no catalog groups. Entries are opaque engine ids, not
+   * provider/model pairs, so the selected ref is {provider: '', model: id}.
+   * Search filters on label and id; rows whose label differs from their id
+   * show the id as secondary text (labels can collide, e.g. Claude lists
+   * both the 'opus' alias and the concrete id as "Opus").
    */
   staticOptions?: Array<{ id: string; label?: string }>
   /** Optional title attribute for the trigger button (header tooltips). */
@@ -193,8 +124,8 @@ export interface ModelSelectorProps {
   onEffortChange?: (effort: '' | ReasoningEffortLevel) => void
 }
 
-// Radio value for the defaultOption sentinel row. Never a valid model key
-// (real keys always contain "provider/").
+// cmdk item value for the defaultOption sentinel row. Never a valid model
+// key (real keys always contain "provider/").
 const DEFAULT_OPTION_KEY = '__default__'
 
 // Un-scoped custom entries can't know their provider, so the rule is:
@@ -230,7 +161,6 @@ export function ModelSelector({
   inheritDefault,
   variant = 'pill',
   providerFilter,
-  liveCredentials,
   allowCustom = false,
   staticOptions,
   triggerTitle,
@@ -245,15 +175,7 @@ export function ModelSelector({
   const sentinel = defaultOption ?? inheritDefault
   const sentinelMuted = !defaultOption && Boolean(inheritDefault)
 
-  // Probe mode: the form's typed credentials trump anything saved — an
-  // unsaved provider isn't in the catalog, so its list is probe-fetched.
-  const liveFlavor = liveCredentials?.flavor
-  const liveApiKey = liveCredentials?.apiKey.trim() ?? ''
-  const liveBaseURL = liveCredentials?.baseURL.trim() ?? ''
-  const probeActive = Boolean(providerFilter && liveFlavor === providerFilter && (liveApiKey || liveBaseURL))
-
   const groups = useMemo<ModelPickerGroup[]>(() => {
-    if (probeActive) return []
     if (!providerFilter) return allGroups
     const scoped = allGroups.filter((g) => g.id === providerFilter)
     if (scoped.length > 0) return scoped
@@ -261,68 +183,97 @@ export function ModelSelector({
     return catalogModels.length > 0
       ? [{ id: providerFilter, flavor: providerFilter, models: catalogModels, status: 'ok' }]
       : []
-  }, [allGroups, providerFilter, catalogByProvider, probeActive])
+  }, [allGroups, providerFilter, catalogByProvider])
 
-  // Search filter for the model dropdown. Reset each time the menu opens;
-  // matching is a case-insensitive substring test on the model id. The probe
-  // group filters itself and reports whether it still has rows, so the
-  // parent can render the global "No models match" row.
-  const [modelFilter, setModelFilter] = useState('')
-  const modelFilterInputRef = useRef<HTMLInputElement>(null)
-  const [probeHasRows, setProbeHasRows] = useState(true)
-  const modelFilterValue = modelFilter.trim().toLowerCase()
-  const handleProbeRows = useCallback((_flavor: string, hasRows: boolean) => {
-    setProbeHasRows(hasRows)
-  }, [])
+  const [open, setOpen] = useState(false)
+  // cmdk's highlighted-item value, controlled: when the split view swaps the
+  // provider column, the previous group's items unmount and cmdk's internal
+  // highlight is left pointing at a value with no item — ↵ becomes a no-op.
+  // Driving the value ourselves re-anchors the highlight on the new group.
+  const [commandValue, setCommandValue] = useState('')
+  // Search text; case-insensitive substring test on the model id AND the
+  // provider name — typing "rowboat" surfaces the whole Rowboat group.
+  const [query, setQuery] = useState('')
+  const queryValue = query.trim().toLowerCase()
+  const groupMatchesFilter = useCallback((g: ModelPickerGroup) =>
+    (providerDisplayNames[g.flavor] || g.flavor).toLowerCase().includes(queryValue)
+    || g.id.toLowerCase().includes(queryValue), [queryValue])
+
+  // Split view only where browsing across providers is meaningful.
+  const splitMode = !staticOptions && !providerFilter && !queryValue && groups.length > 1
+  const [activeProviderId, setActiveProviderId] = useState<string | null>(null)
+  const activeGroup = splitMode
+    ? (groups.find((g) => g.id === activeProviderId) ?? groups[0])
+    : null
+
+  const handleOpenChange = useCallback((next: boolean) => {
+    setOpen(next)
+    if (next) {
+      // Per-opening state: fresh search, provider column on the selection's
+      // (else the assistant's) provider — groups[0] is already the
+      // assistant's group by store ordering. Empty commandValue lets cmdk
+      // highlight the first rendered item itself.
+      setQuery('')
+      setCommandValue('')
+      setActiveProviderId(value?.provider ?? defaultModel?.provider ?? null)
+    }
+  }, [value, defaultModel])
+
+  // Switch the split view's provider column and re-anchor the keyboard
+  // highlight on the new group's first row (see commandValue above).
+  const switchProvider = useCallback((g: ModelPickerGroup) => {
+    setActiveProviderId(g.id)
+    setCommandValue(
+      g.models.length > 0
+        ? `${g.id}/${g.models[0]}`
+        : g.status === 'error'
+          ? `__retry__:${g.id}`
+          : sentinel ? DEFAULT_OPTION_KEY : '',
+    )
+  }, [sentinel])
 
   // The effective default always renders even when no group carries it (the
   // provider's list failed, or its provider was removed from config) — the
-  // picker must never be missing the model that actually runs. The probe
-  // group pins the default itself, so it opts out here. A provider-scoped
-  // picker only shows it when it belongs to that provider.
+  // picker must never be missing the model that actually runs. A
+  // provider-scoped picker only shows it when it belongs to that provider.
   const standaloneDefault = useMemo<ModelRef | null>(() => {
-    if (!defaultModel || probeActive) return null
+    if (!defaultModel) return null
     if (providerFilter && defaultModel.provider !== providerFilter) return null
     const covered = groups.some((g) =>
       g.id === defaultModel.provider && g.models.includes(defaultModel.model))
     return covered ? null : defaultModel
-  }, [groups, defaultModel, providerFilter, probeActive])
+  }, [groups, defaultModel, providerFilter])
 
   const standaloneVisible = standaloneDefault !== null &&
-    (!modelFilterValue || standaloneDefault.model.toLowerCase().includes(modelFilterValue))
+    (!queryValue || standaloneDefault.model.toLowerCase().includes(queryValue))
   // Static mode replaces all store-driven rows with the caller's list.
   const staticVisible = useMemo(() => {
     if (!staticOptions) return null
-    if (!modelFilterValue) return staticOptions
+    if (!queryValue) return staticOptions
     return staticOptions.filter((o) =>
-      (o.label ?? o.id).toLowerCase().includes(modelFilterValue) || o.id.toLowerCase().includes(modelFilterValue))
-  }, [staticOptions, modelFilterValue])
+      (o.label ?? o.id).toLowerCase().includes(queryValue) || o.id.toLowerCase().includes(queryValue))
+  }, [staticOptions, queryValue])
   const staticLabelFor = (id: string) => staticOptions?.find((o) => o.id === id)?.label ?? id
-  // Nothing matches anywhere → "No models match". A probe that hasn't
-  // reported yet (first render after opening) counts as having rows so the
-  // empty row never flashes.
+  // Nothing matches anywhere → "No models match".
   const anyModelRowVisible = staticVisible
     ? staticVisible.length > 0
     : standaloneVisible
-      || groups.some((g) => g.models.some((m) => m.toLowerCase().includes(modelFilterValue)))
-      || (probeActive && probeHasRows)
+      || groups.some((g) =>
+        groupMatchesFilter(g) ? g.models.length > 0
+          : g.models.some((m) => m.toLowerCase().includes(queryValue)))
 
-  const handleModelChange = useCallback((key: string) => {
+  // The cmdk value of the current selection, for check indicators.
+  const selectedKey = value
+    ? (staticOptions ? value.model : `${value.provider}/${value.model}`)
+    : sentinel
+      ? DEFAULT_OPTION_KEY
+      : (defaultModel ? `${defaultModel.provider}/${defaultModel.model}` : '')
+
+  const select = useCallback((ref: ModelRef | null) => {
     if (lockedModel) return
-    if (key === DEFAULT_OPTION_KEY) {
-      onChange(null)
-      return
-    }
-    // Static keys are opaque engine ids — no provider/model split (ids may
-    // themselves contain slashes).
-    if (staticOptions) {
-      onChange({ provider: '', model: key })
-      return
-    }
-    const slash = key.indexOf('/')
-    if (slash <= 0 || slash === key.length - 1) return
-    onChange({ provider: key.slice(0, slash), model: key.slice(slash + 1) })
-  }, [lockedModel, onChange, staticOptions])
+    setOpen(false)
+    onChange(ref)
+  }, [lockedModel, onChange])
 
   // Reasoning effort applies to the model the next message will actually use:
   // the frozen model when locked, else the picker selection, else the app
@@ -344,6 +295,42 @@ export function ModelSelector({
       onEffortChange?.('')
     }
   }, [reasoningAvailable, effort, onEffortChange])
+
+  const renderModelItem = (providerId: string, model: string, secondary?: string) => {
+    const key = `${providerId}/${model}`
+    return (
+      <CommandItem
+        key={key}
+        value={key}
+        onSelect={() => select({ provider: providerId, model })}
+      >
+        <Check className={cn('size-3.5 shrink-0', selectedKey === key ? 'opacity-100' : 'opacity-0')} />
+        <span className="truncate">{model}</span>
+        {secondary && <span className="ml-auto shrink-0 text-xs text-muted-foreground">{secondary}</span>}
+      </CommandItem>
+    )
+  }
+
+  const renderSentinelItem = () => sentinel && (
+    <CommandItem value={DEFAULT_OPTION_KEY} onSelect={() => select(null)}>
+      <Check className={cn('size-3.5 shrink-0', selectedKey === DEFAULT_OPTION_KEY ? 'opacity-100' : 'opacity-0')} />
+      <span className="truncate">{sentinel.label}</span>
+    </CommandItem>
+  )
+
+  const renderErrorItem = (g: ModelPickerGroup) => (
+    <CommandItem
+      key={`__retry__:${g.id}`}
+      value={`__retry__:${g.id}`}
+      // Retry refreshes in place — the popover stays open and the group
+      // re-renders when the store updates.
+      onSelect={() => refresh(g.id)}
+      className="text-xs"
+    >
+      <span className="truncate text-destructive">{g.error || 'Failed to load models'}</span>
+      <span className="ml-auto shrink-0 text-muted-foreground">Retry</span>
+    </CommandItem>
+  )
 
   return (
     <>
@@ -390,19 +377,14 @@ export function ModelSelector({
           </TooltipContent>
         </Tooltip>
       ) : (
-        <DropdownMenu
-          onOpenChange={(open) => {
-            // The filter is per-opening, never sticky. Focus the search
-            // input once the content has mounted and Radix has run its own
-            // open-focus (DropdownMenu.Content has no onOpenAutoFocus).
-            if (open) {
-              setModelFilter('')
-              setProbeHasRows(true)
-              setTimeout(() => modelFilterInputRef.current?.focus(), 0)
-            }
-          }}
-        >
-          <DropdownMenuTrigger asChild>
+        // modal: the settings Dialog's scroll-lock cancels wheel events over
+        // content portalled outside its subtree — a modal popover brings its
+        // own lock layer that permits scrolling within (Radix's supported
+        // fix for popover-inside-dialog; matches the old DropdownMenu's
+        // modality). Keyboard scrolling was never affected (cmdk uses
+        // programmatic scrollIntoView).
+        <Popover open={open} onOpenChange={handleOpenChange} modal>
+          <PopoverTrigger asChild>
             {variant === 'field' ? (
               // Styled after ui/select's SelectTrigger so it sits naturally
               // in forms next to real Select fields.
@@ -439,139 +421,154 @@ export function ModelSelector({
                 <ChevronDown className="h-3 w-3 shrink-0" />
               </button>
             )}
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
+          </PopoverTrigger>
+          <PopoverContent
             align={variant === 'field' ? 'start' : 'end'}
-            className={cn('p-0 overflow-hidden', variant === 'field' && 'min-w-[var(--radix-dropdown-menu-trigger-width)]')}
-          >
-            {!staticOptions && !probeActive && groups.length === 0 && !standaloneDefault && !sentinel && !allowCustom ? (
-              <div className="p-1">
-                <DropdownMenuItem disabled>Connect a provider in Settings</DropdownMenuItem>
-              </div>
-            ) : (
-              <>
-                {/* Fixed search header — lives OUTSIDE the scroll area (the
-                    inner div below scrolls), so it's flush at the very top
-                    and always visible without any scroll. */}
-                <div className="bg-popover p-1">
-                  <input
-                    ref={modelFilterInputRef}
-                    value={modelFilter}
-                    onChange={(e) => setModelFilter(e.target.value)}
-                    onKeyDown={(e) => {
-                      // Printable keys belong to the input, not the menu's
-                      // typeahead; arrows and Escape stay with the menu.
-                      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Escape') {
-                        e.stopPropagation()
-                      }
-                    }}
-                    placeholder="Search models…"
-                    className="h-7 w-full rounded-sm border border-input bg-transparent px-2 text-xs outline-none placeholder:text-muted-foreground"
-                  />
-                </div>
-                <div className="max-h-80 overflow-y-auto p-1 pt-0">
-                <DropdownMenuRadioGroup
-                  value={
-                    value
-                      ? (staticOptions ? value.model : `${value.provider}/${value.model}`)
-                      : sentinel
-                        ? DEFAULT_OPTION_KEY
-                        : (defaultModel ? `${defaultModel.provider}/${defaultModel.model}` : '')
-                  }
-                  onValueChange={handleModelChange}
-                >
-                  {sentinel && (
-                    <DropdownMenuRadioItem value={DEFAULT_OPTION_KEY}>
-                      <span className="truncate">{sentinel.label}</span>
-                    </DropdownMenuRadioItem>
-                  )}
-                  {staticVisible?.map((o) => (
-                    <DropdownMenuRadioItem key={o.id} value={o.id}>
-                      <span className="truncate">{o.label ?? o.id}</span>
-                      {o.label && o.label !== o.id && (
-                        <span className="ml-2 shrink-0 text-xs text-muted-foreground">{o.id}</span>
-                      )}
-                    </DropdownMenuRadioItem>
-                  ))}
-                  {!staticOptions && standaloneDefault && standaloneVisible && (
-                    <DropdownMenuRadioItem value={`${standaloneDefault.provider}/${standaloneDefault.model}`}>
-                      <span className="truncate">{standaloneDefault.model}</span>
-                      <span className="ml-2 text-xs text-muted-foreground">
-                        {providerDisplayNames[standaloneDefault.provider] || standaloneDefault.provider}
-                      </span>
-                    </DropdownMenuRadioItem>
-                  )}
-                  {!staticOptions && groups.map((g) => {
-                    const label = providerDisplayNames[g.flavor] || g.flavor
-                    const visibleModels = modelFilterValue
-                      ? g.models.filter((m) => m.toLowerCase().includes(modelFilterValue))
-                      : g.models
-                    // Error rows are status, not models: they render (with
-                    // the header) regardless of the filter and don't count
-                    // toward "No models match".
-                    const showError = g.status === 'error'
-                    if (visibleModels.length === 0 && !showError) return null
-                    return (
-                      <Fragment key={g.id}>
-                        <DropdownMenuLabel className="text-xs text-muted-foreground">
-                          {label}
-                        </DropdownMenuLabel>
-                        {visibleModels.map((m) => {
-                          const key = `${g.id}/${m}`
-                          return (
-                            <DropdownMenuRadioItem key={key} value={key}>
-                              <span className="truncate">{m}</span>
-                            </DropdownMenuRadioItem>
-                          )
-                        })}
-                        {showError && (
-                          <DropdownMenuItem
-                            onSelect={(e) => {
-                              e.preventDefault()
-                              refresh(g.id)
-                            }}
-                            className="text-xs"
-                          >
-                            <span className="truncate text-destructive">{g.error || 'Failed to load models'}</span>
-                            <span className="ml-auto shrink-0 text-muted-foreground">Retry</span>
-                          </DropdownMenuItem>
-                        )}
-                      </Fragment>
-                    )
-                  })}
-                  {probeActive && liveFlavor && (
-                    <ProbeProviderGroupItems
-                      flavor={liveFlavor}
-                      apiKey={liveApiKey}
-                      baseURL={liveBaseURL}
-                      label={providerDisplayNames[liveFlavor] || liveFlavor}
-                      pinnedModels={defaultModel && defaultModel.provider === liveFlavor ? [defaultModel.model] : []}
-                      filter={modelFilterValue}
-                      onModelRowsChange={handleProbeRows}
-                    />
-                  )}
-                  {modelFilterValue && !anyModelRowVisible && (
-                    allowCustom ? (
-                      // Escape hatch for ids the lists don't carry (local
-                      // servers, brand-new models): select exactly what was
-                      // typed. Scoped pickers attach it to their provider;
-                      // un-scoped ones split "provider/model" on the first
-                      // slash, else pair the text with the default provider.
-                      <DropdownMenuItem
-                        onSelect={() => onChange(parseCustomModel(modelFilter.trim(), providerFilter, defaultModel))}
-                      >
-                        <span className="truncate">Use &quot;{modelFilter.trim()}&quot;</span>
-                      </DropdownMenuItem>
-                    ) : (
-                      <div className="px-2 py-1.5 text-xs text-muted-foreground">No models match</div>
-                    )
-                  )}
-                </DropdownMenuRadioGroup>
-                </div>
-              </>
+            className={cn(
+              'p-0 overflow-hidden',
+              splitMode
+                ? 'w-[480px]'
+                : variant === 'field'
+                  ? 'w-[var(--radix-popover-trigger-width)] min-w-[300px]'
+                  : 'w-[320px]',
             )}
-          </DropdownMenuContent>
-        </DropdownMenu>
+          >
+            {!staticOptions && groups.length === 0 && !standaloneDefault && !sentinel && !allowCustom ? (
+              <div className="px-3 py-2 text-sm text-muted-foreground">Connect a provider in Settings</div>
+            ) : (
+              <Command
+                // Filtering is ours (provider-name matching, the custom-id
+                // escape hatch, split-mode layout) — cmdk only does keyboard
+                // navigation and selection over what we render, with the
+                // highlighted value controlled (see commandValue).
+                shouldFilter={false}
+                value={commandValue}
+                onValueChange={setCommandValue}
+                onKeyDown={(e) => {
+                  // Split mode: ←/→ cycles the provider column (tabs
+                  // semantics); ↑/↓ stays on the model list via cmdk.
+                  if (!splitMode || groups.length === 0) return
+                  if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+                  e.preventDefault()
+                  const index = groups.findIndex((g) => g.id === (activeGroup?.id ?? ''))
+                  const next = e.key === 'ArrowRight'
+                    ? (index + 1) % groups.length
+                    : (index - 1 + groups.length) % groups.length
+                  switchProvider(groups[next])
+                }}
+              >
+                <CommandInput
+                  autoFocus
+                  value={query}
+                  onValueChange={setQuery}
+                  placeholder="Search models and providers…"
+                />
+                {splitMode && activeGroup ? (
+                  <div className="flex">
+                    {/* Provider column — tab-like: click or ←/→. */}
+                    <div className="w-40 shrink-0 border-r max-h-80 overflow-y-auto p-1" role="tablist" aria-label="Providers">
+                      {groups.map((g) => (
+                        <button
+                          key={g.id}
+                          type="button"
+                          role="tab"
+                          aria-selected={g.id === activeGroup.id}
+                          tabIndex={-1}
+                          onClick={() => switchProvider(g)}
+                          className={cn(
+                            'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm',
+                            g.id === activeGroup.id ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50',
+                          )}
+                        >
+                          <span className="min-w-0 flex-1 truncate">{providerDisplayNames[g.flavor] || g.flavor}</span>
+                          {g.status === 'error' ? (
+                            <span className="size-2 shrink-0 rounded-full bg-destructive" />
+                          ) : (
+                            <span className="shrink-0 text-[10px] text-muted-foreground">{g.models.length}</span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                    <CommandList className="max-h-80 flex-1">
+                      <CommandGroup>
+                        {renderSentinelItem()}
+                        {standaloneDefault && standaloneDefault.provider === activeGroup.id &&
+                          renderModelItem(standaloneDefault.provider, standaloneDefault.model)}
+                        {activeGroup.models.map((m) => renderModelItem(activeGroup.id, m))}
+                        {activeGroup.status === 'error' && renderErrorItem(activeGroup)}
+                        {activeGroup.status === 'ok' && activeGroup.models.length === 0 && (
+                          <div className="px-2 py-1.5 text-xs text-muted-foreground">No models reported</div>
+                        )}
+                      </CommandGroup>
+                    </CommandList>
+                  </div>
+                ) : (
+                  <CommandList className="max-h-80">
+                    {sentinel && !queryValue && (
+                      <CommandGroup>{renderSentinelItem()}</CommandGroup>
+                    )}
+                    {staticVisible && staticVisible.length > 0 && (
+                      <CommandGroup>
+                        {staticVisible.map((o) => (
+                          <CommandItem key={o.id} value={o.id} onSelect={() => select({ provider: '', model: o.id })}>
+                            <Check className={cn('size-3.5 shrink-0', selectedKey === o.id ? 'opacity-100' : 'opacity-0')} />
+                            <span className="truncate">{o.label ?? o.id}</span>
+                            {o.label && o.label !== o.id && (
+                              <span className="ml-2 shrink-0 text-xs text-muted-foreground">{o.id}</span>
+                            )}
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    )}
+                    {!staticOptions && standaloneDefault && standaloneVisible && (
+                      <CommandGroup>
+                        {renderModelItem(
+                          standaloneDefault.provider,
+                          standaloneDefault.model,
+                          providerDisplayNames[standaloneDefault.provider] || standaloneDefault.provider,
+                        )}
+                      </CommandGroup>
+                    )}
+                    {!staticOptions && groups.map((g) => {
+                      // A provider-name match shows the whole group.
+                      const visibleModels = queryValue && !groupMatchesFilter(g)
+                        ? g.models.filter((m) => m.toLowerCase().includes(queryValue))
+                        : g.models
+                      // Error rows are status, not models: they render (with
+                      // the header) regardless of the filter and don't count
+                      // toward "No models match".
+                      const showError = g.status === 'error'
+                      if (visibleModels.length === 0 && !showError) return null
+                      return (
+                        <CommandGroup key={g.id} heading={providerDisplayNames[g.flavor] || g.flavor}>
+                          {visibleModels.map((m) => renderModelItem(g.id, m))}
+                          {showError && renderErrorItem(g)}
+                        </CommandGroup>
+                      )
+                    })}
+                    {queryValue && !anyModelRowVisible && (
+                      allowCustom ? (
+                        // Escape hatch for ids the lists don't carry (local
+                        // servers, brand-new models): select exactly what was
+                        // typed.
+                        <CommandGroup>
+                          <CommandItem
+                            value="__custom__"
+                            onSelect={() => select(parseCustomModel(query.trim(), providerFilter, defaultModel))}
+                          >
+                            <span className="truncate">Use &quot;{query.trim()}&quot;</span>
+                          </CommandItem>
+                        </CommandGroup>
+                      ) : (
+                        <div className="px-2 py-1.5 text-xs text-muted-foreground">No models match</div>
+                      )
+                    )}
+                  </CommandList>
+                )}
+              </Command>
+            )}
+          </PopoverContent>
+        </Popover>
       )}
     </>
   )

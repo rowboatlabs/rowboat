@@ -40,9 +40,10 @@ export interface UseModelsResult extends ModelsSnapshot {
   /**
    * Force a refetch now (e.g. a composer tab becoming active). With a
    * provider id, that provider's cached list is dropped and refetched
-   * (the error-row Retry).
+   * (the error-row Retry, Manage's "Refresh models"). Resolves once the
+   * snapshot has been updated, so callers can render progress.
    */
-  refresh: (providerId?: string) => void
+  refresh: (providerId?: string) => Promise<void>
 }
 
 const EMPTY_SNAPSHOT: ModelsSnapshot = {
@@ -116,13 +117,13 @@ async function buildSnapshot(refreshProvider?: string): Promise<ModelsSnapshot> 
   }
 }
 
-function startFetch(refreshProvider?: string): void {
+function startFetch(refreshProvider?: string): Promise<void> {
   // Concurrent fetches race (an event can fire while one is in flight) —
   // only the newest run may write the snapshot, else a slow stale run can
   // clobber the fresh list.
   const seq = ++fetchSeq
   fetching = true
-  void buildSnapshot(refreshProvider)
+  return buildSnapshot(refreshProvider)
     .then((next) => {
       if (seq !== fetchSeq) return
       snapshot = next
@@ -138,19 +139,19 @@ function startFetch(refreshProvider?: string): void {
     })
 }
 
-function refreshModels(providerId?: string): void {
-  startFetch(typeof providerId === 'string' ? providerId : undefined)
+function refreshModels(providerId?: string): Promise<void> {
+  return startFetch(typeof providerId === 'string' ? providerId : undefined)
 }
 
 function ensureLoaded(): void {
-  if (!loaded && !fetching) startFetch()
+  if (!loaded && !fetching) void startFetch()
 }
 
 function wireGlobalEvents(): void {
   if (wired) return
   wired = true
   // Event payloads must not leak into startFetch's refreshProvider arg.
-  const refetch = () => startFetch()
+  const refetch = () => void startFetch()
   // Config edits anywhere in the app (settings dialog, composer pick,
   // onboarding) announce themselves on this window event.
   window.addEventListener('models-config-changed', refetch)

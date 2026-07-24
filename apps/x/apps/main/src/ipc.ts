@@ -1271,6 +1271,30 @@ export function setupIpcHandlers() {
       console.log(`[llm:generate] -> provider=${result.provider ?? '?'} model=${result.model ?? '?'} chars=${result.text?.length ?? 0}${result.error ? ` error=${result.error}` : ''}`);
       return result;
     },
+    'models:getConfig': async () => {
+      const repo = container.resolve<IModelConfigRepo>('modelConfigRepo');
+      const cfg = await repo.getConfig().catch(() => null);
+      const tasks = cfg?.taskModels ?? {};
+      return {
+        providers: Object.entries(cfg?.providers ?? {}).map(([id, entry]) => ({
+          id,
+          flavor: entry.flavor,
+          ...(entry.baseURL ? { baseURL: entry.baseURL } : {}),
+          hasApiKey: Boolean(entry.apiKey),
+        })),
+        assistantModel: cfg?.assistantModel ?? null,
+        taskModels: {
+          knowledgeGraph: tasks.knowledgeGraph ?? null,
+          meetingNotes: tasks.meetingNotes ?? null,
+          liveNoteAgent: tasks.liveNoteAgent ?? null,
+          autoPermissionDecision: tasks.autoPermissionDecision ?? null,
+          chatTitle: tasks.chatTitle ?? null,
+          backgroundTask: tasks.backgroundTask ?? null,
+          subagent: tasks.subagent ?? null,
+        },
+        deferBackgroundTasks: cfg?.deferBackgroundTasks === true,
+      };
+    },
     'models:setProvider': async (_event, args) => {
       const repo = container.resolve<IModelConfigRepo>('modelConfigRepo');
       await repo.setProvider(args.id, args.provider);

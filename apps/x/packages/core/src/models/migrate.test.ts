@@ -38,6 +38,8 @@ describe('migrateModelsConfig', () => {
             taskModels: {
                 knowledgeGraph: { provider: 'rowboat', model: 'google/gemini-3.1-flash-lite' },
                 liveNoteAgent: { provider: 'rowboat', model: 'google/gemini-3.1-flash-lite' },
+                // v1 background tasks mirrored the live-note model.
+                backgroundTask: { provider: 'rowboat', model: 'google/gemini-3.1-flash-lite' },
                 autoPermissionDecision: { provider: 'rowboat', model: 'google/gemini-3.1-flash-lite' },
                 // chat titles used flash-lite because the assistant routes
                 // through the gateway; meeting notes used the curated default
@@ -59,6 +61,7 @@ describe('migrateModelsConfig', () => {
         expect(v2?.taskModels).toEqual({
             knowledgeGraph: { provider: 'rowboat', model: 'google/gemini-3.1-flash-lite' },
             liveNoteAgent: { provider: 'rowboat', model: 'google/gemini-3.1-flash-lite' },
+            backgroundTask: { provider: 'rowboat', model: 'google/gemini-3.1-flash-lite' },
             autoPermissionDecision: { provider: 'rowboat', model: 'google/gemini-3.1-flash-lite' },
             // Meeting notes used the curated gateway default, which now
             // differs from the (BYOK) assistant — preserved explicitly.
@@ -80,6 +83,18 @@ describe('migrateModelsConfig', () => {
         expect(v2?.taskModels).toEqual({
             knowledgeGraph: { provider: 'openai', model: 'gpt-5.4-mini' },
             meetingNotes: { provider: 'ollama', model: 'qwen3' },
+        });
+    });
+
+    it('a v1 live-note override propagates to backgroundTask (v1 bg tasks mirrored live-note)', () => {
+        const v1 = {
+            provider: { flavor: 'openai', apiKey: 'sk-a' },
+            model: 'gpt-5.4',
+            liveNoteAgentModel: { provider: 'ollama', model: 'qwen3' },
+        };
+        expect(migrateModelsConfig(v1, false)?.taskModels).toEqual({
+            liveNoteAgent: { provider: 'ollama', model: 'qwen3' },
+            backgroundTask: { provider: 'ollama', model: 'qwen3' },
         });
     });
 

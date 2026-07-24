@@ -656,7 +656,7 @@ const ipcSchemas = {
     }).nullable(),
     res: z.object({
       providers: z.array(z.object({
-        // Provider INSTANCE id — what ModelRef.provider / defaultSelection /
+        // Provider INSTANCE id — what ModelRef.provider / assistantModel /
         // refreshProvider reference. One instance per flavor today, so it
         // always equals the flavor key; kept distinct so a future
         // multi-instance setup ("openai-work") is additive.
@@ -748,6 +748,33 @@ const ipcSchemas = {
       success: z.literal(true),
     }),
   },
+  // Current model selections plus credential-FREE provider metadata (the
+  // renderer never needs keys to render pickers or provider cards). Null
+  // assistantModel = not configured yet.
+  'models:getConfig': {
+    req: z.null(),
+    res: z.object({
+      // Configured BYOK provider entries, secrets stripped: enough to
+      // render manage/edit surfaces (masked key indicator, endpoint).
+      providers: z.array(z.object({
+        id: z.string(),
+        flavor: z.string(),
+        baseURL: z.string().optional(),
+        hasApiKey: z.boolean(),
+      })),
+      assistantModel: ModelRef.nullable(),
+      taskModels: z.object({
+        knowledgeGraph: ModelRef.nullable(),
+        meetingNotes: ModelRef.nullable(),
+        liveNoteAgent: ModelRef.nullable(),
+        autoPermissionDecision: ModelRef.nullable(),
+        chatTitle: ModelRef.nullable(),
+        backgroundTask: ModelRef.nullable(),
+        subagent: ModelRef.nullable(),
+      }),
+      deferBackgroundTasks: z.boolean(),
+    }),
+  },
   // Partial merge of model selections into models.json. Omitted keys are
   // untouched; null clears a key (a cleared task override inherits the
   // assistant model again). taskModels merges per-key.
@@ -760,6 +787,8 @@ const ipcSchemas = {
         liveNoteAgent: ModelRef.nullable().optional(),
         autoPermissionDecision: ModelRef.nullable().optional(),
         chatTitle: ModelRef.nullable().optional(),
+        backgroundTask: ModelRef.nullable().optional(),
+        subagent: ModelRef.nullable().optional(),
       }).optional(),
       deferBackgroundTasks: z.boolean().nullable().optional(),
     }),
