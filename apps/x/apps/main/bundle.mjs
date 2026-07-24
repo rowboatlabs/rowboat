@@ -33,7 +33,10 @@ await esbuild.build({
   // relative to their own package dirs), so they stay external and are copied
   // into .package/node_modules below, where require() from dist/main.cjs
   // finds them.
-  external: ['electron', 'node-pty', 'uiohook-napi'],
+  // electron-liquid-glass is external but NOT staged: the quick-ask glass
+  // experiment loads it lazily and degrades to the solid capsule when the
+  // require fails (as it will in packaged builds until it's staged).
+  external: ['electron', 'node-pty', 'uiohook-napi', 'electron-liquid-glass'],
   // Use CommonJS format - many dependencies use require() which doesn't work
   // well with esbuild's ESM shim. CJS handles dynamic requires natively.
   format: 'cjs',

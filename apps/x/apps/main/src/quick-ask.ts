@@ -75,6 +75,7 @@ function createWindow(): BrowserWindow {
   // Zoom factor resets on navigation — apply it once the page is in.
   win.webContents.on('did-finish-load', () => {
     win.webContents.setZoomFactor(SCALE);
+    void applyLiquidGlass(win);
   });
   if (app.isPackaged) {
     void win.loadURL('app://-/index.html#quick-ask');
@@ -99,6 +100,30 @@ function positionOnActiveDisplay(win: BrowserWindow) {
     Math.round(workArea.x + (workArea.width - width) / 2),
     Math.round(workArea.y + workArea.height - height - BOTTOM_MARGIN),
   );
+}
+
+// --- Liquid Glass (experiment) ---
+// Real NSGlassEffectView behind the bar via electron-liquid-glass (macOS
+// 26+; safe no-op elsewhere). Loaded lazily: it's a native module, and its
+// absence (older macOS, packaged builds that don't stage it) must degrade
+// to the solid capsule — the renderer only swaps to a translucent
+// background when told the glass actually applied.
+async function applyLiquidGlass(win: BrowserWindow) {
+  if (process.platform !== 'darwin') return;
+  try {
+    const { default: liquidGlass } = await import('electron-liquid-glass');
+    liquidGlass.addView(win.getNativeWindowHandle(), {
+      // Matches the CSS capsule radius (44 design px × 0.9 zoom).
+      cornerRadius: 40,
+      tintColor: '#1a1b1e33',
+    });
+    await win.webContents.executeJavaScript(
+      "document.documentElement.dataset.liquidGlass = '1'",
+      true,
+    );
+  } catch (err) {
+    console.warn('[quick-ask] liquid glass unavailable, keeping solid capsule:', err);
+  }
 }
 
 export function hideQuickAsk() {

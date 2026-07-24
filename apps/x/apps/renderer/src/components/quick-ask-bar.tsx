@@ -139,10 +139,19 @@ export function QuickAskBar() {
       // No CSS shadow here: it would paint into the window's square corner
       // zones (the only area it isn't clipped) as dark smudges — the native
       // window shadow already provides the depth.
-      className={`flex h-screen w-screen select-none flex-col overflow-hidden border border-white/10 bg-[#1a1b1e]/95 text-white ${
-        expanded ? 'rounded-[28px]' : 'rounded-full'
+      className={`qa-root flex h-screen w-screen select-none flex-col overflow-hidden border border-white/10 bg-[#1a1b1e]/95 text-white ${
+        expanded ? 'rounded-[44px]' : 'rounded-full'
       }`}
     >
+      {/* Liquid Glass experiment: when main confirms the native glass view
+          applied (html[data-liquid-glass]), the solid capsule becomes a
+          translucent skin over it. Plain CSS so no re-render is needed. */}
+      <style>{`
+        html[data-liquid-glass="1"] .qa-root {
+          background-color: rgba(12, 12, 16, 0.18) !important;
+          border-color: rgba(255, 255, 255, 0.18) !important;
+        }
+      `}</style>
       {asked && (
         <div className="flex min-h-0 flex-1 flex-col border-b border-white/5 px-7 pb-3 pt-5">
           <div className="min-h-0 flex-1 overflow-y-auto text-sm leading-relaxed text-neutral-100">
