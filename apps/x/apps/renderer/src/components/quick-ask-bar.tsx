@@ -235,9 +235,12 @@ export function QuickAskBar() {
           </button>
         ) : (
           <span className="flex shrink-0 items-center gap-3">
-            <span className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3.5 py-2 text-sm text-neutral-300">
-              <Command className="h-4 w-4 text-blue-400" />
-              Hold right
+            {/* Same layered construction as the mic orb: gradient base,
+                inset hairline, radial top sheen. */}
+            <span className="relative flex items-center gap-2 overflow-hidden rounded-full bg-gradient-to-b from-white/10 to-white/[0.03] px-3.5 py-2 text-sm text-neutral-200 ring-1 ring-inset ring-white/15">
+              <span className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(120%_80%_at_50%_0%,rgba(255,255,255,0.12),transparent_55%)]" />
+              <Command className="relative h-4 w-4 text-sky-200 drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)]" />
+              <span className="relative">Hold right</span>
             </span>
             <span className="text-sm text-neutral-400">to speak</span>
           </span>
@@ -246,9 +249,10 @@ export function QuickAskBar() {
           type="submit"
           disabled={!draft.trim()}
           aria-label="Send"
-          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/5 text-neutral-200 transition-colors hover:bg-white/10 disabled:opacity-40"
+          className="relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-b from-white/10 to-white/[0.03] text-neutral-100 ring-1 ring-inset ring-white/15 transition-all hover:from-white/[0.16] disabled:opacity-40"
         >
-          <CornerDownLeft className="h-5 w-5" />
+          <span className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(120%_80%_at_50%_0%,rgba(255,255,255,0.12),transparent_55%)]" />
+          <CornerDownLeft className="relative h-5 w-5 drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)]" />
         </button>
       </form>
     </div>
