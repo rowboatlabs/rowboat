@@ -35,6 +35,7 @@ import type { ITurnEventBus } from '@x/core/dist/runtime/turns/event-hub.js';
 import container from '@x/core/dist/di/container.js';
 import { testModelConnection, listModelsForProvider, generateOneShot } from '@x/core/dist/models/models.js';
 import { getModelCatalog } from '@x/core/dist/models/catalog.js';
+import { captureProviderConnected, captureProviderDisconnected } from '@x/core/dist/analytics/model-providers.js';
 import { getDefaultModelAndProvider } from '@x/core/dist/models/defaults.js';
 import { isSignedIn } from '@x/core/dist/account/account.js';
 import type { IModelConfigRepo } from '@x/core/dist/models/repo.js';
@@ -1336,6 +1337,7 @@ export function setupIpcHandlers() {
         // Model lists gate on sign-in state (composer picker, models:list) —
         // push the change so they refresh without polling.
         broadcastToWindows('chatgpt:statusChanged', { signedIn: true });
+        captureProviderConnected('codex');
       }
       return result;
     },
@@ -1347,6 +1349,7 @@ export function setupIpcHandlers() {
       try {
         await signOutChatGPT();
         broadcastToWindows('chatgpt:statusChanged', { signedIn: false });
+        captureProviderDisconnected('codex');
         return { success: true };
       } catch (error) {
         console.error('[ChatGPTAuth] Sign-out failed:', error);

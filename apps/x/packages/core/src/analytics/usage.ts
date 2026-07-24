@@ -21,18 +21,29 @@ export interface CaptureLlmUsageArgs {
 }
 
 export function captureLlmUsage(args: CaptureLlmUsageArgs): void {
-  const usage = args.usage ?? {};
-  const properties: Record<string, unknown> = {
-    use_case: args.useCase,
-    model: args.model,
-    provider: args.provider,
-    input_tokens: usage.inputTokens ?? 0,
-    output_tokens: usage.outputTokens ?? 0,
-    total_tokens: usage.totalTokens ?? (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0),
-  };
-  if (args.subUseCase) properties.sub_use_case = args.subUseCase;
-  if (args.agentName) properties.agent_name = args.agentName;
-  if (usage.cachedInputTokens != null) properties.cached_input_tokens = usage.cachedInputTokens;
-  if (usage.reasoningTokens != null) properties.reasoning_tokens = usage.reasoningTokens;
-  capture('llm_usage', properties);
+  // Fire-and-forget: callers pass the provider INSTANCE id (ModelRef
+  // .provider); analytics reports the FLAVOR — ids may one day be
+  // user-named, and charts must not fracture when "openai-work" appears.
+  // Today ids equal flavor keys, so the fallback is lossless.
+  void (async () => {
+    let provider = args.provider;
+    try {
+      const { flavorForProviderId } = await import('./model-providers.js');
+      provider = await flavorForProviderId(args.provider);
+    } catch { /* keep the raw value */ }
+    const usage = args.usage ?? {};
+    const properties: Record<string, unknown> = {
+      use_case: args.useCase,
+      model: args.model,
+      provider,
+      input_tokens: usage.inputTokens ?? 0,
+      output_tokens: usage.outputTokens ?? 0,
+      total_tokens: usage.totalTokens ?? (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0),
+    };
+    if (args.subUseCase) properties.sub_use_case = args.subUseCase;
+    if (args.agentName) properties.agent_name = args.agentName;
+    if (usage.cachedInputTokens != null) properties.cached_input_tokens = usage.cachedInputTokens;
+    if (usage.reasoningTokens != null) properties.reasoning_tokens = usage.reasoningTokens;
+    capture('llm_usage', properties);
+  })();
 }

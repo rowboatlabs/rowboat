@@ -3,6 +3,7 @@ import { IModelConfigRepo } from "./repo.js";
 import { listCodexModels } from "./codex.js";
 import { getRowboatConfig } from "../config/rowboat.js";
 import { selectInitialModel } from "./initial-selection.js";
+import { capture } from "../analytics/posthog.js";
 
 /**
  * Model-selection hooks for the ChatGPT-subscription (codex) sign-in
@@ -27,6 +28,12 @@ export async function applyCodexInitialSelection(): Promise<void> {
         const model = selectInitialModel("codex", ids, recommendations);
         if (model) {
             await repo.updateConfig({ assistantModel: { provider: "codex", model } });
+            capture("llm_initial_model_selected", {
+                flavor: "codex",
+                model,
+                recommended: model === recommendations?.["codex"],
+                source: "sign_in",
+            });
         }
     } catch (error) {
         // Best-effort: a failed initial selection must never break sign-in.

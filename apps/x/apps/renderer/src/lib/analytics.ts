@@ -336,3 +336,16 @@ export function settingsTabChanged(tab: string) {
 export function onboardingCompleted() {
   posthog.capture('onboarding_completed')
 }
+
+// A provider connect seeded the assistant model (only happens when none was
+// configured). `recommended` = the backend's flavor recommendation was in
+// the provider's live list; false = first-listed fallback. Flavor only —
+// never provider instance ids, keys, or endpoints.
+export function llmInitialModelSelected(props: {
+  flavor: string
+  model: string
+  recommended: boolean
+  source: 'connect' | 'onboarding'
+}) {
+  posthog.capture('llm_initial_model_selected', { ...props })
+}

@@ -3,6 +3,7 @@ import { IModelConfigRepo } from "./repo.js";
 import { listGatewayModels } from "./gateway.js";
 import { getRowboatConfig } from "../config/rowboat.js";
 import { selectInitialModel } from "./initial-selection.js";
+import { capture } from "../analytics/posthog.js";
 
 /**
  * Model-selection hooks for the Rowboat sign-in lifecycle. Signing in is
@@ -28,6 +29,14 @@ export async function applyRowboatInitialSelection(): Promise<void> {
         const model = selectInitialModel("rowboat", ids, recommendations);
         if (model) {
             await repo.updateConfig({ assistantModel: { provider: "rowboat", model } });
+            // Measures recommendation quality: hit = the backend's pick was
+            // in the gateway list; miss = first-listed fallback.
+            capture("llm_initial_model_selected", {
+                flavor: "rowboat",
+                model,
+                recommended: model === recommendations?.["rowboat"],
+                source: "sign_in",
+            });
         }
     } catch (error) {
         // Best-effort: a failed initial selection must never break sign-in.

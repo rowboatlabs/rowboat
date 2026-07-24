@@ -1,6 +1,12 @@
 import { LlmModelConfig, LlmProvider, ModelRef, TaskModels } from "@x/shared/dist/models.js";
 import { WorkDir } from "../config/config.js";
 import { isSignedIn } from "../account/account.js";
+import { capture } from "../analytics/posthog.js";
+import {
+    captureProviderConnected,
+    captureProviderDisconnected,
+    syncModelProviderPersonProperties,
+} from "../analytics/model-providers.js";
 import { migrateModelsConfig } from "./migrate.js";
 import fs from "fs/promises";
 import path from "path";
@@ -81,6 +87,12 @@ export class FSModelConfigRepo implements IModelConfigRepo {
             // record of the old selections once it runs.
             await fs.writeFile(`${this.configPath}.v1.bak`, rawText).catch(() => {});
             await this.write(migrated);
+            // One-shot rollout signal for the v1 → v2 schema migration.
+            capture("models_config_migrated", {
+                had_assistant: Boolean(migrated.assistantModel),
+                materialized_overrides: Object.keys(migrated.taskModels ?? {}).length,
+                provider_count: Object.keys(migrated.providers).length,
+            });
         }
     }
 
@@ -98,6 +110,7 @@ export class FSModelConfigRepo implements IModelConfigRepo {
             throw new Error(`Provider flavor '${provider.flavor}' is auth-derived and cannot be stored in models.json`);
         }
         const config = await this.read();
+        const isNew = !config.providers[id];
         // Merge over an existing entry: replacing a key must not wipe
         // hand-tuned connection prefs (contextLength, reasoningEffort).
         config.providers[id] = LlmProvider.parse({
@@ -105,10 +118,13 @@ export class FSModelConfigRepo implements IModelConfigRepo {
             ...provider,
         });
         await this.write(config);
+        // A brand-new entry is a connect; a key rotation is not.
+        if (isNew) captureProviderConnected(provider.flavor);
     }
 
     async removeProvider(id: string): Promise<void> {
         const config = await this.read();
+        const removed = config.providers[id];
         delete config.providers[id];
         if (config.assistantModel?.provider === id) {
             delete config.assistantModel;
@@ -122,6 +138,7 @@ export class FSModelConfigRepo implements IModelConfigRepo {
             if (Object.keys(config.taskModels).length === 0) delete config.taskModels;
         }
         await this.write(config);
+        if (removed) captureProviderDisconnected(removed.flavor);
     }
 
     async updateConfig(patch: ModelConfigPatch): Promise<void> {
@@ -145,6 +162,10 @@ export class FSModelConfigRepo implements IModelConfigRepo {
             else config.deferBackgroundTasks = patch.deferBackgroundTasks;
         }
         await this.write(config);
+        // The assistant person properties track the config.
+        if (patch.assistantModel !== undefined) {
+            void syncModelProviderPersonProperties();
+        }
     }
 
     private async read(): Promise<Config> {

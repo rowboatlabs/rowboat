@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
+import * as analytics from "@/lib/analytics"
 import { ArrowLeft, CheckCircle2, Loader2, Plus, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -225,6 +226,7 @@ export function ProvidersSection({ dialogOpen, variant = "settings" }: {
         onChatGPTSignIn={chatgpt.signIn}
         hadAssistant={selections.assistantModel !== null}
         modelRecommendations={modelRecommendations}
+        analyticsSource={variant === "onboarding" ? "onboarding" : "connect"}
       />
 
       {manageCard && (
@@ -249,7 +251,7 @@ type AddStep =
   | { kind: "result"; name: string; first: boolean; pickedModel: string | null; modelCount: number | null }
   | { kind: "error"; flavor: ByokFlavor; message: string }
 
-function AddProviderDialog({ open, onOpenChange, connectedIds, isRowboatConnected, chatgptSignedIn, onChatGPTSignIn, hadAssistant, modelRecommendations }: {
+function AddProviderDialog({ open, onOpenChange, connectedIds, isRowboatConnected, chatgptSignedIn, onChatGPTSignIn, hadAssistant, modelRecommendations, analyticsSource }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   connectedIds: string[]
@@ -258,6 +260,7 @@ function AddProviderDialog({ open, onOpenChange, connectedIds, isRowboatConnecte
   onChatGPTSignIn: () => Promise<unknown> | void
   hadAssistant: boolean
   modelRecommendations: Record<string, string> | undefined
+  analyticsSource: 'connect' | 'onboarding'
 }) {
   const [step, setStep] = useState<AddStep>({ kind: "choose" })
   const [apiKey, setApiKey] = useState("")
@@ -392,6 +395,12 @@ function AddProviderDialog({ open, onOpenChange, connectedIds, isRowboatConnecte
       const hasAssistantNow = cfgNow ? cfgNow.assistantModel !== null : hadAssistant
       if (!hasAssistantNow) {
         await window.ipc.invoke("models:updateConfig", { assistantModel: { provider: flavor, model } })
+        analytics.llmInitialModelSelected({
+          flavor,
+          model,
+          recommended: model === modelRecommendations?.[flavor],
+          source: analyticsSource,
+        })
       }
       for (const warning of testRes.warnings ?? []) {
         toast.warning(warning, { duration: 12000 })
