@@ -144,8 +144,11 @@ Gestures (Right ⌘, or the on-screen talk button on either surface):
 - **Chord** (any other key/click while Right ⌘ is down): the press was a
   keyboard shortcut, not a talk gesture — a live hold is cancelled, a
   locked capture swallows the matching release. Escape also cancels.
-- **Pressing while the assistant thinks/speaks is the interrupt gesture**:
-  TTS is silenced, the run aborted, and listening starts immediately.
+- **Pressing while the assistant thinks/speaks silences its AUDIO and
+  starts listening** — but the run and its reply survive: an accidental or
+  empty press never costs the answer (unspoken segments freeze and resume
+  on release). Only a real submitted utterance aborts the previous turn
+  and drops its unspoken backlog. The Stop button remains the hard abort.
 
 Key sources feed one edge-triggered machine in `App.tsx` (`handlePttDown` /
 `handlePttUp` / `handlePttChord`):
@@ -292,9 +295,9 @@ screen frame per message unless the screen changed.
 
 ## Known limitations
 
-- No open-mic barge-in — but pressing PTT while the assistant speaks IS the
-  interrupt gesture (silences TTS, aborts the run, starts listening), so
-  interrupting never requires reaching for the Stop button.
+- No open-mic barge-in — but pressing PTT while the assistant speaks
+  silences it and starts listening (the run is aborted once the new
+  utterance submits), so interrupting never requires the Stop button.
 - Global PTT (Right ⌘ from other apps) needs macOS Input Monitoring; without
   it PTT only works while the app window is focused (DOM fallback).
 - Frame sampling, not video: motion between frames is invisible (the prompt

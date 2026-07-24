@@ -1063,6 +1063,17 @@ function App() {
     if (tts.state === 'idle') setAssistantCaption('')
   }, [tts.state])
 
+  // Push-to-talk: the mic gate is open while 'held' (key or on-screen button
+  // down) or 'locked' (a quick tap toggled hands-free capture). 'idle' means
+  // the assistant hears nothing. Declared here (above the segment player)
+  // because segment consumption freezes while the gate is open.
+  const [pttStatus, setPttStatus] = useState<'idle' | 'held' | 'locked'>('idle')
+  const pttStatusRef = useRef<'idle' | 'held' | 'locked'>('idle')
+  const setPttState = useCallback((s: 'idle' | 'held' | 'locked') => {
+    pttStatusRef.current = s
+    setPttStatus(s)
+  }, [])
+
   // Speak newly completed <voice> blocks from the new runtime's live stream
   // (parity with the legacy text-delta voice extraction below). The store
   // accumulates completed blocks in chatState.voiceSegments; we speak only
@@ -1086,11 +1097,13 @@ function App() {
       return
     }
     while (spokenVoiceRef.current.count < voiceSegments.length) {
+      // The user is mid-capture (PTT held/locked): speaking now would play
+      // TTS into their open mic. FREEZE consumption (no skip) — if they
+      // release without submitting, the effect re-runs (pttStatus dep) and
+      // the reply resumes; a real submit drops the backlog instead.
+      if (pttStatusRef.current !== 'idle') break
       const segment = voiceSegments[spokenVoiceRef.current.count]
       spokenVoiceRef.current.count += 1
-      // The user is mid-capture (PTT held/locked): speaking now would play
-      // TTS straight into their open mic. They interrupted — drop it.
-      if (pttStatusRef.current !== 'idle') continue
       if (ttsEnabledRef.current) {
         const marks = callTurnMarksRef.current
         if (marks && marks.speak === undefined) marks.speak = performance.now()
@@ -1098,7 +1111,7 @@ function App() {
         setAssistantCaption(segment)
       }
     }
-  }, [voiceSegments, runId])
+  }, [voiceSegments, runId, pttStatus])
 
   // Consistency net: 'full' voice output relies on the model wrapping its
   // reply in <voice> tags — when it doesn't, the turn used to end in total
@@ -1180,15 +1193,6 @@ function App() {
   const [micMuted, setMicMuted] = useState(false)
   const micMutedRef = useRef(false)
   micMutedRef.current = micMuted
-  // Push-to-talk: the mic gate is open while 'held' (key or on-screen button
-  // down) or 'locked' (a quick tap toggled hands-free capture). 'idle' means
-  // the assistant hears nothing.
-  const [pttStatus, setPttStatus] = useState<'idle' | 'held' | 'locked'>('idle')
-  const pttStatusRef = useRef<'idle' | 'held' | 'locked'>('idle')
-  const setPttState = useCallback((s: 'idle' | 'held' | 'locked') => {
-    pttStatusRef.current = s
-    setPttStatus(s)
-  }, [])
   // Practice preset: adds the coaching persona to the system prompt.
   const [practiceMode, setPracticeMode] = useState(false)
   const practiceModeRef = useRef(false)
@@ -1509,14 +1513,17 @@ function App() {
     pttChordedRef.current = false
     pttDownAtRef.current = performance.now()
     if (pttStatusRef.current === 'idle') {
-      // Pressing to talk while the assistant is thinking/speaking is the
-      // interrupt gesture: silence it and listen.
-      handleInterruptAssistant()
+      // Silence the assistant's AUDIO the moment the user starts talking —
+      // but do NOT abort the run or discard its reply: an accidental or
+      // empty press must never cost the answer. The run is stopped only
+      // when a real utterance actually submits (handlePromptSubmit).
+      ttsRef.current.cancel()
+      setAssistantCaption('')
       voiceRef.current.pttBegin()
       setPttState('held')
     }
     // 'locked': the mic is already open — the release decides what happens.
-  }, [pttEdgeIsEcho, handleInterruptAssistant, setPttState])
+  }, [pttEdgeIsEcho, setPttState])
 
   const handlePttUp = useCallback(() => {
     if (pttStatusRef.current === 'idle') return
@@ -3270,9 +3277,16 @@ function App() {
       marks.submit = performance.now()
     }
 
-    // Bookkeeping for the fallback-speech net: if this call turn ends with
-    // no <voice> segment spoken, the reply text itself gets read aloud.
     if (inCallRef.current) {
+      // A new question supersedes whatever of the previous reply was still
+      // unspoken — silence it and drop the frozen backlog so it never plays
+      // over the new turn.
+      ttsRef.current.cancel()
+      if (voiceSegmentsRef.current) {
+        spokenVoiceRef.current.count = voiceSegmentsRef.current.length
+      }
+      // Bookkeeping for the fallback-speech net: if this call turn ends with
+      // no <voice> segment spoken, the reply text itself gets read aloud.
       callTurnVoiceRef.current = {
         pending: true,
         segmentsAtSubmit: voiceSegmentsRef.current?.length ?? 0,
@@ -3373,6 +3387,19 @@ function App() {
         middlePane: middlePane ?? { kind: 'empty' as const },
       })
 
+      // One retry: an in-call submit can land while the previous turn's
+      // abort hasn't fully settled in the runtime — losing the message (and
+      // its spoken answer) over that race is much worse than a short delay.
+      const sendSessionMessage = async (payload: Parameters<typeof window.ipc.invoke<'sessions:sendMessage'>>[1]) => {
+        try {
+          await window.ipc.invoke('sessions:sendMessage', payload)
+        } catch (err) {
+          console.error('[chat] sendMessage failed, retrying once:', err)
+          await new Promise((resolve) => setTimeout(resolve, 600))
+          await window.ipc.invoke('sessions:sendMessage', payload)
+        }
+      }
+
       if (hasAttachments || hasMentions || videoFrames.length > 0) {
         type ContentPart =
           | { type: 'text'; text: string }
@@ -3433,7 +3460,7 @@ function App() {
         }
 
         const middlePaneContext = await buildMiddlePaneContext()
-        await window.ipc.invoke('sessions:sendMessage', {
+        await sendSessionMessage({
           sessionId: currentRunId,
           input: {
             role: 'user',
@@ -3449,7 +3476,7 @@ function App() {
         })
       } else {
         const middlePaneContext = await buildMiddlePaneContext()
-        await window.ipc.invoke('sessions:sendMessage', {
+        await sendSessionMessage({
           sessionId: currentRunId,
           input: {
             role: 'user',
