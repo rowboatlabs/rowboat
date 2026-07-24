@@ -239,8 +239,8 @@ export function QuickAskBar() {
                 inset hairline, radial top sheen. */}
             <span className="relative flex items-center gap-2 overflow-hidden rounded-full bg-gradient-to-b from-white/10 to-white/[0.03] px-3.5 py-2 text-sm text-neutral-200 ring-1 ring-inset ring-white/15">
               <span className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(120%_80%_at_50%_0%,rgba(255,255,255,0.12),transparent_55%)]" />
-              <Command className="relative h-4 w-4 text-sky-200 drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)]" />
               <span className="relative">Hold right</span>
+              <Command className="relative h-4 w-4 text-sky-200 drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)]" />
             </span>
             <span className="text-sm text-neutral-400">to speak</span>
           </span>
