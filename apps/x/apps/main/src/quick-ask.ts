@@ -13,9 +13,9 @@ import { app, BrowserWindow, globalShortcut, screen } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const BAR_WIDTH = 640;
-const BAR_HEIGHT = 88;
-const MAX_HEIGHT = 480;
+const BAR_WIDTH = 580;
+const BAR_HEIGHT = 76;
+const MAX_HEIGHT = 460;
 
 let quickAskWin: BrowserWindow | null = null;
 

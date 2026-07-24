@@ -7,8 +7,8 @@ import { useVoiceMode } from '@/hooks/useVoiceMode'
 // Window heights the bar asks main for: just the input row, or input +
 // answer area. Fixed steps (not content-measured) so the window never
 // feedback-loops with its own resize.
-const BAR_HEIGHT = 88
-const ANSWER_HEIGHT = 380
+const BAR_HEIGHT = 76
+const ANSWER_HEIGHT = 360
 
 /**
  * Content of the quick-ask window (global ⌥⇧Space — see main's quick-ask.ts).
@@ -140,11 +140,11 @@ export function QuickAskBar() {
       // zones (the only area it isn't clipped) as dark smudges — the native
       // window shadow already provides the depth.
       className={`flex h-screen w-screen select-none flex-col overflow-hidden border border-white/10 bg-[#1a1b1e]/95 text-white ${
-        expanded ? 'rounded-[28px]' : 'rounded-full'
+        expanded ? 'rounded-[24px]' : 'rounded-full'
       }`}
     >
       {asked && (
-        <div className="flex min-h-0 flex-1 flex-col border-b border-white/5 px-7 pb-3 pt-5">
+        <div className="flex min-h-0 flex-1 flex-col border-b border-white/5 px-6 pb-3 pt-4">
           <div className="mb-2 shrink-0 truncate text-xs text-neutral-500">{asked}</div>
           <div className="min-h-0 flex-1 overflow-y-auto text-sm leading-relaxed text-neutral-100">
             {answer?.text ? (
@@ -165,7 +165,7 @@ export function QuickAskBar() {
       )}
 
       <form
-        className="flex h-[88px] shrink-0 items-center gap-4 pl-4 pr-4"
+        className="flex h-[76px] shrink-0 items-center gap-3 pl-3.5 pr-3.5"
         onSubmit={(e) => {
           e.preventDefault()
           submit(draft)
@@ -173,13 +173,13 @@ export function QuickAskBar() {
       >
         {/* Mic orb: blue accent with a soft glow; green pulse while live. */}
         <span
-          className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full transition-colors ${
+          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors ${
             recording
               ? 'animate-pulse bg-green-500/20 shadow-[0_0_24px_rgba(34,197,94,0.35)] ring-1 ring-green-400/40'
               : 'bg-blue-500/15 shadow-[0_0_24px_rgba(59,130,246,0.3)] ring-1 ring-blue-400/30'
           }`}
         >
-          <Mic className={`h-5 w-5 ${recording ? 'text-green-400' : 'text-blue-400'}`} />
+          <Mic className={`h-4 w-4 ${recording ? 'text-green-400' : 'text-blue-400'}`} />
         </span>
         <input
           ref={inputRef}
@@ -187,7 +187,7 @@ export function QuickAskBar() {
           value={inputValue}
           onChange={(e) => setDraft(e.target.value)}
           placeholder={recording ? 'Listening…' : 'Ask Rowboat anything…'}
-          className="h-full min-w-0 flex-1 bg-transparent text-xl font-light outline-none placeholder:text-neutral-500"
+          className="h-full min-w-0 flex-1 bg-transparent text-lg font-light outline-none placeholder:text-neutral-500"
         />
         {micDenied ? (
           <button
@@ -199,20 +199,20 @@ export function QuickAskBar() {
           </button>
         ) : (
           <span className="flex shrink-0 items-center gap-3">
-            <span className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3.5 py-2 text-sm text-neutral-300">
-              <Command className="h-4 w-4 text-blue-400" />
+            <span className="flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-[13px] text-neutral-300">
+              <Command className="h-3.5 w-3.5 text-blue-400" />
               Hold right
             </span>
-            <span className="text-sm text-neutral-400">to speak</span>
+            <span className="text-[13px] text-neutral-400">to speak</span>
           </span>
         )}
         <button
           type="submit"
           disabled={!draft.trim()}
           aria-label="Send"
-          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/5 text-neutral-200 transition-colors hover:bg-white/10 disabled:opacity-40"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/5 text-neutral-200 transition-colors hover:bg-white/10 disabled:opacity-40"
         >
-          <CornerDownLeft className="h-5 w-5" />
+          <CornerDownLeft className="h-4 w-4" />
         </button>
       </form>
     </div>
