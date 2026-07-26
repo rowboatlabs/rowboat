@@ -26,6 +26,7 @@ const execFileAsync = promisify(execFile);
 // Active powerSaveBlocker id while Caffeinate is toggled on; null when off.
 let caffeinateBlockerId: number | null = null;
 
+import { initPtt, setPttActive, getPttStatus, retryPttHook, openInputMonitoringSettings } from './ptt.js';
 import { RunEvent } from '@x/shared/dist/runs.js';
 import { ServiceEvent } from '@x/shared/dist/service-events.js';
 import type { SessionBusEvent } from '@x/shared/dist/sessions.js';
@@ -436,12 +437,20 @@ const activeTtsStreams = new Map<string, AbortController>();
 let videoPopoutWin: BrowserWindow | null = null;
 let lastVideoPopoutState: {
   ttsState: 'idle' | 'synthesizing' | 'speaking';
-  status: 'listening' | 'thinking' | 'speaking' | null;
+  status: 'idle' | 'listening' | 'thinking' | 'speaking' | null;
   cameraOn: boolean;
   micMuted: boolean;
   screenSharing: boolean;
   interimText: string | null;
+  pttLocked: boolean;
+  responseText: string | null;
+  questionText: string | null;
 } | null = null;
+
+// Popout window height bounds: the base pill, and the ceiling with the
+// response panel expanded (renderer-driven via video:popoutResize).
+const POPOUT_BASE_HEIGHT = 218;
+const POPOUT_MAX_HEIGHT = 500;
 
 // Match only real app windows — getAllWindows() can also contain the popout
 // itself and hidden utility windows (e.g. PDF-export renderers), which must
@@ -454,6 +463,13 @@ function findMainAppWindow(): BrowserWindow | undefined {
     return isAppWindow && !url.includes('#video-popout');
   });
 }
+
+// Global PTT key events go to the app window (it owns the PTT state
+// machine) — the popout only mirrors state pushed back to it.
+initPtt(() => {
+  const main = findMainAppWindow();
+  return main ? [main] : [];
+});
 
 /**
  * Register all IPC handlers with type safety and runtime validation
@@ -930,7 +946,40 @@ export function setupIpcHandlers() {
     'voice:setCallActive': async (_event, args) => {
       voiceCallActive = args.active;
       updateSelfCaptureState();
+      // The global PTT key hook runs only while a call needs it.
+      void setPttActive('call', args.active);
       return { success: true as const };
+    },
+    'ptt:getStatus': async () => {
+      return getPttStatus();
+    },
+    'ptt:retryHook': async () => {
+      return retryPttHook();
+    },
+    'ptt:openInputMonitoringSettings': async () => {
+      return openInputMonitoringSettings();
+    },
+    'app:relaunch': async () => {
+      app.relaunch();
+      app.exit(0);
+      return {};
+    },
+    'app:openPrivacySettings': async (_event, args) => {
+      if (process.platform !== 'darwin') return { success: false };
+      const anchors = {
+        microphone: 'Privacy_Microphone',
+        camera: 'Privacy_Camera',
+        'screen-recording': 'Privacy_ScreenCapture',
+        'input-monitoring': 'Privacy_ListenEvent',
+      } as const;
+      try {
+        await shell.openExternal(
+          `x-apple.systempreferences:com.apple.preference.security?${anchors[args.section]}`,
+        );
+        return { success: true };
+      } catch {
+        return { success: false };
+      }
     },
     'meeting:notifyNotesReady': async (_event, args) => {
       // Granola-style re-entry point: the note refreshed in place, but the
@@ -2345,7 +2394,7 @@ export function setupIpcHandlers() {
 
       const workArea = screen.getPrimaryDisplay().workArea;
       const width = 340;
-      const height = 184;
+      const height = POPOUT_BASE_HEIGHT;
       const ipcDir = path.dirname(fileURLToPath(import.meta.url));
       const preloadPath = app.isPackaged
         ? path.join(ipcDir, '../preload/dist/preload.js')
@@ -2357,6 +2406,16 @@ export function setupIpcHandlers() {
         y: workArea.y + 24,
         frame: false,
         resizable: false,
+        // Never let macOS fullscreen/tile the pill: creating a window while
+        // the app window is in a native-fullscreen Space can otherwise open
+        // it AS a fullscreen window (the pill swallowing the whole screen).
+        fullscreenable: false,
+        minimizable: false,
+        maximizable: false,
+        // NSPanel (macOS): auxiliary windows may join other apps' fullscreen
+        // Spaces — a plain window can't, which made the pill vanish whenever
+        // the user's current app was fullscreen.
+        ...(process.platform === 'darwin' ? { type: 'panel' as const } : {}),
         alwaysOnTop: true,
         skipTaskbar: true,
         show: false,
@@ -2369,13 +2428,12 @@ export function setupIpcHandlers() {
           preload: preloadPath,
         },
       });
-      // Float above other apps on every workspace. Deliberately NOT
-      // `visibleOnFullScreen: true`: on macOS that flag hides the app's Dock
-      // icon for as long as such a window exists (the app becomes an
-      // "agent" app), which reads as Rowboat having vanished. The trade-off
-      // is the popout won't hover over other apps' fullscreen Spaces.
+      // Float above other apps on every workspace, INCLUDING fullscreen
+      // Spaces. `skipTransformProcessType` keeps the Dock icon: without it,
+      // `visibleOnFullScreen` turns the app into a macOS "agent" app for as
+      // long as the window exists (reads as Rowboat having vanished).
       win.setAlwaysOnTop(true, 'floating');
-      win.setVisibleOnAllWorkspaces(true);
+      win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
       win.webContents.once('did-finish-load', () => {
         if (lastVideoPopoutState) {
           win.webContents.send('video:popout-state', lastVideoPopoutState);
@@ -2399,6 +2457,14 @@ export function setupIpcHandlers() {
       lastVideoPopoutState = args;
       if (videoPopoutWin && !videoPopoutWin.isDestroyed()) {
         videoPopoutWin.webContents.send('video:popout-state', args);
+      }
+      return {};
+    },
+    'video:popoutResize': async (_event, args) => {
+      if (videoPopoutWin && !videoPopoutWin.isDestroyed()) {
+        const clamped = Math.max(POPOUT_BASE_HEIGHT, Math.min(POPOUT_MAX_HEIGHT, Math.round(args.height)));
+        const [width] = videoPopoutWin.getSize();
+        videoPopoutWin.setSize(width, clamped);
       }
       return {};
     },

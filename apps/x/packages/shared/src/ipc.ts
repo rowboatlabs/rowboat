@@ -1023,7 +1023,8 @@ const ipcSchemas = {
     res: z.null(),
   },
   // Renderer → main: assistant voice/video call holds the mic — suppresses
-  // ambient meeting detection (it would otherwise see our own capture).
+  // ambient meeting detection (it would otherwise see our own capture) and
+  // runs the global push-to-talk key hook for the duration of the call.
   'voice:setCallActive': {
     req: z.object({
       active: z.boolean(),
@@ -1031,6 +1032,52 @@ const ipcSchemas = {
     res: z.object({
       success: z.literal(true),
     }),
+  },
+  // --- Global push-to-talk (Right ⌘) ---
+  // Push channel: main → app window, a system-wide PTT key transition.
+  // 'chord' = another key/click while Right ⌘ was held (it's being used as a
+  // modifier, not the talk key) — the renderer cancels the capture.
+  'voice:ptt-key': {
+    req: z.object({
+      type: z.enum(['down', 'up', 'chord']),
+    }),
+    res: z.null(),
+  },
+  // Health of the global key hook. `eventsSeen` false while `running` means
+  // macOS Input Monitoring permission hasn't taken effect — the renderer
+  // shows the permission dialog instead of failing silently.
+  'ptt:getStatus': {
+    req: z.null(),
+    res: z.object({
+      supported: z.boolean(),
+      running: z.boolean(),
+      eventsSeen: z.boolean(),
+    }),
+  },
+  // Recreate the event tap after the user grants Input Monitoring (a tap
+  // created before the grant stays dead forever).
+  'ptt:retryHook': {
+    req: z.null(),
+    res: z.object({
+      running: z.boolean(),
+    }),
+  },
+  'ptt:openInputMonitoringSettings': {
+    req: z.null(),
+    res: z.object({ success: z.boolean() }),
+  },
+  // Deep-link to a macOS Privacy & Security pane (permission dialogs).
+  'app:openPrivacySettings': {
+    req: z.object({
+      section: z.enum(['microphone', 'camera', 'screen-recording', 'input-monitoring']),
+    }),
+    res: z.object({ success: z.boolean() }),
+  },
+  // Relaunch the app — macOS requires it for a fresh Screen Recording grant
+  // to take effect.
+  'app:relaunch': {
+    req: z.null(),
+    res: z.object({}),
   },
   // --- Ambient meeting detection popup (own always-on-top window) ---
   // Main → popup: the detection to display.
@@ -2036,14 +2083,26 @@ const ipcSchemas = {
   'video:popoutState': {
     req: z.object({
       ttsState: z.enum(['idle', 'synthesizing', 'speaking']),
-      status: z.enum(['listening', 'thinking', 'speaking']).nullable(),
+      status: z.enum(['idle', 'listening', 'thinking', 'speaking']).nullable(),
       cameraOn: z.boolean(),
       // User mute: mic audio and frame capture are both paused.
       micMuted: z.boolean(),
       screenSharing: z.boolean(),
       // Live transcript of the in-progress utterance.
       interimText: z.string().nullable(),
+      // A quick ⌘ tap locked hands-free capture (until the next tap).
+      pttLocked: z.boolean(),
+      // Latest assistant reply of this call (streaming) — readable in the
+      // pill's response panel without switching back to the app.
+      responseText: z.string().nullable(),
+      questionText: z.string().nullable(),
     }),
+    res: z.object({}),
+  },
+  // Popout → main: grow/shrink the pill window as the response panel
+  // opens/closes (height clamped in main).
+  'video:popoutResize': {
+    req: z.object({ height: z.number() }),
     res: z.object({}),
   },
   // Popout window → fetch the latest cached call state on mount. The
@@ -2056,21 +2115,27 @@ const ipcSchemas = {
       state: z
         .object({
           ttsState: z.enum(['idle', 'synthesizing', 'speaking']),
-          status: z.enum(['listening', 'thinking', 'speaking']).nullable(),
+          status: z.enum(['idle', 'listening', 'thinking', 'speaking']).nullable(),
           cameraOn: z.boolean(),
           micMuted: z.boolean(),
           screenSharing: z.boolean(),
           interimText: z.string().nullable(),
+          pttLocked: z.boolean(),
+          responseText: z.string().nullable(),
+          questionText: z.string().nullable(),
         })
         .nullable(),
     }),
   },
   // Popout control bar → main process → relayed to the app window, which
   // executes the action on the live call. 'expand' additionally focuses the
-  // main app window (handled in the main process).
+  // main app window (handled in the main process). 'ptt-down'/'ptt-up' are
+  // the on-screen talk button's press/release edges; 'send-text' carries a
+  // typed message from the popout's input.
   'video:popoutAction': {
     req: z.object({
-      action: z.enum(['toggle-mic', 'toggle-camera', 'toggle-share', 'stop-speaking', 'end-call', 'expand']),
+      action: z.enum(['toggle-mic', 'toggle-camera', 'toggle-share', 'stop-speaking', 'ptt-down', 'ptt-up', 'send-text', 'end-call', 'expand']),
+      text: z.string().optional(),
     }),
     res: z.object({}),
   },
@@ -2078,18 +2143,22 @@ const ipcSchemas = {
   'video:popout-state': {
     req: z.object({
       ttsState: z.enum(['idle', 'synthesizing', 'speaking']),
-      status: z.enum(['listening', 'thinking', 'speaking']).nullable(),
+      status: z.enum(['idle', 'listening', 'thinking', 'speaking']).nullable(),
       cameraOn: z.boolean(),
       micMuted: z.boolean(),
       screenSharing: z.boolean(),
       interimText: z.string().nullable(),
+      pttLocked: z.boolean(),
+      responseText: z.string().nullable(),
+      questionText: z.string().nullable(),
     }),
     res: z.null(),
   },
   // Push channel: main → app window with a popout control-bar action.
   'video:popout-action': {
     req: z.object({
-      action: z.enum(['toggle-mic', 'toggle-camera', 'toggle-share', 'stop-speaking', 'end-call', 'expand']),
+      action: z.enum(['toggle-mic', 'toggle-camera', 'toggle-share', 'stop-speaking', 'ptt-down', 'ptt-up', 'send-text', 'end-call', 'expand']),
+      text: z.string().optional(),
     }),
     res: z.null(),
   },

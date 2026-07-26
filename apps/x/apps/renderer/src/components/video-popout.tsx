@@ -1,19 +1,32 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Maximize2, Mic, MicOff, MonitorUp, PhoneOff, Square, User, Video, VideoOff } from 'lucide-react'
+import { ChevronDown, ChevronUp, Maximize2, Mic, MicOff, MonitorUp, PhoneOff, SendHorizontal, Square, User, Video, VideoOff } from 'lucide-react'
 
 import { TalkingHead } from '@/components/talking-head'
 
 type PopoutState = {
   ttsState: 'idle' | 'synthesizing' | 'speaking'
-  status: 'listening' | 'thinking' | 'speaking' | null
+  status: 'idle' | 'listening' | 'thinking' | 'speaking' | null
   cameraOn: boolean
   /** User mute = full input pause: no mic audio AND no frame capture. */
   micMuted: boolean
   screenSharing: boolean
   interimText: string | null
+  /** A quick ⌘ tap locked hands-free capture (until the next tap). */
+  pttLocked: boolean
+  /** Latest assistant reply of this call (streams while generating). */
+  responseText: string | null
+  /** The user message that reply answers. */
+  questionText: string | null
 }
 
+// Window heights the pill asks main for: the base pill, and with the
+// response panel expanded. Fixed steps so the window never feedback-loops
+// with its own resize.
+const BASE_HEIGHT = 218
+const RESPONSE_HEIGHT = 400
+
 const STATUS_DISPLAY: Record<NonNullable<PopoutState['status']>, { label: string; dotClass: string }> = {
+  idle: { label: 'Hold right ⌘ to talk', dotClass: 'bg-neutral-500' },
   listening: { label: 'Listening', dotClass: 'bg-green-500 animate-pulse' },
   thinking: { label: 'Thinking…', dotClass: 'bg-amber-400' },
   speaking: { label: 'Speaking', dotClass: 'bg-sky-400 animate-pulse' },
@@ -36,8 +49,28 @@ export function VideoPopout() {
   // Camera defaults OFF: guessing "on" would flash the user's video for a
   // beat before the real state arrives — which reads as a bug. The true
   // state is fetched immediately below.
-  const [state, setState] = useState<PopoutState>({ ttsState: 'idle', status: null, cameraOn: false, micMuted: false, screenSharing: false, interimText: null })
+  const [state, setState] = useState<PopoutState>({ ttsState: 'idle', status: null, cameraOn: false, micMuted: false, screenSharing: false, interimText: null, pttLocked: false, responseText: null, questionText: null })
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  const [draft, setDraft] = useState('')
+  // Response panel: auto-opens when a new turn starts generating, user can
+  // fold it away. The reply is also spoken — this is the readable half.
+  const [responseOpen, setResponseOpen] = useState(true)
+  const responseRef = useRef<HTMLDivElement | null>(null)
+
+  // A new turn re-opens the panel and rewinds to the top — the reply reads
+  // from its beginning, not wherever the last one left off.
+  useEffect(() => {
+    if (state.status === 'thinking') {
+      setResponseOpen(true)
+      if (responseRef.current) responseRef.current.scrollTop = 0
+    }
+  }, [state.status])
+
+  // Grow/shrink the window with the panel.
+  const showResponse = Boolean(state.responseText || state.questionText) && responseOpen
+  useEffect(() => {
+    void window.ipc.invoke('video:popoutResize', { height: showResponse ? RESPONSE_HEIGHT : BASE_HEIGHT }).catch(() => {})
+  }, [showResponse])
 
   useEffect(() => {
     const cleanup = window.ipc.on('video:popout-state', (next) => setState(next))
@@ -82,9 +115,16 @@ export function VideoPopout() {
   // so the mascot still animates while the assistant speaks in the main window.
   const getLevel = useCallback(() => 0.45 + 0.35 * Math.sin(performance.now() / 90), [])
 
-  const sendAction = useCallback((action: 'toggle-mic' | 'toggle-camera' | 'toggle-share' | 'stop-speaking' | 'end-call' | 'expand') => {
+  const sendAction = useCallback((action: 'toggle-mic' | 'toggle-camera' | 'toggle-share' | 'stop-speaking' | 'ptt-down' | 'ptt-up' | 'end-call' | 'expand') => {
     void window.ipc.invoke('video:popoutAction', { action }).catch(() => {})
   }, [])
+
+  const sendText = useCallback(() => {
+    const text = draft.trim()
+    if (!text) return
+    setDraft('')
+    void window.ipc.invoke('video:popoutAction', { action: 'send-text', text }).catch(() => {})
+  }, [draft])
 
   const statusDisplay = state.status ? STATUS_DISPLAY[state.status] : null
 
@@ -136,11 +176,17 @@ export function VideoPopout() {
           </span>
           {statusDisplay && (
             <span className="absolute right-1.5 top-1.5 flex items-center gap-1 rounded-full bg-black/50 px-1.5 py-0.5 text-[10px] font-medium text-white">
-              {/* Muted overrides "Listening" — the green pulse would be a lie. */}
-              {state.micMuted && state.status === 'listening' ? (
+              {/* Muted overrides the listening/PTT states — the green pulse
+                  (or the "hold to talk" invite) would be a lie. */}
+              {state.micMuted && (state.status === 'listening' || state.status === 'idle') ? (
                 <>
                   <span className="block h-1.5 w-1.5 rounded-full bg-red-500" />
                   Muted
+                </>
+              ) : state.pttLocked ? (
+                <>
+                  <span className="block h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
+                  Hands-free
                 </>
               ) : (
                 <>
@@ -176,6 +222,29 @@ export function VideoPopout() {
 
       {/* Control bar — actions execute in the main app window */}
       <div className="flex h-7 shrink-0 items-center justify-center gap-2" style={noDragRegion}>
+        {/* Push-to-talk: hold to talk, quick tap to lock hands-free —
+            mirrors the Right ⌘ key. Pointer capture keeps the release edge
+            even if the cursor slides off mid-hold. */}
+        <button
+          type="button"
+          onPointerDown={(e) => {
+            e.currentTarget.setPointerCapture(e.pointerId)
+            sendAction('ptt-down')
+          }}
+          onPointerUp={() => sendAction('ptt-up')}
+          onPointerCancel={() => sendAction('ptt-up')}
+          disabled={state.micMuted}
+          className={`flex h-6 items-center gap-1 rounded-full px-2 text-[10px] font-medium transition-colors select-none ${
+            state.status === 'listening' || state.pttLocked
+              ? 'bg-green-600 text-white hover:bg-green-500'
+              : 'bg-neutral-700 text-white/90 hover:bg-neutral-600'
+          } ${state.micMuted ? 'opacity-50' : ''}`}
+          aria-label="Hold to talk — or hold the right ⌘ key from any app"
+          title="Hold to talk (tap to go hands-free) — or hold the right ⌘ key from any app"
+        >
+          <Mic className="h-3 w-3" />
+          {state.pttLocked ? 'Tap to send' : state.status === 'listening' ? 'Release to send' : 'Hold to talk'}
+        </button>
         <button
           type="button"
           onClick={() => sendAction('toggle-mic')}
@@ -234,6 +303,67 @@ export function VideoPopout() {
           <Maximize2 className="h-3.5 w-3.5" />
         </button>
       </div>
+
+      {/* The current exchange, readable in the pill ("drop-down"): the
+          question plus its streaming reply. Auto-opens each turn,
+          collapsible, sits between the controls and the input. */}
+      {(state.responseText || state.questionText) && (
+        <div className="flex min-h-0 shrink-0 flex-col gap-1" style={noDragRegion}>
+          <button
+            type="button"
+            onClick={() => setResponseOpen((v) => !v)}
+            className="flex items-center gap-1 self-start text-[10px] font-medium text-neutral-400 transition-colors hover:text-white"
+          >
+            {responseOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+            {responseOpen ? 'Hide response' : 'Show response'}
+          </button>
+          {responseOpen && (
+            <div
+              ref={responseRef}
+              className="h-[150px] overflow-y-auto rounded-md bg-neutral-800 px-2 py-1.5 text-[11px] leading-relaxed"
+            >
+              {state.questionText && (
+                <div className="mb-1.5 whitespace-pre-wrap border-l-2 border-sky-500/70 pl-1.5 text-neutral-400">
+                  {state.questionText}
+                </div>
+              )}
+              <div className="whitespace-pre-wrap text-neutral-100">
+                {state.responseText}
+                {state.status === 'thinking' && <span className="animate-pulse">▍</span>}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Typed input — lands in the chat exactly like a composer message
+          (current frames ride along), so the user can ask without speaking
+          or switching back to the app. */}
+      <form
+        className="flex h-7 shrink-0 items-center gap-1"
+        style={noDragRegion}
+        onSubmit={(e) => {
+          e.preventDefault()
+          sendText()
+        }}
+      >
+        <input
+          type="text"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder="Type a message…"
+          className="h-full min-w-0 flex-1 rounded-md bg-neutral-800 px-2 text-[11px] text-white placeholder:text-neutral-500 outline-none focus:ring-1 focus:ring-sky-500"
+        />
+        <button
+          type="submit"
+          disabled={!draft.trim()}
+          className="flex h-full w-7 items-center justify-center rounded-md bg-sky-600 text-white transition-colors hover:bg-sky-500 disabled:opacity-40"
+          aria-label="Send"
+          title="Send"
+        >
+          <SendHorizontal className="h-3.5 w-3.5" />
+        </button>
+      </form>
     </div>
   )
 }
