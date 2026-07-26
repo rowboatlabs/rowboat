@@ -3,6 +3,49 @@
  * in knowledge notes and email files.
  */
 
+export type LinkedGoogleDocMeta = {
+  id: string
+  title: string
+  url?: string
+  syncedAt?: string
+}
+
+/**
+ * Pull the `google_doc:` block out of a raw frontmatter string.
+ *
+ * Returns null unless both `id` and `title` are present — a partial block means
+ * the note is not usably linked. Moved verbatim from App.tsx.
+ */
+export const parseLinkedGoogleDocFrontmatter = (raw: string | null | undefined): LinkedGoogleDocMeta | null => {
+  if (!raw?.includes('google_doc:')) return null
+  const doc: Partial<LinkedGoogleDocMeta> = {}
+  let inGoogleDoc = false
+  for (const line of raw.split('\n')) {
+    if (line.trim() === '---') {
+      inGoogleDoc = false
+      continue
+    }
+    const topLevel = line.match(/^([A-Za-z_][\w-]*):\s*.*$/)
+    if (topLevel) {
+      inGoogleDoc = topLevel[1] === 'google_doc'
+      continue
+    }
+    if (!inGoogleDoc) continue
+    const nested = line.match(/^\s+([A-Za-z_][\w-]*):\s*(.*)$/)
+    if (!nested) continue
+    const key = nested[1] as keyof LinkedGoogleDocMeta
+    if (!['id', 'title', 'url', 'syncedAt'].includes(key)) continue
+    let value = nested[2].trim()
+    try {
+      value = JSON.parse(value)
+    } catch {
+      value = value.replace(/^['"]|['"]$/g, '')
+    }
+    doc[key] = value
+  }
+  return doc.id && doc.title ? doc as LinkedGoogleDocMeta : null
+}
+
 /** Split content into raw frontmatter block and body text. */
 export function splitFrontmatter(content: string): { raw: string | null; body: string } {
   if (!content.startsWith('---')) {
