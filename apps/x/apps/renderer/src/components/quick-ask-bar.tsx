@@ -39,6 +39,10 @@ export function QuickAskBar() {
   // corner areas OUTSIDE the border-radius — white spurs at every corner.
   // Clear every layer so only the rounded capsule is visible.
   useEffect(() => {
+    // The bar window skips the app's ThemeProvider, so theme CSS variables
+    // default to LIGHT — inline code rendered as white pills with white
+    // text. The bar is permanently dark; claim the dark tokens.
+    document.documentElement.classList.add('dark')
     document.documentElement.style.background = 'transparent'
     document.body.style.background = 'transparent'
     // The document must never scroll: during window resize transitions the
@@ -191,9 +195,9 @@ export function QuickAskBar() {
                 type="button"
                 onClick={openInApp}
                 aria-label="Open in Rowboat"
-                className="absolute right-4 top-3 z-10 text-neutral-400 transition-colors hover:text-white"
+                className="absolute right-5 top-4 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-white/[0.04] text-neutral-400 ring-1 ring-inset ring-white/10 transition-colors hover:bg-white/10 hover:text-white"
               >
-                <ArrowUpRight className="h-4 w-4" />
+                <ArrowUpRight className="h-3.5 w-3.5" />
               </button>
             </TooltipTrigger>
             <TooltipContent side="bottom">Open in Rowboat</TooltipContent>
@@ -204,7 +208,7 @@ export function QuickAskBar() {
                 answer instead of persisting as a header. */}
             <div className="mb-2 text-sm font-medium text-neutral-400">{asked}</div>
             {answer?.text ? (
-              <Streamdown className="prose prose-sm prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-1.5 [&_ul]:my-1.5 [&_ol]:my-1.5 [&_pre]:my-2 [&_pre]:text-[11px] [&_code]:text-[11px]">
+              <Streamdown className="prose prose-sm prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-1.5 [&_ul]:my-1.5 [&_ol]:my-1.5 [&_pre]:my-2 [&_pre]:text-[11px] [&_code]:text-[11px] [&_:not(pre)>code]:rounded [&_:not(pre)>code]:bg-white/10 [&_:not(pre)>code]:px-1 [&_:not(pre)>code]:text-neutral-100">
                 {answer.text}
               </Streamdown>
             ) : (
