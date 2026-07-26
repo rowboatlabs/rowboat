@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Command, CornerDownLeft, Mic } from 'lucide-react'
+import { ArrowUpRight, Command, CornerDownLeft, Mic } from 'lucide-react'
 import { Streamdown } from 'streamdown'
 
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useVoiceMode } from '@/hooks/useVoiceMode'
 
 // Window heights the bar asks main for: just the input row, or input +
@@ -107,6 +108,14 @@ export function QuickAskBar() {
     void window.ipc.invoke('quickAsk:hide', null).catch(() => {})
   }, [])
 
+  // Jump to the full conversation: the question already lives in the app's
+  // active chat (the bar relays into it), so focusing the app window lands
+  // on this exact exchange. The bar gets out of the way.
+  const openInApp = useCallback(() => {
+    void window.ipc.invoke('app:focusMainWindow', null).catch(() => {})
+    void window.ipc.invoke('quickAsk:hide', null).catch(() => {})
+  }, [])
+
   // Hold Right ⌘ to speak; release submits the transcript.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -175,7 +184,20 @@ export function QuickAskBar() {
         }
       `}</style>
       {asked && (
-        <div className="flex min-h-0 flex-1 flex-col border-b border-white/5 px-7 pb-3 pt-5">
+        <div className="relative flex min-h-0 flex-1 flex-col border-b border-white/5 px-7 pb-3 pt-5">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={openInApp}
+                aria-label="Open in Rowboat"
+                className="absolute right-4 top-3 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-white/5 text-neutral-300 ring-1 ring-inset ring-white/15 transition-colors hover:bg-white/10 hover:text-white"
+              >
+                <ArrowUpRight className="h-3.5 w-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Open in Rowboat</TooltipContent>
+          </Tooltip>
           <div className="min-h-0 flex-1 overflow-y-auto text-sm leading-relaxed text-neutral-100">
             <div ref={panelContentRef}>
             {/* Inside the scroll area — the question scrolls away with the
