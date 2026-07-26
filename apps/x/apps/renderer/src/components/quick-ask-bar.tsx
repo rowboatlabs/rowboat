@@ -112,7 +112,7 @@ export function QuickAskBar() {
   // active chat (the bar relays into it), so focusing the app window lands
   // on this exact exchange. The bar gets out of the way.
   const openInApp = useCallback(() => {
-    void window.ipc.invoke('app:focusMainWindow', null).catch(() => {})
+    void window.ipc.invoke('quickAsk:openChat', null).catch(() => {})
     void window.ipc.invoke('quickAsk:hide', null).catch(() => {})
   }, [])
 
@@ -191,9 +191,9 @@ export function QuickAskBar() {
                 type="button"
                 onClick={openInApp}
                 aria-label="Open in Rowboat"
-                className="absolute right-4 top-3 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-white/5 text-neutral-300 ring-1 ring-inset ring-white/15 transition-colors hover:bg-white/10 hover:text-white"
+                className="absolute right-4 top-3 z-10 text-neutral-400 transition-colors hover:text-white"
               >
-                <ArrowUpRight className="h-3.5 w-3.5" />
+                <ArrowUpRight className="h-4 w-4" />
               </button>
             </TooltipTrigger>
             <TooltipContent side="bottom">Open in Rowboat</TooltipContent>

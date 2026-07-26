@@ -1803,6 +1803,15 @@ function App() {
     return () => clearTimeout(timer)
   }, [])
 
+  // Quick-ask "Open in Rowboat": land on the conversation full-view — chat
+  // pane open and maximized, no middle pane.
+  useEffect(() => {
+    return window.ipc.on('quick-ask:open-chat', () => {
+      setIsChatSidebarOpen(true)
+      setIsRightPaneMaximized(true)
+    })
+  }, [])
+
   // Quick-ask bar: a question typed/spoken into the global ⌥⇧Space bar lands
   // in the current chat exactly like a composer message.
   const quickAskActiveRef = useRef(false)

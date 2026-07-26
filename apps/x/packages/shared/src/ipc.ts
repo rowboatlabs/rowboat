@@ -1029,6 +1029,17 @@ const ipcSchemas = {
     req: z.null(),
     res: z.object({}),
   },
+  // Bar → main: jump to the conversation in the app — focuses the app
+  // window and tells it to show the chat full-view (no middle pane).
+  'quickAsk:openChat': {
+    req: z.null(),
+    res: z.object({}),
+  },
+  // Push channel: main → app window for the jump above.
+  'quick-ask:open-chat': {
+    req: z.null(),
+    res: z.null(),
+  },
   // Bar → main: grow/shrink the window as the response area changes.
   'quickAsk:resize': {
     req: z.object({ height: z.number() }),

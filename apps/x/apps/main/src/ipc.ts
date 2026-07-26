@@ -1001,6 +1001,17 @@ export function setupIpcHandlers() {
       showQuickAsk();
       return {};
     },
+    'quickAsk:openChat': async () => {
+      const main = findMainAppWindow();
+      if (main) {
+        if (main.isMinimized()) main.restore();
+        main.show();
+        main.focus();
+        app.focus({ steal: true });
+        main.webContents.send('quick-ask:open-chat', null);
+      }
+      return {};
+    },
     'quickAsk:resize': async (_event, args) => {
       resizeQuickAsk(args.height);
       return {};
