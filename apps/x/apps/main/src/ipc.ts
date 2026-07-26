@@ -1001,6 +1001,10 @@ export function setupIpcHandlers() {
       showQuickAsk();
       return {};
     },
+    'quickAsk:newChat': async () => {
+      findMainAppWindow()?.webContents.send('quick-ask:new-chat', null);
+      return {};
+    },
     'quickAsk:openChat': async () => {
       const main = findMainAppWindow();
       if (main) {

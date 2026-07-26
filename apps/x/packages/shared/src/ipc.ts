@@ -1040,6 +1040,17 @@ const ipcSchemas = {
     req: z.null(),
     res: z.null(),
   },
+  // Bar → main: start a fresh chat for the next question (the app stays in
+  // the background; only the conversation resets).
+  'quickAsk:newChat': {
+    req: z.null(),
+    res: z.object({}),
+  },
+  // Push channel: main → app window for the reset above.
+  'quick-ask:new-chat': {
+    req: z.null(),
+    res: z.null(),
+  },
   // Bar → main: grow/shrink the window as the response area changes.
   'quickAsk:resize': {
     req: z.object({ height: z.number() }),

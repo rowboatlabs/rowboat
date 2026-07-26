@@ -4351,6 +4351,13 @@ function App() {
     handleNewChat()
   }, [handleNewChat])
 
+  // Quick-ask "+": the bar wants a fresh conversation for its next question.
+  useEffect(() => {
+    return window.ipc.on('quick-ask:new-chat', () => {
+      handleNewChatTabInSidebar()
+    })
+  }, [handleNewChatTabInSidebar])
+
   // Palette → sidebar submission. Opens the sidebar (if closed), forces a fresh chat tab,
   // queues the message; the pending-submit effect (below) flushes it once state has settled
   // so handlePromptSubmit sees the new tab's null runId.

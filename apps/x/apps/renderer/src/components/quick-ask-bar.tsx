@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowUpRight, Command, CornerDownLeft, Mic } from 'lucide-react'
+import { ArrowUpRight, Command, CornerDownLeft, Mic, Plus } from 'lucide-react'
 import { Streamdown } from 'streamdown'
 
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -120,6 +120,13 @@ export function QuickAskBar() {
     void window.ipc.invoke('quickAsk:hide', null).catch(() => {})
   }, [])
 
+  // Fresh conversation for the next question: resets the app's active chat
+  // (in the background) and clears the panel. The bar stays up.
+  const newChat = useCallback(() => {
+    void window.ipc.invoke('quickAsk:newChat', null).catch(() => {})
+    reset()
+  }, [reset])
+
   // Hold Right ⌘ to speak; release submits the transcript.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -189,6 +196,19 @@ export function QuickAskBar() {
       `}</style>
       {asked && (
         <div className="relative flex min-h-0 flex-1 flex-col border-b border-white/5 px-7 pb-3 pt-5">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={newChat}
+                aria-label="New chat"
+                className="absolute right-14 top-4 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-white/[0.04] text-neutral-400 ring-1 ring-inset ring-white/10 transition-colors hover:bg-white/10 hover:text-white"
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">New chat</TooltipContent>
+          </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
               <button
