@@ -1,5 +1,8 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   ChevronRight,
   Copy,
   ExternalLink,
@@ -58,6 +61,45 @@ interface TreeNode {
   name: string
   kind: 'file' | 'dir'
   children?: TreeNode[]
+  stat?: { size: number; mtimeMs: number }
+}
+
+type SortKey = 'name' | 'modified'
+type SortState = { key: SortKey; dir: 'asc' | 'desc' }
+const SORT_STORAGE_KEY = 'workspace:sort'
+
+function readStoredSort(): SortState {
+  try {
+    const raw = localStorage.getItem(SORT_STORAGE_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw) as SortState
+      if ((parsed.key === 'name' || parsed.key === 'modified') && (parsed.dir === 'asc' || parsed.dir === 'desc')) {
+        return parsed
+      }
+    }
+  } catch {
+    // ignore unreadable/legacy values
+  }
+  return { key: 'name', dir: 'asc' }
+}
+
+/** "just now" / "6h ago" / "Yesterday" / "3d ago" / "Mar 14" */
+function formatModified(mtimeMs: number | undefined): string {
+  if (!mtimeMs) return '—'
+  const diffMs = Math.max(0, Date.now() - mtimeMs)
+  const min = Math.floor(diffMs / 60000)
+  if (min < 1) return 'just now'
+  if (min < 60) return `${min}m ago`
+  const hr = Math.floor(min / 60)
+  if (hr < 24) return `${hr}h ago`
+  const day = Math.floor(hr / 24)
+  if (day === 1) return 'Yesterday'
+  if (day < 7) return `${day}d ago`
+  const d = new Date(mtimeMs)
+  const sameYear = d.getFullYear() === new Date().getFullYear()
+  return d.toLocaleDateString([], sameYear
+    ? { month: 'short', day: 'numeric' }
+    : { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
 /** `@folder/<id>/sub/path` → the folder id and the folder-relative remainder. */
@@ -79,6 +121,11 @@ type WorkspaceActions = {
   addGoogleDoc: (parentPath?: string) => void
   createFolder: (parentPath?: string) => Promise<string>
   onOpenInNewTab?: (path: string) => void
+}
+
+function SortArrow({ active, dir }: { active: boolean; dir: 'asc' | 'desc' }) {
+  if (!active) return <ArrowUpDown className="size-3 opacity-40" />
+  return dir === 'asc' ? <ArrowUp className="size-3" /> : <ArrowDown className="size-3" />
 }
 
 function GoogleDriveIcon({ className }: { className?: string }) {
@@ -153,6 +200,20 @@ function findNode(nodes: TreeNode[] | undefined, path: string): TreeNode | null 
   return null
 }
 
+/**
+ * Newest mtime anywhere under a node. A folder's own mtime only moves when its
+ * direct children change, so for a workspace row — where "last updated" should
+ * mean "someone touched something in here" — walk what the tree already holds.
+ */
+function deepMtime(node: TreeNode): number {
+  let newest = node.stat?.mtimeMs ?? 0
+  for (const child of node.children ?? []) {
+    const childMtime = deepMtime(child)
+    if (childMtime > newest) newest = childMtime
+  }
+  return newest
+}
+
 function countChildren(node: TreeNode | null): number {
   if (!node || node.kind !== 'dir' || !node.children) return 0
   return node.children.length
@@ -193,6 +254,10 @@ export function WorkspaceView({ tree, initialPath, actions, onNavigate, onOpenNo
   const [linkedEntries, setLinkedEntries] = useState<TreeNode[]>([])
   const [linkedLoading, setLinkedLoading] = useState(false)
   const [linkedError, setLinkedError] = useState<string | null>(null)
+  // mtime of each linked folder's root, keyed by folder id — the registry
+  // itself has no timestamps, so these are stat'd separately.
+  const [linkedMtimes, setLinkedMtimes] = useState<Record<string, number>>({})
+  const [sort, setSort] = useState<SortState>(readStoredSort)
   const [chatsOpen, setChatsOpen] = useState(false)
   const [chats, setChats] = useState<WorkspaceChat[]>([])
   const [chatsLoading, setChatsLoading] = useState(false)
@@ -226,20 +291,49 @@ export function WorkspaceView({ tree, initialPath, actions, onNavigate, onOpenNo
     if (isRoot) {
       // Linked folders come from this view's own state, not the shared tree —
       // nothing watches the registry, so the tree can lag behind an add/remove.
+      // Their time is the folder's own mtime: their contents aren't walked
+      // (a linked folder can be an entire repo), so there's nothing deeper to read.
       filtered = [
-        ...filtered.filter((c) => !c.path.startsWith(`${LINKED_PREFIX}/`)),
+        ...filtered
+          .filter((c) => !c.path.startsWith(`${LINKED_PREFIX}/`))
+          .map((c) => ({ ...c, stat: { size: c.stat?.size ?? 0, mtimeMs: deepMtime(c) } })),
         ...linkedFolders.map((f) => ({
           name: f.name,
           path: `${LINKED_PREFIX}/${f.id}`,
           kind: 'dir' as const,
+          stat: linkedMtimes[f.id] ? { size: 0, mtimeMs: linkedMtimes[f.id]! } : undefined,
         })),
       ]
     }
+    const flip = sort.dir === 'asc' ? 1 : -1
     return [...filtered].sort((a, b) => {
-      if (a.kind !== b.kind) return a.kind === 'dir' ? -1 : 1
-      return a.name.localeCompare(b.name)
+      // Sorting by time means most-recent-first across the whole folder;
+      // grouping directories ahead of files only makes sense by name.
+      if (sort.key === 'name' && a.kind !== b.kind) return a.kind === 'dir' ? -1 : 1
+      if (sort.key === 'modified') {
+        const diff = (a.stat?.mtimeMs ?? 0) - (b.stat?.mtimeMs ?? 0)
+        if (diff !== 0) return diff * flip
+        return a.name.localeCompare(b.name)
+      }
+      return a.name.localeCompare(b.name) * flip
     })
-  }, [currentNode, isRoot, isLinked, linkedEntries, linkedFolders])
+  }, [currentNode, isRoot, isLinked, linkedEntries, linkedFolders, linkedMtimes, sort])
+
+  const toggleSort = useCallback((key: SortKey) => {
+    setSort((prev) => {
+      // First click on a column picks its natural direction: A→Z for names,
+      // newest first for times.
+      const next: SortState = prev.key === key
+        ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
+        : { key, dir: key === 'modified' ? 'desc' : 'asc' }
+      try {
+        localStorage.setItem(SORT_STORAGE_KEY, JSON.stringify(next))
+      } catch {
+        // non-fatal: the sort just won't persist
+      }
+      return next
+    })
+  }, [])
 
   const breadcrumbs = useMemo(() => {
     if (isRoot) return [] as { path: string; name: string }[]
@@ -267,6 +361,16 @@ export function WorkspaceView({ tree, initialPath, actions, onNavigate, onOpenNo
     try {
       const { folders } = await window.ipc.invoke('workspace:listFolders', null)
       setLinkedFolders(folders)
+      // A folder that has been moved or unmounted simply has no time to show.
+      const stats = await Promise.all(folders.map(async (f) => {
+        try {
+          const s = await window.ipc.invoke('workspace:stat', { path: `${LINKED_PREFIX}/${f.id}` })
+          return [f.id, s.mtimeMs] as const
+        } catch {
+          return null
+        }
+      }))
+      setLinkedMtimes(Object.fromEntries(stats.filter((s) => s !== null)))
     } catch (err) {
       console.error('Failed to load linked folders:', err)
     }
@@ -287,7 +391,7 @@ export function WorkspaceView({ tree, initialPath, actions, onNavigate, onOpenNo
         path: currentPath,
         opts: { includeHidden: false, includeStats: true },
       })
-      setLinkedEntries(entries.map((e) => ({ path: e.path, name: e.name, kind: e.kind })))
+      setLinkedEntries(entries.map((e) => ({ path: e.path, name: e.name, kind: e.kind, stat: e.stat })))
       setLinkedError(null)
     } catch (err) {
       setLinkedEntries([])
@@ -696,23 +800,54 @@ export function WorkspaceView({ tree, initialPath, actions, onNavigate, onOpenNo
             )}
           </div>
         ) : (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-3">
+          <div className="overflow-hidden rounded-lg border border-border bg-card">
+            {/* Column headers double as the sort control. */}
+            <div className="flex items-center gap-3 border-b border-border px-3 py-2 text-xs text-muted-foreground">
+              <button
+                type="button"
+                onClick={() => toggleSort('name')}
+                className="flex min-w-0 flex-1 items-center gap-1 rounded px-1 py-0.5 text-left transition-colors hover:text-foreground"
+              >
+                Name
+                <SortArrow active={sort.key === 'name'} dir={sort.dir} />
+              </button>
+              <span className="hidden w-[180px] shrink-0 px-1 sm:block">{isRoot ? 'Location' : 'Kind'}</span>
+              <button
+                type="button"
+                onClick={() => toggleSort('modified')}
+                className="flex w-[130px] shrink-0 items-center gap-1 rounded px-1 py-0.5 text-left transition-colors hover:text-foreground"
+              >
+                Last updated
+                <SortArrow active={sort.key === 'modified'} dir={sort.dir} />
+              </button>
+            </div>
             {items.map((item) => {
               const childCount = item.kind === 'dir' ? countChildren(item) : 0
-              // A card for a linked folder's root: it points somewhere outside
-              // WorkDir, and its item count is only known once you open it.
+              // A linked folder's root row: it points somewhere outside WorkDir,
+              // and its item count is only known once you open it.
               const linkedItem = parseLinkedPath(item.path)
               const linkedRoot = linkedItem && !linkedItem.sub ? linkedById.get(linkedItem.id) ?? null : null
               const Icon = linkedRoot ? FolderSymlink : item.kind === 'dir' ? FolderIcon : FileIcon
               const isRenaming = renameTarget === item.path
+              const detail = linkedRoot
+                ? linkedRoot.path
+                : item.kind === 'file'
+                  ? fileExtensionLabel(item.name)
+                  // Children of a linked folder are loaded one level at a time,
+                  // so a subfolder's own count isn't known yet.
+                  : isLinked
+                    ? 'Folder'
+                    : isRoot
+                      ? 'In Rowboat'
+                      : `${childCount} ${childCount === 1 ? 'item' : 'items'}`
               const card = (
                 <button
                   type="button"
                   onClick={() => handleItemClick(item)}
-                  className="group flex w-full flex-col items-start gap-2 rounded-lg border border-border bg-card p-4 text-left transition-colors hover:border-foreground/20 hover:bg-accent"
+                  className="group flex w-full items-center gap-3 border-b border-border px-3 py-2 text-left transition-colors last:border-b-0 hover:bg-accent"
                 >
-                  <Icon className="size-6 text-muted-foreground group-hover:text-foreground" />
-                  <div className="min-w-0 w-full">
+                  <Icon className="size-4 shrink-0 text-muted-foreground group-hover:text-foreground" />
+                  <div className="min-w-0 flex-1">
                     {isRenaming ? (
                       <Input
                         autoFocus
@@ -728,21 +863,17 @@ export function WorkspaceView({ tree, initialPath, actions, onNavigate, onOpenNo
                         className="h-6 text-sm"
                       />
                     ) : (
-                      <div className="truncate text-sm font-medium">{item.name}</div>
+                      <div className="truncate text-sm">{item.name}</div>
                     )}
-                    {!isRenaming && (
-                      <div className="truncate text-xs text-muted-foreground" title={linkedRoot?.path}>
-                        {linkedRoot
-                          ? linkedRoot.path
-                          : item.kind === 'file'
-                            ? fileExtensionLabel(item.name)
-                            // Children of a linked folder are loaded one level at
-                            // a time, so a subfolder's own count isn't known yet.
-                            : isLinked
-                              ? 'Folder'
-                              : `${childCount} ${childCount === 1 ? 'item' : 'items'}`}
-                      </div>
-                    )}
+                  </div>
+                  <div className="hidden w-[180px] shrink-0 truncate text-xs text-muted-foreground sm:block" title={detail}>
+                    {detail}
+                  </div>
+                  <div
+                    className="w-[130px] shrink-0 truncate text-xs text-muted-foreground"
+                    title={item.stat?.mtimeMs ? new Date(item.stat.mtimeMs).toLocaleString() : undefined}
+                  >
+                    {formatModified(item.stat?.mtimeMs)}
                   </div>
                 </button>
               )
