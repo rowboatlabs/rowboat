@@ -62,9 +62,13 @@ function createWindow(): BrowserWindow {
     },
   });
   // Same all-workspaces setup as the call popout: float over fullscreen
-  // Spaces too, keeping the Dock icon (skipTransformProcessType).
+  // Spaces too, keeping the Dock icon (skipTransformProcessType). macOS
+  // concepts — on Windows `alwaysOnTop` alone is the whole story (no
+  // Spaces), and the options object is meaningless there.
   win.setAlwaysOnTop(true, 'floating');
-  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
+  if (process.platform === 'darwin') {
+    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
+  }
   // Spotlight behavior: clicking away dismisses the bar.
   win.on('blur', () => {
     if (!win.isDestroyed() && win.isVisible()) win.hide();
