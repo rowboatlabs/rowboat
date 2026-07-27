@@ -73,6 +73,7 @@ import { loadAppSettings, saveAppSettings } from "@x/core/dist/config/app_settin
 import { init as initMeetingDetection } from "@x/core/dist/meetings/detector.js";
 import { createAppTray, hasTray, isRecordingActive, markPendingToggleMeetingNotes } from "./tray.js";
 import { initMeetingPopup, showMeetingPopup } from "./meeting-popup.js";
+import contextMenu from "electron-context-menu";
 
 // Captured as early as possible so it reflects actual process start. Used to
 // gate grace-eligible notifications (e.g. the burst of background-task
@@ -480,6 +481,12 @@ app.on('child-process-gone', (_event, details) => {
 });
 
 app.whenReady().then(async () => {
+  // Native right-click menus (Cut/Copy/Paste, spellcheck, Copy Link, Save
+  // Image, …) for every BrowserWindow. WebContentsView tabs in the embedded
+  // browser are attached separately in browser/view.ts — this package's
+  // no-window mode only hooks browser-window-created.
+  contextMenu({ showSaveImageAs: true });
+
   // Register custom protocol before creating window.
   // In production this serves the renderer SPA; in dev (and prod) it also
   // serves workspace files via app://workspace/<rel-path> for media previews.

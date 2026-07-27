@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { BrowserWindow, WebContentsView, desktopCapturer, session, shell, type Session, type WebContents } from 'electron';
+import contextMenu from 'electron-context-menu';
 import type {
   BrowserPageElement,
   BrowserPageSnapshot,
@@ -409,7 +410,8 @@ export class BrowserViewManager extends EventEmitter {
     const view = new WebContentsView({
       webPreferences: this.browserWebPreferences(),
     });
-
+    // Global contextMenu() only covers BrowserWindows; attach per tab view.
+    contextMenu({ window: view, showSaveImageAs: true });
     return view;
   }
 
