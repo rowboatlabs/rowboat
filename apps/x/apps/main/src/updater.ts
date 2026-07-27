@@ -1,11 +1,15 @@
 import { app, autoUpdater, net, nativeImage, BrowserWindow } from "electron";
+import { promises as fs } from "node:fs";
+import path from "node:path";
 import { capture } from "@x/core/dist/analytics/posthog.js";
+import { isVersionUpgrade } from "@x/core/dist/config/app_version.js";
 import type { ipc } from "@x/shared";
 
 export type UpdaterStatus = ipc.IPCChannels["updater:status"]["req"];
 
 const REPO = "rowboatlabs/rowboat";
 const CHECK_INTERVAL_MS = 10 * 60 * 1000;
+const STALE_VERSION_SWEEP_DELAY_MS = 30 * 1000;
 
 let status: UpdaterStatus = { state: "disabled", version: "", reason: "dev" };
 
@@ -70,6 +74,15 @@ export function initUpdater(): void {
   }
 
   status = { state: "idle", version };
+
+  if (process.platform === "win32") {
+    // Squirrel.Windows is supposed to drop versions older than the previous
+    // one on update, but that cleanup rarely runs (#792) and app-* folders
+    // pile up — a full app copy per update. Sweep them ourselves once boot
+    // has settled; the delay also gives a just-replaced version time to
+    // release its file locks after quitAndInstall relaunched us.
+    setTimeout(() => void sweepStaleSquirrelVersions(version), STALE_VERSION_SWEEP_DELAY_MS);
+  }
 
   autoUpdater.on("checking-for-update", () => {
     setStatus({ state: "checking", lastCheckedAt: status.lastCheckedAt });
@@ -137,6 +150,61 @@ async function backfillReleaseNotes(releaseName: string | undefined): Promise<vo
     }
   } catch {
     // Offline or rate-limited — the Squirrel snapshot / fallback line stands.
+  }
+}
+
+/**
+ * Remove leftovers of older versions from the Squirrel.Windows install root
+ * (#792). Everything strictly older than the running version goes: sibling
+ * app-<version> folders and their .nupkg files under packages/. The running
+ * version stays (its full .nupkg is what delta updates apply against), and
+ * so does anything newer — that's an update staged while we run. Entries
+ * that stay locked are skipped; the next launch retries them.
+ */
+async function sweepStaleSquirrelVersions(current: string): Promise<void> {
+  const appDir = path.dirname(process.execPath); // <root>\app-<version>\rowboat.exe
+  const rootDir = path.dirname(appDir);
+  const ownDir = path.basename(appDir).toLowerCase();
+  try {
+    // Only sweep a real Squirrel layout (Update.exe above an app-* folder) —
+    // zip/portable installs don't match and are left untouched.
+    if (!ownDir.startsWith("app-")) return;
+    await fs.access(path.join(rootDir, "Update.exe"));
+
+    const stale: string[] = [];
+    for (const entry of await fs.readdir(rootDir, { withFileTypes: true })) {
+      if (!entry.isDirectory() || entry.name.toLowerCase() === ownDir) continue;
+      const version = /^app-(.+)$/i.exec(entry.name)?.[1];
+      if (version && isVersionUpgrade(version, current)) {
+        stale.push(path.join(rootDir, entry.name));
+      }
+    }
+    const packagesDir = path.join(rootDir, "packages");
+    const packages = await fs.readdir(packagesDir, { withFileTypes: true }).catch(() => []);
+    for (const entry of packages) {
+      const version = /-((?:\d+\.)+\d+(?:-[A-Za-z0-9.]+)?)-(?:full|delta)\.nupkg$/i.exec(entry.name)?.[1];
+      if (entry.isFile() && version && isVersionUpgrade(version, current)) {
+        stale.push(path.join(packagesDir, entry.name));
+      }
+    }
+    if (stale.length === 0) return;
+
+    let removed = 0;
+    for (const target of stale) {
+      try {
+        // Retries cover transient Windows locks (antivirus scans, a previous
+        // version's process still on its way out).
+        await fs.rm(target, { recursive: true, force: true, maxRetries: 2, retryDelay: 500 });
+        removed++;
+      } catch (err) {
+        console.error(`[updater] failed to remove stale ${target}:`, err);
+      }
+    }
+    console.log(`[updater] swept ${removed}/${stale.length} stale Squirrel entries from ${rootDir}`);
+    capture("update_cleaned", { removed, failed: stale.length - removed });
+  } catch {
+    // Not a Squirrel install, or the install root was unreadable — nothing
+    // to sweep.
   }
 }
 

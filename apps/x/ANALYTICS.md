@@ -112,6 +112,7 @@ The desktop client's own updates — distinct from the in-app apps feature, whic
 - `update_prompted` — renderer (`apps/renderer/src/lib/analytics.ts`): the "Update available" card was shown for a staged update
 - `update_restarted` — main (`apps/main/src/updater.ts`), `{ from, to? }`: the user clicked restart-to-update (`to` may be missing when the update feed doesn't report the release name)
 - `update_failed` — main (`apps/main/src/updater.ts`), `{ message }`: the auto-updater errored (includes network errors for now)
+- `update_cleaned` — main (`apps/main/src/updater.ts`), `{ removed, failed }`: stale Squirrel.Windows leftovers (app-* folders / .nupkg packages older than the running version) were swept on boot; `failed` counts entries that stayed locked and will be retried next launch
 - `client_updated` — main (`apps/main/src/ipc.ts`), `{ from, to }`: first launch on a newer version (fires once per update, whatever the restart path; downgrades restamp silently and don't fire)
 ### `view_opened` — feature-importance funnel
 
