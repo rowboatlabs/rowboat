@@ -8,13 +8,18 @@ import {
   Folder as FolderIcon,
   FolderOpen,
   FolderPlus,
+  FolderSymlink,
+  Link2Off,
   Loader2,
   MessageSquare,
   Pencil,
   Plus,
+  RefreshCw,
   Trash2,
   UploadCloud,
 } from 'lucide-react'
+import type { z } from 'zod'
+import { workspace } from '@x/shared'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -44,12 +49,26 @@ import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 
 const WORKSPACE_ROOT = 'knowledge/Workspace'
+const LINKED_PREFIX = workspace.LINKED_FOLDER_PREFIX
+
+type LinkedFolder = z.infer<typeof workspace.LinkedFolder>
 
 interface TreeNode {
   path: string
   name: string
   kind: 'file' | 'dir'
   children?: TreeNode[]
+}
+
+/** `@folder/<id>/sub/path` → the folder id and the folder-relative remainder. */
+function parseLinkedPath(path: string): { id: string; sub: string } | null {
+  if (!path.startsWith(`${LINKED_PREFIX}/`)) return null
+  const rest = path.slice(LINKED_PREFIX.length + 1)
+  if (!rest) return null
+  const slash = rest.indexOf('/')
+  return slash === -1
+    ? { id: rest, sub: '' }
+    : { id: rest.slice(0, slash), sub: rest.slice(slash + 1) }
 }
 
 type WorkspaceActions = {
@@ -86,6 +105,8 @@ type WorkspaceViewProps = {
   onNavigate: (path: string) => void
   onOpenNote: (path: string) => void
   onCreateWorkspace: (name: string) => Promise<void>
+  // A linked folder was added, renamed or unlinked — reload the shared tree.
+  onWorkspacesChanged: () => Promise<void> | void
   // Opens a previous chat (run) whose work directory is set to this workspace.
   onOpenRun: (runId: string) => void
 }
@@ -162,9 +183,16 @@ function readFileAsBase64(file: File): Promise<string> {
   })
 }
 
-export function WorkspaceView({ tree, initialPath, actions, onNavigate, onOpenNote, onCreateWorkspace, onOpenRun }: WorkspaceViewProps) {
+export function WorkspaceView({ tree, initialPath, actions, onNavigate, onOpenNote, onCreateWorkspace, onWorkspacesChanged, onOpenRun }: WorkspaceViewProps) {
   const currentPath = initialPath || WORKSPACE_ROOT
   const [addOpen, setAddOpen] = useState(false)
+  const [linkedFolders, setLinkedFolders] = useState<LinkedFolder[]>([])
+  // Contents of the linked folder currently being browsed. Linked folders sit
+  // outside the workspace watcher, so this is fetched (and refreshed) here
+  // rather than read off the shared tree.
+  const [linkedEntries, setLinkedEntries] = useState<TreeNode[]>([])
+  const [linkedLoading, setLinkedLoading] = useState(false)
+  const [linkedError, setLinkedError] = useState<string | null>(null)
   const [chatsOpen, setChatsOpen] = useState(false)
   const [chats, setChats] = useState<WorkspaceChat[]>([])
   const [chatsLoading, setChatsLoading] = useState(false)
@@ -182,19 +210,50 @@ export function WorkspaceView({ tree, initialPath, actions, onNavigate, onOpenNo
   const isRoot = currentPath === WORKSPACE_ROOT
   const fileManagerName = getFileManagerName()
 
+  const linkedRef = useMemo(() => parseLinkedPath(currentPath), [currentPath])
+  const isLinked = linkedRef !== null
+  const linkedById = useMemo(
+    () => new Map(linkedFolders.map((f) => [f.id, f])),
+    [linkedFolders],
+  )
+  const currentFolder = linkedRef ? linkedById.get(linkedRef.id) ?? null : null
+
   const currentNode = useMemo(() => findNode(tree, currentPath), [tree, currentPath])
 
   const items = useMemo<TreeNode[]>(() => {
-    const children = currentNode?.children ?? []
-    const filtered = isRoot ? children.filter((c) => c.kind === 'dir') : children
+    const children = isLinked ? linkedEntries : currentNode?.children ?? []
+    let filtered = isRoot ? children.filter((c) => c.kind === 'dir') : children
+    if (isRoot) {
+      // Linked folders come from this view's own state, not the shared tree —
+      // nothing watches the registry, so the tree can lag behind an add/remove.
+      filtered = [
+        ...filtered.filter((c) => !c.path.startsWith(`${LINKED_PREFIX}/`)),
+        ...linkedFolders.map((f) => ({
+          name: f.name,
+          path: `${LINKED_PREFIX}/${f.id}`,
+          kind: 'dir' as const,
+        })),
+      ]
+    }
     return [...filtered].sort((a, b) => {
       if (a.kind !== b.kind) return a.kind === 'dir' ? -1 : 1
       return a.name.localeCompare(b.name)
     })
-  }, [currentNode, isRoot])
+  }, [currentNode, isRoot, isLinked, linkedEntries, linkedFolders])
 
   const breadcrumbs = useMemo(() => {
     if (isRoot) return [] as { path: string; name: string }[]
+    if (linkedRef) {
+      const root = `${LINKED_PREFIX}/${linkedRef.id}`
+      let acc = root
+      return [
+        { path: root, name: currentFolder?.name ?? 'Folder' },
+        ...linkedRef.sub.split('/').filter(Boolean).map((seg) => {
+          acc = `${acc}/${seg}`
+          return { path: acc, name: seg }
+        }),
+      ]
+    }
     const rel = currentPath.slice(WORKSPACE_ROOT.length + 1)
     const parts = rel.split('/').filter(Boolean)
     let acc = WORKSPACE_ROOT
@@ -202,7 +261,54 @@ export function WorkspaceView({ tree, initialPath, actions, onNavigate, onOpenNo
       acc = `${acc}/${seg}`
       return { path: acc, name: seg }
     })
-  }, [currentPath, isRoot])
+  }, [currentPath, isRoot, linkedRef, currentFolder])
+
+  const loadLinkedFolders = useCallback(async () => {
+    try {
+      const { folders } = await window.ipc.invoke('workspace:listFolders', null)
+      setLinkedFolders(folders)
+    } catch (err) {
+      console.error('Failed to load linked folders:', err)
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadLinkedFolders()
+  }, [loadLinkedFolders])
+
+  // Read the current linked directory. Nothing watches folders outside
+  // WorkDir (a linked repo's node_modules would blow the fd limit), so this
+  // re-runs on navigation, on window focus, and after our own mutations.
+  const refreshLinkedEntries = useCallback(async () => {
+    if (!isLinked) return
+    setLinkedLoading(true)
+    try {
+      const entries = await window.ipc.invoke('workspace:readdir', {
+        path: currentPath,
+        opts: { includeHidden: false, includeStats: true },
+      })
+      setLinkedEntries(entries.map((e) => ({ path: e.path, name: e.name, kind: e.kind })))
+      setLinkedError(null)
+    } catch (err) {
+      setLinkedEntries([])
+      setLinkedError(err instanceof Error ? err.message : 'Failed to read this folder')
+    } finally {
+      setLinkedLoading(false)
+    }
+  }, [currentPath, isLinked])
+
+  useEffect(() => {
+    setLinkedEntries([])
+    setLinkedError(null)
+    void refreshLinkedEntries()
+  }, [refreshLinkedEntries])
+
+  useEffect(() => {
+    if (!isLinked) return
+    const onFocus = () => void refreshLinkedEntries()
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [isLinked, refreshLinkedEntries])
 
   // Load the chats whose work directory is this workspace folder (or nested
   // inside it). The work directory is stored as an absolute path per run, so
@@ -214,8 +320,7 @@ export function WorkspaceView({ tree, initialPath, actions, onNavigate, onOpenNo
     }
     setChatsLoading(true)
     try {
-      const { root } = await window.ipc.invoke('workspace:getRoot', null)
-      const abs = `${root.replace(/\/$/, '')}/${currentPath}`
+      const { path: abs } = await window.ipc.invoke('workspace:toAbsolute', { path: currentPath })
       const { runs } = await window.ipc.invoke('runs:listByWorkDir', { dir: abs })
       setChats(runs.map((r) => ({ id: r.id, title: r.title, createdAt: r.createdAt, modifiedAt: r.modifiedAt })))
     } catch (err) {
@@ -253,23 +358,66 @@ export function WorkspaceView({ tree, initialPath, actions, onNavigate, onOpenNo
     const trimmed = renameValue.trim()
     setRenameTarget(null)
     if (!node || !trimmed || trimmed === node.name || trimmed.includes('/')) return
+    const linked = parseLinkedPath(renameTarget)
+    // Renaming a linked folder renames how Rowboat labels it — the folder on
+    // disk keeps its own name.
+    if (linked && !linked.sub) {
+      try {
+        await window.ipc.invoke('workspace:renameFolder', { id: linked.id, name: trimmed })
+        await loadLinkedFolders()
+        await onWorkspacesChanged()
+        toast('Renamed', 'success')
+      } catch (err) {
+        toast(err instanceof Error ? err.message : 'Failed to rename', 'error')
+      }
+      return
+    }
     const parent = renameTarget.slice(0, renameTarget.lastIndexOf('/'))
     try {
       await window.ipc.invoke('workspace:rename', { from: renameTarget, to: `${parent}/${trimmed}` })
+      await refreshLinkedEntries()
       toast('Renamed', 'success')
     } catch {
       toast('Failed to rename', 'error')
     }
-  }, [renameTarget, renameValue, items])
+  }, [renameTarget, renameValue, items, loadLinkedFolders, onWorkspacesChanged, refreshLinkedEntries])
 
   const handleDelete = useCallback(async (item: TreeNode) => {
     try {
       await actions.remove(item.path)
+      await refreshLinkedEntries()
       toast('Moved to trash', 'success')
-    } catch {
-      toast('Failed to delete', 'error')
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Failed to delete', 'error')
     }
-  }, [actions])
+  }, [actions, refreshLinkedEntries])
+
+  // Unlinking never touches the folder itself — it only stops Rowboat
+  // showing it as a workspace.
+  const handleUnlink = useCallback(async (folderId: string) => {
+    try {
+      await window.ipc.invoke('workspace:removeFolder', { id: folderId })
+      await loadLinkedFolders()
+      await onWorkspacesChanged()
+      toast('Folder removed from Rowboat. Nothing on disk was deleted.', 'success')
+    } catch {
+      toast('Failed to remove folder', 'error')
+    }
+  }, [loadLinkedFolders, onWorkspacesChanged])
+
+  const handleAddFolder = useCallback(async () => {
+    try {
+      const { folder } = await window.ipc.invoke('workspace:addFolder', {})
+      if (!folder) return
+      setAddOpen(false)
+      await loadLinkedFolders()
+      await onWorkspacesChanged()
+      toast(`Added "${folder.name}"`, 'success')
+      onNavigate(`${LINKED_PREFIX}/${folder.id}`)
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Failed to add folder', 'error')
+    }
+  }, [loadLinkedFolders, onWorkspacesChanged, onNavigate])
 
   const uploadFiles = useCallback(async (files: FileList | File[], preserveStructure = false) => {
     const list = Array.from(files)
@@ -289,13 +437,14 @@ export function WorkspaceView({ tree, initialPath, actions, onNavigate, onOpenNo
         })
       }
       toast(list.length === 1 ? 'Added' : `${list.length} items added`, 'success')
+      await refreshLinkedEntries()
     } catch (err) {
       console.error('Failed to add files:', err)
       toast('Failed to add', 'error')
     } finally {
       setUploading(false)
     }
-  }, [currentPath])
+  }, [currentPath, refreshLinkedEntries])
 
   // Drag-and-drop (only inside a workspace folder, not at the root grid).
   // stopPropagation keeps the drop from also reaching the copilot's
@@ -410,6 +559,17 @@ export function WorkspaceView({ tree, initialPath, actions, onNavigate, onOpenNo
               Chats{chats.length ? ` (${chats.length})` : ''}
             </Button>
           )}
+          {isLinked && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void refreshLinkedEntries()}
+              title="Reload this folder"
+            >
+              <RefreshCw className={cn('size-4', linkedLoading && 'animate-spin')} />
+              Refresh
+            </Button>
+          )}
           <Button
             size="sm"
             variant="outline"
@@ -419,10 +579,24 @@ export function WorkspaceView({ tree, initialPath, actions, onNavigate, onOpenNo
             Open in {fileManagerName}
           </Button>
           {isRoot ? (
-            <Button size="sm" onClick={() => setAddOpen(true)}>
-              <Plus className="size-4" />
-              Add workspace
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="sm">
+                  <Plus className="size-4" />
+                  Add workspace
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => setAddOpen(true)}>
+                  <FolderPlus className="mr-2 size-4" />
+                  New workspace
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => void handleAddFolder()}>
+                  <FolderSymlink className="mr-2 size-4" />
+                  Add existing folder…
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           ) : (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -489,24 +663,47 @@ export function WorkspaceView({ tree, initialPath, actions, onNavigate, onOpenNo
         <div className="mx-auto h-full w-full max-w-[1120px] px-[30px] py-6">
         {items.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-muted-foreground">
-            <FolderIcon className="size-10 opacity-50" />
-            <div className="text-sm">
-              {isRoot
-                ? 'No workspaces yet. Create one to get started.'
-                : 'This folder is empty. Drag files in or use New note / New folder.'}
-            </div>
-            {isRoot && (
-              <Button size="sm" variant="outline" onClick={() => setAddOpen(true)}>
-                <Plus className="size-4" />
-                Add workspace
-              </Button>
+            {linkedLoading ? (
+              <Loader2 className="size-6 animate-spin opacity-60" />
+            ) : (
+              <>
+                <FolderIcon className="size-10 opacity-50" />
+                <div className="text-sm">
+                  {linkedError
+                    ? linkedError
+                    : isRoot
+                      ? 'No workspaces yet. Create one, or add a folder you already have.'
+                      : 'This folder is empty. Drag files in or use New note / New folder.'}
+                </div>
+                {isLinked && currentFolder && !linkedError && (
+                  <div className="max-w-[520px] truncate font-mono text-xs opacity-70" title={currentFolder.path}>
+                    {currentFolder.path}
+                  </div>
+                )}
+                {isRoot && (
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" variant="outline" onClick={() => setAddOpen(true)}>
+                      <Plus className="size-4" />
+                      New workspace
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => void handleAddFolder()}>
+                      <FolderSymlink className="size-4" />
+                      Add existing folder…
+                    </Button>
+                  </div>
+                )}
+              </>
             )}
           </div>
         ) : (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-3">
             {items.map((item) => {
               const childCount = item.kind === 'dir' ? countChildren(item) : 0
-              const Icon = item.kind === 'dir' ? FolderIcon : FileIcon
+              // A card for a linked folder's root: it points somewhere outside
+              // WorkDir, and its item count is only known once you open it.
+              const linkedItem = parseLinkedPath(item.path)
+              const linkedRoot = linkedItem && !linkedItem.sub ? linkedById.get(linkedItem.id) ?? null : null
+              const Icon = linkedRoot ? FolderSymlink : item.kind === 'dir' ? FolderIcon : FileIcon
               const isRenaming = renameTarget === item.path
               const card = (
                 <button
@@ -534,10 +731,16 @@ export function WorkspaceView({ tree, initialPath, actions, onNavigate, onOpenNo
                       <div className="truncate text-sm font-medium">{item.name}</div>
                     )}
                     {!isRenaming && (
-                      <div className="truncate text-xs text-muted-foreground">
-                        {item.kind === 'dir'
-                          ? `${childCount} ${childCount === 1 ? 'item' : 'items'}`
-                          : fileExtensionLabel(item.name)}
+                      <div className="truncate text-xs text-muted-foreground" title={linkedRoot?.path}>
+                        {linkedRoot
+                          ? linkedRoot.path
+                          : item.kind === 'file'
+                            ? fileExtensionLabel(item.name)
+                            // Children of a linked folder are loaded one level at
+                            // a time, so a subfolder's own count isn't known yet.
+                            : isLinked
+                              ? 'Folder'
+                              : `${childCount} ${childCount === 1 ? 'item' : 'items'}`}
                       </div>
                     )}
                   </div>
@@ -583,10 +786,17 @@ export function WorkspaceView({ tree, initialPath, actions, onNavigate, onOpenNo
                       <Pencil className="mr-2 size-4" />
                       Rename
                     </ContextMenuItem>
-                    <ContextMenuItem variant="destructive" onClick={() => void handleDelete(item)}>
-                      <Trash2 className="mr-2 size-4" />
-                      Delete
-                    </ContextMenuItem>
+                    {linkedRoot ? (
+                      <ContextMenuItem onClick={() => void handleUnlink(linkedRoot.id)}>
+                        <Link2Off className="mr-2 size-4" />
+                        Remove from Rowboat
+                      </ContextMenuItem>
+                    ) : (
+                      <ContextMenuItem variant="destructive" onClick={() => void handleDelete(item)}>
+                        <Trash2 className="mr-2 size-4" />
+                        Delete
+                      </ContextMenuItem>
+                    )}
                   </ContextMenuContent>
                 </ContextMenu>
               )
@@ -658,7 +868,7 @@ export function WorkspaceView({ tree, initialPath, actions, onNavigate, onOpenNo
           <DialogHeader>
             <DialogTitle>New workspace</DialogTitle>
             <DialogDescription>
-              Workspaces are top-level folders inside knowledge/Workspace.
+              A new workspace is a folder inside knowledge/Workspace.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-2">
@@ -678,6 +888,24 @@ export function WorkspaceView({ tree, initialPath, actions, onNavigate, onOpenNo
             />
             {error && <p className="text-xs text-destructive">{error}</p>}
           </div>
+          <div className="flex items-center gap-3">
+            <div className="h-px flex-1 bg-border" />
+            <span className="text-xs text-muted-foreground">or</span>
+            <div className="h-px flex-1 bg-border" />
+          </div>
+          <button
+            type="button"
+            onClick={() => void handleAddFolder()}
+            className="flex w-full items-center gap-3 rounded-lg border border-border p-3 text-left transition-colors hover:border-foreground/20 hover:bg-accent"
+          >
+            <FolderSymlink className="size-5 shrink-0 text-muted-foreground" />
+            <span className="min-w-0">
+              <span className="block text-sm font-medium">Add a folder you already have</span>
+              <span className="block text-xs text-muted-foreground">
+                Browse it in Rowboat, wherever it lives. Files stay where they are.
+              </span>
+            </span>
+          </button>
           <DialogFooter>
             <Button
               variant="outline"

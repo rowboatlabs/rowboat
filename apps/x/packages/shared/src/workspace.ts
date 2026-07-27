@@ -64,6 +64,23 @@ export const RemoveOptions = z.object({
   trash: z.boolean().optional(),
 });
 
+// ============================================================================
+// Linked Folders
+// ============================================================================
+
+// A workspace that lives outside WorkDir: any folder on disk the user has
+// pointed Rowboat at. Addressed through the normal workspace path space with
+// the `@folder/<id>` prefix, so every workspace:* IPC works on it unchanged.
+export const LINKED_FOLDER_PREFIX = '@folder';
+
+export const LinkedFolder = z.object({
+  id: z.string(),
+  name: z.string(),
+  // Absolute path on disk.
+  path: z.string(),
+  addedAt: z.string(),
+});
+
 export const WorkspaceChangeEvent = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('created'),

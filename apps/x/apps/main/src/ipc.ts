@@ -8,7 +8,7 @@ import {
   disconnectProvider,
   listProviders,
 } from './oauth-handler.js';
-import { watcher as watcherCore, workspace } from '@x/core';
+import { watcher as watcherCore, workspace, linkedFolders } from '@x/core';
 import { WorkDir } from '@x/core/dist/config/config.js';
 import { workspace as workspaceShared } from '@x/shared';
 import * as mcpCore from '@x/core/dist/mcp/mcp.js';
@@ -872,6 +872,10 @@ export function setupIpcHandlers() {
   // Forward knowledge commit events to renderer for panel refresh
   versionHistory.onCommit(() => emitKnowledgeCommitEvent());
 
+  // Deletions inside a linked folder go to the OS trash — core can't reach
+  // Electron's shell, so hand it the implementation.
+  workspace.registerTrashHandler((absPath) => shell.trashItem(absPath));
+
   // Relay backend-confirmed credit grants (first-time-action rewards) to all
   // windows so the UI can update balances and celebrate.
   subscribeCreditActivations((event) => broadcastToWindows('credits:didActivate', event));
@@ -1039,6 +1043,35 @@ export function setupIpcHandlers() {
     },
     'workspace:remove': async (_event, args) => {
       return workspace.remove(args.path, args.opts);
+    },
+    'workspace:toAbsolute': async (_event, args) => {
+      return { path: workspace.resolveWorkspacePath(args.path) };
+    },
+    'workspace:listFolders': async () => {
+      return { folders: linkedFolders.listLinkedFolders() };
+    },
+    'workspace:addFolder': async (event, args) => {
+      let chosen = args.path;
+      if (!chosen) {
+        const win = BrowserWindow.fromWebContents(event.sender);
+        const result = await dialog.showOpenDialog(win!, {
+          title: 'Choose a folder to add as a workspace',
+          defaultPath: os.homedir(),
+          buttonLabel: 'Add folder',
+          properties: ['openDirectory', 'createDirectory'],
+        });
+        if (result.canceled || result.filePaths.length === 0) {
+          return { folder: null };
+        }
+        chosen = result.filePaths[0];
+      }
+      return { folder: await linkedFolders.addLinkedFolder(chosen!, args.name) };
+    },
+    'workspace:renameFolder': async (_event, args) => {
+      return { folder: await linkedFolders.renameLinkedFolder(args.id, args.name) };
+    },
+    'workspace:removeFolder': async (_event, args) => {
+      return linkedFolders.removeLinkedFolder(args.id);
     },
     'gmail:getImportant': async (_event, args) => {
       return listImportantThreads({ cursor: args.cursor, limit: args.limit });
