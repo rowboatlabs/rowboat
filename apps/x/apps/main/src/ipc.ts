@@ -119,11 +119,11 @@ import { summarizeMeeting } from '@x/core/dist/knowledge/summarize_meeting.js';
 import { getAccessToken } from '@x/core/dist/auth/tokens.js';
 import { getRowboatConfig } from '@x/core/dist/config/rowboat.js';
 import { runLiveNoteAgent } from '@x/core/dist/knowledge/live-note/runner.js';
-import { listImportantThreads, listEverythingElseThreads, saveMessageBodyHeight, triggerSync as triggerGmailSync, sendThreadReply, saveThreadDraft, deleteThreadDraft, listDraftThreads, searchThreads, archiveThread, archiveCategoryThreads, trashThread, markThreadRead, downloadAttachment, getAccountEmail, getAccountName, getConnectionStatus as getGmailConnectionStatus, setThreadImportance, setThreadCategory } from '@x/core/dist/knowledge/sync_gmail.js';
+import { listImportantThreads, listEverythingElseThreads, saveMessageBodyHeight, setThreadImportance, setThreadCategory } from '@x/core/dist/knowledge/email/store.js';
+import { triggerEmailSync, sendThreadReply, saveThreadDraft, deleteThreadDraft, listDraftThreads, searchThreads, archiveThread, archiveCategoryThreads, trashThread, markThreadRead, downloadAttachment, getAccountEmail, getAccountName, getConnectionStatus as getEmailConnectionStatus, searchSentContacts, warmSentContacts } from '@x/core/dist/knowledge/email/dispatcher.js';
 import { loadEmailInstructions, saveEmailInstructions } from '@x/core/dist/knowledge/email_instructions.js';
 import { getEmailLabels, syncCustomLabelsFromInstructions } from '@x/core/dist/knowledge/email_labels.js';
 import { searchContacts as searchGmailContacts, warmContactIndex } from '@x/core/dist/knowledge/gmail_contacts.js';
-import { searchSentContacts, warmSentContacts } from '@x/core/dist/knowledge/gmail_sent_contacts.js';
 import { getGoogleDocsConnectionStatus, importGoogleDoc, syncGoogleDocDown, syncGoogleDocUp, getGoogleDocLink } from '@x/core/dist/knowledge/google_docs.js';
 import { startManagedGooglePick } from './google-picker-managed.js';
 import { liveNoteBus } from '@x/core/dist/knowledge/live-note/bus.js';
@@ -664,9 +664,10 @@ export function emitOAuthEvent(event: { provider: string; success: boolean; erro
   // prompt, so any OAuth state change must rebuild it.
   invalidateCopilotInstructionsCache();
   broadcastToWindows('oauth:didConnect', event);
-  // Google connect (both BYOK and rowboat-mode paths funnel through here) is
-  // the "connected Gmail" first-time reward.
-  if (event.provider === 'google' && event.success) {
+  // Email connect (Google BYOK, Google rowboat-mode, and Microsoft all funnel
+  // through here) is the "connected email" first-time reward. The stored
+  // credit key keeps its historical name — renaming would double-grant.
+  if ((event.provider === 'google' || event.provider === 'microsoft') && event.success) {
     void maybeActivateCredit('first_gmail_connected');
   }
 }
@@ -861,12 +862,12 @@ export function setupIpcHandlers() {
   // windows so the UI can update balances and celebrate.
   subscribeCreditActivations((event) => broadcastToWindows('credits:didActivate', event));
 
-  // Pre-warm the Gmail contact indices so the first compose-box keystroke is instant.
+  // Pre-warm the email contact indices so the first compose-box keystroke is instant.
   // - warmContactIndex(): synchronous local-snapshot fallback (instant, narrow coverage).
-  // - warmSentContacts(): kicks off a background Gmail API sync of the SENT label
-  //   for full historical coverage of people you've actually emailed.
+  // - warmSentContacts(): kicks off a background sync of the active provider's
+  //   sent mail for full historical coverage of people you've actually emailed.
   warmContactIndex();
-  warmSentContacts();
+  void warmSentContacts();
 
   registerIpcHandlers({
     'app:getVersions': async () => {
@@ -999,7 +1000,7 @@ export function setupIpcHandlers() {
       return listEverythingElseThreads({ cursor: args.cursor, limit: args.limit, category: args.category });
     },
     'gmail:triggerSync': async () => {
-      triggerGmailSync();
+      await triggerEmailSync();
       return {};
     },
     'gmail:sendReply': async (_event, args) => {
@@ -1022,7 +1023,7 @@ export function setupIpcHandlers() {
       return searchThreads(args.query, { limit: args.limit });
     },
     'gmail:getConnectionStatus': async () => {
-      return getGmailConnectionStatus();
+      return getEmailConnectionStatus();
     },
     'gmail:getAccountEmail': async () => {
       return { email: await getAccountEmail() };

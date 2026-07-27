@@ -2,7 +2,7 @@ import { Loader2, CheckCircle2, ArrowLeft, Calendar, FileText } from "lucide-rea
 import { motion } from "motion/react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { GmailIcon, FirefliesIcon } from "../provider-icons"
+import { GmailIcon, FirefliesIcon, OutlookIcon } from "../provider-icons"
 import type { OnboardingState, ProviderState } from "../use-onboarding-state"
 
 interface ConnectAccountsStepProps {
@@ -18,6 +18,7 @@ function ProviderCard({
   providerState,
   onConnect,
   rightSlot,
+  disabledReason,
   index,
 }: {
   name: string
@@ -28,9 +29,12 @@ function ProviderCard({
   providerState?: ProviderState
   onConnect?: () => void
   rightSlot?: React.ReactNode
+  /** When set (and not connected), Connect is disabled and this text replaces the description. */
+  disabledReason?: string
   index: number
 }) {
   const isConnected = providerState?.isConnected ?? false
+  const connectDisabled = !isConnected && Boolean(disabledReason)
 
   return (
     <motion.div
@@ -50,7 +54,7 @@ function ProviderCard({
         </div>
         <div className="min-w-0">
           <div className="text-sm font-semibold">{name}</div>
-          <div className="text-xs text-muted-foreground truncate">{description}</div>
+          <div className="text-xs text-muted-foreground truncate">{connectDisabled ? disabledReason : description}</div>
         </div>
       </div>
       <div className="shrink-0">
@@ -66,7 +70,8 @@ function ProviderCard({
             <Button
               size="sm"
               onClick={onConnect}
-              disabled={providerState?.isConnecting}
+              disabled={providerState?.isConnecting || connectDisabled}
+              title={connectDisabled ? disabledReason : undefined}
             >
               {providerState?.isConnecting ? (
                 <Loader2 className="size-4 animate-spin" />
@@ -108,7 +113,7 @@ export function ConnectAccountsStep({ state }: ConnectAccountsStepProps) {
       ) : (
         <div className="space-y-6">
           {/* Email & Calendar */}
-          {(useComposioForGoogle || useComposioForGoogleCalendar || providers.includes('google')) && (
+          {(useComposioForGoogle || useComposioForGoogleCalendar || providers.includes('google') || providers.includes('microsoft')) && (
             <div className="space-y-3">
               <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                 Email & Calendar
@@ -133,6 +138,22 @@ export function ConnectAccountsStep({ state }: ConnectAccountsStepProps) {
                   iconColor="text-red-500"
                   providerState={providerStates['google']}
                   onConnect={() => handleConnect('google')}
+                  // Only one email provider at a time — the main process
+                  // enforces this too; the disabled button just explains it.
+                  disabledReason={providerStates.microsoft?.isConnected ? 'Disconnect Microsoft Outlook first' : undefined}
+                  index={cardIndex++}
+                />
+              )}
+              {providers.includes('microsoft') && (
+                <ProviderCard
+                  name="Microsoft Outlook"
+                  description="Rowboat uses your email and calendar to provide personalized, context-aware assistance"
+                  icon={<OutlookIcon />}
+                  iconBg="bg-sky-500/10"
+                  iconColor="text-sky-500"
+                  providerState={providerStates['microsoft']}
+                  onConnect={() => handleConnect('microsoft')}
+                  disabledReason={providerStates.google?.isConnected ? 'Disconnect Google first' : undefined}
                   index={cardIndex++}
                 />
               )}

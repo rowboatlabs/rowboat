@@ -10,7 +10,8 @@ import * as files from "../../../filesystem/files.js";
 import { WorkDir } from "../../../config/config.js";
 import { RowboatAppManifestSchema } from "@x/shared/dist/rowboat-app.js";
 import { listApps } from "../../../apps/indexer.js";
-import { listImportantThreads, searchThreads } from "../../../knowledge/sync_gmail.js";
+import { listImportantThreads } from "../../../knowledge/email/store.js";
+import { searchThreads } from "../../../knowledge/email/dispatcher.js";
 import { listTasks as listBackgroundTasks } from "../../../background-tasks/fileops.js";
 import type { ISessions } from "../../sessions/api.js";
 import { BuiltinToolsSchema } from "../types.js";
@@ -29,7 +30,7 @@ export const appNavigationTools: z.infer<typeof BuiltinToolsSchema> = {
             // open-view / read-view
             view: z.enum(["home", "email", "meetings", "live-notes", "bg-tasks", "chat-history", "knowledge", "workspace", "code", "bases", "graph", "apps"]).optional().describe("Which view to open (open-view) or read (read-view; supported for read: email, bg-tasks, chat-history, apps)"),
             // read-view (email)
-            query: z.string().optional().describe("For read-view on email: runs a LIVE Gmail search over the user's ENTIRE mailbox (not just synced mail) via the Gmail API. Supports full Gmail search operators: from:, to:, subject:, before:/after:, has:attachment, quoted phrases, OR, etc. Omit to list the latest important inbox threads."),
+            query: z.string().optional().describe("For read-view on email: runs a LIVE search over the user's ENTIRE mailbox (not just synced mail) via the connected provider's native search — Gmail search operators (from:, to:, subject:, before:/after:, has:attachment, OR) or Outlook KQL (from:, subject:, received>=, hasattachment:true), plus quoted phrases. Omit to list the latest important inbox threads."),
             limit: z.number().int().min(1).max(50).optional().describe("For read-view: max items to return (default 15)"),
             // open-item
             kind: z.enum(["email-thread", "note", "bg-task", "session"]).optional().describe("What to open (for open-item)"),

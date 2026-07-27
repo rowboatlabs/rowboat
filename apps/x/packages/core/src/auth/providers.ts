@@ -49,6 +49,14 @@ export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
 export type ProviderConfigEntry = ProviderConfig[string];
 
 /**
+ * Azure Entra application (client) ID for the Microsoft / Outlook connection.
+ * A multi-tenant "Mobile and desktop applications" public client — PKCE +
+ * loopback redirect, NO client secret. Overridable via env for development.
+ */
+const MICROSOFT_CLIENT_ID =
+  process.env.ROWBOAT_MICROSOFT_CLIENT_ID || 'b173a85c-6d6e-4422-a735-3ca7f2c8f477';
+
+/**
  * All configured OAuth providers
  */
 const providerConfigs: ProviderConfig = {
@@ -95,7 +103,37 @@ const providerConfigs: ProviderConfig = {
       'profile',
       'email',
     ]
-  }
+  },
+  microsoft: {
+    // Static endpoints, no OIDC discovery: the Microsoft identity platform's
+    // /common discovery document carries a `{tenantid}` templated issuer that
+    // openid-client's issuer validation rejects. Static config never fetches
+    // it. We also deliberately do NOT request `openid`/`profile` — with no
+    // id_token in the response, openid-client skips all ID-token validation;
+    // account identity comes from Graph /me instead.
+    discovery: {
+      mode: 'static',
+      authorizationEndpoint: 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize',
+      tokenEndpoint: 'https://login.microsoftonline.com/common/oauth2/v2.0/token',
+      // No revocationEndpoint — the MS identity platform v2 has none. Users
+      // revoke consent at account.live.com/consent/Manage (personal) or
+      // myapps.microsoft.com (work/school).
+    },
+    client: {
+      mode: 'static',
+      clientId: MICROSOFT_CLIENT_ID,
+    },
+    // Fully-qualified Graph scopes: MS echoes these forms back in the token
+    // response `scope` field (offline_access is granted but never echoed), so
+    // requesting them fully-qualified keeps the persisted-scope check simple.
+    scopes: [
+      'offline_access',
+      'https://graph.microsoft.com/User.Read',
+      'https://graph.microsoft.com/Mail.ReadWrite',
+      'https://graph.microsoft.com/Mail.Send',
+      'https://graph.microsoft.com/Calendars.Read',
+    ],
+  },
 };
 
 /**

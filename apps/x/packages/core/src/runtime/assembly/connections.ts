@@ -42,3 +42,24 @@ export async function isGoogleConnected(): Promise<boolean> {
         return false;
     }
 }
+
+export async function isMicrosoftConnected(): Promise<boolean> {
+    try {
+        const repo = await lazyResolve<import("../../auth/repo.js").IOAuthRepo>("oauthRepo");
+        const connection = await repo.read("microsoft");
+        return !!connection.tokens;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Which native email provider is connected (at most one — the connect flow
+ * enforces mutual exclusion; Google wins a hand-edited tie, matching the
+ * email dispatcher).
+ */
+export async function getConnectedEmailProvider(): Promise<'google' | 'microsoft' | null> {
+    if (await isGoogleConnected()) return 'google';
+    if (await isMicrosoftConnected()) return 'microsoft';
+    return null;
+}
