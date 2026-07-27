@@ -72,6 +72,7 @@ import { isOnboardingComplete, markOnboardingComplete } from '@x/core/dist/confi
 import { loadNotificationSettings, saveNotificationSettings } from '@x/core/dist/config/notification_config.js';
 import { loadTurnLimitsSettings, saveTurnLimitsSettings } from '@x/core/dist/config/turn_limits.js';
 import { saveAppSettings } from '@x/core/dist/config/app_settings.js';
+import { isLoginItemEnabled, setLoginItemEnabled } from './login_item.js';
 import { setSelfCaptureActive } from '@x/core/dist/meetings/detector.js';
 import { notifyIfEnabled } from '@x/core/dist/application/notification/notifier.js';
 import { consumePendingToggleMeetingNotes, setTrayRecordingState } from './tray.js';
@@ -926,14 +927,11 @@ export function setupIpcHandlers() {
       // Dev builds never register a login item (it would point at the dev
       // Electron binary), so report off.
       if (!app.isPackaged) return { openAtLogin: false };
-      return { openAtLogin: app.getLoginItemSettings().openAtLogin };
+      return { openAtLogin: isLoginItemEnabled() };
     },
     'app:setLoginItemSettings': async (_event, args) => {
       if (app.isPackaged) {
-        app.setLoginItemSettings({
-          openAtLogin: args.openAtLogin,
-          ...(process.platform === 'win32' ? { args: ['--hidden'] } : {}),
-        });
+        setLoginItemEnabled(args.openAtLogin);
         // The user has expressed an explicit choice — never re-apply the
         // first-run default over it.
         saveAppSettings({ loginItemRegistered: true });

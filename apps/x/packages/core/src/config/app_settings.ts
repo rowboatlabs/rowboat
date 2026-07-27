@@ -12,6 +12,14 @@ export interface AppSettings {
      * re-registers on boot, so disabling it in System Settings sticks.
      */
     loginItemRegistered?: boolean;
+    /**
+     * Windows only: set once the login item has been (re-)registered via the
+     * version-agnostic Squirrel stub launcher. Builds before this flag
+     * registered the versioned app-x.y.z exe, which keeps auto-starting the
+     * OLD version after every update — the first run of a newer build
+     * rewrites that registry entry in place (see apps/main/src/login_item.ts).
+     */
+    loginItemRegisteredV2?: boolean;
 }
 
 export function loadAppSettings(): AppSettings {
