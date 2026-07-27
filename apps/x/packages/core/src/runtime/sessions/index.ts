@@ -1,5 +1,6 @@
 export * from "./api.js";
 export * from "./bus.js";
+export * from "./by-workdir.js";
 export * from "./fs-repo.js";
 export * from "./in-memory-session-repo.js";
 export * from "./repo.js";

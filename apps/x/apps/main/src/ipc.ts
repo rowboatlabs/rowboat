@@ -32,6 +32,7 @@ import { ServiceEvent } from '@x/shared/dist/service-events.js';
 import type { SessionBusEvent } from '@x/shared/dist/sessions.js';
 import { isDurableTurnEvent } from '@x/shared/dist/turns.js';
 import type { ISessions, EmitterSessionBus } from '@x/core/dist/runtime/sessions/index.js';
+import { listByWorkDir as listSessionsByWorkDir } from '@x/core/dist/runtime/sessions/by-workdir.js';
 import type { ITurnEventBus } from '@x/core/dist/runtime/turns/event-hub.js';
 import container from '@x/core/dist/di/container.js';
 import { testModelConnection, listModelsForProvider, generateOneShot } from '@x/core/dist/models/models.js';
@@ -1210,7 +1211,23 @@ export function setupIpcHandlers() {
       return runsCore.listRuns(args.cursor);
     },
     'runs:listByWorkDir': async (_event, args) => {
-      return runsCore.listRunsByWorkDir(args.dir);
+      // Chats are sessions now; the legacy runs/*.jsonl logs this used to scan
+      // are migrated away at boot, so the session index is the only source.
+      await sessionsIndexReady;
+      const sessions = container.resolve<ISessions>('sessions').listSessions();
+      return listSessionsByWorkDir(args.dir, sessions
+        // A session the index couldn't load carries empty timestamps, which
+        // the response schema rejects — one of those would otherwise fail the
+        // whole call and blank the panel. It has no title or date to show
+        // anyway, so leave it out.
+        .filter((s) => !s.error && s.createdAt)
+        .map((s) => ({
+          id: s.sessionId,
+          ...(s.title ? { title: s.title } : {}),
+          createdAt: s.createdAt,
+          modifiedAt: s.updatedAt || s.createdAt,
+          ...(s.lastAgentId ? { agentId: s.lastAgentId } : {}),
+        })));
     },
     'runs:delete': async (_event, args) => {
       await runsCore.deleteRun(args.runId);

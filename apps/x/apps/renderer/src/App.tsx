@@ -31,7 +31,7 @@ import { LiveNotesView } from '@/components/live-notes-view';
 import { BgTasksView } from '@/components/bg-tasks-view';
 import { AppsView } from '@/components/apps/apps-view';
 import { EmailView } from '@/components/email-view';
-import { WorkspaceView } from '@/components/workspace-view';
+import { WorkspaceView, WORKSPACE_CHATS_CHANGED } from '@/components/workspace-view';
 import { CodingRunBlock } from '@/components/coding-run';
 import { SubAgentBlock } from '@/components/sub-agent-block';
 import { KnowledgeView, type KnowledgeViewMode } from '@/components/knowledge-view';
@@ -1886,6 +1886,9 @@ function App() {
         path: `config/workdir-${runId}.json`,
         data: JSON.stringify(value ? { path: value } : {}, null, 2),
       })
+      // Nothing watches config/, so tell an open workspace view itself — this
+      // chat just joined (or left) one of its folders.
+      window.dispatchEvent(new Event(WORKSPACE_CHATS_CHANGED))
     } catch (err) {
       console.error('Failed to persist work directory for run', runId, err)
     }

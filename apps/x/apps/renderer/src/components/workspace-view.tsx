@@ -54,6 +54,14 @@ import { cn } from '@/lib/utils'
 const WORKSPACE_ROOT = 'knowledge/Workspace'
 const LINKED_PREFIX = workspace.LINKED_FOLDER_PREFIX
 
+/**
+ * Fired by the app after a chat's work-directory sidecar is written, so an open
+ * workspace can pick the chat up. That sidecar (`config/workdir-<id>.json`)
+ * lives outside the workspace watcher's roots and doesn't touch the session
+ * index, so this is the only signal for "an existing chat joined/left a folder".
+ */
+export const WORKSPACE_CHATS_CHANGED = 'workspace-chats:changed'
+
 type LinkedFolder = z.infer<typeof workspace.LinkedFolder>
 
 interface TreeNode {
@@ -438,6 +446,35 @@ export function WorkspaceView({ tree, initialPath, actions, onNavigate, onOpenNo
   useEffect(() => {
     void loadChats()
   }, [loadChats])
+
+  // Keep the list live. The session index changes whenever a chat is created,
+  // retitled or deleted; WORKSPACE_CHATS_CHANGED covers an existing chat having
+  // its work directory (re)pointed. Both can fire in bursts — a turn advancing
+  // republishes the index entry — so coalesce into one refetch.
+  useEffect(() => {
+    if (isRoot) return
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const schedule = () => {
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => {
+        timer = null
+        void loadChats()
+      }, 400)
+    }
+    const stopSessions = window.ipc.on('sessions:events', schedule)
+    window.addEventListener(WORKSPACE_CHATS_CHANGED, schedule)
+    return () => {
+      if (timer) clearTimeout(timer)
+      stopSessions()
+      window.removeEventListener(WORKSPACE_CHATS_CHANGED, schedule)
+    }
+  }, [isRoot, loadChats])
+
+  // Opening the panel always shows current data, even if every live signal was
+  // somehow missed while it sat closed.
+  useEffect(() => {
+    if (chatsOpen) void loadChats()
+  }, [chatsOpen, loadChats])
 
   const handleItemClick = useCallback(
     (item: TreeNode) => {
