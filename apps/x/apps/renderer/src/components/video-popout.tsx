@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ChevronDown, ChevronUp, Maximize2, Mic, MicOff, MonitorUp, PhoneOff, SendHorizontal, Square, User, Video, VideoOff } from 'lucide-react'
+import { Streamdown } from 'streamdown'
 
 import { TalkingHead } from '@/components/talking-head'
 
@@ -327,8 +328,12 @@ export function VideoPopout() {
                   {state.questionText}
                 </div>
               )}
-              <div className="whitespace-pre-wrap text-neutral-100">
-                {state.responseText}
+              <div className="text-neutral-100">
+                {state.responseText && (
+                  <Streamdown className="prose prose-sm prose-invert max-w-none text-[11px] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0 [&_pre]:my-1.5 [&_pre]:text-[10px] [&_code]:text-[10px]">
+                    {state.responseText}
+                  </Streamdown>
+                )}
                 {state.status === 'thinking' && <span className="animate-pulse">▍</span>}
               </div>
             </div>

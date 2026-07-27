@@ -1079,6 +1079,77 @@ const ipcSchemas = {
     req: z.null(),
     res: z.object({}),
   },
+  // --- Quick-ask bar (global ⌥Space, own always-on-top window) ---
+  // Bar → main: relay a typed/spoken question into the app window's chat.
+  'quickAsk:submit': {
+    req: z.object({ text: z.string() }),
+    res: z.object({}),
+  },
+  // Push channel: main → app window with the relayed question.
+  'quick-ask:submit': {
+    req: z.object({ text: z.string() }),
+    res: z.null(),
+  },
+  // Bar → main: dismiss the bar (Esc).
+  'quickAsk:hide': {
+    req: z.null(),
+    res: z.object({}),
+  },
+  // App window → main: open the bar (the discoverability toast's "Try it").
+  'quickAsk:show': {
+    req: z.null(),
+    res: z.object({}),
+  },
+  // Bar → main: jump to the conversation in the app — focuses the app
+  // window and tells it to show the chat full-view (no middle pane).
+  'quickAsk:openChat': {
+    req: z.null(),
+    res: z.object({}),
+  },
+  // Push channel: main → app window for the jump above.
+  'quick-ask:open-chat': {
+    req: z.null(),
+    res: z.null(),
+  },
+  // Bar → main: start a fresh chat for the next question (the app stays in
+  // the background; only the conversation resets).
+  'quickAsk:newChat': {
+    req: z.null(),
+    res: z.object({}),
+  },
+  // Push channel: main → app window for the reset above.
+  'quick-ask:new-chat': {
+    req: z.null(),
+    res: z.null(),
+  },
+  // Bar → main: grow/shrink the window as the response area changes.
+  'quickAsk:resize': {
+    req: z.object({ height: z.number() }),
+    res: z.object({}),
+  },
+  // App window → main: mirror of the in-flight answer for the bar
+  // (streaming text while processing, final text when done).
+  'quickAsk:state': {
+    req: z.object({
+      processing: z.boolean(),
+      responseText: z.string().nullable(),
+      // What the agent is doing right now ("Reasoning…", "Web search…") —
+      // shown blinking in the bar until the answer starts streaming.
+      statusText: z.string().nullable(),
+    }),
+    res: z.object({}),
+  },
+  // Push channel: main → bar with the latest answer state.
+  'quick-ask:state': {
+    req: z.object({
+      processing: z.boolean(),
+      responseText: z.string().nullable(),
+      // What the agent is doing right now ("Reasoning…", "Web search…") —
+      // shown blinking in the bar until the answer starts streaming.
+      statusText: z.string().nullable(),
+    }),
+    res: z.null(),
+  },
   // --- Ambient meeting detection popup (own always-on-top window) ---
   // Main → popup: the detection to display.
   'meetingDetect:payload': {

@@ -27,6 +27,7 @@ const execFileAsync = promisify(execFile);
 let caffeinateBlockerId: number | null = null;
 
 import { initPtt, setPttActive, getPttStatus, retryPttHook, openInputMonitoringSettings } from './ptt.js';
+import { getQuickAskWindow, hideQuickAsk, showQuickAsk, resizeQuickAsk } from './quick-ask.js';
 import { RunEvent } from '@x/shared/dist/runs.js';
 import { ServiceEvent } from '@x/shared/dist/service-events.js';
 import type { SessionBusEvent } from '@x/shared/dist/sessions.js';
@@ -460,7 +461,12 @@ function findMainAppWindow(): BrowserWindow | undefined {
     if (w === videoPopoutWin || w.isDestroyed()) return false;
     const url = w.webContents.getURL();
     const isAppWindow = url.startsWith('app://') || url.startsWith('http://localhost');
-    return isAppWindow && !url.includes('#video-popout');
+    // Every utility window loads the same bundle with a hash route
+    // (#video-popout, #quick-ask, #meeting-detected) — only the hashless
+    // window is the real app. Matching just video-popout let the quick-ask
+    // relay pick the quick-ask window ITSELF as the "app window" and send
+    // the question right back to it (bar stuck on "Thinking…").
+    return isAppWindow && !url.includes('#');
   });
 }
 
@@ -980,6 +986,42 @@ export function setupIpcHandlers() {
       } catch {
         return { success: false };
       }
+    },
+    // --- Quick-ask bar relays ---
+    'quickAsk:submit': async (_event, args) => {
+      findMainAppWindow()?.webContents.send('quick-ask:submit', args);
+      return {};
+    },
+    'quickAsk:hide': async () => {
+      hideQuickAsk();
+      return {};
+    },
+    'quickAsk:show': async () => {
+      showQuickAsk();
+      return {};
+    },
+    'quickAsk:newChat': async () => {
+      findMainAppWindow()?.webContents.send('quick-ask:new-chat', null);
+      return {};
+    },
+    'quickAsk:openChat': async () => {
+      const main = findMainAppWindow();
+      if (main) {
+        if (main.isMinimized()) main.restore();
+        main.show();
+        main.focus();
+        app.focus({ steal: true });
+        main.webContents.send('quick-ask:open-chat', null);
+      }
+      return {};
+    },
+    'quickAsk:resize': async (_event, args) => {
+      resizeQuickAsk(args.height);
+      return {};
+    },
+    'quickAsk:state': async (_event, args) => {
+      getQuickAskWindow()?.webContents.send('quick-ask:state', args);
+      return {};
     },
     'meeting:notifyNotesReady': async (_event, args) => {
       // Granola-style re-entry point: the note refreshed in place, but the
