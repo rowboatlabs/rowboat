@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowUpRight, Bot, CircleAlert, LayoutGrid, Loader2, MessageCircle, RotateCcw, X } from 'lucide-react'
 import type { TodoBlock, TodoEventType, TodoItem, TodoLink, TodoList } from '@x/shared/dist/todo.js'
-import { TodoThreadPanel } from '@/components/todo-thread-panel'
 
 // ---------------------------------------------------------------------------
 // The home to-do list — one rolling ~/.rowboat/todo.md shared with @rowboat.
@@ -13,7 +12,8 @@ import { TodoThreadPanel } from '@/components/todo-thread-panel'
 
 type TodoViewProps = {
   onOpenNote: (path: string) => void
-  onOpenRun: (runId: string) => void
+  /** Bind the chat dock to an item's session — the full thread view. */
+  onOpenInChat: (sessionId: string) => void
   onShowOverview: () => void
 }
 
@@ -57,6 +57,7 @@ function ReceiptRow({ item, onOpenNote, onRetry, onOpenThread }: {
   item: TodoItem
   onOpenNote: (path: string) => void
   onRetry: () => void
+  /** Opens the inline comment box (questions are answered right there). */
   onOpenThread: () => void
 }) {
   if (item.receipts.length === 0) return null
@@ -113,15 +114,56 @@ function ReceiptRow({ item, onOpenNote, onRetry, onOpenThread }: {
 // One item row — checkbox, editable text, chips, receipts, dismiss
 // ---------------------------------------------------------------------------
 
-function ItemRow({ item, isRunning, onToggle, onCommitText, onDismiss, onRun, onOpenNote, onOpenThread }: {
+function CommentComposer({ onSend, onCancel, sessionId, onOpenInChat }: {
+  onSend: (message: string) => void
+  onCancel: () => void
+  sessionId: string | null
+  onOpenInChat: (sessionId: string) => void
+}) {
+  const [message, setMessage] = useState('')
+  return (
+    <div className="mt-1.5 flex items-center gap-2 rounded-lg border border-border bg-background px-2.5 py-1.5">
+      <MessageCircle className="size-3.5 shrink-0 text-muted-foreground" />
+      <input
+        autoFocus
+        value={message}
+        onChange={(e) => setMessage(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && message.trim()) {
+            e.preventDefault()
+            onSend(message.trim())
+          }
+          if (e.key === 'Escape') onCancel()
+        }}
+        placeholder="Tell @rowboat something about this…"
+        className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-muted-foreground"
+      />
+      {sessionId && (
+        <button
+          type="button"
+          onClick={() => onOpenInChat(sessionId)}
+          className="shrink-0 whitespace-nowrap rounded-md px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+        >
+          open in chat →
+        </button>
+      )}
+    </div>
+  )
+}
+
+function ItemRow({ item, isRunning, commentOpen, sessionId, onToggle, onCommitText, onDismiss, onRun, onOpenNote, onToggleComment, onComment, onOpenInChat }: {
   item: TodoItem
   isRunning: boolean
+  commentOpen: boolean
+  sessionId: string | null
   onToggle: (checked: boolean) => void
   onCommitText: (text: string) => void
   onDismiss: () => void
   onRun: () => void
   onOpenNote: (path: string) => void
-  onOpenThread: () => void
+  onToggleComment: () => void
+  onComment: (message: string) => void
+  onOpenInChat: (sessionId: string) => void
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(item.text)
@@ -175,12 +217,20 @@ function ItemRow({ item, isRunning, onToggle, onCommitText, onDismiss, onRun, on
             )}
           </div>
         )}
-        <ReceiptRow item={item} onOpenNote={onOpenNote} onRetry={onRun} onOpenThread={onOpenThread} />
+        <ReceiptRow item={item} onOpenNote={onOpenNote} onRetry={onRun} onOpenThread={onToggleComment} />
+        {commentOpen && (
+          <CommentComposer
+            onSend={onComment}
+            onCancel={onToggleComment}
+            sessionId={sessionId}
+            onOpenInChat={onOpenInChat}
+          />
+        )}
       </div>
       <button
         type="button"
-        onClick={onOpenThread}
-        title="Open thread — steer @rowboat's work"
+        onClick={onToggleComment}
+        title="Comment — tell @rowboat something about this item"
         className={`mt-0.5 shrink-0 rounded-md p-1 text-muted-foreground/50 transition-opacity hover:bg-accent hover:text-foreground ${
           item.receipts.length > 0 || isRunning ? '' : 'opacity-0 group-hover/todo:opacity-100'
         }`}
@@ -268,11 +318,12 @@ function Composer({ onSubmit }: { onSubmit: (text: string) => void }) {
 // The view
 // ---------------------------------------------------------------------------
 
-export function TodoView({ onOpenNote, onOpenRun, onShowOverview }: TodoViewProps) {
+export function TodoView({ onOpenNote, onOpenInChat, onShowOverview }: TodoViewProps) {
   const [blocks, setBlocks] = useState<TodoBlock[] | null>(null)
   const [running, setRunning] = useState<Set<string>>(new Set())
+  const [sessions, setSessions] = useState<Record<string, string>>({})
   const [showCallout, setShowCallout] = useState(false)
-  const [openThreadKey, setOpenThreadKey] = useState<string | null>(null)
+  const [commentKey, setCommentKey] = useState<string | null>(null)
 
   const blocksRef = useRef<TodoBlock[] | null>(null)
   const dirtyRef = useRef(false)
@@ -289,6 +340,7 @@ export function TodoView({ onOpenNote, onOpenRun, onShowOverview }: TodoViewProp
     const res = await window.ipc.invoke('todo:get', null)
     adopt(res.list)
     setRunning(new Set(res.running))
+    setSessions(res.sessions)
   }, [])
 
   const saveNow = useCallback(async () => {
@@ -349,6 +401,12 @@ export function TodoView({ onOpenNote, onOpenRun, onShowOverview }: TodoViewProp
     void window.ipc.invoke('todo:runItem', { key })
   }, [])
 
+  const commentOnItem = useCallback((key: string, message: string) => {
+    setCommentKey(null)
+    setRunning((s) => new Set(s).add(key))
+    void window.ipc.invoke('todo:comment', { key, message })
+  }, [])
+
   const addItem = useCallback(async (text: string) => {
     // Flush edits first so the appended line lands on the saved file.
     if (dirtyRef.current) await saveNowRef.current()
@@ -366,14 +424,8 @@ export function TodoView({ onOpenNote, onOpenRun, onShowOverview }: TodoViewProp
   const hasCompleted = itemBlocks.some(({ block }) => block.kind === 'item' && block.item.checked)
   const todayLabel = new Date().toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })
 
-  // The panel follows the item live; if the line is dismissed it closes.
-  const threadItem = openThreadKey
-    ? itemBlocks.find(({ block }) => block.kind === 'item' && block.item.key === openThreadKey)?.block
-    : undefined
-  const threadItemResolved = threadItem?.kind === 'item' ? threadItem.item : null
-
   return (
-    <div className="flex h-full flex-row overflow-hidden bg-muted/30">
+    <div className="flex h-full flex-col overflow-hidden bg-muted/30">
       <div className="flex-1 overflow-y-auto px-9 py-7">
         <div className="mx-auto flex max-w-[720px] flex-col gap-4">
 
@@ -404,7 +456,7 @@ export function TodoView({ onOpenNote, onOpenRun, onShowOverview }: TodoViewProp
           {showCallout && (
             <div className="flex items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-4 py-2.5 text-sm">
               <Bot className="size-4 shrink-0 text-primary" />
-              <span className="flex-1">@rowboat finished an item — the → line under it links to what it did. Open its thread (💬) to refine the work with a reply.</span>
+              <span className="flex-1">@rowboat finished an item — the → line under it links to what it did. Hit 💬 on the row to refine the work with a comment, or open it in chat.</span>
               <button
                 type="button"
                 onClick={() => { localStorage.setItem(CALLOUT_KEY, '1'); setShowCallout(false) }}
@@ -463,7 +515,11 @@ export function TodoView({ onOpenNote, onOpenRun, onShowOverview }: TodoViewProp
                     }}
                     onRun={() => runItem(item.key)}
                     onOpenNote={onOpenNote}
-                    onOpenThread={() => setOpenThreadKey(item.key)}
+                    commentOpen={commentKey === item.key}
+                    sessionId={sessions[item.key] ?? null}
+                    onToggleComment={() => setCommentKey(commentKey === item.key ? null : item.key)}
+                    onComment={(message) => commentOnItem(item.key, message)}
+                    onOpenInChat={onOpenInChat}
                   />
                 )
               })
@@ -478,14 +534,6 @@ export function TodoView({ onOpenNote, onOpenRun, onShowOverview }: TodoViewProp
           </div>
         </div>
       </div>
-      {threadItemResolved && (
-        <TodoThreadPanel
-          item={threadItemResolved}
-          isRunning={running.has(threadItemResolved.key)}
-          onClose={() => setOpenThreadKey(null)}
-          onOpenRun={onOpenRun}
-        />
-      )}
     </div>
   )
 }

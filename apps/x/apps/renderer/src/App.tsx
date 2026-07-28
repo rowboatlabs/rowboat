@@ -3501,9 +3501,13 @@ function App() {
         .invoke('turnLimits:getSettings', null)
         .then((settings) => settings.chatMaxModelCalls)
         .catch(() => undefined)
+      // A to-do item's session keeps its own agent on continuation — typing
+      // in that chat steers the item's work, it doesn't summon the copilot.
+      const sessionAgentId = runs.find((r) => r.id === currentRunId)?.agentId
+      const effectiveAgentId = sessionAgentId === 'todo-item-agent' ? sessionAgentId : agentId
       const sendConfig = {
         agent: {
-          agentId,
+          agentId: effectiveAgentId,
           overrides: {
             ...(selected ? { model: { provider: selected.provider, model: selected.model } } : {}),
             composition: {
@@ -6993,7 +6997,19 @@ function App() {
                   {homeTab === 'todos' ? (
                     <TodoView
                       onOpenNote={(path) => navigateToFile(path)}
-                      onOpenRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
+                      onOpenInChat={(sessionId) => {
+                        // Bind the dock (not the full-screen chat) to the
+                        // item's session — same pattern as ChatSidebar's
+                        // onSelectRun.
+                        const existingTab = chatTabs.find((t) => t.runId === sessionId)
+                        if (existingTab) {
+                          switchChatTab(existingTab.id)
+                        } else {
+                          setChatTabs(prev => prev.map(t => t.id === activeChatTabId ? { ...t, runId: sessionId } : t))
+                          void loadRun(sessionId)
+                        }
+                        setIsChatSidebarOpen(true)
+                      }}
                       onShowOverview={() => setHomeTab('overview')}
                     />
                   ) : (

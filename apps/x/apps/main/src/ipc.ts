@@ -139,8 +139,8 @@ import {
   listLiveNotes,
 } from '@x/core/dist/knowledge/live-note/fileops.js';
 import { runBackgroundTask } from '@x/core/dist/background-tasks/runner.js';
-import { runTodoItem, followUpTodoItem, runningItemKeys } from '@x/core/dist/todo/runner.js';
-import { readThread as readTodoThread } from '@x/core/dist/todo/threads.js';
+import { runTodoItem, commentOnTodoItem, runningItemKeys } from '@x/core/dist/todo/runner.js';
+import { getSessionIndex as getTodoSessionIndex } from '@x/core/dist/todo/session-index.js';
 import { todoBus } from '@x/core/dist/todo/bus.js';
 import {
   readTodo,
@@ -2621,7 +2621,7 @@ export function setupIpcHandlers() {
     // Todo (home to-do list) handlers
     'todo:get': async () => {
       const list = await readTodo();
-      return { list, running: runningItemKeys() };
+      return { list, running: runningItemKeys(), sessions: await getTodoSessionIndex() };
     },
     'todo:save': async (_event, args) => {
       try {
@@ -2651,13 +2651,9 @@ export function setupIpcHandlers() {
         return { success: false, error: err instanceof Error ? err.message : String(err) };
       }
     },
-    'todo:getThread': async (_event, args) => {
-      const entries = await readTodoThread(args.key);
-      return { entries };
-    },
-    'todo:followUp': async (_event, args) => {
+    'todo:comment': async (_event, args) => {
       try {
-        void followUpTodoItem(args.key, args.message).catch(() => {});
+        void commentOnTodoItem(args.key, args.message).catch(() => {});
         return { success: true };
       } catch (err) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };

@@ -7,7 +7,7 @@ import { AgentScheduleConfig, AgentScheduleEntry } from './agent-schedule.js';
 import { AgentScheduleState } from './agent-schedule-state.js';
 import { ServiceEvent } from './service-events.js';
 import { LiveNoteAgentEvent, LiveNoteSchema } from './live-note.js';
-import { TodoEvent, TodoListSchema, TodoThreadEntrySchema } from './todo.js';
+import { TodoEvent, TodoListSchema } from './todo.js';
 import {
     BackgroundTaskAgentEvent,
     BackgroundTaskSchema,
@@ -2428,6 +2428,9 @@ const ipcSchemas = {
       // Keys of items with a run currently in flight — ephemeral state, never
       // in the file; the renderer overlays spinners from this + todo:events.
       running: z.array(z.string()),
+      // Item key → sessionId for items whose thread exists; "open in chat"
+      // binds the chat dock to that session.
+      sessions: z.record(z.string(), z.string()),
     }),
   },
   // Full-model save from the renderer. Core re-normalizes keys and merges
@@ -2466,18 +2469,10 @@ const ipcSchemas = {
       error: z.string().optional(),
     }),
   },
-  // The conversation behind one item (todo/threads/<slug>.md).
-  'todo:getThread': {
-    req: z.object({
-      key: z.string(),
-    }),
-    res: z.object({
-      entries: z.array(TodoThreadEntrySchema),
-    }),
-  },
-  // Record a user message on the item's thread, reopen it, and re-run with
-  // the thread as context. Fire-and-forget like todo:runItem.
-  'todo:followUp': {
+  // Inline comment on an item — the next user message in its session
+  // (answers a pending ask-human question when one is waiting). Reopens a
+  // checked item. Fire-and-forget like todo:runItem.
+  'todo:comment': {
     req: z.object({
       key: z.string(),
       message: z.string(),
