@@ -333,12 +333,12 @@ export function QuickAskBar() {
           <span className="flex shrink-0 items-center gap-3">
             {/* Same layered construction as the mic orb: gradient base,
                 inset hairline, radial top sheen. */}
-            <span className="relative flex items-center gap-2 overflow-hidden rounded-full bg-gradient-to-b from-white/10 to-white/[0.03] px-3.5 py-2 text-sm text-neutral-200 ring-1 ring-inset ring-white/15">
+            <span className="relative flex items-center gap-1.5 overflow-hidden rounded-full bg-gradient-to-b from-white/10 to-white/[0.03] px-3 py-1.5 text-[13px] text-neutral-200 ring-1 ring-inset ring-white/15">
               <span className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(120%_80%_at_50%_0%,rgba(255,255,255,0.12),transparent_55%)]" />
               <span className="relative">Hold right</span>
-              <Command className="relative h-4 w-4 text-sky-200 drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)]" />
+              <Command className="relative h-3.5 w-3.5 text-sky-200 drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)]" />
             </span>
-            <span className="text-sm text-neutral-400">to speak</span>
+            <span className="text-[13px] text-neutral-400">to speak</span>
           </span>
         )}
         {/* Optional toggles: speak answers aloud, share the screen. Same
