@@ -347,41 +347,63 @@ export function QuickAskBar() {
             tooltip can't open downward here (the window ends ~24px below,
             and with liquid glass the window must stay exactly capsule-sized),
             so the label lives in that 24px instead. */}
+        {/* Hint placement depends on the surface: expanded, the panel above
+            gives a normal tooltip room to open upward; collapsed, the window
+            is exactly the capsule, so a tiny in-capsule label sits in the
+            ~24px under the button instead. */}
         <span className="relative shrink-0">
-          <button
-            type="button"
-            onClick={toggleVoiceOut}
-            aria-label={voiceOut ? 'Stop speaking answers' : 'Speak answers aloud'}
-            className={`peer relative flex h-10 w-10 items-center justify-center overflow-hidden rounded-full ring-1 ring-inset transition-all ${
-              voiceOut
-                ? 'bg-gradient-to-b from-sky-400/30 to-sky-600/10 text-sky-100 ring-sky-300/30'
-                : 'bg-gradient-to-b from-white/10 to-white/[0.03] text-neutral-400 ring-white/15 hover:text-neutral-100'
-            }`}
-          >
-            <span className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(120%_80%_at_50%_0%,rgba(255,255,255,0.1),transparent_55%)]" />
-            <Volume2 className="relative h-4 w-4" />
-          </button>
-          <span className="pointer-events-none absolute left-1/2 top-full z-20 mt-0.5 -translate-x-1/2 whitespace-nowrap rounded-md bg-white px-1.5 py-0.5 text-[10px] font-medium text-neutral-900 shadow-md opacity-0 transition-opacity peer-hover:opacity-100">
-            {voiceOut ? 'Click to mute' : 'Speak answers aloud'}
-          </span>
+          <Tooltip open={expanded ? undefined : false}>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={toggleVoiceOut}
+                aria-label={voiceOut ? 'Stop speaking answers' : 'Speak answers aloud'}
+                className={`peer relative flex h-10 w-10 items-center justify-center overflow-hidden rounded-full ring-1 ring-inset transition-all ${
+                  voiceOut
+                    ? 'bg-gradient-to-b from-sky-400/30 to-sky-600/10 text-sky-100 ring-sky-300/30'
+                    : 'bg-gradient-to-b from-white/10 to-white/[0.03] text-neutral-400 ring-white/15 hover:text-neutral-100'
+                }`}
+              >
+                <span className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(120%_80%_at_50%_0%,rgba(255,255,255,0.1),transparent_55%)]" />
+                <Volume2 className="relative h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              {voiceOut ? 'Answers are spoken — click to mute' : 'Speak answers aloud'}
+            </TooltipContent>
+          </Tooltip>
+          {!expanded && (
+            <span className="pointer-events-none absolute left-1/2 top-full z-20 mt-0.5 -translate-x-1/2 whitespace-nowrap rounded-md bg-white px-1.5 py-0.5 text-[10px] font-medium text-neutral-900 shadow-md opacity-0 transition-opacity peer-hover:opacity-100">
+              {voiceOut ? 'Click to mute' : 'Speak answers aloud'}
+            </span>
+          )}
         </span>
         <span className="relative shrink-0">
-          <button
-            type="button"
-            onClick={toggleShare}
-            aria-label={sharing ? 'Stop sharing your screen' : 'Share your screen'}
-            className={`peer relative flex h-10 w-10 items-center justify-center overflow-hidden rounded-full ring-1 ring-inset transition-all ${
-              sharing
-                ? 'bg-gradient-to-b from-emerald-400/30 to-emerald-600/10 text-emerald-100 ring-emerald-300/30'
-                : 'bg-gradient-to-b from-white/10 to-white/[0.03] text-neutral-400 ring-white/15 hover:text-neutral-100'
-            }`}
-          >
-            <span className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(120%_80%_at_50%_0%,rgba(255,255,255,0.1),transparent_55%)]" />
-            <MonitorUp className="relative h-4 w-4" />
-          </button>
-          <span className="pointer-events-none absolute left-1/2 top-full z-20 mt-0.5 -translate-x-1/2 whitespace-nowrap rounded-md bg-white px-1.5 py-0.5 text-[10px] font-medium text-neutral-900 shadow-md opacity-0 transition-opacity peer-hover:opacity-100">
-            {sharing ? 'Stop sharing' : 'Share your screen'}
-          </span>
+          <Tooltip open={expanded ? undefined : false}>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={toggleShare}
+                aria-label={sharing ? 'Stop sharing your screen' : 'Share your screen'}
+                className={`peer relative flex h-10 w-10 items-center justify-center overflow-hidden rounded-full ring-1 ring-inset transition-all ${
+                  sharing
+                    ? 'bg-gradient-to-b from-emerald-400/30 to-emerald-600/10 text-emerald-100 ring-emerald-300/30'
+                    : 'bg-gradient-to-b from-white/10 to-white/[0.03] text-neutral-400 ring-white/15 hover:text-neutral-100'
+                }`}
+              >
+                <span className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(120%_80%_at_50%_0%,rgba(255,255,255,0.1),transparent_55%)]" />
+                <MonitorUp className="relative h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              {sharing ? 'Sharing your screen with this chat — click to stop' : 'Share your screen with this chat'}
+            </TooltipContent>
+          </Tooltip>
+          {!expanded && (
+            <span className="pointer-events-none absolute left-1/2 top-full z-20 mt-0.5 -translate-x-1/2 whitespace-nowrap rounded-md bg-white px-1.5 py-0.5 text-[10px] font-medium text-neutral-900 shadow-md opacity-0 transition-opacity peer-hover:opacity-100">
+              {sharing ? 'Stop sharing' : 'Share your screen'}
+            </span>
+          )}
         </span>
         <button
           type="submit"
