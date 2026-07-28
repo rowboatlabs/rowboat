@@ -1802,8 +1802,9 @@ function App() {
     const timer = setTimeout(() => {
       localStorage.setItem('quick-ask-tip-shown', '1')
       toast('Ask Rowboat from anywhere', {
-        description: 'Press ⌥⇧Space in any app for a quick question — the answer shows up right there and in your chat.',
+        description: `Press ${isMac ? '⌥⇧Space' : 'Alt+Shift+Space'} in any app for a quick question — the answer shows up right there and in your chat.`,
         duration: 12000,
+        closeButton: true,
         action: {
           label: 'Try it',
           onClick: () => void window.ipc.invoke('quickAsk:show', null).catch(() => {}),
