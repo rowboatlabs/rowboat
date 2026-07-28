@@ -361,7 +361,7 @@ export function QuickAskBar() {
             <span className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(120%_80%_at_50%_0%,rgba(255,255,255,0.1),transparent_55%)]" />
             <Volume2 className="relative h-4 w-4" />
           </button>
-          <span className="pointer-events-none absolute left-1/2 top-full z-20 mt-0.5 -translate-x-1/2 whitespace-nowrap rounded-md bg-black/85 px-1.5 py-0.5 text-[10px] text-white opacity-0 transition-opacity peer-hover:opacity-100">
+          <span className="pointer-events-none absolute left-1/2 top-full z-20 mt-0.5 -translate-x-1/2 whitespace-nowrap rounded-md bg-white px-1.5 py-0.5 text-[10px] font-medium text-neutral-900 shadow-md opacity-0 transition-opacity peer-hover:opacity-100">
             {voiceOut ? 'Click to mute' : 'Speak answers aloud'}
           </span>
         </span>
@@ -378,11 +378,8 @@ export function QuickAskBar() {
           >
             <span className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(120%_80%_at_50%_0%,rgba(255,255,255,0.1),transparent_55%)]" />
             <MonitorUp className="relative h-4 w-4" />
-            {sharing && (
-              <span className="absolute right-1 top-1 h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
-            )}
           </button>
-          <span className="pointer-events-none absolute left-1/2 top-full z-20 mt-0.5 -translate-x-1/2 whitespace-nowrap rounded-md bg-black/85 px-1.5 py-0.5 text-[10px] text-white opacity-0 transition-opacity peer-hover:opacity-100">
+          <span className="pointer-events-none absolute left-1/2 top-full z-20 mt-0.5 -translate-x-1/2 whitespace-nowrap rounded-md bg-white px-1.5 py-0.5 text-[10px] font-medium text-neutral-900 shadow-md opacity-0 transition-opacity peer-hover:opacity-100">
             {sharing ? 'Stop sharing' : 'Share your screen'}
           </span>
         </span>
