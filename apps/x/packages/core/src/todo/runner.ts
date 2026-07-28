@@ -38,6 +38,11 @@ function truncate(s: string | null | undefined, n = 120): string {
     return s.length <= n ? s : `${s.slice(0, n - 1)}…`;
 }
 
+/** Provider errors can be multi-line JSON walls — keep the first line. */
+function errorLine(msg: string, n = 200): string {
+    return truncate(msg.split('\n')[0], n);
+}
+
 function buildFirstMessage(text: string, context?: string): string {
     const now = new Date();
     const localNow = now.toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'long' });
@@ -220,7 +225,7 @@ async function landSettled(
             return { key: norm, sessionId, turnId, summary: settled.text };
         }
         case 'failed': {
-            await attachReceipt(norm, { kind: 'error', text: truncate(settled.error, 200), links: [] }).catch(() => {});
+            await attachReceipt(norm, { kind: 'error', text: errorLine(settled.error), links: [] }).catch(() => {});
             log.log(`failed turn=${turnId}: ${truncate(settled.error)}`);
             todoBus.publish({ type: 'run_error', key: norm, error: settled.error });
             return { key: norm, sessionId, turnId, summary: null, error: settled.error };
@@ -290,7 +295,7 @@ async function driveTurn(
             // resolution) must surface exactly like run failures — an
             // invisible no-op teaches the user the list is broken.
             const msg = err instanceof Error ? err.message : String(err);
-            await attachReceipt(norm, { kind: 'error', text: truncate(msg, 200), links: [] }).catch(() => {});
+            await attachReceipt(norm, { kind: 'error', text: errorLine(msg), links: [] }).catch(() => {});
             log.log(`failed to start: ${truncate(msg)}`);
             todoBus.publish({ type: 'run_error', key: norm, error: msg });
             return { key: norm, sessionId, turnId: null, summary: null, error: msg };

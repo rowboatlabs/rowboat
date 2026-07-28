@@ -7,7 +7,7 @@ import { AgentScheduleConfig, AgentScheduleEntry } from './agent-schedule.js';
 import { AgentScheduleState } from './agent-schedule-state.js';
 import { ServiceEvent } from './service-events.js';
 import { LiveNoteAgentEvent, LiveNoteSchema } from './live-note.js';
-import { TodoEvent, TodoListSchema } from './todo.js';
+import { TodoChatBubbleSchema, TodoEvent, TodoListSchema } from './todo.js';
 import {
     BackgroundTaskAgentEvent,
     BackgroundTaskSchema,
@@ -2467,6 +2467,17 @@ const ipcSchemas = {
     res: z.object({
       success: z.boolean(),
       error: z.string().optional(),
+    }),
+  },
+  // Compact conversation view of an item's session: each turn's user message
+  // and the agent's final reply (with todo-report links). Derived, not stored.
+  'todo:getConversation': {
+    req: z.object({
+      key: z.string(),
+    }),
+    res: z.object({
+      sessionId: z.string().nullable(),
+      bubbles: z.array(TodoChatBubbleSchema),
     }),
   },
   // Inline comment on an item — the next user message in its session

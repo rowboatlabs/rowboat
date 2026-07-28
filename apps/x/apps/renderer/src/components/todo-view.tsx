@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowUpRight, Bot, CircleAlert, LayoutGrid, Loader2, MessageCircle, RotateCcw, X } from 'lucide-react'
-import type { TodoBlock, TodoEventType, TodoItem, TodoLink, TodoList } from '@x/shared/dist/todo.js'
+import { ArrowUpRight, Bot, CircleAlert, LayoutGrid, Loader2, MessageCircle, Plus, RotateCcw, X } from 'lucide-react'
+import type { TodoBlock, TodoChatBubble, TodoEventType, TodoItem, TodoLink, TodoList } from '@x/shared/dist/todo.js'
 
 // ---------------------------------------------------------------------------
 // The home to-do list — one rolling ~/.rowboat/todo.md shared with @rowboat.
@@ -114,11 +114,9 @@ function ReceiptRow({ item, onOpenNote, onRetry, onOpenThread }: {
 // One item row — checkbox, editable text, chips, receipts, dismiss
 // ---------------------------------------------------------------------------
 
-function CommentComposer({ onSend, onCancel, sessionId, onOpenInChat }: {
+function CommentComposer({ onSend, onCancel }: {
   onSend: (message: string) => void
   onCancel: () => void
-  sessionId: string | null
-  onOpenInChat: (sessionId: string) => void
 }) {
   const [message, setMessage] = useState('')
   return (
@@ -138,24 +136,107 @@ function CommentComposer({ onSend, onCancel, sessionId, onOpenInChat }: {
         placeholder="Tell @rowboat something about this…"
         className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-muted-foreground"
       />
-      {sessionId && (
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// The conversation under an item — WhatsApp-style bubbles derived from the
+// item's session: yours on the right, @rowboat's on the left with its
+// artifact links. Long threads cap here and continue in the chat dock.
+// ---------------------------------------------------------------------------
+
+const MAX_BUBBLES = 6
+
+function ConversationView({ bubbles, sessionId, onOpenNote, onOpenInChat, onRetry, onReply, composerOpen }: {
+  bubbles: TodoChatBubble[]
+  sessionId: string | null
+  onOpenNote: (path: string) => void
+  onOpenInChat: (sessionId: string) => void
+  onRetry: () => void
+  onReply: () => void
+  composerOpen: boolean
+}) {
+  const shown = bubbles.slice(-MAX_BUBBLES)
+  const hidden = bubbles.length - shown.length
+  return (
+    <div className="mt-1.5 flex flex-col gap-1.5">
+      {hidden > 0 && sessionId && (
         <button
           type="button"
           onClick={() => onOpenInChat(sessionId)}
-          className="shrink-0 whitespace-nowrap rounded-md px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="self-center rounded-full px-2.5 py-0.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
         >
-          open in chat →
+          {hidden} earlier message{hidden === 1 ? '' : 's'} — open in chat
+        </button>
+      )}
+      {shown.map((b, i) => {
+        if (b.role === 'user') {
+          return (
+            <div key={i} className="flex justify-end">
+              <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-primary px-3 py-1.5 text-[13px] text-primary-foreground">
+                {b.text}
+              </div>
+            </div>
+          )
+        }
+        return (
+          <div key={i} className="flex items-end gap-1.5">
+            <Bot className="mb-1.5 size-3.5 shrink-0 text-muted-foreground" />
+            <div
+              className={`max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-bl-md px-3 py-1.5 text-[13px] ${
+                b.kind === 'error'
+                  ? 'bg-red-500/10 text-red-600 dark:text-red-400'
+                  : 'bg-muted text-foreground'
+              }`}
+            >
+              {b.kind === 'error' ? `failed: ${b.text}` : b.text}
+              {b.kind === 'error' && (
+                <button
+                  type="button"
+                  onClick={onRetry}
+                  className="ml-2 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[12px] font-medium hover:bg-red-500/15"
+                >
+                  <RotateCcw className="size-3" /> retry
+                </button>
+              )}
+              {b.links.length > 0 && (
+                <span className="mt-1 flex flex-wrap gap-1.5">
+                  {b.links.map((l, j) => (
+                    <button
+                      key={j}
+                      type="button"
+                      onClick={() => openLink(l, onOpenNote)}
+                      className="inline-flex items-center gap-1 rounded-md bg-background px-1.5 py-0.5 text-[12px] font-medium text-foreground shadow-sm ring-1 ring-border hover:bg-accent"
+                    >
+                      <ArrowUpRight className="size-3" /> {l.label}
+                    </button>
+                  ))}
+                </span>
+              )}
+            </div>
+          </div>
+        )
+      })}
+      {!composerOpen && (
+        <button
+          type="button"
+          onClick={onReply}
+          className="flex w-fit items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+        >
+          <Plus className="size-3" /> reply
         </button>
       )}
     </div>
   )
 }
 
-function ItemRow({ item, isRunning, commentOpen, sessionId, onToggle, onCommitText, onDismiss, onRun, onOpenNote, onToggleComment, onComment, onOpenInChat }: {
+function ItemRow({ item, isRunning, commentOpen, sessionId, bubbles, onToggle, onCommitText, onDismiss, onRun, onOpenNote, onToggleComment, onComment, onOpenInChat }: {
   item: TodoItem
   isRunning: boolean
   commentOpen: boolean
   sessionId: string | null
+  bubbles: TodoChatBubble[]
   onToggle: (checked: boolean) => void
   onCommitText: (text: string) => void
   onDismiss: () => void
@@ -167,6 +248,9 @@ function ItemRow({ item, isRunning, commentOpen, sessionId, onToggle, onCommitTe
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(item.text)
+  // The live exchange renders as bubbles; a checked item collapses back to
+  // its compact receipt lines so the list stays a list.
+  const showConversation = !item.checked && bubbles.length > 0
 
   const commit = () => {
     setEditing(false)
@@ -217,22 +301,29 @@ function ItemRow({ item, isRunning, commentOpen, sessionId, onToggle, onCommitTe
             )}
           </div>
         )}
-        <ReceiptRow item={item} onOpenNote={onOpenNote} onRetry={onRun} onOpenThread={onToggleComment} />
-        {commentOpen && (
-          <CommentComposer
-            onSend={onComment}
-            onCancel={onToggleComment}
+        {showConversation ? (
+          <ConversationView
+            bubbles={bubbles}
             sessionId={sessionId}
+            onOpenNote={onOpenNote}
             onOpenInChat={onOpenInChat}
+            onRetry={onRun}
+            onReply={onToggleComment}
+            composerOpen={commentOpen}
           />
+        ) : (
+          <ReceiptRow item={item} onOpenNote={onOpenNote} onRetry={onRun} onOpenThread={onToggleComment} />
+        )}
+        {commentOpen && (
+          <CommentComposer onSend={onComment} onCancel={onToggleComment} />
         )}
       </div>
       <button
         type="button"
-        onClick={onToggleComment}
-        title="Comment — tell @rowboat something about this item"
+        onClick={() => (sessionId ? onOpenInChat(sessionId) : onToggleComment())}
+        title={sessionId ? 'Open this conversation in the chat sidebar' : 'Comment — tell @rowboat something about this item'}
         className={`mt-0.5 shrink-0 rounded-md p-1 text-muted-foreground/50 transition-opacity hover:bg-accent hover:text-foreground ${
-          item.receipts.length > 0 || isRunning ? '' : 'opacity-0 group-hover/todo:opacity-100'
+          item.receipts.length > 0 || isRunning || showConversation ? '' : 'opacity-0 group-hover/todo:opacity-100'
         }`}
       >
         <MessageCircle className="size-3.5" />
@@ -322,6 +413,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview }: TodoViewP
   const [blocks, setBlocks] = useState<TodoBlock[] | null>(null)
   const [running, setRunning] = useState<Set<string>>(new Set())
   const [sessions, setSessions] = useState<Record<string, string>>({})
+  const [conversations, setConversations] = useState<Record<string, TodoChatBubble[]>>({})
   const [showCallout, setShowCallout] = useState(false)
   const [commentKey, setCommentKey] = useState<string | null>(null)
 
@@ -341,6 +433,19 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview }: TodoViewP
     adopt(res.list)
     setRunning(new Set(res.running))
     setSessions(res.sessions)
+    // Conversations are derived per session; fetch them all (lists are small).
+    const keys = Object.keys(res.sessions)
+    const fetched = await Promise.all(
+      keys.map(async (key) => {
+        try {
+          const conv = await window.ipc.invoke('todo:getConversation', { key })
+          return [key, conv.bubbles] as const
+        } catch {
+          return [key, []] as const
+        }
+      }),
+    )
+    setConversations(Object.fromEntries(fetched))
   }, [])
 
   const saveNow = useCallback(async () => {
@@ -404,6 +509,8 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview }: TodoViewP
   const commentOnItem = useCallback((key: string, message: string) => {
     setCommentKey(null)
     setRunning((s) => new Set(s).add(key))
+    // Optimistic bubble; the canonical one arrives with the next refetch.
+    setConversations((c) => ({ ...c, [key]: [...(c[key] ?? []), { role: 'user', text: message, links: [] }] }))
     void window.ipc.invoke('todo:comment', { key, message })
   }, [])
 
@@ -517,6 +624,7 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview }: TodoViewP
                     onOpenNote={onOpenNote}
                     commentOpen={commentKey === item.key}
                     sessionId={sessions[item.key] ?? null}
+                    bubbles={conversations[item.key] ?? []}
                     onToggleComment={() => setCommentKey(commentKey === item.key ? null : item.key)}
                     onComment={(message) => commentOnItem(item.key, message)}
                     onOpenInChat={onOpenInChat}

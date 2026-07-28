@@ -51,6 +51,25 @@ describe('todo fileops parse/serialize', () => {
         expect(normalizeKey('  @Rowboat   Research pricing MODELS ')).toEqual('@rowboat research pricing models');
     });
 
+    it('flattens multi-line receipt text to one line', () => {
+        const md = serializeTodoFile({
+            blocks: [{
+                kind: 'item',
+                item: {
+                    key: 'x', text: 'x', checked: false, delegated: false,
+                    receipts: [{ kind: 'error', text: 'Incorrect API key [status 401 — {\n  "error": {\n    "message": "boom"\n}]', links: [] }],
+                },
+            }],
+        });
+        expect(md).toEqual('- [ ] x\n  - → failed: Incorrect API key [status 401 — { "error": { "message": "boom" }]\n');
+        // Round-trips as one item with one receipt — no raw junk lines.
+        const back = parseTodoFile(md);
+        const items = back.blocks.filter(b => b.kind === 'item');
+        expect(items).toHaveLength(1);
+        expect(items[0].kind === 'item' && items[0].item.receipts).toHaveLength(1);
+        expect(back.blocks.filter(b => b.kind === 'raw' && b.text.trim() !== '')).toHaveLength(0);
+    });
+
     it('detects @rowboat mentions as delegation', () => {
         expect(isDelegated('@rowboat do the thing')).toBe(true);
         expect(isDelegated('email arjun@rowboatlabs.com')).toBe(false);

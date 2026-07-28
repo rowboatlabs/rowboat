@@ -60,12 +60,15 @@ function parseReceipt(body: string): TodoReceipt {
 }
 
 function serializeReceipt(r: TodoReceipt): string {
-    if (r.kind === 'question') return `  - → needs you: ${r.text}`;
-    if (r.kind === 'error') return `  - → failed: ${r.text}`;
+    // A receipt is exactly one line — embedded newlines (e.g. multi-line
+    // provider errors) would leak raw text lines into the file.
+    const text = r.text.replace(/\s+/g, ' ').trim();
+    if (r.kind === 'question') return `  - → needs you: ${text}`;
+    if (r.kind === 'error') return `  - → failed: ${text}`;
     const links = r.links.map(l => `[${l.label}](${l.url ?? l.path ?? ''})`).join(', ');
-    if (links && r.text) return `  - → ${links} — ${r.text}`;
+    if (links && text) return `  - → ${links} — ${text}`;
     if (links) return `  - → ${links}`;
-    return `  - → ${r.text}`;
+    return `  - → ${text}`;
 }
 
 export function parseTodoFile(markdown: string): TodoList {

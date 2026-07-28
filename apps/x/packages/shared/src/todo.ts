@@ -71,6 +71,19 @@ export type TodoList = {
     blocks: TodoBlock[];
 };
 
+/**
+ * One bubble in the compact conversation view of an item's session — derived
+ * from the session's turns (each turn's user message + the agent's final
+ * reply), never stored. `error` kind marks failed/stopped turns.
+ */
+export type TodoChatBubble = {
+    role: 'user' | 'rowboat';
+    text: string;
+    kind?: 'error';
+    /** todo-report links from the turn — the artifacts, as buttons. */
+    links: TodoLink[];
+};
+
 /** Push events for the renderer (todo:events channel). `key` identifies the
  * item; `list_changed` means "re-fetch the file". */
 export type TodoEventType =
@@ -108,6 +121,13 @@ export const TodoBlockSchema = z.discriminatedUnion('kind', [
 
 export const TodoListSchema = z.object({
     blocks: z.array(TodoBlockSchema),
+});
+
+export const TodoChatBubbleSchema = z.object({
+    role: z.enum(['user', 'rowboat']),
+    text: z.string(),
+    kind: z.literal('error').optional(),
+    links: z.array(TodoLinkSchema),
 });
 
 export const TodoEvent = z.discriminatedUnion('type', [

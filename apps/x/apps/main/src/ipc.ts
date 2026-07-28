@@ -141,6 +141,7 @@ import {
 import { runBackgroundTask } from '@x/core/dist/background-tasks/runner.js';
 import { runTodoItem, commentOnTodoItem, runningItemKeys } from '@x/core/dist/todo/runner.js';
 import { getSessionIndex as getTodoSessionIndex } from '@x/core/dist/todo/session-index.js';
+import { getConversation as getTodoConversation } from '@x/core/dist/todo/conversation.js';
 import { todoBus } from '@x/core/dist/todo/bus.js';
 import {
   readTodo,
@@ -2650,6 +2651,9 @@ export function setupIpcHandlers() {
       } catch (err) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };
       }
+    },
+    'todo:getConversation': async (_event, args) => {
+      return getTodoConversation(container.resolve<ISessions>('sessions'), args.key);
     },
     'todo:comment': async (_event, args) => {
       try {
