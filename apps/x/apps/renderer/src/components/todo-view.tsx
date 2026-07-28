@@ -15,6 +15,9 @@ type TodoViewProps = {
   /** Bind the chat dock to an item's session — the full thread view. */
   onOpenInChat: (sessionId: string) => void
   onShowOverview: () => void
+  /** The real assistant composer, mounted by App (full features, submits
+   * through the app's chat machinery). Falls back to a basic input. */
+  composer?: React.ReactNode
 }
 
 const ROWBOAT_MENTION_RE = /(^|\s)@rowboat\b/i
@@ -775,7 +778,7 @@ function ArchivedSection({ entries, onRestore, onOpenNote }: {
   )
 }
 
-export function TodoView({ onOpenNote, onOpenInChat, onShowOverview }: TodoViewProps) {
+export function TodoView({ onOpenNote, onOpenInChat, onShowOverview, composer }: TodoViewProps) {
   const [blocks, setBlocks] = useState<TodoBlock[] | null>(null)
   const [running, setRunning] = useState<Set<string>>(new Set())
   const [sessions, setSessions] = useState<Record<string, string>>({})
@@ -925,6 +928,20 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview }: TodoViewP
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     if (dirtyRef.current) void saveNowRef.current()
   }, [])
+
+  // Dock chats advance without todo:events — follow the session index feed
+  // (debounced: it fires per turn event) so the stream stays current.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const off = window.ipc.on('sessions:events', () => {
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => void refetch(), 600)
+    })
+    return () => {
+      off()
+      if (timer) clearTimeout(timer)
+    }
+  }, [refetch])
 
   const runItem = useCallback((key: string) => {
     setRunning((s) => new Set(s).add(key))
@@ -1227,8 +1244,9 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview }: TodoViewP
             {blocks !== null && <AddItemRow onAdd={(text) => void addItem(text)} />}
           </div>
 
-          {/* Composer — one door for both: tasks land above, asks below */}
-          <Composer onSubmit={(text, kind) => void (kind === 'task' ? addItem(text) : startChat(text))} />
+          {/* The assistant composer — always chat; tasks are born in the
+              list's add-row or by @rowboat mention. */}
+          {composer ?? <Composer onSubmit={(text, kind) => void (kind === 'task' ? addItem(text) : startChat(text))} />}
 
           {/* The stream — recent chat threads */}
           <ConversationsSection

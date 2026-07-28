@@ -4415,6 +4415,59 @@ function App() {
     setPendingPaletteSubmit(null)
   }, [pendingPaletteSubmit])
 
+  // Home composer → a fresh dock chat. Same settle-then-flush dance as the
+  // palette: the fresh tab's null runId must be visible to handlePromptSubmit
+  // before the message goes out. Model/effort picked on the Home composer are
+  // copied onto the fresh tab at flush time.
+  const homeSelectedModelRef = useRef<{ provider: string; model: string } | null>(null)
+  const homeReasoningEffortRef = useRef<'low' | 'medium' | 'high' | null>(null)
+  const [pendingHomeSubmit, setPendingHomeSubmit] = useState<{
+    message: PromptInputMessage
+    mentions?: FileMention[]
+    attachments: StagedAttachment[]
+    searchEnabled?: boolean
+    codeMode?: 'claude' | 'codex'
+    permissionMode?: PermissionMode
+  } | null>(null)
+
+  const handleHomeComposerSubmit = useCallback((
+    message: PromptInputMessage,
+    mentions?: FileMention[],
+    stagedAttachments: StagedAttachment[] = [],
+    searchEnabled?: boolean,
+    codeMode?: 'claude' | 'codex',
+    permissionMode?: PermissionMode,
+  ) => {
+    const text = message.text?.trim() ?? ''
+    if (!text && stagedAttachments.length === 0) return
+    // The composer's task door: a bare @rowboat message is a delegated
+    // to-do, not a chat. Attachments/mentions force the chat path — the
+    // list can't carry them.
+    if (/(^|\s)@rowboat\b/i.test(text) && stagedAttachments.length === 0 && !(mentions?.length)) {
+      void window.ipc.invoke('todo:addItem', { text, run: true })
+      return
+    }
+    setIsChatSidebarOpen(true)
+    handleNewChatTabInSidebar()
+    setPendingHomeSubmit({ message, mentions, attachments: stagedAttachments, searchEnabled, codeMode, permissionMode })
+  }, [handleNewChatTabInSidebar])
+
+  useEffect(() => {
+    if (!pendingHomeSubmit) return
+    const tabId = activeChatTabIdRef.current
+    if (homeSelectedModelRef.current) selectedModelByTabRef.current.set(tabId, homeSelectedModelRef.current)
+    if (homeReasoningEffortRef.current) reasoningEffortByTabRef.current.set(tabId, homeReasoningEffortRef.current)
+    void handlePromptSubmitRef.current?.(
+      pendingHomeSubmit.message,
+      pendingHomeSubmit.mentions,
+      pendingHomeSubmit.attachments,
+      pendingHomeSubmit.searchEnabled,
+      pendingHomeSubmit.codeMode,
+      pendingHomeSubmit.permissionMode,
+    )
+    setPendingHomeSubmit(null)
+  }, [pendingHomeSubmit])
+
   // Listener for "Edit with Copilot" events from the live-note panel.
   useEffect(() => {
     const handler = (e: Event) => {
@@ -6996,6 +7049,19 @@ function App() {
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                   {homeTab === 'todos' ? (
                     <TodoView
+                      composer={
+                        <ChatInputWithMentions
+                          knowledgeFiles={knowledgeFiles}
+                          recentFiles={recentWikiFiles}
+                          visibleFiles={visibleKnowledgeFiles}
+                          onSubmit={handleHomeComposerSubmit}
+                          isProcessing={false}
+                          runId={null}
+                          onSelectedModelChange={(m) => { homeSelectedModelRef.current = m ?? null }}
+                          onReasoningEffortChange={(effort) => { homeReasoningEffortRef.current = effort ?? null }}
+                          workDir={null}
+                        />
+                      }
                       onOpenNote={(path) => navigateToFile(path)}
                       onOpenInChat={(sessionId) => {
                         // Bind the dock (not the full-screen chat) to the
