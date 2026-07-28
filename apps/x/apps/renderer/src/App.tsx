@@ -1828,6 +1828,21 @@ function App() {
     })
   }, [])
 
+  // A screen share ended since the last message: the NEXT message tells the
+  // model its earlier frames are stale (history keeps frames inline forever,
+  // so without this it answers "what's on my screen" from the past).
+  const screenShareEndedRef = useRef(false)
+  const prevScreenStateRef = useRef(video.screenState)
+  useEffect(() => {
+    if (prevScreenStateRef.current === 'live' && video.screenState !== 'live') {
+      screenShareEndedRef.current = true
+    }
+    // Sharing again supersedes the notice — fresh frames arrive with the
+    // next message anyway.
+    if (video.screenState === 'live') screenShareEndedRef.current = false
+    prevScreenStateRef.current = video.screenState
+  }, [video.screenState])
+
   // Quick-ask toggles (voice response / screen share), pushed from the bar.
   // Screen share reuses the call engine's capture wholesale — the bar owns
   // the share indicator, so no pill appears outside calls. Calls own the
@@ -3582,21 +3597,27 @@ function App() {
         ...(reasoningEffort ? { reasoningEffort } : {}),
         ...(chatMaxModelCalls !== undefined ? { maxModelCalls: chatMaxModelCalls } : {}),
       }
-      const userMessageContextFor = (middlePane: Awaited<ReturnType<typeof buildMiddlePaneContext>>) => ({
-        // Local wall-clock with explicit timezone, never toISOString: the model
-        // adopts this as its time frame, so a UTC "now" makes it quote email
-        // timestamps (which carry their own offsets) in UTC instead of local.
-        currentDateTime: `${new Date().toLocaleString('en-US', {
-          weekday: 'long',
-          year: 'numeric',
-          month: 'long',
-          day: 'numeric',
-          hour: 'numeric',
-          minute: '2-digit',
-          timeZoneName: 'short',
-        })} (${Intl.DateTimeFormat().resolvedOptions().timeZone})`,
-        middlePane: middlePane ?? { kind: 'empty' as const },
-      })
+      const userMessageContextFor = (middlePane: Awaited<ReturnType<typeof buildMiddlePaneContext>>) => {
+        // One-shot: the stale-frames notice rides on exactly one message.
+        const screenShareEnded = screenShareEndedRef.current
+        screenShareEndedRef.current = false
+        return {
+          // Local wall-clock with explicit timezone, never toISOString: the model
+          // adopts this as its time frame, so a UTC "now" makes it quote email
+          // timestamps (which carry their own offsets) in UTC instead of local.
+          currentDateTime: `${new Date().toLocaleString('en-US', {
+            weekday: 'long',
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+            timeZoneName: 'short',
+          })} (${Intl.DateTimeFormat().resolvedOptions().timeZone})`,
+          middlePane: middlePane ?? { kind: 'empty' as const },
+          ...(screenShareEnded ? { screenShareEnded: true } : {}),
+        }
+      }
 
       // One retry: an in-call submit can land while the previous turn's
       // abort hasn't fully settled in the runtime — losing the message (and
