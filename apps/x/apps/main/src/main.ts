@@ -69,7 +69,7 @@ import {
 } from "./deeplink.js";
 import { disconnectGoogleIfScopesStale } from "./oauth-handler.js";
 import { startModelsDevRefresh } from "@x/core/dist/models/models-dev.js";
-import { loadAppSettings, saveAppSettings } from "@x/core/dist/config/app_settings.js";
+import { ensureLoginItemRegistration } from "./login_item.js";
 import { init as initMeetingDetection } from "@x/core/dist/meetings/detector.js";
 import { createAppTray, hasTray, isRecordingActive, markPendingToggleMeetingNotes } from "./tray.js";
 import { initMeetingPopup, showMeetingPopup } from "./meeting-popup.js";
@@ -555,20 +555,12 @@ app.whenReady().then(async () => {
   });
 
   // Resident app (Granola-style): register as an OS login item once, on the
-  // first packaged run. After that the OS registry is the source of truth —
-  // the Settings toggle writes it directly, and disabling the login item in
-  // System Settings sticks because we never re-register on boot.
-  if (app.isPackaged && !loadAppSettings().loginItemRegistered) {
-    try {
-      app.setLoginItemSettings({
-        openAtLogin: true,
-        ...(process.platform === "win32" ? { args: ["--hidden"] } : {}),
-      });
-      saveAppSettings({ loginItemRegistered: true });
-    } catch (error) {
-      console.error("[LoginItem] Failed to register login item:", error);
-    }
-  }
+  // first packaged run — and on Windows, migrate pre-existing registrations
+  // that point at a stale versioned exe (see login_item.ts). After that the
+  // OS registry is the source of truth — the Settings toggle writes it
+  // directly, and disabling the login item in System Settings sticks because
+  // we never re-register on boot.
+  ensureLoginItemRegistration();
 
   createWindow({ startHidden: wasLaunchedAtLogin() });
 
