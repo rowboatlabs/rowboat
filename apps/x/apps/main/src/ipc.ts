@@ -972,6 +972,23 @@ export function setupIpcHandlers() {
       return {};
     },
     'app:openPrivacySettings': async (_event, args) => {
+      if (process.platform === 'win32') {
+        // Windows Settings deep links (ms-settings). Sections without a
+        // Windows equivalent (screen recording, input monitoring are macOS
+        // TCC concepts) report failure, as before.
+        const winUris: Partial<Record<typeof args.section, string>> = {
+          microphone: 'ms-settings:privacy-microphone',
+          camera: 'ms-settings:privacy-webcam',
+        };
+        const uri = winUris[args.section];
+        if (!uri) return { success: false };
+        try {
+          await shell.openExternal(uri);
+          return { success: true };
+        } catch {
+          return { success: false };
+        }
+      }
       if (process.platform !== 'darwin') return { success: false };
       const anchors = {
         microphone: 'Privacy_Microphone',
