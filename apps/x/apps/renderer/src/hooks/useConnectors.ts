@@ -113,7 +113,7 @@ export function useConnectors(active: boolean) {
   // but those handlers are no longer reachable in the UI (the gating
   // condition `useComposioForGoogle` stays false).
   // TODO follow-up: drop these flags entirely and prune the dead UI branches
-  // in connectors-popover, connected-accounts-settings, and onboarding-modal.
+  // in connectors-popover and connected-accounts-settings.
   const [useComposioForGoogle] = useState(false)
   const [gmailConnected, setGmailConnected] = useState(false)
   const [gmailLoading, setGmailLoading] = useState(false)

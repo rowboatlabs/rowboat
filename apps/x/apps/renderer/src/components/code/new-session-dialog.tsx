@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Bot, GitBranch, Loader2, Terminal } from 'lucide-react'
 import type { CodeSession, CodeSessionMode, CodeAgentModelOptions } from '@x/shared/src/code-sessions.js'
-import { fetchCodeAgentOptions, withDefault } from './code-agent-options'
+import { fetchCodeAgentOptions, toSelectorOptions, withDefault } from './code-agent-options'
+import { ModelSelector, type ModelRef } from '@/components/model-selector'
+import { useModels } from '@/hooks/use-models'
 import type { ApprovalPolicy, CodingAgent } from '@x/shared/src/code-mode.js'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -25,44 +27,11 @@ import {
 import type { ProjectRow } from './use-code-sessions'
 
 type AgentStatus = { installed: boolean; signedIn: boolean }
-type ModelOption = { provider: string; model: string }
 
 const POLICY_LABEL: Record<ApprovalPolicy, string> = {
   ask: 'Ask every time',
   'auto-approve-reads': 'Auto-approve reads',
   yolo: 'Auto-approve everything (YOLO)',
-}
-
-// Models the user can pick for Rowboat-mode turns — mirrors the chat
-// composer's loading: gateway list when signed in, models.json otherwise.
-async function loadModelOptions(): Promise<ModelOption[]> {
-  try {
-    const oauth = await window.ipc.invoke('oauth:getState', null)
-    const connected = oauth.config?.rowboat?.connected ?? false
-    if (connected) {
-      const listResult = await window.ipc.invoke('models:list', null)
-      const rowboatProvider = (listResult.providers as Array<{ id: string; models?: Array<{ id: string }> }> | undefined)
-        ?.find((p) => p.id === 'rowboat')
-      return (rowboatProvider?.models ?? []).map((m) => ({ provider: 'rowboat', model: m.id }))
-    }
-    const result = await window.ipc.invoke('workspace:readFile', { path: 'config/models.json' })
-    const parsed = JSON.parse(result.data)
-    const models: ModelOption[] = []
-    if (parsed?.providers) {
-      for (const [flavor, entry] of Object.entries(parsed.providers)) {
-        const e = entry as Record<string, unknown>
-        const modelList: string[] = Array.isArray(e.models) ? e.models as string[] : []
-        const singleModel = typeof e.model === 'string' ? e.model : ''
-        const allModels = modelList.length > 0 ? modelList : singleModel ? [singleModel] : []
-        for (const model of allModels) {
-          if (model) models.push({ provider: flavor, model })
-        }
-      }
-    }
-    return models
-  } catch {
-    return []
-  }
 }
 
 export function NewSessionDialog({
@@ -84,9 +53,11 @@ export function NewSessionDialog({
   const [isolation, setIsolation] = useState<'in-repo' | 'worktree'>('in-repo')
   const [title, setTitle] = useState('')
   const [creating, setCreating] = useState(false)
-  const [modelOptions, setModelOptions] = useState<ModelOption[]>([])
-  // 'default' = let the backend use the configured default model.
-  const [modelKey, setModelKey] = useState('default')
+  // null = let the backend use the configured default model.
+  const [sessionModel, setSessionModel] = useState<ModelRef | null>(null)
+  // Gates the Rowboat-mode picker the way the old options list did: no
+  // configured providers → no picker.
+  const { groups: modelGroups } = useModels()
   // The coding agent's own model + reasoning effort. 'default' leaves the
   // engine default. Choices are discovered live per agent (see effect below).
   const [agentModel, setAgentModel] = useState('default')
@@ -102,10 +73,9 @@ export function NewSessionDialog({
     setCreating(false)
     setIsolation('in-repo')
     setMode('direct')
-    setModelKey('default')
+    setSessionModel(null)
     setAgentModel('default')
     setAgentEffort('default')
-    void loadModelOptions().then(setModelOptions)
     void window.ipc.invoke('codeMode:checkAgentStatus', null).then((status) => {
       setAgentStatus(status)
       // Default to whichever agent is actually ready.
@@ -138,9 +108,6 @@ export function NewSessionDialog({
     if (!projectRow) return
     setCreating(true)
     try {
-      const picked = modelKey !== 'default'
-        ? modelOptions.find((m) => `${m.provider}/${m.model}` === modelKey)
-        : undefined
       const res = await window.ipc.invoke('codeSession:create', {
         projectId: projectRow.project.id,
         title: title.trim() || undefined,
@@ -148,7 +115,7 @@ export function NewSessionDialog({
         mode,
         policy,
         isolation,
-        ...(picked ? { model: picked.model, provider: picked.provider } : {}),
+        ...(sessionModel ? { model: sessionModel.model, provider: sessionModel.provider } : {}),
         ...(agentModel !== 'default' ? { agentModel } : {}),
         ...(modelOpts.efforts.length > 0 && agentEffort !== 'default' ? { agentEffort } : {}),
       })
@@ -303,20 +270,19 @@ export function NewSessionDialog({
           {/* The coding agent's own model + reasoning effort, discovered live
               from the engine and applied to the ACP session each turn (so they
               stay editable from the session header later). Effort is a separate
-              axis only for Claude; Codex folds it into the model id. */}
+              axis only for Claude; Codex folds it into the model id — it stays
+              a plain Select deliberately: it's not model selection, so it's
+              out of ModelSelector's scope. */}
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-medium">Model</label>
-              <Select value={agentModel} onValueChange={setAgentModel}>
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {withDefault(modelOpts.models).map((m) => (
-                    <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <ModelSelector
+                variant="field"
+                defaultOption={{ label: toSelectorOptions(modelOpts.models).defaultLabel }}
+                staticOptions={toSelectorOptions(modelOpts.models).options}
+                value={agentModel !== 'default' ? { provider: '', model: agentModel } : null}
+                onChange={(ref) => setAgentModel(ref?.model ?? 'default')}
+              />
             </div>
             {modelOpts.efforts.length > 0 && (
               <div className="flex flex-col gap-1.5">
@@ -337,21 +303,15 @@ export function NewSessionDialog({
 
           {/* The model only powers Rowboat's own turns; the coding agent uses its
               own configured model, so hide this entirely for direct sessions. */}
-          {mode === 'rowboat' && modelOptions.length > 0 && (
+          {mode === 'rowboat' && modelGroups.length > 0 && (
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-medium">Model</label>
-              <Select value={modelKey} onValueChange={setModelKey}>
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="default">Default model</SelectItem>
-                  {modelOptions.map((m) => {
-                    const key = `${m.provider}/${m.model}`
-                    return <SelectItem key={key} value={key}>{m.model}</SelectItem>
-                  })}
-                </SelectContent>
-              </Select>
+              <ModelSelector
+                variant="field"
+                defaultOption={{ label: 'Default model' }}
+                value={sessionModel}
+                onChange={setSessionModel}
+              />
               <p className="text-[11px] text-muted-foreground">
                 Used when Rowboat drives. Fixed once the session is created, like any chat.
               </p>

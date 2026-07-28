@@ -47,10 +47,17 @@ export const ChartBlockSchema = z.object({
   data: z.array(z.record(z.string(), z.unknown())).optional(),
   source: z.string().optional(),
   x: z.string(),
-  y: z.string(),
+  // One series (string) or several (array of data keys). Pie ignores all
+  // but the first.
+  y: z.union([z.string(), z.array(z.string()).min(1)]),
 });
 
 export type ChartBlock = z.infer<typeof ChartBlockSchema>;
+
+/** The y series list regardless of which form the block used. */
+export function chartSeries(block: ChartBlock): string[] {
+  return Array.isArray(block.y) ? block.y : [block.y];
+}
 
 export const TableBlockSchema = z.object({
   columns: z.array(z.string()),
@@ -145,6 +152,10 @@ export const GmailThreadSchema = EmailBlockSchema.extend({
   threadUrl: z.string().url(),
   unread: z.boolean().optional(),
   importance: z.enum(['important', 'other']).optional(),
+  // What kind of email this is (correspondence, meeting, notification,
+  // newsletter, promotion, cold_outreach, receipt). Loose string so the
+  // classifier's taxonomy can evolve without a lockstep schema change.
+  category: z.string().optional(),
   gmail_draft: z.string().optional(),
   // Gmail-side draft id, present on entries returned by the Drafts list so the
   // composer can update/delete that exact draft.

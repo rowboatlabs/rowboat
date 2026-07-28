@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Bot, ChevronDown, ChevronUp, Code2, GitBranch, Terminal as TerminalIcon } from 'lucide-react'
 import type { CodeSession, CodeSessionStatus, CodeAgentModelOptions } from '@x/shared/src/code-sessions.js'
-import { fetchCodeAgentOptions, withDefault, optionLabel } from './code-agent-options'
+import { fetchCodeAgentOptions, toSelectorOptions, withDefault, optionLabel } from './code-agent-options'
+import { ModelSelector } from '@/components/model-selector'
 import type { ApprovalPolicy } from '@x/shared/src/code-mode.js'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -228,27 +229,15 @@ export function CodeView({
                 </div>
               </div>
               <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2">
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
-                      title="Coding agent model"
-                    >
-                      <span className="whitespace-nowrap">{optionLabel(modelOpts.models, selectedSession.agentModel)}</span>
-                      <ChevronDown className="size-3" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="max-h-80 overflow-y-auto">
-                    {withDefault(modelOpts.models).map((m) => (
-                      <DropdownMenuItem key={m.value} onClick={() => void handleUpdateSession({ agentModel: m.value })}>
-                        {m.label}
-                        {(selectedSession.agentModel ?? 'default') === m.value && <span className="ml-auto">✓</span>}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                <ModelSelector
+                  triggerTitle="Coding agent model"
+                  defaultOption={{ label: toSelectorOptions(modelOpts.models).defaultLabel }}
+                  staticOptions={toSelectorOptions(modelOpts.models).options}
+                  value={selectedSession.agentModel && selectedSession.agentModel !== 'default'
+                    ? { provider: '', model: selectedSession.agentModel }
+                    : null}
+                  onChange={(ref) => void handleUpdateSession({ agentModel: ref?.model ?? 'default' })}
+                />
                 {modelOpts.efforts.length > 0 && (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>

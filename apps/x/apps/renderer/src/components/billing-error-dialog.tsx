@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect } from "react"
 import {
   Dialog,
   DialogContent,
@@ -9,12 +9,8 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import type { BillingErrorMatch } from "@/lib/billing-error"
-
-interface BillingRowboatAccount {
-  config?: {
-    appUrl?: string | null
-  } | null
-}
+import * as analytics from "@/lib/analytics"
+import { useRowboatConfig } from "@/hooks/use-rowboat-config"
 
 interface BillingErrorDialogProps {
   open: boolean
@@ -23,19 +19,16 @@ interface BillingErrorDialogProps {
 }
 
 export function BillingErrorDialog({ open, match, onOpenChange }: BillingErrorDialogProps) {
-  const [appUrl, setAppUrl] = useState<string | null>(null)
+  const appUrl = useRowboatConfig()?.appUrl ?? null
 
   useEffect(() => {
-    if (!open) return
-    window.ipc
-      .invoke('account:getRowboat', null)
-      .then((account: BillingRowboatAccount) => setAppUrl(account.config?.appUrl ?? null))
-      .catch(() => {})
-  }, [open])
+    if (open && match) analytics.billingErrorShown(match.kind)
+  }, [open, match])
 
   if (!match) return null
 
   const handleUpgrade = () => {
+    analytics.billingUpgradeClicked(match.kind)
     if (appUrl) window.open(`${appUrl}?intent=upgrade`)
     onOpenChange(false)
   }

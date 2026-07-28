@@ -1,5 +1,6 @@
-import { app, BrowserWindow, desktopCapturer, protocol, net, shell, session, safeStorage, type Session } from "electron";
+import { app, BrowserWindow, desktopCapturer, dialog, protocol, net, shell, session, safeStorage, type Session } from "electron";
 import path from "node:path";
+import os from "node:os";
 import {
   setupIpcHandlers,
   startRunsWatcher, startSessionsWatcher, startTurnEventsWatcher, markSessionsIndexReady,
@@ -17,13 +18,12 @@ import {
 import { disposeAllTerminals } from "./terminal.js";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname } from "node:path";
-import { updateElectronApp, UpdateSourceType } from "update-electron-app";
+import { initUpdater } from "./updater.js";
 import { init as initGmailSync } from "@x/core/dist/knowledge/sync_gmail.js";
 import { init as initCalendarSync } from "@x/core/dist/knowledge/sync_calendar.js";
 import { init as initFirefliesSync } from "@x/core/dist/knowledge/sync_fireflies.js";
 import { init as initGranolaSync } from "@x/core/dist/knowledge/granola/sync.js";
 import { init as initGraphBuilder } from "@x/core/dist/knowledge/build_graph.js";
-import { init as initEmailLabeling } from "@x/core/dist/knowledge/label_emails.js";
 import { init as initNoteTagging } from "@x/core/dist/knowledge/tag_notes.js";
 import { init as initInlineTasks } from "@x/core/dist/knowledge/inline_tasks.js";
 import { init as initAgentRunner } from "@x/core/dist/agent-schedule/runner.js";
@@ -40,21 +40,25 @@ import { startSkillsWatcher, stopSkillsWatcher } from "@x/core/dist/runtime/asse
 import { init as initAppsServer, shutdown as shutdownAppsServer } from "@x/core/dist/apps/server.js";
 import { registerAppsHostApi } from "@x/core/dist/apps/host-api.js";
 import { setTokenCipher as setGithubTokenCipher } from "@x/core/dist/apps/github-auth.js";
+import { setTokenCipher as setChatGPTTokenCipher } from "@x/core/dist/auth/chatgpt-auth.js";
 import { shutdown as shutdownAnalytics } from "@x/core/dist/analytics/posthog.js";
 import { identifyIfSignedIn } from "@x/core/dist/analytics/identify.js";
+import { syncModelProviderPersonProperties } from "@x/core/dist/analytics/model-providers.js";
 import { migrateRuns } from "@x/core/dist/migrations/runs/migrate.js";
 
 import { initConfigs } from "@x/core/dist/config/initConfigs.js";
 import { getAgentSlackCliStatus } from "@x/core/dist/slack/agent-slack-exec.js";
 import { resolveWorkspacePath } from "@x/core/dist/workspace/workspace.js";
 import started from "electron-squirrel-startup";
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
+import { promisify } from "node:util";
 import { init as initChromeSync } from "@x/core/dist/knowledge/chrome-extension/server/server.js";
 import container, { registerBrowserControlService, registerNotificationService } from "@x/core/dist/di/container.js";
 import type { CodeModeManager } from "@x/core/dist/code-mode/acp/manager.js";
 import type { ISessions } from "@x/core/dist/runtime/sessions/index.js";
 import { browserViewManager, BROWSER_PARTITION } from "./browser/view.js";
 import { setupBrowserEventForwarding } from "./browser/ipc.js";
+import { setupBrowserExtensions } from "./browser/extensions.js";
 import { ElectronBrowserControlService } from "./browser/control-service.js";
 import { ElectronNotificationService } from "./notification/electron-notification-service.js";
 import {
@@ -65,6 +69,11 @@ import {
 } from "./deeplink.js";
 import { disconnectGoogleIfScopesStale } from "./oauth-handler.js";
 import { startModelsDevRefresh } from "@x/core/dist/models/models-dev.js";
+import { ensureLoginItemRegistration } from "./login_item.js";
+import { init as initMeetingDetection } from "@x/core/dist/meetings/detector.js";
+import { createAppTray, hasTray, isRecordingActive, markPendingToggleMeetingNotes } from "./tray.js";
+import { initMeetingPopup, showMeetingPopup } from "./meeting-popup.js";
+import { initQuickAsk } from "./quick-ask.js";
 
 // Captured as early as possible so it reflects actual process start. Used to
 // gate grace-eligible notifications (e.g. the burst of background-task
@@ -73,6 +82,24 @@ const APP_LAUNCHED_AT = Date.now();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+// fs.watch failures (EMFILE fd exhaustion, ENOSPC watch limits) surface as
+// uncaught exceptions from Node's watcher internals, bypassing chokidar's
+// 'error' handlers. Watching is a degradable feature — log and keep running.
+// Everything else keeps Electron's default behavior (native error dialog),
+// which we replicate since registering any listener suppresses it.
+process.on('uncaughtException', (err) => {
+  const code = (err as NodeJS.ErrnoException | undefined)?.code;
+  if ((code === 'EMFILE' || code === 'ENOSPC') && (err?.stack ?? '').includes('FSWatcher')) {
+    console.error('[Main] file watcher error (non-fatal):', err);
+    return;
+  }
+  console.error('[Main] uncaught exception:', err);
+  dialog.showErrorBox(
+    'A JavaScript error occurred in the main process',
+    err?.stack ?? String(err),
+  );
+});
 
 // run this as early in the main process as possible
 if (started) app.quit();
@@ -202,32 +229,106 @@ protocol.registerSchemesAsPrivileged([
   },
 ]);
 
-// The app's own surfaces (meeting notes, calls) legitimately need mic/camera and
-// screen capture, so the default session grants them. The embedded browser
-// session (BROWSER_PARTITION) can load arbitrary http(s) pages, so it must NOT
-// silently receive capture/media — that would let any visited site grab the
-// mic, camera, or screen without user consent. It gets only clipboard access.
-// See https://github.com/rowboatlabs/rowboat/issues/507
-const APP_SESSION_PERMISSIONS = new Set(["media", "display-capture", "clipboard-read", "clipboard-sanitized-write"]);
-const BROWSER_SESSION_PERMISSIONS = new Set(["clipboard-read", "clipboard-sanitized-write"]);
+// Granted to the app's own surfaces, which are trusted Rowboat UI: meeting
+// notes and calls need the mic/camera, and screen capture.
+const APP_SESSION_PERMISSIONS: ReadonlySet<string> = new Set([
+  "media",
+  "display-capture",
+  "clipboard-read",
+  "clipboard-sanitized-write",
+]);
 
-function configureSessionPermissions(targetSession: Session, allowedPermissions: Set<string>): void {
+// The embedded browser partition loads arbitrary http(s) pages, so it gets its
+// own set rather than inheriting the app session's — a page that happens to be
+// open must never reach the mic or camera on its own.
+// `notifications` lets sites (WhatsApp Web, Gmail, Slack, ...) show native OS
+// notifications via the HTML5 Notification API — Electron renders these
+// through the system notification center once the permission resolves to
+// granted. Background Web Push is still unavailable (Electron has no FCM),
+// so notifications only fire while the site is loaded in a tab. The app's
+// own renderer keeps its own set; it notifies through the main-process
+// notification service instead.
+// `media` is deliberately absent: that is Chromium's permission for
+// microphone and camera capture via getUserMedia (#507).
+const BROWSER_SESSION_PERMISSIONS: ReadonlySet<string> = new Set([
+  "clipboard-read",
+  "clipboard-sanitized-write",
+  "notifications",
+]);
+
+// getDisplayMedia() reaches the permission handler as a `media` request too,
+// but with an empty `mediaTypes` — getUserMedia always names 'audio' and/or
+// 'video'. Screen sharing from a page is gated by the pane's own source picker
+// (BrowserViewManager), which is where the user actually consents, and the
+// request has to survive this handler to get there: denying it here makes
+// Electron reject getDisplayMedia() outright and the picker never opens.
+// Requires an explicitly empty array, so anything that doesn't match the shape
+// we recognize is refused rather than waved through.
+function isDisplayMediaRequest(
+  permission: string,
+  details: Electron.PermissionRequest | Electron.FilesystemPermissionRequest | Electron.MediaAccessPermissionRequest | Electron.OpenExternalPermissionRequest | undefined,
+): boolean {
+  if (permission !== "media") return false;
+  const mediaTypes = (details as Electron.MediaAccessPermissionRequest | undefined)?.mediaTypes;
+  return Array.isArray(mediaTypes) && mediaTypes.length === 0;
+}
+
+function configureSessionPermissions(
+  targetSession: Session,
+  allowedPermissions: ReadonlySet<string>,
+  { allowDisplayMediaRequests = false }: { allowDisplayMediaRequests?: boolean } = {},
+): void {
   targetSession.setPermissionCheckHandler((_webContents, permission) => {
     return allowedPermissions.has(permission);
   });
 
-  targetSession.setPermissionRequestHandler((_webContents, permission, callback) => {
-    callback(allowedPermissions.has(permission));
+  targetSession.setPermissionRequestHandler((_webContents, permission, callback, details) => {
+    if (allowedPermissions.has(permission)) {
+      callback(true);
+      return;
+    }
+    callback(allowDisplayMediaRequests && isDisplayMediaRequest(permission, details));
   });
+}
 
-  // Auto-approve display media requests and route system audio as loopback.
-  // Electron requires a video source in the callback even if we only want audio.
-  // We pass the first available screen source; the renderer discards the video track.
-  // Sessions that aren't allowed to capture the display (e.g. the embedded
-  // browser) get an empty response instead of an auto-selected screen source.
-  targetSession.setDisplayMediaRequestHandler(async (_request, callback) => {
-    if (!allowedPermissions.has("display-capture")) {
-      callback({});
+// On Linux, Chromium's loopback capture records the default sink's monitor
+// through the PulseAudio layer, at the monitor source's own volume. Desktop
+// tools sometimes leave that volume near zero — it's invisible plumbing that
+// doesn't affect what the user hears — which turns the whole capture into
+// digital silence with no error anywhere. Raise it back to 100% before
+// capture starts (raise only, so a deliberate >100% boost is left alone).
+// Best-effort: no pactl or no Pulse layer just skips.
+async function ensureLinuxMonitorVolume(): Promise<void> {
+  const execFileP = promisify(execFile);
+  try {
+    const { stdout: sinkOut } = await execFileP("pactl", ["get-default-sink"], { timeout: 3000 });
+    const monitor = `${sinkOut.trim()}.monitor`;
+    const { stdout: volOut } = await execFileP("pactl", ["get-source-volume", monitor], { timeout: 3000 });
+    const percents = [...volOut.matchAll(/(\d+)%/g)].map((m) => Number(m[1]));
+    if (percents.length === 0 || Math.min(...percents) >= 100) return;
+    await execFileP("pactl", ["set-source-volume", monitor, "100%"], { timeout: 3000 });
+    console.log(`[meeting] Raised ${monitor} volume from ${Math.min(...percents)}% to 100% for system-audio capture`);
+  } catch {
+    // pactl missing or non-Pulse audio stack — nothing to fix here.
+  }
+}
+
+// Auto-approve display media requests and route system audio as loopback.
+// Electron requires a video source in the callback even if we only want audio.
+// We pass the first available screen source; the renderer discards the video track.
+// App session only — the embedded browser partition registers its own handler
+// (a user-facing source picker) in BrowserViewManager.
+function configureAppDisplayMediaHandler(targetSession: Session): void {
+  targetSession.setDisplayMediaRequestHandler(async (request, callback) => {
+    // On Linux, enumerating screens via desktopCapturer goes through the
+    // Wayland screencast portal, which can block on a system dialog or hang
+    // outright. Requests that want audio (meeting transcription — the only
+    // audio consumer; it discards the video track) don't need a real screen,
+    // so answer with the requesting frame as the mandatory video source and
+    // Chromium's PulseAudio loopback for the audio.
+    if (process.platform === 'linux' && request.audioRequested && request.frame) {
+      await ensureLinuxMonitorVolume();
+      callback({ video: request.frame, audio: 'loopback' });
       return;
     }
     const sources = await desktopCapturer.getSources({ types: ['screen'] });
@@ -271,7 +372,49 @@ function setupZoomShortcuts(win: BrowserWindow) {
   });
 }
 
-function createWindow() {
+// Resident-app plumbing (Granola-style): the main window may exist hidden
+// (launched at login) or not at all (closed on macOS) while the app keeps
+// running from the tray. showApp() is the single "bring the app up" path
+// used by the tray, the Dock, and pending tray commands.
+let mainWindow: BrowserWindow | null = null;
+
+function showApp(): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    if (!mainWindow.isVisible()) mainWindow.maximize();
+    mainWindow.show();
+    mainWindow.focus();
+  } else {
+    createWindow();
+  }
+  // The user is usually in another app (a meeting!) when this runs — a plain
+  // focus() won't take the foreground from it.
+  app.focus({ steal: true });
+}
+
+/**
+ * Was this process launched by the OS at login (rather than by the user)?
+ * Used to start with the window hidden so login launches are invisible.
+ *
+ * - Windows: our login item registers with an explicit --hidden arg.
+ * - macOS: wasOpenedAtLogin when available. On macOS 13+ (SMAppService)
+ *   Electron doesn't reliably populate it (electron#37244), so fall back to
+ *   a heuristic: a packaged launch while registered as a login item within
+ *   two minutes of boot is treated as a login launch.
+ */
+function wasLaunchedAtLogin(): boolean {
+  if (process.argv.includes("--hidden")) return true;
+  if (process.platform !== "darwin" || !app.isPackaged) return false;
+  try {
+    const settings = app.getLoginItemSettings();
+    if (settings.wasOpenedAtLogin) return true;
+    return settings.openAtLogin && os.uptime() < 120;
+  } catch {
+    return false;
+  }
+}
+
+function createWindow(options: { startHidden?: boolean } = {}) {
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -295,13 +438,25 @@ function createWindow() {
   });
 
   configureSessionPermissions(session.defaultSession, APP_SESSION_PERMISSIONS);
-  configureSessionPermissions(session.fromPartition(BROWSER_PARTITION), BROWSER_SESSION_PERMISSIONS);
+  configureAppDisplayMediaHandler(session.defaultSession);
+  // The browser partition's own getDisplayMedia handler (a user-facing source
+  // picker) lives in BrowserViewManager; let those requests through to it.
+  configureSessionPermissions(session.fromPartition(BROWSER_PARTITION), BROWSER_SESSION_PERMISSIONS, {
+    allowDisplayMediaRequests: true,
+  });
 
+  mainWindow = win;
   setMainWindowForDeepLinks(win);
-  win.on("closed", () => setMainWindowForDeepLinks(null));
+  win.on("closed", () => {
+    if (mainWindow === win) mainWindow = null;
+    setMainWindowForDeepLinks(null);
+  });
 
-  // Show window when content is ready to prevent blank screen
+  // Show window when content is ready to prevent blank screen.
+  // Launched-at-login starts stay hidden: the app is reachable from the
+  // tray/Dock, and showApp() maximizes on first reveal.
   win.once("ready-to-show", () => {
+    if (options.startHidden) return;
     win.maximize();
     win.show();
   });
@@ -373,16 +528,9 @@ app.whenReady().then(async () => {
   // serves workspace files via app://workspace/<rel-path> for media previews.
   registerAppProtocol();
 
-  // Initialize auto-updater (only in production)
-  if (app.isPackaged) {
-    updateElectronApp({
-      updateSource: {
-        type: UpdateSourceType.ElectronPublicUpdateService,
-        repo: "rowboatlabs/rowboat",
-      },
-      notifyUser: true, // Shows native dialog when update is available
-    });
-  }
+  // Initialize auto-updater (no-ops in dev). Update state is pushed to the
+  // renderer (updater:status), which owns the restart prompt — see updater.ts.
+  initUpdater();
 
   // The agent-slack CLI ships bundled with the app (.package/dist/agent-slack.cjs)
   // and is resolved per call by the shared executor in @x/core. Availability is
@@ -407,12 +555,22 @@ app.whenReady().then(async () => {
   identifyIfSignedIn().catch((error) => {
     console.error('[Analytics] Failed to identify on startup:', error);
   });
+  // Baseline the provider person properties (llm_provider_flavors et al) on
+  // every launch — existing installs get them without any provider action.
+  syncModelProviderPersonProperties().catch((error) => {
+    console.error('[Analytics] Failed to sync provider properties:', error);
+  });
 
   registerBrowserControlService(new ElectronBrowserControlService());
   registerNotificationService(new ElectronNotificationService(APP_LAUNCHED_AT));
 
   setupIpcHandlers();
   setupBrowserEventForwarding();
+  setupBrowserExtensions();
+
+  // Quick-ask bar: global ⌥⇧Space summons a Spotlight-style ask-anything
+  // window over whatever app the user is in.
+  initQuickAsk();
 
   // Start the Rowboat Apps server (per-app origins on 127.0.0.1:3210) BEFORE
   // the window and the long service-init chain below. The Apps view is
@@ -428,11 +586,81 @@ app.whenReady().then(async () => {
     encrypt: (plain) => safeStorage.encryptString(plain).toString('base64'),
     decrypt: (encrypted) => safeStorage.decryptString(Buffer.from(encrypted, 'base64')),
   });
+  // ChatGPT subscription tokens at rest: same keychain-backed cipher.
+  setChatGPTTokenCipher({
+    isAvailable: () => safeStorage.isEncryptionAvailable(),
+    encrypt: (plain) => safeStorage.encryptString(plain).toString('base64'),
+    decrypt: (encrypted) => safeStorage.decryptString(Buffer.from(encrypted, 'base64')),
+  });
   initAppsServer().catch((error) => {
     console.error('[Apps] Failed to start:', error);
   });
 
-  createWindow();
+  // Resident app (Granola-style): register as an OS login item once, on the
+  // first packaged run — and on Windows, migrate pre-existing registrations
+  // that point at a stale versioned exe (see login_item.ts). After that the
+  // OS registry is the source of truth — the Settings toggle writes it
+  // directly, and disabling the login item in System Settings sticks because
+  // we never re-register on boot.
+  ensureLoginItemRegistration();
+
+  createWindow({ startHidden: wasLaunchedAtLogin() });
+
+  // Menu bar icon: open the app / start-stop meeting notes without the
+  // window. If the renderer isn't ready to receive the toggle (window closed
+  // or still loading), park it as a pending command the renderer drains on
+  // mount — same pull pattern as pending deep links.
+  createAppTray({
+    openApp: showApp,
+    toggleMeetingNotes: () => {
+      const hadWindow = mainWindow !== null && !mainWindow.isDestroyed();
+      showApp();
+      const win = mainWindow;
+      if (!hadWindow || !win || win.webContents.isLoading()) {
+        markPendingToggleMeetingNotes();
+        return;
+      }
+      win.webContents.send("app:toggleMeetingNotes", null);
+    },
+  });
+
+  // Ambient meeting detection (Granola-style): the mic-monitor helper +
+  // running-app scan produce "Meeting detected" events; the popup asks
+  // before anything records. Clicking "Take Notes" routes into the same
+  // renderer flow as the calendar notification.
+  initMeetingPopup({
+    onTakeNotes: (meeting) => {
+      showApp();
+      // The user may have started recording between popup and click —
+      // sending the take-notes flow then would toggle it OFF.
+      if (isRecordingActive()) return;
+      const payload = {
+        event: meeting.calendarEvent ?? { summary: meeting.noteTitle },
+        openMeeting: false,
+        source: "detected",
+      };
+      const win = mainWindow;
+      if (!win || win.isDestroyed()) return;
+      if (win.webContents.isLoading()) {
+        win.webContents.once("did-finish-load", () => {
+          if (!win.isDestroyed()) win.webContents.send("app:takeMeetingNotes", payload);
+        });
+        return;
+      }
+      win.webContents.send("app:takeMeetingNotes", payload);
+    },
+  });
+  initMeetingDetection({
+    helperPath: path.join(__dirname, "mic-monitor"),
+    onDetected: (meeting) => showMeetingPopup(meeting),
+    // Call ended while recording (meeting app released the mic) — the
+    // renderer stops capture and generates notes, same as a manual stop.
+    onExternalCallEnded: () => {
+      const win = mainWindow;
+      if (!win || win.isDestroyed() || win.webContents.isLoading()) return;
+      win.webContents.send("meeting:externalCallEnded", null);
+    },
+  });
 
   // Start workspace watcher as a main-process service
   // Watcher runs independently and catches ALL filesystem changes:
@@ -535,9 +763,6 @@ app.whenReady().then(async () => {
   // start knowledge graph builder
   initGraphBuilder();
 
-  // start email labeling service
-  initEmailLabeling();
-
   // start note tagging service
   initNoteTagging();
 
@@ -560,14 +785,16 @@ app.whenReady().then(async () => {
   initChromeSync();
 
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
-    }
+    // Reveal the hidden/closed main window (login launches start hidden).
+    showApp();
   });
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
+  // Resident app: with a tray present, keep running with no windows so
+  // meeting detection/notifications stay alive (Granola-style). Without a
+  // tray (creation failed), fall back to the platform-default quit.
+  if (process.platform !== "darwin" && !hasTray()) {
     app.quit();
   }
 });

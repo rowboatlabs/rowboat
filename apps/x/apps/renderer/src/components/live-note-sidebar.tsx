@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Streamdown } from 'streamdown'
 import '@/styles/live-note-panel.css'
+import * as analytics from '@/lib/analytics'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
+import { ModelSelector, modelOverrideToRef, refToModelOverride } from '@/components/model-selector'
 import {
   Play, Square, Loader2, Sparkles,
   AlertCircle, Plus, X, Check, Pencil, Radio, Repeat, Clock, Zap,
@@ -166,6 +168,7 @@ export function LiveNoteSidebar({ filePath, onClose }: LiveNoteSidebarProps) {
         setError(res.error ?? 'Save failed')
         return
       }
+      analytics.liveNoteSaved()
       setLive(res.live ?? null)
       setDraft(res.live ? structuredClone(res.live) as LiveNote : null)
       setEditingObjective(false)
@@ -195,6 +198,7 @@ export function LiveNoteSidebar({ filePath, onClose }: LiveNoteSidebarProps) {
         setError(res.error ?? 'Failed')
         return
       }
+      analytics.liveNoteToggled(live.active === false)
       setLive(res.live ?? null)
       setDraft(res.live ? structuredClone(res.live) as LiveNote : null)
     } catch (err) {
@@ -207,6 +211,7 @@ export function LiveNoteSidebar({ filePath, onClose }: LiveNoteSidebarProps) {
   const handleRun = useCallback(async () => {
     if (!knowledgeRelPath) return
     setError(null)
+    analytics.liveNoteRunClicked()
     try {
       await window.ipc.invoke('live-note:run', { filePath: knowledgeRelPath })
     } catch (err) {
@@ -219,6 +224,7 @@ export function LiveNoteSidebar({ filePath, onClose }: LiveNoteSidebarProps) {
     setError(null)
     try {
       const res = await window.ipc.invoke('live-note:stop', { filePath: knowledgeRelPath })
+      if (res.success) analytics.liveNoteStopped()
       if (!res.success && res.error) setError(res.error)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -235,6 +241,7 @@ export function LiveNoteSidebar({ filePath, onClose }: LiveNoteSidebarProps) {
         setError(res.error ?? 'Delete failed')
         return
       }
+      analytics.liveNoteDeleted()
       setLive(null)
       setDraft(null)
       setConfirmingDelete(false)
@@ -247,6 +254,7 @@ export function LiveNoteSidebar({ filePath, onClose }: LiveNoteSidebarProps) {
 
   const handleEditWithCopilot = useCallback(() => {
     if (!filePath) return
+    analytics.liveNoteEditWithCopilotClicked()
     window.dispatchEvent(new CustomEvent('rowboat:open-copilot-edit-live-note', {
       detail: { filePath },
     }))
@@ -598,19 +606,13 @@ function DetailsTab({
         {showAdvanced && (
           <div className="mt-3">
             <div className="grid grid-cols-[74px_1fr] gap-x-3 gap-y-2.5 text-xs">
-              <span className="pt-1.5 text-muted-foreground">Model</span>
-              <Input
-                value={draft.model ?? ''}
-                onChange={(e) => setDraft({ ...draft, model: e.target.value || undefined })}
-                placeholder="(global default)"
-                className="h-7 font-mono text-xs"
-              />
-              <span className="pt-1.5 text-muted-foreground">Provider</span>
-              <Input
-                value={draft.provider ?? ''}
-                onChange={(e) => setDraft({ ...draft, provider: e.target.value || undefined })}
-                placeholder="(global default)"
-                className="h-7 font-mono text-xs"
+              <span className="pt-2 text-muted-foreground">Model</span>
+              <ModelSelector
+                variant="field"
+                inheritDefault={{ label: '(global default)' }}
+                allowCustom
+                value={modelOverrideToRef(draft.model, draft.provider)}
+                onChange={(ref) => setDraft({ ...draft, ...refToModelOverride(ref) })}
               />
             </div>
             <div className="mt-4">

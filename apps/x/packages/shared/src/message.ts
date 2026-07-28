@@ -64,6 +64,10 @@ export const UserMessageContent = z.union([z.string(), z.array(UserContentPart)]
 
 export const UserMessageContext = z.object({
     currentDateTime: z.string().optional(),
+    // Set on the first message after a screen share stops: history keeps the
+    // captured frames inline forever (pruning would bust prefix caching), so
+    // the model must be told they show the past, not the current screen.
+    screenShareEnded: z.boolean().optional(),
     middlePane: z.discriminatedUnion("kind", [
         z.object({
             kind: z.literal("empty"),

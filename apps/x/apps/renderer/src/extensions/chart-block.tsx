@@ -64,6 +64,7 @@ function ChartBlockView({ node, deleteNode }: { node: { attrs: Record<string, un
     if (error) return <div className="chart-block-error-msg">{error}</div>
     if (!data || data.length === 0) return <div className="chart-block-empty">No data</div>
 
+    const series = blocks.chartSeries(config!)
     return (
       <ResponsiveContainer width="100%" height={250}>
         {config!.chart === 'line' ? (
@@ -73,7 +74,9 @@ function ChartBlockView({ node, deleteNode }: { node: { attrs: Record<string, un
             <YAxis />
             <Tooltip />
             <Legend />
-            <Line type="monotone" dataKey={config!.y} stroke="#8884d8" />
+            {series.map((key, index) => (
+              <Line key={key} type="monotone" dataKey={key} stroke={CHART_COLORS[index % CHART_COLORS.length]} />
+            ))}
           </LineChart>
         ) : config!.chart === 'bar' ? (
           <BarChart data={data}>
@@ -82,13 +85,15 @@ function ChartBlockView({ node, deleteNode }: { node: { attrs: Record<string, un
             <YAxis />
             <Tooltip />
             <Legend />
-            <Bar dataKey={config!.y} fill="#8884d8" />
+            {series.map((key, index) => (
+              <Bar key={key} dataKey={key} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+            ))}
           </BarChart>
         ) : (
           <PieChart>
             <Tooltip />
             <Legend />
-            <Pie data={data} dataKey={config!.y} nameKey={config!.x} cx="50%" cy="50%" outerRadius={80} label>
+            <Pie data={data} dataKey={series[0]} nameKey={config!.x} cx="50%" cy="50%" outerRadius={80} label>
               {data.map((_, index) => (
                 <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
               ))}

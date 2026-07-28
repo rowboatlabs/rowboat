@@ -6,9 +6,7 @@ import container from "../di/container.js";
 import { WorkDir } from "../config/config.js";
 import type { ISessions } from "../runtime/sessions/api.js";
 import type { ITurnEventBus } from "../runtime/turns/event-hub.js";
-import { isSignedIn } from "../account/account.js";
-import { listGatewayModels } from "../models/gateway.js";
-import { listOnboardingModels } from "../models/models-dev.js";
+import { getModelCatalog, providerDisplayName } from "../models/catalog.js";
 import { ChannelBridge, type ModelChoice } from "./bridge.js";
 import type { IChannelsConfigRepo } from "./repo.js";
 import { TelegramTransport } from "./transports/telegram.js";
@@ -82,16 +80,16 @@ export function subscribeChannelsStatus(listener: (status: Status) => void): () 
 
 // Same catalog the desktop model picker uses (models:list IPC).
 async function listBridgeModels(): Promise<ModelChoice[]> {
-    const catalog = (await isSignedIn())
-        ? await listGatewayModels()
-        : await listOnboardingModels();
-    return catalog.providers.flatMap((provider) =>
-        provider.models.map((m) => ({
-            provider: provider.id,
-            model: m.id,
-            label: `${m.name ?? m.id} — ${provider.name}`,
-        })),
-    );
+    const catalog = await getModelCatalog();
+    return catalog.providers
+        .filter((provider) => provider.status === "ok")
+        .flatMap((provider) =>
+            provider.models.map((m) => ({
+                provider: provider.id,
+                model: m.id,
+                label: `${m.name ?? m.id} — ${providerDisplayName(provider.flavor)}`,
+            })),
+        );
 }
 
 function ensureBridge(): ChannelBridge {

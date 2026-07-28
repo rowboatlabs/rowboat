@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   ArrowUp,
@@ -17,7 +17,6 @@ import {
   Globe,
   ImagePlus,
   LoaderIcon,
-  Brain,
   Lock,
   Mic,
   MoreHorizontal,
@@ -38,13 +37,13 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { ModelSelector, type ModelRef, type ReasoningEffortLevel } from '@/components/model-selector'
+import { useModels } from '@/hooks/use-models'
 import {
   type AttachmentIconKind,
   getAttachmentDisplayName,
@@ -83,49 +82,17 @@ const RECENT_WORK_DIRS_CONFIG_PATH = 'config/recent-work-dirs.json'
 const RECENT_WORK_DIRS_CHANGED_EVENT = 'rowboat-chat-recent-work-dirs-changed'
 
 
-const providerDisplayNames: Record<string, string> = {
-  openai: 'OpenAI',
-  anthropic: 'Anthropic',
-  google: 'Gemini',
-  ollama: 'Ollama',
-  openrouter: 'OpenRouter',
-  aigateway: 'AI Gateway',
-  'openai-compatible': 'OpenAI-Compatible',
-  rowboat: 'Rowboat',
-}
-
-type ProviderName = "openai" | "anthropic" | "google" | "openrouter" | "aigateway" | "ollama" | "openai-compatible" | "rowboat"
-
-interface ConfiguredModel {
-  provider: ProviderName
-  model: string
-}
-
 type RecentWorkDir = {
   path: string
   lastUsedAt: number
 }
 
-export interface SelectedModel {
-  provider: string
-  model: string
-}
-
-export type ReasoningEffortLevel = 'low' | 'medium' | 'high'
-
-// '' = auto (provider default). Ordered as shown in the picker.
-const REASONING_EFFORT_OPTIONS: Array<{ value: '' | ReasoningEffortLevel; label: string; hint: string }> = [
-  { value: '', label: 'Auto', hint: 'Provider default' },
-  { value: 'low', label: 'Fast', hint: 'Minimal thinking' },
-  { value: 'medium', label: 'Balanced', hint: 'Moderate thinking' },
-  { value: 'high', label: 'Thorough', hint: 'Deep thinking, costs more' },
-]
+// The picker itself lives in ModelSelector; these aliases keep the composer's
+// public prop surface stable for existing consumers (chat-sidebar, App).
+export type SelectedModel = ModelRef
+export type { ReasoningEffortLevel } from '@/components/model-selector'
 
 export type PermissionMode = 'manual' | 'auto'
-
-function getSelectedModelDisplayName(model: string) {
-  return model.split('/').pop() || model
-}
 
 function getAttachmentIcon(kind: AttachmentIconKind) {
   switch (kind) {
@@ -231,7 +198,9 @@ function compactWorkDirPath(path: string) {
 export type CallPreset = 'voice' | 'video' | 'share' | 'practice'
 
 const CALL_PRESET_MENU: Array<{ preset: CallPreset; label: string; description: string; Icon: typeof Phone }> = [
-  { preset: 'voice', label: 'Voice call', description: 'Just talk — nothing is shared, the mascot hovers while you work', Icon: AudioLines },
+  // 'voice' was dropped from the menu (the quick-ask bar with its voice
+  // toggle covers the talk-without-devices case); the preset itself stays
+  // valid for programmatic callers.
   { preset: 'video', label: 'Video call', description: 'Camera on, face to face — it sees your expressions', Icon: Video },
   { preset: 'practice', label: 'Practice session', description: 'Rehearse a pitch or interview with live coaching', Icon: Presentation },
 ]
@@ -318,21 +287,15 @@ function ChatInputInner({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const canSubmit = (Boolean(message.trim()) || attachments.length > 0) && !isProcessing
 
-  const [configuredModels, setConfiguredModels] = useState<ConfiguredModel[]>([])
-  const [activeModelKey, setActiveModelKey] = useState('')
-  // The effective runtime default (what a run actually uses when the user
-  // hasn't picked a model) — shown in the picker instead of guessing from
-  // list order, which can disagree with the real default.
-  const [defaultModel, setDefaultModel] = useState<ConfiguredModel | null>(null)
-  const loadModelConfigEpoch = useRef(0)
+  // Shared model-catalog store (one fetch app-wide); sign-in state also
+  // gates search availability below.
+  const { isRowboatConnected, refresh: refreshModels } = useModels()
+  const [selectedModel, setSelectedModel] = useState<SelectedModel | null>(null)
   const [lockedModel, setLockedModel] = useState<SelectedModel | null>(null)
-  // '' = auto. Per-model reasoning capability ("provider/model" → flag) from
-  // models:list; the effort control renders only for known-reasoning models.
+  // '' = auto. Effort is per-turn config: reported up, never persisted.
   const [reasoningEffort, setReasoningEffort] = useState<'' | ReasoningEffortLevel>('')
-  const [reasoningByKey, setReasoningByKey] = useState<Record<string, boolean>>({})
   const [searchEnabled, setSearchEnabled] = useState(false)
   const [searchAvailable, setSearchAvailable] = useState(false)
-  const [isRowboatConnected, setIsRowboatConnected] = useState(false)
   const [codingAgent, setCodingAgent] = useState<'claude' | 'codex'>('claude')
   const [codeModeEnabled, setCodeModeEnabled] = useState(false)
   const [codeModeFeatureEnabled, setCodeModeFeatureEnabled] = useState(false)
@@ -372,7 +335,7 @@ function ChatInputInner({
   // no-dep effect below still re-collapses if any toggle happens to widen the row.
   useLayoutEffect(() => {
     setCollapseLevel(0)
-  }, [workDir, searchAvailable, codeModeFeatureEnabled, lockedModel, activeModelKey])
+  }, [workDir, searchAvailable, codeModeFeatureEnabled, lockedModel, selectedModel])
 
   // After each render, if the left group still overflows, collapse one more step.
   // Runs before paint, so the intermediate (overflowing) state is never visible.
@@ -404,130 +367,17 @@ function ChatInputInner({
     }
   }, [])
 
-  // Check Rowboat sign-in state
+  // The store loads on mount and re-fetches on config/sign-in events by
+  // itself; re-fetch on tab activation too, preserving the old per-mount
+  // reload that picked up external edits to config/models.json.
+  const didLoadModelsRef = useRef(false)
   useEffect(() => {
-    window.ipc.invoke('oauth:getState', null).then((result) => {
-      setIsRowboatConnected(result.config?.rowboat?.connected ?? false)
-    }).catch(() => setIsRowboatConnected(false))
-  }, [isActive])
-
-  // Update sign-in state when OAuth events fire
-  useEffect(() => {
-    const cleanup = window.ipc.on('oauth:didConnect', () => {
-      window.ipc.invoke('oauth:getState', null).then((result) => {
-        setIsRowboatConnected(result.config?.rowboat?.connected ?? false)
-      }).catch(() => setIsRowboatConnected(false))
-    })
-    return cleanup
-  }, [])
-
-  // Load the list of models the user can choose from. Hybrid mode: signed-in
-  // users get the gateway list AND every BYOK provider configured in
-  // models.json (selecting a BYOK model routes that message through the
-  // user's own key / local server). Signed-out users get BYOK only.
-  const loadModelConfig = useCallback(async () => {
-    // Concurrent runs race (mount fires one before the sign-in state resolves,
-    // which fires another) — only the newest run may write state, else a slow
-    // stale run can clobber the fresh list with an empty one.
-    const epoch = ++loadModelConfigEpoch.current
-    try {
-      const def = await window.ipc.invoke('llm:getDefaultModel', null)
-      if (loadModelConfigEpoch.current !== epoch) return
-      setDefaultModel({ provider: def.provider as ProviderName, model: def.model })
-    } catch {
-      if (loadModelConfigEpoch.current === epoch) setDefaultModel(null)
+    if (!didLoadModelsRef.current) {
+      didLoadModelsRef.current = true
+      return
     }
-    try {
-      const models: ConfiguredModel[] = []
-      const seen = new Set<string>()
-      const push = (provider: string, model: string) => {
-        if (!model) return
-        const key = `${provider}/${model}`
-        if (seen.has(key)) return
-        seen.add(key)
-        models.push({ provider: provider as ProviderName, model })
-      }
-
-      // Full catalog per provider (gateway + cloud). Providers with no
-      // catalog (Ollama, OpenAI-compatible) fall back to the models saved in
-      // config below.
-      const catalog: Record<string, string[]> = {}
-      const reasoningFlags: Record<string, boolean> = {}
-      try {
-        const listResult = await window.ipc.invoke('models:list', null)
-        for (const p of listResult.providers || []) {
-          catalog[p.id] = (p.models || []).map((m: { id: string }) => m.id)
-          for (const m of p.models || []) {
-            if (typeof m.reasoning === 'boolean') {
-              reasoningFlags[`${p.id}/${m.id}`] = m.reasoning
-            }
-          }
-        }
-      } catch { /* offline / no catalog — fall back to saved config below */ }
-      if (loadModelConfigEpoch.current === epoch) setReasoningByKey(reasoningFlags)
-
-      if (isRowboatConnected) {
-        for (const m of catalog['rowboat'] || []) push('rowboat', m)
-      }
-
-      try {
-        const result = await window.ipc.invoke('workspace:readFile', { path: 'config/models.json' })
-        const parsed = JSON.parse(result.data)
-
-        // List the default provider first so its default model leads the
-        // BYOK section of the picker.
-        const defaultFlavor = typeof parsed?.provider?.flavor === 'string' ? parsed.provider.flavor : ''
-        const flavors = Object.keys(parsed?.providers || {})
-          .sort((a, b) => (a === defaultFlavor ? -1 : b === defaultFlavor ? 1 : 0))
-
-        for (const flavor of flavors) {
-          const e = (parsed.providers[flavor] || {}) as Record<string, unknown>
-          const hasKey = typeof e.apiKey === 'string' && (e.apiKey as string).trim().length > 0
-          const hasBaseURL = typeof e.baseURL === 'string' && (e.baseURL as string).trim().length > 0
-          if (!hasKey && !hasBaseURL) continue // provider not configured
-
-          // The provider's saved default model leads, then the rest of its catalog.
-          push(flavor, typeof e.model === 'string' ? e.model : '')
-          const catalogModels = catalog[flavor] || []
-          if (catalogModels.length > 0) {
-            for (const m of catalogModels) push(flavor, m)
-          } else {
-            // No catalog (local provider) — fall back to whatever is saved.
-            const saved = Array.isArray(e.models) ? e.models as string[] : []
-            for (const m of saved) push(flavor, m)
-          }
-        }
-
-        // The user's explicit default selection leads the whole picker.
-        const sel = parsed?.defaultSelection
-        if (sel && typeof sel.provider === 'string' && typeof sel.model === 'string') {
-          const selKey = `${sel.provider}/${sel.model}`
-          const index = models.findIndex((m) => `${m.provider}/${m.model}` === selKey)
-          if (index > 0) {
-            const [entry] = models.splice(index, 1)
-            models.unshift(entry)
-          }
-        }
-      } catch { /* no BYOK config yet */ }
-
-      if (loadModelConfigEpoch.current !== epoch) return
-      setConfiguredModels(models)
-    } catch (err) {
-      // No config yet — but surface unexpected failures for diagnosis.
-      console.error('[chat-input] failed to load model list', err)
-    }
-  }, [isRowboatConnected])
-
-  useEffect(() => {
-    loadModelConfig()
-  }, [isActive, loadModelConfig])
-
-  // Reload when model config changes (e.g. from settings dialog)
-  useEffect(() => {
-    const handler = () => { loadModelConfig() }
-    window.addEventListener('models-config-changed', handler)
-    return () => window.removeEventListener('models-config-changed', handler)
-  }, [loadModelConfig])
+    refreshModels()
+  }, [isActive, refreshModels])
 
   // Load the global code-mode feature flag (from settings) and stay in sync.
   useEffect(() => {
@@ -701,49 +551,26 @@ function ChatInputInner({
     checkSearch()
   }, [isActive, isRowboatConnected])
 
-  // The dropdown's items: always include the effective default so the picker
-  // is never empty (and never missing the model that actually runs) even
-  // while the full list is still loading.
-  const pickerModels = useMemo<ConfiguredModel[]>(() => {
-    if (!defaultModel) return configuredModels
-    const defaultKey = `${defaultModel.provider}/${defaultModel.model}`
-    if (configuredModels.some((m) => `${m.provider}/${m.model}` === defaultKey)) return configuredModels
-    return [defaultModel, ...configuredModels]
-  }, [configuredModels, defaultModel])
-
-  // Selecting a model affects only the *next* run created from this tab.
-  // Once a run exists, model is frozen on the run and the dropdown is read-only.
-  const handleModelChange = useCallback((key: string) => {
+  // Selecting a model here is PER-CHAT: it affects the next run created
+  // from this tab (frozen once a run exists) and nothing else. The config's
+  // assistantModel is the durable default — new tabs and background work
+  // always start from it, and only the settings Assistant picker (or a
+  // provider connect's initial selection) writes it.
+  const handleModelChange = useCallback((model: SelectedModel | null) => {
     if (lockedModel) return
-    const entry = pickerModels.find((m) => `${m.provider}/${m.model}` === key)
-    if (!entry) return
-    setActiveModelKey(key)
-    onSelectedModelChange?.({ provider: entry.provider, model: entry.model })
-  }, [pickerModels, lockedModel, onSelectedModelChange])
+    // null = the sentinel row, which the composer never renders (no
+    // defaultOption) — guard for the widened onChange contract only.
+    if (!model) return
+    setSelectedModel(model)
+    onSelectedModelChange?.(model)
+  }, [lockedModel, onSelectedModelChange])
 
-  // Reasoning effort applies to the model the next message will actually use:
-  // the run's frozen model once one exists, else the picker selection, else
-  // the app default. Only known-reasoning models show the control.
-  const effectiveModelKey = lockedModel
-    ? `${lockedModel.provider}/${lockedModel.model}`
-    : activeModelKey
-      || (defaultModel ? `${defaultModel.provider}/${defaultModel.model}` : '')
-  const reasoningAvailable = reasoningByKey[effectiveModelKey] === true
-
-  const handleReasoningEffortChange = useCallback((value: string) => {
-    const effort = value === 'low' || value === 'medium' || value === 'high' ? value : ''
+  // Effort is per-turn and unpersisted; ModelSelector reports '' when the
+  // effective model loses reasoning support so a stale effort never sticks.
+  const handleReasoningEffortChange = useCallback((effort: '' | ReasoningEffortLevel) => {
     setReasoningEffort(effort)
     onReasoningEffortChange?.(effort === '' ? null : effort)
   }, [onReasoningEffortChange])
-
-  // Switching to a model without reasoning support drops a stale selection —
-  // otherwise the next message would carry an effort the model rejects.
-  useEffect(() => {
-    if (!reasoningAvailable && reasoningEffort !== '') {
-      setReasoningEffort('')
-      onReasoningEffortChange?.(null)
-    }
-  }, [reasoningAvailable, reasoningEffort, onReasoningEffortChange])
 
   // Restore the tab draft when this input mounts.
   useEffect(() => {
@@ -1336,84 +1163,13 @@ function ChatInputInner({
           </DropdownMenu>
         )}
         <div className="flex-1" />
-        {reasoningAvailable && (
-          <DropdownMenu>
-            <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
-              <TooltipTrigger asChild>
-                <DropdownMenuTrigger asChild>
-                  <button
-                    type="button"
-                    className="flex h-7 shrink-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                  >
-                    <Brain className="h-3 w-3 shrink-0" />
-                    {reasoningEffort !== '' && (
-                      <span>{REASONING_EFFORT_OPTIONS.find((o) => o.value === reasoningEffort)?.label}</span>
-                    )}
-                    <ChevronDown className="h-3 w-3 shrink-0" />
-                  </button>
-                </DropdownMenuTrigger>
-              </TooltipTrigger>
-              <TooltipContent side="top">Reasoning effort — applies to your next message</TooltipContent>
-            </Tooltip>
-            <DropdownMenuContent align="end">
-              <DropdownMenuRadioGroup value={reasoningEffort} onValueChange={handleReasoningEffortChange}>
-                {REASONING_EFFORT_OPTIONS.map((option) => (
-                  <DropdownMenuRadioItem key={option.value || 'auto'} value={option.value}>
-                    <span>{option.label}</span>
-                    <span className="ml-2 text-xs text-muted-foreground">{option.hint}</span>
-                  </DropdownMenuRadioItem>
-                ))}
-              </DropdownMenuRadioGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-        {lockedModel ? (
-          <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>
-            <TooltipTrigger asChild>
-              <span className="flex h-7 min-w-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground">
-                <span className="min-w-0 truncate">{getSelectedModelDisplayName(lockedModel.model)}</span>
-              </span>
-            </TooltipTrigger>
-            <TooltipContent side="top">
-              {providerDisplayNames[lockedModel.provider] || lockedModel.provider} — fixed for this chat
-            </TooltipContent>
-          </Tooltip>
-        ) : pickerModels.length > 0 ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                className="flex h-7 min-w-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              >
-                <span className="min-w-0 truncate">
-                  {getSelectedModelDisplayName(
-                    pickerModels.find((m) => `${m.provider}/${m.model}` === activeModelKey)?.model
-                      || defaultModel?.model
-                      || pickerModels[0]?.model
-                      || 'Model'
-                  )}
-                </span>
-                <ChevronDown className="h-3 w-3 shrink-0" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuRadioGroup
-                value={activeModelKey || (defaultModel ? `${defaultModel.provider}/${defaultModel.model}` : '')}
-                onValueChange={handleModelChange}
-              >
-                {pickerModels.map((m) => {
-                  const key = `${m.provider}/${m.model}`
-                  return (
-                    <DropdownMenuRadioItem key={key} value={key}>
-                      <span className="truncate">{m.model}</span>
-                      <span className="ml-2 text-xs text-muted-foreground">{providerDisplayNames[m.provider] || m.provider}</span>
-                    </DropdownMenuRadioItem>
-                  )
-                })}
-              </DropdownMenuRadioGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        ) : null}
+        <ModelSelector
+          value={selectedModel}
+          onChange={handleModelChange}
+          lockedModel={lockedModel}
+          effort={reasoningEffort}
+          onEffortChange={handleReasoningEffortChange}
+        />
         {onStartCall && (
           <div className="flex shrink-0 items-center">
             <Tooltip delayDuration={CHAT_INPUT_TOOLTIP_DELAY_MS}>

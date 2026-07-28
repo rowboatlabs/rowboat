@@ -1,5 +1,18 @@
 import { contextBridge, ipcRenderer, webFrame, webUtils } from 'electron';
+import { injectBrowserAction } from 'electron-chrome-extensions/browser-action';
 import { ipc as ipcShared } from '@x/shared';
+
+// Expose the <browser-action-list> custom element (extension action icons +
+// popups for the embedded browser pane). App documents only — this preload
+// is attached solely to the app window, but guard against it ever being
+// reused for remote content.
+if (location.protocol === 'app:' || location.origin === 'http://localhost:5173') {
+  try {
+    injectBrowserAction();
+  } catch (error) {
+    console.error('[preload] injectBrowserAction failed:', error);
+  }
+}
 
 type InvokeChannels = ipcShared.InvokeChannels;
 type IPCChannels = ipcShared.IPCChannels;

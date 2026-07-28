@@ -35,24 +35,24 @@ Once created, make sure the new project is selected in the top project dropdown.
 Enable the following APIs for your project:
 
 - Gmail API
-    
+
     https://console.cloud.google.com/apis/api/gmail.googleapis.com
-    
+
 - Google Calendar API
-    
+
     https://console.cloud.google.com/apis/api/calendar-json.googleapis.com
-    
+
 - Google Drive API
-    
+
     https://console.cloud.google.com/apis/api/drive.googleapis.com
-    
+
 
 For each API:
 
 - Click **Enable**
-    
+
     ![Enable the API](https://raw.githubusercontent.com/rowboatlabs/rowboat/main/apps/docs/docs/img/google-setup/02-enable-api.png)
-    
+
 
 ---
 

@@ -20,9 +20,46 @@ export interface AuthServerResult {
   port: number;
 }
 
+interface CallbackHandlingOpts {
+  callbackPath: string;
+  /** Invoked when the provider redirects back with an `error` param. */
+  onError?: (error: string) => void;
+  /**
+   * Gatekeeper run BEFORE the error/callback handling. Return a message to
+   * reject the request with a polite close-this-tab error page — without
+   * invoking onCallback/onError. Lets a caller drop stale callbacks (e.g. the
+   * browser tab of a cancelled sign-in attempt carrying an old `state`)
+   * without disturbing the live flow.
+   */
+  validateCallback?: (url: URL) => string | null;
+}
+
+function renderErrorPage(res: import('http').ServerResponse, message: string): void {
+  res.writeHead(200, { 'Content-Type': 'text/html' });
+  res.end(`
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>OAuth Error</title>
+        <style>
+          body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+          .error { color: #d32f2f; }
+        </style>
+      </head>
+      <body>
+        <h1 class="error">Authorization Failed</h1>
+        <p>${escapeHtml(message)}</p>
+        <p>You can close this window.</p>
+        <script>setTimeout(() => window.close(), 3000);</script>
+      </body>
+    </html>
+  `);
+}
+
 function tryBindPort(
   port: number,
-  onCallback: (callbackUrl: URL) => void | Promise<void>
+  onCallback: (callbackUrl: URL) => void | Promise<void>,
+  opts: CallbackHandlingOpts,
 ): Promise<AuthServerResult> {
   return new Promise((resolve, reject) => {
     const server = createServer((req, res) => {
@@ -34,29 +71,24 @@ function tryBindPort(
 
       const url = new URL(req.url, `http://localhost:${port}`);
 
-      if (url.pathname === OAUTH_CALLBACK_PATH) {
+      if (url.pathname === opts.callbackPath) {
+        // Gatekeeper first: stale/foreign requests must not reach onError or
+        // onCallback (a stale tab's redirect must never settle a live flow).
+        const rejection = opts.validateCallback?.(url) ?? null;
+        if (rejection) {
+          renderErrorPage(res, rejection);
+          return;
+        }
+
         const error = url.searchParams.get('error');
 
         if (error) {
-          res.writeHead(200, { 'Content-Type': 'text/html' });
-          res.end(`
-            <!DOCTYPE html>
-            <html>
-              <head>
-                <title>OAuth Error</title>
-                <style>
-                  body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
-                  .error { color: #d32f2f; }
-                </style>
-              </head>
-              <body>
-                <h1 class="error">Authorization Failed</h1>
-                <p>Error: ${escapeHtml(error)}</p>
-                <p>You can close this window.</p>
-                <script>setTimeout(() => window.close(), 3000);</script>
-              </body>
-            </html>
-          `);
+          // Surface the provider error (e.g. access_denied when the user
+          // cancels consent) so the caller can settle its flow instead of
+          // waiting for the timeout. Callers that don't opt in keep the old
+          // behaviour: the error page renders and the flow times out.
+          opts.onError?.(error);
+          renderErrorPage(res, `Error: ${error}`);
           return;
         }
 
@@ -117,18 +149,29 @@ function tryBindPort(
  * through `port + PORT_RANGE_SIZE - 1` and binds the first available, handling
  * both EADDRINUSE and EACCES (the latter is common on Windows when
  * Hyper-V/WSL2 reserve the port).
+ *
+ * `callbackPath` overrides the served path for providers whose registered
+ * redirect URI differs (ChatGPT/Codex uses /auth/callback). `onError` is
+ * invoked when the provider redirects back with an `error` param (e.g.
+ * access_denied), letting the caller settle instead of waiting for timeout.
+ * `validateCallback` runs before both — see CallbackHandlingOpts.
  */
 export async function createAuthServer(
   port: number = DEFAULT_PORT,
   onCallback: (callbackUrl: URL) => void | Promise<void>,
-  opts: { fallback?: boolean } = {},
+  opts: { fallback?: boolean } & Partial<CallbackHandlingOpts> = {},
 ): Promise<AuthServerResult> {
   const fallback = opts.fallback === true;
+  const handlingOpts: CallbackHandlingOpts = {
+    callbackPath: opts.callbackPath ?? OAUTH_CALLBACK_PATH,
+    onError: opts.onError,
+    validateCallback: opts.validateCallback,
+  };
   const limit = fallback ? port + PORT_RANGE_SIZE - 1 : port;
 
   for (let p = port; p <= limit; p++) {
     try {
-      return await tryBindPort(p, onCallback);
+      return await tryBindPort(p, onCallback, handlingOpts);
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
       if (fallback && (code === 'EADDRINUSE' || code === 'EACCES') && p < limit) {

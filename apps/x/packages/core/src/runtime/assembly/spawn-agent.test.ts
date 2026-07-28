@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { z } from "zod";
 import type { TurnEvent, TurnState } from "@x/shared/dist/turns.js";
 import type { ITurnRuntime } from "../turns/api.js";
@@ -9,6 +9,16 @@ import type {
     IHeadlessAgentRunner,
 } from "./headless.js";
 import { runSpawnedAgent } from "./spawn-agent.js";
+
+// spawn-agent reads the configured subagent override lazily from
+// models/defaults.js; stub it so tests control the whole precedence chain
+// (explicit args > configured override > parent model).
+const subagentOverride = vi.hoisted(() => ({
+    value: null as { provider: string; model: string } | null,
+}));
+vi.mock("../../models/defaults.js", () => ({
+    getSubagentModelOverride: async () => subagentOverride.value,
+}));
 
 const TS = "2026-07-07T10:00:00Z";
 
@@ -38,7 +48,7 @@ function parentCreated(
             config: {
                 autoPermission: true,
                 humanAvailable: false,
-                maxModelCalls: 20,
+                maxModelCalls: 50,
             },
         } as z.infer<typeof TurnEvent>,
     ];
@@ -48,6 +58,7 @@ function fakeServices(opts: {
     parentEvents?: Array<z.infer<typeof TurnEvent>>;
     childResult?: Partial<HeadlessAgentResult>;
     startError?: string;
+    globalMaxModelCalls?: number;
 }) {
     const started: HeadlessAgentOptions[] = [];
     const turnRuntime = {
@@ -79,12 +90,49 @@ function fakeServices(opts: {
             throw new Error("unused");
         },
     };
-    return { services: { turnRuntime, headlessRunner }, started };
+    return {
+        services: {
+            turnRuntime,
+            headlessRunner,
+            ...(opts.globalMaxModelCalls === undefined
+                ? {}
+                : { globalMaxModelCalls: opts.globalMaxModelCalls }),
+        },
+        started,
+    };
 }
 
 const signal = new AbortController().signal;
 
 describe("runSpawnedAgent", () => {
+    beforeEach(() => {
+        subagentOverride.value = null;
+    });
+
+    it("uses the configured subagent override when no explicit model is passed", async () => {
+        subagentOverride.value = { provider: "ollama", model: "qwen3" };
+        const { services, started } = fakeServices({});
+        await runSpawnedAgent(
+            { task: "t", instructions: "x" },
+            { parentTurnId: "parent-1", signal, services },
+        );
+        expect(started[0].agent).toMatchObject({
+            inline: { model: { provider: "ollama", model: "qwen3" } },
+        });
+    });
+
+    it("explicit per-spawn model args beat the configured override", async () => {
+        subagentOverride.value = { provider: "ollama", model: "qwen3" };
+        const { services, started } = fakeServices({});
+        await runSpawnedAgent(
+            { task: "t", instructions: "x", model: "gpt-5.4", provider: "openai" },
+            { parentTurnId: "parent-1", signal, services },
+        );
+        expect(started[0].agent).toMatchObject({
+            inline: { model: { provider: "openai", model: "gpt-5.4" } },
+        });
+    });
+
     it("runs an inline child on the parent's model and returns the result envelope", async () => {
         const { services, started } = fakeServices({});
         const progress: unknown[] = [];
@@ -106,7 +154,7 @@ describe("runSpawnedAgent", () => {
                 model: { provider: "parent-p", model: "parent-m" },
             },
         });
-        expect(started[0].maxModelCalls).toBe(20);
+        expect(started[0].maxModelCalls).toBe(50);
         expect(started[0].signal).toBe(signal);
         expect(progress).toEqual([
             { childTurnId: "child-1", agentName: "researcher", task: "find things" },
@@ -181,14 +229,35 @@ describe("runSpawnedAgent", () => {
         expect(agent.inline.instructions).toMatch(/headlessly/);
     });
 
-    it("rejects a model-call budget above the cap at the schema boundary", async () => {
-        const { services } = fakeServices({});
+    it("clamps a model-call budget above the global limit to it", async () => {
+        const { services, started } = fakeServices({});
         const result = await runSpawnedAgent(
-            { task: "t", instructions: "x", max_model_calls: 50 },
+            { task: "t", instructions: "x", max_model_calls: 80 },
             { parentTurnId: "parent-1", signal, services },
         );
-        expect(result.isError).toBe(true);
-        expect(result.output).toMatch(/invalid input/);
+        expect(result.isError).toBe(false);
+        expect(started[0].maxModelCalls).toBe(50);
+    });
+
+    it("uses the configured global limit as the sub-agent default and cap", async () => {
+        const { services, started } = fakeServices({ globalMaxModelCalls: 60 });
+        await runSpawnedAgent(
+            { task: "t", instructions: "x" },
+            { parentTurnId: "parent-1", signal, services },
+        );
+        expect(started[0].maxModelCalls).toBe(60);
+
+        await runSpawnedAgent(
+            { task: "t", instructions: "x", max_model_calls: 80 },
+            { parentTurnId: "parent-1", signal, services },
+        );
+        expect(started[1].maxModelCalls).toBe(60);
+
+        await runSpawnedAgent(
+            { task: "t", instructions: "x", max_model_calls: 5 },
+            { parentTurnId: "parent-1", signal, services },
+        );
+        expect(started[2].maxModelCalls).toBe(5);
     });
 
     it("refuses to spawn from a child parent (depth cap)", async () => {

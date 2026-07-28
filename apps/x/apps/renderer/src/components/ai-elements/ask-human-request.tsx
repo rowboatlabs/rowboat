@@ -94,6 +94,7 @@ export const AskHumanRequest = ({
               <div className="space-y-2">
                 <Textarea
                   ref={textareaRef}
+                  dir="auto"
                   value={response}
                   onChange={(e) => setResponse(e.target.value)}
                   onKeyDown={handleKeyDown}

@@ -93,6 +93,27 @@ function hasNoiseLabels(content: string): boolean {
     return false;
 }
 
+/**
+ * Admission decision for a gmail_sync email file:
+ *  - 'wait'    — no frontmatter yet; the inbox classifier hasn't stamped a
+ *                verdict. Hold the file (don't mark processed) and try again
+ *                next tick.
+ *  - 'skip'    — stamped `knowledge: skip` (or, for legacy labeling-agent
+ *                frontmatter, carries a noise tag). Mark processed, never extract.
+ *  - 'process' — admitted for knowledge extraction.
+ *
+ * Exported for tests.
+ */
+export function emailAdmission(content: string): 'wait' | 'skip' | 'process' {
+    if (!content.startsWith('---')) return 'wait';
+    const endIdx = content.indexOf('\n---', 3);
+    const frontmatter = endIdx === -1 ? '' : content.slice(3, endIdx);
+    const verdict = frontmatter.match(/^knowledge:\s*(extract|skip)\s*$/m);
+    if (verdict) return verdict[1] === 'skip' ? 'skip' : 'process';
+    // Legacy labeling-agent frontmatter (labels: block) — noise tags decide.
+    return hasNoiseLabels(content) ? 'skip' : 'process';
+}
+
 
 function ensureSuggestedTopicsFileLocation(): string {
     if (fs.existsSync(SUGGESTED_TOPICS_PATH)) {
@@ -537,18 +558,18 @@ export async function buildGraph(sourceDir: string): Promise<void> {
     // Get files that need processing (new or changed)
     let filesToProcess = getFilesToProcess(sourceDir, state);
 
-    // For gmail_sync, only process emails that have been labeled AND don't have noise filter tags
+    // For gmail_sync, only process emails the classifier admitted: hold files
+    // with no stamped verdict yet, permanently skip `knowledge: skip`.
     if (sourceDir.endsWith('gmail_sync')) {
         filesToProcess = filesToProcess.filter(filePath => {
             try {
                 const content = fs.readFileSync(filePath, 'utf-8');
-                if (!content.startsWith('---')) return false;
-                if (hasNoiseLabels(content)) {
+                const admission = emailAdmission(content);
+                if (admission === 'skip') {
                     console.log(`[buildGraph] Skipping noise email: ${path.basename(filePath)}`);
                     markFileAsProcessed(filePath, state);
-                    return false;
                 }
-                return true;
+                return admission === 'process';
             } catch {
                 return false;
             }
@@ -756,18 +777,18 @@ export async function processAllSources(): Promise<void> {
         try {
             let filesToProcess = getFilesToProcess(sourceDir, state);
 
-            // For gmail_sync, only process emails that have been labeled AND don't have noise filter tags
+            // For gmail_sync, only process emails the classifier admitted: hold
+            // files with no stamped verdict yet, permanently skip `knowledge: skip`.
             if (source.provider === 'gmail') {
                 filesToProcess = filesToProcess.filter(filePath => {
                     try {
                         const content = fs.readFileSync(filePath, 'utf-8');
-                        if (!content.startsWith('---')) return false;
-                        if (hasNoiseLabels(content)) {
+                        const admission = emailAdmission(content);
+                        if (admission === 'skip') {
                             console.log(`[GraphBuilder] Skipping noise email: ${path.basename(filePath)}`);
                             markFileAsProcessed(filePath, state);
-                            return false;
                         }
-                        return true;
+                        return admission === 'process';
                     } catch {
                         return false;
                     }

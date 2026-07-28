@@ -2,7 +2,7 @@ import * as React from 'react'
 import { useCallback, useEffect, useLayoutEffect, useState, useRef } from 'react'
 import { workspace } from '@x/shared';
 import { RunEvent } from '@x/shared/src/runs.js';
-import type { LanguageModelUsage, ToolUIPart } from 'ai';
+import type { ToolUIPart } from 'ai';
 import './App.css'
 import z from 'zod';
 import { CheckIcon, LoaderIcon, PanelLeftIcon, ArrowLeft, ArrowRight, MessageSquare, ChevronLeftIcon, ChevronRightIcon, Plus, HistoryIcon } from 'lucide-react';
@@ -79,7 +79,10 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Toaster } from "@/components/ui/sonner"
+import { UpdateCard } from "@/components/update-card"
 import { BillingErrorDialog } from "@/components/billing-error-dialog"
+import { BillingErrorNotice } from "@/components/billing-error-notice"
+import { CreditCelebration } from "@/components/credit-celebration"
 import { matchBillingError, type BillingErrorMatch } from "@/lib/billing-error"
 import { dispatchCreditExhausted, dispatchCreditReplenished } from "@/lib/credit-status"
 import { ensureMarkdownExtension, normalizeWikiPath, splitWikiFragment, stripKnowledgePrefix, toKnowledgePath, wikiLabel } from '@/lib/wiki-links'
@@ -130,11 +133,12 @@ import { useVoiceMode } from '@/hooks/useVoiceMode'
 import { useVideoMode } from '@/hooks/useVideoMode'
 import { useVoiceTTS } from '@/hooks/useVoiceTTS'
 import { VideoCallView } from '@/components/video-call-view'
+import { PermissionDialog, type PermissionKind } from '@/components/permission-dialog'
 import { ProductTour, type TourNavTarget } from '@/components/product-tour'
 import { useMeetingTranscription, type CalendarEventMeta } from '@/hooks/useMeetingTranscription'
 import { useAnalyticsIdentity } from '@/hooks/useAnalyticsIdentity'
 import * as analytics from '@/lib/analytics'
-import { playAckCue } from '@/lib/call-sounds'
+import { playAckCue, playAlertCue, playPopCue } from '@/lib/call-sounds'
 import { useTheme } from '@/contexts/theme-context'
 import { TokenUsageMenu } from '@/components/token-usage-menu'
 
@@ -196,6 +200,33 @@ const graphPalette = [
   { hue: 55, sat: 80, light: 52 },
   { hue: 0, sat: 72, light: 52 },
 ]
+
+// Push-to-talk gesture timing: a Right-⌘ press shorter than PTT_TAP_MS is a
+// tap (toggles hands-free lock); anything longer is a hold (release
+// submits). PTT_EDGE_ECHO_MS collapses the same key edge arriving from two
+// sources at once (global uiohook hook + in-window DOM listener).
+const PTT_TAP_MS = 350
+const PTT_EDGE_ECHO_MS = 80
+
+// Speakable fallback for a call reply that skipped <voice> tags: strip the
+// markdown that reads terribly aloud and cap the length — a minute-long
+// monologue helps nobody.
+function toSpeakableText(markdown: string): string {
+  const text = markdown
+    .replace(/```[\s\S]*?(```|$)/g, ' — code omitted — ')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/^[-*+]\s+/gm, '')
+    .replace(/\*\*|__|\*/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (text.length <= 700) return text
+  const cut = text.slice(0, 700)
+  const lastStop = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('! '), cut.lastIndexOf('? '))
+  return lastStop > 200 ? cut.slice(0, lastStop + 1) : cut
+}
 
 const MACOS_TRAFFIC_LIGHTS_RESERVED_PX = 16 + 12 * 3 + 8 * 2
 const TITLEBAR_BUTTON_PX = 32
@@ -458,7 +489,17 @@ const buildBgTaskSetupPrompt = (description: string) =>
 const buildBgTaskEditPrompt = (slug: string) =>
   `Let's tweak the background task \`${slug}\`. Please load the \`background-task\` skill first, read the task's current \`bg-tasks/${slug}/task.yaml\`, then ask me what I want to change.`
 
-const normalizeUsage = (usage?: Partial<LanguageModelUsage> | null): LanguageModelUsage | null => {
+// The renderer displays our internal (flat) usage shape that arrives over IPC,
+// not the AI SDK's restructured LanguageModelUsage (nested token details).
+type UsageSummary = {
+  inputTokens?: number
+  outputTokens?: number
+  totalTokens?: number
+  reasoningTokens?: number
+  cachedInputTokens?: number
+}
+
+const normalizeUsage = (usage?: UsageSummary | null): UsageSummary | null => {
   if (!usage) return null
   const hasNumbers = Object.values(usage).some((value) => typeof value === 'number')
   if (!hasNumbers) return null
@@ -942,30 +983,34 @@ function App() {
   const [conversation, setConversation] = useState<ConversationItem[]>([])
   const [billingErrorMatch, setBillingErrorMatch] = useState<BillingErrorMatch | null>(null)
   const [billingErrorOpen, setBillingErrorOpen] = useState(false)
-  const lastHandledBillingErrorIdRef = useRef<string | null>(null)
+  const handledBillingErrorIdsRef = useRef<Set<string>>(new Set())
   const [currentAssistantMessage, setCurrentAssistantMessage] = useState<string>('')
+  const [, setModelUsage] = useState<UsageSummary | null>(null)
+  const [runId, setRunId] = useState<string | null>(null)
+  // New runtime: the active session's chat data + actions. All logic lives in
+  // SessionChatStore (tested headlessly); the hook is a thin subscription.
+  // runId IS the session id in the sessions runtime.
+  const sessionChat = useSessionChat(runId)
 
+  // Watch the conversation that is actually rendered — the sessions-runtime
+  // one when loaded, the legacy state otherwise — so billing failures
+  // (out of credits, subscription lapsed) always pop the upgrade dialog.
+  const billingWatchedConversation = sessionChat.chatState?.conversation ?? conversation
   useEffect(() => {
-    for (let i = conversation.length - 1; i >= 0; i--) {
-      const item = conversation[i]
+    for (let i = billingWatchedConversation.length - 1; i >= 0; i--) {
+      const item = billingWatchedConversation[i]
       if (!isErrorMessage(item)) continue
-      if (item.id === lastHandledBillingErrorIdRef.current) return
+      if (handledBillingErrorIdsRef.current.has(item.id)) return
       const match = matchBillingError(item.message)
       if (match) {
-        lastHandledBillingErrorIdRef.current = item.id
+        handledBillingErrorIdsRef.current.add(item.id)
         setBillingErrorMatch(match)
         setBillingErrorOpen(true)
         if (match.kind === 'out_of_credits') dispatchCreditExhausted()
       }
       return
     }
-  }, [conversation])
-  const [, setModelUsage] = useState<LanguageModelUsage | null>(null)
-  const [runId, setRunId] = useState<string | null>(null)
-  // New runtime: the active session's chat data + actions. All logic lives in
-  // SessionChatStore (tested headlessly); the hook is a thin subscription.
-  // runId IS the session id in the sessions runtime.
-  const sessionChat = useSessionChat(runId)
+  }, [billingWatchedConversation])
   const runIdRef = useRef<string | null>(null)
   const loadRunRequestIdRef = useRef(0)
   const [isProcessing, setIsProcessing] = useState(false)
@@ -981,6 +1026,13 @@ function App() {
   const activeIsReasoning = sessionChat.chatState?.isReasoning ?? false
   const activeIsWaitingOnHuman = sessionChat.chatState?.isWaitingOnHuman ?? false
   const activeIsWorking = activeIsProcessing && !activeIsWaitingOnHuman
+  // LIVE chat data: the new runtime streams through sessionChat.chatState —
+  // the standalone conversation/currentAssistantMessage states are only the
+  // legacy pre-load fallback (see activeChatTabState). Anything mirroring
+  // the in-flight reply (pill response panel, fallback speech) must read
+  // these, never the legacy states.
+  const liveConversation = sessionChat.chatState?.conversation ?? conversation
+  const liveAssistantMessage = sessionChat.chatState?.currentAssistantMessage ?? currentAssistantMessage
   // A failed session load must be visible, not a blank chat.
   const sessionLoadErrorItems = React.useMemo<ConversationItem[]>(() => (
     sessionChat.error
@@ -1023,12 +1075,39 @@ function App() {
     if (tts.state === 'idle') setAssistantCaption('')
   }, [tts.state])
 
+  // Push-to-talk: the mic gate is open while 'held' (key or on-screen button
+  // down) or 'locked' (a quick tap toggled hands-free capture). 'idle' means
+  // the assistant hears nothing. Declared here (above the segment player)
+  // because segment consumption freezes while the gate is open.
+  const [pttStatus, setPttStatus] = useState<'idle' | 'held' | 'locked'>('idle')
+  const pttStatusRef = useRef<'idle' | 'held' | 'locked'>('idle')
+  const setPttState = useCallback((s: 'idle' | 'held' | 'locked') => {
+    pttStatusRef.current = s
+    setPttStatus(s)
+  }, [])
+
   // Speak newly completed <voice> blocks from the new runtime's live stream
   // (parity with the legacy text-delta voice extraction below). The store
   // accumulates completed blocks in chatState.voiceSegments; we speak only
   // segments that appeared after the current session became active.
   const spokenVoiceRef = useRef<{ key: string | null; count: number }>({ key: null, count: 0 })
   const voiceSegments = sessionChat.chatState?.voiceSegments
+  const voiceSegmentsRef = useRef(voiceSegments)
+  voiceSegmentsRef.current = voiceSegments
+  // Whether any voice segment of the CURRENT call turn has been spoken —
+  // cleared at submit, set by the segment player; the fallback-speech net
+  // fires only when this is still false at turn completion.
+  const spokeSegmentThisTurnRef = useRef(false)
+  // The current turn should be spoken aloud even without a call — set at
+  // submit for quick-ask questions with the voice toggle on. Per-turn so
+  // composer messages outside the bar never start talking.
+  const speakTurnRef = useRef(false)
+  // Fallback-speech bookkeeping, armed per call turn at submit (see
+  // handlePromptSubmit) and consumed by the effect below the segment player.
+  const callTurnVoiceRef = useRef<{ pending: boolean; submitAt: number }>({
+    pending: false,
+    submitAt: 0,
+  })
   useEffect(() => {
     if (!voiceSegments) return
     if (spokenVoiceRef.current.key !== runId) {
@@ -1036,17 +1115,72 @@ function App() {
       spokenVoiceRef.current = { key: runId, count: voiceSegments.length }
       return
     }
+    // The overlay's segment list is PER-TURN: the store resets it to [] on
+    // every turn_created (store.ts). A shrink therefore means "new turn" —
+    // restart consumption from the top. Without this, the new reply's first
+    // segments sat below the stale counter and only the tail was spoken
+    // (or nothing at all when the new reply was shorter than the old one).
+    if (voiceSegments.length < spokenVoiceRef.current.count) {
+      spokenVoiceRef.current.count = 0
+    }
     while (spokenVoiceRef.current.count < voiceSegments.length) {
+      // The user is mid-capture (PTT held/locked): speaking now would play
+      // TTS into their open mic. FREEZE consumption (no skip) — if they
+      // release without submitting, the effect re-runs (pttStatus dep) and
+      // the reply resumes; a real submit drops the backlog instead.
+      if (pttStatusRef.current !== 'idle') break
       const segment = voiceSegments[spokenVoiceRef.current.count]
       spokenVoiceRef.current.count += 1
-      if (ttsEnabledRef.current) {
+      if (ttsEnabledRef.current || speakTurnRef.current) {
         const marks = callTurnMarksRef.current
         if (marks && marks.speak === undefined) marks.speak = performance.now()
+        spokeSegmentThisTurnRef.current = true
         ttsRef.current.speak(segment)
         setAssistantCaption(segment)
       }
     }
-  }, [voiceSegments, runId])
+  }, [voiceSegments, runId, pttStatus])
+
+  // Consistency net: 'full' voice output relies on the model wrapping its
+  // reply in <voice> tags — when it doesn't, the turn used to end in total
+  // silence. If a call turn finishes with no voice segment, read the reply
+  // text itself aloud.
+  useEffect(() => {
+    if (activeIsProcessing) return
+    const turn = callTurnVoiceRef.current
+    if (!turn.pending) return
+    // Speaking this turn: call TTS, or the quick-ask voice toggle.
+    if (!(inCallRef.current ? ttsEnabledRef.current : speakTurnRef.current)) {
+      turn.pending = false
+      return
+    }
+    // Mid-capture: stay armed and re-evaluate on release (pttStatus dep) —
+    // speaking now would go into the open mic, and the frozen segment
+    // backlog may still cover this turn once it drains.
+    if (pttStatusRef.current !== 'idle') return
+    if (spokeSegmentThisTurnRef.current) {
+      // The segment player voiced (part of) this turn — no fallback.
+      turn.pending = false
+      return
+    }
+    for (let i = liveConversation.length - 1; i >= 0; i--) {
+      const item = liveConversation[i]
+      if (!isChatMessage(item) || item.role !== 'assistant') continue
+      // Only a reply from THIS turn counts — an errored turn would otherwise
+      // re-speak the previous answer. An older newest-message means this
+      // turn's reply hasn't landed in the conversation yet: stay armed and
+      // let the next conversation update resolve it.
+      if (item.timestamp >= turn.submitAt) {
+        turn.pending = false
+        const speakable = toSpeakableText(item.content)
+        if (speakable) {
+          ttsRef.current.speak(speakable)
+          setAssistantCaption(speakable)
+        }
+      }
+      break
+    }
+  }, [activeIsProcessing, liveConversation, pttStatus])
 
   // Emit the turn's voice-to-voice latency breakdown once audio is audible.
   useEffect(() => {
@@ -1073,6 +1207,13 @@ function App() {
   // floating popout; camera on → full-screen call; camera off → popout
   // (mascot pill). Handlers live below the voice/submit plumbing they drive.
   const video = useVideoMode()
+  // Assistant calls hold the mic — tell main so ambient meeting detection
+  // doesn't mistake our own capture for an external meeting.
+  useEffect(() => {
+    void window.ipc
+      .invoke('voice:setCallActive', { active: video.state !== 'idle' })
+      .catch(() => { /* detection may be unavailable */ })
+  }, [video.state])
   const [inCall, setInCall] = useState(false)
   const inCallRef = useRef(false)
   // User explicitly shrank the full-screen call to the floating pill.
@@ -1082,6 +1223,8 @@ function App() {
   // or shown while muted ever reaches the assistant. Output is untouched
   // (in-flight speech keeps playing; the Stop control handles that).
   const [micMuted, setMicMuted] = useState(false)
+  const micMutedRef = useRef(false)
+  micMutedRef.current = micMuted
   // Practice preset: adds the coaching persona to the system prompt.
   const [practiceMode, setPracticeMode] = useState(false)
   const practiceModeRef = useRef(false)
@@ -1090,6 +1233,24 @@ function App() {
   const meetingTranscription = useMeetingTranscription(() => {
     handleToggleMeetingRef.current?.()
   })
+
+  // Keep the tray menu in sync with meeting capture ("Start meeting notes"
+  // vs "Stop recording & generate notes").
+  useEffect(() => {
+    void window.ipc
+      .invoke('meeting:setRecordingState', { recording: meetingTranscription.state === 'recording' })
+      .catch(() => { /* tray may be unavailable */ })
+  }, [meetingTranscription.state])
+
+  // Main detected the meeting app released the mic (call ended) — stop and
+  // generate notes, exactly like a manual stop. Listener only exists while
+  // recording, so a stale signal can never toggle a new recording ON.
+  useEffect(() => {
+    if (meetingTranscription.state !== 'recording') return
+    return window.ipc.on('meeting:externalCallEnded', () => {
+      handleToggleMeetingRef.current?.()
+    })
+  }, [meetingTranscription.state])
 
   // Check if voice is available on mount and when OAuth state changes
   const refreshVoiceAvailability = useCallback(() => {
@@ -1143,12 +1304,31 @@ function App() {
     return cleanup
   }, [])
 
+  // Which macOS permission explainer is up, if any (replaces the old silent
+  // failures: mic/camera denials did nothing visible).
+  const [permissionDialog, setPermissionDialog] = useState<PermissionKind | null>(null)
+
+  // A permission problem must be impossible to miss: chime and bring the app
+  // window to the front — the user may be in another app entirely (pill
+  // share toggle, global PTT) when the failure fires.
+  useEffect(() => {
+    if (!permissionDialog) return
+    playAlertCue()
+    void window.ipc.invoke('app:focusMainWindow', null).catch(() => {})
+  }, [permissionDialog])
+
   const handleStartRecording = useCallback(() => {
     // A live call owns the mic — ignore push-to-talk while one is running.
     if (inCallRef.current) return
     setIsRecording(true)
     isRecordingRef.current = true
-    voice.start()
+    void voice.start().then((result) => {
+      if (result === 'mic-denied') {
+        setIsRecording(false)
+        isRecordingRef.current = false
+        setPermissionDialog('microphone')
+      }
+    })
   }, [voice])
 
   const handlePromptSubmitRef = useRef<((message: PromptInputMessage, mentions?: FileMention[], stagedAttachments?: StagedAttachment[], searchEnabled?: boolean, codeMode?: 'claude' | 'codex', permissionMode?: PermissionMode) => Promise<void>) | null>(null)
@@ -1182,25 +1362,39 @@ function App() {
   // the call button's main click) is "work together": screen shared, camera
   // off, floating pill — the user keeps working while the assistant watches
   // along. 'video'/'practice' open face-to-face full screen instead.
+  const callStartedAtMsRef = useRef<number | null>(null)
+  // Epoch twin of the perf-clock mark above — gates which conversation
+  // messages belong to THIS call (the pill's response mirror).
+  const callStartedEpochRef = useRef(0)
+
   const startCall = useCallback(async (preset: CallPreset) => {
     if (inCallRef.current) return
     const camera = preset === 'video' || preset === 'practice'
     const ok = await video.start({ camera })
-    if (!ok) return // camera denied/unavailable — stay out of the call
+    if (!ok) {
+      // Camera denied/unavailable — stay out of the call, and say why.
+      if (camera) setPermissionDialog('camera')
+      return
+    }
     if (preset === 'share') {
       // If screen capture fails (usually the macOS Screen Recording
       // permission), continue as a voice call — sharing is one tap away on
-      // the pill once permission is granted.
+      // the pill once permission is granted. The dialog explains the grant +
+      // relaunch dance instead of failing silently.
       const shared = await video.startScreenShare()
-      if (!shared) {
-        toast("Couldn't share your screen", {
-          description: 'Grant Rowboat Screen Recording access, then tap the share button on the call.',
-          action: {
-            label: 'Open Settings',
-            onClick: () => void window.ipc.invoke('meeting:openScreenRecordingSettings', null).catch(() => {}),
-          },
+      if (!shared) setPermissionDialog('screen-recording')
+    } else {
+      // Presets that don't share at start still settle the Screen Recording
+      // permission NOW — triggering the macOS prompt (first use) and the
+      // audible in-app dialog when the grant isn't effective — so by the
+      // time the user reaches for the share button it just works, instead
+      // of the permission dance ambushing them mid-call.
+      void window.ipc
+        .invoke('meeting:checkScreenPermission', null)
+        .then(({ granted }) => {
+          if (!granted) setPermissionDialog('screen-recording')
         })
-      }
+        .catch(() => {})
     }
 
     // A manual push-to-talk recording can't coexist with the call's mic.
@@ -1211,26 +1405,42 @@ function App() {
     }
     ttsEnabledRef.current = true
     ttsModeRef.current = 'full'
-    void voiceRef.current.startContinuous((text) => {
-      // Instant "heard you" feedback + start of the latency clock.
-      playAckCue()
-      callTurnMarksRef.current = { t0: performance.now() }
-      pendingVoiceInputRef.current = true
-      handlePromptSubmitRef.current?.({ text, files: [] })
-    })
+    // Push-to-talk: the mic + Deepgram socket stay warm for the whole call,
+    // but nothing is heard until the user opens the gate (hold Right ⌘, or
+    // tap it to lock hands-free capture). The key release is the endpoint —
+    // no silence detection, no misfires.
+    void voiceRef.current
+      .startPtt((text) => {
+        // Instant "heard you" feedback + start of the latency clock.
+        playAckCue()
+        callTurnMarksRef.current = { t0: performance.now() }
+        pendingVoiceInputRef.current = true
+        handlePromptSubmitRef.current?.({ text, files: [] })
+      })
+      .then((result) => {
+        if (result === 'mic-denied') setPermissionDialog('microphone')
+      })
 
+    setPttState('idle')
     setPracticeMode(preset === 'practice')
     practiceModeRef.current = preset === 'practice'
     setMicMuted(false)
-    // Pill-first presets start minimized; face-to-face presets start expanded.
-    setCallMinimized(preset === 'voice' || preset === 'share')
+    // Every preset starts in the floating pill (video included — the camera
+    // preview lives in the pill) except practice, where the coaching session
+    // is a deliberate face-to-face full screen.
+    setCallMinimized(preset !== 'practice')
     inCallRef.current = true
     setInCall(true)
+    callStartedAtMsRef.current = performance.now()
+    callStartedEpochRef.current = Date.now()
     analytics.callStarted(preset)
-  }, [video])
+  }, [video, setPttState])
 
   const endCall = useCallback(() => {
     if (!inCallRef.current) return
+    const startedAt = callStartedAtMsRef.current
+    callStartedAtMsRef.current = null
+    analytics.callEnded(startedAt != null ? (performance.now() - startedAt) / 1000 : 0)
     voiceRef.current.cancel()
     ttsEnabledRef.current = false
     ttsModeRef.current = 'summary'
@@ -1240,18 +1450,11 @@ function App() {
     setPracticeMode(false)
     practiceModeRef.current = false
     setMicMuted(false)
+    setPttState('idle')
     setCallMinimized(false)
     inCallRef.current = false
     setInCall(false)
-  }, [video])
-
-  // During a call, mute the mic while the assistant is thinking or speaking
-  // so its own TTS (or a half-turn) never gets transcribed back at it — and
-  // whenever the user muted themselves.
-  useEffect(() => {
-    if (!inCall) return
-    voiceRef.current.setPaused(micMuted || activeIsProcessing || tts.state !== 'idle')
-  }, [inCall, micMuted, activeIsProcessing, tts.state])
+  }, [video, setPttState])
 
   // The user-mute half that lives in the video pipeline: stop sampling
   // camera/screen frames while muted (see useVideoMode.setCapturePaused).
@@ -1267,7 +1470,8 @@ function App() {
     if (video.screenState === 'live') {
       video.stopScreenShare()
     } else {
-      await video.startScreenShare()
+      const shared = await video.startScreenShare()
+      if (!shared) setPermissionDialog('screen-recording')
     }
   }, [video])
 
@@ -1295,7 +1499,8 @@ function App() {
   // to full screen.
   const handleMinimizeCall = useCallback(async () => {
     setCallMinimized(true)
-    await video.startScreenShare()
+    const shared = await video.startScreenShare()
+    if (!shared) setPermissionDialog('screen-recording')
   }, [video])
 
   // Interrupt the assistant: silence TTS immediately, skip anything already
@@ -1308,19 +1513,171 @@ function App() {
     if (voiceSegments) {
       spokenVoiceRef.current.count = voiceSegments.length
     }
+    // An interrupted turn must not fallback-speak its (aborted) reply.
+    callTurnVoiceRef.current.pending = false
     if (activeIsProcessing) {
       void stopRunRef.current?.()
     }
   }, [voiceSegments, activeIsProcessing])
 
-  // Current phase of the call (null when not in one).
-  const videoCallStatus: 'listening' | 'thinking' | 'speaking' | null =
+  // --- Push-to-talk state machine ---
+  // One edge-triggered machine fed by every source: the global key hook
+  // (uiohook in main), the in-window DOM fallback, and the on-screen talk
+  // buttons (full-screen call + popout). Sources overlap while the app is
+  // focused, so identical edges arriving within the echo window collapse
+  // into one.
+  const pttDownAtRef = useRef(0)
+  const pttLastEdgeRef = useRef<{ type: 'down' | 'up'; at: number } | null>(null)
+  // Right ⌘ was used as a modifier (⌘C etc.) during this press — the
+  // matching release must not commit/lock.
+  const pttChordedRef = useRef(false)
+
+  const pttEdgeIsEcho = useCallback((type: 'down' | 'up') => {
+    const now = performance.now()
+    const last = pttLastEdgeRef.current
+    pttLastEdgeRef.current = { type, at: now }
+    return !!last && last.type === type && now - last.at < PTT_EDGE_ECHO_MS
+  }, [])
+
+  const handlePttDown = useCallback(() => {
+    if (!inCallRef.current || micMutedRef.current) return
+    if (pttEdgeIsEcho('down')) return
+    pttChordedRef.current = false
+    pttDownAtRef.current = performance.now()
+    if (pttStatusRef.current === 'idle') {
+      // Silence the assistant's AUDIO the moment the user starts talking —
+      // but do NOT abort the run or discard its reply: an accidental or
+      // empty press must never cost the answer. The run is stopped only
+      // when a real utterance actually submits (handlePromptSubmit).
+      ttsRef.current.cancel()
+      setAssistantCaption('')
+      voiceRef.current.pttBegin()
+      setPttState('held')
+    }
+    // 'locked': the mic is already open — the release decides what happens.
+  }, [pttEdgeIsEcho, setPttState])
+
+  const handlePttUp = useCallback(() => {
+    if (pttStatusRef.current === 'idle') return
+    if (pttEdgeIsEcho('up')) return
+    if (pttChordedRef.current) {
+      pttChordedRef.current = false
+      return
+    }
+    const heldMs = performance.now() - pttDownAtRef.current
+    if (pttStatusRef.current === 'held' && heldMs < PTT_TAP_MS) {
+      // Quick tap: lock hands-free capture until the next press.
+      setPttState('locked')
+      return
+    }
+    if (pttStatusRef.current === 'held') {
+      // First couple of real holds: teach the hands-free tap.
+      const shown = Number(localStorage.getItem('ptt-hold-tip-shown') ?? '0')
+      if (shown < 2) {
+        localStorage.setItem('ptt-hold-tip-shown', String(shown + 1))
+        toast('No need to keep holding', {
+          description: 'For longer turns, quick-tap right ⌘ instead — talk hands-free, then tap again to send.',
+          duration: 6000,
+        })
+      }
+    }
+    // Releasing a hold (or pressing again while locked) submits.
+    setPttState('idle')
+    void voiceRef.current.pttEnd()
+  }, [pttEdgeIsEcho, setPttState])
+
+  const handlePttCancel = useCallback(() => {
+    if (pttStatusRef.current === 'idle') return
+    voiceRef.current.pttCancel()
+    setPttState('idle')
+  }, [setPttState])
+
+  const handlePttChord = useCallback(() => {
+    // The press was a keyboard shortcut, not a talk gesture.
+    if (pttStatusRef.current === 'held') {
+      voiceRef.current.pttCancel()
+      setPttState('idle')
+    } else if (pttStatusRef.current === 'locked') {
+      pttChordedRef.current = true
+    }
+  }, [setPttState])
+
+  // PTT key sources: the global hook (works over any app) plus in-window DOM
+  // listeners — the fallback that keeps PTT working while the app is focused
+  // even when macOS Input Monitoring hasn't been granted.
+  useEffect(() => {
+    if (!inCall) return
+    const offKey = window.ipc.on('voice:ptt-key', ({ type }) => {
+      if (type === 'down') handlePttDown()
+      else if (type === 'up') handlePttUp()
+      else handlePttChord()
+    })
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'MetaRight') {
+        if (!e.repeat) handlePttDown()
+        return
+      }
+      if (e.key === 'Escape' && pttStatusRef.current !== 'idle') {
+        e.preventDefault()
+        handlePttCancel()
+        return
+      }
+      if (pttStatusRef.current === 'held') handlePttChord()
+      else if (pttStatusRef.current === 'locked' && e.metaKey) handlePttChord()
+    }
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'MetaRight') handlePttUp()
+    }
+    document.addEventListener('keydown', onKeyDown)
+    document.addEventListener('keyup', onKeyUp)
+    return () => {
+      offKey()
+      document.removeEventListener('keydown', onKeyDown)
+      document.removeEventListener('keyup', onKeyUp)
+    }
+  }, [inCall, handlePttDown, handlePttUp, handlePttChord, handlePttCancel])
+
+  // Muting mid-capture discards the capture — nothing said while muted may
+  // reach the assistant.
+  useEffect(() => {
+    if (micMuted) handlePttCancel()
+  }, [micMuted, handlePttCancel])
+
+  // Global-PTT onboarding: shortly into a call, if the key hook is running
+  // but has seen zero input events, macOS Input Monitoring hasn't taken
+  // effect — explain it instead of letting Right ⌘ silently do nothing from
+  // other apps. At most once per app session: once-ever proved too little
+  // (dismiss without granting and global PTT stayed silently broken), every
+  // call would nag. (In-window PTT works regardless.)
+  const inputMonitoringPromptedRef = useRef(false)
+  useEffect(() => {
+    if (!inCall) return
+    if (inputMonitoringPromptedRef.current) return
+    const timer = setTimeout(async () => {
+      try {
+        const status = await window.ipc.invoke('ptt:getStatus', null)
+        if (status.supported && status.running && !status.eventsSeen) {
+          inputMonitoringPromptedRef.current = true
+          setPermissionDialog('input-monitoring')
+        }
+      } catch {
+        // Hook unavailable — the DOM fallback still covers in-app PTT.
+      }
+    }, 4000)
+    return () => clearTimeout(timer)
+  }, [inCall])
+
+  // Current phase of the call (null when not in one). An open mic gate reads
+  // as listening no matter what the assistant is doing — the user is talking.
+  const videoCallStatus: 'idle' | 'listening' | 'thinking' | 'speaking' | null =
     inCall
-      ? tts.state === 'speaking'
-        ? 'speaking'
-        : tts.state === 'synthesizing' || activeIsProcessing
-          ? 'thinking'
-          : 'listening'
+      ? pttStatus !== 'idle'
+        ? 'listening'
+        : tts.state === 'speaking'
+          ? 'speaking'
+          : tts.state === 'synthesizing' || activeIsProcessing
+            ? 'thinking'
+            : 'idle'
       : null
 
   // The call's surface follows one rule: full screen and screen sharing are
@@ -1356,6 +1713,43 @@ function App() {
     }
   }, [video.screenState, video])
 
+  // Latest assistant reply of this call — mirrored into the pill so a typed
+  // question can be READ there without switching back to the app (replies
+  // are spoken too; this is the visual half). Streaming text while the turn
+  // generates, the final message once it lands. Only replies from after the
+  // call started count.
+  let callResponseText: string | null = null
+  let callQuestionText: string | null = null
+  if (inCall) {
+    // The question the reply answers — shown above it in the pill's panel.
+    let questionAt = 0
+    for (let i = liveConversation.length - 1; i >= 0; i--) {
+      const item = liveConversation[i]
+      if (isChatMessage(item) && item.role === 'user') {
+        if (item.timestamp >= callStartedEpochRef.current) {
+          callQuestionText = item.content
+          questionAt = item.timestamp
+        }
+        break
+      }
+    }
+    callResponseText = liveAssistantMessage || null
+    if (!callResponseText) {
+      for (let i = liveConversation.length - 1; i >= 0; i--) {
+        const item = liveConversation[i]
+        if (isChatMessage(item) && item.role === 'assistant') {
+          // Only a reply to the CURRENT question counts — right after a
+          // submit the newest assistant message is still the previous
+          // answer, which must not linger under the new question.
+          if (item.timestamp >= callStartedEpochRef.current && item.timestamp >= questionAt) {
+            callResponseText = item.content
+          }
+          break
+        }
+      }
+    }
+  }
+
   // Keep the popout's mascot/status/devices/caption mirror of the call fresh.
   // The main process caches the latest state and replays it when the popout
   // loads.
@@ -1369,27 +1763,184 @@ function App() {
         micMuted,
         screenSharing: video.screenState === 'live',
         interimText: voice.interimText || null,
+        pttLocked: pttStatus === 'locked',
+        responseText: callResponseText,
+        questionText: callQuestionText,
       })
       .catch(() => {})
-  }, [inCall, tts.state, videoCallStatus, video.cameraOn, micMuted, video.screenState, voice.interimText])
+  }, [inCall, tts.state, videoCallStatus, video.cameraOn, micMuted, video.screenState, voice.interimText, pttStatus, callResponseText, callQuestionText])
 
   // Execute popout control-bar actions (the popout window has no access to
   // the call's mic/camera/capture — they live here). 'expand' goes full
   // screen, which by the exclusivity rule stops any running share; the main
   // process already refocused the app window.
   useEffect(() => {
-    return window.ipc.on('video:popout-action', ({ action }) => {
+    return window.ipc.on('video:popout-action', ({ action, text }) => {
       if (action === 'toggle-mic') handleToggleMic()
       else if (action === 'toggle-camera') handleToggleCamera()
       else if (action === 'toggle-share') void handleToggleScreenShare()
       else if (action === 'stop-speaking') handleInterruptAssistant()
+      else if (action === 'ptt-down') handlePttDown()
+      else if (action === 'ptt-up') handlePttUp()
+      else if (action === 'send-text') {
+        // Typed from the popout: exactly a composer message — frames ride
+        // along via handlePromptSubmit as with any typed mid-call message.
+        if (text?.trim()) handlePromptSubmitRef.current?.({ text: text.trim(), files: [] })
+      }
       else if (action === 'end-call') endCall()
       else if (action === 'expand') {
         if (video.screenState === 'live') video.stopScreenShare()
         setCallMinimized(false)
       }
     })
-  }, [handleToggleMic, handleToggleCamera, handleToggleScreenShare, handleInterruptAssistant, endCall, video])
+  }, [handleToggleMic, handleToggleCamera, handleToggleScreenShare, handleInterruptAssistant, handlePttDown, handlePttUp, endCall, video])
+
+  // Discoverability: nothing else in the UI reveals the global quick-ask
+  // shortcut. One toast, once per install, shortly after launch.
+  useEffect(() => {
+    if (localStorage.getItem('quick-ask-tip-shown')) return
+    const timer = setTimeout(() => {
+      localStorage.setItem('quick-ask-tip-shown', '1')
+      playPopCue()
+      toast('Ask Rowboat from anywhere', {
+        description: `Press ${isMac ? '⌥⇧Space' : 'Alt+Shift+Space'} in any app for a quick question — the answer shows up right there and in your chat.`,
+        duration: 12000,
+        closeButton: true,
+        // Lift the card off the page, and move sonner's close button (which
+        // defaults to the top-LEFT corner) to the top right.
+        className:
+          'shadow-xl shadow-black/25 [&_[data-close-button]]:!left-auto [&_[data-close-button]]:!right-0 [&_[data-close-button]]:!translate-x-[15%] [&_[data-close-button]]:!-translate-y-[15%]',
+        action: {
+          label: 'Try it',
+          onClick: () => void window.ipc.invoke('quickAsk:show', null).catch(() => {}),
+        },
+      })
+    }, 3000)
+    return () => clearTimeout(timer)
+  }, [])
+
+  // Quick-ask "Open in Rowboat": land on the conversation full-view — chat
+  // pane open and maximized, no middle pane.
+  useEffect(() => {
+    return window.ipc.on('quick-ask:open-chat', () => {
+      setIsChatSidebarOpen(true)
+      setIsRightPaneMaximized(true)
+    })
+  }, [])
+
+  // A screen share ended since the last message: the NEXT message tells the
+  // model its earlier frames are stale (history keeps frames inline forever,
+  // so without this it answers "what's on my screen" from the past).
+  const screenShareEndedRef = useRef(false)
+  const lastScreenStateForNoticeRef = useRef(video.screenState)
+  useEffect(() => {
+    if (lastScreenStateForNoticeRef.current === 'live' && video.screenState !== 'live') {
+      screenShareEndedRef.current = true
+    }
+    // Sharing again supersedes the notice — fresh frames arrive with the
+    // next message anyway.
+    if (video.screenState === 'live') screenShareEndedRef.current = false
+    lastScreenStateForNoticeRef.current = video.screenState
+  }, [video.screenState])
+
+  // Quick-ask toggles (voice response / screen share), pushed from the bar.
+  // Screen share reuses the call engine's capture wholesale — the bar owns
+  // the share indicator, so no pill appears outside calls. Calls own the
+  // devices while live: bar toggles never fight an active call.
+  const quickAskOptionsRef = useRef({ voiceOutput: false, screenShare: false })
+  useEffect(() => {
+    return window.ipc.on('quick-ask:set-options', (opts) => {
+      quickAskOptionsRef.current = opts
+      if (inCallRef.current) return
+      if (opts.screenShare && video.screenState !== 'live') {
+        void (async () => {
+          await video.start({ camera: false })
+          const shared = await video.startScreenShare()
+          if (!shared) {
+            video.stop()
+            quickAskOptionsRef.current = { ...opts, screenShare: false }
+            setPermissionDialog('screen-recording')
+          }
+        })()
+      } else if (!opts.screenShare && video.screenState === 'live') {
+        video.stopScreenShare()
+        video.stop()
+      }
+    })
+  }, [video])
+
+  // Report the ACTUAL state back to the bar — its badge must reflect what
+  // capture is really doing (a denied permission means no share, whatever
+  // the toggle wished for).
+  useEffect(() => {
+    if (inCall) return
+    void window.ipc
+      .invoke('quickAsk:optionsState', {
+        voiceOutput: quickAskOptionsRef.current.voiceOutput,
+        screenSharing: video.screenState === 'live',
+      })
+      .catch(() => {})
+  }, [inCall, video.screenState])
+
+  // Quick-ask bar: a question typed/spoken into the global ⌥⇧Space bar lands
+  // in the current chat exactly like a composer message.
+  const quickAskActiveRef = useRef(false)
+  const quickAskStartedAtRef = useRef(0)
+  useEffect(() => {
+    return window.ipc.on('quick-ask:submit', ({ text }) => {
+      const trimmed = text.trim()
+      if (!trimmed) return
+      quickAskActiveRef.current = true
+      quickAskStartedAtRef.current = Date.now()
+      handlePromptSubmitRef.current?.({ text: trimmed, files: [] })
+    })
+  }, [])
+
+  // Mirror the in-flight answer back to the bar while a quick-ask turn is
+  // live: streaming text while generating, the final assistant message when
+  // done (which also ends the mirror). Reads the LIVE chat state — the
+  // standalone conversation/currentAssistantMessage states are legacy
+  // pre-load fallbacks the new runtime never feeds (the original quick-ask
+  // read those, which is why its mirror never showed anything). Only
+  // messages from AFTER the submit count — the previous turn's answer is
+  // still the newest one in the conversation at submit time.
+  useEffect(() => {
+    if (!quickAskActiveRef.current) return
+    let text = liveAssistantMessage
+    if (!text) {
+      for (let i = liveConversation.length - 1; i >= 0; i--) {
+        const item = liveConversation[i]
+        if (isChatMessage(item) && item.role === 'assistant') {
+          if (item.timestamp >= quickAskStartedAtRef.current) text = item.content
+          break
+        }
+      }
+    }
+    // Nothing new yet (run not started / no fresh answer): pushing would
+    // only flicker the bar's local "Thinking…" state away.
+    if (!text && !activeIsProcessing) return
+    // What's happening right now, for the bar's blinking status line: the
+    // most recent activity wins — a running tool by name, else reasoning,
+    // else plain thinking.
+    let statusText: string | null = null
+    if (activeIsProcessing) {
+      statusText = activeIsReasoning ? 'Reasoning…' : 'Thinking…'
+      for (let i = liveConversation.length - 1; i >= 0; i--) {
+        const item = liveConversation[i]
+        if (isToolCall(item)) {
+          if (item.status === 'pending' || item.status === 'running') {
+            statusText = `${getToolDisplayName(item)}…`
+          }
+          break
+        }
+        if (isChatMessage(item)) break
+      }
+    }
+    void window.ipc
+      .invoke('quickAsk:state', { processing: activeIsProcessing, responseText: text || null, statusText })
+      .catch(() => {})
+    if (!activeIsProcessing && text) quickAskActiveRef.current = false
+  }, [activeIsProcessing, activeIsReasoning, liveAssistantMessage, liveConversation])
 
   // Enter to submit voice input, Escape to cancel
   useEffect(() => {
@@ -2235,6 +2786,7 @@ function App() {
           opts: { encoding: 'utf8' }
         })
         markRecentLocalMarkdownWrite(pathToSave)
+        analytics.noteEdited(pathToSave)
         // Store body-only baseline (matches what debouncedContent compares against)
         initialContentByPathRef.current.set(pathToSave, splitFrontmatter(contentToSave).body)
 
@@ -2899,7 +3451,14 @@ function App() {
     codeMode?: 'claude' | 'codex',
     permissionMode?: PermissionMode,
   ) => {
-    if (activeIsProcessing) return
+    if (activeIsProcessing) {
+      // In-call and quick-ask input arrives at arbitrary moments — a hard
+      // drop here silently ate utterances submitted while the previous turn
+      // was still stopping (the PTT interrupt is async). Finish the stop and
+      // proceed with this message instead.
+      if (!inCallRef.current && !quickAskActiveRef.current) return
+      await stopRunRef.current?.()
+    }
 
     const submitTabId = activeChatTabIdRef.current
     const { text } = message
@@ -2916,7 +3475,35 @@ function App() {
       marks.submit = performance.now()
     }
 
-    const videoFrames = inCallRef.current ? video.collectFrames() : []
+    // Quick-ask voice toggle: this turn speaks its reply even though no call
+    // is live. Per-turn (not a sticky flag) so composer messages typed
+    // outside the bar never start talking.
+    speakTurnRef.current =
+      !inCallRef.current && quickAskActiveRef.current && quickAskOptionsRef.current.voiceOutput
+
+    if (inCallRef.current || speakTurnRef.current) {
+      // A new question supersedes whatever of the previous reply was still
+      // unspoken — silence it and drop the frozen backlog so it never plays
+      // over the new turn. (The overlay resets its segment list when the
+      // new turn starts; the segment player detects that shrink and
+      // restarts from the top.)
+      ttsRef.current.cancel()
+      if (voiceSegmentsRef.current) {
+        spokenVoiceRef.current.count = voiceSegmentsRef.current.length
+      }
+      // Bookkeeping for the fallback-speech net: if this call turn ends with
+      // no <voice> segment spoken, the reply text itself gets read aloud.
+      spokeSegmentThisTurnRef.current = false
+      callTurnVoiceRef.current = {
+        pending: true,
+        submitAt: Date.now(),
+      }
+    }
+
+    // Frames ride along whenever screen capture is live — during calls, and
+    // for quick-ask questions with the share toggle on.
+    const videoFrames =
+      inCallRef.current || video.screenState === 'live' ? video.collectFrames() : []
 
     const userMessageId = `user-${Date.now()}`
     const displayAttachments: ChatMessage['attachments'] = hasAttachments || videoFrames.length > 0
@@ -2977,6 +3564,13 @@ function App() {
       // via the agent resolver; keep them session-sticky where possible so the
       // provider prefix cache survives across turns.
       const reasoningEffort = reasoningEffortByTabRef.current.get(submitTabId)
+      // The runtime defaults omitted maxModelCalls to the global limit; the
+      // chat-specific override is the UI's job to pass explicitly. A failed
+      // settings read just falls back to the global limit.
+      const chatMaxModelCalls = await window.ipc
+        .invoke('turnLimits:getSettings', null)
+        .then((settings) => settings.chatMaxModelCalls)
+        .catch(() => undefined)
       const sendConfig = {
         agent: {
           agentId,
@@ -2985,21 +3579,58 @@ function App() {
             composition: {
               workDirId: currentRunId,
               ...(pendingVoiceInputRef.current ? { voiceInput: true } : {}),
-              ...(ttsEnabledRef.current ? { voiceOutput: ttsModeRef.current } : {}),
+              ...(ttsEnabledRef.current
+                ? { voiceOutput: ttsModeRef.current }
+                : speakTurnRef.current
+                  ? { voiceOutput: 'full' as const }
+                  : {}),
               ...(searchEnabled ? { searchEnabled: true } : {}),
               ...(codeMode ? { codeMode } : {}),
-              ...(inCallRef.current && (video.cameraOn || video.screenState === 'live') ? { videoMode: true } : {}),
+              ...((inCallRef.current && video.cameraOn) || video.screenState === 'live'
+                ? { videoMode: true }
+                : {}),
               ...(practiceModeRef.current ? { coachMode: true } : {}),
             },
           },
         },
         autoPermission: (permissionMode ?? 'manual') === 'auto',
         ...(reasoningEffort ? { reasoningEffort } : {}),
+        ...(chatMaxModelCalls !== undefined ? { maxModelCalls: chatMaxModelCalls } : {}),
       }
-      const userMessageContextFor = (middlePane: Awaited<ReturnType<typeof buildMiddlePaneContext>>) => ({
-        currentDateTime: new Date().toISOString(),
-        middlePane: middlePane ?? { kind: 'empty' as const },
-      })
+      const userMessageContextFor = (middlePane: Awaited<ReturnType<typeof buildMiddlePaneContext>>) => {
+        // One-shot: the stale-frames notice rides on exactly one message.
+        const screenShareEnded = screenShareEndedRef.current
+        screenShareEndedRef.current = false
+        return {
+          // Local wall-clock with explicit timezone, never toISOString: the model
+          // adopts this as its time frame, so a UTC "now" makes it quote email
+          // timestamps (which carry their own offsets) in UTC instead of local.
+          currentDateTime: `${new Date().toLocaleString('en-US', {
+            weekday: 'long',
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+            timeZoneName: 'short',
+          })} (${Intl.DateTimeFormat().resolvedOptions().timeZone})`,
+          middlePane: middlePane ?? { kind: 'empty' as const },
+          ...(screenShareEnded ? { screenShareEnded: true } : {}),
+        }
+      }
+
+      // One retry: an in-call submit can land while the previous turn's
+      // abort hasn't fully settled in the runtime — losing the message (and
+      // its spoken answer) over that race is much worse than a short delay.
+      const sendSessionMessage = async (payload: Parameters<typeof window.ipc.invoke<'sessions:sendMessage'>>[1]) => {
+        try {
+          await window.ipc.invoke('sessions:sendMessage', payload)
+        } catch (err) {
+          console.error('[chat] sendMessage failed, retrying once:', err)
+          await new Promise((resolve) => setTimeout(resolve, 600))
+          await window.ipc.invoke('sessions:sendMessage', payload)
+        }
+      }
 
       if (hasAttachments || hasMentions || videoFrames.length > 0) {
         type ContentPart =
@@ -3061,7 +3692,7 @@ function App() {
         }
 
         const middlePaneContext = await buildMiddlePaneContext()
-        await window.ipc.invoke('sessions:sendMessage', {
+        await sendSessionMessage({
           sessionId: currentRunId,
           input: {
             role: 'user',
@@ -3077,7 +3708,7 @@ function App() {
         })
       } else {
         const middlePaneContext = await buildMiddlePaneContext()
-        await window.ipc.invoke('sessions:sendMessage', {
+        await sendSessionMessage({
           sessionId: currentRunId,
           input: {
             role: 'user',
@@ -3822,6 +4453,13 @@ function App() {
     handleNewChat()
   }, [handleNewChat])
 
+  // Quick-ask "+": the bar wants a fresh conversation for its next question.
+  useEffect(() => {
+    return window.ipc.on('quick-ask:new-chat', () => {
+      handleNewChatTabInSidebar()
+    })
+  }, [handleNewChatTabInSidebar])
+
   // Palette → sidebar submission. Opens the sidebar (if closed), forces a fresh chat tab,
   // queues the message; the pending-submit effect (below) flushes it once state has settled
   // so handlePromptSubmit sees the new tab's null runId.
@@ -4047,6 +4685,12 @@ function App() {
     return { type: 'chat', runId }
   }, [selectedBackgroundTask, isEmailOpen, isMeetingsOpen, isLiveNotesOpen, isBgTasksOpen, isAppsOpen, isSuggestedTopicsOpen, selectedPath, isGraphOpen, isWorkspaceOpen, isKnowledgeViewOpen, knowledgeViewFolderPath, knowledgeViewMode, isChatHistoryOpen, isHomeOpen, isCodeOpen, workspaceInitialPath, runId])
 
+  // Feature-importance funnel: one event per view the user lands on. Keyed on
+  // the view *type* so switching files/threads inside a view doesn't re-fire.
+  useEffect(() => {
+    analytics.viewOpened(currentViewState.type)
+  }, [currentViewState.type])
+
   const appendUnique = useCallback((stack: ViewState[], entry: ViewState) => {
     const last = stack[stack.length - 1]
     if (last && viewStatesEqual(last, entry)) return stack
@@ -4232,6 +4876,9 @@ function App() {
       setEmailInitialThreadId(threadId)
       setEmailThreadIdVersion((v) => v + 1)
     }
+    // Same reason as in navigateToView: a stale assistant-driven search must
+    // not repopulate the search box when the user re-enters the email view.
+    setEmailInitialSearchQuery(null)
     ensureEmailFileTab()
   }, [ensureEmailFileTab])
 
@@ -4406,6 +5053,10 @@ function App() {
         if (view.searchQuery) {
           setEmailInitialSearchQuery(view.searchQuery)
           setEmailSearchQueryVersion((v) => v + 1)
+        } else {
+          // Otherwise a past assistant-driven search would be re-applied on
+          // every re-entry, even after the user cleared the search box.
+          setEmailInitialSearchQuery(null)
         }
         ensureEmailFileTab()
         return
@@ -4655,6 +5306,23 @@ function App() {
     return window.ipc.on('app:openUrl', ({ url }) => handle(url))
   }, [])
 
+  // "Updated to vX.Y.Z" card on the first launch after an update. Main
+  // compares its persisted version stamp against the running version and
+  // hands out `updatedFrom` exactly once, so reloads don't re-show this.
+  useEffect(() => {
+    void window.ipc.invoke('app:consumeUpdateInfo', null).then(({ version, updatedFrom }) => {
+      if (!updatedFrom) return
+      toast(`Updated to v${version}`, {
+        description: `Rowboat was updated from v${updatedFrom}.`,
+        action: {
+          label: "What's new",
+          onClick: () => window.open(`https://github.com/rowboatlabs/rowboat/releases/tag/v${version}`, '_blank'),
+        },
+        duration: 10000,
+      })
+    })
+  }, [])
+
   // Report the UI theme to the apps server (spec §7.1): apps read it from
   // GET /_rowboat/app and get live changes via the SSE theme event.
   useEffect(() => {
@@ -4668,11 +5336,23 @@ function App() {
     return () => observer.disconnect()
   }, [])
 
+  // Tray menu "Start/Stop meeting notes": same toggle as the Meetings header
+  // button. Also drains a toggle parked while the window was closed/loading
+  // (mirrors the pending deep-link pull above).
+  useEffect(() => {
+    void window.ipc.invoke('app:consumePendingTrayCommand', null).then(({ toggleMeetingNotes }) => {
+      if (toggleMeetingNotes) handleToggleMeetingRef.current?.()
+    })
+    return window.ipc.on('app:toggleMeetingNotes', () => {
+      handleToggleMeetingRef.current?.()
+    })
+  }, [])
+
   // Triggered by main when the user clicks a calendar-meeting notification.
   // Reuses the same flow as the in-app "Join meeting & take notes" button.
   // When `openMeeting` is true, also opens the meeting URL in the system browser.
   useEffect(() => {
-    return window.ipc.on('app:takeMeetingNotes', ({ event, openMeeting }) => {
+    return window.ipc.on('app:takeMeetingNotes', ({ event, openMeeting, source }) => {
       const e = event as {
         summary?: string
         start?: { dateTime?: string; date?: string; timeZone?: string }
@@ -4696,7 +5376,7 @@ function App() {
         location: e.location,
         htmlLink: e.htmlLink,
         conferenceLink,
-        source: 'calendar-sync',
+        source: source ?? 'calendar-sync',
       }
       window.dispatchEvent(new Event('calendar-block:join-meeting'))
     })
@@ -5274,6 +5954,7 @@ function App() {
     } catch (err) {
       console.error('Failed to mark onboarding complete:', err)
     }
+    analytics.onboardingCompleted()
     setShowOnboarding(false)
     if (opts?.startTour) {
       window.setTimeout(() => setTourActive(true), 400)
@@ -5298,6 +5979,7 @@ function App() {
           data: `# ${name}\n\n`,
           opts: { encoding: 'utf8' }
         })
+        analytics.noteCreated()
         setExpandedPaths(prev => new Set([...prev, parentPath]))
         navigateToFile(fullPath)
       } catch (err) {
@@ -5553,6 +6235,7 @@ function App() {
   }, [loadDirectory, navigateToFile, fileTabs])
 
   const meetingNotePathRef = useRef<string | null>(null)
+  const meetingRecordingStartedAtMsRef = useRef<number | null>(null)
   const pendingCalendarEventRef = useRef<CalendarEventMeta | undefined>(undefined)
   const [meetingSummarizing, setMeetingSummarizing] = useState(false)
   const [showMeetingPermissions, setShowMeetingPermissions] = useState(false)
@@ -5566,6 +6249,8 @@ function App() {
     setRecordingMeetingSource(calEvent?.source ?? null)
     const notePath = await meetingTranscription.start(calEvent)
     if (notePath) {
+      meetingRecordingStartedAtMsRef.current = performance.now()
+      analytics.meetingRecordingStarted(Boolean(calEvent))
       meetingNotePathRef.current = notePath
       await handleVoiceNoteCreated(notePath)
     }
@@ -5591,6 +6276,9 @@ function App() {
   const handleToggleMeeting = useCallback(async () => {
     if (meetingTranscription.state === 'recording') {
       await meetingTranscription.stop()
+      const recordingStartedAt = meetingRecordingStartedAtMsRef.current
+      meetingRecordingStartedAtMsRef.current = null
+      analytics.meetingRecordingStopped(recordingStartedAt != null ? (performance.now() - recordingStartedAt) / 1000 : 0)
       setRecordingMeetingSource(null)
 
       // Read the final transcript and generate meeting notes via LLM
@@ -5627,9 +6315,18 @@ function App() {
               })
               // Refresh the file view
               await handleVoiceNoteCreated(notePath)
+              // Notes are done — bring Rowboat to the foreground on the
+              // finished note (the post-call "redirect"). The notification
+              // below is background-only, so it only fires if the focus
+              // grab didn't take.
+              void window.ipc.invoke('app:focusMainWindow', null).catch(() => {})
+              void window.ipc
+                .invoke('meeting:notifyNotesReady', { notePath, title: noteTitle })
+                .catch(() => { /* notification is best-effort */ })
             }
           }
         } catch (err) {
+          analytics.meetingSummarizeFailed()
           console.error('[meeting] Failed to generate meeting notes:', err)
         }
         setMeetingSummarizing(false)
@@ -6056,8 +6753,9 @@ function App() {
     }
 
     if (isErrorMessage(item)) {
-      if (matchBillingError(item.message)) {
-        return null
+      const billingMatch = matchBillingError(item.message)
+      if (billingMatch) {
+        return <BillingErrorNotice key={item.id} id={item.id} match={billingMatch} />
       }
       return (
         <Message key={item.id} from="assistant" data-message-id={item.id}>
@@ -6189,6 +6887,7 @@ function App() {
               onOpenBgTasks={() => { setBgTaskInitialSlug(null); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
               onOpenAgent={(slug) => { setBgTaskInitialSlug(slug); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
               onOpenApps={openAppsView}
+              onOpenApp={(folder) => { setAppInitialId(folder); setAppIdVersion((v) => v + 1); openAppsView() }}
               recentRuns={runs}
               onOpenRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
               onRenameRun={(rid, title) => {
@@ -7075,12 +7774,23 @@ function App() {
                 onInterrupt={handleInterruptAssistant}
                 ttsState={tts.state}
                 getTtsLevel={tts.getLevel}
-                status={videoCallStatus ?? 'listening'}
+                status={videoCallStatus ?? 'idle'}
+                pttStatus={pttStatus}
+                onPttDown={handlePttDown}
+                onPttUp={handlePttUp}
                 interimText={voice.interimText}
                 assistantCaption={assistantCaption}
                 onLeave={endCall}
               />
             )}
+            {/* macOS permission explainers (mic / camera / input monitoring) */}
+            <PermissionDialog
+              kind={permissionDialog}
+              onOpenChange={(open) => {
+                if (!open) setPermissionDialog(null)
+              }}
+              onRetry={() => void window.ipc.invoke('ptt:retryHook', null).catch(() => {})}
+            />
             {/* Mascot-guided product tour */}
             {tourActive && (
               <ProductTour
@@ -7109,6 +7819,8 @@ function App() {
         />
       </SidebarSectionProvider>
       <Toaster />
+      <UpdateCard />
+      <CreditCelebration />
       <BillingErrorDialog
         open={billingErrorOpen}
         match={billingErrorMatch}

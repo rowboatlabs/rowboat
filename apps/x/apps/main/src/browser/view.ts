@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { BrowserWindow, WebContentsView, session, shell, type Session, type WebContents } from 'electron';
+import { BrowserWindow, WebContentsView, desktopCapturer, session, shell, type Session, type WebContents } from 'electron';
 import type {
   BrowserPageElement,
   BrowserPageSnapshot,
   BrowserState,
   BrowserTabState,
+  DisplayMediaRequest,
   HttpAuthRequest,
 } from '@x/shared/dist/browser-control.js';
 import { normalizeNavigationTarget } from './navigation.js';
@@ -21,7 +22,7 @@ import {
   type RawBrowserPageSnapshot,
 } from './page-scripts.js';
 
-export type { BrowserPageSnapshot, BrowserState, BrowserTabState, HttpAuthRequest };
+export type { BrowserPageSnapshot, BrowserState, BrowserTabState, DisplayMediaRequest, HttpAuthRequest };
 
 /**
  * Embedded browser pane implementation.
@@ -64,6 +65,8 @@ const SPOOF_UA = buildChromeUserAgent();
 const HOME_URL = 'https://www.google.com';
 const NAVIGATION_TIMEOUT_MS = 10000;
 const HTTP_AUTH_TIMEOUT_MS = 120000;
+const DISPLAY_MEDIA_TIMEOUT_MS = 120000;
+const DISPLAY_MEDIA_THUMBNAIL_SIZE = { width: 320, height: 180 };
 const POST_ACTION_IDLE_MS = 400;
 const POST_ACTION_MAX_ELEMENTS = 25;
 const POST_ACTION_MAX_TEXT_LENGTH = 4000;
@@ -94,6 +97,14 @@ type PendingHttpAuth = {
   timer: NodeJS.Timeout;
   // The webContents that raised the challenge, so its teardown can cancel it.
   webContents: WebContents;
+};
+
+type PendingDisplayMedia = {
+  callback: (streams: Electron.Streams) => void;
+  timer: NodeJS.Timeout;
+  // The picker answers with a source id; the native callback needs the full
+  // DesktopCapturerSource, so keep the gathered sources until resolution.
+  sources: Map<string, Electron.DesktopCapturerSource>;
 };
 
 const EMPTY_STATE: BrowserState = {
@@ -138,6 +149,7 @@ export class BrowserViewManager extends EventEmitter {
   private bounds: BrowserBounds = { x: 0, y: 0, width: 0, height: 0 };
   private snapshotCache = new Map<string, CachedSnapshot>();
   private pendingHttpAuth = new Map<string, PendingHttpAuth>();
+  private pendingDisplayMedia = new Map<string, PendingDisplayMedia>();
   // Child windows created by page window.open() (OAuth/SSO popups). Tracked so
   // they can be closed when the host window goes away — otherwise an orphaned
   // popup keeps BrowserWindow.getAllWindows() non-empty and, on macOS, blocks
@@ -187,6 +199,9 @@ export class BrowserViewManager extends EventEmitter {
       this.snapshotCache.clear();
       for (const requestId of [...this.pendingHttpAuth.keys()]) {
         this.finishHttpAuth(requestId);
+      }
+      for (const requestId of [...this.pendingDisplayMedia.keys()]) {
+        this.finishDisplayMedia(requestId);
       }
       // Close any OAuth/SSO popups so they don't outlive the app window.
       for (const popup of popups) {
@@ -244,8 +259,106 @@ export class BrowserViewManager extends EventEmitter {
       callback({ requestHeaders });
     });
 
+    // getDisplayMedia() from pages (e.g. Google Meet "Present now"). When the
+    // browser pane is on screen, forward a source picker to the renderer and
+    // resolve with the user's choice. Registered here (not in main.ts's
+    // configureSessionPermissions) so the picker plumbing lives with the rest
+    // of the pane's request/response wiring; the app's own session keeps its
+    // auto-approve loopback handler for meeting transcription.
+    browserSession.setDisplayMediaRequestHandler((_request, callback) => {
+      this.handleDisplayMediaRequest(callback).catch(() => callback({}));
+    });
+
     this.browserSession = browserSession;
+    // Synchronous on purpose: the extension system (browser/extensions.ts)
+    // must bind to the session — registering its tab-API preload — before the
+    // first tab's WebContentsView is constructed right after this returns.
+    this.emit('session-created', browserSession);
     return browserSession;
+  }
+
+  /**
+   * Resolve a page's getDisplayMedia() request. With the pane visible, gather
+   * shareable sources and ask the renderer to show a picker (denied after a
+   * timeout if unanswered). With the pane hidden, deny outright: nobody can
+   * answer a picker, and auto-granting would hand a live screen capture to an
+   * arbitrary page without consent. `visible` is also false whenever the
+   * renderer hides the view behind a blocking overlay — including this
+   * picker's own dialog — so a page re-requesting mid-picker lands here and
+   * must be denied, not silently granted.
+   */
+  private async handleDisplayMediaRequest(callback: (streams: Electron.Streams) => void): Promise<void> {
+    if (!this.visible || !this.window) {
+      callback({});
+      return;
+    }
+
+    const sources = await desktopCapturer.getSources({
+      types: ['screen', 'window'],
+      thumbnailSize: DISPLAY_MEDIA_THUMBNAIL_SIZE,
+      fetchWindowIcons: true,
+    });
+    if (sources.length === 0) {
+      callback({});
+      return;
+    }
+
+    const requestId = randomUUID();
+    const timer = setTimeout(() => {
+      this.finishDisplayMedia(requestId);
+    }, DISPLAY_MEDIA_TIMEOUT_MS);
+    this.pendingDisplayMedia.set(requestId, {
+      callback,
+      timer,
+      sources: new Map(sources.map((source) => [source.id, source])),
+    });
+
+    const request: DisplayMediaRequest = {
+      requestId,
+      sources: sources.map((source) => ({
+        id: source.id,
+        name: source.name,
+        kind: source.id.startsWith('screen:') ? 'screen' as const : 'window' as const,
+        thumbnailDataUrl: source.thumbnail.isEmpty() ? '' : source.thumbnail.toDataURL(),
+        // appIcon is typed non-null but is absent for screen sources.
+        appIconDataUrl: source.appIcon && !source.appIcon.isEmpty() ? source.appIcon.toDataURL() : null,
+      })),
+    };
+    this.emit('display-media-request', request);
+  }
+
+  /**
+   * Resolve a pending display-media request. `sourceId === undefined` (or an
+   * id no longer in the gathered set) denies it. Always notifies the renderer
+   * so a picker it may still be showing (e.g. after a timeout) is pruned.
+   */
+  private finishDisplayMedia(requestId: string, sourceId?: string, audio?: boolean): boolean {
+    const pending = this.pendingDisplayMedia.get(requestId);
+    if (!pending) return false;
+    this.pendingDisplayMedia.delete(requestId);
+    clearTimeout(pending.timer);
+    const source = sourceId != null ? pending.sources.get(sourceId) : undefined;
+    try {
+      if (!source) {
+        pending.callback({});
+      } else if (audio) {
+        pending.callback({ video: source, audio: 'loopback' });
+      } else {
+        pending.callback({ video: source });
+      }
+    } catch {
+      // The requesting webContents may already be destroyed.
+    }
+    this.emit('display-media-resolved', requestId);
+    return true;
+  }
+
+  respondToDisplayMedia(input: {
+    requestId: string;
+    sourceId?: string;
+    audio?: boolean;
+  }): { ok: boolean } {
+    return { ok: this.finishDisplayMedia(input.requestId, input.sourceId, input.audio) };
   }
 
   private emitState(): void {
@@ -560,6 +673,10 @@ export class BrowserViewManager extends EventEmitter {
     this.invalidateSnapshot(tabId);
     this.syncAttachedView();
     this.emitState();
+    // Register with the extension system (chrome.tabs) before the initial
+    // load below so extensions observe the tab's first navigation.
+    this.emit('tab-created', tab.view.webContents, this.window);
+    this.emit('tab-selected', tab.view.webContents);
 
     const targetUrl =
       initialUrl === 'about:blank'
@@ -733,11 +850,13 @@ export class BrowserViewManager extends EventEmitter {
   }
 
   switchTab(tabId: string): { ok: boolean } {
-    if (!this.tabs.has(tabId)) return { ok: false };
+    const tab = this.tabs.get(tabId);
+    if (!tab) return { ok: false };
     if (this.activeTabId === tabId) return { ok: true };
     this.activeTabId = tabId;
     this.syncAttachedView();
     this.emitState();
+    this.emit('tab-selected', tab.view.webContents);
     return { ok: true };
   }
 
@@ -1046,6 +1165,24 @@ export class BrowserViewManager extends EventEmitter {
 
   getState(): BrowserState {
     return this.snapshotState();
+  }
+
+  // Accessors for the extension system's chrome.tabs bridge
+  // (browser/extensions.ts), which speaks in WebContents while the manager
+  // speaks in tab ids.
+  getWindow(): BrowserWindow | null {
+    return this.window;
+  }
+
+  getTabWebContents(tabId: string): WebContents | null {
+    return this.getTab(tabId)?.view.webContents ?? null;
+  }
+
+  getTabIdForWebContents(wc: WebContents): string | null {
+    for (const tab of this.tabs.values()) {
+      if (tab.view.webContents === wc) return tab.id;
+    }
+    return null;
   }
 
   private snapshotState(): BrowserState {

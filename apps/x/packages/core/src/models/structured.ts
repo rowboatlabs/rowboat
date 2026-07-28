@@ -44,7 +44,7 @@ export async function generateObjectSafe<T>(
     try {
         const result = await generateObject({
             model: options.model,
-            ...(options.system ? { system: options.system } : {}),
+            ...(options.system ? { instructions: options.system } : {}),
             prompt: options.prompt,
             schema: options.schema,
         });
@@ -68,7 +68,7 @@ export async function generateObjectSafe<T>(
             ].join("\n\n").trim();
             const result = await generateObject({
                 model: options.model,
-                system,
+                instructions: system,
                 prompt: options.prompt,
                 schema: options.schema,
             });

@@ -26,6 +26,8 @@ const execFileAsync = promisify(execFile);
 // Active powerSaveBlocker id while Caffeinate is toggled on; null when off.
 let caffeinateBlockerId: number | null = null;
 
+import { initPtt, setPttActive, getPttStatus, retryPttHook, openInputMonitoringSettings } from './ptt.js';
+import { getQuickAskWindow, hideQuickAsk, showQuickAsk, resizeQuickAsk } from './quick-ask.js';
 import { RunEvent } from '@x/shared/dist/runs.js';
 import { ServiceEvent } from '@x/shared/dist/service-events.js';
 import type { SessionBusEvent } from '@x/shared/dist/sessions.js';
@@ -33,13 +35,15 @@ import { isDurableTurnEvent } from '@x/shared/dist/turns.js';
 import type { ISessions, EmitterSessionBus } from '@x/core/dist/runtime/sessions/index.js';
 import type { ITurnEventBus } from '@x/core/dist/runtime/turns/event-hub.js';
 import container from '@x/core/dist/di/container.js';
-import { listOnboardingModels } from '@x/core/dist/models/models-dev.js';
 import { testModelConnection, listModelsForProvider, generateOneShot } from '@x/core/dist/models/models.js';
+import { getModelCatalog } from '@x/core/dist/models/catalog.js';
+import { captureProviderConnected, captureProviderDisconnected } from '@x/core/dist/analytics/model-providers.js';
 import { getDefaultModelAndProvider } from '@x/core/dist/models/defaults.js';
 import { isSignedIn } from '@x/core/dist/account/account.js';
-import { listGatewayModels } from '@x/core/dist/models/gateway.js';
 import type { IModelConfigRepo } from '@x/core/dist/models/repo.js';
 import type { IOAuthRepo } from '@x/core/dist/auth/repo.js';
+import { getChatGPTStatus, signOutChatGPT } from '@x/core/dist/auth/chatgpt-auth.js';
+import { signInWithChatGPT, cancelChatGPTSignIn } from './chatgpt-signin.js';
 import { IGranolaConfigRepo } from '@x/core/dist/knowledge/granola/repo.js';
 import { ICodeModeConfigRepo } from '@x/core/dist/code-mode/repo.js';
 import { CodePermissionRegistry } from '@x/core/dist/code-mode/acp/permission-registry.js';
@@ -66,11 +70,29 @@ import { rankSlackHomeMessages } from '@x/core/dist/knowledge/sources/rank_slack
 import { syncSlackKnowledgeSources, triggerSync as triggerSlackKnowledgeSync, getSlackKnowledgeSyncStatus } from '@x/core/dist/knowledge/sources/sync_slack.js';
 import { isOnboardingComplete, markOnboardingComplete } from '@x/core/dist/config/note_creation_config.js';
 import { loadNotificationSettings, saveNotificationSettings } from '@x/core/dist/config/notification_config.js';
+import { loadTurnLimitsSettings, saveTurnLimitsSettings } from '@x/core/dist/config/turn_limits.js';
+import { saveAppSettings } from '@x/core/dist/config/app_settings.js';
+import { isLoginItemEnabled, setLoginItemEnabled } from './login_item.js';
+import { setSelfCaptureActive } from '@x/core/dist/meetings/detector.js';
+import { notifyIfEnabled } from '@x/core/dist/application/notification/notifier.js';
+import { consumePendingToggleMeetingNotes, setTrayRecordingState } from './tray.js';
+import { closeMeetingPopup, getMeetingPopupPayload, handleMeetingPopupAction } from './meeting-popup.js';
+
+// Ambient meeting detection must ignore Rowboat's own mic use: meeting
+// capture and assistant voice/video calls both hold the mic. Either being
+// active suppresses "Meeting detected" prompts.
+let meetingRecordingActive = false;
+let voiceCallActive = false;
+function updateSelfCaptureState() {
+  setSelfCaptureActive(meetingRecordingActive || voiceCallActive);
+}
 import * as composioHandler from './composio-handler.js';
 import * as appsIndexer from '@x/core/dist/apps/indexer.js';
 import * as appsServer from '@x/core/dist/apps/server.js';
 import * as appsAgents from '@x/core/dist/apps/agents.js';
 import { capture } from '@x/core/dist/analytics/posthog.js';
+import { recordAppVersion, isVersionUpgrade } from '@x/core/dist/config/app_version.js';
+import { getUpdaterStatus, checkForUpdates, quitAndInstallUpdate } from './updater.js';
 import * as githubAuth from '@x/core/dist/apps/github-auth.js';
 import * as appsStars from '@x/core/dist/apps/stars.js';
 import * as appsInstaller from '@x/core/dist/apps/installer.js';
@@ -94,11 +116,14 @@ import { invalidateKnowledgeIndex } from '@x/core/dist/knowledge/knowledge_index
 import { versionHistory, voice } from '@x/core';
 import { classifySchedule, processRowboatInstruction } from '@x/core/dist/knowledge/inline_tasks.js';
 import { getBillingInfo } from '@x/core/dist/billing/billing.js';
+import { claimReferralCode, getCreditsState, maybeActivateCredit, subscribeCreditActivations } from '@x/core/dist/billing/credits.js';
 import { summarizeMeeting } from '@x/core/dist/knowledge/summarize_meeting.js';
 import { getAccessToken } from '@x/core/dist/auth/tokens.js';
 import { getRowboatConfig } from '@x/core/dist/config/rowboat.js';
 import { runLiveNoteAgent } from '@x/core/dist/knowledge/live-note/runner.js';
-import { listImportantThreads, listEverythingElseThreads, saveMessageBodyHeight, triggerSync as triggerGmailSync, sendThreadReply, saveThreadDraft, deleteThreadDraft, listDraftThreads, searchThreads, archiveThread, trashThread, markThreadRead, downloadAttachment, getAccountEmail, getAccountName, getConnectionStatus as getGmailConnectionStatus, setThreadImportance } from '@x/core/dist/knowledge/sync_gmail.js';
+import { listImportantThreads, listEverythingElseThreads, saveMessageBodyHeight, triggerSync as triggerGmailSync, sendThreadReply, saveThreadDraft, deleteThreadDraft, listDraftThreads, searchThreads, archiveThread, archiveCategoryThreads, trashThread, markThreadRead, downloadAttachment, getAccountEmail, getAccountName, getConnectionStatus as getGmailConnectionStatus, setThreadImportance, setThreadCategory } from '@x/core/dist/knowledge/sync_gmail.js';
+import { loadEmailInstructions, saveEmailInstructions } from '@x/core/dist/knowledge/email_instructions.js';
+import { getEmailLabels, syncCustomLabelsFromInstructions } from '@x/core/dist/knowledge/email_labels.js';
 import { searchContacts as searchGmailContacts, warmContactIndex } from '@x/core/dist/knowledge/gmail_contacts.js';
 import { searchSentContacts, warmSentContacts } from '@x/core/dist/knowledge/gmail_sent_contacts.js';
 import { getGoogleDocsConnectionStatus, importGoogleDoc, syncGoogleDocDown, syncGoogleDocUp, getGoogleDocLink } from '@x/core/dist/knowledge/google_docs.js';
@@ -414,12 +439,20 @@ const activeTtsStreams = new Map<string, AbortController>();
 let videoPopoutWin: BrowserWindow | null = null;
 let lastVideoPopoutState: {
   ttsState: 'idle' | 'synthesizing' | 'speaking';
-  status: 'listening' | 'thinking' | 'speaking' | null;
+  status: 'idle' | 'listening' | 'thinking' | 'speaking' | null;
   cameraOn: boolean;
   micMuted: boolean;
   screenSharing: boolean;
   interimText: string | null;
+  pttLocked: boolean;
+  responseText: string | null;
+  questionText: string | null;
 } | null = null;
+
+// Popout window height bounds: the base pill, and the ceiling with the
+// response panel expanded (renderer-driven via video:popoutResize).
+const POPOUT_BASE_HEIGHT = 218;
+const POPOUT_MAX_HEIGHT = 500;
 
 // Match only real app windows — getAllWindows() can also contain the popout
 // itself and hidden utility windows (e.g. PDF-export renderers), which must
@@ -429,9 +462,21 @@ function findMainAppWindow(): BrowserWindow | undefined {
     if (w === videoPopoutWin || w.isDestroyed()) return false;
     const url = w.webContents.getURL();
     const isAppWindow = url.startsWith('app://') || url.startsWith('http://localhost');
-    return isAppWindow && !url.includes('#video-popout');
+    // Every utility window loads the same bundle with a hash route
+    // (#video-popout, #quick-ask, #meeting-detected) — only the hashless
+    // window is the real app. Matching just video-popout let the quick-ask
+    // relay pick the quick-ask window ITSELF as the "app window" and send
+    // the question right back to it (bar stuck on "Thinking…").
+    return isAppWindow && !url.includes('#');
   });
 }
+
+// Global PTT key events go to the app window (it owns the PTT state
+// machine) — the popout only mirrors state pushed back to it.
+initPtt(() => {
+  const main = findMainAppWindow();
+  return main ? [main] : [];
+});
 
 /**
  * Register all IPC handlers with type safety and runtime validation
@@ -583,11 +628,12 @@ function handleWorkspaceChange(event: z.infer<typeof workspaceShared.WorkspaceCh
 
 /**
  * Start workspace watcher
- * Watches the configured workspace root recursively and emits change events to renderer
+ * Watches the user-facing workspace roots recursively and emits change events to renderer
  * 
  * This should be called once when the app starts (from main.ts).
- * The watcher runs as a main-process service and catches ALL filesystem changes
- * (both from IPC handlers and external changes like terminal/git).
+ * The watcher runs as a main-process service and catches all filesystem changes
+ * under the watched roots (both from IPC handlers and external changes like
+ * terminal/git).
  * 
  * Safe to call multiple times - guards against duplicate watchers.
  */
@@ -640,6 +686,11 @@ export function emitOAuthEvent(event: { provider: string; success: boolean; erro
   // prompt, so any OAuth state change must rebuild it.
   invalidateCopilotInstructionsCache();
   broadcastToWindows('oauth:didConnect', event);
+  // Google connect (both BYOK and rowboat-mode paths funnel through here) is
+  // the "connected Gmail" first-time reward.
+  if (event.provider === 'google' && event.success) {
+    void maybeActivateCredit('first_gmail_connected');
+  }
 }
 
 async function requireCodeSession(sessionId: string): Promise<CodeSession> {
@@ -816,6 +867,10 @@ export function stopServicesWatcher(): void {
 // Handler Implementations
 // ============================================================================
 
+// app:consumeUpdateInfo returns `updatedFrom` at most once per app run, so a
+// renderer reload doesn't re-show the "updated to vX" card.
+let updateNoticeConsumed = false;
+
 /**
  * Register all IPC handlers
  * Add new handlers here as you add channels to IPCChannels
@@ -823,6 +878,10 @@ export function stopServicesWatcher(): void {
 export function setupIpcHandlers() {
   // Forward knowledge commit events to renderer for panel refresh
   versionHistory.onCommit(() => emitKnowledgeCommitEvent());
+
+  // Relay backend-confirmed credit grants (first-time-action rewards) to all
+  // windows so the UI can update balances and celebrate.
+  subscribeCreditActivations((event) => broadcastToWindows('credits:didActivate', event));
 
   // Pre-warm the Gmail contact indices so the first compose-box keystroke is instant.
   // - warmContactIndex(): synchronous local-snapshot fallback (instant, narrow coverage).
@@ -838,6 +897,159 @@ export function setupIpcHandlers() {
     },
     'app:consumePendingDeepLink': async () => {
       return { url: consumePendingDeepLink() };
+    },
+    'app:consumeUpdateInfo': async () => {
+      const version = app.getVersion();
+      if (updateNoticeConsumed) return { version, updatedFrom: null };
+      updateNoticeConsumed = true;
+      const changedFrom = recordAppVersion(version);
+      // Downgrades still restamp (so the next upgrade reports correctly) but
+      // don't toast "Updated to vX" or count as a client update.
+      const updatedFrom = changedFrom && isVersionUpgrade(changedFrom, version) ? changedFrom : null;
+      // 'app_updated' is taken by the in-app apps feature; this is the client itself.
+      if (updatedFrom) capture('client_updated', { from: updatedFrom, to: version });
+      return { version, updatedFrom };
+    },
+    'updater:getStatus': async () => {
+      return getUpdaterStatus();
+    },
+    'updater:check': async () => {
+      return checkForUpdates();
+    },
+    'updater:quitAndInstall': async () => {
+      quitAndInstallUpdate();
+      return {};
+    },
+    'app:consumePendingTrayCommand': async () => {
+      return { toggleMeetingNotes: consumePendingToggleMeetingNotes() };
+    },
+    'app:getLoginItemSettings': async () => {
+      // Dev builds never register a login item (it would point at the dev
+      // Electron binary), so report off.
+      if (!app.isPackaged) return { openAtLogin: false };
+      return { openAtLogin: isLoginItemEnabled() };
+    },
+    'app:setLoginItemSettings': async (_event, args) => {
+      if (app.isPackaged) {
+        setLoginItemEnabled(args.openAtLogin);
+        // The user has expressed an explicit choice — never re-apply the
+        // first-run default over it.
+        saveAppSettings({ loginItemRegistered: true });
+      }
+      return { success: true as const };
+    },
+    'meeting:setRecordingState': async (_event, args) => {
+      setTrayRecordingState(args.recording);
+      meetingRecordingActive = args.recording;
+      updateSelfCaptureState();
+      // Recording started through another path — a lingering "Take Notes?"
+      // popup is stale now.
+      if (args.recording) closeMeetingPopup();
+      return { success: true as const };
+    },
+    'voice:setCallActive': async (_event, args) => {
+      voiceCallActive = args.active;
+      updateSelfCaptureState();
+      // The global PTT key hook runs only while a call needs it.
+      void setPttActive('call', args.active);
+      return { success: true as const };
+    },
+    'ptt:getStatus': async () => {
+      return getPttStatus();
+    },
+    'ptt:retryHook': async () => {
+      return retryPttHook();
+    },
+    'ptt:openInputMonitoringSettings': async () => {
+      return openInputMonitoringSettings();
+    },
+    'app:relaunch': async () => {
+      app.relaunch();
+      app.exit(0);
+      return {};
+    },
+    'app:openPrivacySettings': async (_event, args) => {
+      if (process.platform !== 'darwin') return { success: false };
+      const anchors = {
+        microphone: 'Privacy_Microphone',
+        camera: 'Privacy_Camera',
+        'screen-recording': 'Privacy_ScreenCapture',
+        'input-monitoring': 'Privacy_ListenEvent',
+      } as const;
+      try {
+        await shell.openExternal(
+          `x-apple.systempreferences:com.apple.preference.security?${anchors[args.section]}`,
+        );
+        return { success: true };
+      } catch {
+        return { success: false };
+      }
+    },
+    // --- Quick-ask bar relays ---
+    'quickAsk:submit': async (_event, args) => {
+      findMainAppWindow()?.webContents.send('quick-ask:submit', args);
+      return {};
+    },
+    'quickAsk:hide': async () => {
+      hideQuickAsk();
+      return {};
+    },
+    'quickAsk:show': async () => {
+      showQuickAsk();
+      return {};
+    },
+    'quickAsk:newChat': async () => {
+      findMainAppWindow()?.webContents.send('quick-ask:new-chat', null);
+      return {};
+    },
+    'quickAsk:setOptions': async (_event, args) => {
+      findMainAppWindow()?.webContents.send('quick-ask:set-options', args);
+      return {};
+    },
+    'quickAsk:optionsState': async (_event, args) => {
+      getQuickAskWindow()?.webContents.send('quick-ask:options-state', args);
+      return {};
+    },
+    'quickAsk:openChat': async () => {
+      const main = findMainAppWindow();
+      if (main) {
+        if (main.isMinimized()) main.restore();
+        main.show();
+        main.focus();
+        app.focus({ steal: true });
+        main.webContents.send('quick-ask:open-chat', null);
+      }
+      return {};
+    },
+    'quickAsk:resize': async (_event, args) => {
+      resizeQuickAsk(args.height);
+      return {};
+    },
+    'quickAsk:state': async (_event, args) => {
+      getQuickAskWindow()?.webContents.send('quick-ask:state', args);
+      return {};
+    },
+    'meeting:notifyNotesReady': async (_event, args) => {
+      // Granola-style re-entry point: the note refreshed in place, but the
+      // user has usually switched back to the meeting app — the notification
+      // brings them back. Suppressed while the app is focused.
+      void notifyIfEnabled('meeting_notes_ready', {
+        title: 'Meeting notes ready',
+        message: `Your notes for "${args.title}" are ready.`,
+        link: `rowboat://open?type=file&path=${encodeURIComponent(args.notePath)}`,
+        actionLabel: 'Open notes',
+        onlyWhenBackground: true,
+      });
+      return { success: true as const };
+    },
+    'meetingDetect:getPayload': async () => {
+      return { payload: getMeetingPopupPayload() };
+    },
+    'meetingDetect:action': async (_event, args) => {
+      // Captured here because the popup window runs without PostHog.
+      capture('meeting_popup_action', { action: args.action });
+      handleMeetingPopupAction(args.action);
+      return {};
     },
     'analytics:bootstrap': async () => {
       return {
@@ -880,14 +1092,18 @@ export function setupIpcHandlers() {
       return listImportantThreads({ cursor: args.cursor, limit: args.limit });
     },
     'gmail:getEverythingElse': async (_event, args) => {
-      return listEverythingElseThreads({ cursor: args.cursor, limit: args.limit });
+      return listEverythingElseThreads({ cursor: args.cursor, limit: args.limit, category: args.category });
     },
     'gmail:triggerSync': async () => {
       triggerGmailSync();
       return {};
     },
     'gmail:sendReply': async (_event, args) => {
-      return sendThreadReply(args);
+      const result = await sendThreadReply(args);
+      if (!result.error) {
+        void maybeActivateCredit('first_email_sent');
+      }
+      return result;
     },
     'gmail:saveDraft': async (_event, args) => {
       return saveThreadDraft(args);
@@ -913,6 +1129,33 @@ export function setupIpcHandlers() {
     'gmail:setImportance': async (_event, args) => {
       const result = setThreadImportance(args.threadId, args.importance);
       return { ok: result.success, previous: result.previous, error: result.error };
+    },
+    'gmail:setCategory': async (_event, args) => {
+      const result = setThreadCategory(args.threadId, args.category);
+      return { ok: result.success, error: result.error };
+    },
+    'gmail:archiveCategory': async (_event, args) => {
+      return archiveCategoryThreads(args.category);
+    },
+    'gmail:getEmailInstructions': async () => {
+      return { instructions: loadEmailInstructions() };
+    },
+    'gmail:setEmailInstructions': async (_event, args) => {
+      const saved = saveEmailInstructions(args.instructions);
+      if (!saved.ok) return saved;
+      // Extract any custom labels the instructions define so they become
+      // valid classifier outputs immediately. Extraction failure shouldn't
+      // fail the save — the instructions themselves are already persisted
+      // and still steer classification as free text.
+      try {
+        await syncCustomLabelsFromInstructions(args.instructions);
+      } catch (err) {
+        console.warn('[EmailLabels] custom label extraction failed:', err);
+      }
+      return saved;
+    },
+    'gmail:getEmailLabels': async () => {
+      return { labels: getEmailLabels().map(({ id, name, kind }) => ({ id, name, kind })) };
     },
     'gmail:archiveThread': async (_event, args) => {
       return archiveThread(args.threadId);
@@ -1102,11 +1345,8 @@ export function setupIpcHandlers() {
         return { success: false, error: message };
       }
     },
-    'models:list': async () => {
-      if (await isSignedIn()) {
-        return await listGatewayModels();
-      }
-      return await listOnboardingModels();
+    'models:list': async (_event, args) => {
+      return await getModelCatalog({ refreshProvider: args?.refreshProvider });
     },
     'models:test': async (_event, args) => {
       return await testModelConnection(args.provider, args.model);
@@ -1129,9 +1369,38 @@ export function setupIpcHandlers() {
       console.log(`[llm:generate] -> provider=${result.provider ?? '?'} model=${result.model ?? '?'} chars=${result.text?.length ?? 0}${result.error ? ` error=${result.error}` : ''}`);
       return result;
     },
-    'models:saveConfig': async (_event, args) => {
+    'models:getConfig': async () => {
       const repo = container.resolve<IModelConfigRepo>('modelConfigRepo');
-      await repo.setConfig(args);
+      const cfg = await repo.getConfig().catch(() => null);
+      const tasks = cfg?.taskModels ?? {};
+      return {
+        providers: Object.entries(cfg?.providers ?? {}).map(([id, entry]) => ({
+          id,
+          flavor: entry.flavor,
+          ...(entry.baseURL ? { baseURL: entry.baseURL } : {}),
+          hasApiKey: Boolean(entry.apiKey),
+        })),
+        assistantModel: cfg?.assistantModel ?? null,
+        taskModels: {
+          knowledgeGraph: tasks.knowledgeGraph ?? null,
+          meetingNotes: tasks.meetingNotes ?? null,
+          liveNoteAgent: tasks.liveNoteAgent ?? null,
+          autoPermissionDecision: tasks.autoPermissionDecision ?? null,
+          chatTitle: tasks.chatTitle ?? null,
+          backgroundTask: tasks.backgroundTask ?? null,
+          subagent: tasks.subagent ?? null,
+        },
+        deferBackgroundTasks: cfg?.deferBackgroundTasks === true,
+      };
+    },
+    'models:setProvider': async (_event, args) => {
+      const repo = container.resolve<IModelConfigRepo>('modelConfigRepo');
+      await repo.setProvider(args.id, args.provider);
+      return { success: true };
+    },
+    'models:removeProvider': async (_event, args) => {
+      const repo = container.resolve<IModelConfigRepo>('modelConfigRepo');
+      await repo.removeProvider(args.id);
       return { success: true };
     },
     'models:updateConfig': async (_event, args) => {
@@ -1156,20 +1425,51 @@ export function setupIpcHandlers() {
       const config = await repo.getClientFacingConfig();
       return { config };
     },
+    'chatgpt:getStatus': async () => {
+      return await getChatGPTStatus();
+    },
+    'chatgpt:signIn': async () => {
+      const result = await signInWithChatGPT();
+      if (result.signedIn) {
+        // Model lists gate on sign-in state (composer picker, models:list) —
+        // push the change so they refresh without polling.
+        broadcastToWindows('chatgpt:statusChanged', { signedIn: true });
+        captureProviderConnected('codex');
+      }
+      return result;
+    },
+    'chatgpt:cancelSignIn': async () => {
+      await cancelChatGPTSignIn();
+      return { success: true };
+    },
+    'chatgpt:signOut': async () => {
+      try {
+        await signOutChatGPT();
+        broadcastToWindows('chatgpt:statusChanged', { signedIn: false });
+        captureProviderDisconnected('codex');
+        return { success: true };
+      } catch (error) {
+        console.error('[ChatGPTAuth] Sign-out failed:', error);
+        return { success: false };
+      }
+    },
     'account:getRowboat': async () => {
       const signedIn = await isSignedIn();
       if (!signedIn) {
-        return { signedIn: false, accessToken: null, config: null };
+        return { signedIn: false, accessToken: null };
       }
-
-      const config = await getRowboatConfig();
-
       try {
         const accessToken = await getAccessToken();
-        return { signedIn: true, accessToken, config };
+        return { signedIn: true, accessToken };
       } catch {
-        return { signedIn: true, accessToken: null, config };
+        return { signedIn: true, accessToken: null };
       }
+    },
+    // Unauthenticated /v1/config bootstrap, independent of sign-in (signed-out
+    // BYOK users need its model recommendations when connecting a provider).
+    // getRowboatConfig caches once per app run; best-effort null on failure.
+    'rowboat:getConfig': async () => {
+      return await getRowboatConfig().catch(() => null);
     },
     'granola:getConfig': async () => {
       const repo = container.resolve<IGranolaConfigRepo>('granolaConfigRepo');
@@ -1234,6 +1534,7 @@ export function setupIpcHandlers() {
     'codeSession:create': async (_event, args) => {
       const service = container.resolve<CodeSessionService>('codeSessionService');
       const session = await service.create(args);
+      capture('code_session_created', { mode: session.mode, agent: session.agent });
       return { session };
     },
     'codeSession:list': async () => {
@@ -1630,6 +1931,13 @@ export function setupIpcHandlers() {
         lastAppsFingerprint = fingerprint;
         invalidateCopilotInstructionsCache();
       }
+      // The copilot builds apps by writing the folder directly — apps:create is
+      // never on that path — so the first-app reward triggers off observed
+      // state instead: a valid non-installed app means the user built one.
+      // Cheap on repeat polls (maybeActivateCredit short-circuits once claimed).
+      if (apps.some((a) => a.kind === 'local' && a.status === 'ok')) {
+        void maybeActivateCredit('first_app_built');
+      }
       return {
         serverRunning: status.running,
         ...(status.error ? { serverError: status.error } : {}),
@@ -1649,6 +1957,7 @@ export function setupIpcHandlers() {
     'apps:create': async (_event, args) => {
       const app = await appsIndexer.createApp(args);
       capture('app_created', { folder: app.folder });
+      void maybeActivateCredit('first_app_built');
       return { app };
     },
     'apps:delete': async (_event, args) => {
@@ -1746,7 +2055,9 @@ export function setupIpcHandlers() {
       return { app };
     },
     'apps:rollback': async (_event, args) => {
-      return { app: await appsInstaller.rollbackApp(args.folder) };
+      const app = await appsInstaller.rollbackApp(args.folder);
+      capture('app_rolled_back', { folder: args.folder });
+      return { app };
     },
     'apps:publish': async (event, args) => {
       const win = BrowserWindow.fromWebContents(event.sender);
@@ -2020,6 +2331,9 @@ export function setupIpcHandlers() {
     },
     'meeting:summarize': async (_event, args) => {
       const notes = await summarizeMeeting(args.transcript, args.meetingStartTime, args.calendarEventJson);
+      if (notes && notes.trim()) {
+        void maybeActivateCredit('first_meeting_note');
+      }
       return { notes };
     },
     'meeting-prep:resolve': async (_event, args) => {
@@ -2128,7 +2442,7 @@ export function setupIpcHandlers() {
 
       const workArea = screen.getPrimaryDisplay().workArea;
       const width = 340;
-      const height = 184;
+      const height = POPOUT_BASE_HEIGHT;
       const ipcDir = path.dirname(fileURLToPath(import.meta.url));
       const preloadPath = app.isPackaged
         ? path.join(ipcDir, '../preload/dist/preload.js')
@@ -2140,6 +2454,16 @@ export function setupIpcHandlers() {
         y: workArea.y + 24,
         frame: false,
         resizable: false,
+        // Never let macOS fullscreen/tile the pill: creating a window while
+        // the app window is in a native-fullscreen Space can otherwise open
+        // it AS a fullscreen window (the pill swallowing the whole screen).
+        fullscreenable: false,
+        minimizable: false,
+        maximizable: false,
+        // NSPanel (macOS): auxiliary windows may join other apps' fullscreen
+        // Spaces — a plain window can't, which made the pill vanish whenever
+        // the user's current app was fullscreen.
+        ...(process.platform === 'darwin' ? { type: 'panel' as const } : {}),
         alwaysOnTop: true,
         skipTaskbar: true,
         show: false,
@@ -2152,13 +2476,12 @@ export function setupIpcHandlers() {
           preload: preloadPath,
         },
       });
-      // Float above other apps on every workspace. Deliberately NOT
-      // `visibleOnFullScreen: true`: on macOS that flag hides the app's Dock
-      // icon for as long as such a window exists (the app becomes an
-      // "agent" app), which reads as Rowboat having vanished. The trade-off
-      // is the popout won't hover over other apps' fullscreen Spaces.
+      // Float above other apps on every workspace, INCLUDING fullscreen
+      // Spaces. `skipTransformProcessType` keeps the Dock icon: without it,
+      // `visibleOnFullScreen` turns the app into a macOS "agent" app for as
+      // long as the window exists (reads as Rowboat having vanished).
       win.setAlwaysOnTop(true, 'floating');
-      win.setVisibleOnAllWorkspaces(true);
+      win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
       win.webContents.once('did-finish-load', () => {
         if (lastVideoPopoutState) {
           win.webContents.send('video:popout-state', lastVideoPopoutState);
@@ -2185,12 +2508,23 @@ export function setupIpcHandlers() {
       }
       return {};
     },
+    'video:popoutResize': async (_event, args) => {
+      if (videoPopoutWin && !videoPopoutWin.isDestroyed()) {
+        const clamped = Math.max(POPOUT_BASE_HEIGHT, Math.min(POPOUT_MAX_HEIGHT, Math.round(args.height)));
+        const [width] = videoPopoutWin.getSize();
+        videoPopoutWin.setSize(width, clamped);
+      }
+      return {};
+    },
     'app:focusMainWindow': async () => {
       const main = findMainAppWindow();
       if (main) {
         if (main.isMinimized()) main.restore();
         main.show();
         main.focus();
+        // The user is typically in another app (e.g. just left a meeting) —
+        // a plain focus() won't take the foreground from it.
+        app.focus({ steal: true });
       }
       return {};
     },
@@ -2308,6 +2642,7 @@ export function setupIpcHandlers() {
           ...(args.model ? { model: args.model } : {}),
           ...(args.provider ? { provider: args.provider } : {}),
         });
+        void maybeActivateCredit('first_bg_agent');
         return { success: true, slug };
       } catch (err) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };
@@ -2344,11 +2679,25 @@ export function setupIpcHandlers() {
     'billing:getInfo': async () => {
       return await getBillingInfo();
     },
+    // First-time-action credit rewards
+    'credits:getState': async () => {
+      return await getCreditsState();
+    },
+    'referral:claim': async (_event, args) => {
+      return await claimReferralCode(args.code);
+    },
     'notifications:getSettings': async () => {
       return loadNotificationSettings();
     },
     'notifications:setSettings': async (_event, args) => {
       saveNotificationSettings(args);
+      return { success: true };
+    },
+    'turnLimits:getSettings': async () => {
+      return await loadTurnLimitsSettings();
+    },
+    'turnLimits:setSettings': async (_event, args) => {
+      await saveTurnLimitsSettings(args);
       return { success: true };
     },
     // Embedded browser handlers (WebContentsView + navigation)

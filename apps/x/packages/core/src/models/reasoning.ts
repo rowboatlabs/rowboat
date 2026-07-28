@@ -95,6 +95,13 @@ export function mapReasoningEffort(
             if (supportsReasoning === false) return undefined;
             return { providerOptions: { openrouter: { reasoning: { effort } } } };
         }
+        case "codex": {
+            // Every ChatGPT-subscription model reasons, but models.dev has
+            // no "codex" flavor so support reads as unknown — map unless
+            // known-false rather than failing closed.
+            if (supportsReasoning === false) return undefined;
+            return { providerOptions: { openai: { reasoningEffort: effort } } };
+        }
         default:
             return undefined;
     }

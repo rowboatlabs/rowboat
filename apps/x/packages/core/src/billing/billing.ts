@@ -33,6 +33,10 @@ export async function getBillingInfo(): Promise<BillingInfo> {
           availableCredits: number;
           usageDay: string;
         };
+        // credit-store bucket; absent on API deployments that predate grants
+        store?: {
+          availableCredits: number;
+        };
       };
     };
   };
@@ -45,5 +49,8 @@ export async function getBillingInfo(): Promise<BillingInfo> {
     catalog: config.billing,
     monthly: body.billing.usage.monthly,
     daily: body.billing.usage.daily,
+    store: {
+      availableCredits: body.billing.usage.store?.availableCredits ?? 0,
+    },
   };
 }

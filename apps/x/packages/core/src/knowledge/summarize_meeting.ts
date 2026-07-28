@@ -154,7 +154,7 @@ export async function summarizeMeeting(transcript: string, meetingStartTime?: st
 
     const result = await withUseCase({ useCase: 'meeting_note' }, () => generateText({
         model,
-        system: SYSTEM_PROMPT,
+        instructions: SYSTEM_PROMPT,
         prompt,
     }));
 

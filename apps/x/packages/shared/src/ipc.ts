@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { RelPath, Encoding, Stat, DirEntry, ReaddirOptions, ReadFileResult, WorkspaceChangeEvent, WriteFileOptions, WriteFileResult, RemoveOptions } from './workspace.js';
 import { ListToolsResponse } from './mcp.js';
 import { AskHumanResponsePayload, CreateRunOptions, Run, ListRunsResponse, ToolPermissionAuthorizePayload } from './runs.js';
-import { LlmModelConfig, LlmProvider, ModelOverride, ModelRef, ReasoningEffort } from './models.js';
+import { LlmProvider, ModelRef, ReasoningEffort } from './models.js';
 import { AgentScheduleConfig, AgentScheduleEntry } from './agent-schedule.js';
 import { AgentScheduleState } from './agent-schedule-state.js';
 import { ServiceEvent } from './service-events.js';
@@ -19,11 +19,13 @@ import type { SessionBusEvent, SessionIndexEntry, SessionState } from './session
 import { RowboatApiConfig } from './rowboat-account.js';
 import { ZListToolkitsResponse } from './composio.js';
 import { AppSummarySchema, RegistryRecordSchema, RowboatAppManifestSchema } from './rowboat-app.js';
-import { BrowserStateSchema, HttpAuthRequestSchema } from './browser-control.js';
+import { BrowserStateSchema, DisplayMediaRequestSchema, HttpAuthRequestSchema } from './browser-control.js';
 import { BillingInfoSchema } from './billing.js';
+import { CreditActivatedEventSchema, CreditsStateSchema, ReferralClaimResultSchema } from './credits.js';
 import { EmailBlockSchema, GmailThreadSchema } from './blocks.js';
 import { PermissionDecision, ApprovalPolicy, CodingAgent, type CodeRunFeedEvent } from './code-mode.js';
 import { NotificationSettingsSchema } from './notification-settings.js';
+import { TurnLimitsSettingsSchema } from './turn-limits.js';
 import { CodeProject, CodeSession, CodeSessionMode, CodeSessionStatus, GitRepoInfo, GitStatusFile, CodeAgentModelOptions } from './code-sessions.js';
 import { ChannelsConfig, ChannelsStatus } from './channels.js';
 
@@ -56,6 +58,22 @@ const KnowledgeSourceConfigSchema = z.object({
   scopes: z.array(KnowledgeSourceScopeSchema).default([]),
   instructions: z.string().optional(),
   filters: z.record(z.string(), z.unknown()).optional(),
+});
+
+// Lifecycle of the client auto-updater (apps/main/src/updater.ts).
+// - disabled: dev build — the updater never initializes
+// - unsupported: platform can't auto-update (`reason` says why)
+// - ready: an update is downloaded and installed; restart switches to it
+const UpdaterStatusSchema = z.object({
+  state: z.enum(['disabled', 'unsupported', 'idle', 'checking', 'downloading', 'ready', 'error']),
+  version: z.string(),
+  reason: z.enum(['dev', 'platform', 'not-in-applications']).optional(),
+  newVersion: z.string().optional(),
+  // Markdown body of the staged update's GitHub release, when known — the
+  // restart card renders it as "What's new".
+  releaseNotes: z.string().optional(),
+  error: z.string().optional(),
+  lastCheckedAt: z.number().optional(),
 });
 
 const ipcSchemas = {
@@ -167,16 +185,21 @@ const ipcSchemas = {
     res: z.object({
       threads: z.array(GmailThreadSchema),
       nextCursor: z.string().nullable(),
+      categoryCounts: z.record(z.string(), z.number()).optional(),
     }),
   },
   'gmail:getEverythingElse': {
     req: z.object({
       cursor: z.string().optional(),
       limit: z.number().int().min(1).max(100).optional(),
+      // Restrict to one category (filter pills). Whole-section categoryCounts
+      // are returned regardless, so the pills stay populated while filtered.
+      category: z.string().optional(),
     }),
     res: z.object({
       threads: z.array(GmailThreadSchema),
       nextCursor: z.string().nullable(),
+      categoryCounts: z.record(z.string(), z.number()).optional(),
     }),
   },
   'gmail:triggerSync': {
@@ -291,6 +314,53 @@ const ipcSchemas = {
     res: z.object({
       ok: z.boolean(),
       previous: z.enum(['important', 'other']).optional(),
+      error: z.string().optional(),
+    }),
+  },
+  // User explicitly picks a thread's category. Sticky on the thread
+  // (re-classification never overrides) and recorded as a correction the
+  // classifier learns from. Never affects the knowledge-graph verdict.
+  'gmail:setCategory': {
+    req: z.object({
+      threadId: z.string().min(1),
+      // Open string: valid ids come from the email label registry (built-ins
+      // plus user-defined labels), which the renderer fetches at runtime.
+      category: z.string().min(1).max(40),
+    }),
+    res: z.object({
+      ok: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  // The label registry: built-in categories plus labels the user defined in
+  // their agent instructions. Chips, filter pills, and the correction
+  // dropdown all render from this list.
+  'gmail:getEmailLabels': {
+    req: z.object({}),
+    res: z.object({
+      labels: z.array(z.object({
+        id: z.string(),
+        name: z.string(),
+        kind: z.enum(['builtin', 'custom']),
+      })),
+    }),
+  },
+  // Free-text standing instructions injected into every classification /
+  // draft call. Stored at config/email_instructions.md.
+  'gmail:getEmailInstructions': {
+    req: z.object({}),
+    res: z.object({ instructions: z.string() }),
+  },
+  'gmail:setEmailInstructions': {
+    req: z.object({ instructions: z.string().max(8000) }),
+    res: z.object({ ok: z.boolean(), error: z.string().optional() }),
+  },
+  // Archive every "Everything else" thread of one category in a single sweep.
+  'gmail:archiveCategory': {
+    req: z.object({ category: z.string().min(1) }),
+    res: z.object({
+      archived: z.number(),
+      failed: z.number(),
       error: z.string().optional(),
     }),
   },
@@ -576,26 +646,44 @@ const ipcSchemas = {
     req: BackgroundTaskAgentEvent,
     res: z.null(),
   },
+  // The unified model catalog (core/models/catalog.ts): every connected
+  // provider — Rowboat gateway, ChatGPT subscription (codex), BYOK keys,
+  // local/custom endpoints — listed the same way, with per-provider status.
   'models:list': {
-    req: z.null(),
+    req: z.object({
+      // Drop this provider's cached list and refetch (Retry / Refresh).
+      refreshProvider: z.string().optional(),
+    }).nullable(),
     res: z.object({
       providers: z.array(z.object({
+        // Provider INSTANCE id — what ModelRef.provider / assistantModel /
+        // refreshProvider reference. One instance per flavor today, so it
+        // always equals the flavor key; kept distinct so a future
+        // multi-instance setup ("openai-work") is additive.
         id: z.string(),
-        name: z.string(),
+        // Provider TYPE ("openai", "ollama", "rowboat", "codex", …) —
+        // drives display naming and credential-field UI.
+        flavor: z.string(),
+        // 'error' = provider is connected but its model list failed to load.
+        status: z.enum(['ok', 'error']),
+        error: z.string().optional(),
         models: z.array(z.object({
           id: z.string(),
           name: z.string().optional(),
-          release_date: z.string().optional(),
           // models.dev "supports reasoning/extended thinking" flag; absent =
           // unknown. Gates the composer's reasoning-effort control.
           reasoning: z.boolean().optional(),
         })),
       })),
-      lastUpdated: z.string().optional(),
+      // The effective runtime default (what runs when nothing is picked).
+      defaultModel: ModelRef.nullable(),
     }),
   },
   'models:test': {
-    req: LlmModelConfig,
+    req: z.object({
+      provider: LlmProvider,
+      model: z.string(),
+    }),
     res: z.object({
       success: z.boolean(),
       error: z.string().optional(),
@@ -639,23 +727,69 @@ const ipcSchemas = {
       error: z.string().optional(),
     }),
   },
-  'models:saveConfig': {
-    req: LlmModelConfig,
+  // Upsert one provider entry (credentials + connection prefs). Model
+  // choices are NOT part of a provider — set them via models:updateConfig.
+  'models:setProvider': {
+    req: z.object({
+      id: z.string(),
+      provider: LlmProvider,
+    }),
     res: z.object({
       success: z.literal(true),
     }),
   },
-  // Partial top-level merge into models.json — used by hybrid (signed-in +
-  // BYOK) settings to set the default selection / category overrides without
-  // clobbering the BYOK provider config that saveConfig owns. Omitted keys
-  // are untouched; null clears a key back to its default.
+  // Remove a provider entry plus any assistantModel / task override that
+  // references it (dangling selections would just error at run time).
+  'models:removeProvider': {
+    req: z.object({
+      id: z.string(),
+    }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  // Current model selections plus credential-FREE provider metadata (the
+  // renderer never needs keys to render pickers or provider cards). Null
+  // assistantModel = not configured yet.
+  'models:getConfig': {
+    req: z.null(),
+    res: z.object({
+      // Configured BYOK provider entries, secrets stripped: enough to
+      // render manage/edit surfaces (masked key indicator, endpoint).
+      providers: z.array(z.object({
+        id: z.string(),
+        flavor: z.string(),
+        baseURL: z.string().optional(),
+        hasApiKey: z.boolean(),
+      })),
+      assistantModel: ModelRef.nullable(),
+      taskModels: z.object({
+        knowledgeGraph: ModelRef.nullable(),
+        meetingNotes: ModelRef.nullable(),
+        liveNoteAgent: ModelRef.nullable(),
+        autoPermissionDecision: ModelRef.nullable(),
+        chatTitle: ModelRef.nullable(),
+        backgroundTask: ModelRef.nullable(),
+        subagent: ModelRef.nullable(),
+      }),
+      deferBackgroundTasks: z.boolean(),
+    }),
+  },
+  // Partial merge of model selections into models.json. Omitted keys are
+  // untouched; null clears a key (a cleared task override inherits the
+  // assistant model again). taskModels merges per-key.
   'models:updateConfig': {
     req: z.object({
-      defaultSelection: ModelRef.nullable().optional(),
-      knowledgeGraphModel: ModelOverride.nullable().optional(),
-      meetingNotesModel: ModelOverride.nullable().optional(),
-      liveNoteAgentModel: ModelOverride.nullable().optional(),
-      autoPermissionDecisionModel: ModelOverride.nullable().optional(),
+      assistantModel: ModelRef.nullable().optional(),
+      taskModels: z.object({
+        knowledgeGraph: ModelRef.nullable().optional(),
+        meetingNotes: ModelRef.nullable().optional(),
+        liveNoteAgent: ModelRef.nullable().optional(),
+        autoPermissionDecision: ModelRef.nullable().optional(),
+        chatTitle: ModelRef.nullable().optional(),
+        backgroundTask: ModelRef.nullable().optional(),
+        subagent: ModelRef.nullable().optional(),
+      }).optional(),
       deferBackgroundTasks: z.boolean().nullable().optional(),
     }),
     res: z.object({
@@ -703,8 +837,15 @@ const ipcSchemas = {
     res: z.object({
       signedIn: z.boolean(),
       accessToken: z.string().nullable(),
-      config: RowboatApiConfig.nullable(),
     }),
+  },
+  // The unauthenticated /v1/config bootstrap (service URLs, billing catalog,
+  // model recommendations). Independent of sign-in state — main caches the
+  // fetch once per app run; null when the API is unreachable. Renderer
+  // consumers go through the useRowboatConfig() hook.
+  'rowboat:getConfig': {
+    req: z.null(),
+    res: RowboatApiConfig.nullable(),
   },
   'oauth:didConnect': {
     req: z.object({
@@ -712,6 +853,53 @@ const ipcSchemas = {
       success: z.boolean(),
       error: z.string().optional(),
       userId: z.string().optional(),
+    }),
+    res: z.null(),
+  },
+  // --- "Sign in with ChatGPT" (subscription OAuth via the Codex CLI client) ---
+  // Raw tokens are never exposed over IPC — the renderer only sees identity
+  // and connection state.
+  'chatgpt:getStatus': {
+    req: z.null(),
+    res: z.object({
+      signedIn: z.boolean(),
+      email: z.string().optional(),
+      accountId: z.string().optional(),
+    }),
+  },
+  // Resolves when the browser flow settles (success, denial, timeout, port
+  // busy, exchange failure, cancellation) — same shape as getStatus plus an
+  // error string; `cancelled` marks expected teardown (no error toast).
+  'chatgpt:signIn': {
+    req: z.null(),
+    res: z.object({
+      signedIn: z.boolean(),
+      email: z.string().optional(),
+      accountId: z.string().optional(),
+      cancelled: z.boolean().optional(),
+      error: z.string().optional(),
+    }),
+  },
+  // Abort the pending sign-in attempt: stops the loopback server and settles
+  // the in-flight chatgpt:signIn with a cancelled outcome. No-op when idle.
+  'chatgpt:cancelSignIn': {
+    req: z.null(),
+    res: z.object({
+      success: z.boolean(),
+    }),
+  },
+  'chatgpt:signOut': {
+    req: z.null(),
+    res: z.object({
+      success: z.boolean(),
+    }),
+  },
+  // Push event (main → renderer): ChatGPT sign-in state changed. Model
+  // pickers listen and refresh — subscription models appear/disappear with
+  // the session.
+  'chatgpt:statusChanged': {
+    req: z.object({
+      signedIn: z.boolean(),
     }),
     res: z.null(),
   },
@@ -734,6 +922,9 @@ const ipcSchemas = {
       // When true, the renderer should also open the meeting URL (Zoom/Meet/etc.)
       // in addition to triggering the take-notes flow.
       openMeeting: z.boolean().optional(),
+      // Origin recorded in the note frontmatter: 'calendar-sync' (default) for
+      // notification/deep-link starts, 'detected' for ambient meeting detection.
+      source: z.string().optional(),
     }),
     res: z.null(),
   },
@@ -742,6 +933,290 @@ const ipcSchemas = {
     res: z.object({
       url: z.string().nullable(),
     }),
+  },
+  // Consume-once "the app was just updated" notice. `updatedFrom` is the
+  // previously recorded version on the first invoke of the first launch
+  // after an update, and null on every other invoke (fresh install,
+  // unchanged version, or already consumed this run).
+  'app:consumeUpdateInfo': {
+    req: z.null(),
+    res: z.object({
+      version: z.string(),
+      updatedFrom: z.string().nullable(),
+    }),
+  },
+  // --- Client auto-update (apps/main/src/updater.ts) ---
+  // Pushed to all windows whenever the updater state changes.
+  'updater:status': {
+    req: UpdaterStatusSchema,
+    res: z.null(),
+  },
+  'updater:getStatus': {
+    req: z.null(),
+    res: UpdaterStatusSchema,
+  },
+  // Kick off a manual check (no-op unless idle/error); progress arrives via
+  // updater:status pushes. Returns the snapshot after initiating.
+  'updater:check': {
+    req: z.null(),
+    res: UpdaterStatusSchema,
+  },
+  'updater:quitAndInstall': {
+    req: z.null(),
+    res: z.object({}),
+  },
+  // Tray commands issued before the renderer was ready (mirrors the pending
+  // deep-link pull above): the renderer drains this once on mount.
+  'app:consumePendingTrayCommand': {
+    req: z.null(),
+    res: z.object({
+      toggleMeetingNotes: z.boolean(),
+    }),
+  },
+  // Main → renderer: tray menu "Start/Stop meeting notes" — runs the same
+  // toggle flow as the Meetings header button.
+  'app:toggleMeetingNotes': {
+    req: z.null(),
+    res: z.null(),
+  },
+  // Launch-at-login (resident app). The OS login-item registry is the source
+  // of truth; these read/write it directly rather than a config file.
+  'app:getLoginItemSettings': {
+    req: z.null(),
+    res: z.object({
+      openAtLogin: z.boolean(),
+    }),
+  },
+  'app:setLoginItemSettings': {
+    req: z.object({
+      openAtLogin: z.boolean(),
+    }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  // Renderer → main: meeting capture state, so the tray menu/tooltip can
+  // reflect an active recording.
+  'meeting:setRecordingState': {
+    req: z.object({
+      recording: z.boolean(),
+    }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  // Renderer → main: meeting notes finished generating — fire the "notes
+  // ready" notification (background only; click opens the note).
+  'meeting:notifyNotesReady': {
+    req: z.object({
+      notePath: z.string(),
+      title: z.string(),
+    }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  // Main → renderer: the meeting app released the microphone while a
+  // recording was running — the call likely ended, auto-stop and summarize.
+  'meeting:externalCallEnded': {
+    req: z.null(),
+    res: z.null(),
+  },
+  // Renderer → main: assistant voice/video call holds the mic — suppresses
+  // ambient meeting detection (it would otherwise see our own capture) and
+  // runs the global push-to-talk key hook for the duration of the call.
+  'voice:setCallActive': {
+    req: z.object({
+      active: z.boolean(),
+    }),
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  // --- Global push-to-talk (Right ⌘) ---
+  // Push channel: main → app window, a system-wide PTT key transition.
+  // 'chord' = another key/click while Right ⌘ was held (it's being used as a
+  // modifier, not the talk key) — the renderer cancels the capture.
+  'voice:ptt-key': {
+    req: z.object({
+      type: z.enum(['down', 'up', 'chord']),
+    }),
+    res: z.null(),
+  },
+  // Health of the global key hook. `eventsSeen` false while `running` means
+  // macOS Input Monitoring permission hasn't taken effect — the renderer
+  // shows the permission dialog instead of failing silently.
+  'ptt:getStatus': {
+    req: z.null(),
+    res: z.object({
+      supported: z.boolean(),
+      running: z.boolean(),
+      eventsSeen: z.boolean(),
+    }),
+  },
+  // Recreate the event tap after the user grants Input Monitoring (a tap
+  // created before the grant stays dead forever).
+  'ptt:retryHook': {
+    req: z.null(),
+    res: z.object({
+      running: z.boolean(),
+    }),
+  },
+  'ptt:openInputMonitoringSettings': {
+    req: z.null(),
+    res: z.object({ success: z.boolean() }),
+  },
+  // Deep-link to a macOS Privacy & Security pane (permission dialogs).
+  'app:openPrivacySettings': {
+    req: z.object({
+      section: z.enum(['microphone', 'camera', 'screen-recording', 'input-monitoring']),
+    }),
+    res: z.object({ success: z.boolean() }),
+  },
+  // Relaunch the app — macOS requires it for a fresh Screen Recording grant
+  // to take effect.
+  'app:relaunch': {
+    req: z.null(),
+    res: z.object({}),
+  },
+  // --- Quick-ask bar (global ⌥Space, own always-on-top window) ---
+  // Bar → main: relay a typed/spoken question into the app window's chat.
+  'quickAsk:submit': {
+    req: z.object({ text: z.string() }),
+    res: z.object({}),
+  },
+  // Push channel: main → app window with the relayed question.
+  'quick-ask:submit': {
+    req: z.object({ text: z.string() }),
+    res: z.null(),
+  },
+  // Bar → main: dismiss the bar (Esc).
+  'quickAsk:hide': {
+    req: z.null(),
+    res: z.object({}),
+  },
+  // App window → main: open the bar (the discoverability toast's "Try it").
+  'quickAsk:show': {
+    req: z.null(),
+    res: z.object({}),
+  },
+  // Bar → main: jump to the conversation in the app — focuses the app
+  // window and tells it to show the chat full-view (no middle pane).
+  'quickAsk:openChat': {
+    req: z.null(),
+    res: z.object({}),
+  },
+  // Push channel: main → app window for the jump above.
+  'quick-ask:open-chat': {
+    req: z.null(),
+    res: z.null(),
+  },
+  // Bar → main → app window: the bar's optional toggles. voiceOutput speaks
+  // the answers aloud; screenShare turns on the existing screen capture so
+  // frames ride along with bar submits (the bar owns the share indicator —
+  // no floating pill outside calls).
+  'quickAsk:setOptions': {
+    req: z.object({
+      voiceOutput: z.boolean(),
+      screenShare: z.boolean(),
+    }),
+    res: z.object({}),
+  },
+  // Push channel: main → app window with the toggles above.
+  'quick-ask:set-options': {
+    req: z.object({
+      voiceOutput: z.boolean(),
+      screenShare: z.boolean(),
+    }),
+    res: z.null(),
+  },
+  // App window → main → bar: the ACTUAL state (share can fail on the macOS
+  // permission; the bar must never show a "sharing" badge that lies).
+  'quickAsk:optionsState': {
+    req: z.object({
+      voiceOutput: z.boolean(),
+      screenSharing: z.boolean(),
+    }),
+    res: z.object({}),
+  },
+  // Push channel: main → bar for the state above.
+  'quick-ask:options-state': {
+    req: z.object({
+      voiceOutput: z.boolean(),
+      screenSharing: z.boolean(),
+    }),
+    res: z.null(),
+  },
+  // Bar → main: start a fresh chat for the next question (the app stays in
+  // the background; only the conversation resets).
+  'quickAsk:newChat': {
+    req: z.null(),
+    res: z.object({}),
+  },
+  // Push channel: main → app window for the reset above.
+  'quick-ask:new-chat': {
+    req: z.null(),
+    res: z.null(),
+  },
+  // Bar → main: grow/shrink the window as the response area changes.
+  'quickAsk:resize': {
+    req: z.object({ height: z.number() }),
+    res: z.object({}),
+  },
+  // App window → main: mirror of the in-flight answer for the bar
+  // (streaming text while processing, final text when done).
+  'quickAsk:state': {
+    req: z.object({
+      processing: z.boolean(),
+      responseText: z.string().nullable(),
+      // What the agent is doing right now ("Reasoning…", "Web search…") —
+      // shown blinking in the bar until the answer starts streaming.
+      statusText: z.string().nullable(),
+    }),
+    res: z.object({}),
+  },
+  // Push channel: main → bar with the latest answer state.
+  'quick-ask:state': {
+    req: z.object({
+      processing: z.boolean(),
+      responseText: z.string().nullable(),
+      // What the agent is doing right now ("Reasoning…", "Web search…") —
+      // shown blinking in the bar until the answer starts streaming.
+      statusText: z.string().nullable(),
+    }),
+    res: z.null(),
+  },
+  // --- Ambient meeting detection popup (own always-on-top window) ---
+  // Main → popup: the detection to display.
+  'meetingDetect:payload': {
+    req: z.object({
+      title: z.string(),
+      message: z.string(),
+      // Calendar-linked detections render a solid accent bar; ad-hoc ones a
+      // dashed one (Granola's affordance).
+      hasCalendarEvent: z.boolean(),
+    }),
+    res: z.null(),
+  },
+  // Popup → main: fetch the payload (the push can race listener registration).
+  'meetingDetect:getPayload': {
+    req: z.null(),
+    res: z.object({
+      payload: z
+        .object({
+          title: z.string(),
+          message: z.string(),
+          hasCalendarEvent: z.boolean(),
+        })
+        .nullable(),
+    }),
+  },
+  // Popup → main: user clicked a button.
+  'meetingDetect:action': {
+    req: z.object({
+      action: z.enum(['take-notes', 'dismiss']),
+    }),
+    res: z.object({}),
   },
   'granola:getConfig': {
     req: z.null(),
@@ -1715,14 +2190,26 @@ const ipcSchemas = {
   'video:popoutState': {
     req: z.object({
       ttsState: z.enum(['idle', 'synthesizing', 'speaking']),
-      status: z.enum(['listening', 'thinking', 'speaking']).nullable(),
+      status: z.enum(['idle', 'listening', 'thinking', 'speaking']).nullable(),
       cameraOn: z.boolean(),
       // User mute: mic audio and frame capture are both paused.
       micMuted: z.boolean(),
       screenSharing: z.boolean(),
       // Live transcript of the in-progress utterance.
       interimText: z.string().nullable(),
+      // A quick ⌘ tap locked hands-free capture (until the next tap).
+      pttLocked: z.boolean(),
+      // Latest assistant reply of this call (streaming) — readable in the
+      // pill's response panel without switching back to the app.
+      responseText: z.string().nullable(),
+      questionText: z.string().nullable(),
     }),
+    res: z.object({}),
+  },
+  // Popout → main: grow/shrink the pill window as the response panel
+  // opens/closes (height clamped in main).
+  'video:popoutResize': {
+    req: z.object({ height: z.number() }),
     res: z.object({}),
   },
   // Popout window → fetch the latest cached call state on mount. The
@@ -1735,21 +2222,27 @@ const ipcSchemas = {
       state: z
         .object({
           ttsState: z.enum(['idle', 'synthesizing', 'speaking']),
-          status: z.enum(['listening', 'thinking', 'speaking']).nullable(),
+          status: z.enum(['idle', 'listening', 'thinking', 'speaking']).nullable(),
           cameraOn: z.boolean(),
           micMuted: z.boolean(),
           screenSharing: z.boolean(),
           interimText: z.string().nullable(),
+          pttLocked: z.boolean(),
+          responseText: z.string().nullable(),
+          questionText: z.string().nullable(),
         })
         .nullable(),
     }),
   },
   // Popout control bar → main process → relayed to the app window, which
   // executes the action on the live call. 'expand' additionally focuses the
-  // main app window (handled in the main process).
+  // main app window (handled in the main process). 'ptt-down'/'ptt-up' are
+  // the on-screen talk button's press/release edges; 'send-text' carries a
+  // typed message from the popout's input.
   'video:popoutAction': {
     req: z.object({
-      action: z.enum(['toggle-mic', 'toggle-camera', 'toggle-share', 'stop-speaking', 'end-call', 'expand']),
+      action: z.enum(['toggle-mic', 'toggle-camera', 'toggle-share', 'stop-speaking', 'ptt-down', 'ptt-up', 'send-text', 'end-call', 'expand']),
+      text: z.string().optional(),
     }),
     res: z.object({}),
   },
@@ -1757,18 +2250,22 @@ const ipcSchemas = {
   'video:popout-state': {
     req: z.object({
       ttsState: z.enum(['idle', 'synthesizing', 'speaking']),
-      status: z.enum(['listening', 'thinking', 'speaking']).nullable(),
+      status: z.enum(['idle', 'listening', 'thinking', 'speaking']).nullable(),
       cameraOn: z.boolean(),
       micMuted: z.boolean(),
       screenSharing: z.boolean(),
       interimText: z.string().nullable(),
+      pttLocked: z.boolean(),
+      responseText: z.string().nullable(),
+      questionText: z.string().nullable(),
     }),
     res: z.null(),
   },
   // Push channel: main → app window with a popout control-bar action.
   'video:popout-action': {
     req: z.object({
-      action: z.enum(['toggle-mic', 'toggle-camera', 'toggle-share', 'stop-speaking', 'end-call', 'expand']),
+      action: z.enum(['toggle-mic', 'toggle-camera', 'toggle-share', 'stop-speaking', 'ptt-down', 'ptt-up', 'send-text', 'end-call', 'expand']),
+      text: z.string().optional(),
     }),
     res: z.null(),
   },
@@ -2149,10 +2646,51 @@ const ipcSchemas = {
     }),
     res: z.object({ ok: z.boolean() }),
   },
+  // Screen-share picker for pages calling getDisplayMedia() in the embedded
+  // browser (main → renderer push). The renderer shows a source picker and
+  // answers via browser:displayMediaResponse.
+  'browser:displayMediaRequest': {
+    req: DisplayMediaRequestSchema,
+    res: z.null(),
+  },
+  // Main → renderer: a pending display-media request was resolved without the
+  // renderer answering (timed out, or the window went away), so the renderer
+  // must drop the corresponding picker dialog.
+  'browser:displayMediaResolved': {
+    req: z.object({ requestId: z.string() }),
+    res: z.null(),
+  },
+  // Renderer → main. Omit sourceId to cancel the request; `audio` asks for
+  // system-audio loopback alongside the shared screen.
+  'browser:displayMediaResponse': {
+    req: z.object({
+      requestId: z.string(),
+      sourceId: z.string().optional(),
+      audio: z.boolean().optional(),
+    }),
+    res: z.object({ ok: z.boolean() }),
+  },
   // Billing channels
   'billing:getInfo': {
     req: z.null(),
     res: BillingInfoSchema,
+  },
+  // First-time-action credit rewards (see shared/src/credits.ts)
+  'credits:getState': {
+    req: z.null(),
+    res: CreditsStateSchema,
+  },
+  // Main → renderer: the backend confirmed a credit grant. All activation
+  // triggers live in main/core (oauth success, gmail send, meeting summarize,
+  // bg-task create, app create); the renderer only listens and celebrates.
+  'credits:didActivate': {
+    req: CreditActivatedEventSchema,
+    res: z.null(),
+  },
+  // Redeem another user's invite (referral) code — both sides earn credits.
+  'referral:claim': {
+    req: z.object({ code: z.string() }),
+    res: ReferralClaimResultSchema,
   },
   // Notification settings channels
   'notifications:getSettings': {
@@ -2161,6 +2699,17 @@ const ipcSchemas = {
   },
   'notifications:setSettings': {
     req: NotificationSettingsSchema,
+    res: z.object({
+      success: z.literal(true),
+    }),
+  },
+  // Model-call limit settings channels
+  'turnLimits:getSettings': {
+    req: z.null(),
+    res: TurnLimitsSettingsSchema,
+  },
+  'turnLimits:setSettings': {
+    req: TurnLimitsSettingsSchema,
     res: z.object({
       success: z.literal(true),
     }),

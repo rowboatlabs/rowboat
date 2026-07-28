@@ -232,6 +232,13 @@ export class SessionsImpl implements ISessions {
             this.publishEntry(
                 sessionIndexEntry(reduceSession([...events, ...batch]), "idle"),
             );
+            if (!state.title) {
+                this.generateTitleInBackground(
+                    sessionId,
+                    defaultTitle(input),
+                    messageText(input),
+                );
+            }
             this.startTrackedAdvance(sessionId, turnId);
             return { turnId };
         });
@@ -317,6 +324,46 @@ export class SessionsImpl implements ISessions {
             throw new Error(`session ${sessionId} has no turns to resume`);
         }
         this.startTrackedAdvance(sessionId, state.latestTurnId);
+    }
+
+    // Fire-and-forget: replace the truncated-first-message placeholder with a
+    // short model-generated title. The placeholder stays if the call fails or
+    // the title changed in the meantime (e.g. a manual rename won the race).
+    private generateTitleInBackground(
+        sessionId: string,
+        placeholder: string,
+        firstMessage: string,
+    ): void {
+        void (async () => {
+            try {
+                // Dynamic import: generate_title reaches models/defaults →
+                // di/container, which imports this module (see traits.js note
+                // above) — a static import would close the cycle.
+                const { generateChatTitle } = await import(
+                    "../../knowledge/generate_title.js"
+                );
+                const title = await generateChatTitle(firstMessage);
+                if (!title || title === placeholder) return;
+                await this.sessionRepo.withLock(sessionId, async () => {
+                    const events = await this.sessionRepo.read(sessionId);
+                    const state = reduceSession(events);
+                    if (state.title !== placeholder) return;
+                    const batch: Array<z.infer<typeof SessionEvent>> = [
+                        { type: "title_changed", sessionId, ts: this.clock.now(), title },
+                    ];
+                    await this.sessionRepo.append(sessionId, batch);
+                    const existing = this.index.get(sessionId);
+                    this.publishEntry(
+                        sessionIndexEntry(
+                            reduceSession([...events, ...batch]),
+                            existing?.latestTurnStatus ?? "none",
+                        ),
+                    );
+                });
+            } catch {
+                // Placeholder title stays.
+            }
+        })();
     }
 
     async setTitle(sessionId: string, title: string): Promise<void> {
@@ -541,14 +588,18 @@ function withActiveSkills(
     };
 }
 
-function defaultTitle(input: z.infer<typeof UserMessage>): string {
+function messageText(input: z.infer<typeof UserMessage>): string {
     const text =
         typeof input.content === "string"
             ? input.content
             : input.content
                   .map((part) => (part.type === "text" ? part.text : ""))
                   .join(" ");
-    const collapsed = text.trim().replace(/\s+/g, " ");
+    return text.trim().replace(/\s+/g, " ");
+}
+
+function defaultTitle(input: z.infer<typeof UserMessage>): string {
+    const collapsed = messageText(input);
     if (collapsed.length === 0) {
         return "New session";
     }

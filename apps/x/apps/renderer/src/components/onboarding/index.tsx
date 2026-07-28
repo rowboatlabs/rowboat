@@ -62,10 +62,7 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
           onEscapeKeyDown={(e) => e.preventDefault()}
         >
           <div className="flex flex-col h-full max-h-[85vh] overflow-y-auto p-8 md:p-10">
-            <StepIndicator
-              currentStep={state.currentStep}
-              path={state.onboardingPath}
-            />
+            <StepIndicator currentStep={state.currentStep} />
             <AnimatePresence mode="wait">
               <motion.div
                 key={state.currentStep}

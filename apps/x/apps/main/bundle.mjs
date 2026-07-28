@@ -28,11 +28,15 @@ await esbuild.build({
   platform: 'node',
   target: 'node20',
   outfile: './.package/dist/main.cjs',
-  // electron is provided by the runtime. node-pty is a NATIVE module: it can't
-  // be inlined (its loader requires .node binaries + a spawn-helper relative to
-  // its own package dir), so it stays external and is copied into
-  // .package/node_modules below, where require() from dist/main.cjs finds it.
-  external: ['electron', 'node-pty'],
+  // electron is provided by the runtime. node-pty and uiohook-napi are NATIVE
+  // modules: they can't be inlined (their loaders require .node binaries
+  // relative to their own package dirs), so they stay external and are copied
+  // into .package/node_modules below, where require() from dist/main.cjs
+  // finds them.
+  // electron-liquid-glass is staged below on macOS (its only platform);
+  // elsewhere the quick-ask bar's lazy import fails and it keeps the solid
+  // capsule.
+  external: ['electron', 'node-pty', 'uiohook-napi', 'electron-liquid-glass'],
   // Use CommonJS format - many dependencies use require() which doesn't work
   // well with esbuild's ESM shim. CJS handles dynamic requires natively.
   format: 'cjs',
@@ -59,10 +63,20 @@ const ptySrc = fs.realpathSync(path.join(here, 'node_modules', 'node-pty'));
 const ptyDest = path.join(here, '.package', 'node_modules', 'node-pty');
 fs.rmSync(ptyDest, { recursive: true, force: true });
 fs.mkdirSync(ptyDest, { recursive: true });
-for (const item of ['package.json', 'lib', 'prebuilds']) {
+for (const item of ['package.json', 'lib']) {
   fs.cpSync(path.join(ptySrc, item), path.join(ptyDest, item), { recursive: true, dereference: true });
 }
+// Stage only the CURRENT platform's prebuilds. Each OS packages natively in CI,
+// so other platforms' binaries are dead weight — and worse: Windows code signing
+// walks every .node file in the app and signtool hard-fails on the Mach-O darwin
+// pty.node ("file format cannot be signed").
+const prebuildsSrc = path.join(ptySrc, 'prebuilds');
 const prebuildsDir = path.join(ptyDest, 'prebuilds');
+fs.mkdirSync(prebuildsDir, { recursive: true });
+for (const dir of fs.readdirSync(prebuildsSrc)) {
+  if (!dir.startsWith(`${process.platform}-`)) continue;
+  fs.cpSync(path.join(prebuildsSrc, dir), path.join(prebuildsDir, dir), { recursive: true, dereference: true });
+}
 for (const dir of fs.readdirSync(prebuildsDir)) {
   const helper = path.join(prebuildsDir, dir, 'spawn-helper');
   if (fs.existsSync(helper)) fs.chmodSync(helper, 0o755);
@@ -90,6 +104,85 @@ if (!fs.existsSync(stagedBinary)) {
   console.log(`✅ node-pty: staged ${hostTriple}/pty.node`);
 }
 console.log('✅ node-pty staged in .package/node_modules');
+
+// Ship uiohook-napi (global push-to-talk key hook) the same way. Its loader
+// is node-gyp-build, which resolves prebuilds/<platform>-<arch>/*.node
+// relative to the package dir — stage the package plus the loader. Only the
+// current platform's prebuild ships (same code-signing reason as node-pty).
+const uiohookSrc = fs.realpathSync(path.join(here, 'node_modules', 'uiohook-napi'));
+const uiohookDest = path.join(here, '.package', 'node_modules', 'uiohook-napi');
+fs.rmSync(uiohookDest, { recursive: true, force: true });
+fs.mkdirSync(uiohookDest, { recursive: true });
+for (const item of ['package.json', 'dist']) {
+  fs.cpSync(path.join(uiohookSrc, item), path.join(uiohookDest, item), { recursive: true, dereference: true });
+}
+const uiohookPrebuildsSrc = path.join(uiohookSrc, 'prebuilds');
+const uiohookPrebuildsDest = path.join(uiohookDest, 'prebuilds');
+fs.mkdirSync(uiohookPrebuildsDest, { recursive: true });
+for (const dir of fs.readdirSync(uiohookPrebuildsSrc)) {
+  if (!dir.startsWith(`${process.platform}-`)) continue;
+  fs.cpSync(path.join(uiohookPrebuildsSrc, dir), path.join(uiohookPrebuildsDest, dir), { recursive: true, dereference: true });
+}
+// The node-gyp-build loader itself (resolved through pnpm's virtual store —
+// it's a sibling of the real uiohook-napi package dir).
+const nodeGypBuildSrc = fs.realpathSync(path.join(uiohookSrc, '..', 'node-gyp-build'));
+const nodeGypBuildDest = path.join(here, '.package', 'node_modules', 'node-gyp-build');
+fs.rmSync(nodeGypBuildDest, { recursive: true, force: true });
+fs.cpSync(nodeGypBuildSrc, nodeGypBuildDest, { recursive: true, dereference: true });
+console.log('✅ uiohook-napi staged in .package/node_modules');
+
+// electron-liquid-glass (quick-ask bar's glass material): same node-gyp-build
+// loader + prebuilds layout as uiohook-napi. macOS-only prebuilds — on other
+// platforms nothing is staged and the lazy import in quick-ask.ts falls back
+// to the solid capsule.
+if (process.platform === 'darwin') {
+  const glassSrc = fs.realpathSync(path.join(here, 'node_modules', 'electron-liquid-glass'));
+  const glassDest = path.join(here, '.package', 'node_modules', 'electron-liquid-glass');
+  fs.rmSync(glassDest, { recursive: true, force: true });
+  fs.mkdirSync(glassDest, { recursive: true });
+  for (const item of ['package.json', 'dist']) {
+    fs.cpSync(path.join(glassSrc, item), path.join(glassDest, item), { recursive: true, dereference: true });
+  }
+  const glassPrebuildsSrc = path.join(glassSrc, 'prebuilds');
+  const glassPrebuildsDest = path.join(glassDest, 'prebuilds');
+  fs.mkdirSync(glassPrebuildsDest, { recursive: true });
+  for (const dir of fs.readdirSync(glassPrebuildsSrc)) {
+    if (!dir.startsWith(`${process.platform}-`)) continue;
+    fs.cpSync(path.join(glassPrebuildsSrc, dir), path.join(glassPrebuildsDest, dir), { recursive: true, dereference: true });
+  }
+  console.log('✅ electron-liquid-glass staged in .package/node_modules');
+}
+
+// electron-chrome-extensions injects a preload script into browser tabs to
+// implement the chrome.* extension APIs. It resolves that file at runtime:
+// via require.resolve when node_modules is present (dev), falling back to a
+// file next to the running bundle (packaged app, where node_modules is
+// gone). Stage it next to main.cjs for the packaged case.
+const crxPreloadSrc = fs.realpathSync(
+  path.join(here, 'node_modules', 'electron-chrome-extensions', 'dist', 'chrome-extension-api.preload.js'),
+);
+fs.copyFileSync(crxPreloadSrc, path.join(here, '.package', 'dist', 'chrome-extension-api.preload.js'));
+console.log('✅ electron-chrome-extensions preload staged');
+
+// Compile the mic-monitor helper (ambient meeting detection) on macOS.
+// Best-effort: without swiftc — or on other platforms — the app still works,
+// ad-hoc meeting detection just stays off (main checks the binary exists).
+if (process.platform === 'darwin') {
+  const swiftSrc = path.join(here, 'native', 'mic-monitor.swift');
+  const helperOut = path.join(here, '.package', 'dist', 'mic-monitor');
+  const upToDate = fs.existsSync(helperOut) &&
+    fs.statSync(helperOut).mtimeMs >= fs.statSync(swiftSrc).mtimeMs;
+  if (upToDate) {
+    console.log('✅ mic-monitor helper up to date');
+  } else {
+    try {
+      execSync(`swiftc -O "${swiftSrc}" -o "${helperOut}"`, { stdio: 'inherit' });
+      console.log('✅ mic-monitor helper compiled');
+    } catch {
+      console.warn('⚠️  mic-monitor helper not built (swiftc unavailable?) — meeting detection disabled');
+    }
+  }
+}
 
 // Bundle the vendored agent-slack CLI into a single self-contained script next
 // to main.cjs. It runs as a child process (process.execPath with

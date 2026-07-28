@@ -14,6 +14,9 @@ import { captureLlmUsage } from '../analytics/usage.js';
 import { withUseCase } from '../analytics/use_case.js';
 import type { GmailThreadSnapshot } from './sync_gmail.js';
 import { formatImportanceFeedbackForPrompt, maybeDistillImportanceRules } from './email_importance_feedback.js';
+import { formatCategoryFeedbackForPrompt } from './email_category_feedback.js';
+import { formatEmailInstructionsForPrompt } from './email_instructions.js';
+import { getEmailLabels, type EmailLabelDef } from './email_labels.js';
 
 const STYLE_GUIDE_PATH = path.join(WorkDir, 'knowledge', 'Agent Notes', 'style', 'email.md');
 const CALENDAR_DIR = path.join(WorkDir, 'calendar_sync');
@@ -100,25 +103,72 @@ export async function getUserEmail(auth: OAuth2Client): Promise<string | null> {
     return null;
 }
 
+/**
+ * What kind of email this is — shown as a chip on inbox rows and stamped
+ * into the gmail_sync markdown for the knowledge pipeline. The value set is
+ * open: built-in ids plus user-defined labels from the email_labels registry
+ * (which is why this is a string, not a closed union). Orthogonal to
+ * importance: a newsletter is almost always "other", but an investor update
+ * arriving as a newsletter can still carry knowledge.
+ */
+export type EmailCategory = string;
+
 export interface Classification {
     importance: 'important' | 'other';
+    /** Absent when the LLM call failed (fail-open) — callers must not stamp a verdict they don't have. */
+    category?: EmailCategory;
+    /** Whether the knowledge-graph pipeline should extract from this thread. Absent on LLM failure. */
+    knowledge?: 'extract' | 'skip';
     summary?: string;
     draftResponse?: string;
 }
 
-const ClassificationSchema = z.object({
-    importance: z.enum(['important', 'other']).describe('important = real correspondence, action-required, or content worth referencing later. other = newsletters, marketing, automated notifications, transactional receipts, cold outreach.'),
-    summary: z.string().optional().describe('One or two sentences capturing what the thread is about and any implied action. Required when importance is important. Omit when other.'),
-    draftResponse: z.string().optional().describe('A complete draft reply the user can send as-is or edit. Plain text with real line breaks (\\n): greeting on its own line, a blank line between paragraphs, and the sign-off on its own line(s) — e.g. "Hi Tyrone,\\n\\nThanks for the follow-up.\\n\\nBest,\\nJohn". If a sign-off name is included, use only the user\'s first name. Required when importance is important AND the thread implies a response is wanted. Omit when other, or when no response is appropriate (e.g. an FYI from a colleague that does not need a reply).'),
-});
+// The category enum is built per call from the label registry, so labels the
+// user defines in their instructions become valid classifier outputs without
+// a code change.
+function buildClassificationSchema(labelIds: string[]) {
+    return z.object({
+        importance: z.enum(['important', 'other']).describe('important = real correspondence, action-required, or content worth referencing later. other = newsletters, marketing, automated notifications, transactional receipts, cold outreach.'),
+        category: z.enum(labelIds as [string, ...string[]]).describe('Which category label fits this email best — definitions are in the system prompt. When a user-defined label and a built-in both fit, prefer the user-defined one.'),
+        knowledge: z.enum(['extract', 'skip']).describe('Whether this thread contains durable facts worth adding to the user\'s knowledge base about their people, companies, and projects. extract = real relationships (investor, customer, prospect, partner, vendor, team, advisor, press, personal) or substantive topics (deals, contracts, hiring, fundraising, support, incidents, real meetings, intros). skip = noise with no durable facts: marketing, newsletters, automated notifications, receipts, social/forum digests, cold outreach from strangers, job applicants and recruiters.'),
+        summary: z.string().optional().describe('One or two sentences capturing what the thread is about and any implied action. Required when importance is important. Omit when other.'),
+        draftResponse: z.string().optional().describe('A complete draft reply the user can send as-is or edit. Plain text with real line breaks (\\n): greeting on its own line, a blank line between paragraphs, and the sign-off on its own line(s) — e.g. "Hi Tyrone,\\n\\nThanks for the follow-up.\\n\\nBest,\\nJohn". If a sign-off name is included, use only the user\'s first name. Required when importance is important AND the thread implies a response is wanted. Omit when other, or when no response is appropriate (e.g. an FYI from a colleague that does not need a reply).'),
+    });
+}
 
-const SYSTEM_PROMPT = `You classify a Gmail thread for a personal inbox view and, when appropriate, draft a reply on behalf of the user.
+function buildCategorySection(labels: EmailLabelDef[]): string {
+    const lines = [
+        `# Category`,
+        ``,
+        `Pick exactly one category — it labels the email in the inbox:`,
+    ];
+    for (const l of labels) {
+        const marker = l.kind === 'custom' ? ' [user-defined]' : '';
+        lines.push(`- ${l.id}${marker}: ${l.description}`);
+    }
+    const hasCustom = labels.some(l => l.kind === 'custom');
+    if (hasCustom) {
+        lines.push(``);
+        lines.push(`User-defined labels are the user's own filing system — when one of them fits, prefer it over a built-in that also fits.`);
+    }
+    return lines.join('\n');
+}
+
+const SYSTEM_PROMPT_HEAD = `You classify a Gmail thread for a personal inbox view and, when appropriate, draft a reply on behalf of the user.
 
 # Importance
 
 Decide if the thread is "important" or "other":
 - important: real human correspondence the user is part of (customer, investor, team, vendor, candidate); a time-sensitive notification; a message that needs a response from the user; anything worth referencing later (contracts, pricing, deadlines, decisions).
-- other: newsletters, industry digests, marketing or promotional, product tips from vendors, automated notifications (verifications, recording uploads, platform policy updates), transactional confirmations (payment receipts, GST/tax filings, salary disbursements), unsolicited cold outreach.
+- other: newsletters, industry digests, marketing or promotional, product tips from vendors, automated notifications (verifications, recording uploads, platform policy updates), transactional confirmations (payment receipts, GST/tax filings, salary disbursements), unsolicited cold outreach.`;
+
+const SYSTEM_PROMPT_TAIL = `# Knowledge
+
+Decide whether the user's knowledge base should extract durable facts from this thread:
+- extract: threads involving real relationships (investors, customers, prospects, partners, vendors under contract, team, advisors, press, friends and family, government) or substantive topics (sales and deals, support, legal, finance decisions, hiring processes the user is running, fundraising, security incidents, infrastructure issues, real meetings with named people, events the user attends, warm intros, genuine follow-ups).
+- skip: nothing durable to learn — spam, promotions, cold outreach, newsletters, notifications, digests, product updates, receipts, social media, mailing lists, automated scheduling reminders, travel and shopping confirmations, and unsolicited job applicants or recruiter outreach.
+
+Importance and knowledge are independent judgments. A board member's long FYI may need no reply yet be knowledge-rich; a quick "can we move to 3pm?" needs action but adds little durable knowledge. When a message from a real relationship arrives wrapped in a bulk format (an investor update sent as a newsletter), knowledge is still extract.
 
 # Summary (important only)
 
@@ -227,14 +277,18 @@ export async function classifyThread(
         // first-touch outreach, self-test sends) are not inbox-important —
         // when a recipient replies, the thread updates and is re-classified,
         // and this shortcut then correctly marks it important.
+        //
+        // Either way the user wrote the latest message themselves, so the
+        // knowledge pipeline always extracts: their own words carry their
+        // commitments, decisions, and relationships.
         const needle = (userEmail ?? '').toLowerCase();
         const othersParticipated = needle
             ? snapshot.messages.some((m) => m.from && !m.from.toLowerCase().includes(needle))
             : false;
         if (othersParticipated) {
-            return { importance: 'important' };
+            return { importance: 'important', category: 'correspondence', knowledge: 'extract' };
         }
-        return { importance: 'other' };
+        return { importance: 'other', category: 'correspondence', knowledge: 'extract' };
     }
 
     try {
@@ -249,22 +303,37 @@ export async function classifyThread(
         const config = await resolveProviderConfig(provider);
         const model = createLanguageModel(config, modelId);
 
-        let systemPrompt = options.skipDraft
-            ? `${SYSTEM_PROMPT}\n\n# Skip the draft\n\nThe user already has their own draft in progress for this thread — DO NOT generate a draftResponse. Always omit the draftResponse field.`
-            : SYSTEM_PROMPT;
+        // Assembled fresh per call so labels the user just defined apply to
+        // the very next classification (the registry read is mtime-cached).
+        const labels = getEmailLabels();
+        const basePrompt = `${SYSTEM_PROMPT_HEAD}\n\n${buildCategorySection(labels)}\n\n${SYSTEM_PROMPT_TAIL}`;
 
-        // The user's learned importance preferences override the generic
-        // criteria — appended last so they take precedence.
+        let systemPrompt = options.skipDraft
+            ? `${basePrompt}\n\n# Skip the draft\n\nThe user already has their own draft in progress for this thread — DO NOT generate a draftResponse. Always omit the draftResponse field.`
+            : basePrompt;
+
+        // The user's learned preferences override the generic criteria —
+        // appended last so they take precedence.
         const feedback = formatImportanceFeedbackForPrompt();
         if (feedback) {
             systemPrompt = `${systemPrompt}\n\n${feedback}`;
+        }
+        const categoryFeedback = formatCategoryFeedbackForPrompt();
+        if (categoryFeedback) {
+            systemPrompt = `${systemPrompt}\n\n${categoryFeedback}`;
+        }
+        // The user's explicit standing instructions go last — the final word
+        // over both the generic criteria and the learned feedback.
+        const instructions = formatEmailInstructionsForPrompt();
+        if (instructions) {
+            systemPrompt = `${systemPrompt}\n\n${instructions}`;
         }
 
         const result = await withUseCase({ useCase: 'knowledge_sync', subUseCase: 'email_classifier' }, () => generateObjectSafe({
             model,
             system: systemPrompt,
             prompt: buildPrompt(snapshot, userEmail, styleGuide, calendar),
-            schema: ClassificationSchema,
+            schema: buildClassificationSchema(labels.map((l) => l.id)),
             retry: true,
         }));
 
@@ -276,7 +345,19 @@ export async function classifyThread(
             usage: result.usage,
         });
 
-        const out: Classification = { importance: result.object.importance };
+        const out: Classification = {
+            importance: result.object.importance,
+            category: result.object.category,
+            knowledge: result.object.knowledge,
+        };
+        // Guardrail, enforced in code rather than the prompt: if the user ever
+        // wrote in this thread, the knowledge pipeline must see it — their own
+        // messages carry commitments and decisions regardless of how the LLM
+        // categorized the thread.
+        const needle = (userEmail ?? '').toLowerCase();
+        if (needle && snapshot.messages.some((m) => (m.from || '').toLowerCase().includes(needle))) {
+            out.knowledge = 'extract';
+        }
         if (result.object.importance === 'important') {
             if (result.object.summary) out.summary = result.object.summary;
             if (!options.skipDraft && result.object.draftResponse) out.draftResponse = result.object.draftResponse;
@@ -284,6 +365,9 @@ export async function classifyThread(
         return out;
     } catch (err) {
         console.warn(`[Email classifier] LLM call failed for thread ${snapshot.threadId}:`, err);
+        // Fail open on importance so real mail is never hidden, but leave
+        // category/knowledge absent — callers must not stamp a verdict that
+        // was never made (the sync sweep retries these threads later).
         return { importance: 'important' };
     }
 }

@@ -8,7 +8,6 @@ import {
 } from "@/components/ui/hover-card";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
-import type { LanguageModelUsage } from "ai";
 import { type ComponentProps, createContext, useContext } from "react";
 import { getUsage } from "tokenlens";
 
@@ -20,10 +19,20 @@ const ICON_STROKE_WIDTH = 2;
 
 type ModelId = string;
 
+// Our internal (flat) usage shape received over IPC, not the AI SDK's
+// restructured LanguageModelUsage (nested token details as of AI SDK 7).
+type UsageSummary = {
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  reasoningTokens?: number;
+  cachedInputTokens?: number;
+};
+
 type ContextSchema = {
   usedTokens: number;
   maxTokens: number;
-  usage?: LanguageModelUsage;
+  usage?: UsageSummary;
   modelId?: ModelId;
 };
 

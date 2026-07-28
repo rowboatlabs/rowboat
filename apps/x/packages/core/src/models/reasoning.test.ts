@@ -68,6 +68,13 @@ describe("mapReasoningEffort", () => {
         expect(mapReasoningEffort("rowboat", "x/y", "high", false)).toBeUndefined();
     });
 
+    it("maps codex like openai but forgiving on unknown support (models.dev has no codex flavor)", () => {
+        expect(mapReasoningEffort("codex", "gpt-5.5", "high", undefined)).toEqual({
+            providerOptions: { openai: { reasoningEffort: "high" } },
+        });
+        expect(mapReasoningEffort("codex", "gpt-5.5", "medium", false)).toBeUndefined();
+    });
+
     it("sends nothing for flavors without a safe parameter", () => {
         expect(mapReasoningEffort("ollama", "gpt-oss", "high", true)).toBeUndefined();
         expect(mapReasoningEffort("openai-compatible", "my-vllm-model", "high", true)).toBeUndefined();

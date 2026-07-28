@@ -1,4 +1,4 @@
-import { ProviderV2 } from '@ai-sdk/provider';
+import { ProviderV4 } from '@ai-sdk/provider';
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { getAccessToken } from '../auth/tokens.js';
 import { getCurrentUseCase } from '../analytics/use_case.js';
@@ -16,7 +16,7 @@ const authedFetch: typeof fetch = async (input, init) => {
     return fetch(input, { ...init, headers });
 };
 
-export function getGatewayProvider(): ProviderV2 {
+export function getGatewayProvider(): ProviderV4 {
     return createOpenRouter({
         baseURL: `${API_URL}/v1/llm`,
         apiKey: 'managed-by-rowboat',
