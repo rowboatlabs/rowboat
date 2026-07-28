@@ -15,7 +15,7 @@ import { ChatHeader } from './components/chat-header';
 import { ChatSessionPane, ChatSessionComposer } from './components/chat-session';
 // Value import: the Home to-do surface mounts a standalone composer directly
 // (not tab-bound); chat tabs render theirs through ChatSessionComposer.
-import { ChatInputWithMentions, type CallPreset, type PermissionMode, type StagedAttachment } from './components/chat-input-with-mentions';
+import { ChatInputWithMentions, type CallPreset, type PermissionMode, type StagedAttachment, type ModelSelection } from './components/chat-input-with-mentions';
 import { GraphView, type GraphEdge, type GraphNode } from '@/components/graph-view';
 import { BasesView, type BaseConfig, DEFAULT_BASE_CONFIG } from '@/components/bases-view';
 import { ImageFileViewer } from '@/components/image-file-viewer';
@@ -1950,10 +1950,10 @@ function App() {
   })
   const chatViewStateByTabRef = useRef(chatViewStateByTab)
   const chatDraftsRef = useRef(new Map<string, string>())
-  const selectedModelByTabRef = useRef(new Map<string, { provider: string; model: string }>())
-  // Reasoning effort is per-tab, next-turn intent like the model selection —
-  // but unlike model it is never frozen on a run; it applies turn by turn.
-  const reasoningEffortByTabRef = useRef(new Map<string, 'low' | 'medium' | 'high'>())
+  // Per-tab selection (model + effort as ONE value) — the composer reports
+  // every change (settings seed included) and reads it back on remount, so
+  // a tab's selection survives tab switches for the life of the app.
+  const selectionByTabRef = useRef(new Map<string, { provider: string; model: string; effort?: 'low' | 'medium' | 'high' }>())
   // Work directory is per-chat. Keyed by tab id; null/absent means none set.
   const [workDirByTab, setWorkDirByTab] = useState<Record<string, string | null>>({})
   const workDirByTabRef = useRef(workDirByTab)
@@ -3514,7 +3514,7 @@ function App() {
       let currentRunId = runId
       let isNewRun = false
       let newRunCreatedAt: string | null = null
-      const selected = selectedModelByTabRef.current.get(chatIdForTab(submitTabId))
+      const selected = selectionByTabRef.current.get(chatIdForTab(submitTabId))
       if (!currentRunId) {
         const createdSession = await window.ipc.invoke('sessions:create', {})
         currentRunId = createdSession.sessionId
@@ -3540,7 +3540,7 @@ function App() {
       // Per-message turn config. Composition inputs land in the system prompt
       // via the agent resolver; keep them session-sticky where possible so the
       // provider prefix cache survives across turns.
-      const reasoningEffort = reasoningEffortByTabRef.current.get(chatIdForTab(submitTabId))
+      const reasoningEffort = selected?.effort
       // The runtime defaults omitted maxModelCalls to the global limit; the
       // chat-specific override is the UI's job to pass explicitly. A failed
       // settings read just falls back to the global limit.
@@ -3830,8 +3830,11 @@ function App() {
       ...prev,
       [activeChatTabIdRef.current]: createEmptyChatTabViewState(),
     }))
-    // A brand-new chat starts with no work directory.
+    // A brand-new chat starts with no work directory and restarts its
+    // selection from the settings pair (the composer re-seeds when its
+    // runId prop drops to null; clearing here keeps the map in lockstep).
     setWorkDirByTab(prev => ({ ...prev, [activeChatTabIdRef.current]: null }))
+    selectionByTabRef.current.delete(activeChatTabIdRef.current)
   }, [setChatViewportAnchor])
 
   // Chat tab operations
@@ -3954,8 +3957,7 @@ function App() {
       return next
     })
     chatDraftsRef.current.delete(closingChatId)
-    selectedModelByTabRef.current.delete(closingChatId)
-    reasoningEffortByTabRef.current.delete(closingChatId)
+    selectionByTabRef.current.delete(closingChatId)
     chatScrollTopByTabRef.current.delete(tabId)
     setWorkDirByTab((prev) => {
       if (!(tabId in prev)) return prev
@@ -4481,8 +4483,9 @@ function App() {
   // palette: the fresh tab's null runId must be visible to handlePromptSubmit
   // before the message goes out. Model/effort picked on the Home composer are
   // copied onto the fresh tab at flush time.
-  const homeSelectedModelRef = useRef<{ provider: string; model: string } | null>(null)
-  const homeReasoningEffortRef = useRef<'low' | 'medium' | 'high' | null>(null)
+  // The Home composer's selection (model + effort as one value) — handed to
+  // todo:* calls and onto the chat tab a home submit turns into.
+  const homeSelectionRef = useRef<ModelSelection | null>(null)
   // Destination chip: when set, the Home composer writes to the to-do list
   // instead of the chat. Entered via the list's ＋ affordances, announced by
   // the chip + tint, cleared on send/Escape/✕.
@@ -4525,7 +4528,11 @@ function App() {
       const attachments = stagedAttachments.length > 0
         ? stagedAttachments.map((a) => ({ path: a.path, name: a.filename }))
         : undefined
-      const model = homeSelectedModelRef.current ?? undefined
+      // todo:* schemas carry a bare {provider, model} ref today; effort
+      // threading through the todo runner is a follow-up.
+      const model = homeSelectionRef.current
+        ? { provider: homeSelectionRef.current.provider, model: homeSelectionRef.current.model }
+        : undefined
       if (target.kind === 'comment') {
         void window.ipc.invoke('todo:comment', { key: target.key, message: text, attachments, model, permissionMode })
       } else if (target.kind === 'chatReply') {
@@ -4550,8 +4557,7 @@ function App() {
   useEffect(() => {
     if (!pendingHomeSubmit) return
     const tabId = activeChatTabIdRef.current
-    if (homeSelectedModelRef.current) selectedModelByTabRef.current.set(tabId, homeSelectedModelRef.current)
-    if (homeReasoningEffortRef.current) reasoningEffortByTabRef.current.set(tabId, homeReasoningEffortRef.current)
+    if (homeSelectionRef.current) selectionByTabRef.current.set(chatIdForTab(tabId), homeSelectionRef.current)
     void handlePromptSubmitRef.current?.(
       pendingHomeSubmit.message,
       pendingHomeSubmit.mentions,
@@ -6967,8 +6973,7 @@ function App() {
                           runId={null}
                           presetMessage={homeComposerPreset}
                           onPresetMessageConsumed={() => setHomeComposerPreset(undefined)}
-                          onSelectedModelChange={(m) => { homeSelectedModelRef.current = m ?? null }}
-                          onReasoningEffortChange={(effort) => { homeReasoningEffortRef.current = effort ?? null }}
+                          onSelectionChange={(selection) => { homeSelectionRef.current = selection }}
                           workDir={null}
                           focusSignal={homeComposerFocusSignal}
                           contextChip={homeComposeTarget ? {
@@ -7463,8 +7468,14 @@ function App() {
                           codeSessionLocks={codeSessionLocks}
                           initialDraft={chatDraftsRef.current.get(tab.chatId)}
                           onDraftChange={setChatDraftForTab}
-                          selectedModelByTabRef={selectedModelByTabRef}
-                          reasoningEffortByTabRef={reasoningEffortByTabRef}
+                          onSelectionChange={(t, selection) => {
+                            if (selection) {
+                              selectionByTabRef.current.set(t.chatId, selection)
+                            } else {
+                              selectionByTabRef.current.delete(t.chatId)
+                            }
+                          }}
+                          initialSelection={selectionByTabRef.current.get(tab.chatId) ?? null}
                           workDirByTab={workDirByTab}
                           onWorkDirChange={setTabWorkDir}
                           isRecording={isRecording}
@@ -7545,20 +7556,14 @@ function App() {
                 onPresetMessageConsumed={() => setPresetMessage(undefined)}
                 getInitialDraft={(tabId) => chatDraftsRef.current.get(chatIdForTab(tabId))}
                 onDraftChangeForTab={setChatDraftForTab}
-                onSelectedModelChangeForTab={(tabId, m) => {
-                  if (m) {
-                    selectedModelByTabRef.current.set(chatIdForTab(tabId), m)
+                onSelectionChangeForTab={(tabId, selection) => {
+                  if (selection) {
+                    selectionByTabRef.current.set(chatIdForTab(tabId), selection)
                   } else {
-                    selectedModelByTabRef.current.delete(chatIdForTab(tabId))
+                    selectionByTabRef.current.delete(chatIdForTab(tabId))
                   }
                 }}
-                onReasoningEffortChangeForTab={(tabId, effort) => {
-                  if (effort) {
-                    reasoningEffortByTabRef.current.set(chatIdForTab(tabId), effort)
-                  } else {
-                    reasoningEffortByTabRef.current.delete(chatIdForTab(tabId))
-                  }
-                }}
+                getInitialSelection={(tabId) => selectionByTabRef.current.get(chatIdForTab(tabId)) ?? null}
                 workDirByTab={workDirByTab}
                 onWorkDirChangeForTab={setTabWorkDir}
                 codeSessionLocks={codeSessionLocks}

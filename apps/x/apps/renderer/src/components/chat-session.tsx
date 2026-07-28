@@ -36,7 +36,7 @@ import { useSmoothedText } from '@/hooks/useSmoothedText'
 import type { useVoiceMode } from '@/hooks/useVoiceMode'
 import type { PermissionDecision } from '@x/shared/src/code-mode.js'
 import { ChatEmptyState } from './chat-empty-state'
-import { ChatInputWithMentions, type CallPreset, type PermissionMode, type StagedAttachment, type SelectedModel, type ReasoningEffortLevel } from './chat-input-with-mentions'
+import { ChatInputWithMentions, type CallPreset, type PermissionMode, type StagedAttachment, type ModelSelection } from './chat-input-with-mentions'
 import { type ChatTab } from './tab-bar'
 import { useReportTabMeta } from '@/lib/tab-meta'
 import { useSessionTitle } from '@/lib/session-title'
@@ -516,14 +516,14 @@ export interface ChatSessionComposerProps {
   codeSessionLocks: Record<string, { cwd: string; agent: 'claude' | 'codex' }>
   initialDraft: string | undefined
   onDraftChange: (tabId: string, text: string) => void
-  /** Ref-style model tracking keyed by chatId (App). Either this or onSelectedModelChange. */
-  selectedModelByTabRef?: React.RefObject<Map<string, { provider: string; model: string }>>
-  /** Ref-style effort tracking keyed by chatId (App). Either this or onReasoningEffortChange. */
-  reasoningEffortByTabRef?: React.RefObject<Map<string, 'low' | 'medium' | 'high'>>
-  /** Callback-style model reporting (side-pane chat); receives the tab so the caller picks its key. */
-  onSelectedModelChange?: (tab: ChatTab, model: SelectedModel | null) => void
-  /** Callback-style effort reporting (side-pane chat). */
-  onReasoningEffortChange?: (tab: ChatTab, effort: ReasoningEffortLevel | null) => void
+  /**
+   * The chat's selection (model + effort, ONE value — see the composer's
+   * ModelSelection contract) reported on every change, settings seed
+   * included; receives the tab so the caller picks its key (chatId).
+   */
+  onSelectionChange?: (tab: ChatTab, selection: ModelSelection | null) => void
+  /** The chat's prior selection (per-tab continuity / latest-turn restore). */
+  initialSelection?: ModelSelection | null
   workDirByTab: Record<string, string | null>
   onWorkDirChange: (tabId: string, value: string | null) => void
   isRecording?: boolean
@@ -568,10 +568,8 @@ export function ChatSessionComposer({
   codeSessionLocks,
   initialDraft,
   onDraftChange,
-  selectedModelByTabRef,
-  reasoningEffortByTabRef,
-  onSelectedModelChange,
-  onReasoningEffortChange,
+  onSelectionChange,
+  initialSelection = null,
   workDirByTab,
   onWorkDirChange,
   isRecording,
@@ -610,26 +608,8 @@ export function ChatSessionComposer({
         codeSessionLock={tabState.runId ? codeSessionLocks[tabState.runId] ?? null : null}
         initialDraft={initialDraft}
         onDraftChange={(text) => onDraftChange(tab.id, text)}
-        onSelectedModelChange={(m) => {
-          if (selectedModelByTabRef) {
-            if (m) {
-              selectedModelByTabRef.current.set(tab.chatId, m)
-            } else {
-              selectedModelByTabRef.current.delete(tab.chatId)
-            }
-          }
-          onSelectedModelChange?.(tab, m)
-        }}
-        onReasoningEffortChange={(effort) => {
-          if (reasoningEffortByTabRef) {
-            if (effort) {
-              reasoningEffortByTabRef.current.set(tab.chatId, effort)
-            } else {
-              reasoningEffortByTabRef.current.delete(tab.chatId)
-            }
-          }
-          onReasoningEffortChange?.(tab, effort)
-        }}
+        onSelectionChange={(selection) => onSelectionChange?.(tab, selection)}
+        initialSelection={initialSelection}
         workDir={workDirByTab[tab.id] ?? null}
         onWorkDirChange={(v) => onWorkDirChange(tab.id, v)}
         isRecording={recordingOverrides ? recordingOverrides.isRecording : (isRecording && ownsVoice)}
