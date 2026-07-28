@@ -637,7 +637,8 @@ export function ChatSidebar({
                   const tabHasConversation = tabState.conversation.length > 0 || Boolean(tabState.currentAssistantMessage)
                   return (
                     <div
-                      key={tab.id}
+                      // Keyed by chat identity — see App's chat panel key.
+                      key={tab.chatId}
                       className={cn(
                         'min-h-0 h-full flex-col',
                         isActive
@@ -763,7 +764,8 @@ export function ChatSidebar({
                     const tabState = getTabState(tab.id)
                     return (
                       <div
-                        key={tab.id}
+                        // Composer instance per chat — see App's composer key.
+                        key={tab.chatId}
                         className={isActive ? 'block' : 'hidden'}
                         data-chat-input-panel={tab.id}
                         aria-hidden={!isActive}

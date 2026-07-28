@@ -5,6 +5,13 @@ import { cn } from "@/lib/utils"
 export type ChatTab = {
   id: string
   runId: string | null
+  // Identity of the CHAT this tab currently shows. Minted fresh on every
+  // rebinding (new chat, opening a history item into this tab) and kept
+  // stable when a draft chat's first send binds its runId — so components
+  // keyed by it remount exactly when the tab starts showing a different
+  // chat, never mid-send. Chat sessions behave like self-sufficient
+  // component instances; tabs stay dumb containers.
+  chatId: string
 }
 
 export type FileTab = {

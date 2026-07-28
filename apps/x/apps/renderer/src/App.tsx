@@ -1984,9 +1984,15 @@ function App() {
   const [runs, setRuns] = useState<RunListItem[]>([])
 
   // Chat tab state
-  const [chatTabs, setChatTabs] = useState<ChatTab[]>([{ id: 'default-chat-tab', runId: null }])
+  const [chatTabs, setChatTabs] = useState<ChatTab[]>(() => [{ id: 'default-chat-tab', runId: null, chatId: crypto.randomUUID() }])
   const chatTabsRef = useRef(chatTabs)
   chatTabsRef.current = chatTabs
+  // A tab's current chat identity (see ChatTab.chatId). Session-scoped maps
+  // below are keyed by chatId, not tab id, so rebinding a tab to another
+  // session can never leak the previous chat's draft/model/effort into it.
+  const chatIdForTab = useCallback((tabId: string) => (
+    chatTabsRef.current.find((t) => t.id === tabId)?.chatId ?? tabId
+  ), [])
   const [activeChatTabId, setActiveChatTabId] = useState('default-chat-tab')
   const [chatViewStateByTab, setChatViewStateByTab] = useState<Record<string, ChatTabViewState>>({
     'default-chat-tab': createEmptyChatTabViewState(),
@@ -2007,12 +2013,13 @@ function App() {
   const activeChatTabIdRef = useRef(activeChatTabId)
   activeChatTabIdRef.current = activeChatTabId
   const setChatDraftForTab = useCallback((tabId: string, text: string) => {
+    const chatId = chatIdForTab(tabId)
     if (text) {
-      chatDraftsRef.current.set(tabId, text)
+      chatDraftsRef.current.set(chatId, text)
     } else {
-      chatDraftsRef.current.delete(tabId)
+      chatDraftsRef.current.delete(chatId)
     }
-  }, [])
+  }, [chatIdForTab])
   // Persist a run's work directory to its per-run sidecar config file. The agent
   // runtime reads this same file (config/workdir-<runId>.json) on each turn.
   const persistRunWorkDir = useCallback(async (runId: string, value: string | null) => {
@@ -2166,7 +2173,10 @@ function App() {
       runId,
       conversation,
       currentAssistantMessage,
-      sessionUsage: {},
+      // The legacy mirrors this snapshot is built from never carried usage,
+      // so inactive tabs showed zero tokens; take it from the live session
+      // store instead.
+      sessionUsage: sessionChat.chatState?.sessionUsage ?? {},
       pendingAskHumanRequests: new Map(pendingAskHumanRequests),
       allPermissionRequests: new Map(allPermissionRequests),
       permissionResponses: new Map(permissionResponses),
@@ -2178,6 +2188,7 @@ function App() {
     runId,
     conversation,
     currentAssistantMessage,
+    sessionChat.chatState,
     pendingAskHumanRequests,
     allPermissionRequests,
     permissionResponses,
@@ -3004,8 +3015,11 @@ function App() {
     setPermissionResponses(new Map())
     setAutoPermissionDecisions(new Map())
     try {
-      // Restore the session's per-chat work directory into the active tab.
-      const tabId = activeChatTabIdRef.current
+      // Restore the session's per-chat work directory into the tab BOUND to
+      // this run when one exists — targeting the active tab is racy under
+      // fast switching (the guard below narrows but can't close the gap).
+      const tabId = chatTabsRef.current.find((t) => t.runId === id)?.id
+        ?? activeChatTabIdRef.current
       const wd = await loadRunWorkDir(id)
       if (loadRunRequestIdRef.current !== requestId) return
       setWorkDirByTab((prev) => ({ ...prev, [tabId]: wd }))
@@ -3549,7 +3563,7 @@ function App() {
       let currentRunId = runId
       let isNewRun = false
       let newRunCreatedAt: string | null = null
-      const selected = selectedModelByTabRef.current.get(submitTabId)
+      const selected = selectedModelByTabRef.current.get(chatIdForTab(submitTabId))
       if (!currentRunId) {
         const createdSession = await window.ipc.invoke('sessions:create', {})
         currentRunId = createdSession.sessionId
@@ -3575,7 +3589,7 @@ function App() {
       // Per-message turn config. Composition inputs land in the system prompt
       // via the agent resolver; keep them session-sticky where possible so the
       // provider prefix cache survives across turns.
-      const reasoningEffort = reasoningEffortByTabRef.current.get(submitTabId)
+      const reasoningEffort = reasoningEffortByTabRef.current.get(chatIdForTab(submitTabId))
       // The runtime defaults omitted maxModelCalls to the global limit; the
       // chat-specific override is the UI's job to pass explicitly. A failed
       // settings read just falls back to the global limit.
@@ -3967,7 +3981,8 @@ function App() {
       return
     }
     setChatTabs((prev) => prev.map((t) => (
-      t.id === activeChatTabIdRef.current ? { ...t, runId: rowboatSessionId } : t
+      // Rebinding to a different session = a different chat identity.
+      t.id === activeChatTabIdRef.current ? { ...t, runId: rowboatSessionId, chatId: crypto.randomUUID() } : t
     )))
     loadRun(rowboatSessionId)
   }, [switchChatTab, loadRun])
@@ -3977,6 +3992,8 @@ function App() {
     const idx = chatTabs.findIndex(t => t.id === tabId)
     if (idx === -1) return
     saveChatScrollForTab(tabId)
+    // Resolve before the tab list changes — chat-keyed maps below.
+    const closingChatId = chatIdForTab(tabId)
     const nextTabs = chatTabs.filter(t => t.id !== tabId)
     setChatTabs(nextTabs)
     setChatViewStateByTab(prev => {
@@ -3985,9 +4002,9 @@ function App() {
       delete next[tabId]
       return next
     })
-    chatDraftsRef.current.delete(tabId)
-    selectedModelByTabRef.current.delete(tabId)
-    reasoningEffortByTabRef.current.delete(tabId)
+    chatDraftsRef.current.delete(closingChatId)
+    selectedModelByTabRef.current.delete(closingChatId)
+    reasoningEffortByTabRef.current.delete(closingChatId)
     chatScrollTopByTabRef.current.delete(tabId)
     setWorkDirByTab((prev) => {
       if (!(tabId in prev)) return prev
@@ -4438,8 +4455,8 @@ function App() {
 
   const handleNewChatTab = useCallback(() => {
     // Single-chat model: reset the one conversation in place instead of
-    // opening a new tab.
-    setChatTabs([{ id: activeChatTabIdRef.current, runId: null }])
+    // opening a new tab. Fresh chatId = fresh chat-session instance.
+    setChatTabs([{ id: activeChatTabIdRef.current, runId: null, chatId: crypto.randomUUID() }])
     dismissBrowserOverlay()
     handleNewChat()
     // Left-pane "new chat" should always open full chat view.
@@ -4465,7 +4482,7 @@ function App() {
 
   // Sidebar variant: reset the chat in place without leaving file/graph context.
   const handleNewChatTabInSidebar = useCallback(() => {
-    setChatTabs([{ id: activeChatTabIdRef.current, runId: null }])
+    setChatTabs([{ id: activeChatTabIdRef.current, runId: null, chatId: crypto.randomUUID() }])
     handleNewChat()
   }, [handleNewChat])
 
@@ -5290,7 +5307,8 @@ function App() {
             setActiveChatTabId(existingTab.id)
           } else {
             setChatTabs((prev) => prev.map((tab) => (
-              tab.id === activeChatTabIdRef.current ? { ...tab, runId: targetRunId } : tab
+              // Rebinding to a different session = a different chat identity.
+              tab.id === activeChatTabIdRef.current ? { ...tab, runId: targetRunId, chatId: crypto.randomUUID() } : tab
             )))
           }
           await loadRun(targetRunId)
@@ -7637,7 +7655,10 @@ function App() {
                       : "mx-auto w-full max-w-4xl min-h-full items-center justify-center pb-0"
                     return (
                       <div
-                        key={tab.id}
+                        // Keyed by CHAT identity: rebinding this tab to a
+                        // different session remounts the panel (fresh
+                        // scroll/DOM state); first-send runId binding does not.
+                        key={tab.chatId}
                         className={cn(
                           'min-h-0 h-full flex-col',
                           isActive
@@ -7760,7 +7781,11 @@ function App() {
                       const tabState = getChatTabStateForRender(tab.id)
                       return (
                         <div
-                          key={tab.id}
+                          // Composer instance per CHAT (see chat panel key
+                          // above): a rebound tab gets a fresh composer, so
+                          // attachments/toggles/selection can't leak across
+                          // sessions; first-send binding keeps the instance.
+                          key={tab.chatId}
                           className={isActive ? 'block' : 'hidden'}
                           data-chat-input-panel={tab.id}
                           aria-hidden={!isActive}
@@ -7778,20 +7803,20 @@ function App() {
                             onPresetMessageConsumed={isActive ? () => setPresetMessage(undefined) : undefined}
                             runId={tabState.runId}
                             codeSessionLock={tabState.runId ? codeSessionLocks[tabState.runId] ?? null : null}
-                            initialDraft={chatDraftsRef.current.get(tab.id)}
+                            initialDraft={chatDraftsRef.current.get(tab.chatId)}
                             onDraftChange={(text) => setChatDraftForTab(tab.id, text)}
                             onSelectedModelChange={(m) => {
                               if (m) {
-                                selectedModelByTabRef.current.set(tab.id, m)
+                                selectedModelByTabRef.current.set(tab.chatId, m)
                               } else {
-                                selectedModelByTabRef.current.delete(tab.id)
+                                selectedModelByTabRef.current.delete(tab.chatId)
                               }
                             }}
                             onReasoningEffortChange={(effort) => {
                               if (effort) {
-                                reasoningEffortByTabRef.current.set(tab.id, effort)
+                                reasoningEffortByTabRef.current.set(tab.chatId, effort)
                               } else {
-                                reasoningEffortByTabRef.current.delete(tab.id)
+                                reasoningEffortByTabRef.current.delete(tab.chatId)
                               }
                             }}
                             workDir={workDirByTab[tab.id] ?? null}
@@ -7854,7 +7879,7 @@ function App() {
                     switchChatTab(existingTab.id)
                     return
                   }
-                  setChatTabs((prev) => prev.map((t) => (t.id === activeChatTabId ? { ...t, runId: rid } : t)))
+                  setChatTabs((prev) => prev.map((t) => (t.id === activeChatTabId ? { ...t, runId: rid, chatId: crypto.randomUUID() } : t)))
                   loadRun(rid)
                 }}
                 onOpenChatHistory={() => void navigateToView({ type: 'chat-history' })}
@@ -7874,20 +7899,20 @@ function App() {
                 runId={runId}
                 presetMessage={presetMessage}
                 onPresetMessageConsumed={() => setPresetMessage(undefined)}
-                getInitialDraft={(tabId) => chatDraftsRef.current.get(tabId)}
+                getInitialDraft={(tabId) => chatDraftsRef.current.get(chatIdForTab(tabId))}
                 onDraftChangeForTab={setChatDraftForTab}
                 onSelectedModelChangeForTab={(tabId, m) => {
                   if (m) {
-                    selectedModelByTabRef.current.set(tabId, m)
+                    selectedModelByTabRef.current.set(chatIdForTab(tabId), m)
                   } else {
-                    selectedModelByTabRef.current.delete(tabId)
+                    selectedModelByTabRef.current.delete(chatIdForTab(tabId))
                   }
                 }}
                 onReasoningEffortChangeForTab={(tabId, effort) => {
                   if (effort) {
-                    reasoningEffortByTabRef.current.set(tabId, effort)
+                    reasoningEffortByTabRef.current.set(chatIdForTab(tabId), effort)
                   } else {
-                    reasoningEffortByTabRef.current.delete(tabId)
+                    reasoningEffortByTabRef.current.delete(chatIdForTab(tabId))
                   }
                 }}
                 workDirByTab={workDirByTab}
