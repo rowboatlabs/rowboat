@@ -76,11 +76,11 @@ export function loadAgentNotesContext(): string | null {
     } catch { /* ignore */ }
 
     if (otherFiles.length > 0) {
-        sections.push(`## More Specific Preferences\nFor more specific preferences, you can read these files using file-readText. Only read them when relevant to the current task.\n\n${otherFiles.map(f => `- knowledge/Agent Notes/${f}`).join('\n')}`);
+        sections.push(`## More Specific Preferences\nFor more specific preferences, you can read these files using file-readText. Only read one of these when it is directly relevant to the current task; never read them for greetings or trivial messages.\n\n${otherFiles.map(f => `- knowledge/Agent Notes/${f}`).join('\n')}`);
     }
 
     if (sections.length === 0) return null;
-    return `# Agent Memory\n\n${sections.join('\n\n')}`;
+    return `# Agent Memory\nThe sections below are already fully loaded into this prompt. NEVER re-read knowledge/Agent Notes/user.md or knowledge/Agent Notes/preferences.md with file tools — their complete contents are here.\n\n${sections.join('\n\n')}`;
 }
 
 export interface WorkspaceContext {
