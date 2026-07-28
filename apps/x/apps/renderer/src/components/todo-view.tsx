@@ -220,6 +220,59 @@ function CommentComposer({ onSend, onCancel }: {
 
 const MAX_BUBBLES = 6
 
+function Bubble({ b, onOpenNote, onRetry }: {
+  b: TodoChatBubble
+  onOpenNote: (path: string) => void
+  onRetry?: () => void
+}) {
+  if (b.role === 'user') {
+    return (
+      <div className="flex justify-end">
+        <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-primary px-3 py-1.5 text-[13px] text-primary-foreground">
+          {b.text}
+        </div>
+      </div>
+    )
+  }
+  return (
+    <div className="flex items-end gap-1.5">
+      <Bot className="mb-1.5 size-3.5 shrink-0 text-muted-foreground" />
+      <div
+        className={`max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-bl-md px-3 py-1.5 text-[13px] ${
+          b.kind === 'error'
+            ? 'bg-red-500/10 text-red-600 dark:text-red-400'
+            : 'bg-muted text-foreground'
+        }`}
+      >
+        {b.kind === 'error' ? `failed: ${b.text}` : b.text}
+        {b.kind === 'error' && onRetry && (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="ml-2 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[12px] font-medium hover:bg-red-500/15"
+          >
+            <RotateCcw className="size-3" /> retry
+          </button>
+        )}
+        {b.links.length > 0 && (
+          <span className="mt-1 flex flex-wrap gap-1.5">
+            {b.links.map((l, j) => (
+              <button
+                key={j}
+                type="button"
+                onClick={() => openLink(l, onOpenNote)}
+                className="inline-flex items-center gap-1 rounded-md bg-background px-1.5 py-0.5 text-[12px] font-medium text-foreground shadow-sm ring-1 ring-border hover:bg-accent"
+              >
+                <ArrowUpRight className="size-3" /> {l.label}
+              </button>
+            ))}
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function ConversationView({ bubbles, sessionId, onOpenNote, onOpenInChat, onRetry, onReply, composerOpen }: {
   bubbles: TodoChatBubble[]
   sessionId: string | null
@@ -243,54 +296,9 @@ function ConversationView({ bubbles, sessionId, onOpenNote, onOpenInChat, onRetr
           {hidden} earlier message{hidden === 1 ? '' : 's'} — open in chat
         </button>
       )}
-      {shown.map((b, i) => {
-        if (b.role === 'user') {
-          return (
-            <div key={i} className="flex justify-end">
-              <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-primary px-3 py-1.5 text-[13px] text-primary-foreground">
-                {b.text}
-              </div>
-            </div>
-          )
-        }
-        return (
-          <div key={i} className="flex items-end gap-1.5">
-            <Bot className="mb-1.5 size-3.5 shrink-0 text-muted-foreground" />
-            <div
-              className={`max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-bl-md px-3 py-1.5 text-[13px] ${
-                b.kind === 'error'
-                  ? 'bg-red-500/10 text-red-600 dark:text-red-400'
-                  : 'bg-muted text-foreground'
-              }`}
-            >
-              {b.kind === 'error' ? `failed: ${b.text}` : b.text}
-              {b.kind === 'error' && onRetry && (
-                <button
-                  type="button"
-                  onClick={onRetry}
-                  className="ml-2 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[12px] font-medium hover:bg-red-500/15"
-                >
-                  <RotateCcw className="size-3" /> retry
-                </button>
-              )}
-              {b.links.length > 0 && (
-                <span className="mt-1 flex flex-wrap gap-1.5">
-                  {b.links.map((l, j) => (
-                    <button
-                      key={j}
-                      type="button"
-                      onClick={() => openLink(l, onOpenNote)}
-                      className="inline-flex items-center gap-1 rounded-md bg-background px-1.5 py-0.5 text-[12px] font-medium text-foreground shadow-sm ring-1 ring-border hover:bg-accent"
-                    >
-                      <ArrowUpRight className="size-3" /> {l.label}
-                    </button>
-                  ))}
-                </span>
-              )}
-            </div>
-          </div>
-        )
-      })}
+      {shown.map((b, i) => (
+        <Bubble key={i} b={b} onOpenNote={onOpenNote} onRetry={onRetry} />
+      ))}
       {!composerOpen && (
         <button
           type="button"
@@ -571,6 +579,26 @@ function relativeTime(iso: string): string {
   return `${Math.floor(h / 24)}d`
 }
 
+/** The trailing segment worth peeking at: Rowboat's most recent reply plus
+ * anything the user sent after it. Never the history — that's the sidebar. */
+function lastResponseTail(bubbles: TodoChatBubble[]): TodoChatBubble[] {
+  let idx = -1
+  for (let i = bubbles.length - 1; i >= 0; i--) {
+    if (bubbles[i].role === 'rowboat') { idx = i; break }
+  }
+  const tail = idx >= 0 ? bubbles.slice(idx) : bubbles
+  return tail.slice(-3)
+}
+
+function previewLine(bubbles: TodoChatBubble[]): string {
+  const last = bubbles[bubbles.length - 1]
+  if (!last) return ''
+  if (last.role === 'user') return `You: ${last.text}`
+  if (last.kind === 'error') return `failed: ${last.text}`
+  const links = last.links.map((l) => l.label).join(', ')
+  return last.text || links
+}
+
 function ConversationsSection({ threads, running, conversations, expanded, replyFor, onToggle, onReply, onSendReply, onOpenNote, onOpenInChat }: {
   threads: StreamThread[]
   running: Set<string>
@@ -591,38 +619,66 @@ function ConversationsSection({ threads, running, conversations, expanded, reply
         {threads.map((t) => {
           const isRunning = running.has(`chat:${t.sessionId}`)
           const isOpen = expanded === t.sessionId
+          const bubbles = conversations[t.sessionId] ?? []
+          const preview = previewLine(bubbles)
           return (
             <div key={t.sessionId} className="group/thread border-b border-border/40 py-1.5 last:border-b-0">
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => onToggle(t.sessionId)}
-                  className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                  className="min-w-0 flex-1 text-left"
                 >
-                  <MessageCircle className="size-3.5 shrink-0 text-muted-foreground/60" />
-                  <span className="min-w-0 flex-1 truncate text-sm">{t.title}</span>
+                  <span className="flex items-center gap-2">
+                    <MessageCircle className="size-3.5 shrink-0 text-muted-foreground/60" />
+                    <span className="min-w-0 flex-1 truncate text-sm">{t.title}</span>
+                  </span>
+                  {/* One glance = where this ended up. Click = the peek. */}
+                  {preview && !isOpen && (
+                    <span className="block truncate pl-[22px] text-[12px] text-muted-foreground/70">{preview}</span>
+                  )}
                 </button>
                 {isRunning && <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" />}
                 <span className="shrink-0 text-[11px] text-muted-foreground/60">{relativeTime(t.updatedAt)}</span>
                 <button
                   type="button"
                   onClick={() => onOpenInChat(t.sessionId)}
-                  title="Open in the chat sidebar"
+                  title="Open the full thread in the chat sidebar"
                   className="shrink-0 rounded-md p-1 text-muted-foreground/50 opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/thread:opacity-100"
                 >
                   <ArrowUpRight className="size-3.5" />
                 </button>
               </div>
               {isOpen && (
-                <div className="pb-1 pl-5">
-                  <ConversationView
-                    bubbles={conversations[t.sessionId] ?? []}
-                    sessionId={t.sessionId}
-                    onOpenNote={onOpenNote}
-                    onOpenInChat={onOpenInChat}
-                    onReply={() => onReply(t.sessionId)}
-                    composerOpen={replyFor === t.sessionId}
-                  />
+                <div className="flex flex-col gap-1.5 pb-1 pl-5 pt-1">
+                  {/* The last response only — the full thread lives in the
+                      sidebar, like Slack threads opening on the side. */}
+                  {lastResponseTail(bubbles).map((b, i) => (
+                    <Bubble key={i} b={b} onOpenNote={onOpenNote} />
+                  ))}
+                  {isRunning && (
+                    <div className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
+                      <Loader2 className="size-3 animate-spin" /> working…
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2">
+                    {replyFor !== t.sessionId && (
+                      <button
+                        type="button"
+                        onClick={() => onReply(t.sessionId)}
+                        className="flex w-fit items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                      >
+                        <Plus className="size-3" /> reply
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => onOpenInChat(t.sessionId)}
+                      className="flex w-fit items-center gap-1 rounded-full px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                    >
+                      view full thread →
+                    </button>
+                  </div>
                   {replyFor === t.sessionId && (
                     <CommentComposer
                       onSend={(m) => onSendReply(t.sessionId, m)}
@@ -741,13 +797,17 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview }: TodoViewP
     void window.ipc.invoke('sessions:list', {}).then(({ sessions: all }) => {
       const todoSessionIds = new Set(Object.values(res.sessions))
       setSessionUpdatedAt(Object.fromEntries(all.map((s) => [s.sessionId, s.updatedAt])))
-      setStreamThreads(
-        all
-          .filter((s) => !todoSessionIds.has(s.sessionId))
-          .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-          .slice(0, 8)
-          .map((s) => ({ sessionId: s.sessionId, title: s.title ?? 'New chat', updatedAt: s.updatedAt })),
-      )
+      const threads = all
+        .filter((s) => !todoSessionIds.has(s.sessionId))
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+        .slice(0, 8)
+        .map((s) => ({ sessionId: s.sessionId, title: s.title ?? 'New chat', updatedAt: s.updatedAt }))
+      setStreamThreads(threads)
+      for (const t of threads) {
+        if (streamConvFetchedRef.current[t.sessionId] !== t.updatedAt) {
+          void fetchStreamConv(t.sessionId, t.updatedAt)
+        }
+      }
     }).catch(() => {})
     // Conversations are derived per session; fetch them all (lists are small).
     const keys = Object.keys(res.sessions)
@@ -786,9 +846,14 @@ export function TodoView({ onOpenNote, onOpenInChat, onShowOverview }: TodoViewP
     saveTimerRef.current = setTimeout(() => void saveNowRef.current(), 600)
   }, [])
 
-  const fetchStreamConv = useCallback(async (sessionId: string) => {
+  // Conversation cache keyed by the session's updatedAt — collapsed rows
+  // need the last response for their preview line, so every visible thread
+  // gets fetched, but only re-derived when it actually advanced.
+  const streamConvFetchedRef = useRef<Record<string, string>>({})
+  const fetchStreamConv = useCallback(async (sessionId: string, updatedAt?: string) => {
     try {
       const r = await window.ipc.invoke('todo:getSessionConversation', { sessionId })
+      if (updatedAt) streamConvFetchedRef.current[sessionId] = updatedAt
       setStreamConvs((c) => ({ ...c, [sessionId]: r.bubbles }))
     } catch {
       // session may have been deleted
