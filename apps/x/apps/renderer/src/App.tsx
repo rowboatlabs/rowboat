@@ -1809,7 +1809,7 @@ function App() {
         // Lift the card off the page, and move sonner's close button (which
         // defaults to the top-LEFT corner) to the top right.
         className:
-          'shadow-xl shadow-black/25 [&_[data-close-button]]:!left-auto [&_[data-close-button]]:!right-0 [&_[data-close-button]]:!translate-x-[35%] [&_[data-close-button]]:!-translate-y-[35%]',
+          'shadow-xl shadow-black/25 [&_[data-close-button]]:!left-auto [&_[data-close-button]]:!right-0 [&_[data-close-button]]:!translate-x-[15%] [&_[data-close-button]]:!-translate-y-[15%]',
         action: {
           label: 'Try it',
           onClick: () => void window.ipc.invoke('quickAsk:show', null).catch(() => {}),
