@@ -114,11 +114,41 @@ function mapResponseStatus(response: string | undefined): string {
     }
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+const MIN_UTC_OFFSET_MS = -12 * 60 * 60 * 1000;
+const MAX_UTC_OFFSET_MS = 14 * 60 * 60 * 1000;
+
+/**
+ * All-day boundaries arrive as midnight in the event's original time zone
+ * converted to UTC (the Prefer header below), so slicing the string yields the
+ * previous day for every UTC+ zone — IST midnight is 18:30Z the day before.
+ * The intended civil date is the UTC day boundary that sits within the valid
+ * offset window [-12h, +14h] of the instant. That boundary is unique except in
+ * a 2h band where two zones could both explain the instant (e.g. UTC-10 vs
+ * UTC+14); there we pick the boundary implied by this machine's own offset.
+ */
+export function allDayDate(raw: string): string {
+    const withZone = /Z|[+-]\d{2}:\d{2}$/.test(raw) ? raw : `${raw}Z`;
+    const instant = Date.parse(withZone);
+    if (!Number.isFinite(instant)) return raw.slice(0, 10);
+    const prevBoundary = Math.floor(instant / DAY_MS) * DAY_MS;
+    const candidates = [prevBoundary, prevBoundary + DAY_MS]
+        .filter((b) => b - instant >= MIN_UTC_OFFSET_MS && b - instant <= MAX_UTC_OFFSET_MS);
+    if (candidates.length === 0) return raw.slice(0, 10);
+    let boundary = candidates[0];
+    if (candidates.length > 1) {
+        const machineOffsetMs = -new Date(instant).getTimezoneOffset() * 60 * 1000;
+        boundary = candidates.reduce((a, b) =>
+            Math.abs(a - instant - machineOffsetMs) <= Math.abs(b - instant - machineOffsetMs) ? a : b);
+    }
+    return new Date(boundary).toISOString().slice(0, 10);
+}
+
 function mapDateTime(dt: GraphDateTimeTimeZone | undefined, isAllDay: boolean | undefined): { dateTime?: string; date?: string } | undefined {
     const raw = dt?.dateTime;
     if (!raw) return undefined;
     if (isAllDay) {
-        return { date: raw.slice(0, 10) };
+        return { date: allDayDate(raw) };
     }
     // Prefer: outlook.timezone="UTC" makes these UTC wall times; stamp the Z so
     // Date.parse treats them correctly (Graph omits the offset).

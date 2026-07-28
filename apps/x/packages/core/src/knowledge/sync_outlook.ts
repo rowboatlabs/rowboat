@@ -31,6 +31,7 @@ import {
     stripQuotedReplyText,
     sanitizeReplyBody,
     parseAddressList,
+    textToHtml,
 } from './email/store.js';
 import type {
     EmailProvider,
@@ -282,7 +283,11 @@ async function saveAttachmentToDisk(messageId: string, att: GraphAttachment): Pr
 function inlineCidImages(html: string, inlineAtts: Array<{ contentId: string; contentType: string; bytes: string }>): string {
     let rewritten = html;
     for (const att of inlineAtts) {
-        const escaped = att.contentId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        // Graph often wraps contentId in angle brackets (`<f_abc@xyz>`) while
+        // the HTML references `cid:f_abc@xyz` — strip them or the substitution
+        // never matches.
+        const cid = att.contentId.replace(/^<|>$/g, '').trim();
+        const escaped = cid.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         rewritten = rewritten.replace(new RegExp(`cid:${escaped}`, 'gi'), `data:${att.contentType};base64,${att.bytes}`);
     }
     return rewritten;
@@ -340,8 +345,14 @@ async function parseConversationSnapshot(
             try {
                 const metadata = await listAttachmentMetadata(msg.id);
 
+                // The cid checks below must run against the pre-inlining HTML —
+                // once inlineCidImages rewrites `cid:` refs to data: URIs there
+                // is nothing left to match, and inlined images would be
+                // double-reported as regular attachments.
+                const originalHtml = bodyHtml;
+
                 // Inline images referenced via cid: get baked into the HTML.
-                if (bodyHtml && /src\s*=\s*["']?cid:/i.test(bodyHtml)) {
+                if (originalHtml && /src\s*=\s*["']?cid:/i.test(originalHtml)) {
                     const inline = metadata.filter((a) => a.isInline && a.contentId && a.id && (a.contentType ?? '').startsWith('image/'));
                     const withBytes: Array<{ contentId: string; contentType: string; bytes: string }> = [];
                     for (const att of inline) {
@@ -352,7 +363,7 @@ async function parseConversationSnapshot(
                             console.warn(`[Outlook] inline image fetch failed for ${att.contentId}:`, err);
                         }
                     }
-                    if (withBytes.length > 0) bodyHtml = inlineCidImages(bodyHtml, withBytes);
+                    if (withBytes.length > 0) bodyHtml = inlineCidImages(originalHtml, withBytes);
                 }
 
                 // Real attachments: everything except inline images that are
@@ -360,8 +371,8 @@ async function parseConversationSnapshot(
                 for (const att of metadata) {
                     if (!att.id || !att.name) continue;
                     const cid = att.contentId?.replace(/^<|>$/g, '').trim();
-                    const referencedInHtml = !!cid && !!bodyHtml
-                        && new RegExp(`cid:${cid.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'i').test(bodyHtml);
+                    const referencedInHtml = !!cid && !!originalHtml
+                        && new RegExp(`cid:${cid.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'i').test(originalHtml);
                     const isInlineImage = (att.contentType ?? '').startsWith('image/') && att.isInline && referencedInHtml;
                     if (isInlineImage) continue;
                     if (opts.downloadAttachments) {
@@ -554,8 +565,27 @@ async function buildAndCacheSnapshot(conversationId: string, messages: GraphMess
  * its snapshot — the Outlook mirror of sync_gmail's processThread.
  */
 async function processConversation(conversationId: string): Promise<SyncedThread | null> {
+    let messages: GraphMessage[];
     try {
-        const messages = await fetchConversationMessages(conversationId);
+        messages = await fetchConversationMessages(conversationId);
+    } catch (error) {
+        if (error instanceof GraphError) {
+            if (error.status === 404) return null;
+            // 401 (auth revoked) and 429 (still throttled after graphFetch's
+            // built-in retry) are run-wide: bail so the deltaLink is not
+            // advanced and the whole batch retries next cycle.
+            if (error.status === 401 || error.status === 429) throw error;
+            // Any other Graph status is specific to this conversation. Skip it —
+            // rethrowing would abort the run before the deltaLink advances, so
+            // one persistently failing conversation would block sync forever.
+            console.error(`[Outlook] Skipping conversation ${conversationId} (fetch failed):`, error);
+            return null;
+        }
+        // Network-level failure — abort the run and retry next cycle.
+        throw error;
+    }
+
+    try {
         if (messages.length === 0) return null;
 
         // Exclude unsent drafts — a draft rendered as a normal message block
@@ -609,9 +639,10 @@ async function processConversation(conversationId: string): Promise<SyncedThread
 
         return { threadId: conversationId, markdown: mdContent };
     } catch (error) {
-        console.error(`[Outlook] Error processing conversation ${conversationId}:`, error);
-        if (error instanceof GraphError && error.status === 404) return null;
-        throw error;
+        // Deterministic processing failures (pathological bodies, disk errors)
+        // must not stall deltaLink advancement — skip the conversation.
+        console.error(`[Outlook] Skipping conversation ${conversationId} (processing failed):`, error);
+        return null;
     }
 }
 
@@ -1260,7 +1291,9 @@ function buildDraftBody(opts: SaveDraftOptions): DraftBody {
 function draftPatchPayload(body: DraftBody): Record<string, unknown> {
     return {
         subject: body.subject,
-        body: { contentType: 'html', content: body.bodyHtml || `<p>${body.bodyText}</p>` },
+        // textToHtml escapes — raw bodyText interpolated into markup would let
+        // a literal "<" or "&" in the user's text ship as live HTML.
+        body: { contentType: 'html', content: body.bodyHtml || textToHtml(body.bodyText) },
         toRecipients: toGraphRecipients(body.to),
         ccRecipients: toGraphRecipients(body.cc),
         bccRecipients: toGraphRecipients(body.bcc),
