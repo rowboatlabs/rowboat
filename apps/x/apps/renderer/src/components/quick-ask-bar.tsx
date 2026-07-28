@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowUpRight, Command, CornerDownLeft, Mic, Plus } from 'lucide-react'
+import { ArrowUpRight, Command, CornerDownLeft, Mic, MonitorUp, Plus, Volume2 } from 'lucide-react'
 import { Streamdown } from 'streamdown'
 
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -108,17 +108,59 @@ export function QuickAskBar() {
     setDraft('')
   }, [])
 
-  const dismiss = useCallback(() => {
-    void window.ipc.invoke('quickAsk:hide', null).catch(() => {})
+  // Optional toggles (the standup's "voice and screen share as opt-ins").
+  // voiceOut: answers to bar questions are spoken aloud. sharing: the app
+  // window's screen capture runs and frames ride along with bar submits —
+  // the ACTUAL state comes back over quick-ask:options-state (a denied
+  // permission must never leave a lying badge).
+  const [voiceOut, setVoiceOut] = useState(false)
+  const [sharing, setSharing] = useState(false)
+  const pushOptions = useCallback((voiceOutput: boolean, screenShare: boolean) => {
+    void window.ipc.invoke('quickAsk:setOptions', { voiceOutput, screenShare }).catch(() => {})
   }, [])
+  useEffect(() => {
+    return window.ipc.on('quick-ask:options-state', (s) => {
+      setSharing(s.screenSharing)
+      setVoiceOut(s.voiceOutput)
+    })
+  }, [])
+  const toggleVoiceOut = useCallback(() => {
+    const next = !voiceOut
+    setVoiceOut(next)
+    pushOptions(next, sharing)
+  }, [voiceOut, sharing, pushOptions])
+  const toggleShare = useCallback(() => {
+    const next = !sharing
+    setSharing(next)
+    pushOptions(voiceOut, next)
+  }, [voiceOut, sharing, pushOptions])
+  // The bar owns the share's consent surface — when it goes away (blur,
+  // Esc, jump to the app), the share it started must stop with it. Nothing
+  // may keep capturing the screen with no indicator in sight.
+  const stopShareIfOn = useCallback(() => {
+    if (!sharing) return
+    setSharing(false)
+    pushOptions(voiceOut, false)
+  }, [sharing, voiceOut, pushOptions])
+  useEffect(() => {
+    const onBlur = () => stopShareIfOn()
+    window.addEventListener('blur', onBlur)
+    return () => window.removeEventListener('blur', onBlur)
+  }, [stopShareIfOn])
+
+  const dismiss = useCallback(() => {
+    stopShareIfOn()
+    void window.ipc.invoke('quickAsk:hide', null).catch(() => {})
+  }, [stopShareIfOn])
 
   // Jump to the full conversation: the question already lives in the app's
   // active chat (the bar relays into it), so focusing the app window lands
   // on this exact exchange. The bar gets out of the way.
   const openInApp = useCallback(() => {
+    stopShareIfOn()
     void window.ipc.invoke('quickAsk:openChat', null).catch(() => {})
     void window.ipc.invoke('quickAsk:hide', null).catch(() => {})
-  }, [])
+  }, [stopShareIfOn])
 
   // Fresh conversation for the next question: resets the app's active chat
   // (in the background) and clears the panel. The bar stays up.
@@ -299,6 +341,49 @@ export function QuickAskBar() {
             <span className="text-sm text-neutral-400">to speak</span>
           </span>
         )}
+        {/* Optional toggles: speak answers aloud, share the screen. Same
+            layered chrome as the send button; a lit tint marks active. */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={toggleVoiceOut}
+              aria-label={voiceOut ? 'Stop speaking answers' : 'Speak answers aloud'}
+              className={`relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full ring-1 ring-inset transition-all ${
+                voiceOut
+                  ? 'bg-gradient-to-b from-sky-400/30 to-sky-600/10 text-sky-100 ring-sky-300/30'
+                  : 'bg-gradient-to-b from-white/10 to-white/[0.03] text-neutral-400 ring-white/15 hover:text-neutral-100'
+              }`}
+            >
+              <span className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(120%_80%_at_50%_0%,rgba(255,255,255,0.1),transparent_55%)]" />
+              <Volume2 className="relative h-4 w-4" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top">{voiceOut ? 'Answers are spoken — click to mute' : 'Speak answers aloud'}</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={toggleShare}
+              aria-label={sharing ? 'Stop sharing your screen' : 'Share your screen'}
+              className={`relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full ring-1 ring-inset transition-all ${
+                sharing
+                  ? 'bg-gradient-to-b from-emerald-400/30 to-emerald-600/10 text-emerald-100 ring-emerald-300/30'
+                  : 'bg-gradient-to-b from-white/10 to-white/[0.03] text-neutral-400 ring-white/15 hover:text-neutral-100'
+              }`}
+            >
+              <span className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(120%_80%_at_50%_0%,rgba(255,255,255,0.1),transparent_55%)]" />
+              <MonitorUp className="relative h-4 w-4" />
+              {sharing && (
+                <span className="absolute right-1 top-1 h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
+              )}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top">
+            {sharing ? 'Sharing your screen with this chat — click to stop' : 'Share your screen with this chat'}
+          </TooltipContent>
+        </Tooltip>
         <button
           type="submit"
           disabled={!draft.trim()}

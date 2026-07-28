@@ -299,6 +299,20 @@ question relays through main into the current chat (`quickAsk:submit` →
 timestamped after the submit count). The window is hidden, not destroyed,
 on dismiss (blur or Esc); it grows to show the answer via `quickAsk:resize`.
 
+**Optional toggles** (`quickAsk:setOptions` → `quick-ask:set-options`;
+actual state echoes back over `quickAsk:optionsState` →
+`quick-ask:options-state`): **voice response** speaks the bar's answers
+aloud — per-turn (`speakTurnRef` set at submit for quick-ask turns), so
+composer messages outside the bar never start talking; the segment player
+and fallback-speech net honor it. **Screen share** reuses the call
+engine's capture wholesale (`video.start({camera:false})` +
+`startScreenShare`, black-frame permission check included): frames ride
+along with bar submits and `composition.videoMode` is set. The bar owns
+the consent surface outside calls — a lit share toggle with a pulsing dot
+is the badge, no floating pill appears, and the share STOPS whenever the
+bar goes away (blur, Esc, the Open-in-Rowboat jump). Bar toggles never
+touch devices while a call is live.
+
 ## Cost notes
 
 Webcam frames ≈ 250–350 tokens each (≤12/message ≈ 3–4k); screen frames ≈

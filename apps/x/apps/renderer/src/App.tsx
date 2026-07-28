@@ -1098,6 +1098,10 @@ function App() {
   // cleared at submit, set by the segment player; the fallback-speech net
   // fires only when this is still false at turn completion.
   const spokeSegmentThisTurnRef = useRef(false)
+  // The current turn should be spoken aloud even without a call — set at
+  // submit for quick-ask questions with the voice toggle on. Per-turn so
+  // composer messages outside the bar never start talking.
+  const speakTurnRef = useRef(false)
   // Fallback-speech bookkeeping, armed per call turn at submit (see
   // handlePromptSubmit) and consumed by the effect below the segment player.
   const callTurnVoiceRef = useRef<{ pending: boolean; submitAt: number }>({
@@ -1127,7 +1131,7 @@ function App() {
       if (pttStatusRef.current !== 'idle') break
       const segment = voiceSegments[spokenVoiceRef.current.count]
       spokenVoiceRef.current.count += 1
-      if (ttsEnabledRef.current) {
+      if (ttsEnabledRef.current || speakTurnRef.current) {
         const marks = callTurnMarksRef.current
         if (marks && marks.speak === undefined) marks.speak = performance.now()
         spokeSegmentThisTurnRef.current = true
@@ -1145,7 +1149,8 @@ function App() {
     if (activeIsProcessing) return
     const turn = callTurnVoiceRef.current
     if (!turn.pending) return
-    if (!inCallRef.current || !ttsEnabledRef.current) {
+    // Speaking this turn: call TTS, or the quick-ask voice toggle.
+    if (!(inCallRef.current ? ttsEnabledRef.current : speakTurnRef.current)) {
       turn.pending = false
       return
     }
@@ -1816,6 +1821,45 @@ function App() {
       setIsRightPaneMaximized(true)
     })
   }, [])
+
+  // Quick-ask toggles (voice response / screen share), pushed from the bar.
+  // Screen share reuses the call engine's capture wholesale — the bar owns
+  // the share indicator, so no pill appears outside calls. Calls own the
+  // devices while live: bar toggles never fight an active call.
+  const quickAskOptionsRef = useRef({ voiceOutput: false, screenShare: false })
+  useEffect(() => {
+    return window.ipc.on('quick-ask:set-options', (opts) => {
+      quickAskOptionsRef.current = opts
+      if (inCallRef.current) return
+      if (opts.screenShare && video.screenState !== 'live') {
+        void (async () => {
+          await video.start({ camera: false })
+          const shared = await video.startScreenShare()
+          if (!shared) {
+            video.stop()
+            quickAskOptionsRef.current = { ...opts, screenShare: false }
+            setPermissionDialog('screen-recording')
+          }
+        })()
+      } else if (!opts.screenShare && video.screenState === 'live') {
+        video.stopScreenShare()
+        video.stop()
+      }
+    })
+  }, [video])
+
+  // Report the ACTUAL state back to the bar — its badge must reflect what
+  // capture is really doing (a denied permission means no share, whatever
+  // the toggle wished for).
+  useEffect(() => {
+    if (inCall) return
+    void window.ipc
+      .invoke('quickAsk:optionsState', {
+        voiceOutput: quickAskOptionsRef.current.voiceOutput,
+        screenSharing: video.screenState === 'live',
+      })
+      .catch(() => {})
+  }, [inCall, video.screenState])
 
   // Quick-ask bar: a question typed/spoken into the global ⌥⇧Space bar lands
   // in the current chat exactly like a composer message.
@@ -3410,7 +3454,13 @@ function App() {
       marks.submit = performance.now()
     }
 
-    if (inCallRef.current) {
+    // Quick-ask voice toggle: this turn speaks its reply even though no call
+    // is live. Per-turn (not a sticky flag) so composer messages typed
+    // outside the bar never start talking.
+    speakTurnRef.current =
+      !inCallRef.current && quickAskActiveRef.current && quickAskOptionsRef.current.voiceOutput
+
+    if (inCallRef.current || speakTurnRef.current) {
       // A new question supersedes whatever of the previous reply was still
       // unspoken — silence it and drop the frozen backlog so it never plays
       // over the new turn. (The overlay resets its segment list when the
@@ -3429,7 +3479,10 @@ function App() {
       }
     }
 
-    const videoFrames = inCallRef.current ? video.collectFrames() : []
+    // Frames ride along whenever screen capture is live — during calls, and
+    // for quick-ask questions with the share toggle on.
+    const videoFrames =
+      inCallRef.current || video.screenState === 'live' ? video.collectFrames() : []
 
     const userMessageId = `user-${Date.now()}`
     const displayAttachments: ChatMessage['attachments'] = hasAttachments || videoFrames.length > 0
@@ -3505,10 +3558,16 @@ function App() {
             composition: {
               workDirId: currentRunId,
               ...(pendingVoiceInputRef.current ? { voiceInput: true } : {}),
-              ...(ttsEnabledRef.current ? { voiceOutput: ttsModeRef.current } : {}),
+              ...(ttsEnabledRef.current
+                ? { voiceOutput: ttsModeRef.current }
+                : speakTurnRef.current
+                  ? { voiceOutput: 'full' as const }
+                  : {}),
               ...(searchEnabled ? { searchEnabled: true } : {}),
               ...(codeMode ? { codeMode } : {}),
-              ...(inCallRef.current && (video.cameraOn || video.screenState === 'live') ? { videoMode: true } : {}),
+              ...((inCallRef.current && video.cameraOn) || video.screenState === 'live'
+                ? { videoMode: true }
+                : {}),
               ...(practiceModeRef.current ? { coachMode: true } : {}),
             },
           },

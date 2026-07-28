@@ -1111,6 +1111,42 @@ const ipcSchemas = {
     req: z.null(),
     res: z.null(),
   },
+  // Bar → main → app window: the bar's optional toggles. voiceOutput speaks
+  // the answers aloud; screenShare turns on the existing screen capture so
+  // frames ride along with bar submits (the bar owns the share indicator —
+  // no floating pill outside calls).
+  'quickAsk:setOptions': {
+    req: z.object({
+      voiceOutput: z.boolean(),
+      screenShare: z.boolean(),
+    }),
+    res: z.object({}),
+  },
+  // Push channel: main → app window with the toggles above.
+  'quick-ask:set-options': {
+    req: z.object({
+      voiceOutput: z.boolean(),
+      screenShare: z.boolean(),
+    }),
+    res: z.null(),
+  },
+  // App window → main → bar: the ACTUAL state (share can fail on the macOS
+  // permission; the bar must never show a "sharing" badge that lies).
+  'quickAsk:optionsState': {
+    req: z.object({
+      voiceOutput: z.boolean(),
+      screenSharing: z.boolean(),
+    }),
+    res: z.object({}),
+  },
+  // Push channel: main → bar for the state above.
+  'quick-ask:options-state': {
+    req: z.object({
+      voiceOutput: z.boolean(),
+      screenSharing: z.boolean(),
+    }),
+    res: z.null(),
+  },
   // Bar → main: start a fresh chat for the next question (the app stays in
   // the background; only the conversation resets).
   'quickAsk:newChat': {
