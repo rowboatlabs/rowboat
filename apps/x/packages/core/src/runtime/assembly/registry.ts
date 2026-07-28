@@ -4,6 +4,7 @@ import { parseFrontmatter } from "../../application/lib/parse-frontmatter.js";
 import { buildCopilotAgent } from "./copilot/agent.js";
 import { buildBackgroundTaskAgent } from "../../background-tasks/agent.js";
 import { buildLiveNoteAgent } from "../../knowledge/live-note/agent.js";
+import { buildTodoItemAgent } from "../../todo/agent.js";
 import { getRaw as getNoteCreationRaw } from "../../knowledge/note_creation.js";
 import { getRaw as getNoteCurationRaw } from "../../knowledge/note_curation.js";
 import { getRaw as getNoteTaggingAgentRaw } from "../../knowledge/note_tagging_agent.js";
@@ -57,6 +58,7 @@ const builtinAgents: Record<string, BuiltinAgentDefinition> = {
     rowboatx: COPILOT,
     "live-note-agent": { build: buildLiveNoteAgent },
     "background-task-agent": { build: buildBackgroundTaskAgent },
+    "todo-item-agent": { build: buildTodoItemAgent },
     note_creation: promptFileAgent("note_creation", getNoteCreationRaw),
     note_curation: promptFileAgent("note_curation", getNoteCurationRaw),
     note_tagging_agent: promptFileAgent("note_tagging_agent", getNoteTaggingAgentRaw),

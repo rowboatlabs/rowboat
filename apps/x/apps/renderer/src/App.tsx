@@ -38,6 +38,7 @@ import { KnowledgeView, type KnowledgeViewMode } from '@/components/knowledge-vi
 import { GoogleDocPickerDialog } from '@/components/google-doc-picker-dialog';
 import { ChatHistoryView } from '@/components/chat-history-view';
 import { HomeView } from '@/components/home-view';
+import { TodoView } from '@/components/todo-view';
 import { MeetingsView } from '@/components/meetings-view';
 import { CodeView, type ActiveCodeSession } from '@/components/code/code-view';
 import { CodeChat } from '@/components/code/code-chat';
@@ -896,6 +897,9 @@ function App() {
   const [isChatHistoryOpen, setIsChatHistoryOpen] = useState(false)
   // Default landing view: Home with the chat docked according to appearance settings.
   const [isHomeOpen, setIsHomeOpen] = useState(true)
+  // Home surface: the to-do list is the primary tab; the legacy dashboard
+  // stays reachable via its Overview toggle.
+  const [homeTab, setHomeTab] = useState<'todos' | 'overview'>('todos')
   const [emailInitialThreadId, setEmailInitialThreadId] = useState<string | null>(null)
   const [emailThreadIdVersion, setEmailThreadIdVersion] = useState(0)
   // Search query pushed into the email view's search box (e.g. the assistant's
@@ -6986,19 +6990,35 @@ function App() {
                 />
               ) : isHomeOpen ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-                  <HomeView
-                    tree={tree}
-                    runs={runs}
-                    bgTaskSummaries={bgTaskSummaries}
-                    onOpenEmail={() => openEmailView()}
-                    onOpenMeetings={openMeetingsView}
-                    onOpenAgents={() => { setBgTaskInitialSlug(null); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
-                    onOpenAgent={(slug) => { setBgTaskInitialSlug(slug); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
-                    onOpenNote={(path) => navigateToFile(path)}
-                    onOpenRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
-                    onTakeMeetingNotes={() => { void handleToggleMeeting() }}
-                    onOpenChat={handleNewChatTab}
-                  />
+                  {homeTab === 'todos' ? (
+                    <TodoView
+                      onOpenNote={(path) => navigateToFile(path)}
+                      onShowOverview={() => setHomeTab('overview')}
+                    />
+                  ) : (
+                    <div className="relative flex-1 min-h-0 flex flex-col overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => setHomeTab('todos')}
+                        className="absolute right-6 top-4 z-10 rounded-md border border-border bg-card px-2.5 py-1 text-xs text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground"
+                      >
+                        ← To-dos
+                      </button>
+                      <HomeView
+                        tree={tree}
+                        runs={runs}
+                        bgTaskSummaries={bgTaskSummaries}
+                        onOpenEmail={() => openEmailView()}
+                        onOpenMeetings={openMeetingsView}
+                        onOpenAgents={() => { setBgTaskInitialSlug(null); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
+                        onOpenAgent={(slug) => { setBgTaskInitialSlug(slug); setBgTaskSlugVersion((v) => v + 1); openBgTasksView() }}
+                        onOpenNote={(path) => navigateToFile(path)}
+                        onOpenRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
+                        onTakeMeetingNotes={() => { void handleToggleMeeting() }}
+                        onOpenChat={handleNewChatTab}
+                      />
+                    </div>
+                  )}
                 </div>
               ) : isSuggestedTopicsOpen ? (
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">

@@ -10,6 +10,7 @@ import {
   startServicesWatcher,
   startLiveNoteAgentWatcher,
   startBackgroundTaskAgentWatcher,
+  startTodoWatcher,
   startWorkspaceWatcher,
   stopRunsWatcher,
   stopServicesWatcher,
@@ -27,6 +28,7 @@ import { init as initGraphBuilder } from "@x/core/dist/knowledge/build_graph.js"
 import { init as initNoteTagging } from "@x/core/dist/knowledge/tag_notes.js";
 import { init as initInlineTasks } from "@x/core/dist/knowledge/inline_tasks.js";
 import { init as initAgentRunner } from "@x/core/dist/agent-schedule/runner.js";
+import { DEV_SERVER_URL } from "./dev-server.js";
 import { init as initChannels } from "@x/core/dist/channels/service.js";
 import { init as initAgentNotes } from "@x/core/dist/knowledge/agent_notes.js";
 import { init as initCalendarNotifications } from "@x/core/dist/knowledge/notify_calendar_meetings.js";
@@ -430,7 +432,7 @@ function createWindow(options: { startHidden?: boolean } = {}) {
   // Returns true when the URL was external and routed to the system browser.
   const routeExternalNavigation = (url: string): boolean => {
     const isInternal =
-      url.startsWith("app://") || url.startsWith("http://localhost:5173");
+      url.startsWith("app://") || url.startsWith(DEV_SERVER_URL);
     if (isInternal) return false;
     shell.openExternal(url);
     return true;
@@ -466,7 +468,7 @@ function createWindow(options: { startHidden?: boolean } = {}) {
   if (app.isPackaged) {
     win.loadURL("app://-/index.html");
   } else {
-    win.loadURL("http://localhost:5173");
+    win.loadURL(DEV_SERVER_URL);
   }
 }
 
@@ -691,6 +693,9 @@ app.whenReady().then(async () => {
 
   // start bg-task agent event watcher (forwards bus → renderer)
   startBackgroundTaskAgentWatcher();
+
+  // start todo event watcher (forwards bus → renderer)
+  startTodoWatcher();
 
   // start live-note scheduler (cron / window)
   initLiveNoteScheduler();

@@ -1,3 +1,4 @@
+import { DEV_SERVER_URL } from './dev-server.js';
 import { ipcMain, BrowserWindow, shell, dialog, systemPreferences, desktopCapturer, app, screen, powerSaveBlocker } from 'electron';
 import { ipc } from '@x/shared';
 import path from 'node:path';
@@ -138,6 +139,14 @@ import {
   listLiveNotes,
 } from '@x/core/dist/knowledge/live-note/fileops.js';
 import { runBackgroundTask } from '@x/core/dist/background-tasks/runner.js';
+import { runTodoItem, runningItemKeys } from '@x/core/dist/todo/runner.js';
+import { todoBus } from '@x/core/dist/todo/bus.js';
+import {
+  readTodo,
+  saveTodo,
+  addItem as addTodoItem,
+  clearCompleted as clearTodoCompleted,
+} from '@x/core/dist/todo/fileops.js';
 import { backgroundTaskBus } from '@x/core/dist/background-tasks/bus.js';
 import {
   fetchTask,
@@ -845,6 +854,14 @@ export function startBackgroundTaskAgentWatcher(): void {
   if (backgroundTaskAgentWatcher) return;
   backgroundTaskAgentWatcher = backgroundTaskBus.subscribe((event) => {
     broadcastToWindows('bg-task-agent:events', event);
+  });
+}
+
+let todoWatcher: (() => void) | null = null;
+export function startTodoWatcher(): void {
+  if (todoWatcher) return;
+  todoWatcher = todoBus.subscribe((event) => {
+    broadcastToWindows('todo:events', event);
   });
 }
 
@@ -2491,7 +2508,7 @@ export function setupIpcHandlers() {
       if (app.isPackaged) {
         win.loadURL('app://-/index.html#video-popout');
       } else {
-        win.loadURL('http://localhost:5173/#video-popout');
+        win.loadURL(`${DEV_SERVER_URL}/#video-popout`);
       }
       return {};
     },
@@ -2599,6 +2616,48 @@ export function setupIpcHandlers() {
     'live-note:listNotes': async () => {
       const notes = await listLiveNotes();
       return { notes };
+    },
+    // Todo (home to-do list) handlers
+    'todo:get': async () => {
+      const list = await readTodo();
+      return { list, running: runningItemKeys() };
+    },
+    'todo:save': async (_event, args) => {
+      try {
+        const list = await saveTodo(args.list);
+        return { success: true, list };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'todo:addItem': async (_event, args) => {
+      try {
+        const item = await addTodoItem(args.text);
+        if (args.run || item.delegated) {
+          void runTodoItem(item.key).catch(() => {});
+        }
+        todoBus.publish({ type: 'list_changed' });
+        return { success: true };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'todo:runItem': async (_event, args) => {
+      try {
+        void runTodoItem(args.key, args.context).catch(() => {});
+        return { success: true };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'todo:clearCompleted': async () => {
+      try {
+        const archived = await clearTodoCompleted();
+        todoBus.publish({ type: 'list_changed' });
+        return { success: true, archived };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
     },
     // Bg-task handlers
     'bg-task:run': async (_event, args) => {

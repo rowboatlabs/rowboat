@@ -9,6 +9,7 @@
  * to the app window (which owns the chat), response state relays back here
  * (see the quickAsk handlers in ipc.ts).
  */
+import { DEV_SERVER_URL } from './dev-server.js';
 import { app, BrowserWindow, globalShortcut, screen } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -80,7 +81,7 @@ function createWindow(): BrowserWindow {
   if (app.isPackaged) {
     void win.loadURL('app://-/index.html#quick-ask');
   } else {
-    void win.loadURL('http://localhost:5173/#quick-ask');
+    void win.loadURL(`${DEV_SERVER_URL}/#quick-ask`);
   }
   quickAskWin = win;
   return win;

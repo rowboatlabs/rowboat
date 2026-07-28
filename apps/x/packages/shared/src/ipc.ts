@@ -7,6 +7,7 @@ import { AgentScheduleConfig, AgentScheduleEntry } from './agent-schedule.js';
 import { AgentScheduleState } from './agent-schedule-state.js';
 import { ServiceEvent } from './service-events.js';
 import { LiveNoteAgentEvent, LiveNoteSchema } from './live-note.js';
+import { TodoEvent, TodoListSchema } from './todo.js';
 import {
     BackgroundTaskAgentEvent,
     BackgroundTaskSchema,
@@ -644,6 +645,10 @@ const ipcSchemas = {
   },
   'bg-task-agent:events': {
     req: BackgroundTaskAgentEvent,
+    res: z.null(),
+  },
+  'todo:events': {
+    req: TodoEvent,
     res: z.null(),
   },
   // The unified model catalog (core/models/catalog.ts): every connected
@@ -2413,6 +2418,61 @@ const ipcSchemas = {
         isActive: z.boolean(),
         objective: z.string(),
       })),
+    }),
+  },
+  // Todo (home to-do list) channels
+  'todo:get': {
+    req: z.null(),
+    res: z.object({
+      list: TodoListSchema,
+      // Keys of items with a run currently in flight — ephemeral state, never
+      // in the file; the renderer overlays spinners from this + todo:events.
+      running: z.array(z.string()),
+    }),
+  },
+  // Full-model save from the renderer. Core re-normalizes keys and merges
+  // against disk so receipts that landed after the renderer's last read
+  // survive stale saves.
+  'todo:save': {
+    req: z.object({
+      list: TodoListSchema,
+    }),
+    res: z.object({
+      success: z.boolean(),
+      list: TodoListSchema.optional(),
+      error: z.string().optional(),
+    }),
+  },
+  'todo:addItem': {
+    req: z.object({
+      text: z.string(),
+      // Fire the item's run immediately (composer delegate / @rowboat typed).
+      run: z.boolean(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  // Fire a run for one item, identified by its normalized line text.
+  // Fire-and-forget: progress and completion arrive on todo:events.
+  'todo:runItem': {
+    req: z.object({
+      key: z.string(),
+      context: z.string().optional(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  // Archive checked items (receipts intact) to todo/archive/<YYYY-MM>.md.
+  'todo:clearCompleted': {
+    req: z.null(),
+    res: z.object({
+      success: z.boolean(),
+      archived: z.number().optional(),
+      error: z.string().optional(),
     }),
   },
   // Background-task channels
