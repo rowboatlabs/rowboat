@@ -930,8 +930,9 @@ function SetupTab({
                                 variant="field"
                                 inheritDefault={{ label: '(global default)' }}
                                 allowCustom
-                                value={modelOverrideToRef(draft.model, draft.provider)}
-                                onChange={(ref) => setDraft({ ...draft, ...refToModelOverride(ref) })}
+                                effortSelectable
+                                value={modelOverrideToRef(draft.model, draft.provider, draft.effort)}
+                                onChange={(selection) => setDraft({ ...draft, ...refToModelOverride(selection) })}
                             />
                         </div>
                         <div className="mt-4">
@@ -1464,6 +1465,7 @@ function TaskDetail({
             if (JSON.stringify(draft.triggers) !== JSON.stringify(task.triggers)) partial.triggers = draft.triggers
             if (draft.model !== task.model) partial.model = draft.model
             if (draft.provider !== task.provider) partial.provider = draft.provider
+            if (draft.effort !== task.effort) partial.effort = draft.effort
             const result = await window.ipc.invoke('bg-task:patch', { slug, partial })
             if (result.success && result.task) {
                 analytics.bgAgentUpdated()
