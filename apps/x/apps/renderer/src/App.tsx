@@ -138,7 +138,7 @@ import { ProductTour, type TourNavTarget } from '@/components/product-tour'
 import { useMeetingTranscription, type CalendarEventMeta } from '@/hooks/useMeetingTranscription'
 import { useAnalyticsIdentity } from '@/hooks/useAnalyticsIdentity'
 import * as analytics from '@/lib/analytics'
-import { playAckCue, playAlertCue } from '@/lib/call-sounds'
+import { playAckCue, playAlertCue, playPopCue } from '@/lib/call-sounds'
 import { useTheme } from '@/contexts/theme-context'
 import { TokenUsageMenu } from '@/components/token-usage-menu'
 
@@ -1098,6 +1098,10 @@ function App() {
   // cleared at submit, set by the segment player; the fallback-speech net
   // fires only when this is still false at turn completion.
   const spokeSegmentThisTurnRef = useRef(false)
+  // The current turn should be spoken aloud even without a call — set at
+  // submit for quick-ask questions with the voice toggle on. Per-turn so
+  // composer messages outside the bar never start talking.
+  const speakTurnRef = useRef(false)
   // Fallback-speech bookkeeping, armed per call turn at submit (see
   // handlePromptSubmit) and consumed by the effect below the segment player.
   const callTurnVoiceRef = useRef<{ pending: boolean; submitAt: number }>({
@@ -1127,7 +1131,7 @@ function App() {
       if (pttStatusRef.current !== 'idle') break
       const segment = voiceSegments[spokenVoiceRef.current.count]
       spokenVoiceRef.current.count += 1
-      if (ttsEnabledRef.current) {
+      if (ttsEnabledRef.current || speakTurnRef.current) {
         const marks = callTurnMarksRef.current
         if (marks && marks.speak === undefined) marks.speak = performance.now()
         spokeSegmentThisTurnRef.current = true
@@ -1145,7 +1149,8 @@ function App() {
     if (activeIsProcessing) return
     const turn = callTurnVoiceRef.current
     if (!turn.pending) return
-    if (!inCallRef.current || !ttsEnabledRef.current) {
+    // Speaking this turn: call TTS, or the quick-ask voice toggle.
+    if (!(inCallRef.current ? ttsEnabledRef.current : speakTurnRef.current)) {
       turn.pending = false
       return
     }
@@ -1796,9 +1801,15 @@ function App() {
     if (localStorage.getItem('quick-ask-tip-shown')) return
     const timer = setTimeout(() => {
       localStorage.setItem('quick-ask-tip-shown', '1')
+      playPopCue()
       toast('Ask Rowboat from anywhere', {
-        description: 'Press ⌥⇧Space in any app for a quick question — the answer shows up right there and in your chat.',
+        description: `Press ${isMac ? '⌥⇧Space' : 'Alt+Shift+Space'} in any app for a quick question — the answer shows up right there and in your chat.`,
         duration: 12000,
+        closeButton: true,
+        // Lift the card off the page, and move sonner's close button (which
+        // defaults to the top-LEFT corner) to the top right.
+        className:
+          'shadow-xl shadow-black/25 [&_[data-close-button]]:!left-auto [&_[data-close-button]]:!right-0 [&_[data-close-button]]:!translate-x-[15%] [&_[data-close-button]]:!-translate-y-[15%]',
         action: {
           label: 'Try it',
           onClick: () => void window.ipc.invoke('quickAsk:show', null).catch(() => {}),
@@ -1816,6 +1827,60 @@ function App() {
       setIsRightPaneMaximized(true)
     })
   }, [])
+
+  // A screen share ended since the last message: the NEXT message tells the
+  // model its earlier frames are stale (history keeps frames inline forever,
+  // so without this it answers "what's on my screen" from the past).
+  const screenShareEndedRef = useRef(false)
+  const lastScreenStateForNoticeRef = useRef(video.screenState)
+  useEffect(() => {
+    if (lastScreenStateForNoticeRef.current === 'live' && video.screenState !== 'live') {
+      screenShareEndedRef.current = true
+    }
+    // Sharing again supersedes the notice — fresh frames arrive with the
+    // next message anyway.
+    if (video.screenState === 'live') screenShareEndedRef.current = false
+    lastScreenStateForNoticeRef.current = video.screenState
+  }, [video.screenState])
+
+  // Quick-ask toggles (voice response / screen share), pushed from the bar.
+  // Screen share reuses the call engine's capture wholesale — the bar owns
+  // the share indicator, so no pill appears outside calls. Calls own the
+  // devices while live: bar toggles never fight an active call.
+  const quickAskOptionsRef = useRef({ voiceOutput: false, screenShare: false })
+  useEffect(() => {
+    return window.ipc.on('quick-ask:set-options', (opts) => {
+      quickAskOptionsRef.current = opts
+      if (inCallRef.current) return
+      if (opts.screenShare && video.screenState !== 'live') {
+        void (async () => {
+          await video.start({ camera: false })
+          const shared = await video.startScreenShare()
+          if (!shared) {
+            video.stop()
+            quickAskOptionsRef.current = { ...opts, screenShare: false }
+            setPermissionDialog('screen-recording')
+          }
+        })()
+      } else if (!opts.screenShare && video.screenState === 'live') {
+        video.stopScreenShare()
+        video.stop()
+      }
+    })
+  }, [video])
+
+  // Report the ACTUAL state back to the bar — its badge must reflect what
+  // capture is really doing (a denied permission means no share, whatever
+  // the toggle wished for).
+  useEffect(() => {
+    if (inCall) return
+    void window.ipc
+      .invoke('quickAsk:optionsState', {
+        voiceOutput: quickAskOptionsRef.current.voiceOutput,
+        screenSharing: video.screenState === 'live',
+      })
+      .catch(() => {})
+  }, [inCall, video.screenState])
 
   // Quick-ask bar: a question typed/spoken into the global ⌥⇧Space bar lands
   // in the current chat exactly like a composer message.
@@ -3410,7 +3475,13 @@ function App() {
       marks.submit = performance.now()
     }
 
-    if (inCallRef.current) {
+    // Quick-ask voice toggle: this turn speaks its reply even though no call
+    // is live. Per-turn (not a sticky flag) so composer messages typed
+    // outside the bar never start talking.
+    speakTurnRef.current =
+      !inCallRef.current && quickAskActiveRef.current && quickAskOptionsRef.current.voiceOutput
+
+    if (inCallRef.current || speakTurnRef.current) {
       // A new question supersedes whatever of the previous reply was still
       // unspoken — silence it and drop the frozen backlog so it never plays
       // over the new turn. (The overlay resets its segment list when the
@@ -3429,7 +3500,10 @@ function App() {
       }
     }
 
-    const videoFrames = inCallRef.current ? video.collectFrames() : []
+    // Frames ride along whenever screen capture is live — during calls, and
+    // for quick-ask questions with the share toggle on.
+    const videoFrames =
+      inCallRef.current || video.screenState === 'live' ? video.collectFrames() : []
 
     const userMessageId = `user-${Date.now()}`
     const displayAttachments: ChatMessage['attachments'] = hasAttachments || videoFrames.length > 0
@@ -3505,10 +3579,16 @@ function App() {
             composition: {
               workDirId: currentRunId,
               ...(pendingVoiceInputRef.current ? { voiceInput: true } : {}),
-              ...(ttsEnabledRef.current ? { voiceOutput: ttsModeRef.current } : {}),
+              ...(ttsEnabledRef.current
+                ? { voiceOutput: ttsModeRef.current }
+                : speakTurnRef.current
+                  ? { voiceOutput: 'full' as const }
+                  : {}),
               ...(searchEnabled ? { searchEnabled: true } : {}),
               ...(codeMode ? { codeMode } : {}),
-              ...(inCallRef.current && (video.cameraOn || video.screenState === 'live') ? { videoMode: true } : {}),
+              ...((inCallRef.current && video.cameraOn) || video.screenState === 'live'
+                ? { videoMode: true }
+                : {}),
               ...(practiceModeRef.current ? { coachMode: true } : {}),
             },
           },
@@ -3517,21 +3597,27 @@ function App() {
         ...(reasoningEffort ? { reasoningEffort } : {}),
         ...(chatMaxModelCalls !== undefined ? { maxModelCalls: chatMaxModelCalls } : {}),
       }
-      const userMessageContextFor = (middlePane: Awaited<ReturnType<typeof buildMiddlePaneContext>>) => ({
-        // Local wall-clock with explicit timezone, never toISOString: the model
-        // adopts this as its time frame, so a UTC "now" makes it quote email
-        // timestamps (which carry their own offsets) in UTC instead of local.
-        currentDateTime: `${new Date().toLocaleString('en-US', {
-          weekday: 'long',
-          year: 'numeric',
-          month: 'long',
-          day: 'numeric',
-          hour: 'numeric',
-          minute: '2-digit',
-          timeZoneName: 'short',
-        })} (${Intl.DateTimeFormat().resolvedOptions().timeZone})`,
-        middlePane: middlePane ?? { kind: 'empty' as const },
-      })
+      const userMessageContextFor = (middlePane: Awaited<ReturnType<typeof buildMiddlePaneContext>>) => {
+        // One-shot: the stale-frames notice rides on exactly one message.
+        const screenShareEnded = screenShareEndedRef.current
+        screenShareEndedRef.current = false
+        return {
+          // Local wall-clock with explicit timezone, never toISOString: the model
+          // adopts this as its time frame, so a UTC "now" makes it quote email
+          // timestamps (which carry their own offsets) in UTC instead of local.
+          currentDateTime: `${new Date().toLocaleString('en-US', {
+            weekday: 'long',
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+            timeZoneName: 'short',
+          })} (${Intl.DateTimeFormat().resolvedOptions().timeZone})`,
+          middlePane: middlePane ?? { kind: 'empty' as const },
+          ...(screenShareEnded ? { screenShareEnded: true } : {}),
+        }
+      }
 
       // One retry: an in-call submit can land while the previous turn's
       // abort hasn't fully settled in the runtime — losing the message (and

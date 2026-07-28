@@ -15,6 +15,12 @@ function formatUserMessageContextForLlm(userMessageContext: z.infer<typeof UserM
         sections.push(`Current date and time: ${userMessageContext.currentDateTime}`);
     }
 
+    if (userMessageContext.screenShareEnded) {
+        sections.push(
+            'Screen sharing has ENDED. Any screen-share frames earlier in this conversation are from the past — they do NOT show the current screen. Never answer questions about the current screen from them; if asked, say screen sharing is off.',
+        );
+    }
+
     if (userMessageContext.middlePane) {
         if (userMessageContext.middlePane.kind === 'empty') {
             sections.push(`Middle pane:\nState: empty`);

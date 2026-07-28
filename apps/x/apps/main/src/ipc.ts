@@ -1002,6 +1002,14 @@ export function setupIpcHandlers() {
       findMainAppWindow()?.webContents.send('quick-ask:new-chat', null);
       return {};
     },
+    'quickAsk:setOptions': async (_event, args) => {
+      findMainAppWindow()?.webContents.send('quick-ask:set-options', args);
+      return {};
+    },
+    'quickAsk:optionsState': async (_event, args) => {
+      getQuickAskWindow()?.webContents.send('quick-ask:options-state', args);
+      return {};
+    },
     'quickAsk:openChat': async () => {
       const main = findMainAppWindow();
       if (main) {
