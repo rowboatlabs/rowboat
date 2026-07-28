@@ -198,7 +198,9 @@ function compactWorkDirPath(path: string) {
 export type CallPreset = 'voice' | 'video' | 'share' | 'practice'
 
 const CALL_PRESET_MENU: Array<{ preset: CallPreset; label: string; description: string; Icon: typeof Phone }> = [
-  { preset: 'voice', label: 'Voice call', description: 'Just talk — nothing is shared, the mascot hovers while you work', Icon: AudioLines },
+  // 'voice' was dropped from the menu (the quick-ask bar with its voice
+  // toggle covers the talk-without-devices case); the preset itself stays
+  // valid for programmatic callers.
   { preset: 'video', label: 'Video call', description: 'Camera on, face to face — it sees your expressions', Icon: Video },
   { preset: 'practice', label: 'Practice session', description: 'Rehearse a pitch or interview with live coaching', Icon: Presentation },
 ]

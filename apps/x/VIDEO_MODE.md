@@ -19,7 +19,7 @@ and ends it.
 | Preset | Starting devices | First surface |
 |--------|------------------|---------------|
 | `share` — main click | screen on, camera off | floating pill |
-| `voice` — "Voice call" | camera off, screen off | floating mascot pill |
+| `voice` — no menu entry (programmatic only; the quick-ask bar's voice toggle covers this case) | camera off, screen off | floating mascot pill |
 | `video` — "Video call" | camera on | floating pill (camera in the pill; expand for full screen) |
 | `practice` — "Practice session" | camera on, + coaching persona | full-screen call |
 
