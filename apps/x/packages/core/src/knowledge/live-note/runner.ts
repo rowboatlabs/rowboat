@@ -114,6 +114,10 @@ export async function runLiveNoteAgent(
         const selection = await getLiveNoteAgentModel();
         const model = live.model ?? selection.model;
         const provider = live.provider ?? (live.model ? undefined : selection.provider);
+        // Effort pairs with whichever source supplied the model: an explicit
+        // note effort always wins; otherwise the category selection's effort
+        // applies only when the note didn't pin its own model.
+        const effort = live.effort ?? (live.model ? undefined : selection.effort);
         // Manual runs are user-requested (the Run button, or the copilot's
         // run-live-note-agent tool mid-chat) and must NOT wait for chat-idle:
         // the requesting chat turn holds the chat-activity lock, so deferring
@@ -130,6 +134,7 @@ export async function runLiveNoteAgent(
                 message: buildMessage(filePath, live, trigger, context),
                 model,
                 ...(provider ? { provider } : {}),
+                ...(effort ? { reasoningEffort: effort } : {}),
                 throwOnError: true,
             }),
         );

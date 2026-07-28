@@ -1,7 +1,7 @@
 import { generateText } from 'ai';
 import { createLanguageModel } from '../models/models.js';
 import { getChatTitleModel, resolveProviderConfig } from '../models/defaults.js';
-import { mapReasoningEffort } from '../models/reasoning.js';
+import { directCallReasoningOptions } from '../models/reasoning.js';
 import { captureLlmUsage } from '../analytics/usage.js';
 import { withUseCase } from '../analytics/use_case.js';
 
@@ -34,20 +34,22 @@ export async function generateChatTitle(firstMessage: string): Promise<string | 
     const text = firstMessage.trim().replace(/\s+/g, ' ');
     if (!text) return null;
 
-    const { model: modelId, provider: providerName } = await getChatTitleModel();
+    const { model: modelId, provider: providerName, effort } = await getChatTitleModel();
     const providerConfig = await resolveProviderConfig(providerName);
     const model = createLanguageModel(providerConfig, modelId);
 
     // Reasoning models (e.g. gateway gemini-3.5-flash) think by default and
     // can starve a tight output cap — dial thinking to low and leave the cap
-    // roomy; the title itself is a handful of tokens either way.
-    const reasoning = mapReasoningEffort(providerConfig.flavor, modelId, 'low', undefined);
+    // roomy; the title itself is a handful of tokens either way. An explicit
+    // effort on the chatTitle task slot overrides the low pin (spread last so
+    // its Anthropic budget floor can raise the cap).
+    const reasoning = await directCallReasoningOptions(providerConfig.flavor, modelId, effort ?? 'low');
     const result = await withUseCase({ useCase: 'copilot_chat', subUseCase: 'chat_title' }, () => generateText({
         model,
         system: SYSTEM_PROMPT,
         prompt: text.slice(0, MAX_INPUT_CHARS),
         maxOutputTokens: 1000,
-        ...(reasoning?.providerOptions ? { providerOptions: reasoning.providerOptions } : {}),
+        ...reasoning,
     }));
 
     captureLlmUsage({

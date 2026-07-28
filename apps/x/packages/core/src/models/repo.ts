@@ -1,4 +1,4 @@
-import { LlmModelConfig, LlmProvider, ModelRef, TaskModels } from "@x/shared/dist/models.js";
+import { LlmModelConfig, LlmProvider, ModelSelection, TaskModels } from "@x/shared/dist/models.js";
 import { WorkDir } from "../config/config.js";
 import { isSignedIn } from "../account/account.js";
 import { capture } from "../analytics/posthog.js";
@@ -13,13 +13,14 @@ import path from "path";
 import z from "zod";
 
 type Config = z.infer<typeof LlmModelConfig>;
-type Ref = z.infer<typeof ModelRef>;
-type TaskModelPatch = { [K in keyof z.infer<typeof TaskModels>]?: Ref | null };
+// Selections are stored as ModelSelection (ref + the effort picked with it).
+type Choice = z.infer<typeof ModelSelection>;
+type TaskModelPatch = { [K in keyof z.infer<typeof TaskModels>]?: Choice | null };
 
 // Top-level merge patch: omitted keys are untouched; an explicit null clears
 // a key. taskModels merges per-key (null clears that task's override).
 export type ModelConfigPatch = {
-    assistantModel?: Ref | null;
+    assistantModel?: Choice | null;
     taskModels?: TaskModelPatch;
     deferBackgroundTasks?: boolean | null;
 };

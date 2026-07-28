@@ -1,6 +1,7 @@
 import type { z } from "zod";
 import type { ReasoningEffort } from "@x/shared/dist/models.js";
 import type { JsonValue } from "@x/shared/dist/turns.js";
+import { isReasoningModel } from "./models-dev.js";
 
 export type ReasoningEffortLevel = z.infer<typeof ReasoningEffort>;
 
@@ -41,6 +42,32 @@ export function parseReasoningEffort(value: unknown): ReasoningEffortLevel | und
  * provider-level fetch rewrite (models/local.ts), and openai-compatible
  * endpoints have no safe universal parameter.
  */
+/**
+ * Effort options for DIRECT AI SDK calls (generateText/generateObject in the
+ * task utilities — chat titles, classifiers, summarizers), mirroring what
+ * the turn bridge does centrally: cache-only capability lookup, canonical →
+ * provider mapping, and the Anthropic output floor. Returns {} when there is
+ * no effort or the model/flavor cannot express it — spread the result into
+ * the call's options as the LAST entry so maxOutputTokens can apply.
+ */
+export async function directCallReasoningOptions(
+    flavor: string,
+    modelId: string,
+    effort: ReasoningEffortLevel | undefined,
+): Promise<{
+    providerOptions?: Record<string, Record<string, JsonValue>>;
+    maxOutputTokens?: number;
+}> {
+    if (!effort) return {};
+    const supports = await isReasoningModel(flavor, modelId).catch(() => undefined);
+    const mapped = mapReasoningEffort(flavor, modelId, effort, supports);
+    if (!mapped) return {};
+    return {
+        providerOptions: mapped.providerOptions,
+        ...(mapped.minOutputTokens ? { maxOutputTokens: mapped.minOutputTokens } : {}),
+    };
+}
+
 export function mapReasoningEffort(
     flavor: string,
     modelId: string,

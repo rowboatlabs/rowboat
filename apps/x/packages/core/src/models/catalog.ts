@@ -48,8 +48,9 @@ export interface CatalogProviderEntry {
 
 export interface ModelCatalogResult {
     providers: CatalogProviderEntry[];
-    /** The effective runtime default (what runs when nothing is picked). */
-    defaultModel: { provider: string; model: string } | null;
+    /** The effective runtime default (what runs when nothing is picked),
+     *  with the effort stored alongside it — seeds new chats' composers. */
+    defaultModel: { provider: string; model: string; effort?: "low" | "medium" | "high" } | null;
 }
 
 const PROVIDER_DISPLAY_NAMES: Record<string, string> = {

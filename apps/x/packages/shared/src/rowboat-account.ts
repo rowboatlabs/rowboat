@@ -1,6 +1,18 @@
 import { z } from 'zod';
 import { BillingCatalogSchema } from './billing.js';
 import { CreditActivationCatalogEntrySchema } from './credits.js';
+import { ReasoningEffort, StoredReasoningEffort } from './models.js';
+
+// One recommended slot on the wire: a bare model id (legacy — effort Auto)
+// or { model, effort? }. Effort is lenient like stored config: missing,
+// null, and "auto" all normalize to undefined (= Auto).
+const RecommendedChoice = z.union([
+  z.string(),
+  z.object({
+    model: z.string(),
+    effort: StoredReasoningEffort.optional(),
+  }),
+]);
 
 export const RowboatApiConfig = z.object({
   appUrl: z.string(),
@@ -28,17 +40,28 @@ export const RowboatApiConfig = z.object({
   modelRecommendations: z.record(z.string(), z.union([
     z.string(),
     z.object({
-      assistantModel: z.string(),
-      taskModels: z.record(z.string(), z.string()).optional(),
+      assistantModel: RecommendedChoice,
+      taskModels: z.record(z.string(), RecommendedChoice).optional(),
     }),
   ])).optional(),
 });
 
 export type ModelRecommendations = NonNullable<z.infer<typeof RowboatApiConfig>['modelRecommendations']>;
 
+/** A recommendation slot in canonical form: model id + normalized effort. */
+export interface RecommendedModelChoice {
+  model: string;
+  effort?: z.infer<typeof ReasoningEffort>;
+}
+
 export interface NormalizedModelRecommendation {
-  assistantModel: string;
-  taskModels: Record<string, string>;
+  assistantModel: RecommendedModelChoice;
+  taskModels: Record<string, RecommendedModelChoice>;
+}
+
+function normalizeChoice(raw: z.infer<typeof RecommendedChoice>): RecommendedModelChoice {
+  if (typeof raw === 'string') return { model: raw };
+  return { model: raw.model, ...(raw.effort ? { effort: raw.effort } : {}) };
 }
 
 /** One provider's recommendation in canonical form; null when absent. */
@@ -48,6 +71,11 @@ export function normalizeModelRecommendation(
 ): NormalizedModelRecommendation | null {
   const raw = recommendations?.[flavor];
   if (!raw) return null;
-  if (typeof raw === 'string') return { assistantModel: raw, taskModels: {} };
-  return { assistantModel: raw.assistantModel, taskModels: raw.taskModels ?? {} };
+  if (typeof raw === 'string') return { assistantModel: { model: raw }, taskModels: {} };
+  return {
+    assistantModel: normalizeChoice(raw.assistantModel),
+    taskModels: Object.fromEntries(
+      Object.entries(raw.taskModels ?? {}).map(([key, value]) => [key, normalizeChoice(value)]),
+    ),
+  };
 }

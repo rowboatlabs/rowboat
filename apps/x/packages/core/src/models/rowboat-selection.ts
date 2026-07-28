@@ -27,23 +27,27 @@ export async function applyRowboatInitialSelection(): Promise<void> {
         const catalog = await listGatewayModels();
         const ids = catalog.providers[0]?.models.map((m) => m.id) ?? [];
         const recommendations = (await getRowboatConfig().catch(() => null))?.modelRecommendations;
-        const model = selectInitialModel("rowboat", ids, recommendations);
-        if (model) {
+        const choice = selectInitialModel("rowboat", ids, recommendations);
+        if (choice) {
             // Task recommendations ride along the seeding moment: the
             // gateway's lite-tier task models become visible overrides so
             // always-on background work doesn't run on assistant-class
             // models (plan-credit economics).
-            const taskModels = selectInitialTaskModels("rowboat", "rowboat", ids, recommendations, model);
+            const taskModels = selectInitialTaskModels("rowboat", "rowboat", ids, recommendations, choice);
             await repo.updateConfig({
-                assistantModel: { provider: "rowboat", model },
+                assistantModel: {
+                    provider: "rowboat",
+                    model: choice.model,
+                    ...(choice.effort ? { effort: choice.effort } : {}),
+                },
                 ...(Object.keys(taskModels).length > 0 ? { taskModels } : {}),
             });
             // Measures recommendation quality: hit = the backend's pick was
             // in the gateway list; miss = first-listed fallback.
             capture("llm_initial_model_selected", {
                 flavor: "rowboat",
-                model,
-                recommended: model === normalizeModelRecommendation(recommendations, "rowboat")?.assistantModel,
+                model: choice.model,
+                recommended: choice.model === normalizeModelRecommendation(recommendations, "rowboat")?.assistantModel.model,
                 task_overrides_seeded: Object.keys(taskModels).length,
                 source: "sign_in",
             });

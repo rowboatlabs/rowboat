@@ -41,17 +41,34 @@ export const ModelRef = z.object({
   model: z.string(),
 });
 
+// Stored effort is lenient on read: missing, null, and "auto" all mean Auto
+// (send nothing; provider default) and normalize to `undefined`. Writers
+// emit the canonical form — the key omitted when Auto.
+export const StoredReasoningEffort = z
+  .union([ReasoningEffort, z.literal("auto"), z.null(), z.undefined()])
+  .transform((v) => (v === "auto" || v === null ? undefined : v));
+
+// A model choice as stored in config: the ref plus the reasoning effort the
+// user picked with it. Model and effort are selected together in the picker
+// and treated as one explicit pair everywhere — Auto (absent effort) means
+// the user picked Auto. Runs seeded from a choice use its effort verbatim;
+// there is no cross-level effort inference.
+export const ModelSelection = ModelRef.extend({
+  effort: StoredReasoningEffort.optional(),
+});
+
 // The per-task model override slots. Absence = inherit the assistant model
 // (except `subagent`, whose default is the PARENT turn's model — which is
-// the assistant for a top-level chat).
+// the assistant for a top-level chat). An override carries its own effort;
+// inheriting the assistant model inherits the assistant's effort with it.
 export const TaskModels = z.object({
-  knowledgeGraph: ModelRef.optional(),
-  meetingNotes: ModelRef.optional(),
-  liveNoteAgent: ModelRef.optional(),
-  autoPermissionDecision: ModelRef.optional(),
-  chatTitle: ModelRef.optional(),
-  backgroundTask: ModelRef.optional(),
-  subagent: ModelRef.optional(),
+  knowledgeGraph: ModelSelection.optional(),
+  meetingNotes: ModelSelection.optional(),
+  liveNoteAgent: ModelSelection.optional(),
+  autoPermissionDecision: ModelSelection.optional(),
+  chatTitle: ModelSelection.optional(),
+  backgroundTask: ModelSelection.optional(),
+  subagent: ModelSelection.optional(),
 });
 export type TaskModelKey = keyof z.infer<typeof TaskModels>;
 
@@ -72,8 +89,10 @@ export const LlmModelConfig = z.object({
   version: z.literal(2),
   providers: z.record(z.string(), LlmProvider),
   // The one primary model choice: what runs when nothing more specific was
-  // picked. Absent only before onboarding / first provider connect.
-  assistantModel: ModelRef.optional(),
+  // picked, and what seeds a new chat's composer (model + effort shown as
+  // the explicit initial selection). Absent only before onboarding / first
+  // provider connect.
+  assistantModel: ModelSelection.optional(),
   taskModels: TaskModels.optional(),
   // When true, background agent runs (knowledge pipeline, live notes,
   // background tasks) wait until no chat turn is running before starting.
