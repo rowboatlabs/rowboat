@@ -71,6 +71,19 @@ export type TodoList = {
     blocks: TodoBlock[];
 };
 
+/**
+ * One entry in an item's thread — the conversation behind a delegated item,
+ * stored human-readable at `todo/threads/<slug>.md`. `rowboat` entries carry
+ * the run that produced them so the full transcript stays one click away.
+ */
+export type TodoThreadEntry = {
+    author: 'user' | 'rowboat';
+    /** ISO timestamp. */
+    at: string;
+    text: string;
+    runId?: string;
+};
+
 /** Push events for the renderer (todo:events channel). `key` identifies the
  * item; `list_changed` means "re-fetch the file". */
 export type TodoEventType =
@@ -108,6 +121,13 @@ export const TodoBlockSchema = z.discriminatedUnion('kind', [
 
 export const TodoListSchema = z.object({
     blocks: z.array(TodoBlockSchema),
+});
+
+export const TodoThreadEntrySchema = z.object({
+    author: z.enum(['user', 'rowboat']),
+    at: z.string(),
+    text: z.string(),
+    runId: z.string().optional(),
 });
 
 export const TodoEvent = z.discriminatedUnion('type', [

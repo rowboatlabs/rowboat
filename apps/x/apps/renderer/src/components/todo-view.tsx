@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowUpRight, Bot, CircleAlert, LayoutGrid, Loader2, RotateCcw, X } from 'lucide-react'
+import { ArrowUpRight, Bot, CircleAlert, LayoutGrid, Loader2, MessageCircle, RotateCcw, X } from 'lucide-react'
 import type { TodoBlock, TodoEventType, TodoItem, TodoLink, TodoList } from '@x/shared/dist/todo.js'
+import { TodoThreadPanel } from '@/components/todo-thread-panel'
 
 // ---------------------------------------------------------------------------
 // The home to-do list — one rolling ~/.rowboat/todo.md shared with @rowboat.
@@ -12,6 +13,7 @@ import type { TodoBlock, TodoEventType, TodoItem, TodoLink, TodoList } from '@x/
 
 type TodoViewProps = {
   onOpenNote: (path: string) => void
+  onOpenRun: (runId: string) => void
   onShowOverview: () => void
 }
 
@@ -51,10 +53,11 @@ function TextWithMentions({ text }: { text: string }) {
 // Receipt rows — the durable record of what @rowboat did
 // ---------------------------------------------------------------------------
 
-function ReceiptRow({ item, onOpenNote, onRetry }: {
+function ReceiptRow({ item, onOpenNote, onRetry, onOpenThread }: {
   item: TodoItem
   onOpenNote: (path: string) => void
   onRetry: () => void
+  onOpenThread: () => void
 }) {
   if (item.receipts.length === 0) return null
   return (
@@ -62,10 +65,16 @@ function ReceiptRow({ item, onOpenNote, onRetry }: {
       {item.receipts.map((r, i) => {
         if (r.kind === 'question') {
           return (
-            <div key={i} className="flex items-start gap-1.5 rounded-lg bg-amber-500/10 px-2.5 py-1.5 text-[13px] text-amber-700 dark:text-amber-400">
+            <button
+              key={i}
+              type="button"
+              onClick={onOpenThread}
+              title="Answer in the thread"
+              className="flex items-start gap-1.5 rounded-lg bg-amber-500/10 px-2.5 py-1.5 text-left text-[13px] text-amber-700 hover:bg-amber-500/20 dark:text-amber-400"
+            >
               <CircleAlert className="mt-0.5 size-3.5 shrink-0" />
               <span><span className="font-medium">needs you:</span> {r.text}</span>
-            </div>
+            </button>
           )
         }
         if (r.kind === 'error') {
@@ -104,7 +113,7 @@ function ReceiptRow({ item, onOpenNote, onRetry }: {
 // One item row — checkbox, editable text, chips, receipts, dismiss
 // ---------------------------------------------------------------------------
 
-function ItemRow({ item, isRunning, onToggle, onCommitText, onDismiss, onRun, onOpenNote }: {
+function ItemRow({ item, isRunning, onToggle, onCommitText, onDismiss, onRun, onOpenNote, onOpenThread }: {
   item: TodoItem
   isRunning: boolean
   onToggle: (checked: boolean) => void
@@ -112,6 +121,7 @@ function ItemRow({ item, isRunning, onToggle, onCommitText, onDismiss, onRun, on
   onDismiss: () => void
   onRun: () => void
   onOpenNote: (path: string) => void
+  onOpenThread: () => void
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(item.text)
@@ -165,8 +175,18 @@ function ItemRow({ item, isRunning, onToggle, onCommitText, onDismiss, onRun, on
             )}
           </div>
         )}
-        <ReceiptRow item={item} onOpenNote={onOpenNote} onRetry={onRun} />
+        <ReceiptRow item={item} onOpenNote={onOpenNote} onRetry={onRun} onOpenThread={onOpenThread} />
       </div>
+      <button
+        type="button"
+        onClick={onOpenThread}
+        title="Open thread — steer @rowboat's work"
+        className={`mt-0.5 shrink-0 rounded-md p-1 text-muted-foreground/50 transition-opacity hover:bg-accent hover:text-foreground ${
+          item.receipts.length > 0 || isRunning ? '' : 'opacity-0 group-hover/todo:opacity-100'
+        }`}
+      >
+        <MessageCircle className="size-3.5" />
+      </button>
       <button
         type="button"
         onClick={onDismiss}
@@ -248,10 +268,11 @@ function Composer({ onSubmit }: { onSubmit: (text: string) => void }) {
 // The view
 // ---------------------------------------------------------------------------
 
-export function TodoView({ onOpenNote, onShowOverview }: TodoViewProps) {
+export function TodoView({ onOpenNote, onOpenRun, onShowOverview }: TodoViewProps) {
   const [blocks, setBlocks] = useState<TodoBlock[] | null>(null)
   const [running, setRunning] = useState<Set<string>>(new Set())
   const [showCallout, setShowCallout] = useState(false)
+  const [openThreadKey, setOpenThreadKey] = useState<string | null>(null)
 
   const blocksRef = useRef<TodoBlock[] | null>(null)
   const dirtyRef = useRef(false)
@@ -345,8 +366,14 @@ export function TodoView({ onOpenNote, onShowOverview }: TodoViewProps) {
   const hasCompleted = itemBlocks.some(({ block }) => block.kind === 'item' && block.item.checked)
   const todayLabel = new Date().toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })
 
+  // The panel follows the item live; if the line is dismissed it closes.
+  const threadItem = openThreadKey
+    ? itemBlocks.find(({ block }) => block.kind === 'item' && block.item.key === openThreadKey)?.block
+    : undefined
+  const threadItemResolved = threadItem?.kind === 'item' ? threadItem.item : null
+
   return (
-    <div className="flex h-full flex-col overflow-hidden bg-muted/30">
+    <div className="flex h-full flex-row overflow-hidden bg-muted/30">
       <div className="flex-1 overflow-y-auto px-9 py-7">
         <div className="mx-auto flex max-w-[720px] flex-col gap-4">
 
@@ -377,7 +404,7 @@ export function TodoView({ onOpenNote, onShowOverview }: TodoViewProps) {
           {showCallout && (
             <div className="flex items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-4 py-2.5 text-sm">
               <Bot className="size-4 shrink-0 text-primary" />
-              <span className="flex-1">@rowboat finished an item — the → line under it links to what it did. Reply by editing the item or re-running it.</span>
+              <span className="flex-1">@rowboat finished an item — the → line under it links to what it did. Open its thread (💬) to refine the work with a reply.</span>
               <button
                 type="button"
                 onClick={() => { localStorage.setItem(CALLOUT_KEY, '1'); setShowCallout(false) }}
@@ -436,6 +463,7 @@ export function TodoView({ onOpenNote, onShowOverview }: TodoViewProps) {
                     }}
                     onRun={() => runItem(item.key)}
                     onOpenNote={onOpenNote}
+                    onOpenThread={() => setOpenThreadKey(item.key)}
                   />
                 )
               })
@@ -450,6 +478,14 @@ export function TodoView({ onOpenNote, onShowOverview }: TodoViewProps) {
           </div>
         </div>
       </div>
+      {threadItemResolved && (
+        <TodoThreadPanel
+          item={threadItemResolved}
+          isRunning={running.has(threadItemResolved.key)}
+          onClose={() => setOpenThreadKey(null)}
+          onOpenRun={onOpenRun}
+        />
+      )}
     </div>
   )
 }

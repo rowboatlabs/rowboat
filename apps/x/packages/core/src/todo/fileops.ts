@@ -258,6 +258,23 @@ export async function attachReceipt(
     });
 }
 
+/** Set an item's checkbox. Returns false when the line no longer exists. */
+export async function setChecked(key: string, checked: boolean): Promise<boolean> {
+    const norm = normalizeKey(key);
+    return withTodoLock(async () => {
+        const list = parseTodoFile(await readRaw());
+        for (const block of list.blocks) {
+            if (block.kind !== 'item' || block.item.key !== norm) continue;
+            if (block.item.checked !== checked) {
+                block.item.checked = checked;
+                await writeRaw(serializeTodoFile(list));
+            }
+            return true;
+        }
+        return false;
+    });
+}
+
 // ---------------------------------------------------------------------------
 // Archive
 // ---------------------------------------------------------------------------

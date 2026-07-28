@@ -7,7 +7,7 @@ import { AgentScheduleConfig, AgentScheduleEntry } from './agent-schedule.js';
 import { AgentScheduleState } from './agent-schedule-state.js';
 import { ServiceEvent } from './service-events.js';
 import { LiveNoteAgentEvent, LiveNoteSchema } from './live-note.js';
-import { TodoEvent, TodoListSchema } from './todo.js';
+import { TodoEvent, TodoListSchema, TodoThreadEntrySchema } from './todo.js';
 import {
     BackgroundTaskAgentEvent,
     BackgroundTaskSchema,
@@ -2460,6 +2460,27 @@ const ipcSchemas = {
     req: z.object({
       key: z.string(),
       context: z.string().optional(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  // The conversation behind one item (todo/threads/<slug>.md).
+  'todo:getThread': {
+    req: z.object({
+      key: z.string(),
+    }),
+    res: z.object({
+      entries: z.array(TodoThreadEntrySchema),
+    }),
+  },
+  // Record a user message on the item's thread, reopen it, and re-run with
+  // the thread as context. Fire-and-forget like todo:runItem.
+  'todo:followUp': {
+    req: z.object({
+      key: z.string(),
+      message: z.string(),
     }),
     res: z.object({
       success: z.boolean(),

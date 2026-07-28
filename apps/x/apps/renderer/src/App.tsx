@@ -6993,6 +6993,7 @@ function App() {
                   {homeTab === 'todos' ? (
                     <TodoView
                       onOpenNote={(path) => navigateToFile(path)}
+                      onOpenRun={(rid) => void navigateToView({ type: 'chat', runId: rid })}
                       onShowOverview={() => setHomeTab('overview')}
                     />
                   ) : (
