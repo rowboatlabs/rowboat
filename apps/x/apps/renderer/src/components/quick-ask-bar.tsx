@@ -359,7 +359,12 @@ export function QuickAskBar() {
               <Volume2 className="relative h-4 w-4" />
             </button>
           </TooltipTrigger>
-          <TooltipContent side="bottom">{voiceOut ? 'Answers are spoken — click to mute' : 'Speak answers aloud'}</TooltipContent>
+          {/* Forced bottom + compact: the window edge is ~24px below the
+              button, so Radix's collision logic would flip a normal-size
+              tooltip back to the top. */}
+          <TooltipContent side="bottom" sideOffset={2} avoidCollisions={false} className="px-2 py-0.5 text-[11px]">
+            {voiceOut ? 'Answers are spoken — click to mute' : 'Speak answers aloud'}
+          </TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -380,7 +385,7 @@ export function QuickAskBar() {
               )}
             </button>
           </TooltipTrigger>
-          <TooltipContent side="bottom">
+          <TooltipContent side="bottom" sideOffset={2} avoidCollisions={false} className="px-2 py-0.5 text-[11px]">
             {sharing ? 'Sharing your screen with this chat — click to stop' : 'Share your screen with this chat'}
           </TooltipContent>
         </Tooltip>
