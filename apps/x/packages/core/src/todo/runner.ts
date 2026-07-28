@@ -1,4 +1,4 @@
-import { getBackgroundTaskAgentModel } from '../models/defaults.js';
+import { getBackgroundTaskAgentModel, getDefaultModelAndProvider } from '../models/defaults.js';
 import { withUseCase } from '../analytics/use_case.js';
 import { notifyIfEnabled } from '../application/notification/notifier.js';
 import { PrefixLogger } from '@x/shared/dist/prefix-logger.js';
@@ -346,6 +346,90 @@ export async function runTodoItem(key: string, context?: string): Promise<TodoRu
     } finally {
         runningItems.delete(norm);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Home-stream chat threads — plain messages from the home composer. Same
+// thread machinery as to-do items, but the copilot answers and nothing
+// touches todo.md: no receipts, no checkbox, just the conversation. Events
+// ride the todo bus keyed `chat:<sessionId>` so the stream shows live state.
+// ---------------------------------------------------------------------------
+
+export interface HomeChatResult {
+    sessionId: string | null;
+    turnId: string | null;
+    error?: string;
+}
+
+async function driveChatTurn(sessionId: string, message: string): Promise<HomeChatResult> {
+    const key = `chat:${sessionId}`;
+    if (runningItems.has(key)) {
+        return { sessionId, turnId: null, error: 'Already running' };
+    }
+    runningItems.add(key);
+    const { sessions, turnEventBus } = await resolveDeps();
+    const watcher = watchSettles(turnEventBus);
+    try {
+        let sent: { turnId: string };
+        try {
+            const { model, provider } = await getDefaultModelAndProvider();
+            sent = await withUseCase(
+                { useCase: 'copilot_chat', subUseCase: 'home_stream' },
+                () => sessions.sendMessage(
+                    sessionId,
+                    { role: 'user', content: message },
+                    {
+                        agent: {
+                            agentId: 'copilot',
+                            overrides: { model: { provider, model } },
+                        },
+                        // Matches in-app chat semantics: permission prompts
+                        // pend for the chat surface rather than auto-decide.
+                        autoPermission: false,
+                    },
+                ),
+            );
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            if (err instanceof TurnNotSettledError) {
+                return { sessionId, turnId: null, error: 'Already running — open the chat to see progress' };
+            }
+            log.log(`chat failed to start: ${truncate(msg)}`);
+            todoBus.publish({ type: 'run_error', key, error: msg });
+            return { sessionId, turnId: null, error: msg };
+        }
+
+        todoBus.publish({ type: 'run_start', key });
+        const settled = await watcher.waitFor(sent.turnId, TURN_TIMEOUT_MS);
+        if (settled.kind === 'failed') {
+            todoBus.publish({ type: 'run_error', key, error: settled.error });
+            return { sessionId, turnId: sent.turnId, error: settled.error };
+        }
+        // Completed / question / suspended / cancelled / timeout all just end
+        // the spinner — the conversation itself is the record.
+        todoBus.publish({ type: 'run_complete', key });
+        return { sessionId, turnId: sent.turnId };
+    } finally {
+        watcher.dispose();
+        runningItems.delete(key);
+    }
+}
+
+/** A plain message from the home composer: new copilot session, first turn.
+ * Returns as soon as the session exists (the caller needs its id to render
+ * the thread); the turn itself is fire-and-forget — progress arrives on
+ * todo:events. The session auto-titles from the message like any chat. */
+export async function startHomeChat(text: string): Promise<HomeChatResult> {
+    const { sessions } = await resolveDeps();
+    const sessionId = await sessions.createSession();
+    todoBus.publish({ type: 'list_changed' });
+    void driveChatTurn(sessionId, text).catch(() => {});
+    return { sessionId, turnId: null };
+}
+
+/** An inline reply on a stream thread — the next user message in it. */
+export async function replyHomeChat(sessionId: string, message: string): Promise<HomeChatResult> {
+    return driveChatTurn(sessionId, message);
 }
 
 /**

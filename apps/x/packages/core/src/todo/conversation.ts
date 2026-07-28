@@ -59,7 +59,15 @@ export async function getConversation(
 ): Promise<{ sessionId: string | null; bubbles: TodoChatBubble[] }> {
     const sessionId = await getSessionId(key);
     if (!sessionId) return { sessionId: null, bubbles: [] };
+    return deriveConversation(sessions, sessionId);
+}
 
+/** Same compact lens, for any session — the home stream's chat threads use
+ * this directly by sessionId. */
+export async function deriveConversation(
+    sessions: ISessions,
+    sessionId: string,
+): Promise<{ sessionId: string | null; bubbles: TodoChatBubble[] }> {
     let turnIds: string[];
     try {
         const state = await sessions.getSession(sessionId);

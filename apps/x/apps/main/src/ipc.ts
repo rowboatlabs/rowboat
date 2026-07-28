@@ -139,9 +139,9 @@ import {
   listLiveNotes,
 } from '@x/core/dist/knowledge/live-note/fileops.js';
 import { runBackgroundTask } from '@x/core/dist/background-tasks/runner.js';
-import { runTodoItem, commentOnTodoItem, runningItemKeys } from '@x/core/dist/todo/runner.js';
+import { runTodoItem, commentOnTodoItem, startHomeChat, replyHomeChat, runningItemKeys } from '@x/core/dist/todo/runner.js';
 import { getSessionIndex as getTodoSessionIndex } from '@x/core/dist/todo/session-index.js';
-import { getConversation as getTodoConversation } from '@x/core/dist/todo/conversation.js';
+import { getConversation as getTodoConversation, deriveConversation as deriveSessionConversation } from '@x/core/dist/todo/conversation.js';
 import { todoBus } from '@x/core/dist/todo/bus.js';
 import {
   readTodo,
@@ -2655,6 +2655,28 @@ export function setupIpcHandlers() {
       } catch (err) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };
       }
+    },
+    'todo:startChat': async (_event, args) => {
+      try {
+        const result = await startHomeChat(args.text);
+        return result.sessionId
+          ? { success: true, sessionId: result.sessionId }
+          : { success: false, error: result.error ?? 'Failed to start chat' };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'todo:chatReply': async (_event, args) => {
+      try {
+        void replyHomeChat(args.sessionId, args.message).catch(() => {});
+        return { success: true };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    'todo:getSessionConversation': async (_event, args) => {
+      const { bubbles } = await deriveSessionConversation(container.resolve<ISessions>('sessions'), args.sessionId);
+      return { bubbles };
     },
     'todo:addSubItem': async (_event, args) => {
       try {

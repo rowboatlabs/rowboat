@@ -2469,6 +2469,38 @@ const ipcSchemas = {
       error: z.string().optional(),
     }),
   },
+  // Home-stream chat threads: a plain message from the home composer starts
+  // a copilot session; replies continue it. Events ride todo:events keyed
+  // `chat:<sessionId>`.
+  'todo:startChat': {
+    req: z.object({
+      text: z.string(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      sessionId: z.string().optional(),
+      error: z.string().optional(),
+    }),
+  },
+  'todo:chatReply': {
+    req: z.object({
+      sessionId: z.string(),
+      message: z.string(),
+    }),
+    res: z.object({
+      success: z.boolean(),
+      error: z.string().optional(),
+    }),
+  },
+  // The compact bubble lens over any session (stream threads).
+  'todo:getSessionConversation': {
+    req: z.object({
+      sessionId: z.string(),
+    }),
+    res: z.object({
+      bubbles: z.array(TodoChatBubbleSchema),
+    }),
+  },
   // Add a sub-item under an existing top-level item (one level only).
   'todo:addSubItem': {
     req: z.object({
